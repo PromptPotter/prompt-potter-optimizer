@@ -41,6 +41,10 @@ before reading §0; run it after, against §0.
 
 ## §0 — PromptPotter on one page
 
+**Vocabulary cheat sheet:** [`docs/glossary.md`](glossary.md) — one
+line per term with the canonical implementation file. Read it before
+introducing a new domain word here.
+
 **Vocabulary note for this page.** §0 describes the architecture
 **after the §2/§3/§4.5 renames in `m10-cleanup.md` have landed**
 (the names that survive long-term). Where today's code uses

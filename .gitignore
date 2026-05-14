@@ -99,3 +99,6 @@ campaign_config.json
 
 # teach-impeccable skill scratch (unrelated to PromptPotter)
 .impeccable.md
+
+# AI runtime index — regenerable via `python scripts/build_ai_index.py`
+.ai/SYMBOLS.txt

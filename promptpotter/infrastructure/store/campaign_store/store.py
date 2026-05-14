@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 from datetime import UTC, datetime
@@ -17,49 +16,16 @@ from promptpotter.infrastructure.store.base import (
     validate_path_component,
     write_json,
 )
+from promptpotter.infrastructure.store.campaign_store.index_helpers import (
+    fresh_sibling_index_blob,
+    round_summary,
+)
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_max_round_complete,
+)
 from promptpotter.infrastructure.store.paths import campaign_dir_for, sibling_kind
 
 logger = logging.getLogger(__name__)
-
-
-def _scan_ledger_max_round_complete(ledger_path: Path) -> int:
-    """Return the highest round number that has a closing PhaseRecord in the
-    ledger at ``ledger_path``. Returns ``-1`` if no round has closed.
-
-    Closing events follow ``AuditTrailView._handle_phase``'s symmetry:
-    ``(phase="origin", event="exit", round=0)`` for origin and
-    ``(phase="round", event="complete", round=N)`` for normal rounds.
-    Both close their round and flush the audit cache.
-
-    Pure file read — does not instantiate :class:`CycleEventLog` so no
-    subscribers fire. The ledger is JSONL; each line is one record dict.
-    Corrupt lines are skipped (graceful — the ledger has at-least-once
-    semantics from the writer's perspective; readers tolerate gaps).
-    """
-    max_complete = -1
-    try:
-        with ledger_path.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if rec.get("record_type") != "phase":
-                    continue
-                phase = rec.get("phase")
-                event = rec.get("event")
-                if (phase == "round" and event == "complete") or (
-                    phase == "origin" and event == "exit"
-                ):
-                    rnd = rec.get("round")
-                    if isinstance(rnd, int) and rnd > max_complete:
-                        max_complete = rnd
-    except OSError:
-        return -1
-    return max_complete
 
 
 class CampaignStore(EntityStore):
@@ -76,21 +42,21 @@ class CampaignStore(EntityStore):
         return self._base_dir / "campaigns"
 
     def _campaign_dir(self, _backend_id: str, cycle_id: str) -> Path:
-        """Per-cycle dir holding rounds + audit. Resolves root vs fork layout."""
+        """Per-cycle dir. Backend-agnostic; pass ``""`` to read parent indexes."""
         return campaign_dir_for(self._base_dir, cycle_id)
 
     def campaign_dir(self, cycle_id: str) -> Path:
-        """Public path accessor — root cycles at ``campaigns/{cycle_id}``,
-        forks at ``campaigns/{root}/forks/{cycle_id}``."""
-        return campaign_dir_for(self._base_dir, cycle_id)
+        """Public wrapper for ``_campaign_dir`` — used by orchestration to derive
+        the per-cycle path without leaking the leading underscore."""
+        return self._campaign_dir("", cycle_id)
 
     def _rounds_dir(self, backend_id: str, cycle_id: str) -> Path:
         return self._campaign_dir(backend_id, cycle_id) / "rounds"
 
     def _candidates_dir(self, backend_id: str, cycle_id: str) -> Path:
-        # Internal resume checkpoint — hidden under ``.runtime/cache/`` so the
-        # cycle dir's top level shows only files an operator should read.
-        return self._campaign_dir(backend_id, cycle_id) / ".runtime" / "cache" / "candidates"
+        return (
+            self._campaign_dir(backend_id, cycle_id) / ".runtime" / "cache" / "candidates"
+        )
 
     def _entity_path(self, backend_id: str, entity_id: str) -> Path:
         """Campaign metadata (index.json) lives INSIDE the per-cycle dir."""
@@ -179,7 +145,7 @@ class CampaignStore(EntityStore):
         ledger_path = cycle_dir / ".runtime" / "ledger.jsonl"
         if not ledger_path.exists():
             raise LookupError(f"cycle {cycle_id!r} has no ledger on disk")
-        max_complete = _scan_ledger_max_round_complete(ledger_path)
+        max_complete = scan_ledger_max_round_complete(ledger_path)
         if after_round > max_complete:
             raise LookupError(
                 f"--from {after_round}: ledger only has completed rounds 0..{max_complete}"
@@ -245,22 +211,6 @@ class CampaignStore(EntityStore):
 
         self._rebuild_round_index(backend_id, cycle_id, survivors)
 
-    @staticmethod
-    def _round_summary(round_data: dict[str, Any]) -> dict[str, Any]:
-        """Projection of a round_data detail into the index.json::rounds shape."""
-        round_num = round_data.get("round", 0)
-        return {
-            "round_id": round_data.get("round_id", f"round_{round_num}"),
-            "round": round_num,
-            "label": round_data.get("label", ""),
-            "prompt_fields_id": round_data.get("prompt_fields_id", ""),
-            "accuracy": round_data.get("accuracy", 0.0),
-            "hits": round_data.get("hits", 0),
-            "total": round_data.get("total", 0),
-            "improved": round_data.get("improved", False),
-            "created_at": round_data.get("created_at", ""),
-        }
-
     def _rebuild_round_index(
         self,
         backend_id: str,
@@ -272,7 +222,7 @@ class CampaignStore(EntityStore):
         campaign_path = self._entity_path(backend_id, cycle_id)
         data = read_json(campaign_path)
 
-        rebuilt = [self._round_summary(read_json(p)) for p in sorted(survivors)]
+        rebuilt = [round_summary(read_json(p)) for p in sorted(survivors)]
         best = max(rebuilt, key=lambda s: s["accuracy"], default=None)
 
         data["rounds"] = rebuilt
@@ -453,38 +403,6 @@ class CampaignStore(EntityStore):
 
     # -- Fork helpers ---------------------------------------------------------
 
-    @staticmethod
-    def _fresh_sibling_index_blob(
-        parent_index: dict[str, Any],
-        new_cycle_id: str,
-        parent_cycle_id: str,
-        fork_kind: str,
-        forked_at: str,
-        **extras: Any,
-    ) -> dict[str, Any]:
-        """Clean-slate sibling index inheriting type/config/backend from the parent."""
-        return {
-            "campaign_id": new_cycle_id,
-            "type": parent_index.get("type", "optimization_loop"),
-            "config": parent_index.get("config", {}),
-            "connector_type": parent_index.get("connector_type", ""),
-            "backend_id": parent_index.get("backend_id", ""),
-            "parent_cycle_id": parent_cycle_id,
-            "parent_session_id": parent_index.get("parent_session_id", ""),
-            "forked_from_round": 0,
-            "forked_at": forked_at,
-            "fork_kind": fork_kind,
-            "rounds": [],
-            "n_rounds": 0,
-            "best_accuracy": 0.0,
-            "best_round_id": None,
-            "origin_accuracy": parent_index.get("origin_accuracy", 0.0),
-            "status": "active",
-            "created_at": forked_at,
-            "updated_at": forked_at,
-            **extras,
-        }
-
     def save_divergence_fork(
         self,
         parent_cycle_id: str,
@@ -540,7 +458,7 @@ class CampaignStore(EntityStore):
         """Clean-slate diag-sibling ``index.json``."""
         parent_path = self._campaign_dir("", parent_cycle_id) / "index.json"
         parent_index = read_json_optional(parent_path) or {}
-        blob = self._fresh_sibling_index_blob(
+        blob = fresh_sibling_index_blob(
             parent_index, new_cycle_id, parent_cycle_id, "diag_sibling", forked_at
         )
         path = self._campaign_dir("", new_cycle_id) / "index.json"
@@ -558,7 +476,7 @@ class CampaignStore(EntityStore):
         """Clean-slate sweep-fork ``index.json`` carrying ``sweep_batch_id``."""
         parent_path = self._campaign_dir("", parent_cycle_id) / "index.json"
         parent_index = read_json_optional(parent_path) or {}
-        blob = self._fresh_sibling_index_blob(
+        blob = fresh_sibling_index_blob(
             parent_index,
             new_cycle_id,
             parent_cycle_id,
@@ -629,7 +547,7 @@ class CampaignStore(EntityStore):
         data = read_json(campaign_path)
 
         data["rounds"] = [t for t in data["rounds"] if t.get("round") != round_num]
-        data["rounds"].append(self._round_summary(round_data))
+        data["rounds"].append(round_summary(round_data))
         data["n_rounds"] = len(data["rounds"])
 
         if round_data["accuracy"] > data.get("best_accuracy", 0.0):

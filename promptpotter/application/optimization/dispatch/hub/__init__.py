@@ -32,7 +32,7 @@ Module map:
   ``RoundDigest``, ``InjectionKind``, ``_Injection``) + format constants
   + the dataset-content fence helper.
 * :mod:`injections` — the renderers and the :data:`INJECTIONS` registry.
-* :mod:`dispatch` — :class:`DispatchHub` + :func:`validate_template`.
+* :mod:`facade` — :class:`DispatchHub` + :func:`validate_template`.
 * :mod:`builder` — :func:`build_bundle` (wires live ``Cycle`` state).
 """
 
@@ -45,7 +45,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     InjectionKind,
     RoundDigest,
 )
-from promptpotter.application.optimization.dispatch.hub.dispatch import (
+from promptpotter.application.optimization.dispatch.hub.facade import (
     DispatchHub,
     validate_template,
 )
