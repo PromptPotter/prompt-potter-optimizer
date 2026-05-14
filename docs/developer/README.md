@@ -43,9 +43,9 @@ L1 generate is the only layer with an L2-mutable layout; the rest run on fixed t
 | `OSP.task_context` | L2 (refines via merge) | L1, L1 critique, L2, L3 (`task_context` injection — broadcast) | persistent, accumulative |
 | `OSP.l1_layout` | L2 | L1 generate (`fill_l1`) | persistent (in `MEMORY_FIELDS`) |
 | `OSP.plan` | L3 | every prompt (`plan` injection in all 4 templates) | persistent — never cleared |
-| `OSP.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
-| `OSP.l2_guard_breaches` | L2 parser + layout validator | L3 (`l2_guard_breaches` injection) | persistent until L3 fires |
-| `OSP.l3_guard_breaches` | L3 parser | L3 next fire (`l3_guard_breaches` injection) | persistent |
+| `OSP.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
+| `OSP.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (`l2_guard_breaches` injection) | persistent until L3 fires |
+| `OSP.wounds.l3_guard_breaches` | L3 parser | L3 next fire (`l3_guard_breaches` injection) | persistent |
 
 **Symmetric broadcast:** L3 writes `plan`; every prompt reads it via the same `_r_plan` renderer. L2 writes `task_context`; every prompt reads it via the same `_r_task_context` renderer. L1 sees both as framing inputs; L2 reads them as the strategic + task context for the next refinement.
 
@@ -60,12 +60,12 @@ Layer-agnostic by contract. Every renderer reads off `InjectionBundle` and retur
 | `rendered_prompt` | `opt_sp.render()` | L1 (parent prompt) |
 | `pipeline_param_catalogue` | `pipeline_schema` | L1 (search-space menu) |
 | `diagnostics` | STATUS prefix from `cycle_slice` (round / stall / best counters) + `digest.diagnostics` (`RoundDiagnostics`) body | L1, L1 critique, L2, L3 |
-| `validation_failures` | `opt_sp.validation_failures` (Wound 1, fenced) | L1, L1 critique, L2, L3 |
-| `runtime_failures` | `opt_sp.runtime_failures` (Wound 2, fenced) | L1, L1 critique, L2, L3 |
-| `l2_guard_breaches` | `opt_sp.l2_guard_breaches` (Wound 4, plain) | L3 only |
-| `l3_guard_breaches` | `opt_sp.l3_guard_breaches` (L3 self-heal, plain) | L3 only |
+| `validation_failures` | `opt_sp.wounds.validation_failures` (Wound 1, fenced) | L1, L1 critique, L2, L3 |
+| `runtime_failures` | `opt_sp.wounds.runtime_failures` (Wound 2, fenced) | L1, L1 critique, L2, L3 |
+| `l2_guard_breaches` | `opt_sp.wounds.l2_guard_breaches` (Wound 4, plain) | L3 only |
+| `l3_guard_breaches` | `opt_sp.wounds.l3_guard_breaches` (L3 self-heal, plain) | L3 only |
 | `critique` | `digest.critique` | L1, L2, L3 |
-| `l3_to_l2_note` | `opt_sp.l3_note` | L2 only |
+| `l3_to_l2_note` | `opt_sp.wounds.l3_note` | L2 only |
 | `l1_overrides` | `opt_sp.l1_overrides` | L1 (caller extras `n_variants`/`creativity`), L2 |
 | `l1_signal_catalogue` | `L1_POSSIBLE` | L2 (menu) |
 | `axis_memory` | `cycle.axes.digest()` (DERIVED) | L1, L2, L3 |

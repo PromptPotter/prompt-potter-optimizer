@@ -218,7 +218,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         osp.task_context = result.task_context
     if result.l1_layout is not None:
         osp.l1_layout = result.l1_layout
-    osp.l2_guard_breaches = list(result.l2_guard_breaches)
+    osp.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
     cycle.escalation.record_l2_fired(
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
@@ -319,8 +319,8 @@ def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     # which carried the *prior* l3_note onto the new OSP. We overwrite it
     # with the L3 fire's output (possibly ``""`` when the LLM omitted
     # ``note``) — that's the "cleared only when L3 fires again" contract.
-    cycle.opt_sp.l3_note = result.l3_note
-    cycle.opt_sp.l3_guard_breaches = list(result.l3_guard_breaches)
+    cycle.opt_sp.wounds.l3_note = result.l3_note
+    cycle.opt_sp.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
     cycle.escalation.record_l3_fired(
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
@@ -517,10 +517,10 @@ async def escalate_l2(
         # Wound 4: post-L2 validator failure force-triggers L3 to heal L2's
         # output. Trigger is deterministic from L2's output (rides on round_data
         # JSON), so resume reproduces it without a separate decision record.
-        if cycle.opt_sp.l2_guard_breaches:
+        if cycle.opt_sp.wounds.l2_guard_breaches:
             logger.warning(
                 "L3 force-triggered by %d L2-output validator failure(s) at round %d",
-                len(cycle.opt_sp.l2_guard_breaches),
+                len(cycle.opt_sp.wounds.l2_guard_breaches),
                 round_num,
             )
             await _run_transition(

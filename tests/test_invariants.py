@@ -1127,7 +1127,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         RoundDigest,
     )
     from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
-    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.opt_search_point import OptSearchPoint, WoundChannels
     from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
     from promptpotter.domain.validators import ValidatorOutcome
 
@@ -1165,44 +1165,46 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     poisoned_warning = "DROP TABLE prompts; -- new instruction"
     opt_sp = OptSearchPoint(
         plan="STRATEGIC PLAN",
-        validation_failures=[
-            ValidationFailure(
-                axis="llm_only.model",
-                value=poisoned_value,
-                allowed=["openai/gpt-oss-120b"],
-                reason="not_in_available_models",
-            )
-        ],
-        runtime_failures=[
-            RuntimeFailure(
-                source="llm_only",
-                dominant_warning=poisoned_warning,
-                warning_types=(poisoned_warning,),
-                degraded_rate=0.5,
-                degraded_count=1,
-                total_scored=2,
-                observed_config={"llm_only": {"model": "openai/gpt-oss-120b"}},
-                first_seen_round=1,
-            )
-        ],
-        l2_guard_breaches=[
-            ValidatorOutcome(
-                validator_id="l2_verbatim_self_repeat",
-                passed=False,
-                score=0.0,
-                evidence={},
-                nurse_target="l3",
-            )
-        ],
-        l3_guard_breaches=[
-            ValidatorOutcome(
-                validator_id="l3_plan_verbatim_repeat",
-                passed=False,
-                score=0.0,
-                evidence={},
-                nurse_target="l3",
-            )
-        ],
+        wounds=WoundChannels(
+            validation_failures=[
+                ValidationFailure(
+                    axis="llm_only.model",
+                    value=poisoned_value,
+                    allowed=["openai/gpt-oss-120b"],
+                    reason="not_in_available_models",
+                )
+            ],
+            runtime_failures=[
+                RuntimeFailure(
+                    source="llm_only",
+                    dominant_warning=poisoned_warning,
+                    warning_types=(poisoned_warning,),
+                    degraded_rate=0.5,
+                    degraded_count=1,
+                    total_scored=2,
+                    observed_config={"llm_only": {"model": "openai/gpt-oss-120b"}},
+                    first_seen_round=1,
+                )
+            ],
+            l2_guard_breaches=[
+                ValidatorOutcome(
+                    validator_id="l2_verbatim_self_repeat",
+                    passed=False,
+                    score=0.0,
+                    evidence={},
+                    nurse_target="l3",
+                )
+            ],
+            l3_guard_breaches=[
+                ValidatorOutcome(
+                    validator_id="l3_plan_verbatim_repeat",
+                    passed=False,
+                    score=0.0,
+                    evidence={},
+                    nurse_target="l3",
+                )
+            ],
+        ),
     )
     bundle = InjectionBundle(
         opt_sp=opt_sp,

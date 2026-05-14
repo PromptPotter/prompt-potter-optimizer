@@ -182,6 +182,35 @@ class EvidenceGrounding(BaseModel):
     citation: str = Field(description="Short string naming the panel entry cited.")
 
 
+class WoundChannels(BaseModel):
+    """Self-healing surface — the four wound channels plus the sticky L3→L2 note.
+
+    Each list is a stream of failure observations one layer above the
+    failing one reads to decide how to heal. Dispatch-hub injection
+    renderers (``_r_validation_failures``, ``_r_runtime_failures``,
+    ``_r_l2_guard_breaches``, ``_r_l3_guard_breaches``, ``_r_l3_to_l2_note``)
+    consume directly from these fields. Persisted as a memory field across
+    L2/L3 transitions; children spawned by ``mutate()`` start with empty
+    channels.
+
+    | Field | Writer | Reader | Lifetime |
+    |---|---|---|---|
+    | ``validation_failures`` | L1 parse-time validators | L1/L2/L3 prompts | persistent until L2 heals |
+    | ``runtime_failures`` | mid-eval DegradationCheck | L1/L2/L3 prompts | persistent until L2 heals |
+    | ``l2_guard_breaches`` | L2 output validators | L3 prompt (force-trigger via wound 4) | persistent until L3 heals |
+    | ``l3_guard_breaches`` | L3 output validators | next L3 fire | persistent |
+    | ``l3_note`` | L3 | L2 prompt only | persistent until next L3 fire |
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    l3_note: str = ""
+    validation_failures: list[ValidationFailure] = Field(default_factory=list)
+    runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
+    l2_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
+    l3_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
+
+
 class IndividualLineage(BaseModel):
     """Identity and provenance of a single individual in the population.
 
@@ -245,16 +274,10 @@ class OptSearchPoint(PromptTemplate):
             return TaskDecomposition.from_dict(v)
         return TaskDecomposition()
 
-    # -- Optimization memory (flat; bundled by MEMORY_FIELDS for copy_memory_to) --
-    # Sticky L3→L2 channel: L3 writes, L2 reads via the ``l3_to_l2_note``
-    # signal; never surfaced to L1 (absent from ``L1_POSSIBLE``). Persists
-    # across L2 fires via :data:`MEMORY_FIELDS`; replaced wholesale on each
-    # L3 fire (``_apply_l3``).
-    l3_note: str = ""
-    validation_failures: list[ValidationFailure] = Field(default_factory=list)
-    runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
-    l2_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
-    l3_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
+    # -- Optimization memory (bundled by MEMORY_FIELDS for copy_memory_to) --
+    # Self-healing surface: four wound streams + sticky L3→L2 note. See
+    # ``WoundChannels`` docstring for the per-field contract.
+    wounds: WoundChannels = Field(default_factory=WoundChannels)
 
     # -- L1-generate surface state (owned by L2 mutations) ----------------
     # Per-slot list of placeholder names L2 picks from `L1_POSSIBLE`. The
@@ -268,11 +291,7 @@ class OptSearchPoint(PromptTemplate):
     # children inherit in-flight L2 surface edits instead of being
     # silently merged from a stale OSP.
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "l3_note",
-        "validation_failures",
-        "runtime_failures",
-        "l2_guard_breaches",
-        "l3_guard_breaches",
+        "wounds",
         "l1_layout",
         "l1_overrides",
     )

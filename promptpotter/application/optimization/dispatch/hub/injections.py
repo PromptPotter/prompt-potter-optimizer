@@ -38,7 +38,8 @@ def _r_plan(b: InjectionBundle) -> str:
 def _r_l3_to_l2_note(b: InjectionBundle) -> str:
     """Sticky L3→L2 pointer. Mounted only in L2's template; absent from
     ``L1_POSSIBLE`` so L1 never sees it."""
-    return f"L3 NOTE TO L2:\n{b.opt_sp.l3_note}" if b.opt_sp.l3_note else ""
+    note = b.opt_sp.wounds.l3_note
+    return f"L3 NOTE TO L2:\n{note}" if note else ""
 
 
 def _r_rendered_prompt(b: InjectionBundle) -> str:
@@ -233,11 +234,11 @@ def _r_validation_failures(b: InjectionBundle) -> str:
     Fenced because it echoes LLM-proposed values (``vf.value``), which
     the LLM could have written as anything.
     """
-    osp = b.opt_sp
-    if not osp.validation_failures:
+    failures = b.opt_sp.wounds.validation_failures
+    if not failures:
         return ""
     sec = ["L1 VALIDATION FAILURES (last round produced invalid variants):"]
-    for vf in osp.validation_failures:
+    for vf in failures:
         allowed_str = ", ".join((vf.allowed or [])[:5])
         sec.append(
             f"  axis={vf.axis} value={vf.value!r} reason={vf.reason}"
@@ -251,19 +252,19 @@ def _r_runtime_failures(b: InjectionBundle) -> str:
     failures from ``DegradationCheck``). Fenced because it echoes pipeline
     warning strings.
     """
-    osp = b.opt_sp
+    runtime_failures = b.opt_sp.wounds.runtime_failures
     parts: list[str] = []
 
-    if osp.runtime_failures:
+    if runtime_failures:
         round_num = b.cycle_slice.round_num
         cutoff = round_num - RUNTIME_FAILURE_RECENCY_WINDOW + 1
-        new_rfs = [rf for rf in osp.runtime_failures if rf.first_seen_round == round_num]
+        new_rfs = [rf for rf in runtime_failures if rf.first_seen_round == round_num]
         acc_rfs = [
             rf
-            for rf in osp.runtime_failures
+            for rf in runtime_failures
             if rf.first_seen_round != round_num and rf.first_seen_round >= cutoff
         ]
-        dropped = sum(1 for rf in osp.runtime_failures if rf.first_seen_round < cutoff)
+        dropped = sum(1 for rf in runtime_failures if rf.first_seen_round < cutoff)
         sec = ["RUNTIME FAILURES (candidates ran but degraded):"]
         if new_rfs:
             sec.append("  NEW (this round):")
@@ -295,7 +296,7 @@ def _r_l2_guard_breaches(b: InjectionBundle) -> str:
     Plain (only ``validator_id`` from a controlled registry + ``score``
     float — no untrusted content).
     """
-    outcomes = b.opt_sp.l2_guard_breaches
+    outcomes = b.opt_sp.wounds.l2_guard_breaches
     if not outcomes:
         return ""
     lines = ["L2 GUARD BREACHES (post-parse guards on L2's output caught thrashing):"]
@@ -309,7 +310,7 @@ def _r_l3_guard_breaches(b: InjectionBundle) -> str:
     L3 sees its own past breaches to avoid repeating them. Plain (only
     ``validator_id`` + ``score``).
     """
-    outcomes = b.opt_sp.l3_guard_breaches
+    outcomes = b.opt_sp.wounds.l3_guard_breaches
     if not outcomes:
         return ""
     lines = ["L3 GUARD BREACHES (post-parse guards on L3's output caught thrashing):"]

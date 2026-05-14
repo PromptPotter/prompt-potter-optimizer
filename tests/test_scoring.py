@@ -308,7 +308,9 @@ def test_composite_fitness_matches_default_formula():
 
 
 def test_composite_fitness_zeroed_on_validation_failure():
-    fake_opt_sp = SimpleNamespace(validation_failures=[object()], runtime_failures=[])
+    fake_opt_sp = SimpleNamespace(
+        wounds=SimpleNamespace(validation_failures=[object()], runtime_failures=[])
+    )
     scored = compute_composite_fitness(
         [_eval_result(score=1.0)], _single_node_schema(), opt_sp=fake_opt_sp
     )

@@ -338,8 +338,8 @@ def detect_invariants(
     invariant failures are dropped first so resume-from-disk doesn't dup.
     """
     for cp in proposals:
-        cp.osp.validation_failures = [
-            vf for vf in cp.osp.validation_failures if vf.reason not in _INVARIANT_REASONS
+        cp.osp.wounds.validation_failures = [
+            vf for vf in cp.osp.wounds.validation_failures if vf.reason not in _INVARIANT_REASONS
         ]
     seen: dict[tuple, int] = {}
     n_no_op = 0
@@ -363,8 +363,8 @@ def detect_invariants(
         )
         sig = (pf_delta, tc_delta, no_canon)
         if not any(sig):
-            cp.osp.validation_failures = [
-                *cp.osp.validation_failures,
+            cp.osp.wounds.validation_failures = [
+                *cp.osp.wounds.validation_failures,
                 ValidationFailure(
                     axis="variant",
                     value="(no mutation)",
@@ -376,8 +376,8 @@ def detect_invariants(
             continue
         if sig in seen:
             twin = seen[sig]
-            cp.osp.validation_failures = [
-                *cp.osp.validation_failures,
+            cp.osp.wounds.validation_failures = [
+                *cp.osp.wounds.validation_failures,
                 ValidationFailure(
                     axis="variant",
                     value=f"duplicate of C{twin + 1}",

@@ -39,7 +39,7 @@ All fields are optional. Missing fields leave the corresponding OSP state untouc
 - `task_context`: dict of refined framing fields, merged onto `opt_sp.task_context` via `TaskDecomposition.merge`. A non-empty proposal that produces zero delta is flagged as `l2_task_context_verbatim_repeat` → L3 heal trigger.
 - `action`: `"normal_round"` (default) or `"probe_round"`. Probe re-runs only the warned-query subset under the same OSP next round.
 - `axis_targeted`: the axis this fire tests. Required prose when `action="probe_round"`; otherwise stamped on the cycle for the next probe-outcome render.
-- `l1_layout`: coerced to `L1Layout`, validated against `validate_l1_layout(prior=opt_sp.l1_layout)`. HARD-failed layouts roll back to the prior; SOFT-flagged outcomes (e.g. unchanged from prior) ride along on `opt_sp.l2_guard_breaches`.
+- `l1_layout`: coerced to `L1Layout`, validated against `validate_l1_layout(prior=opt_sp.l1_layout)`. HARD-failed layouts roll back to the prior; SOFT-flagged outcomes (e.g. unchanged from prior) ride along on `opt_sp.wounds.l2_guard_breaches`.
 - `l1_overrides`: merged onto a `mutate()`-derived child OSP. Two known knobs today: `n_variants` (in-prompt directive to L1 via `{{n_variants}}` caller extra) and `creativity` (L1 LLM-call temperature, out-of-prompt).
 
 ## How L2 steers L1

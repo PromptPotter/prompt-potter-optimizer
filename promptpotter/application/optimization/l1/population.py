@@ -90,7 +90,7 @@ def parse_population(
             )
             if outcome is not None:
                 failures: list[ValidationFailure] = outcome.evidence["failures"]
-                osp.validation_failures = failures
+                osp.wounds.validation_failures = failures
                 for vf in failures:
                     logger.warning(
                         "candidate %s: validation failure on %s — proposed %r not in allowed %r (reason=%s)",
@@ -143,7 +143,7 @@ def build_score_report(
         expected_samples=len(dataset),
         invalid=invalid,
         resumed_from_cache=resumed_from_cache,
-        validation_failures=[vf.to_dict() for vf in osp.validation_failures],
+        validation_failures=[vf.to_dict() for vf in osp.wounds.validation_failures],
         runtime_failures=[new_runtime_failure.to_dict()] if new_runtime_failure else [],
         elimination_context=dict(elimination_context) if elimination_context else {},
     )

@@ -152,16 +152,16 @@ This is where the reader's mental model of a round usually starts: candidates we
 - ⁴ **`diagnostics`** ← STATUS prefix (plain) + fenced `RoundDiagnostics` body
   - **STATUS prefix** ← `bundle.cycle_slice` — `round`🧩, `current`🧩 (parent fitness `f"{cs.current_accuracy:.1%}"`), `best`🧩 (acc + round), `L1 stall`🧩 (rounds), and — when fired — `L2 fired`🧩 (count + stall), `L3 fired`🧩 (count + stall). Plain text (cycle counters are trusted optimizer state, not untrusted dataset content). Always renders, including pre-round-1 when `digest.diagnostics is None`. Despite the `current`/`best` accuracy labels, the rendered values are mean composite *fitness* under the active scorer, not hit-rates.
   - **Body** [fenced] ← `bundle.digest.diagnostics`: `RoundDiagnostics` from `compute_round_diagnostics` (built deterministically by L1_SCORE) — trajectory + recent-rounds evolution, anomalies, rank dist + top-k, pipeline-health termination split, failures by step / warning class, near-misses, cross-candidate diff, diversity, cache-share, miss-sample, prompt-size warning, probe outcome 🧩
-- ⁵ **`validation_failures`** [fenced] ← `opt_sp.validation_failures` · Wound 1 evidence
+- ⁵ **`validation_failures`** [fenced] ← `opt_sp.wounds.validation_failures` · Wound 1 evidence
   - Each entry: `axis`🧩, `value`🧩 (LLM-proposed), `allowed`🧩, `reason`🧩. Fenced because `value` is arbitrary LLM output.
   - L1 parse-time deterministic validator (`L1_SCHEMA_COMPLIANCE`). Accumulates on `OptSearchPoint` cross-round.
-- ¹¹ **`runtime_failures`** [fenced] ← `opt_sp.runtime_failures` · Wound 2 evidence
+- ¹¹ **`runtime_failures`** [fenced] ← `opt_sp.wounds.runtime_failures` · Wound 2 evidence
   - Per-candidate runtime failures from `DegradationCheck`; accumulates on `OptSearchPoint` cross-round.
   - Fenced because it echoes pipeline warning strings.
-- ¹² **`l2_guard_breaches`** ← `opt_sp.l2_guard_breaches` · Wound 4 evidence
+- ¹² **`l2_guard_breaches`** ← `opt_sp.wounds.l2_guard_breaches` · Wound 4 evidence
   - Plain (only `validator_id`🧩 from a controlled registry + `score`🧩 float — no untrusted content).
   - Set by L2_CONTEXT post-parse validators (`run_l2_output_validators`); non-empty triggers immediate L3 fire. **L3-only consumer** because L2 doesn't fire while these are outstanding (L3 replans first, then L2 fires fresh).
-- ¹³ **`l3_guard_breaches`** ← `opt_sp.l3_guard_breaches` · L3 self-healing evidence
+- ¹³ **`l3_guard_breaches`** ← `opt_sp.wounds.l3_guard_breaches` · L3 self-healing evidence
   - Plain (only `validator_id`🧩 + `score`🧩).
   - Set by L3_PLAN post-parse validators. **L3-only consumer** — L3 reads its own past failures to avoid repeating them on next replan.
 - ⁸ **`critique`** ← `bundle.digest.critique` (L1_CRITIQUE output, consumes ⁴ + ⁵ + ¹¹)
@@ -175,7 +175,7 @@ This is where the reader's mental model of a round usually starts: candidates we
   - 5 rendered fields: `domain`🧩, `pipeline_purpose`🧩, `data_characteristics`🧩, `optimization_goals`🧩, `key_challenges`🧩
   - Seeded by `restructure` decomposition at `init`; L2_CONTEXT merges on each fire — broadcast to every layer as the persistent task framing
   - 3 model-only sub-fields skipped by the renderer: `raw_description`🧩, `upstream_context`🧩, `downstream_context`🧩
-- **`l3_to_l2_note`** ← `opt_sp.l3_note` · L2_CONTEXT template only; explicitly excluded from L1_GENERATE.
+- **`l3_to_l2_note`** ← `opt_sp.wounds.l3_note` · L2_CONTEXT template only; explicitly excluded from L1_GENERATE.
 
 ### Cross-round derived
 

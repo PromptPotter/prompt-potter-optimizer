@@ -56,7 +56,7 @@ Five independent mechanisms can end a candidate's evaluation early or annotate a
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
-| 1 | **Validation skip** — `OptSearchPoint.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `validation_failures` | `application/optimization/l1.py::score_population` |
+| 1 | **Validation skip** — `OptSearchPoint.wounds.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `wounds.validation_failures` | `application/optimization/l1.py::score_population` |
 | 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | annotated + possibly re-measured / swapped | — | `application/scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |

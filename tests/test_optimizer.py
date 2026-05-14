@@ -58,7 +58,7 @@ from promptpotter.application.optimization.validators.l2_l3 import (
     run_l3_output_validators,
 )
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import OptSearchPoint, WoundChannels
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.run_records import ForkPayload, ForkTrigger, ResumeCheckpointKind
 from promptpotter.domain.search_point import TaskDecomposition
@@ -91,9 +91,9 @@ def test_no_op_clone_attaches_validation_failure():
 
     stats = detect_invariants(proposals, parent)
 
-    no_op_reasons = [vf.reason for vf in proposals[0].osp.validation_failures]
+    no_op_reasons = [vf.reason for vf in proposals[0].osp.wounds.validation_failures]
     assert "no_op_variant" in no_op_reasons
-    assert proposals[1].osp.validation_failures == []
+    assert proposals[1].osp.wounds.validation_failures == []
     assert stats.l1_n_no_op == 1
     assert stats.l1_n_duplicate == 0
     assert stats.l1_yield == 0.5
@@ -109,10 +109,10 @@ def test_duplicate_signature_attaches_validation_failure():
 
     stats = detect_invariants(proposals, parent)
 
-    assert proposals[0].osp.validation_failures == []
-    dup_reasons = [vf.reason for vf in proposals[1].osp.validation_failures]
+    assert proposals[0].osp.wounds.validation_failures == []
+    dup_reasons = [vf.reason for vf in proposals[1].osp.wounds.validation_failures]
     assert "duplicate_variant" in dup_reasons
-    assert proposals[2].osp.validation_failures == []
+    assert proposals[2].osp.wounds.validation_failures == []
     assert stats.l1_n_duplicate == 1
     assert stats.l1_n_no_op == 0
     assert stats.l1_yield == 2 / 3
@@ -147,7 +147,7 @@ def test_parse_population_attaches_forbidden_axis_failure_to_osp():
 
     osp_list, _ = parse_population([proposal], pipeline_params=None, schema=schema)
 
-    failures = osp_list[0].validation_failures
+    failures = osp_list[0].wounds.validation_failures
     assert len(failures) == 1
     assert failures[0].reason == "forbidden_axis"
     assert failures[0].axis == "llm_only.model"
@@ -494,12 +494,12 @@ def test_l3_note_is_memory_field_and_forwarded_via_copy_memory_to():
     """Stickiness across L2-fire OSP swaps: ``l3_note`` is in
     ``MEMORY_FIELDS`` so :meth:`copy_memory_to` forwards it onto the
     fresh OSP that ``_run_transition`` mints."""
-    assert "l3_note" in OptSearchPoint.MEMORY_FIELDS
+    assert "wounds" in OptSearchPoint.MEMORY_FIELDS
 
-    osp = _osp(l3_note="constraint X discovered, steer L2 around it")
+    osp = _osp(wounds=WoundChannels(l3_note="constraint X discovered, steer L2 around it"))
     target = _osp()
     osp.copy_memory_to(target)
-    assert target.l3_note == osp.l3_note
+    assert target.wounds.l3_note == osp.wounds.l3_note
 
 
 def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
@@ -508,7 +508,7 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
     each L3 fire produces a complete (or null) note."""
     from promptpotter.application.optimization.escalation.state import EscalationState
 
-    osp = _osp(plan="prior plan", l3_note="prior note")
+    osp = _osp(plan="prior plan", wounds=WoundChannels(l3_note="prior note"))
     raw = L3PlanOutput(plan="x" * 200, note="new sticky pointer", rationale="test")
     result = _parse_l3(raw, osp, prompt="<prompt>")
     assert result.l3_note == "new sticky pointer"
@@ -521,13 +521,17 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
         tracking=types.SimpleNamespace(best_accuracy=0.0, best_composite_fitness=0.0),
     )
     osp.copy_memory_to(cycle.opt_sp)
-    assert cycle.opt_sp.l3_note == "prior note"  # copy_memory_to forwarded
+    assert cycle.opt_sp.wounds.l3_note == "prior note"  # copy_memory_to forwarded
     _apply_l3(cycle, result, round_num=5)
-    assert cycle.opt_sp.l3_note == "new sticky pointer"  # _apply_l3 replaced
+    assert cycle.opt_sp.wounds.l3_note == "new sticky pointer"  # _apply_l3 replaced
 
     # And: missing note → wipe.
     raw_no_note = L3PlanOutput(plan="y" * 200, rationale="test")
-    result2 = _parse_l3(raw_no_note, _osp(plan="p", l3_note="something"), prompt="<prompt>")
+    result2 = _parse_l3(
+        raw_no_note,
+        _osp(plan="p", wounds=WoundChannels(l3_note="something")),
+        prompt="<prompt>",
+    )
     assert result2.l3_note == ""
 
 

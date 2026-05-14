@@ -14,7 +14,7 @@ Layout validation is split into HARD and SOFT outcomes
 
 * HARD — mandatory missing / unknown placeholder / dups within slot →
   rollback to prior layout, append ``ValidatorOutcome`` to
-  ``opt_sp.l2_guard_breaches`` for self-healing next L2 fire.
+  ``opt_sp.wounds.l2_guard_breaches`` for self-healing next L2 fire.
 * SOFT — layout unchanged from prior → apply with warning logged.
 """
 

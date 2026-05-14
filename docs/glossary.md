@@ -131,7 +131,7 @@ implementation site lands, or rename to a term already on the list.
   `docs/developer/self-healing-internals.md`.
 - **Guard breach** — programmatic post-parse validator outcome on the
   L2 or L3 LLM output. Fields:
-  `OptSearchPoint.l2_guard_breaches`, `l3_guard_breaches`.
+  `OptSearchPoint.wounds.l2_guard_breaches`, `wounds.l3_guard_breaches`.
 
 ## Dispatch — info-flow to optimizer prompts
 

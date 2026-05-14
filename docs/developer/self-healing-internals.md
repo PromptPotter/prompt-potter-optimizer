@@ -12,7 +12,7 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 | **Detector** | `L1_SCHEMA_COMPLIANCE` validator | `DegradationCheck` (mid-eval) | `escalate_l2` patience | `L2_*` validators (post-parse) |
 | **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
 | **OSP storage** | `validation_failures` | `runtime_failures` | `escalation.l2.stall_count` | `l2_guard_breaches` |
-| **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.runtime_failures` | none | per-round on the OSP itself |
+| **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.wounds.runtime_failures` | none | per-round on the OSP itself |
 | **Nurse prompt slot** | `{{validation_failures}}` | `{{runtime_failures}}` | (whole `l3_plan` template) | `{{l2_guard_breaches_section}}` |
 | **Renderer** | `_r_validation_failures` | `_r_runtime_failures` | `_r_runtime_failures` | `_r_l2_guard_breaches` |
 | **Nurse's writeback** | `cycle.opt_sp.task_context` | `task_context` / scheme + text overrides | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
@@ -22,7 +22,7 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 
 `L1_SCHEMA_COMPLIANCE` (`application/optimization/l1.py`) wraps `validate_overrides()` and runs at L1 parse time in `parse_population()`. When L1's `pipeline_params_override` proposes a value outside `PipelineSchema.available_models`, outside a node's `param_allowed_values`, mismatched against the declared `param_types`, or touches an operator-locked axis (`PARAM_FORBIDDEN_KEYS = {model, provider}`, gated by `OptimizationConfig.forbidden_axes_strict` — default on), the validator emits a `ValidatorOutcome` whose `evidence["failures"]` is `list[ValidationFailure(axis, value, allowed, reason)]`. `reason` is one of `not_in_available_models`, `not_in_param_allowed_values`, `type_mismatch`, or `forbidden_axis`.
 
-Failures land on `OptSearchPoint.validation_failures` — outer-layer optimizer state, not target-layer. Effect chain: `score_population()` shortcuts to a synthetic-0 report (Path 1) → inline winner-selection deprioritises the candidate → round checkpoint persists the failure.
+Failures land on `OptSearchPoint.wounds.validation_failures` — outer-layer optimizer state, not target-layer. Effect chain: `score_population()` shortcuts to a synthetic-0 report (Path 1) → inline winner-selection deprioritises the candidate → round checkpoint persists the failure.
 
 L2's template (`optimizer_pipeline.json::resolved_prompts['l2_context/1']`) renders `{{validation_failures}}` via `_r_validation_failures()`. L2 writes a brief pointing L1 toward the allowed region. Healing is gradual — if L1 still proposes invalid values next round, the validator fires again and L2 gets fresh evidence.
 
@@ -33,9 +33,9 @@ L2's template (`optimizer_pipeline.json::resolved_prompts['l2_context/1']`) rend
 1. **Fatal-code fast path.** `classify_result()` derives a fatal code from raw response shape (`finish_reason=length` + `reasoning_tokens > 0` → `reasoning_budget_exhausted`). One sighting ends the candidate; bypasses `min_queries`/`threshold`.
 2. **Rate-based.** After `min_queries=3`, if `degraded_rate >= 0.4`, eliminate.
 
-Both produce `EscalationSignal(target=ELIMINATE_CANDIDATE)`. `score_population` synthesises `RuntimeFailure(source, dominant_warning, warning_types, degraded_rate, …)` from the check + observed pipeline_params, attaches to `cp.osp.runtime_failures`, and continues with the next candidate — round winner unaffected.
+Both produce `EscalationSignal(target=ELIMINATE_CANDIDATE)`. `score_population` synthesises `RuntimeFailure(source, dominant_warning, warning_types, degraded_rate, …)` from the check + observed pipeline_params, attaches to `cp.osp.wounds.runtime_failures`, and continues with the next candidate — round winner unaffected.
 
-End-of-round, `execute_round` mirrors new `RuntimeFailure`s onto `cycle.opt_sp.runtime_failures`, deduplicated by `(source, dominant_warning, observed_config)`. Never cleared — represents discovered runtime constraints.
+End-of-round, `execute_round` mirrors new `RuntimeFailure`s onto `cycle.opt_sp.wounds.runtime_failures`, deduplicated by `(source, dominant_warning, observed_config)`. Never cleared — represents discovered runtime constraints.
 
 `_r_runtime_failures()` partitions into NEW (this round) vs ACCUMULATED (`first_seen_round != current_round`). ACCUMULATED is the real signal — surviving items mean L2's prior angle didn't take. L2 updates its outputs; if ACCUMULATED keeps growing, Wound 3 takes over.
 
@@ -62,9 +62,9 @@ L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPo
 | `l2_verbatim_self_repeat` | L2's `brief` this round equals previous round's brief on OSP |
 | `l2_catalogue_redundancy` | `text_overrides[section]` equals existing override on OSP for that section |
 
-Validators run inside `L2RefineStrategy.build_result()` between LLM-output parse and `TransitionResult` construction. Outcomes ride on `TransitionResult.l2_guard_breaches` and are written by `apply_side_effects` to `cycle.opt_sp.l2_guard_breaches`.
+Validators run inside `L2RefineStrategy.build_result()` between LLM-output parse and `TransitionResult` construction. Outcomes ride on `TransitionResult.l2_guard_breaches` and are written by `apply_side_effects` to `cycle.opt_sp.wounds.l2_guard_breaches`.
 
-When `cycle.opt_sp.l2_guard_breaches` is non-empty after L2 runs, `escalate_l2` invokes `L3ModifyPlan` *immediately* — bypassing `l2_patience` and `l3_patience`. Broken L2 output is not "wait and see". Trigger is deterministic from L2's output (already on the round file), so resume reproduces it without a separate decision record.
+When `cycle.opt_sp.wounds.l2_guard_breaches` is non-empty after L2 runs, `escalate_l2` invokes `L3ModifyPlan` *immediately* — bypassing `l2_patience` and `l3_patience`. Broken L2 output is not "wait and see". Trigger is deterministic from L2's output (already on the round file), so resume reproduces it without a separate decision record.
 
 ## Validators are Evaluator-shaped
 

@@ -235,14 +235,14 @@ class Cycle:
         for r in all_results:
             if extract_warning_types(r) and (q := r.get("query")):
                 self.warned_queries.add(q)
-        existing_keys = {_rf_dedup_key(rf.to_dict()) for rf in self.opt_sp.runtime_failures}
+        existing_keys = {_rf_dedup_key(rf.to_dict()) for rf in self.opt_sp.wounds.runtime_failures}
         for cs in rr.candidate_scores:
             for rf_dict in cs.get("runtime_failures") or []:
                 k = _rf_dedup_key(rf_dict)
                 if k in existing_keys:
                     continue
                 existing_keys.add(k)
-                self.opt_sp.runtime_failures.append(RuntimeFailure(**rf_dict))
+                self.opt_sp.wounds.runtime_failures.append(RuntimeFailure(**rf_dict))
 
         # 2. round + tracking. Per-round trajectory lives on ``self.rounds``
         # (transient); persistent trajectory derives from ledger events.

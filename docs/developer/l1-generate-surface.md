@@ -56,7 +56,7 @@ Both modes feed `compile_prompt(**hub_dict, **extras)`. Template-author scalars 
 
 `validate_l1_layout(layout, prior_layout)` enforces:
 
-* HARD — missing mandatory placeholder, name outside `L1_POSSIBLE`, duplicate within a slot. Caller rolls back to the prior layout; outcomes append to `opt_sp.l2_guard_breaches` for self-healing on the next L2 fire.
+* HARD — missing mandatory placeholder, name outside `L1_POSSIBLE`, duplicate within a slot. Caller rolls back to the prior layout; outcomes append to `opt_sp.wounds.l2_guard_breaches` for self-healing on the next L2 fire.
 * SOFT — layout unchanged from prior. Apply with warning logged; flagged as `score=0.5` so L3 sees the churn signal next replan.
 
 L2's parser (`escalation._parse_l2`) coerces `{slot: [name, ...]}` into `L1Layout`, validates, and only writes the new layout to OSP when HARD checks pass.

@@ -75,7 +75,7 @@ class CandidateOutcome(StrEnum):
 @dataclass(frozen=True)
 class CandidateRunResult:
     """One candidate's full lifecycle output. ``runtime_failure`` is the
-    caller's signal to append to ``osp_c.runtime_failures``; the function
+    caller's signal to append to ``osp_c.wounds.runtime_failures``; the function
     cannot mutate it directly because the OSP is shared with other paths."""
 
     outcome: CandidateOutcome
@@ -247,7 +247,7 @@ async def score_one_candidate(
     label = candidate_label(round_num, idx)
 
     # Path 1 — validation-skip synthetic-0.
-    if osp_c.validation_failures:
+    if osp_c.wounds.validation_failures:
         return CandidateRunResult(
             outcome=CandidateOutcome.SKIPPED_VALIDATION,
             results=[],
@@ -443,7 +443,10 @@ async def score_population(
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
         if cr_result.runtime_failure is not None:
-            osp_c.runtime_failures = [*osp_c.runtime_failures, cr_result.runtime_failure]
+            osp_c.wounds.runtime_failures = [
+                *osp_c.wounds.runtime_failures,
+                cr_result.runtime_failure,
+            ]
         candidate_scores.append(cr_result.report)
         callbacks.on_candidate_scored(idx, n, cr_result.report.to_dict())
         if obs:
