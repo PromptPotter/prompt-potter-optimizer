@@ -44,7 +44,6 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
         scorer_id=scoring_spec.scorer_id,
         experiment_id=ctx.state.get("experiment_id", ""),
         cycle_id=ctx.cycle_id,
-        max_consecutive_errors=campaign_config.optimization.max_consecutive_errors,
     )
 
     armset = discover_compare_arms(

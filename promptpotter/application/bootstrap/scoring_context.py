@@ -48,7 +48,6 @@ HOT_UPDATEABLE_KEYS: frozenset[str] = frozenset(
         "degradation_threshold",
         "model",
         "n_variants",
-        "creativity",
         "improvement_threshold",
         "sp_budget_ttest",
     }
@@ -128,7 +127,6 @@ def populate_session_scoring(
     scorer_id: str | None = None,
     experiment_id: str = "",
     cycle_id: str | None = None,
-    max_consecutive_errors: int = 3,
     stale_data_load_protocol: list[str] | None = None,
     rerun_trigger_count: int = 3,
     samplescan_candidates: int = 3,
@@ -148,7 +146,6 @@ def populate_session_scoring(
     )
     session.state.obs = obs
     session.source = source
-    session.max_consecutive_errors = max_consecutive_errors
     session.stale_data_load_protocol = stale_data_load_protocol
     session.rerun_trigger_count = rerun_trigger_count
     session.samplescan_candidates = samplescan_candidates
@@ -277,7 +274,6 @@ def _start_observability_and_scoring(
         obs=obs,
         experiment_id=experiment_id,
         cycle_id=resolved_cycle_id,
-        max_consecutive_errors=opt.max_consecutive_errors,
         stale_data_load_protocol=opt.stale_data_load_protocol,
         rerun_trigger_count=opt.rerun_trigger_count,
         samplescan_candidates=opt.samplescan_candidates,

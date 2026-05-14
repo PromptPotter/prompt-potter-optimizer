@@ -9,22 +9,17 @@
       "l1_patience": 5,
       "max_rounds": 8,
       "n_variants": 5,
-      "creativity": 0.7,
       "improvement_threshold": 0.03,
       "max_failures": 10,
       "degradation_threshold": 0.4,
       "l2_patience": 2,
       "l3_patience": 1,
-      "l2_temperature": 0.3,
-      "l3_temperature": 0.5,
       "elimination_n_min": 4,
       "pobb_epsilon": 0.05
     },
     "optimizer_llm": {
       "model": "mistralai/mistral-small-3.2-24b-instruct",
-      "provider": "openrouter",
-      "temperature": 0.4,
-      "max_tokens": 2000
+      "provider": "openrouter"
     }
   }
 }

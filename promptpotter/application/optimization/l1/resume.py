@@ -36,6 +36,8 @@ async def generate_or_load_candidates(
     obs: ObservabilityBridge | None = None,
 ) -> tuple[list[CandidateProposal], L1YieldStats]:
     """Load persisted candidates or generate fresh ones via LLM; detect no-op + duplicate variants."""
+    from promptpotter.application.optimization.l1.generate import L1_CREATIVITY
+
     session = cycle.session
     config = cycle.config
     # Cap n_variants at 3× config so L2 can't blow up the round budget.
@@ -43,7 +45,7 @@ async def generate_or_load_candidates(
     model = config.optimizer_llm.model
     opt_params = cycle.opt_sp.l1_overrides
     _n_variants = min(opt_params.get("n_variants", opt.n_variants), opt.n_variants * 3)
-    _creativity = opt_params.get("creativity", opt.creativity)
+    _creativity = opt_params.get("creativity", L1_CREATIVITY)
     prompt_preview = cycle.opt_sp.render()[:120]
 
     assert cycle.tracking.current_sp is not None

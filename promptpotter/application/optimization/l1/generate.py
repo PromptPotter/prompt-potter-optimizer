@@ -66,11 +66,15 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
     return summaries
 
 
+L1_CREATIVITY: float = 0.7
+"""LLM sampling temperature for L1 candidate generation."""
+
+
 async def l1_generate(
     cycle: Cycle,
     *,
     n_variants: int,
-    creativity: float,
+    creativity: float = L1_CREATIVITY,
     llm_client: LLMClientBase,
     model: str | None = None,
     obs: ObservabilityBridge | None = None,

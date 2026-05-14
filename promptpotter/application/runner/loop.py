@@ -35,6 +35,11 @@ from promptpotter.domain.sample import Sample
 logger = logging.getLogger(__name__)
 
 
+HARD_CAP: int = 100
+"""Absolute upper bound on round_num — guards against runaway loops if
+``max_rounds`` is None and L2/L3 keep firing without convergence."""
+
+
 async def _force_l2(
     cycle: Cycle,
     config: CampaignConfig,
@@ -69,7 +74,6 @@ async def run_round_loop(
     omitted, ``max_spend_usd`` has no effect.
     """
     opt = config.optimization
-    hard_cap = opt.hard_cap
     # ``resumed_from_round`` is next-L1-round-to-run (fresh = 1). ``clean_rounds``
     # tracks lifetime L1 rounds completed; origin (round 0) is not counted.
     round_num = session.state.resumed_from_round
@@ -77,7 +81,7 @@ async def run_round_loop(
     max_rounds = opt.max_rounds or 999
 
     try:
-        while clean_rounds < max_rounds and round_num < hard_cap:
+        while clean_rounds < max_rounds and round_num < HARD_CAP:
             is_probe = cycle.probe_next_round
             if is_probe:
                 round_eval_data = [s for s in dataset if s.query in cycle.warned_queries]
@@ -180,7 +184,7 @@ async def run_round_loop(
                 )
                 return StopReason.DIAG_COMPLETE
 
-        return StopReason.HARD_CAP if round_num >= hard_cap else StopReason.MAX_ROUNDS
+        return StopReason.HARD_CAP if round_num >= HARD_CAP else StopReason.MAX_ROUNDS
 
     except StopLoop as sl:
         return sl.reason

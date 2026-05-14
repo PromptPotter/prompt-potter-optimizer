@@ -106,7 +106,6 @@ class RoundStartView:
     prompt_preview: str
     n_variants: int
     model: str
-    creativity: float
     has_l1_critique: bool
 
 

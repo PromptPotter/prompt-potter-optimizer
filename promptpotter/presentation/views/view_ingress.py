@@ -203,7 +203,6 @@ def _l1_generate_enter(d: dict, ctx: dict) -> RoundStartView:
         prompt_preview=preview,
         n_variants=d.get("n_variants", 0),
         model=d.get("model") or "(default)",
-        creativity=d.get("creativity", 0.7),
         has_l1_critique=bool(d.get("has_l1_critique")),
     )
 

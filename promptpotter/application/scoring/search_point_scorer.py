@@ -43,6 +43,11 @@ logger = logging.getLogger(__name__)
 __all__ = ["QueryLoopResult", "merge_with_unprocessed_priors", "score_search_point"]
 
 
+MAX_CONSECUTIVE_ERRORS: int = 3
+"""Abort the per-sample loop after this many consecutive client/pipeline
+errors — a runaway backend shouldn't burn the round's compute budget."""
+
+
 def merge_with_unprocessed_priors(
     results: list[QueryMeasurement],
     *,
@@ -224,14 +229,13 @@ async def _maybe_recover_degraded(
 def _classify_abort(
     result: QueryMeasurement,
     state: _LoopState,
-    session: Session,
 ) -> str:
     """Abort reason on error or "" to continue. Mutates state.consecutive_errors."""
     cat = error_category(result.get("error"))
     if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
         return f"skipped_after_{cat or 'pipeline'}_error"
     state.consecutive_errors += 1
-    if state.consecutive_errors >= session.max_consecutive_errors:
+    if state.consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
         return "skipped_after_consecutive_errors"
     return ""
 
@@ -298,7 +302,7 @@ async def _process_fresh_sample(
     ctx.persist_fresh(state.results)
 
     if is_error_result(result):
-        abort_reason = _classify_abort(result, state, ctx.session)
+        abort_reason = _classify_abort(result, state)
         if abort_reason:
             return _SampleOutcome(abort_reason=abort_reason)
     else:

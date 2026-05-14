@@ -107,7 +107,6 @@ class Session:
     scoring: ScoringContext = field(default_factory=ScoringContext)
 
     # -- Runtime config --------------------------------------------------
-    max_consecutive_errors: int = 3
     stale_data_load_protocol: list[str] | None = None
     # Stale-data protocol thresholds (defaults preserve previous behavior).
     # Operators override via ``campaign.json::optimization.*``.

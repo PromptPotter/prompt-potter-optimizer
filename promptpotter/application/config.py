@@ -73,7 +73,6 @@ class OptimizationConfig(BaseModel):
     max_rounds: int | None = Field(10, description="Max rounds (None = unlimited)")
     l1_patience: int = Field(3, description="Stop after N consecutive non-improving L1 rounds")
     n_variants: int = Field(5, description="Candidates per round")
-    creativity: float = Field(0.7, description="Temperature for candidate generation")
     improvement_threshold: float = Field(..., description="Min accuracy delta")
     max_failures: int = Field(..., description="Max failure examples fed to L1")
 
@@ -98,9 +97,6 @@ class OptimizationConfig(BaseModel):
             "want continuous task_context refinement instead of stall-driven."
         ),
     )
-    l2_temperature: float = Field(0.3)
-    l3_temperature: float = Field(0.5)
-
     degradation_threshold: float = Field(...)
 
     elimination_n_min: int = Field(
@@ -113,18 +109,6 @@ class OptimizationConfig(BaseModel):
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Default 5%; smaller → fewer stops.",
     )
-    pobb_lock_in: float = Field(
-        0.95,
-        description="Lock in the current candidate as round leader and terminate "
-        "the round when its posterior P(best) reaches this threshold. Default 95%; "
-        "1.0 disables lock-in. Saves compute when the leader is already confirmed.",
-    )
-    pobb_lock_in_n_min: int = Field(
-        8,
-        description="Minimum queries before PoBB lock-in can fire. Higher than "
-        "elimination_n_min because locker-in commits the round-winner — needs more "
-        "samples for posterior stability than the loser-elimination floor.",
-    )
 
     improvement_significance: float = Field(
         1.0,
@@ -134,9 +118,6 @@ class OptimizationConfig(BaseModel):
         "stricter. Default 1.0 disables the gate (promote on observed lift only); "
         "set lower (e.g. 0.10) to require statistical significance for ablation runs.",
     )
-
-    max_consecutive_errors: int = Field(3)
-    hard_cap: int = Field(100)
 
     stale_data_load_protocol: list[str] = Field(
         default_factory=lambda: ["rerun", "samplescan", "sampleswitch"]
@@ -191,8 +172,6 @@ class OptimizerLLMConfig(BaseModel):
 
     provider: str = Field("groq")
     model: str | None = Field(None)
-    temperature: float = Field(0.4)
-    max_tokens: int = Field(2000)
 
 
 class CampaignConfig(BaseModel):
@@ -201,7 +180,6 @@ class CampaignConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dataset_name: str = Field("")
-    starting_prompt: str = Field("default")
     sp_budget_ttest: int = Field(20)
     exclude_nodes: list[str] = Field(default_factory=list)
     pipeline_overrides: dict = Field(default_factory=dict)
@@ -309,15 +287,14 @@ def configure_and_apply_pipeline(
                     value,
                 )
 
-    # Starting-point prompts from ``datasets/{name}/prompts/`` injected
-    # per prompt-bearing node.
-    starting_name = campaign_config.starting_prompt or "default"
+    # Starting-point prompts from ``datasets/{name}/prompts/[<node>|default].json``
+    # injected per prompt-bearing node.
     if dataset_name and filtered and has_dataset_prompts(dataset_name):
         prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
         for pnode in prompt_nodes:
-            template = load_node_prompt(dataset_name, pnode, starting_name)
+            template = load_node_prompt(dataset_name, pnode, "default")
             valid_overrides.setdefault(pnode, {})["prompt"] = template.render()
-            log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|{starting_name}].json → {pnode}")
+            log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|default].json → {pnode}")
 
     pipeline_params: dict[str, Any] = (
         filtered.to_pipeline_params() if filtered else {"steps": active}

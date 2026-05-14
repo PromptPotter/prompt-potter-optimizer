@@ -365,7 +365,9 @@ L3 = LayerStrategy(
 # ---------------------------------------------------------------------------
 
 
-_TEMP_ATTR: dict[str, str] = {"L2": "l2_temperature", "L3": "l3_temperature"}
+_LAYER_TEMPERATURE: dict[str, float] = {"L2": 0.3, "L3": 0.5}
+"""LLM sampling temperature per escalation layer — refinement is conservative,
+replanning explores wider."""
 
 
 # Module-default L1 layout so apply_fork_payload_to_osp can be invoked
@@ -405,7 +407,7 @@ async def _run_transition(
             cycle,
             client,
             model=config.optimizer_llm.model,
-            temperature=getattr(config.optimization, _TEMP_ATTR[transition.layer_id]),
+            temperature=_LAYER_TEMPERATURE[transition.layer_id],
             round_num=round_num,
         )
     new_opt = result.opt_search_point

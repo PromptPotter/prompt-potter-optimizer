@@ -9,20 +9,15 @@
       "l1_patience": 3,
       "max_rounds": 15,
       "n_variants": 6,
-      "creativity": 0.7,
       "improvement_threshold": 0.01,
       "max_failures": 15,
       "degradation_threshold": 0.4,
       "l2_patience": 2,
-      "l3_patience": 1,
-      "l2_temperature": 0.3,
-      "l3_temperature": 0.5
+      "l3_patience": 1
     },
     "optimizer_llm": {
       "model": "openai/gpt-oss-120b",
-      "provider": "groq",
-      "temperature": 0.4,
-      "max_tokens": 2000
+      "provider": "groq"
     }
   }
 }

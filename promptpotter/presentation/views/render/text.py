@@ -88,7 +88,7 @@ def _render_round_start(v: RoundStartView) -> str:
                 "GENERATE",
                 f"Current best    {v.current_acc:.1%}",
                 f"Prompt          {v.prompt_preview}",
-                f"Candidates      {v.n_variants}   Creativity: {v.creativity}   Critique: {crit}",
+                f"Candidates      {v.n_variants}   Critique: {crit}",
                 f"Model           {v.model}",
             ),
         ]
