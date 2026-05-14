@@ -432,7 +432,6 @@ def test_evolve_scoring_set_respects_min_size() -> None:
     rounds = [_make_round(0, candidate_results)]
 
     cfg = ExplorationConfig(
-        enabled=True,
         swap_out_delta_se=10.0,  # extremely permissive — every scoring-set sample qualifies
         swap_in_kg_threshold=0.0,
         max_swaps_per_round=10,

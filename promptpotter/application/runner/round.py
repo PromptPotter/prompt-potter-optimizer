@@ -169,7 +169,6 @@ async def post_round(
         improved=round_result.improved,
         current_accuracy=cycle.tracking.current_accuracy,
         l1_patience=config.optimization.l1_patience,
-        enable_l2=config.optimization.enable_l2,
         axes_with_positive_yield=axes_with_positive_yield,
         escalate_on_yield_drought=config.optimization.escalate_on_yield_drought,
         fire_l2_every_round=config.optimization.fire_l2_every_round,

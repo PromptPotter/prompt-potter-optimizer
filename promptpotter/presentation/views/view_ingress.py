@@ -124,8 +124,6 @@ def _init_enter(d: dict, ctx: dict) -> InitEnterView:
         dataset_size=len(dataset),
         mde=min_detectable_effect(sample),
         model=config.optimizer_llm.model or "(default)",
-        l2_enabled=opt.enable_l2,
-        l3_enabled=opt.enable_l3,
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
     )
@@ -468,8 +466,6 @@ def _init_enter_from_dict(v: dict) -> InitEnterView:
         dataset_size=v.get("dataset_size", 0),
         mde=v.get("mde", 0.0),
         model=v.get("model", ""),
-        l2_enabled=v.get("l2_enabled", False),
-        l3_enabled=v.get("l3_enabled", False),
         composite_fitness_formula=v.get("composite_fitness_formula"),
         composite_fitness_formula_short=v.get("composite_fitness_formula_short"),
     )

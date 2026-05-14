@@ -122,8 +122,7 @@ async def run_round_loop(
                 await close_round(
                     cycle, round_result, trial_dict, round_num, session, cb, is_probe=True
                 )
-                if opt.enable_l2:
-                    await escalate_or_stop(cycle, config, session, round_num, cb)
+                await escalate_or_stop(cycle, config, session, round_num, cb)
                 round_num += 1
                 clean_rounds += 1
                 continue
@@ -141,7 +140,7 @@ async def run_round_loop(
                     warning_types=signal.check_result.get("warning_types"),
                 )
                 await close_round(cycle, round_result, trial_dict, round_num, session, cb)
-                if signal.routes_to_optimizer and opt.enable_l2:
+                if signal.routes_to_optimizer:
                     await escalate_or_stop(cycle, config, session, round_num, cb)
                 elif signal.is_abort:
                     raise StopLoop(StopReason.ABORT)

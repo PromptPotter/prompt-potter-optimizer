@@ -16,12 +16,10 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 
 | Stop Reason | What Happened | What to Do |
 |-------------|---------------|------------|
-| `patience_exhausted` | L1 stalled, L2/L3 couldn't improve further | Normal convergence. Check results — this is usually a good outcome. |
 | `perfect_score` | 100% accuracy achieved | Done. Winner is in `index.json::final::winner_prompt_fields`. |
 | `max_rounds` | Hit maximum round limit | May need more rounds (`max_rounds` in config) or L2/L3 intervention. |
 | `interrupted` | Ctrl+C during optimization | Resume with `optimize`. State was checkpointed. |
 | `escalation_abort` | Backend degradation too severe for L2 to fix | Read `output.log` and the latest `rounds/round_NNNN.json` for degradation details. May need backend fix. |
-| `l2_patience_exhausted` | L2 tried `l2_patience` times, no improvement | Consider manual task_context changes or different scan axes. |
 | `l3_patience_exhausted` | All three layers exhausted | Optimization has converged. Review results for best achieved. |
 | `hard_cap_reached` | Hit absolute round limit (100) | Very rare. Review if L2/L3 is cycling without progress. |
 

@@ -1005,8 +1005,8 @@ def test_escalation_state_round_trips_through_ledger(tmp_path: Path) -> None:
     ledger = _scripted_ledger(tmp_path)
     rebuilt = EscalationState.from_ledger(ledger)
     live = EscalationState()
-    live.observe_round(improved=False, current_accuracy=0.5, l1_patience=10, enable_l2=True)
-    live.observe_round(improved=True, current_accuracy=0.6, l1_patience=10, enable_l2=True)
+    live.observe_round(improved=False, current_accuracy=0.5, l1_patience=10)
+    live.observe_round(improved=True, current_accuracy=0.6, l1_patience=10)
     live.record_l2_fired(best_accuracy=0.6, best_composite_fitness=0.6)
 
     fields = [

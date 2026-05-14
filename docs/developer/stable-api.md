@@ -75,7 +75,7 @@ Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::C
 
 **Required per dataset** (no defaults): `optimization.improvement_threshold`, `optimization.max_failures`, `optimization.degradation_threshold`.
 
-**System invariants** (defaulted, MUST NOT appear in any `campaign.json`): `optimization.enable_l2 = True`, `optimization.enable_l3 = True`, `exploration.swap_out_delta_se = 0.7`.
+**System invariants** (defaulted, MUST NOT appear in any `campaign.json`): `exploration.swap_out_delta_se = 0.7`. L2 and L3 are always-on architecture, not feature flags.
 
 ### Other files
 

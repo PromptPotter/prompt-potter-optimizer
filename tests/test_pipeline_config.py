@@ -174,9 +174,7 @@ class TestCoordinateLookups:
 def test_no_numeric_max_tokens_in_dataset_pipeline_configs() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     pipeline_files = sorted(
-        p
-        for p in (repo_root / "datasets").glob("*/pipeline.json")
-        if p.parent.name != "_optimizer"
+        p for p in (repo_root / "datasets").glob("*/pipeline.json") if p.parent.name != "_optimizer"
     )
     assert pipeline_files, "no datasets/*/pipeline.json found — wrong cwd?"
 
@@ -238,9 +236,7 @@ def test_runtime_pipeline_params_is_rejected() -> None:
 def test_required_optimization_fields_must_be_explicit() -> None:
     """Per-dataset knobs (``improvement_threshold``, ``max_failures``,
     ``degradation_threshold``) have no default — a campaign that omits them
-    is rejected at load time so dataset configs are self-describing.
-    System invariants (``enable_l2``, ``enable_l3``) DO have
-    defaults — they are not per-dataset knobs."""
+    is rejected at load time so dataset configs are self-describing."""
     with pytest.raises(ValidationError):
         CampaignConfig.model_validate({"optimization": {"l1_patience": 3}})
 

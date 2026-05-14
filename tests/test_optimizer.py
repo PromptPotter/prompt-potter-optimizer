@@ -622,7 +622,6 @@ def test_default_round_rules_reproduce_observe_round_fsm():
         current_accuracy=1.0,
         l1_stall_count=0,
         l1_patience=3,
-        enable_l2=True,
     )
     assert decide_escalation(perfect).next_action == NextAction.STOP_PERFECT
 
@@ -632,27 +631,15 @@ def test_default_round_rules_reproduce_observe_round_fsm():
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
-        enable_l2=True,
     )
     assert decide_escalation(continuing).next_action == NextAction.CONTINUE
 
-    # Branch 3 — patience exhausted, L2 disabled → STOP_L1_PATIENCE (priority 30)
-    no_l2 = EscalationInputs(
-        improved=False,
-        current_accuracy=0.5,
-        l1_stall_count=3,
-        l1_patience=3,
-        enable_l2=False,
-    )
-    assert decide_escalation(no_l2).next_action == NextAction.STOP_L1_PATIENCE
-
-    # Branch 4 — patience exhausted, L2 enabled → FIRE_L2 (priority 10)
+    # Branch 3 — patience exhausted → FIRE_L2 (priority 10, fall-through)
     fire = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
         l1_stall_count=3,
         l1_patience=3,
-        enable_l2=True,
     )
     assert decide_escalation(fire).next_action == NextAction.FIRE_L2
 
@@ -671,7 +658,6 @@ def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
-        enable_l2=True,
         axes_with_positive_yield=0,
         escalate_on_yield_drought=True,
     )
@@ -683,7 +669,6 @@ def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
-        enable_l2=True,
         axes_with_positive_yield=0,
         escalate_on_yield_drought=False,
     )
@@ -695,7 +680,6 @@ def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
-        enable_l2=True,
         axes_with_positive_yield=None,
         escalate_on_yield_drought=True,
     )
@@ -710,13 +694,12 @@ def test_l2_every_round_rule_fires_only_when_opted_in():
     )
     from promptpotter.application.optimization.escalation.state import NextAction
 
-    # Opt-in + no stall + L2 enabled → FIRE_L2 (rule l2_every_round @ priority 80)
+    # Opt-in + no stall → FIRE_L2 (rule l2_every_round @ priority 80)
     on_no_stall = EscalationInputs(
         improved=True,
         current_accuracy=0.5,
         l1_stall_count=0,
         l1_patience=3,
-        enable_l2=True,
         fire_l2_every_round=True,
     )
     event = decide_escalation(on_no_stall)
@@ -729,7 +712,6 @@ def test_l2_every_round_rule_fires_only_when_opted_in():
         current_accuracy=1.0,
         l1_stall_count=0,
         l1_patience=3,
-        enable_l2=True,
         fire_l2_every_round=True,
     )
     assert decide_escalation(perfect_on).next_action == NextAction.STOP_PERFECT
@@ -740,21 +722,9 @@ def test_l2_every_round_rule_fires_only_when_opted_in():
         current_accuracy=0.5,
         l1_stall_count=0,
         l1_patience=3,
-        enable_l2=True,
         fire_l2_every_round=False,
     )
     assert decide_escalation(off).next_action == NextAction.CONTINUE
-
-    # Opt-in but L2 disabled ⇒ falls through to l1_continue (still in patience)
-    on_l2_off = EscalationInputs(
-        improved=False,
-        current_accuracy=0.5,
-        l1_stall_count=0,
-        l1_patience=3,
-        enable_l2=False,
-        fire_l2_every_round=True,
-    )
-    assert decide_escalation(on_l2_off).next_action == NextAction.CONTINUE
 
 
 # ---------------------------------------------------------------------------

@@ -45,15 +45,11 @@ class NextAction(enum.StrEnum):
     FIRE_L2 = "fire_l2"
     FIRE_L3 = "fire_l3"
     STOP_PERFECT = "stop_perfect"
-    STOP_L1_PATIENCE = "stop_l1_patience"
-    STOP_L2_PATIENCE = "stop_l2_patience"
     STOP_L3_PATIENCE = "stop_l3_patience"
 
 
 _NEXT_ACTION_TO_STOP: dict[NextAction, StopReason] = {
     NextAction.STOP_PERFECT: StopReason.PERFECT,
-    NextAction.STOP_L1_PATIENCE: StopReason.PATIENCE,
-    NextAction.STOP_L2_PATIENCE: StopReason.L2_PATIENCE,
     NextAction.STOP_L3_PATIENCE: StopReason.L3_PATIENCE,
 }
 
@@ -159,13 +155,12 @@ class EscalationState:
         improved: bool,
         current_accuracy: float,
         l1_patience: int,
-        enable_l2: bool,
         axes_with_positive_yield: int | None = None,
         escalate_on_yield_drought: bool = False,
         fire_l2_every_round: bool = False,
     ) -> EscalationEvent:
         """L1 round outcome. Bumps the stall counter; returns CONTINUE /
-        FIRE_L2 / STOP_PERFECT / STOP_L1_PATIENCE.
+        FIRE_L2 / STOP_PERFECT.
 
         Counter mutation stays here (state ownership). The decision
         lifts into :func:`escalation.decide.decide_escalation` — this
@@ -190,7 +185,6 @@ class EscalationState:
             current_accuracy=current_accuracy,
             l1_stall_count=self._l1_stall_count,
             l1_patience=l1_patience,
-            enable_l2=enable_l2,
             axes_with_positive_yield=axes_with_positive_yield,
             escalate_on_yield_drought=escalate_on_yield_drought,
             fire_l2_every_round=fire_l2_every_round,
@@ -203,11 +197,10 @@ class EscalationState:
         current_composite_fitness: float,
         l2_patience: int | None,
         l3_patience: int | None,
-        enable_l3: bool,
     ) -> EscalationEvent:
         """L2 escalation requested (L1 patience or mid-round signal). Updates
         the L2 stall counter (and L3's when cascading); returns FIRE_L2 /
-        FIRE_L3 / STOP_L2_PATIENCE / STOP_L3_PATIENCE.
+        FIRE_L3 / STOP_L3_PATIENCE.
 
         First-invocation grace: ``stall_count`` only advances after a layer
         has fired at least once (``round > 0``) — the prior best composite_fitness
@@ -222,13 +215,6 @@ class EscalationState:
                 next_action=NextAction.FIRE_L2,
                 stall_depth=self._l2_stall_count,
                 reason=f"L2 stall {self._l2_stall_count}/{l2_patience}",
-            )
-
-        if not enable_l3:
-            return EscalationEvent(
-                next_action=NextAction.STOP_L2_PATIENCE,
-                stall_depth=self._l2_stall_count,
-                reason="L2 patience exhausted; L3 disabled",
             )
 
         if self._l3_round > 0:

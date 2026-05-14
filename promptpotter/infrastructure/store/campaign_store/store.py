@@ -54,9 +54,7 @@ class CampaignStore(EntityStore):
         return self._campaign_dir(backend_id, cycle_id) / "rounds"
 
     def _candidates_dir(self, backend_id: str, cycle_id: str) -> Path:
-        return (
-            self._campaign_dir(backend_id, cycle_id) / ".runtime" / "cache" / "candidates"
-        )
+        return self._campaign_dir(backend_id, cycle_id) / ".runtime" / "cache" / "candidates"
 
     def _entity_path(self, backend_id: str, entity_id: str) -> Path:
         """Campaign metadata (index.json) lives INSIDE the per-cycle dir."""

@@ -448,8 +448,6 @@ class LiveDashboardView(DerivedView):
             s["origin"] = cycle.tracking.current_accuracy
             self.patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self.patience_max}"
-            budget = getattr(config.optimization, "spend_budget_usd", None)
-            s["spend"]["budget_usd"] = float(budget) if budget is not None else None
             if view is not None:
                 s["composite_fitness_formula"] = view.get("composite_fitness_formula")
                 self.short_formula_template = view.get("composite_fitness_formula_short")

@@ -33,12 +33,10 @@ class CampaignPhase(enum.StrEnum):
 class StopReason(enum.StrEnum):
     """Feedback cycle termination reasons."""
 
-    PATIENCE = "patience_exhausted"
     PERFECT = "perfect_score"
     MAX_ROUNDS = "max_rounds"
     INTERRUPTED = "interrupted"
     ABORT = "escalation_abort"
-    L2_PATIENCE = "l2_patience_exhausted"
     L3_PATIENCE = "l3_patience_exhausted"
     HARD_CAP = "hard_cap_reached"
     SWEEP_COMPLETE = "sweep_complete"

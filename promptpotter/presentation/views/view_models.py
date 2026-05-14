@@ -73,8 +73,6 @@ class InitEnterView:
     dataset_size: int = 0
     mde: float = 0.0
     model: str = ""
-    l2_enabled: bool = False
-    l3_enabled: bool = False
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
 

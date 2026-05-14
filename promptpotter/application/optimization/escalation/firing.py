@@ -486,7 +486,6 @@ async def escalate_l2(
         current_composite_fitness=cycle.tracking.best_composite_fitness,
         l2_patience=opt.l2_patience,
         l3_patience=opt.l3_patience,
-        enable_l3=opt.enable_l3,
     )
 
     # L2 trigger decision is replayed for divergence — record fired-or-not.
@@ -516,7 +515,7 @@ async def escalate_l2(
         # Wound 4: post-L2 validator failure force-triggers L3 to heal L2's
         # output. Trigger is deterministic from L2's output (rides on round_data
         # JSON), so resume reproduces it without a separate decision record.
-        if cycle.opt_sp.l2_guard_breaches and opt.enable_l3:
+        if cycle.opt_sp.l2_guard_breaches:
             logger.warning(
                 "L3 force-triggered by %d L2-output validator failure(s) at round %d",
                 len(cycle.opt_sp.l2_guard_breaches),
@@ -533,9 +532,6 @@ async def escalate_l2(
                 tracing_campaign_id=tracing_campaign_id,
             )
         return None
-
-    if event.next_action == NextAction.STOP_L2_PATIENCE:
-        return StopReason.L2_PATIENCE
 
     # FIRE_L3 or STOP_L3_PATIENCE — record L3 trigger decision either way.
     l3_inputs, l3_data = _trigger_payload(cycle, round_num, opt.l3_patience, layer="l3")

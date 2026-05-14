@@ -110,9 +110,9 @@ After an interrupted run, check for orphan processes (`tasklist | findstr python
 
 ## Zero-signal sample filtering
 
-Off by default. `min_observations=5` gate prevents premature exclusion. Queries with variance 0 (always-hit or always-miss) across at least `zero_signal_filter_min_observations` samples are physically moved from `datasets/{name}.json::items` into `datasets/{name}.json::excluded` after each round.
+Off by default. Queries with variance 0 (always-hit or always-miss) across at least one observation are physically moved from `datasets/{name}.json::items` into `datasets/{name}.json::excluded` after each round.
 
-Enable via `optimization.zero_signal_filter_enabled: true` in `campaign.json`. Tune `optimization.zero_signal_filter_min_observations` (default 5).
+Enable via `optimization.zero_signal_filter_enabled: true` in `campaign.json`.
 
 ```bash
 # Inspect what's been excluded

@@ -83,10 +83,10 @@ round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_w
                   ↓
         decide_escalation(inputs) → EscalationRule
                   ↓
-   {STOP_PERFECT, FIRE_L2 (yield-drought rule | patience-exhausted rule), CONTINUE, STOP_L1_PATIENCE}
+   {STOP_PERFECT, FIRE_L2 (yield-drought rule | patience-exhausted rule), CONTINUE}
 ```
 
-Default rules in `escalation/rules.py` reproduce the prior FSM exactly (`perfect_accuracy`, `l1_continue`, `l1_stop_no_l2`, `l1_to_l2`); plus opt-in `l2_axis_yield_drought` (priority 60) — fires L2 early when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor. Gated by `campaign.json::optimization.escalate_on_yield_drought`.
+Default rules in `escalation/rules.py`: `perfect_accuracy`, `l1_continue`, `l1_to_l2`; plus opt-in `l2_axis_yield_drought` (priority 60) — fires L2 early when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor. Gated by `campaign.json::optimization.escalate_on_yield_drought`.
 
 Counter state lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle, persisted to `rounds/round_NNNN.json` after every round, replayed on resume by `resume_with_divergence_check()`. Every transition is checkpointed.
 

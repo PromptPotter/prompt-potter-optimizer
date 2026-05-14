@@ -370,12 +370,10 @@ def evolve_scoring_set(
 ) -> EvolveResult:
     """Decide the next round's scoring set. Pure — no I/O, no mutation of inputs.
 
-    When the feature is disabled, when there are no completed rounds yet,
-    or when the dataset has nothing left to swap in, returns the current
-    scoring set unchanged with ``reason`` populated for telemetry.
+    When there are no completed rounds yet, or when the dataset has
+    nothing left to swap in, returns the current scoring set unchanged
+    with ``reason`` populated for telemetry.
     """
-    if not config.enabled:
-        return EvolveResult(new_scoring_set=list(current_scoring_set), reason="disabled")
     if not rounds:
         return EvolveResult(new_scoring_set=list(current_scoring_set), reason="no_rounds_yet")
 

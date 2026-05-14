@@ -50,9 +50,8 @@ class EscalationInputs:
     # Stall counters (mirror EscalationState properties post-mutation)
     l1_stall_count: int
 
-    # Patience config + enabled gates
+    # Patience config
     l1_patience: int
-    enable_l2: bool
 
     # Optional derived-memory inputs (None when AxisIndex not initialised
     # or the corresponding feature flag is off — predicates must handle).

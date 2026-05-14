@@ -63,7 +63,7 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
     ),
     EscalationRule(
         name="l2_every_round",
-        when=lambda s: s.fire_l2_every_round and s.enable_l2,
+        when=lambda s: s.fire_l2_every_round,
         fire=NextAction.FIRE_L2,
         priority=80,
         reason=lambda s: f"fire_l2_every_round=True (L1 stall {s.l1_stall_count}/{s.l1_patience})",
@@ -89,13 +89,6 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
         fire=NextAction.CONTINUE,
         priority=50,
         reason=lambda s: f"L1 stall {s.l1_stall_count}/{s.l1_patience}",
-    ),
-    EscalationRule(
-        name="l1_stop_no_l2",
-        when=lambda s: not s.enable_l2,
-        fire=NextAction.STOP_L1_PATIENCE,
-        priority=30,
-        reason="L1 patience exhausted; L2 disabled",
     ),
     EscalationRule(
         name="l1_to_l2",

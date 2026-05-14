@@ -57,9 +57,7 @@ L1 stalls (patience rounds without improvement)
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `patience` | 3 | L1 rounds without improvement before L2 |
-| `enable_l2` | true | Allow L2 escalation |
 | `l2_patience` | 2 | L2 invocations without improvement before L3 |
-| `enable_l3` | true | Allow L3 escalation |
 | `l3_patience` | 1 | L3 invocations without improvement before stop |
 | `enable_l1_critique` | true | L1 critique-guided generation (vs. direct generation) |
 | `degradation_threshold` | 0.4 | Mid-eval abort threshold (0 = disabled) |

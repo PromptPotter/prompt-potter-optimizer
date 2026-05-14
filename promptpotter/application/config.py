@@ -37,20 +37,10 @@ class ExplorationConfig(BaseModel):
     """Round-level Rasch IRT — fits one posterior per round, used for both
     scoring-set evolution (in-memory swap of understood ↔ high-info samples)
     and the round-end hard-sample heatmap rendered into ``log.md``.
-
-    Replaces the prior split between ``ScoringSetConfig`` and
-    ``HardSampleSorterConfig`` — they consumed the same Rasch fit, so they
-    share one config block and one posterior object.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = Field(
-        True,
-        description="Master switch — true = Rasch + KG scoring-set evolution active. "
-        "Independent of ``hard_sample_sorter_enabled``: a disabled exploration loop "
-        "still produces the round-end hard-sample heatmap if requested.",
-    )
     swap_out_delta_se: float = Field(
         0.7,
         description="Swap-out threshold: SE on delta_s below which a sample is 'understood' "
@@ -66,19 +56,6 @@ class ExplorationConfig(BaseModel):
         1.5,
         description="Sigma on the N(0, sigma²) theta prior when no observations yet.",
     )
-    hard_sample_sorter_enabled: bool = Field(
-        True,
-        description="Render the candidate-by-sample heatmap section inside log.md at "
-        "round-end. Independent of ``enabled``.",
-    )
-    top_k_candidates: int = Field(
-        40,
-        description="Cap on persisted candidate axis (θ_c desc) in the heatmap.",
-    )
-    top_k_samples: int = Field(
-        40,
-        description="Cap on persisted sample axis (δ_s desc) in the heatmap.",
-    )
 
 
 class OptimizationConfig(BaseModel):
@@ -87,10 +64,6 @@ class OptimizationConfig(BaseModel):
     Required per-dataset fields (no default — Pydantic raises if missing): every
     ``datasets/*/campaign.json`` must declare ``improvement_threshold``,
     ``max_failures``, ``degradation_threshold``.
-
-    System invariants (defaulted, MUST NOT appear in any ``campaign.json``):
-    ``enable_l2=True``, ``enable_l3=True``, and
-    ``ExplorationConfig.swap_out_delta_se=0.7``.
 
     Guard test: ``tests/test_campaign_config_validation.py::test_required_optimization_fields_must_be_explicit``.
     """
@@ -104,8 +77,6 @@ class OptimizationConfig(BaseModel):
     improvement_threshold: float = Field(..., description="Min accuracy delta")
     max_failures: int = Field(..., description="Max failure examples fed to L1")
 
-    enable_l2: bool = Field(True, description="System invariant — L2 is part of the architecture")
-    enable_l3: bool = Field(True, description="System invariant — L3 is part of the architecture")
     l2_patience: int | None = Field(2)
     l3_patience: int | None = Field(1)
     escalate_on_yield_drought: bool = Field(
@@ -129,15 +100,6 @@ class OptimizationConfig(BaseModel):
     )
     l2_temperature: float = Field(0.3)
     l3_temperature: float = Field(0.5)
-    spend_budget_usd: float | None = Field(
-        None,
-        description=(
-            "Operator-set spend ceiling in USD for the whole cycle "
-            "(optimizer + backend LLM calls). None = uncapped. Surfaces on "
-            "dashboard.json::spend.budget_usd; not yet enforced — see "
-            "docs/specs/m11-spend-tracking.md."
-        ),
-    )
 
     degradation_threshold: float = Field(...)
 
@@ -202,7 +164,6 @@ class OptimizationConfig(BaseModel):
     )
 
     zero_signal_filter_enabled: bool = Field(False)
-    zero_signal_filter_min_observations: int = Field(5)
 
     forbidden_axes_strict: bool = Field(
         True,
