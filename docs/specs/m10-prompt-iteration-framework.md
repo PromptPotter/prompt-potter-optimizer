@@ -1,60 +1,47 @@
 # M10: Prompt-Iteration Framework + L1-generate Tuning
 
-**Version:** 0.2.0
-**Date:** 2026-04-30
-**Status:** Planned
-**Depends on:** M9
+**Status:** Active.
+**Goal:** `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`.
+**Headline metric:** `rounds_to_95` (first round where best accuracy ≥ 0.95; `None` if never).
+**Cost envelope:** ≤ ~500 LOC of new code total. No new persistence channel, no new I/O kind. Everything rides existing infra (`AuditTrailView`, `OptSearchPoint`, `MeasurementArchive`, `CycleEventLog.inherit_from`, escalation rules engine, `INJECTIONS`).
 
-**0.2.0 amendment:** Track 5 replaces the original `optimize --sweep` halt-flag with a **unified fork primitive** (typed `ForkPayload`, trigger-agnostic `_mint_fork()`). Sweep becomes the first caller; future L2/L3 rebase, L4 auto-rebase, M12 pipeline-switch, and M11 webapp-replay are additional callers built on the same mechanism. See Track 5.
+This is the M10 charter for everything around tuning the four optimizer meta-prompts: the framework (Tracks 1–4), the unified fork primitive that sweep rides on (Track 5), the sweep toolkit verbs (Track 6), the L2 self-diagnosis surface (Track 7), and Imagination (Track 8 — the deferred bet).
 
-**Gating dependency:** the ≥95%-in-5 exit goal depends on the **sweep toolkit** ([`m10-sweep-toolkit.md`](m10-sweep-toolkit.md)) — four small CLI verbs (`time-to`, `round1`, `round2`, `slice`) + a `rank` view that make L1 meta-prompt edits cheap-gradable using existing `optimize --sweep` plumbing. No new infrastructure layer; results land as JSON under `archive/sweeps/`. Built before the next live campaign.
+## Why bother
 
----
+`l1_generate` is the principal bottleneck — the loop only descends gradient when L1 produces useful variants. L1 has known misbehaviors (ignores `context_object`, mutates LLM-call params before prompt fields saturate) plus open unknowns. Auto-tuning (L4) is too expensive in the small-N regime, so the framework's job is to give the operator + Claude the same quality of feedback an L4 would give itself — manually, fast, and per-cycle.
 
-## Goal
-
-≥95% training-set accuracy in ≤5 rounds on `llm_only` AND TermNorm under the same prompt revision. ~1 week of manual iteration once framework lands. Then M11 picks up for test-set + benchmarks.
-
-## L4 partial — what this also is
-
-The framework doubles as the partial implementation of L4 self-optimization (see [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md)). L4 has two blockers: (1) credit assignment / cheap proxy reward; (2) "PromptPotter-as-backend" adapter. **M10 closes most of (1)**: `proxy_lift_corr` is the credit-assignment validation, the unified fork primitive (Track 5) is the cheap-trial mechanism *and* the substrate that L4 auto-rebase will plug into, behavior checks are the programmatic conformance signal, `review.md` + `L1Stats` are the per-cycle structured features. (2) stays in M12+. Architectural consequence: **target ≤ ~500 LOC of new code** (50 LOC bump from 0.1.0 to absorb the fork primitive generalization), all reusing existing primitives (`AuditTrailProjection`, `OptSearchPoint` traces, `MeasurementArchive`, `CycleLedger.inherit_from`, `formatting.py`, scipy.stats). No new persistence, no new abstraction layer. If a proposed component doesn't forerun L4, push back.
-
-## Why a milestone
-
-`l1_generate` is the principal bottleneck — the loop only descends gradient when L1 produces useful variants. L1 has known misbehaviors (ignores `context_object`, mutates LLM-call params before prompt fields are saturated) plus open unknown unknowns. **Auto-tuning ("L4") is too expensive in the small-N regime — no replay surrogate, no large run dataset to fit a meta-policy on.** The framework's job is to give the operator + Claude the same quality of feedback an L4 would give itself, manually, fast.
-
-Lifted from M9 Track 1: infrastructure + prompt-tuning don't share work-units. Tuning before benchmarking is cheaper than re-running benchmarks against an untuned loop.
+**L4 partial.** M10 closes most of credit-assignment for a future L4: `proxy_lift_corr` validates the cheap proxy, the unified fork primitive is the cheap-trial mechanism *and* the substrate L4 auto-rebase will plug into, behavior checks are the programmatic conformance signal, `review.md` + `L1Stats` are the per-cycle structured features. PromptPotter-as-backend stays in M12+.
 
 ## Operating principles
 
-1. **Each searchpoint is costly.** Treat rounds as scarce. **Round-1 gate (mandatory):** after round 1, halt and review before committing rounds 2-5. Most diagnostic signal is in round 1; rounds 2-5 only earn their cost if round 1 looks healthy.
-2. **Round-1 sweep, round-2 promote.** When comparing N candidate L1 prompts, run each for **1 scored round + 1 unscored generation peek** (round 2's L1 generates variants but does not score them — their proposals are persisted as `OptSearchPoint` traces only). Compare side-by-side cheaply. Promote winners to a full round 2 scoring. Spin up new candidates from learnings; same protocol.
-3. **Proxy validation is a first-class question.** The above protocol assumes round-1 stats predict full-cycle outcome. **Validate or refute that hypothesis as the data accumulates.** If the proxy holds, cost drops ~80%; if it doesn't, the framework gets modified on the go (sweep-mode rules update, not the whole stack).
-4. **Build the framework before and while running.** The framework lands first (Tracks 1-4). Subsequent `optimize` runs feed it. Each new "unknown unknown" surfaced in a run becomes a new behavior check — the registry grows with the iteration, not before it.
-5. **Skill-collaborative analysis, not solo runs.** Operator runs `optimize`, then [`/potter-l1-meta-campaign`](../../.claude/skills/potter-l1-meta-campaign/SKILL.md) reads the cycle's artifacts, surfaces the top issue, and writes one proposed edit to disk. Operator confirms or redirects; Claude edits. That skill *is* the L4 substitute — per-cycle gate + sweep-batch ranking + multi-tick state all live there.
-6. **One change at a time, by default.** Bundled edits (e.g. prompt + threshold together) cloud attribution: when the next run improves, you can't tell which change helped. The default is one change per iteration. Bundling is fine when the operator explicitly accepts the attribution loss — usually because both edits target the same observed failure, or the interaction is already well-understood. Treat the default as a tiebreaker, not a rule.
-7. **General fix, not specific.** When L1 misbehaves on round 3 with input X, the prompt edit must guard against the *class* of mistake. Re-run to verify.
+1. **Each searchpoint is costly.** Round-1 gate is mandatory: halt + review before committing rounds 2–5.
+2. **Round-1 sweep, round-2 promote.** Compare N L1 candidates with 1 scored round + 1 unscored generation peek; promote winners to full.
+3. **Proxy validation is a first-class question.** If `proxy_lift_corr ≥ 0.6`, sweep-mode is trusted as primary screening. `< 0.4` ⇒ revisit rules. In between ⇒ pair with one confirmation full-cycle.
+4. **Build the framework while running.** Each new unknown unknown becomes a new behavior check.
+5. **Skill-collaborative analysis is the L4 substitute.** `/potter-l1-meta-campaign` reads cycle artifacts, surfaces the top issue, proposes one edit; operator confirms; Claude edits.
+6. **One change per iteration by default.** Bundle only when both edits target the same observed failure and the operator accepts the attribution loss.
+7. **General fix, not specific.** Round-3 failure on input X → guard the *class*, re-run.
 
 ## Tracks
 
-### 1. L1 behavior checks
+### Track 1 — L1 behavior checks
 
-`promptpotter/application/l1_behavior_checks.py` (planned — landing site after V10 hoist). Registry of programmatic checks: `(round_dict, ctx) -> CheckResult`. Each check looks at one round's output and verdicts ✓/✗ + evidence string. Pure functions, no I/O.
+Registry at `promptpotter/application/optimization/validators/l1_behavior.py`. Pure functions: `(round_dict, ctx) -> CheckResult`. Adding a check = one-function diff.
 
 | check_id | rule |
 |---|---|
-| `context_object_honored` | Each variant references at least one of the three `context_object` items in `changes_description` or new prompt-field text. |
-| `param_scope_discipline` | No variant touches `temperature`/`max_tokens`/`reasoning_effort` while ≥1 prompt field has been unchanged for the past 2 rounds, or before round `param_unlock_round` (default 3). |
+| `context_object_honored` | Each variant references ≥1 `context_object` item in `changes_description` or new prompt-field text. |
+| `param_scope_discipline` | No variant touches `temperature`/`max_tokens`/`reasoning_effort` while ≥1 prompt field has been unchanged for 2 rounds, or before `param_unlock_round` (default 3). |
 | `not_only_param_variants` | ≥1 variant per round mutates a `PROMPT_STRING_FIELDS` field. |
-| `optimizer_rewind_guard` *(5b — wired only when L2/L3 rebase emission lands)* | If the round emitted a `RebaseAction`, target round must exist + be ≤ current round; `reason` non-empty; payload non-empty (no-op rebase = bug). |
+| `evidence_grounding_present` | Each variant's `evidence_grounding.field` ∈ `{parent_panel, sibling_yield, axis_memory, escalation_panel, task_context, plan, stall_exploration}` with non-empty citation. `stall_exploration` only when `escalation_panel.exploration_budget ∈ {normal, wide}`. |
+| `optimizer_rewind_guard` *(wired when L2/L3 rebase emission lands — Track 5b/M11)* | If round emitted a `RebaseAction`: target round exists + ≤ current; reason non-empty; payload non-empty. |
 
-Adding a check = one-function diff. New unknown unknowns land here as the operator iterates.
+`evidence_grounding` is a required field in `l1_generate.json` output schema; carries through `CandidateProposal` → `OptSearchPoint.lineage` → `review.md`'s `evidence` column. Unjustified-mutation count > N triggers the `l2_unjustified_mutations` healing rule (Track 7).
 
-`l1_generate.json` revised in the same commit to encode the two seeded constraints. First post-edit run is the framework's own first test.
+### Track 2 — Per-cycle `review.md`
 
-### 2. Per-cycle `review.md`
-
-`promptpotter/application/review.py` (planned — landing site after V10 hoist). Pure renderer (peer of `presentation/views/log_md.py`).
+Pure renderer at `promptpotter/application/review.py` (peer of `presentation/views/render/markdown.py`).
 
 ```python
 def render_review_md(
@@ -65,159 +52,166 @@ def render_review_md(
 ) -> str: ...
 ```
 
-**Per-round section:**
-- L1 inputs: `task_context` (broadcast L2-refined framing), critique fed in, three `context_object` items.
-- Behavior-check checklist (✓/✗ + evidence string).
-- Variants table: `variant | composite | accuracy | Δ_parent | Δ_origin | beat_parent | changes`.
-- This round's critique (output of `l1_critique`).
-- **Next-generation peek** (sweep mode only, when round was halted post-generation/pre-scoring): the `OptSearchPoint` traces L1 produced for the next round. Rendered as a compact `cand_id | changes | derived_axes` table. No fitness columns — it wasn't measured.
+**Per-round section:** L1 inputs (`task_context`, fed critique, three `context_object` items) · behavior-check checklist (✓/✗ + evidence) · variants table (`variant | composite | accuracy | Δ_parent | Δ_origin | beat_parent | evidence | changes`) · this round's critique · **next-generation peek** (sweep mode only — the `OptSearchPoint` traces L1 produced for the halted next round, rendered as `cand_id | changes | derived_axes`, no fitness columns).
 
-**Header:** four prompt-template hashes, `L1Stats` block, behavior-violation summary, **round-1 verdict** (see Track 5).
+**Header:** four prompt-template hashes · `L1Stats` block · behavior-violation summary · **round-1 verdict** (Track 3).
 
-Wired into `runner.py::finalize` AND emitted incrementally after round 1 so the round-1 gate has something to read. `tests/test_invariants.py::PER_CYCLE_OPERATOR_ARTIFACTS` gains `review.md`.
+Wired into `runner/entry.py::_finalize_run` AND emitted incrementally after round 1 so the round-1 gate has something to read. `tests/test_invariants.py::PER_CYCLE_OPERATOR_ARTIFACTS` gains `review.md`.
 
-### 3. L1Stats
+### Track 3 — `L1Stats`
 
-`compute_l1_stats(rounds, *, origin_composite, behavior_results) -> L1Stats`. Frozen dataclass.
+Frozen dataclass returned by `compute_l1_stats(rounds, *, origin_composite, behavior_results) -> L1Stats`.
 
 | metric | formula | role |
 |---|---|---|
-| `rounds_to_95` | first round where best accuracy ≥ 0.95; `None` if never reached | **headline** |
-| `round_1_verdict` | `healthy` / `degraded` / `broken` per Track 5 rule table | **gate signal** |
+| `rounds_to_95` | first round where best accuracy ≥ 0.95; `None` if never | **headline** |
+| `round_1_verdict` | `healthy` / `degraded` / `broken` per rule table below | **gate signal** |
 | `yield_rate` | mean over rounds of (variants beating parent / variants generated) | diagnostic |
 | `top_lift_mean` | mean over rounds of (best variant composite − parent composite) | diagnostic |
 | `behavior_pass_rate` | (round × check) cells passing / total | diagnostic |
 | `stagnation_max` | longest run with `top_lift ≤ 0` | diagnostic |
 | `l2_fires` | rounds with `lineage.source == l2_context` | diagnostic |
-| `proxy_lift_corr` (cross-cycle, computed by leaderboard) | Spearman rank correlation between round-1 `top_lift` and `rounds_to_95`-or-final-acc across qualifying cycles | **proxy validity** |
+| `proxy_lift_corr` *(cross-cycle, computed by leaderboard)* | Spearman rank corr between round-1 `top_lift` and final outcome across qualifying cycles | **proxy validity** |
 
 Parent composite: `origin_composite` for round 1, `trials[r-1].composite` thereafter.
 
-### 4. Cross-cycle / cross-branch leaderboard
+**Round-1 verdict** thresholds (calibrate after first 3 cycles): `yield_rate ≥ 0.20` → healthy · `< 0.20` → degraded · L1 schema failure / parse-fail-rate ≥ 50% / behavior checks all ✗ → broken.
 
-`promptpotter/application/leaderboard.py` (planned — landing site after V10 hoist). Read-only shim `scripts/ppot_review.py`.
+### Track 4 — Cross-cycle / cross-branch leaderboard
+
+Read-only at `promptpotter/application/leaderboard.py`; shim `scripts/ppot_review.py`. Stdout-only. Not a new write verb.
 
 Row: `branch_path | dataset | pipeline | l1_generate_hash[:8] | l1_critique_hash[:8] | mode | fork_trigger | rounds_to_95 | round_1_verdict | round_1_top_lift | round_1_yield | best_acc | origin_acc | Δacc | behavior_pass_rate | rounds_completed | l2_fires | stop_reason`.
 
-`branch_path` = `root_cycle_id → ... → leaf_cycle_id` (renders the branch's lineage in one column). `fork_trigger` ∈ `{none, operator_sweep, operator_rewind, l2_rebase, l3_rebase, scoring_divergence}` (none = root cycle of a family).
+`branch_path` = `root_cycle_id → … → leaf_cycle_id`. `fork_trigger` ∈ `{none, operator_sweep, operator_rewind, l2_rebase, l3_rebase, scoring_divergence}`. `mode` ∈ `{sweep, full}`.
 
-`mode` = `sweep` (1 round + gen peek; emitted by sweep-triggered forks) or `full` (≥ 2 scored rounds).
+**Views.** `--leaderboard` sorts everything `(l1_generate_hash, rounds_to_95 asc with None last, behavior_pass_rate desc)`. `--sweep` filters to `fork_trigger = operator_sweep`, groups by parent root, sorts by `round_1_top_lift` desc — that's the narrowing view for picking sweep winners. Footer reports `proxy_lift_corr` across branches with the same `l1_generate_hash` in both modes.
 
-Two views:
-- **Default** (`--leaderboard`): all branches across all family-roots, sorted `(l1_generate_hash, rounds_to_95 asc with None last, behavior_pass_rate desc)`.
-- **Sweep** (`--sweep`): branches with `fork_trigger = operator_sweep` only, grouped by parent `root_cycle_id`, sorted by `round_1_top_lift` desc within each group. Used for narrowing down candidate L1 prompts before promoting to full runs.
+### Track 5 — Unified fork primitive
 
-Computes `proxy_lift_corr` across all branches where the same `l1_generate_hash` exists in both modes — answers "does round-1 lift predict full-cycle outcome?". Reported in the table footer. Stdout-only. Not a new write verb.
-
-### 5. Unified fork primitive (`--sweep` is the first caller)
-
-Today `DecisionRecord(kind=FORK_CUT)` is scoring-divergence-only and its payload is `{from_round, forked_at}`. Generalize it to a typed action that **any trigger** can emit. Operator sweep is one caller; future L2/L3 rebase, L4 auto-rebase, M11 manual rewind, M12 pipeline-switch, and M11/M12 webapp-replay are additional callers built on the same code path. **One mechanism, multiple drivers.**
-
-**Why this shape (vs the 0.1.0 `--sweep` halt-flag).** Sweep, L2-rebase-to-historical-parent, L3-meta-replan, and scoring-divergence all answer the same shape of question: *"abandon this lineage from round N, start over from round M < N with a different payload."* They differ only in (a) who issues the cut, (b) what payload differs at the cut. Building one primitive per driver compounds tech debt. Building the typed primitive once means new drivers (L4, webapp, multi-pipeline) ship as small callers rather than re-architecture.
-
-**Domain extension** (`promptpotter/domain/run_records.py`):
+Today `DecisionRecord(kind=FORK_CUT)` is scoring-divergence-only. Generalize so **any** trigger emits the same shape: sweep, operator rewind, L2 rebase, L3 rebase, M12 pipeline-switch, M11 webapp-replay, future L4 auto-rebase. One mechanism, multiple drivers.
 
 ```python
 class ForkTrigger(StrEnum):
     OPERATOR_SWEEP    = "operator_sweep"
-    OPERATOR_REWIND   = "operator_rewind"     # M11 — labelled manual fork from any round
-    L2_REBASE         = "l2_rebase"            # M11 — gated behind --allow-llm-rebase
-    L3_REBASE         = "l3_rebase"            # M11 — gated behind --allow-llm-rebase
-    SCORING_DIVERGENCE = "scoring_divergence"  # already wired; today's only trigger
-    # M12+ additions land as enum members; payload + mechanism unchanged:
+    OPERATOR_REWIND   = "operator_rewind"       # M11 — labelled manual fork
+    L2_REBASE         = "l2_rebase"              # M11 — gated on --allow-llm-rebase
+    L3_REBASE         = "l3_rebase"              # M11 — gated on --allow-llm-rebase
+    SCORING_DIVERGENCE = "scoring_divergence"   # already wired
+    # M12+ enum additions only — payload + mechanism unchanged:
     # PIPELINE_SWITCH, COMPETITOR_HARNESS, WEBAPP_REPLAY, L4_AUTO_REBASE
 
 class ForkPayload(BaseModel):
-    """The diff that distinguishes the fork from its parent at the cut point.
-    Trigger-agnostic — every trigger uses the same payload shape."""
+    """The diff that distinguishes the fork from its parent at the cut.
+    Trigger-agnostic — every trigger uses this shape."""
     trigger: ForkTrigger
-    reason: str                          # mandatory; LLM-issued reason or operator label
-    issued_by: str                       # operator id, "L2", "L3", "L4", or "system"
-    # Optional deltas; any subset may be set:
+    reason: str                          # mandatory; LLM-issued or operator label
+    issued_by: str                       # operator id / "L2" / "L3" / "L4" / "system"
     brief: str | None = None
     l1_section_overrides: dict[str, bool] | None = None
     l1_section_overrides_text: dict[str, str] | None = None
     l1_template_override: str | None = None
-    pipeline_swap: dict | None = None    # M12 — connector / pipeline change at the cut
-    scoring_swap: dict | None = None     # forward-compat: explicit scorer change at fork
+    pipeline_swap: dict | None = None    # M12 connector / pipeline change at cut
+    scoring_swap: dict | None = None     # explicit scorer change at fork
 ```
 
-`DecisionRecord(kind=FORK_CUT)` continues to carry `inputs_ref={"from_round": N}` and `outcome=new_cycle_id` (existing wire shape preserved); the new payload moves into `data.fork: ForkPayload`. Existing scoring-divergence forks keep working — runner backfills `trigger=SCORING_DIVERGENCE`, `issued_by="system"`, `reason="scorer_mismatch:<decision_kind>"`.
+`DecisionRecord(kind=FORK_CUT)` keeps `inputs_ref={"from_round": N}` + `outcome=new_cycle_id`; the payload moves into `data.fork: ForkPayload`. Scoring-divergence forks keep working — runner backfills `trigger=SCORING_DIVERGENCE`, `issued_by="system"`, `reason="scorer_mismatch:<decision_kind>"`. `FORK_CUT` stays `ARCHIVAL` in `DECISION_GATING`.
 
-`FORK_CUT` stays `ARCHIVAL` in `DECISION_GATING` — its outcome (the new cycle_id) is downstream of the divergence-checked decisions, never gating itself.
+**Mechanism.** Rename `_fork_at_divergence()` → `_mint_fork(parent, fork_from_round, payload)` in `application/optimization/cycle.py`. Body unchanged: parent ledger gets `FORK_CUT` with `data.fork`, fork dir under `campaigns/{root}/forks/{cycle_id}/`, rounds/candidates copied for rounds `< fork_from_round`, active pointer retargeted, `CycleEventLog.inherit_from(parent, parent.next_offset)`.
 
-**Mechanism.** Rename `_fork_at_divergence()` → `_mint_fork(parent, fork_from_round, payload: ForkPayload)` in `application/optimization/cycle.py`. Body unchanged: parent ledger gets `FORK_CUT` (now carrying `data.fork`), fork dir minted under `campaigns/{root}/forks/{cycle_id}/`, rounds/candidates copied for rounds `< fork_from_round`, active pointer retargeted, `CycleLedger.inherit_from(parent, parent.next_offset)`. The scoring-divergence branch in `cycle.py:790` becomes one caller; sweep + future LLM-rebase are new callers.
+**LLM-side surface.** Extend `OptimizerAction` with `rebase: RebaseAction | None` (ForkPayload-shaped sans `trigger`/`issued_by`; runner stamps those from the emitting layer). **L1 cannot rebase** — only outer layers (L2/L3). L1 is the thing being rebased on. M10 ships the schema field unwired; M11 wires emission.
 
-**LLM-side surface.** Extend `OptimizerAction` in `application/optimization/pipeline.py`:
+**Telemetry.** Active fork's `cycle_id` already at `dashboard.json::cycle_id`; extend with `cycle_id_path: list[str]` (root → … → current) so live view + webapp render the tree without walking ledgers.
+
+### Track 6 — Sweep toolkit
+
+Four verbs + one view. Not a workflow — tools you jump between. Result JSONs persist under `archive/sweeps/{l1_meta_prompt_hash}/{dataset}/{verb}_{timestamp}.json`; `rank` reads them.
+
+| verb | answers |
+|---|---|
+| `time-to N` | How many rounds / how much spend until L1-vX hits N% on dataset D? Halts on accuracy / max-rounds / max-spend. |
+| `round1` | One round on a panel of L1 variants. Per-variant `round1_accuracy`, `round1_best`, `panel_size`, `parse_fail_rate`, `pipeline_params_entropy`, `cost_usd`. |
+| `round2` | Reads a prior `round1` sweep, takes top-K survivors, runs one more round. Adds `round2_accuracy`, `round2_lift`, `cumulative_cost_usd`. |
+| `slice` | Modifier on any verb: `hard` (top quartile by `SampleProfile` difficulty), `easy` (bottom), `all` (default), `samples=S1,S2,…`. Free variance reduction. |
+| `rank` | Reads last N sweep JSONs for a dataset, prints a sorted table. Columns: every verb-emitted field + derived `cost_per_lift`. Pure read; no persistence. |
+
+**Result JSON** — single shape across verbs, some fields populated per verb: `{sweep_id, verb, timestamp, l1_meta_prompt_hash, l1_meta_prompt_label, dataset, slice, panel_size, round1_accuracy, round1_best, round2_accuracy, round2_lift, rounds_to_target, early_exit_reason, parse_fail_rate, pipeline_params_entropy, diversity_l2_score, cost_usd, final_accuracy, notes}`.
+
+**No held-out eval set, no replay corpus, no projection layer.** Cheap models make live sweeps cheap enough that frozen 30-sample mini-benchmarks are overbuilt; cross-dataset signal comes from running sweeps on different datasets. `diversity_l2_score` placeholder is for a later L2-rates-diversity follow-on (L2 already sees the panel; one new field in its response schema, no new LLM call).
+
+### Track 7 — L2 self-diagnosis surface
+
+L2 today reads (via `INJECTIONS`): `parent_panel`, `sibling_yield`, `axis_memory`, `escalation_panel`, `task_context`, `l1_critique`, `prev_l2_directive`, `l1_signal_catalogue`. To diagnose L1 instead of just framing edits, it needs four more panels and one escalation signal:
+
+- **`l1_considered_mutations`** — per-round trace of what L1 *proposed*, not just what won. From `CandidateScore` in `RoundResult.candidate_scores`. Renders `cand_id | mutation | evidence_field | composite | beat_parent`. Separates "bad pool" from "bad selection."
+- **`axis_exhaustion`** — promote `AxisIndex.digest()` exhaustion-per-axis to an explicit boolean (`exhausted = n_tried ≥ N and mean_delta within noise_floor`); surface prominently.
+- **`sample_delta`** — top-K (default 5) regressions + top-K gains, sorted by `|delta|`. Lets L2 cite specific samples.
+- **`l1_verbosity_stats`** — chars per prompt field for parent + winner + each scored candidate vs. configured soft thresholds (`campaign.json::optimization.prompt_field_char_thresholds`, defaults `{persona: 600, task_intent: 800, problem_description: 1200, thinking_style: 800, system_role: 400, output_format: 400, examples: 1500, constraints: 600}`).
+
+Four new entries in `INJECTIONS`, four new lines in `l2_context.md`. All derived from `RoundResult` / `AxisIndex` / `SampleIndex` / `cycle.opt_sp`. **Vocabulary contract:** L2 must be the writer of these reads — every new signal earns its place by being a vocabulary item L2 cites in `task_context` deltas.
+
+**Verbosity self-healer (weak notice).** Low-priority escalation rule firing when verbosity stats from `l1_verbosity_stats` cross threshold, regardless of L1 stall:
 
 ```python
-class OptimizerAction(BaseModel):
-    # ... existing L1-surface fields ...
-    rebase: RebaseAction | None = None  # ForkPayload-shaped sans `trigger`/`issued_by`
-                                         # (set by runner from the layer that emitted it)
+EscalationRule(
+    name="prompt_field_above_verbosity_threshold",
+    when=lambda s: s.over_threshold_field_count > 0,
+    fire=NextAction.CONTINUE,    # never preempts a real escalation
+    priority=5,                   # below l1_to_l2 (10)
+    reason=lambda s: f"{s.over_threshold_field_count} prompt field(s) over verbosity threshold",
+)
 ```
 
-L2 and L3 emit `rebase` through their existing JSON-output channel — no new optimizer-side plumbing. **L1 cannot rebase** (asymmetry: only outer layers (L2/L3) may; L1 is the thing being rebased *on*).
+`EscalationInputs` gains `over_threshold_field_count: int = 0`, computed at `EscalationState.observe_round` from `cycle.opt_sp.prompt_field_dict()` + thresholds. Fires `CONTINUE` — surfaces signal only; one `escalation/rule_fired` PhaseRecord per fire. Composite-score *penalty* for verbosity is M12 (`m12-multi-connector.md`).
 
-**Operator caller (M10 deliverable).** `optimize --sweep` becomes a thin harness over the primitive:
+### Track 8 — L2 Imagination *(deferred — §0 amendment)*
 
-1. Read N L1-candidate payloads from `datasets/{name}/sweep/*.json` (one `ForkPayload` per candidate, `trigger=OPERATOR_SWEEP`, `issued_by=<operator>`).
-2. For each candidate: `_mint_fork(root_cycle, fork_from_round=1, payload=candidate_i)`, run round 1 (full: generate + score) → round 2 generation only (no scoring) → halt.
-3. Round-2 round file written with `status: "generation_only"`, no `composite`/`accuracy`.
-4. `index.json::final.mode = "sweep"` and `index.json::fork.trigger = "operator_sweep"` distinguish the branch.
+The structural bet. Only fires after Tracks 1–7 are live and we've measured whether the existing surface plus better panels closes the gap.
 
-All sweep branches share their parent's origin measurements via the `archive/` cache — `(JobSearchPoint, sample) → hit` reuse is automatic across branches of the same family.
+**Shape.** New optimizer prompt `l2_imagine` invoked by L2 *before* it commits a `task_context` refinement. L2 produces 2–3 *candidate framings* (A, B, C); Imagination simulates, for each, the predicted L1 mutation set; the highest-scoring framing wins.
 
-**LLM-rebase callers (M11 deliverable, scoped here for forward compat).** Out of M10 implementation, but the primitive must support:
+**Cost.** §0's four-LLM-calls invariant becomes **five** — explicit `CLAUDE.md` + `promptpotter/CLAUDE.md` amendment required, lands as a separate PR before this code. ~250 LOC: one new prompt entry, one transition pre-step, new `ResumeCheckpointKind.L2_IMAGINE`, new `INJECTIONS` entry `l2_candidate_framings: list[dict]`, `_TEMPLATE_EXTRAS["l2_imagine"] = {"n_framings"}`.
 
-- L2 rebase fires when accumulated `RuntimeFailure` trail contaminates the current branch beyond what L2's L1-surface writes can fix. Gated behind: (a) `--allow-llm-rebase` opt-in (default off until calibrated), (b) `l2_rebase_patience` counter (default `l2_patience × 2`), (c) hard cap of one L2 rebase per branch.
-- L3 rebase fires when the whole L2 alley has stalled and L3's brief-rewrite is insufficient. Same gating shape with `l3_rebase_patience`, hard cap of one L3 rebase per branch.
-- `OPTIMIZER_REWIND_GUARD` behavior check (Track 1): rebase target round must exist + be ≤ current round; reason field non-empty; payload non-empty (no-op rebase = bug).
+**Gating.** Fires only when L2 is about to fire anyway (L1 stall hit patience) AND `axis_memory` has ≥5 rounds of digest history AND `campaign.json::optimization.l2_imagination = True` (default off). Gated off → existing `task_context` refinement runs unchanged.
 
-**Telemetry.** Stays at family root. The active fork's `cycle_id` already lives at `dashboard.json::cycle_id`; extend with `cycle_id_path: list[str]` (root → ... → current) so the live view + webapp can render the branch tree without walking ledgers.
+**Scoring of rollouts.**
+1. **Proxy (v0).** Score predicted mutations against `AxisIndex.digest()` — sum each axis's historical `mean_delta` across the predicted set; pick the highest sum. Free; requires ≥~5 rounds of history.
+2. **Mini-eval rollouts (fallback).** Run each predicted variant on 3–5 samples; pick framing whose set scored best. ~3× backend cost; works from round 1.
 
-**Forward compat (≥M13).** New trigger types are enum additions. New payload deltas are optional fields. The mechanism (parent FORK_CUT + ledger inherit + dir copy + active-pointer retarget) does not change. Webapp-driven replay, multi-pipeline parallel evaluation, L4 auto-rebase, and competitor harnesses all ship as new callers + new enum members, never as schema or code-path changes.
+Ship proxy only. Mini-eval is a follow-up if `imagination_lift_corr < 0.5` over the first 10 imagine fires.
 
-### 6. Methodology doc
+### Track 9 — Methodology doc
 
-`docs/methods/manual-prompt-tuning.md`:
+`docs/methods/manual-prompt-tuning.md`: goal restatement · operating principles · sweep workflow · single-cycle cadence · round-1 verdict rule table · diagnosis tree (behavior ✗ → fix the class · all ✓ + low yield → broaden L1 creativity · all ✓ + flat lift → scoring/sample-set issue · early `l2_fires` → `l1_critique` weak) · bundling carve-out · proxy validation procedure · generalization gate (re-run on second pipeline before promoting) · adding a new behavior check · stopping criteria.
 
-- Goal restatement.
-- Operating principles (above).
-- **Sweep workflow:** run N candidate L1 prompts via `optimize --sweep` (each = origin + round 1 + round-2 gen peek). The next `/potter-l1-meta-campaign` tick ranks them on round-1 stats + next-gen peek → narrow to top 2-3 → promote those to full `optimize` runs → `proxy_lift_corr` is recomputed every tick after ≥ 4 paired (sweep, full) cycles.
-- Single-cycle cadence: run round 1 → next `/potter-l1-meta-campaign` tick writes the proposed edit (or halts on a non-healthy cycle) → confirm fix → apply → clear `paused` → re-run.
-- Round-1 verdict rule table.
-- Diagnosis tree: behavior ✗ → fix the rule generally; all ✓ + low yield → broaden L1 creativity; all ✓ + flat lift → scoring/sample-set issue; early `l2_fires` → likely `l1_critique` weak.
-- **Bundling carve-out:** the one-change default is a tiebreaker, not a mandate. Document the operator's bundling decision in the cycle note when it happens (e.g. "prompt + `param_unlock_round` together — both target the early-temperature-mutation failure").
-- **Proxy validation procedure:** when `proxy_lift_corr ≥ 0.6` over ≥ 4 paired cycles, sweep-mode is trusted as the primary screening tool. When `< 0.4`, sweep-mode is suspended; revisit the rule table and either tighten round-1 metrics or accept that 2-round screening is the minimum. Between 0.4 and 0.6, run sweep + 1 confirmation full-cycle per candidate.
-- **Generalization gate:** re-run on the second pipeline before promoting a prompt to default. Promote-only, not every iteration.
-- Adding a new behavior check.
-- Stopping criteria.
+Sibling: `docs/operations/operator-loop.md` (round stats per round, improvement velocity, the spend loop: define → compute → review → redefine).
 
 ## Wave sequencing
 
-Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first sweep workflow on day one. Without it, the operator workflow stalls and downstream tracks have no sweep data to consume. Subsequent tracks layer on as data accumulates.
+Biggest-blocker first — Track 5a (the fork primitive) gates the breadth-first sweep workflow on day one.
 
-1. **Track 5a — unified fork primitive (M10).** Domain extension (`ForkTrigger`, `ForkPayload`) + `_mint_fork()` generalization + scoring-divergence-path retrofit + `optimize --sweep` as first operator caller. `OptimizerAction.rebase` schema field added but unwired (no L2/L3 emission yet). **This is the gating deliverable** — every other track produces or consumes sweep-cycle data.
-2. **Tracks 1 + 3 (parallel).** L1 behavior checks + `L1Stats`. Pure-Python over loaded dicts; run against sweep round-1 data as it accumulates. Manual reading of round JSONs covers the analysis gap until these land.
-3. **Track 4 — branch-tree leaderboard.** Consumes 5a fork metadata + Track 3 stats. First cross-branch comparison view; sweep candidates ranked side-by-side.
-4. **Track 2 — `review.md` renderer.** Consumes 1 + 3 output; per-fork view. `runner.py::finalize` wiring + parity test + incremental round-1 emission + next-generation peek.
-5. **Track 6 — methodology doc** + `l1_generate.json` revision.
-6. **Track 5b — LLM-rebase callers (M11).** L2/L3 rebase emission + patience gating + `--allow-llm-rebase` opt-in + `optimizer_rewind_guard` behavior check. `optimize --rewind --label X` second operator caller. Out of M10; lands once 5a + sweep workflow have produced calibration data.
-7. **Iterate.** Each new "unknown unknown" → new behavior check + skill rule update; each batch of sweep branches updates `proxy_lift_corr`.
+1. **5a — fork primitive (M10).** Domain extension + `_mint_fork()` generalization + scoring-divergence retrofit + `optimize --sweep` as first caller. `OptimizerAction.rebase` schema added but unwired.
+2. **7 verbosity rule (~30 LOC).** Pure observability, lowest risk.
+3. **1 evidence-grounding validator (~80 LOC).** Schema field additive; validator heal-able not fatal.
+4. **6 sweep toolkit verbs** — incremental: `time-to` day 1, `round1` day 2, `round2` day 3, `slice` day 4, `rank` day 5. `rank` slipping a day is fine — the four verbs are usable without it.
+5. **1+3 parallel** — L1 behavior checks + `L1Stats` against sweep round-1 data as it accumulates.
+6. **4 leaderboard.** Consumes 5a fork metadata + Track 3 stats.
+7. **2 `review.md`.** Per-fork view. Runner wiring + parity test + incremental round-1 emission.
+8. **7 panel additions (~150 LOC).** L2 self-diagnosis reads.
+9. **9 methodology doc** + `l1_generate.json` revision.
+10. **5b — LLM-rebase callers (M11).** L2/L3 rebase emission + patience gating + `--allow-llm-rebase` opt-in + `optimizer_rewind_guard` behavior check. Out of M10.
+11. **8 Imagination.** Only after 1–7 are live and we've measured the gap.
+12. **Iterate.** Each new unknown unknown → new behavior check + skill rule update; each batch of sweep branches updates `proxy_lift_corr`.
 
-## Entry / exit
+## Exit gate
 
-**Entry:** M9 exit gate.
-
-**Exit:**
-- All seven deliverables shipped, tests green.
+- All deliverables shipped, tests green.
 - `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`.
-- `behavior_pass_rate = 1.0` for both seeded checks across the qualifying cycles.
-- `/potter-l1-meta-campaign` demonstrably catches at least one prompt regression on a re-run before round 2 fires.
-- **Proxy hypothesis decision recorded** — either `proxy_lift_corr ≥ 0.6` over ≥ 4 paired branches (sweep validated as primary screening tool), or sweep-mode rules modified per the proxy validation procedure with the rationale documented in the methodology doc.
+- `behavior_pass_rate = 1.0` for both seeded checks across qualifying cycles.
+- `/potter-l1-meta-campaign` catches at least one prompt regression on a re-run before round 2 fires.
+- **Proxy hypothesis decision recorded** — either `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (sweep validated), or rules modified per the proxy validation procedure with rationale in the methodology doc.
 - Methodology doc maps section-by-section to actual `review.md` output.
-- **Unified `_mint_fork()` covers both scoring-divergence and operator-sweep callers under one code path.** `Decision(kind=FORK_CUT).data.fork: ForkPayload` populated for both. `OptimizerAction.rebase` schema field present (unwired in M10; M11 wires L2/L3 emission).
+- **Unified `_mint_fork()` covers both scoring-divergence and operator-sweep callers under one code path.** `DecisionRecord(kind=FORK_CUT).data.fork: ForkPayload` populated for both. `OptimizerAction.rebase` schema field present (unwired in M10; M11 wires emission).
 
 ## Out of scope
 
@@ -225,46 +219,47 @@ Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first swe
 - Test-set validation → M11.
 - Third pipeline → M12 multi-connector.
 - Webapp surfacing → M11/M12.
-- Variant-vs-sample heatmap in `review.md` — deferred unless seeded checks prove insufficient.
+- Composite-score verbosity penalty → [`m12-multi-connector.md#track-5--composite-fitness-function`](m12-multi-connector.md#track-5--composite-fitness-function).
+- Variant-vs-sample heatmap in `review.md`; mechanical diversity-as-constraint (L2 rates diversity subjectively as a follow-on).
+- L1 meta-prompt decomposition (splitting overloaded `l1_generate` into sub-prompts) — separate spec, after the toolkit ships.
 
 ## Open decisions
 
 - `param_unlock_round` default: 3.
-- `round_1_verdict` thresholds: `yield_rate ≥ 0.20` for healthy, `< 0.20` for degraded. Calibrate after first 3 cycles.
-- Evidence strictness: substring match. Upgrade to semantic if false-pass rate misleads iteration.
-- Leaderboard persistence: stdout only.
-- **Sweep-payload source**: `datasets/{name}/sweep/*.json` (one ForkPayload per file) vs stdin vs CLI-flag-array. Default to filesystem layout for git-tracked reproducibility; revisit if operator friction shows up.
-- **L2/L3 rebase patience defaults** (5b): proposed `l2_rebase_patience = l2_patience × 2`, `l3_rebase_patience = l3_patience × 2`. Calibrate during M11 once first L2/L3 rebase events ship.
-- **`cycle_id_path` exposure**: add to `dashboard.json` only, or also to `index.json::final` for offline branch-tree reconstruction. Default to both — cheap, makes webapp wiring trivial later.
+- Round-1 verdict thresholds: calibrate after first 3 cycles.
+- Evidence strictness: substring match; upgrade to semantic only if false-pass rate misleads iteration.
+- Sweep-payload source: `datasets/{name}/sweep/*.json` (one `ForkPayload` per file) for git-tracked reproducibility.
+- L2/L3 rebase patience defaults (5b): proposed `l2_rebase_patience = l2_patience × 2`, `l3_rebase_patience = l3_patience × 2`. Calibrate during M11.
+- `cycle_id_path` exposure: `dashboard.json` only, or also `index.json::final`? Default to both — cheap, makes webapp wiring trivial.
 
 ## Key existing code
 
 | Area | Files |
-|------|-------|
-| Optimizer prompts | `promptpotter/application/optimization/optimizer_pipeline.json::resolved_prompts['{l1_generate,l1_critique,l2_context,l3_plan,restructure}/1']` |
+|---|---|
+| Optimizer prompts | `application/optimization/optimizer_pipeline.json::resolved_prompts['{l1_generate,l1_critique,l2_context,l3_plan,restructure}/1']` |
 | Optimizer output schemas | `optimizer_pipeline.json::resolved_schemas['{l1_generate,l1_critique}/1']` (`l1_generate` is the static envelope; `build_l1_output_schema` grafts per-target node properties on top) |
-| Prompt loading | `pipeline.py::load_optimizer_prompt` (manifest registry → Langfuse override) |
+| Prompt loading | `pipeline.py::load_optimizer_prompt` |
 | Per-round trace | `campaigns/{cycle_id}/.cache/rounds/round_NNNN.json` (`nodes.l1_generate`, `nodes.l1_score`, `nodes.l1_critique`) |
 | Per-round optimizer state | `campaigns/{cycle_id}/rounds/round_NNNN.json` |
 | Prompt snapshots | `campaigns/{cycle_id}/prompts/optimizer_prompt/{hash}/` |
-| Existing log renderer | `presentation/views/log_md.py::render_log_md` (purity pattern) |
+| Existing log renderer | `presentation/views/render/markdown.py::to_markdown` (purity pattern) |
 | Reusable formatters | `presentation/views/display.py` |
 | Surface compile path | `application/optimization/pipeline.py::compile_l1_surface`, `compile_l2_surface`, `compile_l1_critique_blob` |
-| Cycle finalize / round emission | `application/runner.py` |
-| Operator skills | `.claude/skills/potter-run/SKILL.md` (campaign launcher), `.claude/skills/potter-l1-meta-campaign/SKILL.md` (L4 substitute — round-1 gate, sweep-batch ranking, one-edit-per-cycle) |
+| Cycle finalize / round emission | `application/runner/` |
+| Operator skills | `.claude/skills/potter-run/SKILL.md`, `.claude/skills/potter-l1-meta-campaign/SKILL.md` |
 | Parity test | `tests/test_invariants.py::PER_CYCLE_OPERATOR_ARTIFACTS` |
-| **Fork primitive (Track 5 substrate)** | `domain/run_records.py::DecisionKind.FORK_CUT` + `DECISION_GATING`; `infrastructure/ledger.py::CycleLedger.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner.py::fork_on_divergence` plumbing; `presentation/cli/campaign_runner.py::--fork-on-divergence` CLI; `presentation/api.py` ForksResponse |
-| **Active-pointer + family-root binding** | `infrastructure/store/stores.py::save_active_pointer`; `infrastructure/projections/live_dashboard.py` (telemetry binds to root with no `parent_cycle_id`) |
+| **Fork substrate** | `domain/run_records.py::DecisionKind.FORK_CUT` + `DECISION_GATING`; `infrastructure/ledger.py::CycleEventLog.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner/entry.py::fork_on_divergence` plumbing; `presentation/cli/commands/optimize.py::--fork-on-divergence`; `presentation/api/` ForksResponse |
+| **Active-pointer + family-root binding** | `infrastructure/store/stores.py::save_active_pointer`; `infrastructure/projections/live_dashboard/view.py` (telemetry binds to root with no `parent_cycle_id`) |
 
 ## Risks
 
-| Risk | Mitigation |
-|------|------------|
-| Proxy hypothesis fails (round-1 doesn't predict full-cycle) | Detected by `proxy_lift_corr`; framework modifies on the go (revisit rule table or accept 2-round screening) — that's what Track 6's proxy validation procedure is for |
-| Sweep mode hides regressions that only surface in round 2-3 | Pair every promoted candidate with a full-cycle confirmation run; never publish a prompt that only has sweep-mode evidence |
-| Round-1 gate triggers on noise, halts a run that would have recovered | Operator can override; skill warns but doesn't block. Calibrate thresholds after first 3 cycles. |
-| Substring match too coarse (L1 superficially echoes a token) | Upgrade to semantic only if false-pass rate misleads iteration |
-| Behavior-check registry grows ad-hoc, rules contradict | Methodology doc owns the running list; consolidate periodically |
-| `l1_generate.json` over-restricted, yield drops | One knob per iteration + general-fix rule keep edits reversible; leaderboard catches regression |
-| 95% unreachable on TermNorm under current pipeline | Track per-pipeline `rounds_to_95` separately; recalibrate at exit-gate review |
-| Skill proposes wrong fix, operator follows blindly | Methodology doc forbids "apply without thinking"; operator confirms/redirects every edit |
+| risk | mitigation |
+|---|---|
+| Proxy hypothesis fails | Detected by `proxy_lift_corr`; framework modifies on the go per the proxy validation procedure. |
+| Sweep mode hides regressions that only surface round 2–3 | Pair every promoted candidate with a full-cycle confirmation; never publish a prompt with only sweep-mode evidence. |
+| Round-1 gate triggers on noise | Operator can override; skill warns but doesn't block. Calibrate after first 3 cycles. |
+| Substring match too coarse (L1 superficially echoes a token) | Upgrade to semantic only if false-pass rate misleads iteration. |
+| Behavior-check registry grows ad-hoc, rules contradict | Methodology doc owns the running list; consolidate periodically. |
+| `l1_generate.json` over-restricted, yield drops | One knob per iteration + general-fix rule keep edits reversible; leaderboard catches regression. |
+| 95% unreachable on TermNorm under current pipeline | Track per-pipeline `rounds_to_95` separately; recalibrate at exit-gate review. |
+| Skill proposes wrong fix, operator follows blindly | Methodology doc forbids "apply without thinking"; operator confirms every edit. |

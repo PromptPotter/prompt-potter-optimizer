@@ -8,7 +8,7 @@ the directory directly to see "what does this L1 edit measure to?"
 without grepping campaign artifacts.
 
 Single result shape across verbs; only some fields populated per verb —
-see ``docs/specs/m10-sweep-toolkit.md::Result JSON format``.
+see ``docs/specs/m10-prompt-iteration-framework.md::Result JSON format``.
 """
 
 from __future__ import annotations

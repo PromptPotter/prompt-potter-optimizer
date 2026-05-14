@@ -45,7 +45,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 ### Track 4: File-Directory UI v0 (Webapp Preparation) — **DONE (renderer unified; the literal `views/` subtree was abandoned)**
 
-**Outcome:** Renderer unification happened. There is no `sessions/{session_id}/views/` subtree — instead, the existing `campaigns/{cycle_id}/` artifact tree (`dashboard.json` + `log.md` + `rounds/`) became the shared view model, and `LiveDisplay` (`promptpotter/presentation/views/live.py`) became the shared renderer that both CLI and notebook call. Same outcome as the spec's intent (one render path, one view model, future webapp can read both), different layout.
+**Outcome:** Renderer unification happened. There is no `sessions/{session_id}/views/` subtree — instead, the existing `campaigns/{cycle_id}/` artifact tree (`dashboard.json` + `log.md` + `rounds/`) became the shared view model, and `LiveDisplay` (`promptpotter/presentation/views/live/display.py`) became the shared renderer that both CLI and notebook call. Same outcome as the spec's intent (one render path, one view model, future webapp can read both), different layout.
 
 **What shipped:**
 
@@ -265,7 +265,7 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 - [x] Hexagonal layout in place; all tests green; no `from promptpotter.services` imports remain
 - [x] `TenantContext` importable from `promptpotter.domain.tenant`; `Session.tenant` exists (`SessionEnv` was renamed to `Session` in Track 7)
 - [x] Multi-dataset coexistence demonstrated across five datasets (`lca-termnorm`, `bbeh`, `gsm8k`, `hotpotqa`, `aime_2025`); pipeline identity carried by `pipeline_schema.name` + `JobSearchPoint.content_hash`, not as a path component
-- [x] Renderer unification: `LiveDisplay` (`promptpotter/presentation/views/live.py`) is the shared renderer; CLI live output and notebook both call it; the artifact tree (`campaigns/{cycle_id}/dashboard.json` + `log.md` + `rounds/`) is the shared view model. Frozen webapp-reads schema doc deferred to M11
+- [x] Renderer unification: `LiveDisplay` (`promptpotter/presentation/views/live/display.py`) is the shared renderer; CLI live output and notebook both call it; the artifact tree (`campaigns/{cycle_id}/dashboard.json` + `log.md` + `rounds/`) is the shared view model. Frozen webapp-reads schema doc deferred to M11
 - [x] Seed sources collapsed to two after recon archival: fresh-default and `--from <int>` resume. Typed three-value `--from` vocabulary not built — moot. `--fork-on-divergence` covers cross-cycle lineage
 - [x] Three-tree layout: `sessions/{session_id}/` (per-session metadata + journal/notes), `campaigns/{cycle_id}/` (per-cycle artifacts with `parent_session_id`; family-root cycles also carry `dashboard.json` + `output.log` shared with their forks), and `archive/` (all cross-run reference). Tenant partition at `.promptpotter/projects/{tenant_id}/`; MLflow via SDK at `archive/mlruns/`. `CAMPAIGN_ARTIFACTS` further split into `ROOT_TELEMETRY_ARTIFACTS` + `PER_CYCLE_AUDIT_ARTIFACTS`; parity enforced by `tests/test_artifact_parity.py`
 - [x] `LoopConfig` deleted; `CampaignConfig` is Pydantic with nested sub-models (`OptimizationConfig`, `OptimizerLLMConfig`, `ScoringSetConfig`, `HardSampleSorterConfig`) + `extra='forbid'`; runtime fields live on `Session`; `configure_and_apply_pipeline` writes to `session.pipeline_params` not `campaign_config`; all on-disk `campaign.json` files use the nested shape (legacy flat-form `model_validator` not built — no flat-form configs exist in practice)
@@ -281,7 +281,7 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 | Dataset builder | `promptpotter/application/datasets.py` |
 | Measurement archive | `promptpotter/infrastructure/store/measurement_archive.py` |
 | Session + Campaign stores | `promptpotter/infrastructure/store/stores.py` |
-| CLI live output | `promptpotter/presentation/cli/campaign_runner.py`, `promptpotter/presentation/views/live.py` |
+| CLI live output | `promptpotter/presentation/cli/campaign_runner.py`, `promptpotter/presentation/views/live/display.py` |
 | Notebook | `notebooks/optimization_campaign.ipynb` |
 | Renderers | `promptpotter/presentation/views/` |
 

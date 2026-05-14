@@ -1,4 +1,4 @@
-// Workflow topology — pipeline shape never changes (per m11-webapp-minimal-preview.md).
+// Workflow topology — pipeline shape never changes (per docs/specs/archive/m11-webapp-minimal-preview.md).
 // Lifted verbatim from webapp/index.html:1181 (LAYOUT) and :1199 (EDGES).
 // Three nested loops:
 //   L1 (innermost): l1_critique → l1_generate (bow under the row)

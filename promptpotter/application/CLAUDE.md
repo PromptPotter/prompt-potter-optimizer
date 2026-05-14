@@ -2,7 +2,7 @@
 
 The use-case layer between `domain/` (pure types, frozen models) and
 `infrastructure/` (I/O, persistence, LLM clients). One entry point —
-`runner.py` — coordinates everything; subpackages each own a coherent
+`runner/` — coordinates everything; subpackages each own a coherent
 slice of orchestration.
 
 ## Layer rule (enforced by `tests/test_invariants.py::test_no_unexpected_runtime_layer_violations`)
@@ -23,15 +23,16 @@ intelligence; intelligence does not depend on either.
 
 ## Top-level modules
 
-- `runner.py` — master orchestrator; the optimize-loop entry point.
+- `runner/` — master orchestrator; the optimize-loop entry point (`identity`, `round`, `sweep`, `loop`, `entry`).
 - `config.py` — `CampaignConfig` model + LLM factory.
 - `origin.py` — campaign origin scoring + dataset loading.
 - `review.py` — per-cycle markdown renderer (post-cycle log).
 - `datasets.py` — dataset loaders + sample materialization.
+- `run_observers.py` — `RunCallbacks` typed event constructor over `CycleEventLog.append`.
 
 ## Conventions
 
-- Optimizer LLM calls go through `llm_call()` (`optimization/llm_call.py`),
+- Optimizer LLM calls go through `llm_call()` (`optimization/dispatch/llm_call.py`),
   never `chat()`.
 - Escalation flows via return value (`QueryLoopResult.escalation_signal`),
   not exception.

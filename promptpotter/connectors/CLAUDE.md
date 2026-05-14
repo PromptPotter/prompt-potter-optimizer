@@ -39,7 +39,7 @@ modification. Three observations the next connector should heed:
 
 `promptpotter_wire_adapter` shapes the inner-cycle payload but the actual
 "run an inner cycle" path is not yet wired — see
-`docs/specs/m12-promptpotter-as-connector.md` § Deliverables. Two design
+`docs/specs/m12-multi-connector.md` § Track 1.5. Two design
 options for that follow-up:
 
 - **Localhost endpoint.** Add `POST /inner/matches` to the FastAPI app

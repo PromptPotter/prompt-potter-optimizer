@@ -93,4 +93,4 @@ python -m promptpotter sweep round2     --from-sweep <sweep_id> --top 3
 python -m promptpotter sweep rank       --dataset aime --by round1_accuracy --last 10
 ```
 
-Result JSON: `archive/sweeps/{l1_hash}/{dataset}/{verb}_..._{ts}.json`. Spec: [`m10-sweep-toolkit.md`](../specs/m10-sweep-toolkit.md). Skill reads these for Phase 4 verdicts + Phase 6 correlation.
+Result JSON: `archive/sweeps/{l1_hash}/{dataset}/{verb}_..._{ts}.json`. Spec: [`m10-prompt-iteration-framework.md#track-6--sweep-toolkit`](../specs/m10-prompt-iteration-framework.md#track-6--sweep-toolkit). Skill reads these for Phase 4 verdicts + Phase 6 correlation.

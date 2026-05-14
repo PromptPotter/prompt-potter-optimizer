@@ -25,16 +25,6 @@ dirs next to monoliths) blueprinted intended splits; (2)
 | P3.1 | `application/optimization/l1.py` (1116) → `l1/{generate,score,resume,execute}.py` |
 | P3.2 | `application/optimization/` reshape: new `dispatch/` (hub.py + llm_call.py + schemas.py + pipeline.json), `pobb/` (elimination + elevation), `helpers/` (observers, transitions, decomposition, round_analysis, l1_population, l1_stats, l1_critique) |
 
-## Not in scope
-
-- **`dispatch_hub.py` (851) split** — §0.5 load-bearing; INJECTIONS
-  registry + import-time `validate_template()` contract.
-- **`presentation/views/live.py` (922), `live_dashboard.py` (808),
-  `views/render.py` (777), `campaign_store.py` (722), `runner.py`
-  (736)** — cohesive single-concern; size isn't a defect.
-- **`shared/statistics.py` merge** — leaf utility, pure stats.
-- **`domain/backend.py` merge** — record vs. protocol; keep separate.
-
 ## Verify
 
 `ruff check . && ruff format --check . && deptry . && mypy

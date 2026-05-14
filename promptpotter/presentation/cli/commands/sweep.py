@@ -633,7 +633,7 @@ async def _cmd_sweep_rank(args: argparse.Namespace) -> CommandResult:
 
 async def cmd_sweep(args: argparse.Namespace) -> CommandResult:
     """Dispatch ``sweep <verb>`` — ``time-to`` / ``round1`` / ``round2`` /
-    ``rank`` per ``docs/specs/m10-sweep-toolkit.md``."""
+    ``rank`` per ``docs/specs/m10-prompt-iteration-framework.md``."""
     verb = args.sweep_verb
     if verb == "time-to":
         return await _cmd_sweep_time_to(args)

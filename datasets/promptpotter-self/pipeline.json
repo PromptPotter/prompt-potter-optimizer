@@ -1,7 +1,7 @@
 {
   "name": "PromptPotter-self",
   "version": "v0.1",
-  "description": "Optimizer-of-the-optimizer — outer PromptPotter cycle mutates inner PromptPotter's L1/L1_CRITIQUE/L2/L3 meta-prompts. Each outer 'sample' runs an inner cycle on a cheap proxy benchmark (configured per inner_tasks.json). See docs/specs/m12-promptpotter-as-connector.md.",
+  "description": "Optimizer-of-the-optimizer — outer PromptPotter cycle mutates inner PromptPotter's L1/L1_CRITIQUE/L2/L3 meta-prompts. Each outer 'sample' runs an inner cycle on a cheap proxy benchmark (configured per inner_tasks.json). See docs/specs/m12-multi-connector.md.",
   "backend_name": "PromptPotter",
   "backend_type": "promptpotter",
   "available_models": ["openai/gpt-oss-120b"],

@@ -8,7 +8,7 @@
 - Static deploy: Next.js `output: "export"` + `basePath: "/ui"` + `trailingSlash: true`, served by FastAPI's existing `/ui` mount.
 - Build pipeline: `npm run deploy` (= `next build && node scripts/deploy-to-webapp.mjs`) writes the export over `webapp/`. During development: `next dev` on :3000 (visit `/ui`), FastAPI on :8001, Next config rewrites `/api/*` → `http://127.0.0.1:8001/api/*` (dev only — rewrites are stripped from the export).
 
-**Depends on:** Vanilla a11y / tooltip / resilience pass (DONE — commit `f1dab82`). FastAPI read endpoints (DONE — `m11-webapp-minimal-preview.md`). Active session pointer (DONE).
+**Depends on:** Vanilla a11y / tooltip / resilience pass (DONE — commit `f1dab82`). FastAPI read endpoints (DONE — `archive/m11-webapp-minimal-preview.md`). Active session pointer (DONE).
 **Blocks:** M11 monitoring slices (hard-sample leaderboard, per-searchpoint score histogram, family-tree speciation, dataset preview on drop). M12 webapp Phase 2 (control plane, chat panel, wand toggle, multi-cycle).
 
 ---
@@ -118,7 +118,7 @@ These 9 patterns are *production-tested* in vanilla as of `f1dab82`. The port co
 - The `--*-rgb` triplet trick that lets `rgba()` overlays follow the theme.
 - Theme persistence: `localStorage.getItem('promptpotter.theme')` key stays the same so a vanilla session and a React session share the same preference.
 
-**Workflow topology** — `LAYOUT` and `EDGES` constants in vanilla (`webapp/index.html`) hardcode positions. Pipeline shape "never changes" per `m11-webapp-minimal-preview.md`. Lift these constants verbatim into `components/workflow/layout.ts`. The SVG marker definitions also lift unchanged.
+**Workflow topology** — `LAYOUT` and `EDGES` constants in vanilla (`webapp/index.html`) hardcode positions. Pipeline shape "never changes" per `archive/m11-webapp-minimal-preview.md`. Lift these constants verbatim into `components/workflow/layout.ts`. The SVG marker definitions also lift unchanged.
 
 ---
 
@@ -140,7 +140,7 @@ Glassmorphism (chat user message, LLM hero node, what-if active tile, wand row, 
 
 ## API integration
 
-No new endpoints. The port consumes the existing FastAPI surface from `m11-webapp-minimal-preview.md`:
+No new endpoints. The port consumes the existing FastAPI surface from `archive/m11-webapp-minimal-preview.md`:
 - `GET /api/v1/active`
 - `GET /api/v1/optimizer/pipeline`
 - `GET /api/v1/campaigns/{cycle_id}/files`
@@ -182,7 +182,7 @@ CORS: same-origin under `/ui` in production. Dev-mode the rewrite avoids preflig
 - Add `npm run build && cp -r out/* ../webapp/` make target.
 - Update `promptpotter/main.py` static mount comment to point at the export source.
 - Delete `webapp/index.html` (the vanilla file). Keep `webapp/assets/`.
-- Update `m11-webapp-minimal-preview.md` status: "Slice 1 archived; React port active in webapp-react/."
+- Update `archive/m11-webapp-minimal-preview.md` status: "Slice 1 archived; React port active in webapp-react/."
 - Update CLAUDE.md: drop "ugly read-only webapp preview" wording; replace with "Next.js read-only operator dashboard at /ui."
 
 ---
@@ -208,7 +208,7 @@ If a bug is found in vanilla that *also* matters for the port, fix it in the por
 ## Pre-reading for the implementer
 
 - `webapp/index.html` (vanilla — the source of truth for behavior post-`f1dab82`).
-- `docs/specs/m11-webapp-minimal-preview.md` (charter for the read-only surface; API contracts).
+- `docs/specs/archive/m11-webapp-minimal-preview.md` (charter for the read-only surface; API contracts).
 - `docs/specs/m11-publication-benchmarks.md` line 84 (stack constraint: plain CSS + CSS Modules, no Tailwind).
 - `docs/specs/m12-multi-connector.md` § Track 3 (what M12 layers on top of this origin).
 - `promptpotter/presentation/api.py` (the API surface — read end-to-end; the port is a pure consumer).

@@ -8,7 +8,7 @@ or talks to a network without going through one of these seams.
 
 **Sole ingress:** per-cycle `CycleEventLog` (`ledger.py`, `events.jsonl`).
 Forks via `CycleEventLog.inherit_from(parent, offset)`. The writer-side API
-above the ledger is `RunCallbacks` (`application/run_callbacks.py`) — a
+above the ledger is `RunCallbacks` (`application/run_observers.py`) — a
 typed event constructor over `CycleEventLog.append`. Orchestration uses
 `RunCallbacks`; the ledger is the only thing that touches disk for the
 campaign event stream.
@@ -43,14 +43,16 @@ post-mortem readers can see what the ledger has.
 `rounds/` tree) for admissibility: `--from N` is valid iff the ledger
 contains a closing PhaseRecord for round N (`(phase="round", event="complete")`
 or, for round 0, `(phase="origin", event="exit")`). The pure ledger scan
-lives in `_scan_ledger_max_round_complete` and never instantiates
-`CycleEventLog`, so no subscribers fire during admissibility checks.
+lives in `scan_ledger_max_round_complete` (`store/campaign_store/ledger_scan.py`)
+and never instantiates `CycleEventLog`, so no subscribers fire during
+admissibility checks.
 
 ## Stores — composite over leaves
 
 `store/stores.py`: `Stores` frozen dataclass + `build_stores(base_dir)`
 builder. Composite over focused leaf stores (`BackendStore`,
-`CampaignStore`, `DatasetRunStore`, `PlanStore`, `SessionStore`). Shared
+`CampaignStore` (`store/campaign_store/`), `DatasetRunStore`, `PlanStore`,
+`SessionStore`). Shared
 I/O + `EntityStore` in `store/base.py`. Path helpers + `CycleDir` /
 `RootCycleDir` newtypes in `store/paths.py` — projections and stores
 accept these newtypes, not raw `str`/`Path`. `archive/` is

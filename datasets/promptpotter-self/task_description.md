@@ -42,4 +42,4 @@ Better = higher delta after N AND/OR fewer rounds to target.
 GSM8K-small (``n_samples_per_inner_round: 10``, ``max_inner_rounds: 3``)
 keeps each outer "sample" at order-of-minutes rather than -hours. Trade-off
 is signal quality — bump sample count before publication runs. See
-``docs/specs/m12-promptpotter-as-connector.md`` § Cost realism.
+``docs/specs/m12-multi-connector.md`` § Track 1.5 (Cost realism).

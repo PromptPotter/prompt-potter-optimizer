@@ -83,7 +83,7 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
 
 **Technology:** Next.js + React in `webapp/` directory, consuming the existing FastAPI API which in turn reads the M9 view model. Thin pixel layer on top of a flat data layer — no duplication of render logic. Styling continues from the vanilla preview's plain CSS + design-token approach (CSS Modules ship with Next.js by default; no Tailwind dependency).
 
-**Status (2026-05-07):** Slice 1 shipped 2026-05-05 as a vanilla `webapp/index.html` preview (see [`m11-webapp-minimal-preview.md`](m11-webapp-minimal-preview.md)). Next.js + React migration is now imminent — the vanilla file is the migration preservation list, not an iteration target. All Track 3 deliverables below land in the Next.js codebase.
+**Status (2026-05-07):** Slice 1 shipped 2026-05-05 as a vanilla `webapp/index.html` preview (see [`archive/m11-webapp-minimal-preview.md`](archive/m11-webapp-minimal-preview.md)). Next.js + React migration is now imminent — the vanilla file is the migration preservation list, not an iteration target. All Track 3 deliverables below land in the Next.js codebase.
 
 **Deliverables:**
 

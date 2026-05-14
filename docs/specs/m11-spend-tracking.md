@@ -52,6 +52,6 @@ each consumer guarantees drift.
 ## Anchors
 
 - `promptpotter/infrastructure/llm/models.py` — `TokenUsage`.
-- `promptpotter/application/optimization/llm_call.py:209` — emit site.
-- `promptpotter/infrastructure/projections/live_dashboard.py` — projection.
+- `promptpotter/application/optimization/dispatch/llm_call.py` — emit site.
+- `promptpotter/infrastructure/projections/live_dashboard/view.py` — projection.
 - `promptpotter/application/origin.py::build_campaign_emitter` — wiring.

@@ -182,7 +182,7 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
     """M10 sweep-toolkit verbs. Wraps ``optimize`` with halt gates +
     per-round panel stats and persists one result JSON per run under
     ``archive/sweeps/{l1_meta_prompt_hash}/{dataset}/``. See
-    ``docs/specs/m10-sweep-toolkit.md``.
+    ``docs/specs/m10-prompt-iteration-framework.md``.
     """
     sweep_sub = p_sweep.add_subparsers(dest="sweep_verb", required=True)
 
@@ -387,7 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
             "sweep",
             help="M10 sweep-toolkit verbs — cheap-grade L1 meta-prompt edits. "
             "Each verb wraps optimize with halt gates and persists one result "
-            "JSON; see docs/specs/m10-sweep-toolkit.md.",
+            "JSON; see docs/specs/m10-prompt-iteration-framework.md.",
         )
     )
 

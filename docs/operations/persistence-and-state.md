@@ -95,7 +95,7 @@ Prior evaluation results replay without backend calls when a new config shares a
 | `.runtime/cache/rounds/round_NNNN.json` | per cycle | each round | Per-node I/O: l1_generate, l1_critique, l1_score, l2/l3 (when escalated). |
 | `.runtime/cache/candidates/round_NNNN.json` | per cycle | each round's pre-scoring | Generated candidate checkpoint — overwritten next round. |
 | `.runtime/archived/resumed_at_{ts}/` | per cycle | `--from` runs | Mid-cycle rewind sweepup. |
-| `.runtime/inner/{outer_round}/{sample_idx}/` | per cycle | PromptPotter-as-connector only | Isolated inner-cycle sub-tree (own `sessions/`, `campaigns/`, `archive/`). Each outer "sample" gets its own root; pruned at outer cycle finalize unless `optimization.retain_inner_cycles: true`. See `docs/specs/m12-promptpotter-as-connector.md`. |
+| `.runtime/inner/{outer_round}/{sample_idx}/` | per cycle | PromptPotter-as-connector only | Isolated inner-cycle sub-tree (own `sessions/`, `campaigns/`, `archive/`). Each outer "sample" gets its own root; pruned at outer cycle finalize unless `optimization.retain_inner_cycles: true`. See `docs/specs/m12-multi-connector.md`. |
 | `sweeps/{batch_id}/index.json` | family root | sweep mint + per-payload + finalize | Batch metadata: payload list with status. |
 
 ### `dashboard.json`

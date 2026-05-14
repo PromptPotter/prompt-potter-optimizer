@@ -39,7 +39,7 @@ function fmtDuration(sec: number): string {
 // Vanilla "New Job" pane, ported verbatim. Inert UI — chat input + most
 // toggles are disabled. The wand-row toggle is the lone interactive element
 // (purely visual, mirrors vanilla). Control plane lands in M12 — see
-// docs/specs/m12-newjob-status-bar.md for the interactive write path.
+// docs/specs/m12-multi-connector.md § Track 3 for the interactive write path.
 export function ChatPane({
   cycleId,
   sessionId,

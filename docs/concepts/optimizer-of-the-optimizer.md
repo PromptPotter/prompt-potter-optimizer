@@ -10,7 +10,7 @@ PromptPotter**.
 This is the headline self-referential capability of M12. Connector:
 `promptpotter/connectors/promptpotter.py`. Demo dataset:
 `datasets/promptpotter-self/`. Spec:
-[`../specs/m12-promptpotter-as-connector.md`](../specs/m12-promptpotter-as-connector.md).
+[`../specs/m12-multi-connector.md#track-15--promptpotter-as-connector`](../specs/m12-multi-connector.md#track-15--promptpotter-as-connector).
 
 ## Why it's interesting
 

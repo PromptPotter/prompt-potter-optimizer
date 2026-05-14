@@ -17,7 +17,7 @@ L1's prompt is composed by walking a per-slot list of **injection names** and re
 └────────────────────────────────────────────────────────────┘
 ```
 
-Every injection name in the layout maps to a renderer `(InjectionBundle) → str` in `INJECTIONS` (`dispatch_hub.py`). Renderers are layer-agnostic — the same `plan` renderer feeds L1, L2, and L3.
+Every injection name in the layout maps to a renderer `(InjectionBundle) → str` in `INJECTIONS` (`dispatch/hub/injections.py`). Renderers are layer-agnostic — the same `plan` renderer feeds L1, L2, and L3.
 
 ## Layout — `L1Layout`
 
@@ -63,7 +63,7 @@ L2's parser (`escalation._parse_l2`) coerces `{slot: [name, ...]}` into `L1Layou
 
 ## Adding an injection
 
-1. Implement `_r_<name>(b: InjectionBundle) -> str` in `dispatch_hub.py`. Return `""` when the bundle's source field is empty — empty injections are skipped by `fill_l1` so they don't waste tokens.
+1. Implement `_r_<name>(b: InjectionBundle) -> str` in `dispatch/hub/injections.py`. Return `""` when the bundle's source field is empty — empty injections are skipped by `fill_l1` so they don't waste tokens.
 2. Register in `INJECTIONS`.
 3. If L2 may pick it for L1's layout, add to `L1_POSSIBLE`. If it's part of L1's contract, add to `L1_MANDATORY` — the validator will then refuse layouts that drop it.
 4. Reference `{{<name>}}` in any fixed template body that should resolve through `fill_fixed`.
@@ -72,9 +72,9 @@ Renderers stay layer-agnostic. Per-layer specialisation is the kind of complexit
 
 ## File-line anchors
 
-- `INJECTIONS`, `InjectionBundle`, `DispatchHub`, `build_bundle`: `promptpotter/application/optimization/dispatch/hub.py`
+- `INJECTIONS`: `promptpotter/application/optimization/dispatch/hub/injections.py`; `InjectionBundle`: `dispatch/hub/bundle.py`; `DispatchHub`: `dispatch/hub/facade.py`; `build_bundle`: `dispatch/hub/builder.py`
 - `L1Layout`, `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `promptpotter/domain/l1_layout.py`
-- L1 generate compose path: `promptpotter/application/optimization/l1.py::l1_generate`
+- L1 generate compose path: `promptpotter/application/optimization/l1/generate.py::l1_generate`
 - OSP layout field: `promptpotter/domain/opt_search_point.py` — `l1_layout` (in `MEMORY_FIELDS`)
 
 L2-side orchestration: [`l2-internals.md`](l2-internals.md).

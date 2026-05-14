@@ -6,7 +6,7 @@ PromptPotter cycle's meta-prompts (``l1_generate`` / ``l1_critique`` /
 cheap proxy benchmark; the outer L1's mutation surface is the inner
 meta-prompt template fields, exposed via ``pipeline_params``.
 
-See ``docs/specs/m12-promptpotter-as-connector.md`` for the full design —
+See ``docs/specs/m12-multi-connector.md`` for the full design —
 five-hook contract, three composable inner-cycle proxies
 (``first_round_delta`` / ``after_N_rounds_delta`` / ``rounds_to_N``), inner
 isolation under ``.runtime/inner/``, cost-realism warning.

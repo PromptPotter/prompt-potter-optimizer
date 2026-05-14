@@ -20,7 +20,7 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch_hub.py`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
+**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch/hub/injections.py`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
 
 **Invariant:** no prompt site summarizes its own data. If a name isn't in `INJECTIONS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear. `validate_template()` (called from `load_optimizer_prompt`) raises at module load on any `{{slot}}` name not in `INJECTIONS` — typos fail loud, not silent.
 
@@ -76,7 +76,7 @@ L2 owns the L1-only injection subset via `l1_layout`; see [`l1-generate-surface.
 
 ## 2. Dispatch (which layer fires when)
 
-The runner asks the escalation rules engine after every round. `EscalationState.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation` (`application/optimization/escalation/evaluator.py`), which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`:
+The runner asks the escalation rules engine after every round. `EscalationState.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation` (`application/optimization/escalation/decide.py`), which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`:
 
 ```
 round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_with_positive_yield, …)
@@ -153,5 +153,8 @@ archive/                            MeasurementArchive
 | [Dispatch hub visual + index](dispatch-hub.md) | Mermaid flow diagram + per-placeholder source map |
 | [Self-healing internals](self-healing-internals.md) | Failure classification, escalation wiring |
 | [Node standard](node-standard.md) | Node JSON declaration format |
+| [Stable API v1](stable-api.md) | Fork-readiness surface |
+| [Conventions](conventions.md) | Style + code-shape rules |
+| [Glossary](../glossary.md) | Domain vocabulary + canonical file pointers |
 
 For the conceptual layer (CONTEXT, PLAN, spend control): [`../concepts/`](../concepts/README.md).

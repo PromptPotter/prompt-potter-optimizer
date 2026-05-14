@@ -32,7 +32,7 @@ multi-tenant data leakage, webapp endpoint hardening.
 | 1 | Restricted-eval bypass in `compile_scorer` (RCE) | P0 (M12-grade) | LANDED | `application/scoring/formula/compiler.py:validate_ast` |
 | 2 | Missing `validate_path_component` on `root_dir_for` / `sweep_batch_dir_for` | P1 | LANDED | `infrastructure/store/paths.py:63,91` |
 | 3 | No log redaction for API-key values | P2 (defense-in-depth) | LANDED | `config/log_redaction.py` |
-| 4 | Prompt injection via dataset content (`diagnostics`, `validation_failures`, `runtime_failures`) | P1 (starter) | LANDED | `application/optimization/dispatch_hub.py:_fence_untrusted` |
+| 4 | Prompt injection via dataset content (`diagnostics`, `validation_failures`, `runtime_failures`) | P1 (starter) | LANDED | `application/optimization/dispatch/hub/bundle.py:fence_untrusted` |
 | 5 | TermNorm wire unauthenticated | P2 today / P0 when shared | LANDED (opt-in) | TermNorm `config/middleware.py::bearer_auth_middleware`; PromptPotter `infrastructure/backend.py:auth_token` |
 | 6 | `tenant_id` not type-enforced — multi-tenant leakage risk | P1 at M12 | DEFERRED-M12 | see § SafeName / TenantId below |
 | 7 | Webapp endpoint hardening (auth/CORS/rate-limit/Pydantic-extra-forbid) | P0 at M11 | DEFERRED-WEBAPP | see § Webapp middleware below |
