@@ -316,6 +316,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     refresh_rates(force=bool(getattr(args, "refresh_rates", False)))
 
     fresh_mode = bool(args.config or args.dataset_name)
+    fresh_session: Session | None = None
     if fresh_mode:
         bad = [
             flag
@@ -331,11 +332,17 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
                 f"ERROR: {', '.join(bad)} is resume-path only and cannot be combined "
                 "with --config / --dataset-name (those mint a fresh cycle at round 0)."
             )
-        await _run_init_body(args)
+        _info, fresh_session = await _run_init_body(args)
 
     ctx = load_session(args)
     campaign_config = ctx.campaign_config
-    session = await init_services_cli(**ctx.init_params)
+    # Fresh mode already paid the init_services_cli cost inside _run_init_body
+    # (backend handshake, pipeline parse, dataset materialization). Reusing
+    # that Session is the difference between "Parsed pipeline 'TermNorm' with
+    # 1 steps" printing once vs twice.
+    session = (
+        fresh_session if fresh_session is not None else await init_services_cli(**ctx.init_params)
+    )
 
     status = await session.backend_client.check_status()
     if status.get("status") == "unreachable":

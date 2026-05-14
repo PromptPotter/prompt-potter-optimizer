@@ -80,7 +80,6 @@ def _build_config(
             "n_variants": variants,
             "creativity": 0.7,
             "improvement_threshold": 0.01,
-            "max_failures": 5,
             "degradation_threshold": 0.4,
             "l2_patience": 1,
             "l3_patience": 1,

@@ -18,13 +18,24 @@ structured-output requires ``additionalProperties: false`` for strict
 mode, and ``extra="forbid"`` emits exactly that. Without it the SDK
 silently falls back to lenient parsing.
 
-``pipeline_params_override`` on :class:`L1Variant` is intentionally
-permissive (``dict[str, Any]``) because its inner shape is derived from
-the active backend ``PipelineSchema`` at runtime (see
-``l1_validators.build_l1_output_schema``). Per-node param validation
-runs downstream through ``validate_overrides`` — that's not a duplicate
-parse, it's a different contract (operator-locked axes, allowed-value
-enums per backend).
+:class:`L1Variant` is **three-slot by contract**:
+
+- ``pipeline_params_override`` — per-node tunables (e.g. ``{"llm_only":
+  {"temperature": 0.7}}``). Inner shape is grafted at runtime by
+  :func:`l1_validators.build_l1_output_schema` from the active
+  ``PipelineSchema``.
+- ``prompt_fields_override`` — the six top-level prompt fields (``persona``,
+  ``task_intent``, ``problem_description``, ``instruction``,
+  ``thinking_style``, ``answer_format``). Each is a string. Constrained
+  by ``PROMPT_STRING_FIELDS``.
+- ``task_context_override`` — the two pipeline-context strings
+  (``upstream_context``, ``downstream_context``). Constrained by
+  ``TASK_CONTEXT_OVERRIDES``.
+
+Splitting these into distinct slots is what makes the shape statically
+validatable — before the split, prompt fields kept landing inside
+``pipeline_params_override.llm_only`` and the runner had to un-nest them
+on every round. With distinct slots the LLM cannot conflate the buckets.
 """
 
 from __future__ import annotations
@@ -99,12 +110,24 @@ class VariantEvidenceGrounding(BaseModel):
 class L1Variant(BaseModel):
     """One candidate variant proposed by ``l1_generate``.
 
-    ``pipeline_params_override`` is dynamically shaped per backend
-    pipeline (see :func:`l1_validators.build_l1_output_schema`); we keep
-    it as ``dict[str, Any]`` so a Pydantic parse never fails on a
-    legitimately backend-specific override key. The per-backend shape is
-    enforced downstream by ``validate_overrides`` against the active
-    ``PipelineSchema``.
+    Three override slots, each carrying a different layer's mutations:
+
+    - ``pipeline_params_override`` — per-node tunables, shape ``{node:
+      {param: value}}``. Inner shape is grafted at runtime by
+      :func:`l1_validators.build_l1_output_schema` from the active
+      ``PipelineSchema``; the keys at this level remain ``dict[str, dict]``
+      so the Pydantic parse never fails on a legitimately backend-specific
+      node name.
+    - ``prompt_fields_override`` — top-level prompt fields, shape
+      ``{field_name: string}``. Keys constrained to ``PROMPT_STRING_FIELDS``
+      by the runtime-built JSON Schema.
+    - ``task_context_override`` — pipeline-context strings, shape
+      ``{field_name: string}``. Keys constrained to ``TASK_CONTEXT_OVERRIDES``
+      by the runtime-built JSON Schema.
+
+    At least one of the three must be non-empty — an all-empty variant is
+    a no-op and is rejected by :func:`detect_invariants` downstream with
+    ``reason="no_op_variant"``.
 
     ``target_axis`` and ``reasoning`` are LLM-side reasoning aids — the
     ``l1_generate`` prompt's ``answer_format`` instructs the model to
@@ -118,11 +141,25 @@ class L1Variant(BaseModel):
 
     variant_name: str
     changes_description: str
-    pipeline_params_override: dict[str, Any] = Field(
+    pipeline_params_override: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description=(
-            "Flat or per-node mutations the variant introduces. Empty means "
-            "clone-of-parent and is rejected downstream by detect_invariants."
+            "Per-node tunables, shape {node_name: {param: value}}. Inner per-node "
+            "properties are grafted from the active PipelineSchema at runtime."
+        ),
+    )
+    prompt_fields_override: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Top-level prompt-template fields; keys must be one of "
+            "{persona, task_intent, problem_description, instruction, "
+            "thinking_style, answer_format}."
+        ),
+    )
+    task_context_override: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}."
         ),
     )
     target_axis: str = ""

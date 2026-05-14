@@ -80,7 +80,6 @@ class RequestTooLargeError(RuntimeError):
             f"(limit={limit}, requested={requested}). Retrying will not help — "
             f"the request alone is larger than the per-minute token allowance.\n"
             f"Reduce the L1 meta-prompt (biggest levers first):\n"
-            f"  - CampaignConfig.optimization.max_failures: 15 -> 5\n"
             f"  - CampaignConfig.optimization.n_variants: 5 -> 3\n"
             f"  - shorten datasets/<name>/task_description.md\n"
             f"Or upgrade your provider tier."

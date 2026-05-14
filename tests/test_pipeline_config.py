@@ -14,8 +14,8 @@ Three named invariants:
   3. ``CampaignConfig`` parses every persisted ``datasets/*/campaign.json``
      verbatim and rejects unknown keys at every nesting level (top-level,
      ``optimization``, ``optimizer_llm``, runtime ``pipeline_params``).
-     Per-dataset knobs (``improvement_threshold``, ``max_failures``,
-     ``degradation_threshold``) have no defaults and must be explicit.
+     Per-dataset knobs (``improvement_threshold``, ``degradation_threshold``)
+     have no defaults and must be explicit.
 """
 
 from __future__ import annotations
@@ -234,9 +234,9 @@ def test_runtime_pipeline_params_is_rejected() -> None:
 
 
 def test_required_optimization_fields_must_be_explicit() -> None:
-    """Per-dataset knobs (``improvement_threshold``, ``max_failures``,
-    ``degradation_threshold``) have no default — a campaign that omits them
-    is rejected at load time so dataset configs are self-describing."""
+    """Per-dataset knobs (``improvement_threshold``, ``degradation_threshold``)
+    have no default — a campaign that omits them is rejected at load time so
+    dataset configs are self-describing."""
     with pytest.raises(ValidationError):
         CampaignConfig.model_validate({"optimization": {"l1_patience": 3}})
 
@@ -377,11 +377,27 @@ def test_validate_overrides_falls_back_to_available_models_when_strict_off():
 
 
 def test_build_l1_output_schema_emits_enum_for_constrained_params():
+    """Three override slots, each constrained server-side:
+
+    - ``pipeline_params_override``: per-node enum/type grafting from the
+      active PipelineSchema.
+    - ``prompt_fields_override``: keys constrained to the six
+      PROMPT_STRING_FIELDS, each a string.
+    - ``task_context_override``: keys constrained to the two
+      TASK_CONTEXT_OVERRIDES, each a string.
+
+    Splitting the slots is what makes the un-nesting defensive repair
+    (deleted in B3) unnecessary — the LLM cannot emit a prompt field
+    inside ``pipeline_params_override.llm_only`` because that path is
+    rejected by ``additionalProperties: false``.
+    """
     schema = _bbeh_schema()
     out = build_l1_output_schema(schema)
     variant_props = out["schema"]["properties"]["variants"]["items"]["properties"]
-    override_props = variant_props["pipeline_params_override"]["properties"]
-    llm_props = override_props["llm_only"]["properties"]
+
+    # Slot 1: pipeline_params_override — per-node enum/type grafting.
+    pp_props = variant_props["pipeline_params_override"]["properties"]
+    llm_props = pp_props["llm_only"]["properties"]
     assert llm_props["reasoning_effort"] == {
         "type": "string",
         "enum": ["none", "default", "low", "medium", "high"],
@@ -391,6 +407,34 @@ def test_build_l1_output_schema_emits_enum_for_constrained_params():
     # emit a stringified number ("0.2" instead of 0.2).
     assert llm_props["temperature"] == {"type": "number"}
     assert "enum" not in llm_props["temperature"]
+    assert variant_props["pipeline_params_override"]["additionalProperties"] is False
+    assert pp_props["llm_only"]["additionalProperties"] is False
+
+    # Slot 2: prompt_fields_override — six keys, each string.
+    pf_slot = variant_props["prompt_fields_override"]
+    assert pf_slot["additionalProperties"] is False
+    pf_props = pf_slot["properties"]
+    for field in (
+        "persona",
+        "task_intent",
+        "problem_description",
+        "instruction",
+        "thinking_style",
+        "answer_format",
+    ):
+        assert pf_props[field] == {"type": "string"}
+    # No prompt-field key under pipeline_params_override.llm_only — the
+    # whole point of B1.
+    assert "instruction" not in llm_props
+    assert "answer_format" not in llm_props
+
+    # Slot 3: task_context_override — two keys, each string.
+    tc_slot = variant_props["task_context_override"]
+    assert tc_slot["additionalProperties"] is False
+    tc_props = tc_slot["properties"]
+    assert tc_props["upstream_context"] == {"type": "string"}
+    assert tc_props["downstream_context"] == {"type": "string"}
+
     assert variant_props["variant_name"] == {"type": "string"}
     assert out["strict"] is False
 

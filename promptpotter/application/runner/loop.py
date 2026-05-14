@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import traceback
 from collections.abc import Callable
 
 from promptpotter.application.bootstrap.session import Session
@@ -188,6 +189,26 @@ async def run_round_loop(
 
     except StopLoop as sl:
         return sl.reason
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        logger.warning("Optimization interrupted at round %d.", len(cycle.rounds))
+    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
+        # Distinguish user-initiated Ctrl+C from a programmatic cancellation
+        # (e.g. a backend timeout wrapped as CancelledError further down the
+        # await chain). Both end the same way, but the operator wants to
+        # know which one fired before they trust the next run.
+        cause = (
+            "user-initiated"
+            if isinstance(exc, KeyboardInterrupt)
+            else ("programmatic cancellation")
+        )
+        logger.warning("Optimization interrupted at round %d (%s).", round_num, cause)
         return StopReason.INTERRUPTED
+    except Exception:
+        # Per application/CLAUDE.md ("escalation flows via return value, not
+        # exception"), the loop must NOT re-raise — return a typed stop
+        # reason. logger.exception emits the full traceback to stderr so
+        # the operator sees the cause; we also stash the formatted
+        # traceback on session.state so _finalize_run can stamp it onto
+        # ``index.json::final.crash_traceback`` (sys.exc_info is cleared
+        # by the time _finalize_run runs).
+        session.state.crash_traceback = traceback.format_exc()
+        logger.exception("Optimization crashed at round %d.", round_num)
+        return StopReason.CRASHED

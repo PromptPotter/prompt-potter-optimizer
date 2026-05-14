@@ -80,7 +80,6 @@ Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::C
 | Key | Default | What it does |
 |---|---|---|
 | `improvement_threshold` | — *required* | Min accuracy delta a round must beat to count as improved. |
-| `max_failures` | — *required* | Max failure examples fed to the L1 critique step. |
 | `degradation_threshold` | — *required* | Mid-eval abort threshold (0 disables). |
 | `max_rounds` | 10 | Cycle round budget (None = unlimited, up to the `HARD_CAP=100` floor). |
 | `l1_patience` | 3 | Stalled-rounds before L2 fires. Set to 0 for "fire L2 every round" cadence. |

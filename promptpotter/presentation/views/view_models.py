@@ -79,13 +79,22 @@ class InitEnterView:
 
 @dataclass(frozen=True)
 class InitExitView:
-    """Post-origin init exit — origin accuracy + cycle identity."""
+    """Post-origin init exit — origin accuracy + cycle identity.
+
+    ``resumed_from_round`` is the next L1 round number to run (1 on a truly
+    fresh cycle, N+1 when N rounds were replayed from disk).
+    ``cached_rounds_count`` is the literal count of round artifacts found on
+    disk at bootstrap time. The two used to share one variable, which made
+    the display "Resumed from round 1 (1 rounds cached)" on every cycle —
+    they're now independent so the renderer can tell the operator the truth.
+    """
 
     origin_acc: float
     cycle_id_short: str
     samples: int
     obs_on: bool
     resumed_from_round: int = 1
+    cached_rounds_count: int = 0
     task_context_keys: int = 0
     l2_round: int = 0
     prompt_field_overlays: dict[str, str] = field(default_factory=dict)

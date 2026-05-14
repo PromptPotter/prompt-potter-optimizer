@@ -3,18 +3,16 @@
 Three concerns, all validation-shaped:
 
 - **Schema construction**: ``build_l1_output_schema`` grafts per-node
-  ``param_allowed_values`` into the static l1_generate envelope so the
-  LLM is constrained at output-time.
+  ``param_allowed_values`` into the static l1_generate envelope and
+  constrains the prompt-field + task-context slots so the LLM is
+  constrained at output-time across all three override slots.
 - **Schema compliance**: ``validate_overrides`` + ``L1_SCHEMA_COMPLIANCE``
-  catch overrides that violate the schema after the fact (LLMs ignore
-  parts of the schema). Failures route to L2 via ``ValidatorOutcome``.
+  catch ``pipeline_params_override`` values that violate the schema
+  after the fact (LLMs sometimes ignore parts of the schema). Failures
+  route to L2 via ``ValidatorOutcome``.
 - **Variant invariants**: ``detect_invariants`` flags ``no_op_variant``
   (no mutation vs parent) and ``duplicate_variant`` (sig-equal across
   population). Returns ``L1YieldStats`` for the round.
-
-``_normalize_pp_override`` lives here because the cleanup it performs
-(un-nest prompt fields, drop hallucinated nodes) is a pre-validation
-step on the same payload.
 """
 
 from __future__ import annotations
@@ -40,6 +38,7 @@ __all__ = [
     "L1YieldStats",
     "build_l1_output_schema",
     "detect_invariants",
+    "filter_pipeline_params_override",
     "validate_overrides",
 ]
 
@@ -66,33 +65,48 @@ def _inline_refs(node: Any, defs: dict[str, dict]) -> Any:
 
 
 def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
-    """l1_generate response_schema with per-node ``param_allowed_values`` grafted in.
+    """l1_generate response_schema — three constrained slots per variant.
 
     The base shape comes from :class:`L1GenerateOutput` (the Pydantic SoT
-    for l1_generate's response); per backend node we then enrich
-    ``pipeline_params_override`` with the node's allowed-value enums so
-    the LLM is constrained at output-time:
+    for l1_generate's response); we then constrain each of the three
+    override slots so the LLM cannot conflate them:
 
-    - if ``param_allowed_values`` carries an enum → ``{"type": "string", "enum": [...]}``
-    - else if ``param_types`` declares a type → ``{"type": <json-type>}``
-    - else → ``{}`` (unconstrained — dataset overlay gap)
+    - ``pipeline_params_override``: per backend node we enrich with the
+      node's allowed-value enums so the LLM is constrained at
+      output-time:
 
-    The type emission is load-bearing: without it, the L1 LLM is free to
-    emit ``"0.2"`` for ``temperature`` (string instead of number), which
-    propagates through the wire payload to the upstream provider and
-    triggers a 4xx that PromptPotter has to skip.
+      * if ``param_allowed_values`` carries an enum → ``{"type": "string", "enum": [...]}``
+      * else if ``param_types`` declares a type → ``{"type": <json-type>}``
+      * else → ``{}`` (unconstrained — dataset overlay gap)
+
+      The type emission is load-bearing: without it, the L1 LLM is free
+      to emit ``"0.2"`` for ``temperature`` (string instead of number),
+      which propagates through the wire payload to the upstream provider
+      and triggers a 4xx that PromptPotter has to skip.
+
+    - ``prompt_fields_override``: properties enumerated as the six
+      :data:`PROMPT_STRING_FIELDS`, each ``{"type": "string"}``;
+      ``additionalProperties: false``.
+
+    - ``task_context_override``: properties enumerated as
+      :data:`TASK_CONTEXT_OVERRIDES`, each ``{"type": "string"}``;
+      ``additionalProperties: false``.
 
     Returns the ``{"name", "schema", "strict"}`` envelope chat() consumes
-    via ``response_schema``.
+    via ``response_schema``. ``strict`` stays False — flipping it on is a
+    follow-up after multi-provider testing.
     """
     raw_schema = L1GenerateOutput.model_json_schema()
     defs = raw_schema.pop("$defs", {})
     inlined = _inline_refs(raw_schema, defs)
 
-    override = inlined["properties"]["variants"]["items"]["properties"]["pipeline_params_override"]
-    override.setdefault("properties", {})
-    override["additionalProperties"] = False
-    override_properties = override["properties"]
+    variant_props = inlined["properties"]["variants"]["items"]["properties"]
+
+    # 1. pipeline_params_override — per-node tunables.
+    pp_override = variant_props["pipeline_params_override"]
+    pp_override.setdefault("properties", {})
+    pp_override["additionalProperties"] = False
+    pp_properties = pp_override["properties"]
 
     for node in pipeline_schema.nodes:
         if not node.param_keys:
@@ -116,11 +130,23 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
                 param_props[param] = {}
         if not param_props:
             continue
-        override_properties[node.name] = {
+        pp_properties[node.name] = {
             "type": "object",
             "properties": param_props,
             "additionalProperties": False,
         }
+
+    # 2. prompt_fields_override — top-level prompt-template fields.
+    pf_override = variant_props["prompt_fields_override"]
+    pf_override["properties"] = {field: {"type": "string"} for field in PROMPT_STRING_FIELDS}
+    pf_override["additionalProperties"] = False
+
+    # 3. task_context_override — pipeline-context strings.
+    tc_override = variant_props["task_context_override"]
+    tc_override["properties"] = {
+        field: {"type": "string"} for field in sorted(TASK_CONTEXT_OVERRIDES)
+    }
+    tc_override["additionalProperties"] = False
 
     return {"name": "l1_variants", "schema": inlined, "strict": False}
 
@@ -254,62 +280,28 @@ L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
 )
 
 
-def _normalize_pp_override(
-    pp_override: dict, pipeline_schema: PipelineSchema | None
-) -> tuple[dict, dict, dict]:
-    """Split LLM pp_override → (prompt, task_context, pipeline_params_override); un-nest, auto-nest, drop unknown nodes."""
-    pp_override.pop("steps", None)  # LLM must not override pipeline composition
-    prompt_changes: dict = {}
-    tc_changes: dict = {}
-    pipeline_params_override: dict = {}
-    for k, pv in pp_override.items():
-        if k in PROMPT_STRING_FIELDS:
-            prompt_changes[k] = pv
-        elif k in TASK_CONTEXT_OVERRIDES:
-            tc_changes[k] = pv
+def filter_pipeline_params_override(
+    pipeline_params_override: dict[str, dict[str, Any]],
+    pipeline_schema: PipelineSchema | None,
+) -> dict[str, dict[str, Any]]:
+    """Drop entries for node names not in the active pipeline schema.
+
+    The JSON schema built by :func:`build_l1_output_schema` already
+    constrains node-name keys to the active schema's nodes, so this is
+    belt-and-braces — provider strict mode is off by default and a
+    weakly-conformant LLM can still emit a hallucinated node. Without
+    this filter the variant lands at the parse stage as a no-op (the
+    hallucinated node isn't a real wire target).
+    """
+    if not pipeline_schema:
+        return dict(pipeline_params_override)
+    filtered: dict[str, dict[str, Any]] = {}
+    for node_name, params in pipeline_params_override.items():
+        if pipeline_schema.has_node(node_name):
+            filtered[node_name] = params
         else:
-            pipeline_params_override[k] = pv
-
-    # Un-nest prompt/task_context fields LLM emitted under a node name
-    # (e.g. {"llm_only": {"answer_format": ...}}).
-    for node_name in list(pipeline_params_override.keys()):
-        nested = pipeline_params_override[node_name]
-        if not isinstance(nested, dict):
-            continue
-        for sub_k in list(nested.keys()):
-            if sub_k in PROMPT_STRING_FIELDS:
-                logger.warning("l1_generate: un-nesting prompt field %r from %r", sub_k, node_name)
-                prompt_changes[sub_k] = nested.pop(sub_k)
-            elif sub_k in TASK_CONTEXT_OVERRIDES:
-                logger.warning("l1_generate: un-nesting task_context %r from %r", sub_k, node_name)
-                tc_changes[sub_k] = nested.pop(sub_k)
-        if not nested:
-            del pipeline_params_override[node_name]
-
-    if pipeline_schema:
-        # Split dotted-path keys (e.g. {"llm_only.model": "X"} → {"llm_only": {"model": "X"}}).
-        # Weaker LLMs emit this shape; without splitting they fall through to the
-        # hallucinated-node drop below and the variant lands as a no-op.
-        for dk in [k for k in list(pipeline_params_override) if "." in k]:
-            node, _, param = dk.partition(".")
-            if pipeline_schema.has_node(node) and param:
-                logger.warning("l1_generate: splitting dotted key %r → %s.%s", dk, node, param)
-                pipeline_params_override.setdefault(node, {})[param] = pipeline_params_override.pop(
-                    dk
-                )
-        # Auto-nest flat params + drop hallucinated nodes.
-        for fk in [k for k, val in pipeline_params_override.items() if not isinstance(val, dict)]:
-            owner = pipeline_schema.node_for_param(fk)
-            if owner:
-                logger.warning("l1_generate: auto-nesting flat param %r → %s", fk, owner)
-                pipeline_params_override.setdefault(owner, {})[fk] = pipeline_params_override.pop(
-                    fk
-                )
-        for bk in [k for k in pipeline_params_override if not pipeline_schema.has_node(k)]:
-            logger.warning("l1_generate: dropping hallucinated node %r", bk)
-            del pipeline_params_override[bk]
-
-    return prompt_changes, tc_changes, pipeline_params_override
+            logger.warning("l1_generate: dropping hallucinated node %r", node_name)
+    return filtered
 
 
 @dataclass(frozen=True)

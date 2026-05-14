@@ -77,6 +77,10 @@ class CycleState:
     obs: ObservabilityBridge | None = None
     audit_projection: AuditTrailView | None = None
     ledger: CycleEventLog | None = None
+    # Set by ``run_round_loop`` when the loop ends with StopReason.CRASHED.
+    # _finalize_run reads it and stamps it onto ``index.json::final.crash_traceback``
+    # so the cause of the crash survives past terminal scrollback.
+    crash_traceback: str | None = None
 
 
 @dataclass

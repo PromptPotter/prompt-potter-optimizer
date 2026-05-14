@@ -58,19 +58,20 @@ def _render_init_exit(v: InitExitView) -> str:
         f"  {GREEN}✓{RESET} Initialized  origin={v.origin_acc:.1%}  "
         f"cycle={v.cycle_id_short}  samples={v.samples}  obs={obs}"
     ]
-    if v.resumed_from_round:
-        parts: list[str] = []
-        if v.task_context_keys:
-            parts.append(f"task_context={v.task_context_keys} keys")
-        if v.l2_round:
-            parts.append(f"l2_round={v.l2_round}")
-        suffix = f"  ({', '.join(parts)})" if parts else ""
+    parts: list[str] = []
+    if v.task_context_keys:
+        parts.append(f"task_context={v.task_context_keys} keys")
+    if v.l2_round:
+        parts.append(f"l2_round={v.l2_round}")
+    suffix = f"  ({', '.join(parts)})" if parts else ""
+    if v.cached_rounds_count > 0:
         out.append(
-            f"    Resumed from round {v.resumed_from_round} "
-            f"({v.resumed_from_round} rounds cached){suffix}"
+            f"    Resuming round {v.resumed_from_round} "
+            f"({v.cached_rounds_count} prior rounds cached){suffix}"
         )
     else:
-        out.append("    Starting fresh (no prior rounds for this cycle)")
+        tail = f"  — starting at round {v.resumed_from_round}{suffix}"
+        out.append(f"    Starting fresh (no prior rounds for this cycle){tail}")
     return "\n".join(out)
 
 
@@ -87,7 +88,7 @@ def _render_round_start(v: RoundStartView) -> str:
             _node_block(
                 "GENERATE",
                 f"Current best    {v.current_acc:.1%}",
-                f"Prompt          {v.prompt_preview}",
+                f"Parent prompt   {v.prompt_preview}",
                 f"Candidates      {v.n_variants}   Critique: {crit}",
                 f"Model           {v.model}",
             ),

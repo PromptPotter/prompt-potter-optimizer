@@ -23,7 +23,6 @@
       "max_rounds": 15,
       "n_variants": 3,
       "improvement_threshold": 0.01,
-      "max_failures": 15,
       "degradation_threshold": 0.4,
       "l2_patience": 2,
       "l3_patience": 1

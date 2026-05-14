@@ -192,9 +192,7 @@ def test_duplicate_insert_fires_when_proposed_lines_already_in_prior_framing():
         task_context=TaskDecomposition(
             domain="math",
             key_challenges=(
-                "Step 1: read the problem\n"
-                "Step 2: compute carefully\n"
-                "Step 3: verify the result"
+                "Step 1: read the problem\nStep 2: compute carefully\nStep 3: verify the result"
             ),
         )
     )

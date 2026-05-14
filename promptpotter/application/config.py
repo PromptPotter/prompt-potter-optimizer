@@ -62,8 +62,8 @@ class OptimizationConfig(BaseModel):
     """Optimization-loop knobs.
 
     Required per-dataset fields (no default — Pydantic raises if missing): every
-    ``datasets/*/campaign.json`` must declare ``improvement_threshold``,
-    ``max_failures``, ``degradation_threshold``.
+    ``datasets/*/campaign.json`` must declare ``improvement_threshold`` and
+    ``degradation_threshold``.
 
     Guard test: ``tests/test_campaign_config_validation.py::test_required_optimization_fields_must_be_explicit``.
     """
@@ -74,7 +74,6 @@ class OptimizationConfig(BaseModel):
     l1_patience: int = Field(3, description="Stop after N consecutive non-improving L1 rounds")
     n_variants: int = Field(5, description="Candidates per round")
     improvement_threshold: float = Field(..., description="Min accuracy delta")
-    max_failures: int = Field(..., description="Max failure examples fed to L1")
 
     l2_patience: int | None = Field(2)
     l3_patience: int | None = Field(1)

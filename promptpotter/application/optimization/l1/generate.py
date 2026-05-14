@@ -11,8 +11,8 @@ from promptpotter.application.optimization.dispatch.llm_call import (
 )
 from promptpotter.application.optimization.dispatch.schemas import VariantEvidenceGrounding
 from promptpotter.application.optimization.validators.l1_strict import (
-    _normalize_pp_override,
     build_l1_output_schema,
+    filter_pipeline_params_override,
 )
 from promptpotter.domain.opt_search_point import EvidenceGrounding
 from promptpotter.domain.results import CandidateProposal, candidate_label
@@ -124,7 +124,13 @@ async def l1_generate(
 
     population: list[CandidateProposal] = []
     for v in variants_list[:n_variants]:
-        prompt_changes, tc_changes, pipeline_params_override = _normalize_pp_override(
+        # Three slots, three readers. The schema split (B1) guarantees the
+        # LLM cannot conflate them — the runtime filter only drops node
+        # names not in the active schema (belt-and-braces; the JSON schema
+        # already enumerates them, but provider strict mode is off).
+        prompt_changes = dict(v.prompt_fields_override or {})
+        tc_changes = dict(v.task_context_override or {})
+        pipeline_params_override = filter_pipeline_params_override(
             v.pipeline_params_override or {}, pipeline_schema
         )
         # Override validation is deferred to parse_population — one producer of truth.

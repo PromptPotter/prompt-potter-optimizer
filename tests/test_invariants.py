@@ -149,7 +149,6 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
             "max_rounds": 5,
             "l1_patience": 3,
             "improvement_threshold": 0.01,
-            "max_failures": 15,
             "degradation_threshold": 0.4,
         }
     )

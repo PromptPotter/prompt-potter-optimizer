@@ -242,13 +242,21 @@ class CampaignStore(EntityStore):
         n_rounds: int,
         finished_at: str,
         interrupted_round: int | None = None,
+        crash_traceback: str | None = None,
     ) -> None:
         """Write the terminal status/stop_reason + outcome summary to disk.
 
-        ``interrupted_round`` is recorded only when ``status == "interrupted"``;
-        it names which round was active when the operator hit Ctrl+C so the
-        webapp / CLI can show "partial round N" without re-deriving from the
-        ledger.
+        ``interrupted_round`` names which round was active when the loop
+        tore down (Ctrl+C, programmatic cancellation, or uncaught
+        exception). Persisted on ``status in {"interrupted", "crashed"}``
+        so the webapp / CLI can show "partial round N" without re-deriving
+        from the ledger.
+
+        ``crash_traceback`` is the formatted traceback from the uncaught
+        exception that ended the run with ``StopReason.CRASHED``. Stamped
+        onto ``index.json::final.crash_traceback`` so the cause survives
+        past terminal scrollback — the operator can read it after the
+        fact.
         """
         from promptpotter.shared.errors import graceful
 
@@ -260,8 +268,10 @@ class CampaignStore(EntityStore):
             "n_rounds": n_rounds,
             "finished_at": finished_at,
         }
-        if status == "interrupted" and interrupted_round is not None:
+        if status in {"interrupted", "crashed"} and interrupted_round is not None:
             updates["interrupted_round"] = interrupted_round
+        if crash_traceback:
+            updates["crash_traceback"] = crash_traceback
         with graceful("Campaign completion update failed"):
             self.update(backend_id, cycle_id, updates)
 

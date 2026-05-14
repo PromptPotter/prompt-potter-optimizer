@@ -31,11 +31,19 @@ class CampaignPhase(enum.StrEnum):
 
 
 class StopReason(enum.StrEnum):
-    """Feedback cycle termination reasons."""
+    """Feedback cycle termination reasons.
+
+    ``INTERRUPTED`` is reserved for KeyboardInterrupt + asyncio.CancelledError
+    (user-initiated or programmatic cancellation). ``CRASHED`` is the
+    catch-all for any other unhandled exception inside the round loop —
+    distinguished so the operator can tell "I hit Ctrl+C" from "the run
+    died and the traceback was swallowed."
+    """
 
     PERFECT = "perfect_score"
     MAX_ROUNDS = "max_rounds"
     INTERRUPTED = "interrupted"
+    CRASHED = "crashed"
     ABORT = "escalation_abort"
     L3_PATIENCE = "l3_patience_exhausted"
     HARD_CAP = "hard_cap_reached"

@@ -163,6 +163,7 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
         samples=len(session.scoring.scoring_set),
         obs_on=session.state.obs is not None,
         resumed_from_round=session.state.resumed_from_round,
+        cached_rounds_count=len(cycle.rounds),
         task_context_keys=len(cycle.opt_sp.task_context),
         l2_round=cycle.escalation.l2_round,
         prompt_field_overlays=overlays,
@@ -173,12 +174,14 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
 
 
 def _l1_generate_enter(d: dict, ctx: dict) -> RoundStartView:
+    # The header is rendered at L1_GENERATE.enter — BEFORE L1 produces
+    # candidates. It describes the parent SP this round is mutating from;
+    # it cannot honestly describe the round's mutation mode (params-only
+    # vs prompt+params), because the candidate set doesn't exist yet. The
+    # per-candidate sp_diff table on the next render emits the actual
+    # mutation surface.
     preview = (d.get("prompt_preview") or "").replace("\n", " ").strip()
-    preview = (
-        "(empty starting prompt - param-only optimization)"
-        if not preview
-        else _truncate(preview, 50)
-    )
+    preview = "(empty)" if not preview else _truncate(preview, 50)
 
     new_flat = flatten_sp_summary(d.get("pipeline_params"))
     for field_name, value in (d.get("parent_prompt_fields") or {}).items():

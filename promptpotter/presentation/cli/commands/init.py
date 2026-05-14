@@ -75,13 +75,15 @@ async def _maybe_decompose_task(
     session.store.sessions.update(session_id, state)
 
 
-async def _run_init_body(args: argparse.Namespace) -> dict[str, Any]:
+async def _run_init_body(args: argparse.Namespace) -> tuple[dict[str, Any], Session]:
     """Mint a fresh session+cycle: services, datasets, pipeline, session record.
 
     Called from the top of :func:`cmd_optimize` when ``--config`` or
-    ``--dataset-name`` is set. Returns a small dict describing the minted
-    cycle so the optimize body (which reloads via ``load_session``) can
-    log + sanity-check.
+    ``--dataset-name`` is set. Returns ``(info_dict, session)`` — the info
+    dict describes the minted cycle for logging, and the ``Session`` is
+    threaded back to ``cmd_optimize`` so the optimize body can reuse it
+    instead of paying a second ``init_services_cli`` (backend handshake +
+    pipeline parse + dataset materialization).
 
     No scoring calls here — the origin runs as phase 0 of optimize on the
     ``sp_budget_ttest`` slice. The one LLM cost is the ``restructure``
@@ -156,15 +158,34 @@ async def _run_init_body(args: argparse.Namespace) -> dict[str, Any]:
         task_text=args.task_text,
     )
 
-    logger.info(
-        "Fresh cycle minted: session=%s cycle=%s dataset=%s (%d queries)",
-        session_id,
-        cycle_id,
-        dataset_name,
-        len(train_data),
-    )
+    # Cycle IDs are content-hashed (JobSearchPoint.content_hash(dataset)),
+    # so a "fresh" mint can land in a directory that already holds rounds
+    # from a prior run with the same origin SP. CampaignStore.create merges
+    # defaults ← existing ← metadata, preserving the prior rounds list.
+    # Distinguish the two outcomes in the log so the operator isn't misled
+    # by a "Fresh cycle minted" message when the cycle is actually being
+    # picked up where a prior run left off.
+    existing = session.store.campaigns.load(backend_id, cycle_id) or {}
+    prior_rounds = len(existing.get("rounds", []))
+    if prior_rounds > 0:
+        logger.info(
+            "Reusing cycle %s (%d prior rounds cached): session=%s dataset=%s (%d queries)",
+            cycle_id,
+            prior_rounds,
+            session_id,
+            dataset_name,
+            len(train_data),
+        )
+    else:
+        logger.info(
+            "Fresh cycle minted: session=%s cycle=%s dataset=%s (%d queries)",
+            session_id,
+            cycle_id,
+            dataset_name,
+            len(train_data),
+        )
 
-    return {
+    info = {
         "session_id": session_id,
         "cycle_id": cycle_id,
         "backend_id": backend_id,
@@ -172,3 +193,4 @@ async def _run_init_body(args: argparse.Namespace) -> dict[str, Any]:
         "active_steps": active,
         "excluded_nodes": excluded,
     }
+    return info, session
