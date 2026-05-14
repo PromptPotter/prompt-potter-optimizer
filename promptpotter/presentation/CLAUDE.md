@@ -12,7 +12,7 @@ points MUST NOT write campaign artifacts directly — they call into
 |---|---|
 | `cli/` | `campaign_runner.py` (the `optimize` shell), `session.py` (`init` shell), `parsers.py` (argparse). Thin shells over `application/runner.py` and `application/bootstrap`. |
 | `views/` | Display formatters: `view_models.py` (frozen view dataclasses), `display.py` (ANSI primitives), `view_ingress.py` (live `PhaseEvent → typed View → wire dict` ingress + `view_from_record` reconstruction), `render.py` (`to_text` / `to_markdown` dispatchers + heatmap + sweep summary), `live.py` (`LiveDisplay` ledger subscriber + per-sample / per-candidate formatters), `notebook_run.py`. Pure data → text/markdown — no I/O outside the file-tree-readable surface. Disk-side reconstruction (`from_disk_round` / `from_disk_log`) lives in `presentation/writers.py` next to its single consumer. |
-| `api.py` | FastAPI read-only API: backend storage, campaign registry, per-cycle live reads (dashboard passthrough, log.md, ledger reads + filtered views). |
+| `api/` | FastAPI read-only API. `routers/{backends,campaigns,active,datasets}.py` (backend storage, campaign registry + per-cycle live reads, active-session + sanctioned mutating endpoints, dataset preview). `deps.py` has `StoreDep` + `get_backend_or_404`. `__init__.py` re-exports the four router objects for `main.py`. |
 | `writers.py` | Per-cycle markdown writers (`write_log_md`, `write_review_md`); disk-side view reconstruction (`from_disk_round`, `from_disk_log`) feeds the same `RoundCompleteView` / `LogMdView` shapes the live ingress emits. |
 
 ## Out-of-bounds

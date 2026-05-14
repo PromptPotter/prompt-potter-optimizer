@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.metrics import count_degraded_samples
-from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
+from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 from promptpotter.shared.statistics import pobb_should_stop, posterior_best_probabilities

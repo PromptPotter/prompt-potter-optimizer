@@ -24,7 +24,7 @@
 |------|-------------|
 | [![m12-multi-connector](https://img.shields.io/badge/m12--multi--connector-red?style=for-the-badge)](m12-multi-connector.md) — subs: [`m12-promptpotter-as-connector.md`](m12-promptpotter-as-connector.md), [`m12-composite-fitness.md`](m12-composite-fitness.md), [`m12-newjob-status-bar.md`](m12-newjob-status-bar.md) | `promptpotter/infrastructure/backend.py`, `promptpotter/connectors/protocol.py`, `webapp/app/` |
 | [![m12-plus-backlog](https://img.shields.io/badge/m12--plus--backlog-black?style=for-the-badge)](m12-plus-backlog.md) | — |
-| [![m11-publication-benchmarks](https://img.shields.io/badge/m11--publication--benchmarks-red?style=for-the-badge)](m11-publication-benchmarks.md) — subs: [`m11-webapp-minimal-preview.md`](m11-webapp-minimal-preview.md), [`m11-webapp-react-port.md`](m11-webapp-react-port.md), [`m11-spend-tracking.md`](m11-spend-tracking.md) | `docs/research/benchmarks.md`, `datasets/{hotpotqa,gsm8k}/`, `promptpotter/application/datasets/datasets.py`, `webapp/app/` |
+| [![m11-publication-benchmarks](https://img.shields.io/badge/m11--publication--benchmarks-red?style=for-the-badge)](m11-publication-benchmarks.md) — subs: [`m11-webapp-minimal-preview.md`](m11-webapp-minimal-preview.md), [`m11-webapp-react-port.md`](m11-webapp-react-port.md), [`m11-spend-tracking.md`](m11-spend-tracking.md) | `docs/research/benchmarks.md`, `datasets/{hotpotqa,gsm8k}/`, `promptpotter/application/datasets.py`, `webapp/app/` |
 | [![m10-prompt-iteration-framework](https://img.shields.io/badge/m10--prompt--iteration--framework-black?style=for-the-badge)](m10-prompt-iteration-framework.md) — subs: [`m10-l2-self-diagnosis-and-imagination.md`](m10-l2-self-diagnosis-and-imagination.md), [`m10-sweep-toolkit.md`](m10-sweep-toolkit.md) | `promptpotter/application/optimization/{optimizer_pipeline.json,pipeline.py,runner.py}`, `tests/test_invariants.py` |
 
 ## Reference (not on the TODO)
@@ -32,7 +32,7 @@
 | Item | Status |
 |------|--------|
 | [Hard-Sample Sorter](hard-sample-sorter.md) | capability spec, unscheduled — `promptpotter/application/intelligence/{hard_sample_sorter,exploration}.py`, `docs/methods/exploration-exploitation.md` |
-| [Security audit](security-audit.md) | first hardening pass complete 2026-05-05 — `promptpotter/application/scoring/formula.py`, `promptpotter/config/log_redaction.py`, `promptpotter/application/optimization/dispatch_hub.py` |
+| [Security audit](security-audit.md) | first hardening pass complete 2026-05-05 — `promptpotter/application/scoring/formula/`, `promptpotter/config/log_redaction.py`, `promptpotter/application/optimization/dispatch_hub.py` |
 | M10 cleanup | archived → [`archive/m10-cleanup.md`](archive/m10-cleanup.md) + sub-audits |
 
 Cross-repo: Proper Step Loop → backend repo `docs/spec/proper-step-loop.md`.

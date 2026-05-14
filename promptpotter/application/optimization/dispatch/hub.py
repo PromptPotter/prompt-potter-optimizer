@@ -722,7 +722,7 @@ def validate_template(name: str, template: PromptTemplate) -> None:
     Closes the silent-drop bug: :meth:`DispatchHub.fill_fixed` only
     populates ``out[name]`` when ``name in INJECTIONS``, so a typo in a
     template body would render to empty and never surface. Called from
-    :func:`promptpotter.application.optimization.llm_call.load_optimizer_prompt`
+    :func:`promptpotter.application.optimization.dispatch.llm_call.load_optimizer_prompt`
     after every load (Langfuse or local manifest).
     """
     extras = _TEMPLATE_EXTRAS.get(name, set())

@@ -24,27 +24,27 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.application.optimization.dispatch_hub import (
+from promptpotter.application.optimization.dispatch.hub import (
     DispatchHub,
     build_bundle,
 )
-from promptpotter.application.optimization.escalation.state import NextAction
-from promptpotter.application.optimization.l2_validators import (
-    run_l2_output_validators,
-    run_l3_output_validators,
-)
-from promptpotter.application.optimization.llm_call import load_optimizer_prompt
-from promptpotter.application.optimization.optimizer_schemas import (
+from promptpotter.application.optimization.dispatch.llm_call import load_optimizer_prompt
+from promptpotter.application.optimization.dispatch.schemas import (
     L2ContextOutput,
     L3PlanOutput,
+)
+from promptpotter.application.optimization.escalation.state import NextAction
+from promptpotter.application.optimization.helpers.transitions import (
+    TransitionResult,
+    run_layer_transition,
 )
 from promptpotter.application.optimization.resume_and_fork import (
     ResumeCheckpointKind,
     record_decision,
 )
-from promptpotter.application.optimization.transitions import (
-    TransitionResult,
-    run_layer_transition,
+from promptpotter.application.optimization.validators.l2_l3 import (
+    run_l2_output_validators,
+    run_l3_output_validators,
 )
 from promptpotter.domain.l1_layout import (
     L1_LAYOUT_SLOTS,

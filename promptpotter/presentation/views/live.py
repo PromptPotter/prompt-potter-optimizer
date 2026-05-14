@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from promptpotter.application.optimization.elimination import classify_result
+from promptpotter.application.optimization.pobb.elimination import classify_result
 from promptpotter.application.scoring.formula import extract_display_answer
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
@@ -157,7 +157,7 @@ def _render_round_stats(
     try:
         from collections import Counter
 
-        from promptpotter.application.optimization.elimination import (
+        from promptpotter.application.optimization.pobb.elimination import (
             get_ranked_items,
             ranked_item_keys_from_schema,
         )

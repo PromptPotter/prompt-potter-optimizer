@@ -68,7 +68,7 @@ def hash_call(
 class OptimizerCallCache:
     """File-backed cache for optimizer LLM responses keyed by input hash.
 
-    Consumed by :func:`promptpotter.application.optimization.llm_call.llm_call`
+    Consumed by :func:`promptpotter.application.optimization.dispatch.llm_call.llm_call`
     — if a hash hits, the stored ``LLMResponse.model_dump()`` is replayed and
     the real LLM call is skipped.
     """

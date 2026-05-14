@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.application.optimization.l1_behavior_checks import (
+from promptpotter.application.optimization.validators.l1_behavior import (
     PARAM_FORBIDDEN_KEYS,
     CheckResult,
     extract_l1_variants,

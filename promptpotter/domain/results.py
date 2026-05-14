@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.domain.analysis import EscalationSignal
+from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 

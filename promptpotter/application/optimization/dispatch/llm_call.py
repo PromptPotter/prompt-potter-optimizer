@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from promptpotter.application.optimization.optimizer_schemas import (
+from promptpotter.application.optimization.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
 )
 from promptpotter.domain.opt_search_point import PromptTemplate
@@ -59,7 +59,7 @@ __all__ = [
 ]
 
 
-_PIPELINE_PATH = Path(__file__).parent / "optimizer_pipeline.json"
+_PIPELINE_PATH = Path(__file__).parent / "pipeline.json"
 
 
 @functools.lru_cache(maxsize=1)
@@ -453,7 +453,7 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
     :data:`dispatch_hub.INJECTIONS` (and not in the per-template extras list)
     raises at load time rather than silently rendering empty.
     """
-    from promptpotter.application.optimization.dispatch_hub import validate_template
+    from promptpotter.application.optimization.dispatch.hub import validate_template
 
     lf_prompt = _try_langfuse(name)
     template = lf_prompt or _load_local(name)

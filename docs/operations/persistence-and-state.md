@@ -281,5 +281,5 @@ formula:  0.65*acc + 0.15*H + 0.10*lat + 0.05*R + 0.05*pc
 
 - Evaluator registry + default formula: `promptpotter/application/scoring/evaluators.py`
 - Composite computation: `promptpotter/application/scoring/metrics.py::compute_composite_score`
-- Hot-swap module: `promptpotter/application/scoring/formula.py`
+- Hot-swap module: `promptpotter/application/scoring/formula/`
 - Per-round trajectory: in-memory `Cycle.rounds` (transient); persistent trajectory derives from ledger events.

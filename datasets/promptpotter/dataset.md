@@ -9,7 +9,7 @@ consumer (the M11 PromptPotter-as-backend connector) is built.
 Sibling shape to `datasets/gsm8k/` and `datasets/lca-termnorm/` for the
 config files; the **rows themselves** live in
 `golden_traces.json` and conform to the row contract emitted by
-`promptpotter/application/datasets/datasets.py::load_potter_traces`.
+`promptpotter/application/datasets.py::load_potter_traces`.
 
 ## What this dataset IS
 

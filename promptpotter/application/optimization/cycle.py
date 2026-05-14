@@ -18,11 +18,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.optimization.elimination import extract_warning_types
 from promptpotter.application.optimization.escalation.state import EscalationState
+from promptpotter.application.optimization.pobb.elimination import extract_warning_types
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.analysis import RuntimeFailure
+from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import RoundOrigin, RoundResult
 from promptpotter.domain.run_records import ResumeCheckpointRecord

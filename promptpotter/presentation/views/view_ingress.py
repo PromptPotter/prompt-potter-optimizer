@@ -24,7 +24,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from promptpotter.application.optimization.dispatch_hub import (
+from promptpotter.application.optimization.dispatch.hub import (
     format_l1_critique_for_prompt,
 )
 from promptpotter.domain.opt_search_point import (

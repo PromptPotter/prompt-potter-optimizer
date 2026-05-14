@@ -276,9 +276,9 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 | Area | Files |
 |------|-------|
 | Optimizer pipeline | `promptpotter/application/optimization/pipeline.py`, `optimizer_pipeline.json` |
-| LLM client | `promptpotter/infrastructure/llm.py` |
-| Scoring | `promptpotter/application/scoring/formula.py` |
-| Dataset builder | `promptpotter/application/datasets/datasets.py` |
+| LLM client | `promptpotter/infrastructure/llm/` |
+| Scoring | `promptpotter/application/scoring/formula/` |
+| Dataset builder | `promptpotter/application/datasets.py` |
 | Measurement archive | `promptpotter/infrastructure/store/measurement_archive.py` |
 | Session + Campaign stores | `promptpotter/infrastructure/store/stores.py` |
 | CLI live output | `promptpotter/presentation/cli/campaign_runner.py`, `promptpotter/presentation/views/live.py` |

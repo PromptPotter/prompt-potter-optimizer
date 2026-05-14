@@ -23,8 +23,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.optimization import llm_call as _llm_call
-from promptpotter.application.optimization.llm_call import compute_optimizer_prompt_hashes
+from promptpotter.application.optimization.dispatch import llm_call as _llm_call
+from promptpotter.application.optimization.dispatch.llm_call import compute_optimizer_prompt_hashes
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store.base import read_json_optional, write_json

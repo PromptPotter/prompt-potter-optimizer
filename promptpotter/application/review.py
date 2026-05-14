@@ -27,14 +27,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.application.optimization.l1_behavior_checks import (
+from promptpotter.application.optimization.helpers.l1_stats import L1Stats, compute_l1_stats
+from promptpotter.application.optimization.validators.l1_behavior import (
     CHECK_REGISTRY,
     CheckContext,
     CheckResult,
     extract_l1_variants,
     run_all_checks,
 )
-from promptpotter.application.optimization.l1_stats import L1Stats, compute_l1_stats
 
 __all__ = ["render_review_md"]
 
@@ -282,7 +282,7 @@ def _fmt_evidence_cell(raw: object) -> str:
 
 
 def _render_critique(round_data: dict[str, Any]) -> list[str]:
-    from promptpotter.application.optimization.dispatch_hub import (
+    from promptpotter.application.optimization.dispatch.hub import (
         format_l1_critique_for_prompt,
     )
 

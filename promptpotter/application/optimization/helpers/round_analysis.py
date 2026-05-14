@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 
-from promptpotter.application.optimization.elimination import (
+from promptpotter.application.optimization.pobb.elimination import (
     get_ranked_items,
     ranked_item_keys_from_schema,
 )

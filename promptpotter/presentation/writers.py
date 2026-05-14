@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.dispatch_hub import (
+from promptpotter.application.optimization.dispatch.hub import (
     format_l1_critique_for_prompt,
 )
 from promptpotter.application.review import render_review_md

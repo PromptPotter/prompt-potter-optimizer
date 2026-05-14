@@ -9,7 +9,7 @@ when prioritized.
 
 Operator-facing surfaces (webapp bar, publication figures, log.md) need
 one shared $-per-cycle number. Today there's none — `TokenUsage` is
-captured per-call (`infrastructure/llm.py:113`) and discarded after a
+captured per-call (`infrastructure/llm/models.py`) and discarded after a
 warn-on-oversize check (`emit_token_usage`).
 
 ## Direction
@@ -51,7 +51,7 @@ each consumer guarantees drift.
 
 ## Anchors
 
-- `promptpotter/infrastructure/llm.py:113` — `TokenUsage`.
+- `promptpotter/infrastructure/llm/models.py` — `TokenUsage`.
 - `promptpotter/application/optimization/llm_call.py:209` — emit site.
 - `promptpotter/infrastructure/projections/live_dashboard.py` — projection.
 - `promptpotter/application/origin.py::build_campaign_emitter` — wiring.

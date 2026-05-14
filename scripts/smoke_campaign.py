@@ -49,7 +49,7 @@ from promptpotter.application.config import (  # noqa: E402
     configure_and_apply_pipeline,
     load_campaign_config,
 )
-from promptpotter.application.datasets.datasets import DATASET_LOADERS  # noqa: E402
+from promptpotter.application.datasets import DATASET_LOADERS  # noqa: E402
 from promptpotter.presentation.views.display import set_display_tags  # noqa: E402
 from promptpotter.presentation.views.notebook_run import (  # noqa: E402
     init_notebook_session,

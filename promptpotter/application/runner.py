@@ -17,13 +17,13 @@ from promptpotter.application.optimization.escalation import (
     apply_fork_payload_to_osp,
     escalate_l2,
 )
-from promptpotter.application.optimization.l1 import execute_round, generate_or_load_candidates
-from promptpotter.application.optimization.observers import (
+from promptpotter.application.optimization.helpers.observers import (
     ForkInfo,
     RunCallbacks,
     RunObservers,
     build_run_observers,
 )
+from promptpotter.application.optimization.l1 import execute_round, generate_or_load_candidates
 from promptpotter.application.origin import (
     CampaignOrigin,
     extract_campaign_origin,
@@ -691,7 +691,7 @@ def _finalize_run(
             final_block["scorer_round_formula"] = formula_full
             final_block["scorer_round_formula_short"] = formula_short
             final_block["origin_composite_fitness"] = origin_composite_fitness
-            from promptpotter.application.optimization.llm_call import (
+            from promptpotter.application.optimization.dispatch.llm_call import (
                 compute_optimizer_prompt_hashes,
             )
 

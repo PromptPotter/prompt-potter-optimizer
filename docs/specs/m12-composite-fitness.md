@@ -11,7 +11,7 @@
 ## Context
 
 Today's fitness function is one-dimensional: composite score from
-`compile_scorer` (`promptpotter/application/scoring/formula.py:340`)
+`compile_scorer` (`promptpotter/application/scoring/formula/compiler.py`)
 returns a `[0,1]`-clamped float per sample. PoBB elimination ranks
 candidates on this single number.
 
@@ -202,5 +202,5 @@ code change for this spec; just verify the foundation is ready.**
 - `archive/m10-pass3` (commit `ccf7984e`) — recent spend extract that
   consolidated the bookkeeping site
 - `promptpotter/domain/run_records.py:115-141` — `TokenUsageRecord` shape
-- `promptpotter/application/scoring/formula.py:340` — `compile_scorer` (per-sample)
+- `promptpotter/application/scoring/formula/compiler.py` — `compile_scorer` (per-sample)
 - `promptpotter/infrastructure/projections/live_state.py` — projection home

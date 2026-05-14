@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.dispatch_hub import (
+from promptpotter.application.optimization.dispatch.hub import (
     DispatchHub,
     build_bundle,
 )
-from promptpotter.application.optimization.llm_call import run_optimizer_node
-from promptpotter.application.optimization.optimizer_schemas import L1CritiqueOutput
+from promptpotter.application.optimization.dispatch.llm_call import run_optimizer_node
+from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.llm import LLMClientBase
 
@@ -51,7 +51,7 @@ async def run_l1_critique(
     Pydantic dep into the domain serialization path.
     """
     bundle = build_bundle(cycle, latest_round=round_result)
-    from promptpotter.application.optimization.llm_call import load_optimizer_prompt
+    from promptpotter.application.optimization.dispatch.llm_call import load_optimizer_prompt
 
     template = load_optimizer_prompt("l1_critique")
     prompt_vars = DispatchHub.fill_fixed(template, bundle)

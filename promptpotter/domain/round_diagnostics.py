@@ -2,7 +2,7 @@
 
 Lifted from inline ``compile_critique_context`` + ``_section_l1c_round_report``
 + scattered ``formatting.py`` helpers into one typed structure computed once
-per round (in ``application/optimization/round_diagnostics.py``) and attached
+per round (in ``application/optimization/round_analysis.py``) and attached
 to ``RoundResult``.
 
 Pure data — rendering lives in the dispatch hub's ``diagnostics`` signal,

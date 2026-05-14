@@ -34,7 +34,7 @@ collects everything else.
   deprecated-sample gate (uses `classify_result()` fatal codes). Any new
   fallback must be documented alongside these.
 - **Optimizer LLM calls go through `llm_call()`**
-  (`application/optimization/llm_call.py`), never `chat()`.
+  (`application/optimization/dispatch/llm_call.py`), never `chat()`.
 - **Escalation flows via return value** (`QueryLoopResult.escalation_signal`),
   not exception. Use `graceful()` (`shared/errors.py`) where exceptions must
   escape.

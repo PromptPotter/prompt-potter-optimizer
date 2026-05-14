@@ -1,0 +1,292 @@
+"""Rolling-window RPM + TPM rate limiter + 429 ``Retry-After`` handling.
+
+Proactive throttle to match provider tier caps (e.g. Groq free tier
+5 req/min + 8000 tokens/min). Prevents 429 bursts by blocking *before*
+sending when either cap would be exceeded. Token estimation uses a rough
+``chars // 4`` approximation; ``record_actual()`` corrects the reservation
+from server-reported usage. Also hosts the shared 429 ``Retry-After``
+parser + visible countdown (RFC 7231 §7.1.3).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import sys
+import time
+from collections import deque
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
+
+from promptpotter.shared.errors import RequestTooLargeError
+
+logger = logging.getLogger(__name__)
+
+MAX_429_ATTEMPTS: int = 5
+# Brief visible cooldown between displaying a deprecated cache row and firing
+# the fresh remeasurement. Not a throttle — a signal so the operator sees the
+# retry happening instead of a 0.0s row jumping to a 20s call.
+DEPR_RETRY_COOLDOWN_SEC: float = 1.0
+_YELLOW = "\033[93m"
+_RESET = "\033[0m"
+
+# Standard OpenAI/Groq rate-limit header keys.
+OPENAI_RPM_HEADER = "x-ratelimit-limit-requests"
+OPENAI_TPM_HEADER = "x-ratelimit-limit-tokens"
+# Anthropic uses its own header naming.
+ANTHROPIC_RPM_HEADER = "anthropic-ratelimit-requests-limit"
+ANTHROPIC_TPM_HEADER = "anthropic-ratelimit-tokens-limit"
+
+
+def parse_retry_after(headers: object | None) -> float | None:
+    """RFC 7231 §7.1.3 — read ``Retry-After`` (seconds) from response headers."""
+    if headers is None:
+        return None
+    for key in ("Retry-After", "retry-after"):
+        val = headers.get(key) if hasattr(headers, "get") else None
+        if val is None:
+            continue
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+async def wait_with_countdown(total_sec: float, label: str) -> None:
+    """Sleep `total_sec` while emitting a yellow single-line countdown to stderr."""
+    end = time.monotonic() + total_sec
+    while True:
+        remaining = max(0.0, end - time.monotonic())
+        mins_total, secs = divmod(int(remaining + 0.5), 60)
+        hours, mins = divmod(mins_total, 60)
+        stamp = f"{hours:d}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
+        sys.stderr.write(
+            f"\r{_YELLOW}⚠ rate-limit ({label}): waiting {stamp}  (Ctrl+C to abort){_RESET}"
+        )
+        sys.stderr.flush()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(1.0, remaining))
+    sys.stderr.write(f"\r{_YELLOW}⚠ rate-limit ({label}): resuming.{' ' * 30}{_RESET}\n")
+    sys.stderr.flush()
+
+
+def estimate_tokens(messages: list[dict[str, str]], max_output: int | None) -> int:
+    """Rough prompt + output token estimate (~4 chars/token).
+
+    When ``max_output`` is ``None`` (no caller-side cap), only the input
+    side is counted. The TPM pre-check loses its output reservation, but
+    the provider's own 429 still surfaces if the actual response overshoots.
+    """
+    char_count = sum(len(m.get("content", "")) for m in messages)
+    return char_count // 4 + (max_output or 0)
+
+
+def _parse_tpm_overflow(err_str: str) -> tuple[int, int] | None:
+    """Extract ``(limit, requested)`` from a Groq-style ``"Limit X, Requested Y"`` body."""
+    m = re.search(r"Limit\s+(\d+),\s*Requested\s+(\d+)", err_str)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def _parse_int_header(headers: Mapping[str, Any] | Any, key: str) -> int | None:
+    """Read ``key`` from a headers mapping and coerce to int, else ``None``."""
+    if headers is None:
+        return None
+    val = headers.get(key) if hasattr(headers, "get") else None
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def raise_if_request_too_large(exc: Exception, provider_name: str) -> None:
+    """Translate a terminal 413/429 "Requested > Limit" into ``RequestTooLargeError``."""
+    status = getattr(exc, "status_code", None)
+    if status not in (413, 429):
+        return
+    parsed = _parse_tpm_overflow(str(exc))
+    if parsed is None:
+        return
+    limit, requested = parsed
+    if requested <= limit:
+        return
+    raise RequestTooLargeError(
+        provider_name=provider_name,
+        limit=limit,
+        requested=requested,
+    ) from exc
+
+
+async def acquire_reservation(
+    rate_limiter: RateLimiter | None,
+    messages: list[dict[str, str]],
+    max_tokens: int | None,
+    provider_name: str,
+) -> RateLimitReservation | None:
+    """Block until ``messages`` fits the rolling window; returns ``None`` when no limiter is set."""
+    if rate_limiter is None:
+        return None
+    return await rate_limiter.acquire_with_estimation(
+        messages, max_tokens, provider_name=provider_name
+    )
+
+
+def apply_discovered_caps(
+    rate_limiter: RateLimiter | None,
+    headers: Any,
+    *,
+    rpm_header: str,
+    tpm_header: str,
+) -> None:
+    """Self-tune the limiter from the provider's rate-limit response headers (no-op without limiter)."""
+    if rate_limiter is None:
+        return
+    rpm = _parse_int_header(headers, rpm_header)
+    tpm = _parse_int_header(headers, tpm_header)
+    rate_limiter.apply_discovered(rpm, tpm)
+
+
+@dataclass
+class RateLimiter:
+    """Rolling-window request/token limiter.
+
+    Attributes:
+        rpm: Requests per window. ``None`` disables the request cap.
+        tpm: Tokens per window. ``None`` disables the token cap.
+        window_s: Window length in seconds (default 60).
+        rpm_pinned: When True, ``apply_discovered()`` won't override ``rpm``
+            (caller explicitly configured it via settings).
+        tpm_pinned: Same for ``tpm``.
+    """
+
+    rpm: int | None = None
+    tpm: int | None = None
+    window_s: float = 60.0
+    rpm_pinned: bool = False
+    tpm_pinned: bool = False
+
+    _requests: deque[float] = field(default_factory=deque)
+    _tokens: deque[tuple[float, int]] = field(default_factory=deque)
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    def apply_discovered(self, rpm: int | None, tpm: int | None) -> None:
+        """Populate caps from server-reported rate-limit headers.
+
+        Pinned slots (explicit user config) are never overwritten. Unpinned
+        slots latch to the first non-``None`` value we see and update if the
+        server later reports a different cap (tier change mid-run).
+        """
+        if rpm is not None and not self.rpm_pinned:
+            self.rpm = rpm
+        if tpm is not None and not self.tpm_pinned:
+            self.tpm = tpm
+
+    async def acquire(self, estimated_tokens: int) -> None:
+        """Block until sending ``estimated_tokens`` fits within RPM + TPM caps.
+
+        Reserves an RPM slot and a TPM allocation on return. Callers should
+        follow up with :meth:`record_actual` once the server reports actual
+        usage so the reservation reflects reality.
+        """
+        async with self._lock:
+            while True:
+                now = time.monotonic()
+                self._prune(now)
+                wait = self._wait_needed(now, estimated_tokens)
+                if wait <= 0:
+                    self._requests.append(now)
+                    self._tokens.append((now, estimated_tokens))
+                    return
+                await asyncio.sleep(wait)
+
+    def record_actual(self, estimated: int, actual: int) -> None:
+        """Correct the most recent reservation with the response's actual tokens."""
+        if self._tokens and self._tokens[-1][1] == estimated:
+            ts, _ = self._tokens[-1]
+            self._tokens[-1] = (ts, actual)
+
+    async def acquire_with_estimation(
+        self,
+        messages: list[dict[str, str]],
+        max_output: int | None,
+        *,
+        provider_name: str,
+    ) -> RateLimitReservation:
+        """Estimate, fail-fast on over-cap, throttle, and return a closeable reservation.
+
+        Bundles the three-step dance every LLM call needs: estimate prompt
+        size, raise ``RequestTooLargeError`` if the configured TPM cap can
+        never fit it, and block until the rolling window has room. The
+        returned reservation must be ``close()``-d with the server's actual
+        token count after the response so the rolling window stays accurate.
+        """
+        estimated = estimate_tokens(messages, max_output)
+        if self.tpm is not None and estimated > self.tpm:
+            raise RequestTooLargeError(
+                provider_name=provider_name,
+                limit=self.tpm,
+                requested=estimated,
+            )
+        await self.acquire(estimated)
+        return RateLimitReservation(estimated=estimated, limiter=self)
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self.window_s
+        while self._requests and self._requests[0] < cutoff:
+            self._requests.popleft()
+        while self._tokens and self._tokens[0][0] < cutoff:
+            self._tokens.popleft()
+
+    def _rpm_wait(self, now: float) -> float:
+        """Seconds until the oldest request ages out, if the RPM cap is full."""
+        if self.rpm is None or len(self._requests) < self.rpm:
+            return 0.0
+        return self._requests[0] + self.window_s - now
+
+    def _tpm_wait(self, now: float, estimated_tokens: int) -> float:
+        """Seconds until enough token budget has aged out to fit the request."""
+        if self.tpm is None:
+            return 0.0
+        current = sum(t for _, t in self._tokens)
+        if current + estimated_tokens <= self.tpm:
+            return 0.0
+        needed = current + estimated_tokens - self.tpm
+        shed = 0
+        for ts, toks in self._tokens:
+            shed += toks
+            if shed >= needed:
+                return ts + self.window_s - now
+        return 0.0
+
+    def _wait_needed(self, now: float, estimated_tokens: int) -> float:
+        return max(self._rpm_wait(now), self._tpm_wait(now, estimated_tokens))
+
+
+@dataclass(frozen=True)
+class RateLimitReservation:
+    """One outstanding throttle reservation — call ``close()`` after the response."""
+
+    estimated: int
+    limiter: RateLimiter
+
+    def close(self, actual: int) -> None:
+        """Reconcile the reservation with the server's actual token usage."""
+        self.limiter.record_actual(self.estimated, actual)
+
+
+def build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
+    """Build a limiter. Configured caps pin; unconfigured slots self-tune from
+    ``x-ratelimit-limit-*`` response headers on the first successful call."""
+    return RateLimiter(
+        rpm=rpm,
+        tpm=tpm,
+        rpm_pinned=rpm is not None,
+        tpm_pinned=tpm is not None,
+    )

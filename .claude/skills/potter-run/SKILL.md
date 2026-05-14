@@ -58,7 +58,7 @@ Trigger if any of: `.env` missing, backend `/status` unreachable, or requested d
 
 **Backend `/status` unreachable.** TermNorm is the canonical test backend. If it isn't local yet, offer `git clone https://github.com/runfish5/TermNorm-excel` to `../TermNorm-excel` (sibling of PromptPotter; operator can override the path). Once present, tell the operator to run `start-server-py-LLMs.bat` in their own terminal — same hand-off model as Phase 4 (`optimize`). Wait for `/status` 200 before continuing. *Future improvement: spawn a dedicated terminal automatically once that capability lands.*
 
-**Dataset has no loader.** Anything already in `promptpotter/application/datasets/datasets.py::DATASET_LOADERS` (bundled benchmarks + `lca-termnorm` via `load_excel_ground_truth`) needs nothing — `init` picks them up. **New dataset:** the skill writes a custom loader for the operator. Vocabulary: a function returning `list[Sample]` (`promptpotter/domain/sample.py` — `query` + `ground_truth` + optional `id`/extras). Read the operator's data shape (CSV, Excel, JSON, HuggingFace, …), generate `load_<name>(...)`, and register it in `DATASET_LOADERS`. Then draft `datasets/<name>/{pipeline.json, campaign.json, dataset.md, prompts/<node>.json}` against the patterns in `datasets/bbeh/`. The operator just describes their data and answer keys — Claude does the wiring.
+**Dataset has no loader.** Anything already in `promptpotter/application/datasets.py::DATASET_LOADERS` (bundled benchmarks + `lca-termnorm` via `load_excel_ground_truth`) needs nothing — `init` picks them up. **New dataset:** the skill writes a custom loader for the operator. Vocabulary: a function returning `list[Sample]` (`promptpotter/domain/sample.py` — `query` + `ground_truth` + optional `id`/extras). Read the operator's data shape (CSV, Excel, JSON, HuggingFace, …), generate `load_<name>(...)`, and register it in `DATASET_LOADERS`. Then draft `datasets/<name>/{pipeline.json, campaign.json, dataset.md, prompts/<node>.json}` against the patterns in `datasets/bbeh/`. The operator just describes their data and answer keys — Claude does the wiring.
 
 ## Phase 0: Audit (silent)
 
@@ -66,7 +66,7 @@ Trigger if any of: `.env` missing, backend `/status` unreachable, or requested d
 2. `curl -s {backend_url}/status` — backend up?
 3. Active pointer → `index.json` + `dashboard.json` if present.
 
-**Print only if** no dataset arg, dataset not implemented (scorer in `promptpotter/application/scoring/formula.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets/datasets.py::DATASET_LOADERS`), or an anomaly from the allowlist below fires.
+**Print only if** no dataset arg, dataset not implemented (scorer in `promptpotter/application/scoring/formula/matchers.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets.py::DATASET_LOADERS`), or an anomaly from the allowlist below fires.
 
 If `datasets/{name}/` has never produced a `dataset_runs/` entry, suggest (don't auto-run): `python scripts/smoke_campaign.py --dataset {name}` (~90s).
 

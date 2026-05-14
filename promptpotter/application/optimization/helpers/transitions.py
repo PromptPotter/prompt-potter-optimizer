@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
-from promptpotter.application.optimization.llm_call import run_optimizer_node
+from promptpotter.application.optimization.dispatch.llm_call import run_optimizer_node
 from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import TaskDecomposition

@@ -123,7 +123,7 @@ archive/                            MeasurementArchive
                                         sample)    config)  both)
 ```
 
-**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/datasets.py:347`) → `archive.save(run_id, data)` (`infrastructure/store/measurement_archive.py:97`) → `AxisIndex.refresh()` pulls via `load_since()` (`application/intelligence/indexes.py:721`).
+**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets.py:347`) → `archive.save(run_id, data)` (`infrastructure/store/measurement_archive.py:97`) → `AxisIndex.refresh()` pulls via `load_since()` (`application/intelligence/indexes.py:721`).
 
 **Read paths** (both return `list[Measurement]`):
 

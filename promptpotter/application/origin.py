@@ -139,7 +139,7 @@ def load_origin_prompt(
         )
 
     if dataset_name and names:
-        from promptpotter.application.datasets.datasets import (
+        from promptpotter.application.datasets import (
             has_dataset_prompts,
             load_node_prompt,
         )
@@ -181,7 +181,7 @@ async def prepare_scoring_context(
     obs: Any | None = None,
 ) -> tuple[OptSearchPoint, list[Sample], list, list]:
     """Load origin prompt, set dataset, and produce a populated ``campaign_rounds[0]``."""
-    from promptpotter.application.datasets.datasets import sample_dataset
+    from promptpotter.application.datasets import sample_dataset
 
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
     dataset_name = campaign_config.dataset_name if campaign_config else None
@@ -291,7 +291,7 @@ def prepare_datasets(
     force: bool = False,
 ) -> DatasetSummary:
     """Load/create datasets and build session terms (pure orchestration — notebook prints the summary)."""
-    from promptpotter.application.datasets.datasets import (
+    from promptpotter.application.datasets import (
         SHEET_COLUMN_MAP,
         load_excel_ground_truth,
         samples_from_dicts,

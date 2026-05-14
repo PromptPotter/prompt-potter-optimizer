@@ -16,7 +16,7 @@ from promptpotter.application.config import (
     configure_and_apply_pipeline,
     load_campaign_config,
 )
-from promptpotter.application.datasets.datasets import samples_from_dicts
+from promptpotter.application.datasets import samples_from_dicts
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.sample import Sample

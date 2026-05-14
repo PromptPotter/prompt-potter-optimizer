@@ -1,5 +1,5 @@
 """Regenerate ``optimizer_pipeline.json::resolved_schemas`` from the Pydantic
-models in ``promptpotter.application.optimization.optimizer_schemas``.
+models in ``promptpotter.application.optimization.dispatch.schemas``.
 
 The Pydantic models are the SoT for what each optimizer LLM call may
 return. The JSON-Schema export in ``optimizer_pipeline.json`` exists for
@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from promptpotter.application.optimization.optimizer_schemas import (
+from promptpotter.application.optimization.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
 )
 
@@ -25,7 +25,7 @@ from promptpotter.application.optimization.optimizer_schemas import (
 def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
     manifest_path = (
-        repo_root / "promptpotter" / "application" / "optimization" / "optimizer_pipeline.json"
+        repo_root / "promptpotter" / "application" / "optimization" / "dispatch" / "pipeline.json"
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 

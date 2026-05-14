@@ -31,7 +31,7 @@ back-compat shims. The word `legacy` is **never** sanctioned.
 - `cycle_paths.py` — `CycleDir`, `RootCycleDir` newtypes (used by stores +
   projections; passed through, never reconstructed from `str`).
 - `pipeline_parsing.py` — pure dict → `PipelineSchema` parser.
-- `validators.py`, `phases.py`, `analysis.py`, `round_diagnostics.py`,
+- `validators.py`, `phases.py`, `escalation_signals.py`, `round_diagnostics.py`,
   `scoring.py`, `connector.py`, `backend.py`, `sample.py`, `l1_layout.py` —
   domain types and pure logic shared across the application layer.
 

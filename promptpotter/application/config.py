@@ -297,7 +297,7 @@ def configure_and_apply_pipeline(
     log: Callable[[str], None] = logger.info,
 ) -> dict:
     """Build pipeline identity, apply filtered schema + overrides onto *session*."""
-    from promptpotter.application.datasets.datasets import (
+    from promptpotter.application.datasets import (
         has_dataset_prompts,
         load_dataset_node_overlay,
         load_node_prompt,

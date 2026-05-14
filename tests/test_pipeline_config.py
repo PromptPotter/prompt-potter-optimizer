@@ -246,7 +246,7 @@ def test_required_optimization_fields_must_be_explicit() -> None:
 # (merged from test_allowed_values.py — same pipeline-config-contract bucket)
 # ---------------------------------------------------------------------------
 
-from promptpotter.application.optimization.l1_validators import (  # noqa: E402
+from promptpotter.application.optimization.validators.l1_strict import (  # noqa: E402
     build_l1_output_schema,
     validate_overrides,
 )
@@ -401,7 +401,7 @@ def test_build_l1_output_schema_emits_enum_for_constrained_params():
 # ---------------------------------------------------------------------------
 
 REPO = Path(__file__).resolve().parent.parent
-OPTIMIZER_PIPELINE = REPO / "promptpotter/application/optimization/optimizer_pipeline.json"
+OPTIMIZER_PIPELINE = REPO / "promptpotter/application/optimization/dispatch/pipeline.json"
 BACKEND_PIPELINES = sorted((REPO / "datasets").glob("*/pipeline.json"))
 
 

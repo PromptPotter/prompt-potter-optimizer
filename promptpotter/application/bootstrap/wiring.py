@@ -20,7 +20,7 @@ from pathlib import Path
 
 from promptpotter import connectors
 from promptpotter.application.bootstrap.session import Session, TenantContext
-from promptpotter.application.datasets.datasets import (
+from promptpotter.application.datasets import (
     DATASET_LOADERS,
     samples_from_dicts,
 )

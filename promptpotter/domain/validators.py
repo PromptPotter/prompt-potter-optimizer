@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from promptpotter.domain.analysis import EscalationSignal
+    from promptpotter.domain.escalation_signals import EscalationSignal
     from promptpotter.domain.scoring import QueryMeasurement
 
 NurseTarget = Literal["l2", "l3"]

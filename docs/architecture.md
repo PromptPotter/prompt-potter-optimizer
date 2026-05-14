@@ -128,7 +128,7 @@ mid-eval, deprecated cache entry from a transient backend hiccup) is
 **innocent** — a technical issue, not the candidate's fault. We log
 it, ignore it, and keep accumulating evidence on the same candidate.
 A candidate is aborted only when its **`DegradationCheck`**
-(`application/optimization/elimination.py:222`) fires — i.e. when its
+(`application/optimization/pobb/elimination.py:222`) fires — i.e. when its
 fraction of failed measurements crosses the per-campaign
 `degradation_threshold` (`campaign.json::degradation_threshold`,
 e.g. `0.4` on gsm8k). Aggregated failures surface at round end and
@@ -293,7 +293,7 @@ PR.
 A cleanup PR that touches anything below needs an explicit case in
 the PR description.
 
-- **PoBB elimination** (`application/optimization/elimination.py`) —
+- **PoBB elimination** (`application/optimization/pobb/elimination.py`) —
   the actual abort-and-continue mechanism. §0 errors-heal-tolerantly
   depends on this.
 - **DegradationCheck** mid-eval halt — the per-candidate

@@ -20,15 +20,14 @@ intelligence; intelligence does not depend on either.
 | `intelligence/` | Materialized views over the MeasurementArchive: `AxisIndex` (axis-keyed digest), `SampleIndex` (per-sample state), `ConfigIndex`, Rasch exploration, hard-sample sorter + archive. Shared by scan and loop. |
 | `scoring/` | The `score_search_point()` gateway plus formula compilation, evaluators, sample measurement, composite-fitness metrics. Per CLAUDE.md: gateway is canonical; everything else is implementation detail. |
 | `sweep/` | Sweep-mode siblings — cheap A/B for L1 candidates ahead of full promotion. |
-| `datasets/` | Dataset loaders + sample materialization. |
 
 ## Top-level modules
 
 - `runner.py` — master orchestrator; the optimize-loop entry point.
 - `config.py` — `CampaignConfig` model + LLM factory.
 - `origin.py` — campaign origin scoring + dataset loading.
-- `resume.py` — campaign config diffing + resume logic.
 - `review.py` — per-cycle markdown renderer (post-cycle log).
+- `datasets.py` — dataset loaders + sample materialization.
 
 ## Conventions
 

@@ -1,7 +1,10 @@
-"""Analysis and escalation data models.
+"""Escalation signals + self-healing failure types.
 
-Pure data containers for escalation signals + validation/runtime failures.
-No I/O, no service dependencies.
+Pure data containers for the four channels that drive L2/L3 escalation:
+``EscalationTarget`` (where a check directs the cycle), ``EscalationSignal``
+(per-round mid-eval emission), ``ValidationFailure`` (L1-output parse
+failure → L2 heal), ``RuntimeFailure`` (post-eval degradation evidence →
+L2 heal). No I/O, no service dependencies.
 """
 
 from __future__ import annotations

@@ -24,10 +24,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.application.optimization.l1_behavior_checks import PARAM_FORBIDDEN_KEYS
-from promptpotter.application.optimization.optimizer_schemas import L1GenerateOutput
+from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput
+from promptpotter.application.optimization.validators.l1_behavior import PARAM_FORBIDDEN_KEYS
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
-from promptpotter.domain.analysis import ValidationFailure
+from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CandidateProposal

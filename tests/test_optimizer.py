@@ -37,6 +37,10 @@ import types
 import numpy as np
 import pytest
 
+from promptpotter.application.optimization.dispatch.schemas import (
+    L2ContextOutput,
+    L3PlanOutput,
+)
 from promptpotter.application.optimization.escalation import apply_fork_payload_to_osp
 from promptpotter.application.optimization.escalation.firing import (
     _apply_l2,
@@ -44,17 +48,13 @@ from promptpotter.application.optimization.escalation.firing import (
     _parse_l2,
     _parse_l3,
 )
-from promptpotter.application.optimization.l1_validators import detect_invariants
-from promptpotter.application.optimization.l2_validators import (
+from promptpotter.application.optimization.validators.l1_strict import detect_invariants
+from promptpotter.application.optimization.validators.l2_l3 import (
     L2_TASK_CONTEXT_VERBATIM_REPEAT,
     L3_PLAN_LENGTH_FLOOR,
     L3_PLAN_VERBATIM_REPEAT,
     run_l2_output_validators,
     run_l3_output_validators,
-)
-from promptpotter.application.optimization.optimizer_schemas import (
-    L2ContextOutput,
-    L3PlanOutput,
 )
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -63,11 +63,11 @@ from promptpotter.domain.run_records import ForkPayload, ForkTrigger, ResumeChec
 
 scipy = pytest.importorskip("scipy")  # transitively required by other math helpers
 
-from promptpotter.application.optimization.elimination import (  # noqa: E402
+from promptpotter.application.optimization.pobb.elimination import (  # noqa: E402
     PoBBCheck,
     PoBBConfig,
 )
-from promptpotter.domain.analysis import EscalationTarget  # noqa: E402
+from promptpotter.domain.escalation_signals import EscalationTarget  # noqa: E402
 from promptpotter.shared.statistics import posterior_best_probabilities  # noqa: E402
 
 # ===========================================================================
@@ -125,7 +125,7 @@ def test_parse_population_attaches_forbidden_axis_failure_to_osp():
     at ``tests/test_pipeline_config.py::test_validate_overrides_rejects_model_as_forbidden_axis_by_default``;
     dispatch-hub render path at ``tests/test_invariants.py`` ``validation_failures`` rendering.)
     """
-    from promptpotter.application.optimization.l1_population import parse_population
+    from promptpotter.application.optimization.helpers.l1_population import parse_population
     from promptpotter.domain.pipeline_schema import (
         NodePromptMeta,
         PipelineNode,
@@ -431,7 +431,7 @@ def test_apply_l2_normal_action_records_commitment_without_probe_state():
 def test_l3_to_l2_note_is_in_signals_but_not_l1_possible():
     """Hard structural guard: the note channel is L2-only. Adding it to
     ``L1_POSSIBLE`` would let L2 leak L3's L2-private guidance to L1."""
-    from promptpotter.application.optimization.dispatch_hub import INJECTIONS
+    from promptpotter.application.optimization.dispatch.hub import INJECTIONS
     from promptpotter.domain.l1_layout import L1_POSSIBLE
 
     assert "l3_to_l2_note" in INJECTIONS
@@ -492,7 +492,7 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
 
 def test_optimizer_prompts_load_with_no_unresolvable_slots():
     """Every shipping optimizer prompt's ``{{slot}}`` references resolve."""
-    from promptpotter.application.optimization.llm_call import (
+    from promptpotter.application.optimization.dispatch.llm_call import (
         list_optimizer_prompts,
         load_optimizer_prompt,
     )
@@ -505,7 +505,7 @@ def test_optimizer_prompts_load_with_no_unresolvable_slots():
 
 def test_validate_template_raises_on_unknown_slot():
     """Typo guard: a slot not in INJECTIONS and not in _TEMPLATE_EXTRAS raises."""
-    from promptpotter.application.optimization.dispatch_hub import validate_template
+    from promptpotter.application.optimization.dispatch.hub import validate_template
     from promptpotter.domain.opt_search_point import PromptTemplate
 
     bad = PromptTemplate(task_intent="see {{not_a_signal}}")
@@ -523,7 +523,7 @@ def test_validate_template_raises_on_unknown_slot():
 
 
 def _empty_cycle_slice():
-    from promptpotter.application.optimization.dispatch_hub import CycleSlice
+    from promptpotter.application.optimization.dispatch.hub import CycleSlice
 
     return CycleSlice(
         round_num=0,
@@ -540,7 +540,7 @@ def _empty_cycle_slice():
 
 def test_axis_memory_renders_when_axes_digest_yields_content():
     """``axis_memory`` wraps :meth:`AxisIndex.digest` into a labeled block."""
-    from promptpotter.application.optimization.dispatch_hub import (
+    from promptpotter.application.optimization.dispatch.hub import (
         DispatchHub,
         InjectionBundle,
         RoundDigest,
@@ -567,7 +567,7 @@ def test_axis_memory_renders_when_axes_digest_yields_content():
 
 def test_axis_memory_empty_when_axes_or_digest_absent():
     """Pre-first-round and empty-digest paths render to empty string."""
-    from promptpotter.application.optimization.dispatch_hub import (
+    from promptpotter.application.optimization.dispatch.hub import (
         DispatchHub,
         InjectionBundle,
         RoundDigest,
@@ -764,7 +764,7 @@ def test_l2_every_round_rule_fires_only_when_opted_in():
 
 import pydantic  # noqa: E402
 
-from promptpotter.application.optimization.round_diagnostics import (  # noqa: E402
+from promptpotter.application.optimization.helpers.round_analysis import (  # noqa: E402
     compute_round_diagnostics,
 )
 from promptpotter.domain.opt_search_point import FewShotExample  # noqa: E402

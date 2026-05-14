@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.analysis import RuntimeFailure, ValidationFailure
+from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout
 from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome

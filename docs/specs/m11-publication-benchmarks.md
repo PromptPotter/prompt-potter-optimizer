@@ -216,8 +216,8 @@ Wave 4: Track 3 (benchmark results display) + Track 5 (PromptPotter-as-backend c
 
 | Area | Files (post-M9 hexagonal layout) |
 |------|-------|
-| Dataset loaders | `application/datasets/datasets.py` |
-| Scoring | `application/scoring/formula.py` |
+| Dataset loaders | `application/datasets.py` |
+| Scoring | `application/scoring/formula/` |
 | Export pipeline | _Deleted (2026-04-27); restore from git history when supplement work resumes._ |
 | FastAPI API | `presentation/api.py` |
 | Benchmark methodology | `docs/research/benchmarks.md` |

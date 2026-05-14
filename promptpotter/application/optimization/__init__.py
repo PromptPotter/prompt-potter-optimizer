@@ -14,10 +14,10 @@ it directly rather than expecting re-exports here:
 * ``promptpotter.application.optimization.resume_and_fork`` — resume +
   fork-on-divergence machinery.
 
-Internals (``dispatch_hub``, ``l1``, ``l1_critique``, ``l1_validators``,
-``transitions``, ``elimination``, ``formatting``, ``llm_call``,
-``round_diagnostics``, ``decomposition``, ``elevation``,
-``observers``) are NOT re-exported. Reach into the submodule directly:
+Internals (``dispatch_hub``, ``l1/``, ``l1_critique``, ``validators/``,
+``transitions``, ``elimination``, ``llm_call``, ``round_analysis``,
+``decomposition``, ``elevation``, ``observers``) are NOT re-exported.
+Reach into the submodule directly:
 ``from promptpotter.application.optimization.l1 import execute_round``.
 """
 

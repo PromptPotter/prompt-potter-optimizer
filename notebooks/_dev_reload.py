@@ -14,7 +14,7 @@ _RELOAD_MODULES = (
     "promptpotter.application.bootstrap",
     "promptpotter.infrastructure.tracing",
     "promptpotter.application.optimization.cycle",
-    "promptpotter.application.optimization.elimination",
+    "promptpotter.application.optimization.pobb.elimination",
     "promptpotter.application.optimization.pipeline",
     "promptpotter.application.optimization.l1",
     "promptpotter.application.scoring.formula",

@@ -29,7 +29,7 @@ multi-tenant data leakage, webapp endpoint hardening.
 
 | # | Vulnerability | Severity | Status | Pointers |
 |---|---|---|---|---|
-| 1 | Restricted-eval bypass in `compile_scorer` (RCE) | P0 (M12-grade) | LANDED | `application/scoring/formula.py:_validate_ast` |
+| 1 | Restricted-eval bypass in `compile_scorer` (RCE) | P0 (M12-grade) | LANDED | `application/scoring/formula/compiler.py:validate_ast` |
 | 2 | Missing `validate_path_component` on `root_dir_for` / `sweep_batch_dir_for` | P1 | LANDED | `infrastructure/store/paths.py:63,91` |
 | 3 | No log redaction for API-key values | P2 (defense-in-depth) | LANDED | `config/log_redaction.py` |
 | 4 | Prompt injection via dataset content (`diagnostics`, `validation_failures`, `runtime_failures`) | P1 (starter) | LANDED | `application/optimization/dispatch_hub.py:_fence_untrusted` |

@@ -13,8 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.optimization.llm_call import run_optimizer_node
-from promptpotter.application.optimization.optimizer_schemas import RestructureOutput
+from promptpotter.application.optimization.dispatch.llm_call import run_optimizer_node
+from promptpotter.application.optimization.dispatch.schemas import RestructureOutput
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm import LLMClientBase
 from promptpotter.infrastructure.store.base import (

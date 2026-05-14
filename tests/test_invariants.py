@@ -407,7 +407,7 @@ def test_run_callbacks_requires_ledger() -> None:
     always bound before any event fired). Forbid the regression: dataclass
     construction without a ledger raises ``TypeError`` at boot.
     """
-    from promptpotter.application.optimization.observers import RunCallbacks
+    from promptpotter.application.optimization.helpers.observers import RunCallbacks
 
     with pytest.raises(TypeError):
         RunCallbacks()  # type: ignore[call-arg]
@@ -660,9 +660,9 @@ def _scan_violations() -> set[tuple[str, str]]:
 
 _CYCLE_FORBIDDEN_PROMPT_SURFACE = frozenset(
     {
-        "promptpotter.application.optimization.dispatch_hub",
-        "promptpotter.application.optimization.l1_critique",
-        "promptpotter.application.optimization.transitions",
+        "promptpotter.application.optimization.dispatch.hub",
+        "promptpotter.application.optimization.helpers.l1_critique",
+        "promptpotter.application.optimization.helpers.transitions",
         "promptpotter.application.optimization.escalation",
     }
 )
@@ -893,7 +893,7 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
 
 def test_runcallbacks_emits_records_to_ledger(tmp_path: Path) -> None:
     """RunCallbacks is the single ingress: every callback appends one typed record."""
-    from promptpotter.application.optimization.observers import RunCallbacks
+    from promptpotter.application.optimization.helpers.observers import RunCallbacks
     from promptpotter.domain.phases import PhaseEvent
 
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc1"))
@@ -1120,13 +1120,13 @@ def test_path_builders_reject_traversal(tmp_path: Path) -> None:
 
 def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     """Dataset-content signals fenced; operator/optimizer state stays bare."""
-    from promptpotter.application.optimization.dispatch_hub import (
+    from promptpotter.application.optimization.dispatch.hub import (
         CycleSlice,
         DispatchHub,
         InjectionBundle,
         RoundDigest,
     )
-    from promptpotter.domain.analysis import RuntimeFailure, ValidationFailure
+    from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
     from promptpotter.domain.validators import ValidatorOutcome

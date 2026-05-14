@@ -21,8 +21,8 @@ import copy
 import logging
 from typing import Any
 
-from promptpotter.application.optimization.l1_validators import L1_SCHEMA_COMPLIANCE
-from promptpotter.domain.analysis import RuntimeFailure, ValidationFailure
+from promptpotter.application.optimization.validators.l1_strict import L1_SCHEMA_COMPLIANCE
+from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import (

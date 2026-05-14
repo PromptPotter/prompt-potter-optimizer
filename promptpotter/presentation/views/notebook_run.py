@@ -11,7 +11,10 @@ from promptpotter.application.bootstrap import (
     init_services as _init_services,
 )
 from promptpotter.application.bootstrap.session import Session
-from promptpotter.application.optimization.observers import RunObservers, build_run_observers
+from promptpotter.application.optimization.helpers.observers import (
+    RunObservers,
+    build_run_observers,
+)
 from promptpotter.application.origin import (
     CampaignOrigin,
     extract_campaign_origin,

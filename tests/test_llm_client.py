@@ -128,7 +128,7 @@ class _Clock:
 @pytest.fixture
 def clock(monkeypatch):
     c = _Clock()
-    monkeypatch.setattr("promptpotter.infrastructure.llm.time.monotonic", c)
+    monkeypatch.setattr("promptpotter.infrastructure.llm.rate_limit.time.monotonic", c)
     return c
 
 
@@ -137,7 +137,7 @@ def fast_sleep(monkeypatch, clock):
     async def _sleep(seconds):
         clock.advance(seconds)
 
-    monkeypatch.setattr("promptpotter.infrastructure.llm.asyncio.sleep", _sleep)
+    monkeypatch.setattr("promptpotter.infrastructure.llm.rate_limit.asyncio.sleep", _sleep)
 
 
 @pytest.mark.asyncio

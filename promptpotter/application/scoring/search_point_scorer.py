@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.datasets.datasets import build_dataset_run_data
+from promptpotter.application.datasets import build_dataset_run_data
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.sample_measurement import (
@@ -19,7 +19,7 @@ from promptpotter.application.scoring.sample_measurement import (
 from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
-from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
+from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.scoring import QueryMeasurement, Scorer
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.store import archive_views
@@ -157,7 +157,7 @@ def _split_off_deprecated_samples(
     cached_sample_results: dict[str, QueryMeasurement],
 ) -> tuple[dict[str, QueryMeasurement], dict[str, QueryMeasurement]]:
     """Load-side cache split: (kept, deprecated rows that need fresh re-measure)."""
-    from promptpotter.application.optimization.elimination import is_deprecated
+    from promptpotter.application.optimization.pobb.elimination import is_deprecated
 
     deprecated = {q: r for q, r in cached_sample_results.items() if is_deprecated(r)}
     kept = {q: r for q, r in cached_sample_results.items() if q not in deprecated}
@@ -423,7 +423,7 @@ async def score_search_point(
 
     cached_sample_results: dict[str, QueryMeasurement] = {}
     if store and backend_id:
-        from promptpotter.application.optimization.elimination import is_deprecated
+        from promptpotter.application.optimization.pobb.elimination import is_deprecated
 
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
         cached_sample_results = cast(

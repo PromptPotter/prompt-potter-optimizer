@@ -28,7 +28,7 @@ from promptpotter.infrastructure.store import archive_views
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.observers import RunCallbacks
+    from promptpotter.application.optimization.helpers.observers import RunCallbacks
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
@@ -342,9 +342,9 @@ def _finalize_loop_state(
 ) -> None:
     """Init AxisIndex, write final session/cycle state, emit ``INIT.exit``."""
     from promptpotter.application.bootstrap.session import _open_cycle_ledger
-    from promptpotter.application.datasets.datasets import sample_dataset
+    from promptpotter.application.datasets import sample_dataset
     from promptpotter.application.intelligence.indexes import AxisIndex
-    from promptpotter.application.optimization.elimination import build_degradation_checks
+    from promptpotter.application.optimization.pobb.elimination import build_degradation_checks
     from promptpotter.domain.phases import CampaignPhase, emit_phase
 
     cycle.axes = AxisIndex.ensure_for(
