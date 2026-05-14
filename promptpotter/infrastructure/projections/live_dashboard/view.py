@@ -1,4 +1,4 @@
-"""LiveDashboardView — operator-facing ``dashboard.json`` writer.
+"""``LiveDashboardView`` — operator-facing ``dashboard.json`` writer.
 
 Family-root-bound: one ``dashboard.json`` per cycle family, shared across
 all forks (the active fork is identified by ``dashboard.json::cycle_id``).
@@ -36,6 +36,8 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.infrastructure.projections.base import DerivedView
+from promptpotter.infrastructure.projections.live_dashboard.pobb import build_pobb_block
+from promptpotter.infrastructure.projections.live_dashboard.score import build_l1_score_block
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
     accumulate_backend_spend,
@@ -51,17 +53,12 @@ from promptpotter.infrastructure.store import (
     session_dir_for,
     walk_cycle_lineage,
 )
-from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
 
 if TYPE_CHECKING:
-    from promptpotter.domain.phases import PhaseEvent
-    from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
 
 logger = logging.getLogger(__name__)
-
-__all__ = ["LiveDashboardView"]
 
 
 # Phase enter → ``state`` value. The L1_SCORE phase has no entry in this
@@ -74,19 +71,6 @@ _PHASE_TO_STATE: dict[str, str] = {
     CampaignPhase.REFINE_STRATEGY: "l2_refining",
     CampaignPhase.MODIFY_PLAN: "l3_replanning",
     CampaignPhase.ESCALATION: "escalation",
-}
-
-
-# Per-sample terminator badge for the compact ``fmt_sample_line`` rendering;
-# unmapped nodes render as the first two characters of the node name.
-_NODE_BADGES: dict[str, str] = {
-    "llm_only": "ai",
-    "llm_ranking": "ai",
-    "entity_profiling": "ai",
-    "cache_lookup": "cache",
-    "fuzzy_matching": "fz",
-    "token_matching": "tk",
-    "web_search": "ws",
 }
 
 
@@ -106,38 +90,6 @@ def _max_round_on_disk(rounds_dir: Path) -> int:
         if suffix.isdigit():
             highest = max(highest, int(suffix))
     return highest
-
-
-def _trim(text: str, n: int) -> str:
-    t = str(text or "").replace("\n", " ").strip()
-    return t if len(t) <= n else t[: n - 1] + "…"
-
-
-def fmt_sample_line(s: dict[str, Any]) -> str:
-    """One compact line per query for ``dashboard.json::current_round.nodes
-    .l1_score.output.candidates[].samples`` — keeps the live dashboard
-    scannable instead of bloating it with full ~2 kB query strings."""
-    qi = int(s.get("qi", 0))
-    hit = bool(s.get("hit"))
-    cached = bool(s.get("cached"))
-    time_s = float(s.get("time_s") or 0.0)
-    badge = _NODE_BADGES.get(s.get("terminated_at") or "", (s.get("terminated_at") or "?")[:2])
-    cache_icon = "📖" if cached else " "
-    mark = "HIT " if hit else "MISS"
-    query = _trim(s.get("query") or "", 42)
-    pred = _trim(s.get("prediction") or "", 28)
-    gt = _trim(s.get("ground_truth") or "", 20)
-    in_tok = s.get("input_tokens")
-    out_tok = s.get("output_tokens")
-    tok_seg = ""
-    if in_tok is not None or out_tok is not None:
-        tok_seg = (
-            f" io={in_tok if in_tok is not None else '-'}/{out_tok if out_tok is not None else '-'}"
-        )
-    return (
-        f"  {time_s:4.1f}s #{qi:03d} {mark} [{badge}]{cache_icon}"
-        f"{tok_seg} -> '{pred}' gt:'{gt}' q:'{query}'"
-    )
 
 
 class LiveDashboardView(DerivedView):
@@ -382,7 +334,11 @@ class LiveDashboardView(DerivedView):
             if round_result is not None:
                 self._absorb_round_complete(round_result.accuracy, l1_stall)
                 if self._recorder is not None:
-                    self._recorder.set_l1_score(self._build_l1_score_block(round_result))
+                    self._recorder.set_l1_score(
+                        build_l1_score_block(
+                            self.state, self._round, self.short_formula_template, round_result
+                        )
+                    )
                 # current_round.round = the just-completed round (= the
                 # round_NNNN.json file the webapp should fetch). Webapp reads
                 # this value directly with no arithmetic.
@@ -399,7 +355,9 @@ class LiveDashboardView(DerivedView):
             and self._recorder is not None
             and self._round.get("candidates")
         ):
-            self._recorder.set_l1_score(self._build_l1_score_block())
+            self._recorder.set_l1_score(
+                build_l1_score_block(self.state, self._round, self.short_formula_template)
+            )
 
         payload = record.payload or {}
         view = payload.get("view")
@@ -595,7 +553,7 @@ class LiveDashboardView(DerivedView):
         before candidate_started seeds the slot, so all mutators funnel here.
 
         ``changes_description`` holds the human-readable mutation text; the
-        canonical display ``label`` is composed in ``_build_l1_score_block``
+        canonical display ``label`` is composed in ``build_l1_score_block``
         from the slot's round + idx via :func:`candidate_label`.
         """
         return self._round.setdefault("candidates", {}).setdefault(
@@ -684,100 +642,6 @@ class LiveDashboardView(DerivedView):
         # Round-wide leaderboard (top-5 by P(best)).
         self._round["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(p_best)]
 
-    def _build_pobb_block(self) -> dict[str, Any]:
-        """Round-wide PoBB telemetry: leader probability, posterior-width, top-5.
-
-        ``posterior_width = 1 - max(p_best)`` — distance the leader has
-        from certainty. Width near 0 = leader confirmed; width near 1 =
-        flat posterior, more samples needed before elimination is safe.
-        Operators read this to judge whether ``elimination_n_min`` is set
-        appropriately for the dataset's per-sample variance.
-        """
-        p_best = self._core.current_p_best
-        if not p_best:
-            return {
-                "current_id": "",
-                "n_samples": 0,
-                "leader_prob": 0.0,
-                "posterior_width": 1.0,
-                "top": [],
-            }
-        leader_prob = max(p_best.values())
-        return {
-            "current_id": self._core.current_p_best_id,
-            "n_samples": self._core.current_p_best_n,
-            "leader_prob": float(leader_prob),
-            "posterior_width": float(1.0 - leader_prob),
-            "top": list(self._round.get("p_best_top") or []),
-        }
-
-    def _build_l1_score_block(
-        self,
-        round_result: RoundResult | None = None,
-    ) -> dict[str, Any]:
-        """Project current candidates to dashboard's l1_score shape.
-
-        ``label`` is canonical ``CN.M`` (``C0`` for origin), composed from
-        the slot's round + idx via :func:`candidate_label`. Display sites
-        read this field verbatim — no ``idx + 1`` arithmetic anywhere.
-
-        ``live`` (round_result is None) renders samples as compact
-        one-liners (keeps dashboard.json from carrying 2 kB query strings
-        per sample); ``not live`` emits the full sample dicts (round-
-        complete flush). Each candidate's composite_fitness number is
-        paired with the active formula and the value-inlined short
-        formula derived from ``self.short_formula_template``.
-        """
-        live = round_result is None
-        active_formula = self.state.get("composite_fitness_formula")
-        candidates = self._round.get("candidates") or {}
-        round_num = int(self._round.get("round", 0))
-        input_candidates: list[dict[str, Any]] = []
-        output_candidates: list[dict[str, Any]] = []
-        for idx in sorted(candidates.keys()):
-            cand = candidates[idx]
-            scores = cand.get("scores") or {}
-            label = candidate_label(round_num, idx)
-            input_candidates.append(
-                {
-                    "idx": idx,
-                    "label": label,
-                    "changes_description": (
-                        cand.get("changes_description") or scores.get("changes_description") or ""
-                    ),
-                    "pp_override": cand.get("pp_override"),
-                }
-            )
-            cand_evaluators = dict(scores.get("evaluators") or {})
-            stats: dict[str, Any] = {
-                "accuracy": scores.get("accuracy"),
-                "composite_fitness": scores.get("composite_fitness"),
-                "composite_fitness_formula": active_formula,
-                # Per-candidate value-inlined short formula. The legend
-                # for short codes (``acc``, ``H``, ``lat``, ``R``,
-                # ``pc``) lives in ``docs/operations/improvement-tracking.md``.
-                "composite_fitness_formula_short": inline_short_formula_values(
-                    self.short_formula_template, cand_evaluators
-                ),
-                "hits": scores.get("hits"),
-                "total": scores.get("total"),
-                "invalid": scores.get("invalid", False),
-                "validation_failures": scores.get("validation_failures") or [],
-            }
-            samples = cand.get("samples") or []
-            output_candidates.append(
-                {
-                    "idx": idx,
-                    "label": label,
-                    "stats": stats,
-                    "samples": [fmt_sample_line(s) for s in samples] if live else list(samples),
-                }
-            )
-        return {
-            "input": {"candidates": input_candidates},
-            "output": {"candidates": output_candidates},
-        }
-
     # -- Internal --------------------------------------------------------------
 
     def _persist(self) -> None:
@@ -789,7 +653,9 @@ class LiveDashboardView(DerivedView):
         if self._recorder is not None:
             nodes.update(self._recorder.snapshot_nodes())
         if self._round.get("candidates"):
-            nodes["l1_score"] = self._build_l1_score_block()
+            nodes["l1_score"] = build_l1_score_block(
+                self.state, self._round, self.short_formula_template
+            )
         ordered = {
             k: nodes.pop(k) for k in ("l1_generate", "l1_critique", "l1_score") if k in nodes
         }
@@ -798,7 +664,7 @@ class LiveDashboardView(DerivedView):
         s["current_round"] = {
             "round": self._round.get("round", 0),
             "nodes": ordered,
-            "pobb": self._build_pobb_block(),
+            "pobb": build_pobb_block(self._core, self._round),
         }
 
         s["wallclock_serialized_at"] = datetime.now(UTC).isoformat()

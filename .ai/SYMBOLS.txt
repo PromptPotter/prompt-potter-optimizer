@@ -34,9 +34,11 @@ build_degradation_checks	promptpotter/application/optimization/pobb/elimination.
 build_hard_samples_artifact	promptpotter/application/intelligence/hard_sample_sorter.py:110
 build_hard_samples_artifact_from_observations	promptpotter/application/intelligence/hard_sample_sorter.py:138
 build_l1_output_schema	promptpotter/application/optimization/validators/l1_strict.py:68
+build_l1_score_block	promptpotter/infrastructure/projections/live_dashboard/score.py:21
 build_observations	promptpotter/application/intelligence/exploration.py:243
 build_origin_cycle_id	promptpotter/application/runner.py:75
 build_parser	promptpotter/presentation/cli/parsers.py:355
+build_pobb_block	promptpotter/infrastructure/projections/live_dashboard/pobb.py:14
 build_rate_limiter	promptpotter/infrastructure/llm/rate_limit.py:284
 build_run_observers	promptpotter/application/run_observers.py:247
 build_score_report	promptpotter/application/optimization/l1/population.py:108
@@ -198,7 +200,7 @@ fmt_pct	promptpotter/presentation/views/display.py:23
 fmt_pp_override	promptpotter/presentation/views/live/candidate.py:32
 fmt_pvalue	promptpotter/presentation/views/display.py:36
 fmt_query_result	promptpotter/presentation/views/live/sample.py:37
-fmt_sample_line	promptpotter/infrastructure/projections/live_dashboard.py:116
+fmt_sample_line	promptpotter/infrastructure/projections/live_dashboard/sample.py:30
 ForkInfo	promptpotter/application/run_observers.py:209
 ForkPayload	promptpotter/domain/run_records.py:243
 ForkRef	promptpotter/presentation/api/routers/campaigns.py:170
@@ -290,7 +292,7 @@ list_dataset_prompts	promptpotter/application/datasets.py:484
 list_experiments	promptpotter/presentation/api/routers/backends.py:142
 list_optimizer_prompts	promptpotter/application/optimization/dispatch/llm_call.py:495
 list_runs	promptpotter/infrastructure/store/archive_views.py:85
-LiveDashboardView	promptpotter/infrastructure/projections/live_dashboard.py:143
+LiveDashboardView	promptpotter/infrastructure/projections/live_dashboard/view.py:95
 LiveDisplay	promptpotter/presentation/views/live/display.py:58
 LiveStateCore	promptpotter/infrastructure/projections/live_state.py:138
 llm_call	promptpotter/application/optimization/dispatch/llm_call.py:139
@@ -706,6 +708,7 @@ TokenUsageRecord	promptpotter/domain/run_records.py:118
 top_n_p_best	promptpotter/infrastructure/projections/live_state.py:197
 TrackingState	promptpotter/application/optimization/cycle.py:90
 TransitionResult	promptpotter/application/optimization/transitions.py:44
+trim	promptpotter/infrastructure/projections/live_dashboard/sample.py:25
 try_groq_json_validate_repair	promptpotter/infrastructure/llm/json_parse.py:122
 try_parse_json	promptpotter/infrastructure/llm/json_parse.py:24
 unhandled_exception_handler	promptpotter/main.py:60
