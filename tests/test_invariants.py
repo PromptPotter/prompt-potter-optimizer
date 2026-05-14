@@ -1267,22 +1267,22 @@ def test_run_round_loop_continue_paths_route_through_close_round() -> None:
     "display is a ledger subscriber" invariant for that round.
     ``_post_round`` is sanctioned because it calls ``_close_round`` itself.
     """
-    runner_src = (ROOT / "application" / "runner.py").read_text(encoding="utf-8")
+    runner_src = (ROOT / "application" / "runner" / "loop.py").read_text(encoding="utf-8")
     tree = ast.parse(runner_src)
 
     fn = next(
         n
         for n in ast.walk(tree)
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_run_round_loop"
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "run_round_loop"
     )
 
     # The round-loop is the only ``while`` directly inside the try/while
     # nesting at function-body scope.
     while_nodes = [n for n in ast.walk(fn) if isinstance(n, ast.While)]
-    assert len(while_nodes) == 1, "expected one while-loop in _run_round_loop"
+    assert len(while_nodes) == 1, "expected one while-loop in run_round_loop"
     round_loop = while_nodes[0]
 
-    sanctioned = {"_close_round", "_post_round"}
+    sanctioned = {"close_round", "post_round"}
 
     def _calls_sanctioned(stmt: ast.AST) -> bool:
         for node in ast.walk(stmt):
@@ -1302,10 +1302,10 @@ def test_run_round_loop_continue_paths_route_through_close_round() -> None:
             continue
         if not _calls_sanctioned(stmt):
             offenders.append(
-                f"line {stmt.lineno}: ``continue`` without _close_round/_post_round call"
+                f"line {stmt.lineno}: ``continue`` without close_round/post_round call"
             )
 
     assert not offenders, (
-        "round-loop branches must route through _close_round before continuing:\n  "
+        "round-loop branches must route through close_round before continuing:\n  "
         + "\n  ".join(offenders)
     )

@@ -36,7 +36,7 @@ build_hard_samples_artifact_from_observations	promptpotter/application/intellige
 build_l1_output_schema	promptpotter/application/optimization/validators/l1_strict.py:68
 build_l1_score_block	promptpotter/infrastructure/projections/live_dashboard/score.py:21
 build_observations	promptpotter/application/intelligence/exploration.py:243
-build_origin_cycle_id	promptpotter/application/runner.py:75
+build_origin_cycle_id	promptpotter/application/runner/identity.py:29
 build_parser	promptpotter/presentation/cli/parsers.py:355
 build_pobb_block	promptpotter/infrastructure/projections/live_dashboard/pobb.py:14
 build_rate_limiter	promptpotter/infrastructure/llm/rate_limit.py:284
@@ -70,6 +70,7 @@ classify_result	promptpotter/application/optimization/pobb/elimination.py:118
 classify_run_origin	promptpotter/infrastructure/tracing/replay.py:45
 clear_active_pointer	promptpotter/infrastructure/store/__init__.py:57
 clock	tests/test_llm_client.py:129
+close_round	promptpotter/application/runner/round.py:119
 cmd_compare	promptpotter/presentation/cli/commands/compare.py:18
 cmd_optimize	promptpotter/presentation/cli/commands/optimize.py:300
 cmd_sweep	promptpotter/presentation/cli/commands/sweep.py:634
@@ -99,13 +100,14 @@ configure_and_apply_pipeline	promptpotter/application/config.py:293
 Connector	promptpotter/connectors/protocol.py:29
 content_hash	promptpotter/shared/hashing.py:26
 count_degraded_samples	promptpotter/application/scoring/metrics.py:84
+count_positive_yield_axes	promptpotter/application/runner/round.py:104
 create_fork	promptpotter/presentation/api/routers/active.py:116
 create_llm_client	promptpotter/application/config.py:382
 CreateForkRequest	promptpotter/presentation/api/routers/active.py:99
 CreateForkResponse	promptpotter/presentation/api/routers/active.py:106
 current_l1_meta_prompt_hash	promptpotter/application/sweep/toolkit.py:163
 Cycle	promptpotter/application/optimization/cycle.py:105
-cycle_config_identity	promptpotter/application/runner.py:64
+cycle_config_identity	promptpotter/application/runner/identity.py:18
 CycleEventLog	promptpotter/infrastructure/ledger.py:41
 CycleListEntry	promptpotter/presentation/api/routers/active.py:53
 CycleRecordEnvelope	promptpotter/presentation/api/routers/campaigns.py:133
@@ -149,6 +151,7 @@ EntityStore	promptpotter/infrastructure/store/base.py:135
 error_category	promptpotter/shared/errors.py:165
 ErrorCategory	promptpotter/shared/errors.py:18
 escalate_l2	promptpotter/application/optimization/escalation/firing.py:464
+escalate_or_stop	promptpotter/application/runner/round.py:27
 EscalationEnterView	promptpotter/presentation/views/view_models.py:181
 EscalationEvent	promptpotter/application/optimization/escalation/state.py:62
 EscalationExitView	promptpotter/presentation/views/view_models.py:189
@@ -370,6 +373,7 @@ parse_resolved_schema	promptpotter/domain/pipeline_parsing.py:30
 parse_response_content	promptpotter/infrastructure/llm/json_parse.py:72
 parse_retry_after	promptpotter/infrastructure/llm/rate_limit.py:43
 PayloadOutcome	promptpotter/domain/results.py:261
+persist_round	promptpotter/application/runner/round.py:48
 PhaseEvent	promptpotter/domain/phases.py:58
 PhaseRecord	promptpotter/domain/run_records.py:82
 pick_round_winner	promptpotter/presentation/views/view_ingress.py:416
@@ -386,6 +390,7 @@ PoBBConfig	promptpotter/application/optimization/pobb/elimination.py:305
 PoBBSnapshot	promptpotter/application/optimization/pobb/elimination.py:296
 PoBBStreamView	promptpotter/infrastructure/projections/pobb_stream.py:32
 populate_session_scoring	promptpotter/application/bootstrap/scoring_context.py:122
+post_round	promptpotter/application/runner/round.py:151
 posterior_best_probabilities	promptpotter/shared/statistics.py:105
 PreflightWarning	promptpotter/application/config.py:261
 prepare_datasets	promptpotter/application/origin.py:287
@@ -475,11 +480,13 @@ run_l1_critique	promptpotter/application/optimization/l1/critique.py:29
 run_l2_output_validators	promptpotter/application/optimization/validators/l2_l3.py:148
 run_l3_output_validators	promptpotter/application/optimization/validators/l2_l3.py:156
 run_layer_transition	promptpotter/application/optimization/transitions.py:72
-run_optimization	promptpotter/application/runner.py:466
+run_optimization	promptpotter/application/runner/entry.py:41
 run_optimization_notebook	promptpotter/presentation/views/notebook_run.py:230
 run_optimizer_node	promptpotter/application/optimization/dispatch/llm_call.py:317
 run_preflight_checks	promptpotter/application/config.py:285
+run_round_loop	promptpotter/application/runner/loop.py:49
 run_sweep_batch	promptpotter/application/sweep/sweep_runner.py:107
+run_sweep_generation_only	promptpotter/application/runner/sweep.py:19
 RunCallbacks	promptpotter/application/run_observers.py:49
 RunObservers	promptpotter/application/run_observers.py:185
 runs_since	promptpotter/infrastructure/store/archive_views.py:90
