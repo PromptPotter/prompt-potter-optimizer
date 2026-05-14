@@ -187,6 +187,9 @@ def _l1_generate_enter(d: dict, ctx: dict) -> RoundStartView:
     for field_name, value in (d.get("parent_prompt_fields") or {}).items():
         if value:
             new_flat[field_name] = str(value)
+    for field_name, value in (d.get("parent_task_context") or {}).items():
+        if value:
+            new_flat[f"tc.{field_name}"] = str(value)
     ctx["previous_sp_flat"] = dict(
         (
             ctx.get("original_sp_flat")

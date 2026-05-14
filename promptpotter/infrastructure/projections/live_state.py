@@ -150,10 +150,11 @@ class LiveStateCore:
 def apply_phase(core: LiveStateCore, event: PhaseEvent, view: dict | None = None) -> None:
     """Update *core* from a ``PhaseEvent``.
 
-    Round number tracks ``event.round`` directly. Origin + best anchors
-    pick up the post-origin accuracy on ``INIT:exit`` and the new winner
-    on an improved ``L1_SCORE:exit``, so cross-round arrows and per-candidate
-    deltas always read against the freshest anchor.
+    Round number tracks ``event.round`` directly. Origin is set once on
+    ``INIT:exit`` and never re-anchored — "vs origin" labels are meant
+    to read against the immutable campaign origin, not the running
+    leader. The leader anchor (``best_acc``) advances on an improved
+    ``L1_SCORE:exit``.
     """
     if event.round is not None:
         core.round_num = event.round
@@ -165,8 +166,7 @@ def apply_phase(core: LiveStateCore, event: PhaseEvent, view: dict | None = None
         if new_origin > core.best_acc:
             core.best_acc = new_origin
     elif event.phase == CampaignPhase.L1_SCORE and event.event == "exit" and view.get("improved"):
-        winner = view.get("winner_accuracy", core.origin_acc)
-        core.origin_acc = winner
+        winner = view.get("winner_accuracy", core.best_acc)
         if winner > core.best_acc:
             core.best_acc = winner
 

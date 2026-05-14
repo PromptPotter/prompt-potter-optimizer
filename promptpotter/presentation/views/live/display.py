@@ -114,10 +114,27 @@ class LiveDisplay(DerivedView):
         return self._core.origin_acc
 
     def set_origin(self, fresh: float) -> None:
-        """Post-origin rewire — replace pre-origin placeholder."""
+        """Post-origin rewire — replace pre-origin placeholder.
+
+        Also seeds ``campaign_rounds`` with an origin row at index 0 so
+        the round-summary trend table reads as ``Origin → 1 → 2 → …``
+        instead of treating the first L1 round as round 0 and dropping
+        the baseline.
+        """
         self._core.origin_acc = fresh
         if fresh > self._core.best_acc:
             self._core.best_acc = fresh
+        if not any(rd.get("label") == "origin" for rd in self.campaign_rounds):
+            self.campaign_rounds.insert(
+                0,
+                {
+                    "round": 0,
+                    "label": "origin",
+                    "accuracy": fresh,
+                    "composite_fitness": self._phase_ctx.get("origin_composite_fitness"),
+                },
+            )
+            self.initial_len = max(self.initial_len, 1)
 
     # --- Ledger subscription (via DerivedView) ---------------------
 
@@ -200,6 +217,17 @@ class LiveDisplay(DerivedView):
             self._round_best_acc = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
+        # INIT:exit carries origin_composite_fitness in its view payload.
+        # Patch the origin row's composite once it's available so the
+        # trend table's Composite column reads against the real composite
+        # instead of the accuracy fallback.
+        if event.phase == CampaignPhase.INIT and event.event == "exit" and view is not None:
+            origin_comp = view.get("origin_composite_fitness")
+            if origin_comp is not None:
+                for rd in self.campaign_rounds:
+                    if rd.get("label") == "origin" and rd.get("composite_fitness") is None:
+                        rd["composite_fitness"] = origin_comp
+                        break
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
             self.sample_counter = 0
         if (

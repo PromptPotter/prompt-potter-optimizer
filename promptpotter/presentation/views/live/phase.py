@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 from promptpotter.presentation.views.display import (
     GREEN,
-    RED,
     RESET,
     YELLOW,
     _node_line,
@@ -62,7 +61,12 @@ def render_progress_table(rounds: list[dict], window: int = 8) -> str:
                 trend = f"+{d:.1%}"
             else:
                 trend = f"{d:.1%}"
-        rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
+        if rd.get("round") == "grid":
+            rl = "G"
+        elif rd.get("label") == "origin":
+            rl = "0"
+        else:
+            rl = str(rd.get("round", "?"))
         comp = rd.get("composite_fitness") if rd.get("composite_fitness") is not None else acc
         row = f"  {rl:<5s} {acc:>8.1%} {comp:>9.4f} {rolling:>12.1%}  {trend}"
         lines.append(_node_line(row))
@@ -139,8 +143,13 @@ def render_round_stats(
         if degraded > 0:
             lines.append(_node_line(f"Degradation: {degraded / n_results:.0%}"))
 
+        # Recall@k requires a ranker / candidate_source node to produce
+        # ranked_items; for llm_only-style pipelines there is no rank to
+        # miss, so the previous unconditional "Recall: top-1=0% top-5=0%"
+        # was misleading. Skip the block entirely when the schema has no
+        # ranked-item-emitting node.
         valid = [r for r in results if not is_error_result(r)]
-        if valid:
+        if valid and ranked_item_keys:
 
             def recall_at_k(k: int) -> float:
                 hit_count = 0
@@ -163,19 +172,17 @@ def render_round_stats(
 
 
 def render_patience_status(improved: bool, l1_stall_count: int, l1_patience: int) -> str:
-    """Green tick on improvement; yellow patience counter; red stop on exhaustion."""
+    """Green tick on improvement; yellow patience counter on stall.
+
+    The patience counter is informational — exhausting it does not stop
+    the loop on its own (L2/L3 escalation may extend). The actual stop
+    banner is printed by the runner at cycle teardown with the real
+    stop_reason; printing a speculative "Stopping" line here previously
+    contradicted the next round actually running.
+    """
     if improved:
         return _node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}")
-    lines = [
-        _node_line(f"{YELLOW}⚠ No improvement ({l1_stall_count}/{l1_patience} patience){RESET}")
-    ]
-    if l1_stall_count >= l1_patience:
-        lines.append(
-            _node_line(
-                f"{RED}Stopping: patience exhausted ({l1_patience} consecutive stalls){RESET}"
-            )
-        )
-    return "\n".join(lines)
+    return _node_line(f"{YELLOW}⚠ No improvement ({l1_stall_count}/{l1_patience} patience){RESET}")
 
 
 __all__ = [

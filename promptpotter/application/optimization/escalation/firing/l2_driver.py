@@ -25,6 +25,7 @@ from promptpotter.application.optimization.validators.l2_l3 import run_l2_output
 from promptpotter.domain.l1_layout import L1Layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase
+from promptpotter.shared.strings import truncate
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
     rationale = raw.rationale or "L2 refine_strategy transition"
-    changes: dict[str, Any] = {"changes_description": f"L2: {rationale[:80]}"}
+    changes: dict[str, Any] = {"changes_description": f"L2: {truncate(rationale, 80)}"}
     if raw.l1_overrides:
         changes["l1_overrides"] = {**opt_sp.l1_overrides, **raw.l1_overrides}
 

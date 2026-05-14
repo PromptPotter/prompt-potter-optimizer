@@ -413,13 +413,22 @@ def flatten_sp_summary(pp: dict | None) -> dict[str, str]:
 
 
 def build_candidate_flat(parent: dict[str, str], candidate_meta: dict) -> dict[str, str]:
-    """Merge candidate overrides onto parent; pipeline_params and prompt_fields layer into disjoint keyspaces."""
+    """Merge candidate overrides onto parent across the three L1 slots.
+
+    pipeline_params, prompt_fields, and task_context layer into disjoint
+    keyspaces (``node.param`` / bare ``persona`` etc. / ``tc.<key>``) so
+    a task_context-only mutation surfaces in the diff table instead of
+    rendering as a bare ``[clone]``.
+    """
     flat = parent.copy()
     if pp := candidate_meta.get("pipeline_params_override"):
         flat.update(flatten_sp_summary(pp))
     for field_name, value in (candidate_meta.get("prompt_fields") or {}).items():
         if value:
             flat[field_name] = str(value)
+    for field_name, value in (candidate_meta.get("task_context") or {}).items():
+        if value:
+            flat[f"tc.{field_name}"] = str(value)
     return flat
 
 

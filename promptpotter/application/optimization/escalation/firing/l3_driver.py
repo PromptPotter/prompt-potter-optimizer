@@ -17,6 +17,7 @@ from promptpotter.application.optimization.transitions import TransitionResult
 from promptpotter.application.optimization.validators.l2_l3 import run_l3_output_validators
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase
+from promptpotter.shared.strings import truncate
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -36,7 +37,7 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> Transit
         )
     return TransitionResult(
         opt_search_point=opt_sp.mutate(
-            plan=new_plan, changes_description=f"L3: {rationale[:80]}", source="l3_plan"
+            plan=new_plan, changes_description=f"L3: {truncate(rationale, 80)}", source="l3_plan"
         ),
         l3_note=raw.note,
         l3_guard_breaches=failures,

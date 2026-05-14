@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING
@@ -531,6 +531,14 @@ async def l1_score(
     best_label = origin.label
     best_scores: dict[str, float] = dict(origin.evaluators)
     winner_idx: int | None = None
+    # ``score_population`` already populated each ``CandidateScore`` with the
+    # ``opt_sp=None`` composite (per-sample scoring path is target-layer; it
+    # doesn't see ``OptSearchPoint``). That makes opt_sp-aware evaluators
+    # (currently ``prompt_compactness``) collapse to their vacuous fallback,
+    # which inflates the composite shown on the SCOREBOARD relative to the
+    # round-summary recompute below. Index by candidate id so we can
+    # back-fill the opt_sp-aware composite + evaluators in one pass.
+    cs_by_id = {cs.candidate_id: i for i, cs in enumerate(candidate_scores)}
     for idx, ind in enumerate(scored):
         s = compute_composite_fitness(
             all_candidate_results[ind.lineage.id],
@@ -539,6 +547,14 @@ async def l1_score(
             round_scorer=session.scoring.round_scorer,
             l1_diversity=yield_stats.l1_yield,
         )
+        cs_idx = cs_by_id.get(ind.lineage.id)
+        if cs_idx is not None:
+            evaluators = {**(s.get("evaluators") or {}), "l1_diversity": yield_stats.l1_yield}
+            candidate_scores[cs_idx] = replace(
+                candidate_scores[cs_idx],
+                composite_fitness=s["composite_fitness"],
+                evaluators=evaluators,
+            )
         if s["accuracy"] > best_acc:
             best_acc = s["accuracy"]
             best_comp = s["composite_fitness"]

@@ -213,7 +213,7 @@ def _render_l2_refine_enter(v: L2RefineEnterView) -> str:
         f"L1 stalled {v.l1_stall_count} rounds  |  acc={v.current_acc:.1%}  best={v.best_acc:.1%}",
         params_line,
         "LLM analyzing failure patterns...",
-        label_right=f"L2 round {v.l2_round}",
+        label_right=f"L2 fire {v.l2_round + 1}",
     )
 
 
@@ -224,9 +224,10 @@ def _render_l2_refine_exit(v: L2RefineExitView) -> str:
     if v.changes_description:
         out.append(f"    {v.changes_description}")
     if v.warned_samples:
+        warning_tag = f" ({v.top_warning})" if v.top_warning else ""
         out.append(
             f"    {YELLOW}⚠ {v.warned_samples} samples with recurring "
-            f"pipeline warnings ({v.top_warning}){RESET}"
+            f"pipeline warnings{warning_tag}{RESET}"
         )
 
     if v.l2_prompt:
@@ -272,7 +273,7 @@ def _render_plan_enter(v: PlanEnterView) -> str:
         f"L2 stalled {v.l2_stall_count} rounds",
         f"Current plan: {plan}",
         "LLM designing new strategy...",
-        label_right=f"L3 round {v.l3_round}",
+        label_right=f"L3 fire {v.l3_round + 1}",
     )
 
 

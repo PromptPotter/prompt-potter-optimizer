@@ -62,6 +62,7 @@ async def generate_or_load_candidates(
         has_l1_critique=bool(cycle.rounds[-1].critique) if cycle.rounds else False,
         pipeline_params=cycle.tracking.current_sp.pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
+        parent_task_context={k: v for k, v in cycle.opt_sp.task_context.to_dict().items() if v},
     )
 
     if session.state.cycle_id:

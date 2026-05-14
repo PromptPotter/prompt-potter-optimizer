@@ -62,6 +62,10 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
             summary["pipeline_params_override"] = cp.pipeline_params_override
         if prompt_fields:
             summary["prompt_fields"] = prompt_fields
+        # task_context is the third L1 mutation slot. Surface it so the
+        # SP-diff table can render task_context-only candidates as a
+        # mutation rather than a bare [clone].
+        summary["task_context"] = cp.osp.task_context.to_dict()
         summaries.append(summary)
     return summaries
 
