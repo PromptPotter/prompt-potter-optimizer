@@ -127,13 +127,13 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 
 **`promptpotter/application/optimization/`** — orchestration
 - `cycle.py` — `Cycle` state container (rounds / population / stall counters)
-- `l1/` — round loop: `generate.py`, `score.py`, `resume.py`, `execute.py`
-- `dispatch/` — info-flow ingress: `hub.py` (INJECTIONS, DispatchHub.fill_*, build_bundle), `llm_call.py`, `schemas.py`, `pipeline.json`
+- `l1/` — round loop: `generate.py`, `score.py`, `resume.py`, `execute.py`, `critique.py`, `population.py`, `stats.py`
+- `dispatch/` — info-flow ingress: `hub.py` (INJECTIONS, DispatchHub.fill_*, build_bundle), `llm_call.py`, `schemas.py` (manifest at `datasets/_optimizer/pipeline.json`)
 - `pobb/` — `elimination.py` (PoBBCheck/Config, DegradationCheck), `elevation.py` (compare-cycle arbitration)
 - `validators/` — `l1_strict.py` (schema), `l1_behavior.py` (soft checks), `l2_l3.py` (L2/L3 output)
 - `escalation/` — `state.py` (FSM), `decide.py` (router), `rules.py`, `firing.py` (L2/L3 strategies)
 - `resume_and_fork/` — `decisions.py` (gating), `resume.py`, `replayers.py`, `fork_siblings.py`
-- `helpers/` — `decomposition.py`, `observers.py` (RunCallbacks), `transitions.py`, `round_analysis.py` (compute_round_diagnostics), `l1_population.py`, `l1_stats.py`, `l1_critique.py`
+- top-level — `task_context.py` (decompose), `transitions.py` (L2/L3 transitions), `round_analysis.py` (compute_round_diagnostics)
 
 **`promptpotter/application/scoring/`** — single-gateway scoring
 - `search_point_scorer.py` — `score_search_point()` gateway
@@ -271,7 +271,7 @@ The word **`legacy`** in code = code smell. The word **`deprecated`** is only sa
 | Where is the scoring gateway? | `application/scoring/search_point_scorer.py::score_search_point` |
 | Where is the composite fitness formula compiled? | `application/scoring/formula/compiler.py::compile_scorer` |
 | Where is the round loop? | `application/optimization/l1/execute.py::execute_round` |
-| Where do L2/L3 transitions dispatch? | `application/optimization/helpers/transitions.py::run_layer_transition` |
+| Where do L2/L3 transitions dispatch? | `application/optimization/transitions.py::run_layer_transition` |
 | Where is `dashboard.json` written? | `infrastructure/projections/live_dashboard.py::LiveDashboardView` |
 | Where are per-round audit JSONs written? | `infrastructure/projections/audit_trail.py::AuditTrailView` |
 | Where is the MeasurementArchive (DB core)? | `infrastructure/store/measurement_archive.py` |
@@ -281,10 +281,10 @@ The word **`legacy`** in code = code smell. The word **`deprecated`** is only sa
 | Where is the dataset overlay merged onto wire payloads? | `application/datasets.py::load_dataset_node_overlay` (`:405`) → `application/config.py::configure_and_apply_pipeline` (`:283`) |
 | Where is `Session` wired? | `application/bootstrap/wiring.py` + `application/bootstrap/session.py::Session` |
 | Where do resume divergence decisions live? | `application/optimization/resume_and_fork/decisions.py` (`RESUME_CHECKPOINT_GATING` at `:53`) |
-| Where is the typed event constructor for ledger writes? | `application/optimization/helpers/observers.py::RunCallbacks` |
+| Where is the typed event constructor for ledger writes? | `application/run_observers.py::RunCallbacks` |
 | Where is the live terminal display? | `presentation/views/live.py::LiveDisplay` (subscribes to ledger via `DerivedView.on_record`) |
 | Where is `PROMPT_STRING_FIELDS`? | `config/settings.py:26` |
-| Where is the L1 critique call? | `application/optimization/helpers/l1_critique.py::run_l1_critique` |
+| Where is the L1 critique call? | `application/optimization/l1/critique.py::run_l1_critique` |
 | Where is L1 generate? | `application/optimization/l1/generate.py::l1_generate` |
 | Where is the read-only HTTP API? | `presentation/api/` (routers: `backends`, `campaigns`, `active`, `datasets`) |
 | Where is the webapp Next.js source? | `webapp-react/` (static export at `webapp/out/`, served under `/ui`) |

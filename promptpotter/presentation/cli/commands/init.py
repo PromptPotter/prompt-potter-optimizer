@@ -43,7 +43,7 @@ async def _maybe_decompose_task(
     is disk-cached, so re-init against the same dataset is free.
     """
     from promptpotter.application.config import create_llm_client
-    from promptpotter.application.optimization.helpers.decomposition import decompose_task_context
+    from promptpotter.application.optimization.task_context import decompose_task_context
 
     if task_file:
         task_description = Path(task_file).read_text(encoding="utf-8")

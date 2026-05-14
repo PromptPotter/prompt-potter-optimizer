@@ -125,7 +125,7 @@ def test_parse_population_attaches_forbidden_axis_failure_to_osp():
     at ``tests/test_pipeline_config.py::test_validate_overrides_rejects_model_as_forbidden_axis_by_default``;
     dispatch-hub render path at ``tests/test_invariants.py`` ``validation_failures`` rendering.)
     """
-    from promptpotter.application.optimization.helpers.l1_population import parse_population
+    from promptpotter.application.optimization.l1.population import parse_population
     from promptpotter.domain.pipeline_schema import (
         NodePromptMeta,
         PipelineNode,
@@ -764,7 +764,7 @@ def test_l2_every_round_rule_fires_only_when_opted_in():
 
 import pydantic  # noqa: E402
 
-from promptpotter.application.optimization.helpers.round_analysis import (  # noqa: E402
+from promptpotter.application.optimization.round_analysis import (  # noqa: E402
     compute_round_diagnostics,
 )
 from promptpotter.domain.opt_search_point import FewShotExample  # noqa: E402

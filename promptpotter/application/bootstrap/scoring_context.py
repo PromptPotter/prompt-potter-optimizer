@@ -28,8 +28,8 @@ from promptpotter.infrastructure.store import archive_views
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.helpers.observers import RunCallbacks
     from promptpotter.application.origin import CampaignOrigin
+    from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
     from promptpotter.infrastructure.tracing import ObservabilityBridge

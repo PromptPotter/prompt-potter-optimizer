@@ -34,13 +34,13 @@ from promptpotter.application.optimization.dispatch.schemas import (
     L3PlanOutput,
 )
 from promptpotter.application.optimization.escalation.state import NextAction
-from promptpotter.application.optimization.helpers.transitions import (
-    TransitionResult,
-    run_layer_transition,
-)
 from promptpotter.application.optimization.resume_and_fork import (
     ResumeCheckpointKind,
     record_decision,
+)
+from promptpotter.application.optimization.transitions import (
+    TransitionResult,
+    run_layer_transition,
 )
 from promptpotter.application.optimization.validators.l2_l3 import (
     run_l2_output_validators,

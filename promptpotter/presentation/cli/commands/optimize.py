@@ -22,7 +22,7 @@ from promptpotter.presentation.cli.session import load_session
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
-    from promptpotter.application.optimization.helpers.observers import RunObservers
+    from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.presentation.cli.session import SessionCtx
     from promptpotter.presentation.views.live import LiveDisplay
@@ -127,7 +127,7 @@ def _build_observers(
     origin_acc: float,
 ) -> RunObservers:
     """CLI thin shim around ``build_run_observers`` — passes ``args``-derived display."""
-    from promptpotter.application.optimization.helpers.observers import build_run_observers
+    from promptpotter.application.run_observers import build_run_observers
 
     display = _build_live_display(
         args, session=session, campaign_config=campaign_config, origin_acc=origin_acc

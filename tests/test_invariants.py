@@ -407,7 +407,7 @@ def test_run_callbacks_requires_ledger() -> None:
     always bound before any event fired). Forbid the regression: dataclass
     construction without a ledger raises ``TypeError`` at boot.
     """
-    from promptpotter.application.optimization.helpers.observers import RunCallbacks
+    from promptpotter.application.run_observers import RunCallbacks
 
     with pytest.raises(TypeError):
         RunCallbacks()  # type: ignore[call-arg]
@@ -661,8 +661,8 @@ def _scan_violations() -> set[tuple[str, str]]:
 _CYCLE_FORBIDDEN_PROMPT_SURFACE = frozenset(
     {
         "promptpotter.application.optimization.dispatch.hub",
-        "promptpotter.application.optimization.helpers.l1_critique",
-        "promptpotter.application.optimization.helpers.transitions",
+        "promptpotter.application.optimization.l1.critique",
+        "promptpotter.application.optimization.transitions",
         "promptpotter.application.optimization.escalation",
     }
 )
@@ -893,7 +893,7 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
 
 def test_runcallbacks_emits_records_to_ledger(tmp_path: Path) -> None:
     """RunCallbacks is the single ingress: every callback appends one typed record."""
-    from promptpotter.application.optimization.helpers.observers import RunCallbacks
+    from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.phases import PhaseEvent
 
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc1"))

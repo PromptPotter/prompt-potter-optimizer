@@ -17,17 +17,17 @@ from promptpotter.application.optimization.escalation import (
     apply_fork_payload_to_osp,
     escalate_l2,
 )
-from promptpotter.application.optimization.helpers.observers import (
-    ForkInfo,
-    RunCallbacks,
-    RunObservers,
-    build_run_observers,
-)
 from promptpotter.application.optimization.l1 import execute_round, generate_or_load_candidates
 from promptpotter.application.origin import (
     CampaignOrigin,
     extract_campaign_origin,
     prepare_scoring_context,
+)
+from promptpotter.application.run_observers import (
+    ForkInfo,
+    RunCallbacks,
+    RunObservers,
+    build_run_observers,
 )
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.opt_search_point import OptSearchPoint

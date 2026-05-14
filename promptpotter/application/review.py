@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.application.optimization.helpers.l1_stats import L1Stats, compute_l1_stats
+from promptpotter.application.optimization.l1.stats import L1Stats, compute_l1_stats
 from promptpotter.application.optimization.validators.l1_behavior import (
     CHECK_REGISTRY,
     CheckContext,

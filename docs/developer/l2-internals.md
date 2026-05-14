@@ -81,7 +81,7 @@ The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome
 
 - L2 trigger gate: `promptpotter/application/optimization/escalation.py::escalate_l2`
 - `LayerStrategy`, `_parse_l2`, `_apply_l2`, `L2`: `escalation.py`
-- `TransitionResult`: `promptpotter/application/optimization/helpers/transitions.py`
+- `TransitionResult`: `promptpotter/application/optimization/transitions.py`
 - L2 prompt template: `optimizer_pipeline.json::resolved_prompts['l2_context/1']`
 - OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `task_context`, `l1_layout`, `l1_overrides`, `l2_guard_breaches`
 - Layout validators: `promptpotter/domain/l1_layout.py::validate_l1_layout`

@@ -16,7 +16,7 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.helpers.l1_population import (
+from promptpotter.application.optimization.l1.population import (
     INVALID_SCORES,
     build_score_report,
     parse_population,
@@ -52,7 +52,7 @@ from promptpotter.shared.statistics import proportion_test
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.helpers.observers import RunCallbacks
+    from promptpotter.application.run_observers import RunCallbacks
 
 logger = logging.getLogger(__name__)
 
