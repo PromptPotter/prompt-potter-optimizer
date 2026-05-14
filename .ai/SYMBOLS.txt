@@ -191,10 +191,12 @@ find_sweep_results	promptpotter/application/sweep/toolkit.py:353
 fit_rasch	promptpotter/application/intelligence/exploration.py:67
 flatten_sp_summary	promptpotter/domain/opt_search_point.py:387
 fmt_ci	promptpotter/presentation/views/display.py:31
-fmt_individual_header	promptpotter/presentation/views/live.py:249
+fmt_elapsed	promptpotter/presentation/views/live/phase.py:26
+fmt_individual_header	promptpotter/presentation/views/live/candidate.py:50
 fmt_pct	promptpotter/presentation/views/display.py:23
-fmt_pp_override	promptpotter/presentation/views/live.py:231
+fmt_pp_override	promptpotter/presentation/views/live/candidate.py:32
 fmt_pvalue	promptpotter/presentation/views/display.py:36
+fmt_query_result	promptpotter/presentation/views/live/sample.py:37
 fmt_sample_line	promptpotter/infrastructure/projections/live_dashboard.py:116
 ForkInfo	promptpotter/application/run_observers.py:209
 ForkPayload	promptpotter/domain/run_records.py:243
@@ -239,9 +241,9 @@ has_limit_node	promptpotter/application/scoring/evaluators.py:223
 hash_call	promptpotter/infrastructure/store/stores.py:38
 health_check	promptpotter/main.py:97
 indexed_stores	tests/test_intelligence.py:208
-individual_summary_from_dict	promptpotter/presentation/views/live.py:477
+individual_summary_from_dict	promptpotter/presentation/views/live/candidate.py:94
 IndividualLineage	promptpotter/domain/opt_search_point.py:186
-IndividualSummary	promptpotter/presentation/views/live.py:455
+IndividualSummary	promptpotter/presentation/views/live/candidate.py:72
 init_notebook_session	promptpotter/presentation/views/notebook_run.py:138
 init_optimization_loop	promptpotter/application/bootstrap/scoring_context.py:379
 init_services	promptpotter/application/bootstrap/wiring.py:231
@@ -288,7 +290,7 @@ list_experiments	promptpotter/presentation/api/routers/backends.py:142
 list_optimizer_prompts	promptpotter/application/optimization/dispatch/llm_call.py:495
 list_runs	promptpotter/infrastructure/store/archive_views.py:85
 LiveDashboardView	promptpotter/infrastructure/projections/live_dashboard.py:143
-LiveDisplay	promptpotter/presentation/views/live.py:592
+LiveDisplay	promptpotter/presentation/views/live/display.py:58
 LiveStateCore	promptpotter/infrastructure/projections/live_state.py:138
 llm_call	promptpotter/application/optimization/dispatch/llm_call.py:139
 llm_client	tests/test_llm_client.py:37
@@ -428,8 +430,11 @@ render_composite_fitness_block	promptpotter/shared/composite.py:196
 render_composite_fitness_oneliner	promptpotter/shared/composite.py:171
 render_hard_sample_heatmap	promptpotter/presentation/views/render.py:507
 render_markdown_box	promptpotter/presentation/views/display.py:321
+render_patience_status	promptpotter/presentation/views/live/phase.py:165
 render_pipeline_overrides	promptpotter/presentation/views/display.py:332
+render_progress_table	promptpotter/presentation/views/live/phase.py:36
 render_review_md	promptpotter/application/review.py:42
+render_round_stats	promptpotter/presentation/views/live/phase.py:84
 render_sweep_summary	promptpotter/presentation/views/render.py:473
 replay_decisions	promptpotter/application/optimization/resume_and_fork/replayers.py:59
 ReplayContext	promptpotter/application/optimization/resume_and_fork/replayers.py:48
