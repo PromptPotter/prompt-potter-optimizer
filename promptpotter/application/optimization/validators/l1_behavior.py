@@ -20,10 +20,10 @@ from typing import Any
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.opt_search_point import EVIDENCE_GROUNDING_FIELDS
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 
 __all__ = [
     "CHECK_REGISTRY",
-    "PARAM_FORBIDDEN_KEYS",
     "PARAM_SCOPE_KEYS",
     "CheckContext",
     "CheckResult",
@@ -56,12 +56,6 @@ def extract_l1_variants(container: dict[str, Any] | None) -> list[dict[str, Any]
 PARAM_SCOPE_KEYS: frozenset[str] = frozenset(
     {"temperature", "max_tokens", "reasoning_effort", "top_p"}
 )
-
-# Per-node LLM-call params that are operator-fixed at the dataset overlay
-# (`datasets/{name}/pipeline.json::nodes.{name}.config`) and never optimizer turf:
-# model identity and provider are infrastructure-level decisions. Any candidate
-# touching these is a wasted slot and fails forbidden_axes_honored.
-PARAM_FORBIDDEN_KEYS: frozenset[str] = frozenset({"model", "provider"})
 
 
 @dataclass(frozen=True)

@@ -19,7 +19,20 @@ from promptpotter.application.intelligence.indexes.format import (
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.scoring import Scorer
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.infrastructure.store import archive_views
+
+
+def _is_forbidden_axis(axis: str) -> bool:
+    """``<node>.<param>`` axes whose ``<param>`` is operator-locked.
+
+    These axes (currently model + provider) carry observations the
+    optimizer cannot act on; surfacing them as "consistently impactful"
+    in the L1/L2/L3 axis digest mis-steers framing refinement.
+    """
+    _, _, param = axis.partition(".")
+    return param in PARAM_FORBIDDEN_KEYS
+
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
@@ -91,11 +104,16 @@ class AxisIndex:
     # ----- axis analytics -----
 
     def axis_rankings(self) -> list[AxisImpact]:
-        """All axes ranked by effect size (descending)."""
+        """All axes ranked by effect size (descending).
+
+        Operator-locked axes (``PARAM_FORBIDDEN_KEYS``) are dropped —
+        a forbidden axis can never become a candidate mutation, so
+        carrying it in the ranking only mis-steers L1/L2/L3.
+        """
         impacts = [
             i
             for axis, vals in self._axis_values.items()
-            if (i := self._compute_axis_impact(axis, vals))
+            if not _is_forbidden_axis(axis) and (i := self._compute_axis_impact(axis, vals))
         ]
         return sorted(impacts, key=lambda a: -a.effect_size)
 
@@ -104,7 +122,8 @@ class AxisIndex:
         out = [
             i
             for axis, vals in self._axis_values.items()
-            if len(vals) >= min_values
+            if not _is_forbidden_axis(axis)
+            and len(vals) >= min_values
             and (i := self._compute_axis_impact(axis, vals))
             and i.effect_size <= max_effect
         ]

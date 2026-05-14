@@ -24,7 +24,34 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     _Injection,
     fence_untrusted,
 )
+from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.l1_layout import L1_POSSIBLE
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+
+
+def _rf_matches_current_config(rf: RuntimeFailure, pipeline_params: dict[str, dict]) -> bool:
+    """Filter ACCUMULATED runtime failures to the current backend config.
+
+    A RuntimeFailure carries an ``observed_config`` snapshot of the
+    offending node's pipeline_params at the time it fired. When a
+    cycle's overlay changes (e.g. provider/model swap mid-experiment),
+    accumulated failures from the prior overlay become stale evidence
+    — keeping them in L2's prompt mis-steers the framing refinement.
+
+    The comparison is on operator-locked keys
+    (``PARAM_FORBIDDEN_KEYS``: provider, model). The node is parsed
+    from ``rf.dominant_warning`` (``"<node>:<warning>"``); if the node
+    isn't in the current pipeline_params, the failure is dropped.
+    """
+    node = (rf.dominant_warning or "").split(":", 1)[0]
+    if not node:
+        return True
+    current = pipeline_params.get(node)
+    if not isinstance(current, dict):
+        return False
+    observed = rf.observed_config or {}
+    return all(observed.get(k) == current.get(k) for k in PARAM_FORBIDDEN_KEYS if k in observed)
+
 
 # ---------------------------------------------------------------------------
 # Signal renderers — uniform ``(InjectionBundle) -> str`` signature, layer-agnostic.
@@ -258,6 +285,14 @@ def _r_runtime_failures(b: InjectionBundle) -> str:
     """Wound 2 — DegradationCheck mid-eval evidence (per-candidate runtime
     failures from ``DegradationCheck``). Fenced because it echoes pipeline
     warning strings.
+
+    ACCUMULATED entries are filtered against the current
+    ``pipeline_params[node].{provider, model}``: a runtime failure
+    observed under a now-superseded backend config (e.g. yesterday's
+    openrouter/gpt-oss-20b carried forward into today's
+    groq/gpt-oss-120b cycle) is dropped before injection. NEW entries
+    (first-seen this round) always pass — they describe the failure
+    being heard right now.
     """
     runtime_failures = b.opt_sp.wounds.runtime_failures
     parts: list[str] = []
@@ -269,7 +304,9 @@ def _r_runtime_failures(b: InjectionBundle) -> str:
         acc_rfs = [
             rf
             for rf in runtime_failures
-            if rf.first_seen_round != round_num and rf.first_seen_round >= cutoff
+            if rf.first_seen_round != round_num
+            and rf.first_seen_round >= cutoff
+            and _rf_matches_current_config(rf, b.cycle_slice.pipeline_params)
         ]
         dropped = sum(1 for rf in runtime_failures if rf.first_seen_round < cutoff)
         sec = ["RUNTIME FAILURES (candidates ran but degraded):"]

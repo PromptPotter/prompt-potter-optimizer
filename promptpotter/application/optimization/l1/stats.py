@@ -16,10 +16,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.application.optimization.validators.l1_behavior import (
-    PARAM_FORBIDDEN_KEYS,
     CheckResult,
     extract_l1_variants,
 )
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 
 __all__ = ["L1Stats", "compute_l1_stats", "compute_round_1_verdict"]
 

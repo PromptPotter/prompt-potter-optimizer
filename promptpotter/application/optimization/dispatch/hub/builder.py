@@ -46,6 +46,8 @@ def build_bundle(
     latest_crit = latest_round.critique if latest_round else None
     round_num = latest_round.round + 1 if latest_round else 1
 
+    current_sp = cycle.tracking.current_sp
+    current_pp = current_sp.pipeline_params if current_sp is not None else None
     cs = CycleSlice(
         round_num=round_num,
         current_accuracy=cycle.tracking.current_accuracy,
@@ -56,6 +58,7 @@ def build_bundle(
         l2_stall_count=cycle.escalation.l2_stall_count,
         l3_round=cycle.escalation.l3_round,
         l3_stall_count=cycle.escalation.l3_stall_count,
+        pipeline_params=dict(current_pp) if current_pp else {},
     )
 
     return InjectionBundle(

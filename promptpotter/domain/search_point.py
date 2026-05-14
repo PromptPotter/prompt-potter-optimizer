@@ -18,6 +18,18 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
+PARAM_FORBIDDEN_KEYS: frozenset[str] = frozenset({"model", "provider"})
+"""``pipeline_params[node]`` keys the optimizer must never mutate.
+
+Operator-fixed at the dataset overlay
+(``datasets/{name}/pipeline.json::nodes.{name}.config``). The L1 strict
+validator rejects any candidate whose ``pipeline_params_override`` carries
+one of these keys; downstream signal renderers (axis digests, runtime-
+failure injections) likewise scrub them so L2/L3 prompts don't surface
+them as candidate axes.
+"""
+
+
 class SearchPoint(BaseModel):
     """A point in any pipeline's search space.
 
@@ -197,4 +209,4 @@ class TaskDecomposition:
         return any(getattr(self, f.name) for f in fields(self))
 
 
-__all__ = ["JobSearchPoint", "SearchPoint", "TaskDecomposition"]
+__all__ = ["PARAM_FORBIDDEN_KEYS", "JobSearchPoint", "SearchPoint", "TaskDecomposition"]

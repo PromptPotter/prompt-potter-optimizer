@@ -101,9 +101,13 @@ class LayerStrategy:
 def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
     """Best-effort coerce ``{slot: [placeholder, …]}`` → :class:`L1Layout`.
 
-    Returns ``None`` when the input is empty or shaped wrong; lets the
-    validator surface mandatory-presence/unknown-name failures uniformly
-    rather than crashing on a Pydantic validation error here.
+    Returns ``None`` when the input is empty (``{}``) or shaped wrong.
+    An empty dict is the **sanctioned omit-sentinel** for L2 LLM
+    output (L2's prompt accepts both omit and ``{}`` as "keep current
+    layout") — the L2 driver treats ``None`` as "no layout proposed"
+    and skips validation. Non-empty but malformed input also returns
+    ``None`` so the validator surfaces mandatory-presence /
+    unknown-name failures uniformly rather than crashing here.
     """
     if not isinstance(raw_layout, dict) or not raw_layout:
         return None

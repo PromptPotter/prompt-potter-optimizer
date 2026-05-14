@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -95,6 +95,10 @@ class CycleSlice:
     only on this slice, never on ``Cycle`` directly — so they're
     unit-testable with a plain fixture and don't drag the orchestration
     state into the rendering layer.
+
+    ``pipeline_params`` is the active JobSearchPoint's nested
+    ``{node: {param: value}}`` dict, snapshotted so wound renderers
+    can filter ACCUMULATED rows by the current backend config.
     """
 
     round_num: int
@@ -106,6 +110,7 @@ class CycleSlice:
     l2_stall_count: int
     l3_round: int
     l3_stall_count: int
+    pipeline_params: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
