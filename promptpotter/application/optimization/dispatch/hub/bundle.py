@@ -147,6 +147,10 @@ class InjectionBundle:
     cycle_slice: CycleSlice
     digest: RoundDigest
     axes: AxisIndex | None
+    # Mirrors OptimizationConfig.forbidden_axes_strict — gates whether the
+    # pipeline-param catalogue advertises locked-axis options (model list).
+    # Default True matches the production OptimizationConfig default.
+    forbidden_axes_strict: bool = True
 
 
 __all__ = [

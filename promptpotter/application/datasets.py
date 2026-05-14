@@ -398,8 +398,8 @@ __all__ = [
     "load_node_prompt",
 ]
 
-# promptpotter/application/datasets/prompt_store.py → repo root
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+# promptpotter/application/datasets.py → repo root
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_dataset_node_overlay(dataset: str) -> dict[str, dict]:

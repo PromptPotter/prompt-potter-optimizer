@@ -20,8 +20,8 @@
       "zero_signal_filter_enabled": true
     },
     "optimizer_llm": {
-      "model": "meta-llama/llama-3.3-70b-instruct:nitro",
-      "provider": "openrouter"
+      "model": "openai/gpt-oss-120b",
+      "provider": "groq"
     }
   }
 }

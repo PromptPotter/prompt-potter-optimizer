@@ -14,7 +14,7 @@
       "config": {
         "provider": "openrouter",
         "model": "openai/gpt-oss-20b:nitro",
-        "temperature": 0.0,
+        "temperature": 0.7,
         "reasoning_effort": "low"
       },
       "prompt_meta": {

@@ -47,13 +47,15 @@ def _r_rendered_prompt(b: InjectionBundle) -> str:
     return f"CURRENT PROMPT:\n---\n{rendered}\n---" if rendered else ""
 
 
-# Single-entry cache keyed on pipeline_schema identity. The schema is
-# session-immutable, so the rendered string is byte-identical across every
-# round of a session. Skipping the recompute saves CPU and — more importantly
-# for small models — guarantees the same text appears verbatim in every
-# prompt, which trains attention to skip past the static block cheaply.
-# id() is sufficient: a session-long schema can't be GC'd-and-reused mid-run.
-_pipeline_param_catalogue_last: tuple[int, str] | None = None
+# Single-entry cache keyed on (pipeline_schema identity, forbidden_axes_strict).
+# The schema is session-immutable, so the rendered string is byte-identical
+# across every round of a session under the same lock state. Skipping the
+# recompute saves CPU and — more importantly for small models — guarantees
+# the same text appears verbatim in every prompt, which trains attention to
+# skip past the static block cheaply. id() is sufficient: a session-long
+# schema can't be GC'd-and-reused mid-run. The lock flag is part of the key
+# because it gates whether MODELS appears.
+_pipeline_param_catalogue_last: tuple[int, bool, str] | None = None
 
 
 def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
@@ -68,11 +70,13 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
     if schema is None:
         return ""
     schema_id = id(schema)
+    lock = b.forbidden_axes_strict
     if (
         _pipeline_param_catalogue_last is not None
         and _pipeline_param_catalogue_last[0] == schema_id
+        and _pipeline_param_catalogue_last[1] == lock
     ):
-        return _pipeline_param_catalogue_last[1]
+        return _pipeline_param_catalogue_last[2]
     npk = schema.node_param_keys()
     if not npk:
         return ""
@@ -97,13 +101,16 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
             else:
                 bits.append(p)
         lines.append(f"  {node_name}: {', '.join(bits)}")
-    if schema.available_models:
+    # Suppress MODELS catalogue when model is operator-locked
+    # (forbidden_axes_strict). Advertising a list that the validator will
+    # immediately reject just costs L1 a candidate slot per round to Wound 1.
+    if schema.available_models and not b.forbidden_axes_strict:
         lines.append("MODELS:")
         lines.append(
             "  " + ", ".join(list(schema.available_models)[:PIPELINE_PARAM_CATALOGUE_MODEL_CAP])
         )
     result = "\n".join(lines)
-    _pipeline_param_catalogue_last = (schema_id, result)
+    _pipeline_param_catalogue_last = (schema_id, lock, result)
     return result
 
 

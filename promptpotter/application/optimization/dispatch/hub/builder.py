@@ -67,6 +67,7 @@ def build_bundle(
             critique=latest_crit,
         ),
         axes=cycle.axes,
+        forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
     )
 
 

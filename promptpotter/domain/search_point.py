@@ -150,11 +150,29 @@ class TaskDecomposition:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any] | None) -> TaskDecomposition:
-        """Construct from dict, ignoring unknown keys."""
+        """Construct from dict, ignoring unknown keys.
+
+        Coerces list values to comma-joined strings. L2's response schema
+        types ``task_context`` as ``dict[str, Any]`` (permissive at the wire),
+        and LLMs frequently return enumeration-style fields like
+        ``key_challenges`` as a JSON list. The TaskDecomposition fields are
+        typed ``str`` for stable display + serialization, so list payloads
+        get joined here at the ingest boundary.
+        """
         if not d:
             return cls()
         known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in d.items() if k in known})
+        coerced: dict[str, str] = {}
+        for k, v in d.items():
+            if k not in known:
+                continue
+            if isinstance(v, list):
+                coerced[k] = ", ".join(str(item) for item in v)
+            elif v is None:
+                coerced[k] = ""
+            else:
+                coerced[k] = str(v)
+        return cls(**coerced)
 
     # ── Merge / copy ────────────────────────────────────────────────
 
