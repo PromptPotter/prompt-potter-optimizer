@@ -50,6 +50,7 @@ from promptpotter.application.optimization.escalation.firing import (
 )
 from promptpotter.application.optimization.validators.l1_strict import detect_invariants
 from promptpotter.application.optimization.validators.l2_l3 import (
+    L2_DUPLICATE_INSERT,
     L2_TASK_CONTEXT_VERBATIM_REPEAT,
     L3_PLAN_LENGTH_FLOOR,
     L3_PLAN_VERBATIM_REPEAT,
@@ -60,6 +61,7 @@ from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.run_records import ForkPayload, ForkTrigger, ResumeCheckpointKind
+from promptpotter.domain.search_point import TaskDecomposition
 
 scipy = pytest.importorskip("scipy")  # transitively required by other math helpers
 
@@ -180,6 +182,56 @@ def test_run_l2_output_validators_aggregates_task_context_repeat():
     )
     ids = {o.validator_id for o in outcomes}
     assert "l2_task_context_verbatim_repeat" in ids
+
+
+def test_duplicate_insert_fires_when_proposed_lines_already_in_prior_framing():
+    """L2 re-asserts ≥3 lines from the prior task_context — merge still
+    succeeds (added a 4th line) so verbatim_repeat is quiet, but
+    duplicate_insert fires and force-triggers L3 via wound-4."""
+    osp = _osp(
+        task_context=TaskDecomposition(
+            domain="math",
+            key_challenges=(
+                "Step 1: read the problem\n"
+                "Step 2: compute carefully\n"
+                "Step 3: verify the result"
+            ),
+        )
+    )
+    proposed = {
+        "key_challenges": (
+            "Step 1: read the problem\n"
+            "Step 2: compute carefully\n"
+            "Step 3: verify the result\n"
+            "Step 4: emit the answer"  # genuinely new — merge succeeds
+        ),
+    }
+    merged = osp.task_context.merge(proposed)
+    out = L2_DUPLICATE_INSERT.run(
+        {"task_context_proposed": proposed, "task_context_applied": merged},
+        opt_sp=osp,
+    )
+    assert out is not None
+    assert out.passed is False
+    assert out.score == 0.0
+    assert out.nurse_target == "l3"
+    assert out.evidence["duplicate_lines"] == 3
+    assert out.evidence["fields"] == ["key_challenges"]
+
+
+def test_duplicate_insert_quiet_below_threshold():
+    """Two duplicate lines + one new ⇒ below the 3-line floor; no fire."""
+    osp = _osp(task_context=TaskDecomposition(key_challenges="line A\nline B"))
+    out = L2_DUPLICATE_INSERT.run(
+        {
+            "task_context_proposed": {"key_challenges": "line A\nline B\nline C"},
+            "task_context_applied": osp.task_context.merge(
+                {"key_challenges": "line A\nline B\nline C"}
+            ),
+        },
+        opt_sp=osp,
+    )
+    assert out is None
 
 
 # ===========================================================================

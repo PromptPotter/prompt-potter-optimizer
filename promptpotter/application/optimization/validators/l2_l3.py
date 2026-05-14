@@ -10,6 +10,9 @@ L2 soft validators here:
 * :data:`L2_TASK_CONTEXT_VERBATIM_REPEAT` — proposed ``task_context``
   refinement produced no semantic change vs the prior OSP framing
   (either the LLM repeated the existing fields or sent a no-op merge).
+* :data:`L2_DUPLICATE_INSERT` — proposed ``task_context`` re-asserts
+  ≥``DUPLICATE_INSERT_LINE_THRESHOLD`` lines already in the prior
+  framing. Merge still succeeds, but L2 is pasting back what's there.
 
 L3 soft validators here:
 * :data:`L3_PLAN_LENGTH_FLOOR` — plan is too short to carry signal.
@@ -29,6 +32,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 
 PLAN_LENGTH_FLOOR_CHARS = 60
+DUPLICATE_INSERT_LINE_THRESHOLD = 3
 
 
 def _check_task_context_verbatim_repeat(
@@ -57,6 +61,52 @@ def _check_task_context_verbatim_repeat(
         passed=False,
         score=0.0,
         evidence={"proposed_keys": sorted(proposed.keys())},
+        nurse_target="l3",
+    )
+
+
+def _check_duplicate_insert(
+    source_output: Mapping[str, Any],
+    *,
+    opt_sp: OptSearchPoint | None = None,
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """Fire when L2's proposed task_context re-asserts ≥3 lines already
+    in the prior OSP framing. Distinct from :data:`L2_TASK_CONTEXT_VERBATIM_REPEAT`
+    (no-op merge): here the merge succeeds, but L2 still pasted back lines
+    that were already there — the refinement surface is exhausted.
+    """
+    if opt_sp is None:
+        return None
+    proposed = source_output.get("task_context_proposed")
+    if not isinstance(proposed, dict) or not proposed:
+        return None
+    prior = opt_sp.task_context.to_dict()
+    duplicate_lines = 0
+    overlapped_fields: list[str] = []
+    for field_name, new_value in proposed.items():
+        if not isinstance(new_value, str) or not new_value:
+            continue
+        prior_value = prior.get(field_name, "")
+        if not isinstance(prior_value, str) or not prior_value:
+            continue
+        new_lines = {ln.strip() for ln in new_value.splitlines() if ln.strip()}
+        prior_lines = {ln.strip() for ln in prior_value.splitlines() if ln.strip()}
+        overlap = new_lines & prior_lines
+        if overlap:
+            duplicate_lines += len(overlap)
+            overlapped_fields.append(field_name)
+    if duplicate_lines < DUPLICATE_INSERT_LINE_THRESHOLD:
+        return None
+    return ValidatorOutcome(
+        validator_id=L2_DUPLICATE_INSERT.id,
+        passed=False,
+        score=0.0,
+        evidence={
+            "duplicate_lines": duplicate_lines,
+            "threshold": DUPLICATE_INSERT_LINE_THRESHOLD,
+            "fields": sorted(overlapped_fields),
+        },
         nurse_target="l3",
     )
 
@@ -112,6 +162,19 @@ L2_TASK_CONTEXT_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
 )
 
 
+L2_DUPLICATE_INSERT: LLMOutputValidator = LLMOutputValidator(
+    id="l2_duplicate_insert",
+    description=(
+        "L2's proposed ``task_context`` re-asserts ≥3 lines already in "
+        "the prior framing. Different from verbatim_repeat (no-op merge): "
+        "the merge succeeds, but L2 is still pasting back what's there. "
+        "The framing-refinement surface is exhausted — L3 must replan."
+    ),
+    nurse_target="l3",
+    check=_check_duplicate_insert,
+)
+
+
 L3_PLAN_LENGTH_FLOOR: LLMOutputValidator = LLMOutputValidator(
     id="l3_plan_length_floor",
     description=(
@@ -136,7 +199,10 @@ L3_PLAN_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
 )
 
 
-L2_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (L2_TASK_CONTEXT_VERBATIM_REPEAT,)
+L2_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (
+    L2_TASK_CONTEXT_VERBATIM_REPEAT,
+    L2_DUPLICATE_INSERT,
+)
 
 
 L3_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (
