@@ -287,3 +287,29 @@ MeasurementEvent = Union[
 
 Event = Union[DatasetRegistered, OptimizationEvent, MeasurementEvent]
 """Per-cycle Langfuse shadow + events.jsonl + prompts under campaigns/{cycle_id}/langfuse/."""
+
+
+__all__ = [
+    "CampaignEnd",
+    "CampaignStart",
+    "CandidateCreated",
+    "CandidateScored",
+    "DatasetRegistered",
+    "DatasetRun",
+    "Event",
+    "L1CritiqueWritten",
+    "LayerApplied",
+    "MeasurementEvent",
+    "NodeEnd",
+    "NodeStart",
+    "OptimizationEvent",
+    "PromptVersion",
+    "QueryNodeSpan",
+    "QueryScoreEnd",
+    "QueryScoreStart",
+    "RoundEnd",
+    "RoundStart",
+    "RoundWinnerChosen",
+    "generate_observation_id",
+    "utcnow_iso",
+]

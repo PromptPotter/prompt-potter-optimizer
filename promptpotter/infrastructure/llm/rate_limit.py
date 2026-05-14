@@ -290,3 +290,22 @@ def build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
         rpm_pinned=rpm is not None,
         tpm_pinned=tpm is not None,
     )
+
+
+__all__ = [
+    "ANTHROPIC_RPM_HEADER",
+    "ANTHROPIC_TPM_HEADER",
+    "DEPR_RETRY_COOLDOWN_SEC",
+    "MAX_429_ATTEMPTS",
+    "OPENAI_RPM_HEADER",
+    "OPENAI_TPM_HEADER",
+    "RateLimitReservation",
+    "RateLimiter",
+    "acquire_reservation",
+    "apply_discovered_caps",
+    "build_rate_limiter",
+    "estimate_tokens",
+    "parse_retry_after",
+    "raise_if_request_too_large",
+    "wait_with_countdown",
+]

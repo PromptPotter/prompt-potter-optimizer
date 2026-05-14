@@ -52,3 +52,6 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
         f"  {time_s:4.1f}s #{qi:03d} {mark} [{badge}]{cache_icon}"
         f"{tok_seg} -> '{pred}' gt:'{gt}' q:'{query}'"
     )
+
+
+__all__ = ["NODE_BADGES", "fmt_sample_line", "trim"]

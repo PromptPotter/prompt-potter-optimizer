@@ -644,3 +644,6 @@ async def cmd_sweep(args: argparse.Namespace) -> CommandResult:
     if verb == "rank":
         return await _cmd_sweep_rank(args)
     raise SystemExit(f"sweep: unknown verb {verb!r}")
+
+
+__all__ = ["cmd_sweep"]

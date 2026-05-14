@@ -196,3 +196,6 @@ def fmt_query_result(
         )
 
     return line
+
+
+__all__ = ["fmt_query_result"]

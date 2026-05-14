@@ -646,3 +646,6 @@ class CampaignStore(EntityStore):
                 "Deleted cached candidates for round %d (escalation invalidation)",
                 round_num,
             )
+
+
+__all__ = ["CampaignStore"]

@@ -306,3 +306,6 @@ def to_text(view: AnyView) -> str:
     """Dispatch a typed view to its ANSI text renderer."""
     fn = _TEXT_RENDERERS.get(type(view))
     return fn(view) if fn else ""
+
+
+__all__ = ["to_text"]

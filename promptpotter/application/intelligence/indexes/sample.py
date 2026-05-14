@@ -275,3 +275,6 @@ class SampleIndex:
     def _dominant_failure_mode(self, sample_id: int) -> str:
         modes = self._failure_modes.get(sample_id, [])
         return Counter(modes).most_common(1)[0][0] if modes else ""
+
+
+__all__ = ["FailureCluster", "SampleIndex", "SampleRecord"]

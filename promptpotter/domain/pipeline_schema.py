@@ -255,3 +255,14 @@ class PipelineSchema(BaseModel):
         (empty means prompt doesn't affect pipeline output).
         """
         return [node.name for node in self.nodes if node.prompt_meta is not None]
+
+
+__all__ = [
+    "NodeOutputSchema",
+    "NodePromptMeta",
+    "NodeType",
+    "ObservationMapping",
+    "PipelineNode",
+    "PipelineSchema",
+    "stable_hash",
+]

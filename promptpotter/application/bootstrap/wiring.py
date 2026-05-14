@@ -310,3 +310,6 @@ async def init_services(
     else:
         await _sync_and_extract_experiment(session, backend_url, experiment_id, status)
     return session
+
+
+__all__ = ["init_services"]

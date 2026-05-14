@@ -66,3 +66,6 @@ class MLflowSink:
             mlflow.log_params(params)
             mlflow.log_metrics(metrics)
             mlflow.set_tags(tags)
+
+
+__all__ = ["MLflowSink"]

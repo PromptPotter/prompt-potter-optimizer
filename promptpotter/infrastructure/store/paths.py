@@ -106,3 +106,16 @@ def session_dir_for(tenant_root: Path, session_id: str) -> Path:
     """
     validate_path_component(session_id)
     return tenant_root / "sessions" / session_id
+
+
+__all__ = [
+    "DEFAULT_DATASETS_ROOT",
+    "DEFAULT_PROJECTS_ROOT",
+    "DEFAULT_TENANT_ID",
+    "campaign_dir_for",
+    "root_cycle_id",
+    "root_dir_for",
+    "session_dir_for",
+    "sibling_kind",
+    "sweep_batch_dir_for",
+]

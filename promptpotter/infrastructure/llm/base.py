@@ -52,3 +52,6 @@ class LLMClientBase(ABC):
             LLMResponse with content + parsed (typed instance, dict, or None).
         """
         ...
+
+
+__all__ = ["LLMClientBase"]

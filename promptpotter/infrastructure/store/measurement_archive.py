@@ -442,3 +442,6 @@ def _to_measurement(
         created_at=detail.get("created_at", ""),
         run_scores=detail.get("scores") or {},
     )
+
+
+__all__ = ["MeasurementArchive"]

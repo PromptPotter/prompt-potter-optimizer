@@ -521,3 +521,6 @@ INJECTIONS: dict[str, _Injection] = {
         "failure clusters, value trends, exhausted axes.",
     ),
 }
+
+
+__all__ = ["INJECTIONS", "format_l1_critique_for_prompt"]

@@ -177,3 +177,6 @@ class TaskDecomposition:
     def __bool__(self) -> bool:
         """True if any field is non-empty."""
         return any(getattr(self, f.name) for f in fields(self))
+
+
+__all__ = ["JobSearchPoint", "SearchPoint", "TaskDecomposition"]

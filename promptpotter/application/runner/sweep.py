@@ -77,3 +77,6 @@ async def run_sweep_generation_only(
         )
     elif _rr := session.state.audit_projection:
         _rr.flush()
+
+
+__all__ = ["run_sweep_generation_only"]

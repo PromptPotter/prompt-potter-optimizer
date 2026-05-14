@@ -90,3 +90,6 @@ def _matches_subset_local(
         if subdict and not (subdict.items() <= cfg.items()):
             return False
     return True
+
+
+__all__ = ["ConfigIndex"]

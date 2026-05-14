@@ -168,3 +168,6 @@ CONNECTOR = Connector(
     extract_experiment=_extract_experiment,
     resolve_ground_truth=_resolve_ground_truth,
 )
+
+
+__all__ = ["CONNECTOR", "PromptPotterSession", "promptpotter_wire_adapter"]

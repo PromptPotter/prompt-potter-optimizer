@@ -212,3 +212,6 @@ async def run_round_loop(
         session.state.crash_traceback = traceback.format_exc()
         logger.exception("Optimization crashed at round %d.", round_num)
         return StopReason.CRASHED
+
+
+__all__ = ["HARD_CAP", "run_round_loop"]

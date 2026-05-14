@@ -32,3 +32,6 @@ def rescore_results(
         r["fitness"] = fitness
         r["hit"] = hit
     return results
+
+
+__all__ = ["rescore_results"]

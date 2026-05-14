@@ -377,3 +377,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         return sweep_result
 
     return await _run_normal_optimize(args, ctx, campaign_config, session, train_data)
+
+
+__all__ = ["cmd_optimize"]

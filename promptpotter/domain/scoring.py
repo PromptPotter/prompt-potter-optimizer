@@ -87,3 +87,14 @@ class ScoringSpec(NamedTuple):
     per_sample: str | None
     per_round: str | None
     scorer_id: str
+
+
+__all__ = [
+    "DEFAULT_SCORER_ID",
+    "EMPTY_SCORER_ID",
+    "PipelineData",
+    "QueryMeasurement",
+    "RoundScorer",
+    "Scorer",
+    "ScoringSpec",
+]

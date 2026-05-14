@@ -150,3 +150,12 @@ def posterior_best_probabilities(
 def pobb_should_stop(p_best: float, epsilon: float) -> bool:
     """Trivial threshold check — kept as a named function for call-site clarity."""
     return p_best < epsilon
+
+
+__all__ = [
+    "min_detectable_effect",
+    "pobb_should_stop",
+    "posterior_best_probabilities",
+    "proportion_test",
+    "wilson_ci",
+]

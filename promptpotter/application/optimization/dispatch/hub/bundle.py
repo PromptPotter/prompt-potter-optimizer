@@ -147,3 +147,19 @@ class InjectionBundle:
     cycle_slice: CycleSlice
     digest: RoundDigest
     axes: AxisIndex | None
+
+
+__all__ = [
+    "AXES_ENUM_PREVIEW",
+    "FAILURE_WARNING_PREVIEW",
+    "NEAR_MISS_RENDER_CAP",
+    "PIPELINE_PARAM_CATALOGUE_MODEL_CAP",
+    "PROMPT_BLOAT_CHARS",
+    "RUNTIME_FAILURE_RECENCY_WINDOW",
+    "SAMPLE_RENDER_CAP",
+    "CycleSlice",
+    "InjectionBundle",
+    "InjectionKind",
+    "RoundDigest",
+    "fence_untrusted",
+]

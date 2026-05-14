@@ -423,3 +423,6 @@ class LangfuseLogger:
         if self.enabled and self.client:
             with graceful("Failed to flush Langfuse events"):
                 self.client.flush()
+
+
+__all__ = ["LangfuseLogger"]

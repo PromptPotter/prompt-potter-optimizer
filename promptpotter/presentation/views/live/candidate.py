@@ -199,3 +199,11 @@ def individual_summary_from_dict(
         body_line=body_line,
         detail_lines=tuple(detail_lines),
     )
+
+
+__all__ = [
+    "IndividualSummary",
+    "fmt_individual_header",
+    "fmt_pp_override",
+    "individual_summary_from_dict",
+]

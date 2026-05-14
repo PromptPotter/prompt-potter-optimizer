@@ -670,3 +670,6 @@ class LiveDashboardView(DerivedView):
             json.dumps(s, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8",
         )
+
+
+__all__ = ["LiveDashboardView"]

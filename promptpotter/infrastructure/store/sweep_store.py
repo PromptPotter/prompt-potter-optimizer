@@ -96,3 +96,6 @@ class SweepStore:
     def load_batch(self, family_root: str, batch_id: str) -> dict[str, Any] | None:
         """Read the batch index; ``None`` if it doesn't exist."""
         return read_json_optional(self.batch_dir(family_root, batch_id) / "index.json")
+
+
+__all__ = ["SweepStore"]

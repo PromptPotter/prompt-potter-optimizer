@@ -229,3 +229,6 @@ class BackendStore:
         return read_json_optional(
             self._backend_dir(backend_id) / "connector_profile.json",
         )
+
+
+__all__ = ["BackendStore"]

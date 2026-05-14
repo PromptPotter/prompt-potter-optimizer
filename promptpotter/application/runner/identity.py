@@ -35,3 +35,6 @@ def build_origin_cycle_id(
     base_pp = schema.to_pipeline_params() if schema else {}
     jsp = osp.to_job_search_point(base_pipeline_params=base_pp, schema=schema)
     return cycle_config_identity(jsp, dataset)
+
+
+__all__ = ["build_origin_cycle_id", "cycle_config_identity"]

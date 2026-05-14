@@ -24,3 +24,6 @@ def render_sweep_summary(view: SweepSummaryView) -> str:
     for row in view.payloads:
         lines.append(f"| `{row.source_file}` | {row.status} | `{row.cycle_id}` |")
     return "\n".join(lines) + "\n"
+
+
+__all__ = ["render_sweep_summary"]

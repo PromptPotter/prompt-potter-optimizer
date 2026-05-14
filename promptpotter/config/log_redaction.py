@@ -78,3 +78,6 @@ class SecretRedactionFilter(logging.Filter):
                     self._redact(a) if isinstance(a, str) else a for a in record.args
                 )
         return True
+
+
+__all__ = ["REDACTED", "SecretRedactionFilter"]

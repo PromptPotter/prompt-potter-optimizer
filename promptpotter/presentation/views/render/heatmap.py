@@ -96,3 +96,6 @@ def render_hard_sample_heatmap(
             lines.append(f"    {sid:>10d} {d:>+8.3f} {se:>10.3f}  {query}")
 
     return "\n".join(lines)
+
+
+__all__ = ["render_hard_sample_heatmap"]

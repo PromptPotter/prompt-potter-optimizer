@@ -172,3 +172,15 @@ def error_category(error: str | None) -> ErrorCategory | None:
             except ValueError:
                 return None
     return None
+
+
+__all__ = [
+    "ActiveSessionMismatchError",
+    "ErrorCategory",
+    "RequestTooLargeError",
+    "ResumeDivergenceError",
+    "error_category",
+    "graceful",
+    "is_degraded",
+    "is_error_result",
+]

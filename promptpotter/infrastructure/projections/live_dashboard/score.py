@@ -85,3 +85,6 @@ def build_l1_score_block(
         "input": {"candidates": input_candidates},
         "output": {"candidates": output_candidates},
     }
+
+
+__all__ = ["build_l1_score_block"]

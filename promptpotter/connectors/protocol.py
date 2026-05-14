@@ -48,3 +48,6 @@ class Connector:
     def to_dict(self) -> dict[str, Any]:
         """Identity projection — ``name`` only; callables are not JSON-able."""
         return {"name": self.name}
+
+
+__all__ = ["Connector", "SessionProtocol", "WireAdapter"]

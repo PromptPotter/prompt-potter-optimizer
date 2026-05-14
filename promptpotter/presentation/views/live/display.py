@@ -386,3 +386,6 @@ class LiveDisplay(DerivedView):
         ).split("\n"):
             self._write(line)
         self._write(_node_bottom())
+
+
+__all__ = ["LiveDisplay"]

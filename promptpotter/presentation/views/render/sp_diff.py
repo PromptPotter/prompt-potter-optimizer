@@ -137,3 +137,6 @@ def render_sp_diff(view: SpDiffView) -> str:
             out.append(_node_line(f"  {code} {full}"))
 
     return "\n".join(out)
+
+
+__all__ = ["render_sp_diff"]

@@ -451,3 +451,11 @@ async def init_optimization_loop(
         resumed_from_round=resumed_from_round,
     )
     return cycle
+
+
+__all__ = [
+    "HOT_UPDATEABLE_KEYS",
+    "bootstrap_cycle",
+    "init_optimization_loop",
+    "populate_session_scoring",
+]

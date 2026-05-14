@@ -31,3 +31,6 @@ def compile_round_scorer(formula: str | None) -> RoundScorer:
 
 def _default_round_scorer(values: dict[str, float]) -> float:
     return max(0.0, min(1.0, float(values.get("accuracy", 0.0))))
+
+
+__all__ = ["compile_round_scorer"]

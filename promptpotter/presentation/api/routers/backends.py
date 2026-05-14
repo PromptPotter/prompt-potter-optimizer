@@ -200,3 +200,12 @@ async def get_pipeline(backend_id: str, store: StoreDep):
         fetched_at=datetime.now(UTC).isoformat(),
         source=source,
     )
+
+
+__all__ = [
+    "PipelineViewResponse",
+    "RegisterBackendRequest",
+    "RegisterBackendResponse",
+    "SyncResponse",
+    "backends_router",
+]

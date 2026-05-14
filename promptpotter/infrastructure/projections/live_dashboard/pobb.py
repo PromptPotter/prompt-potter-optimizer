@@ -37,3 +37,6 @@ def build_pobb_block(core: LiveStateCore, round_block: dict[str, Any]) -> dict[s
         "posterior_width": float(1.0 - leader_prob),
         "top": list(round_block.get("p_best_top") or []),
     }
+
+
+__all__ = ["build_pobb_block"]

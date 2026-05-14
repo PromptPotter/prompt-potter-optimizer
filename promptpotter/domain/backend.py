@@ -14,3 +14,6 @@ class BackendConnection(BaseModel):
     base_url: str = Field(..., description="Backend API base URL")
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     last_synced_at: str | None = None
+
+
+__all__ = ["BackendConnection"]

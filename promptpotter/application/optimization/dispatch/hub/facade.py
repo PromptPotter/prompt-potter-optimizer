@@ -116,3 +116,6 @@ class DispatchHub:
             if name in INJECTIONS:
                 out[name] = DispatchHub.render(name, bundle)
         return out
+
+
+__all__ = ["DispatchHub", "validate_template"]

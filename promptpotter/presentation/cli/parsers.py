@@ -392,3 +392,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+__all__ = ["build_parser"]

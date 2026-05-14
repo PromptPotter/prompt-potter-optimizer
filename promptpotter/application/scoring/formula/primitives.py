@@ -17,3 +17,6 @@ def extract_item_label(c: Any) -> str:
     if isinstance(c, dict):
         return str(c.get("candidate", c))
     return c[0] if isinstance(c, (list, tuple)) else str(c)
+
+
+__all__ = ["extract_item_label"]

@@ -153,3 +153,6 @@ async def generate_or_load_candidates(
     )
 
     return candidates, yield_stats
+
+
+__all__ = ["generate_or_load_candidates"]

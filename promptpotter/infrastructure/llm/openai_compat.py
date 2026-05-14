@@ -172,3 +172,6 @@ class OpenAICompatibleClient(LLMClientBase):
         return try_groq_json_validate_repair(
             exc, request_params, self._provider_name, response_model
         )
+
+
+__all__ = ["OpenAICompatibleClient"]

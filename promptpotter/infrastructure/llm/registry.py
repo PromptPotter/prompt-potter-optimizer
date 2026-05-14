@@ -109,3 +109,6 @@ def get_llm_client(provider: str) -> LLMClientBase:
         valid = ", ".join(sorted(_PROVIDER_FACTORIES))
         raise ValueError(f"Unknown LLM provider: {provider!r}. Valid: {valid}.")
     return factory()
+
+
+__all__ = ["ProviderSpec", "get_llm_client"]

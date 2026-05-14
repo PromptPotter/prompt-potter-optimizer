@@ -76,3 +76,6 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
         },
         human=result.note,
     )
+
+
+__all__ = ["cmd_compare"]

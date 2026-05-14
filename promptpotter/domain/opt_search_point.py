@@ -436,3 +436,17 @@ def group_diff_keys(
         prefix = k.split(".", 1)[0]
         groups[prefix if prefix in groups else ""].append(k)
     return [(sname, sorted(keys)) for sname, keys in groups.items() if keys]
+
+
+__all__ = [
+    "EVIDENCE_GROUNDING_FIELDS",
+    "EvidenceGrounding",
+    "FewShotExample",
+    "IndividualLineage",
+    "OptSearchPoint",
+    "PromptTemplate",
+    "WoundChannels",
+    "build_candidate_flat",
+    "flatten_sp_summary",
+    "group_diff_keys",
+]

@@ -105,3 +105,13 @@ class RoundDiagnostics:
 
     # Probe-round footprint (when last round was a probe; else None)
     probe_outcome: ProbeOutcome | None = None
+
+
+__all__ = [
+    "EvolutionRow",
+    "NearMiss",
+    "ProbeOutcome",
+    "RoundDiagnostics",
+    "SampleDiag",
+    "TrajectoryClass",
+]

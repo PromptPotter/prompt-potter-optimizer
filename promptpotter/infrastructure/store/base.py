@@ -163,3 +163,16 @@ class EntityStore:
         data = read_json(path)
         data.update(updates)
         write_json(path, data)
+
+
+__all__ = [
+    "EntityStore",
+    "append_jsonl",
+    "ensure_parent_dir",
+    "read_json",
+    "read_json_optional",
+    "read_text_optional",
+    "validate_path_component",
+    "write_json",
+    "write_text",
+]

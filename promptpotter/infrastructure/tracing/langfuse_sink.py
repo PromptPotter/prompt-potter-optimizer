@@ -437,3 +437,6 @@ class LangfuseSink:
 
         self._persist()
         return query_to_item_id
+
+
+__all__ = ["LangfuseSink"]

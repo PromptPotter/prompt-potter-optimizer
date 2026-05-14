@@ -174,3 +174,12 @@ def _build_divergence_hint() -> str:
 
 
 _DIVERGENCE_HINT = _build_divergence_hint()
+
+
+__all__ = [
+    "CommandResult",
+    "get_verbose",
+    "init_services_cli",
+    "log_startup_summary",
+    "set_verbose",
+]

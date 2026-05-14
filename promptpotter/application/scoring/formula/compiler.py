@@ -174,3 +174,6 @@ def split_scoring_block(
     if isinstance(block, str) and block:
         return ScoringSpec(block, None, auto_scorer_id(block))
     return ScoringSpec(None, None, DEFAULT_SCORER_ID)
+
+
+__all__ = ["auto_scorer_id", "compile_scorer", "split_scoring_block", "validate_ast"]

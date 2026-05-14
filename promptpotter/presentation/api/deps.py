@@ -26,3 +26,6 @@ def read_text_or_404(path: Path, label: str) -> str:
     if not path.exists():
         raise HTTPException(404, f"{label} not found at {path.name}")
     return path.read_text(encoding="utf-8")
+
+
+__all__ = ["StoreDep", "get_backend_or_404", "read_text_or_404"]

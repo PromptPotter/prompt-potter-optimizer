@@ -301,3 +301,6 @@ def _finalize_run(
             stop_reason=stop_reason,
             best_round=cycle_result.best_round,
         )
+
+
+__all__ = ["run_optimization"]

@@ -65,3 +65,6 @@ class SessionStore:
         data.update(updates)
         data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(path, data)
+
+
+__all__ = ["SessionStore"]

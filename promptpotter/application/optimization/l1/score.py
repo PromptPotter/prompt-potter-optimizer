@@ -613,3 +613,14 @@ async def l1_score(
         l1_n_duplicate=yield_stats.l1_n_duplicate,
     )
     return round_result, best_osp
+
+
+__all__ = [
+    "CandidateOutcome",
+    "CandidateRunResult",
+    "SignalEffect",
+    "decode_signal_effect",
+    "l1_score",
+    "score_one_candidate",
+    "score_population",
+]

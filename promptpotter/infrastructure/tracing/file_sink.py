@@ -436,3 +436,6 @@ class FileSink:
                 "best_round": event.best_round,
             }
         )
+
+
+__all__ = ["FileSink"]

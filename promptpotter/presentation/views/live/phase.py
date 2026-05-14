@@ -176,3 +176,11 @@ def render_patience_status(improved: bool, l1_stall_count: int, l1_patience: int
             )
         )
     return "\n".join(lines)
+
+
+__all__ = [
+    "fmt_elapsed",
+    "render_patience_status",
+    "render_progress_table",
+    "render_round_stats",
+]

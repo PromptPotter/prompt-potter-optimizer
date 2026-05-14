@@ -48,3 +48,6 @@ def scan_ledger_max_round_complete(ledger_path: Path) -> int:
     except OSError:
         return -1
     return max_complete
+
+
+__all__ = ["scan_ledger_max_round_complete"]
