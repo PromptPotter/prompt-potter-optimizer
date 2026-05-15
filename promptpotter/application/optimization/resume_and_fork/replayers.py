@@ -168,13 +168,20 @@ _POBB_REPLAY_TOLERANCE = 0.03
 def _replay_elimination_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    """PoBB gate under rescored paired scores; tolerant of MC noise."""
+    """PoBB gate under rescored paired scores; tolerant of MC noise.
+
+    Records minted after the δ-aware ε-scaling landed carry
+    ``effective_epsilon`` — the threshold the live check actually
+    applied. Older records carry only ``epsilon``; falling back to that
+    field replays them at the original (unscaled) threshold, which is
+    the correct behaviour for pre-feature decisions.
+    """
     snap = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if snap is None:
         return False
     candidate_id, snapshot = snap
     fresh = float(snapshot.get(candidate_id, 1.0))
-    eps = float(inputs_ref["epsilon"])
+    eps = float(inputs_ref.get("effective_epsilon", inputs_ref["epsilon"]))
     recorded = inputs_ref.get("recorded_p_best")
     if recorded is not None and abs(fresh - float(recorded)) < _POBB_REPLAY_TOLERANCE:
         return pobb_should_stop(float(recorded), eps)

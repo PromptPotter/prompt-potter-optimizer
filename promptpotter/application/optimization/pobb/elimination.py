@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -352,12 +352,23 @@ class PoBBSnapshot:
 
 @dataclass(frozen=True)
 class PoBBConfig:
-    """Bundled PoBB tuning knobs — passed through l1_score → score_population → PoBBCheck."""
+    """Bundled PoBB tuning knobs — passed through l1_score → score_population → PoBBCheck.
+
+    ``predictable_tail_*`` knobs scale ``epsilon`` upward as the Rasch
+    sorter exhausts diagnostic samples: when the remaining samples for a
+    candidate are all high-|δ| (predictable from priors — either always-
+    hit or always-miss), the loser-elimination threshold loosens because
+    no further information is coming. Off-by-default behaviour when no
+    deltas are supplied (``predictable_tail_fraction = 0``) leaves
+    ``ε_eff = epsilon``.
+    """
 
     n_min: int = 6
     epsilon: float = 0.05
     lock_in: float = 0.95
     lock_in_n_min: int = 8
+    predictable_tail_delta: float = 1.0
+    predictable_tail_boost: float = 3.0
 
 
 class PoBBCheck:
@@ -393,6 +404,8 @@ class PoBBCheck:
         self.epsilon = config.epsilon
         self.lock_in = config.lock_in
         self.lock_in_n_min = config.lock_in_n_min
+        self.predictable_tail_delta = config.predictable_tail_delta
+        self.predictable_tail_boost = config.predictable_tail_boost
         self.n_samples = n_samples
         self.round_num = int(round_num)
         # Sample-keyed prior fitness — cid → sample_id (str) → fitness.
@@ -403,6 +416,16 @@ class PoBBCheck:
         self._current_id: str = ""
         self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
         self._backfill_fn = backfill_fn
+        # Rasch δ values per sample_id (str-keyed), refreshed per candidate
+        # via ``set_deltas``; empty when the sorter had nothing to fit on
+        # (first candidate of an empty-prior round). Drives ε-scaling in
+        # ``check()`` — see ``predictable_tail_fraction`` below.
+        self._sample_deltas: dict[str, float] = {}
+        # Full hard-sample-sorted order for the active candidate, set per
+        # candidate in lockstep with ``_sample_deltas``. ``check()`` uses
+        # ``sample_order[len(results):]`` to scope the "remaining tail" —
+        # samples the candidate hasn't been scored on yet.
+        self._sample_order: list[str] = []
 
     def set_current(
         self,
@@ -412,6 +435,28 @@ class PoBBCheck:
         """Bind the candidate-under-evaluation; reset per-candidate snapshot state."""
         self._current_id = candidate_id
         self._on_snapshot = on_snapshot
+
+    def set_deltas(
+        self,
+        sample_deltas: Mapping[str, float] | None,
+        sample_order: Sequence[int | str] | None = None,
+    ) -> None:
+        """Bind per-sample Rasch δ + the candidate's hard-first sample order.
+
+        Called by ``score_population`` after each Rasch refit (once per
+        candidate, since the artifact updates as priors accumulate).
+        ``check()`` uses the tail of ``sample_order`` past the current
+        ``len(results)`` to scope which samples are "remaining" and
+        consults ``sample_deltas`` to count predictable-tail samples.
+
+        Both arguments are optional: a missing δ map disables the
+        ε-scaling branch entirely (``ε_eff = epsilon``); a missing
+        ``sample_order`` falls back to no-scoping (also disables
+        scaling). The two are paired by design — ``check()`` cannot
+        meaningfully count remaining samples without both.
+        """
+        self._sample_deltas = {str(k): float(v) for k, v in (sample_deltas or {}).items()}
+        self._sample_order = [str(sid) for sid in (sample_order or [])]
 
     def register_completed(
         self,
@@ -554,7 +599,18 @@ class PoBBCheck:
                 n_total_candidates,
             )
 
-        if not pobb_should_stop(p_best_current, self.epsilon):
+        # δ-aware ε scaling — when the Rasch sorter has run all the
+        # diagnostic samples to the front, the tail is by construction
+        # predictable (large |θ_c − δ_s|, p_hit near 0 or 1), and no
+        # further information is coming. Loosen ε proportionally so
+        # ε_eff = ε × (1 + boost × predictable_tail_fraction). Off-by-
+        # default fallback: empty deltas / order ⇒ fraction=0 ⇒ ε_eff=ε.
+        predictable_fraction = self._predictable_tail_fraction(n)
+        effective_epsilon = self.epsilon * (
+            1.0 + self.predictable_tail_boost * predictable_fraction
+        )
+
+        if not pobb_should_stop(p_best_current, effective_epsilon):
             return None
 
         return _eliminate(
@@ -565,12 +621,33 @@ class PoBBCheck:
                 "n_priors": len(paired_priors),
                 "p_best": float(p_best_current),
                 "epsilon": float(self.epsilon),
+                "effective_epsilon": float(effective_epsilon),
+                "predictable_tail_fraction": float(predictable_fraction),
                 "p_best_snapshot": snapshot,
                 "leader_id": leader_id,
             },
             candidate_idx,
             n_total_candidates,
         )
+
+    def _predictable_tail_fraction(self, scored_so_far: int) -> float:
+        """Fraction of the candidate's remaining samples with |δ| ≥ threshold.
+
+        Returns 0.0 when deltas / order weren't set (the ε-scaling is then a
+        no-op), or when there is no remaining tail (last sample of the
+        budget). The candidate has been scored on ``sample_order[:scored_so_far]``
+        already, so the tail starts at index ``scored_so_far``.
+        """
+        if not self._sample_order or not self._sample_deltas:
+            return 0.0
+        remaining = self._sample_order[scored_so_far:]
+        if not remaining:
+            return 0.0
+        threshold = self.predictable_tail_delta
+        n_predictable = sum(
+            1 for sid in remaining if abs(self._sample_deltas.get(sid, 0.0)) >= threshold
+        )
+        return n_predictable / len(remaining)
 
 
 def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:

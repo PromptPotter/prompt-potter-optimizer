@@ -213,12 +213,19 @@ def decode_signal_effect(
     prior_histories_snapshot = elim_check.snapshot_priors(candidate_sample_ids)
     elimination_decision: tuple[dict, dict] | None = None
     if elimination_stopped and signal.check_name == elim_check.name:
+        # effective_epsilon = ε × (1 + boost × predictable_tail_fraction).
+        # Falls back to ``epsilon`` when the check fired without
+        # δ-scaling info (older records or sorter-empty rounds).
+        eff_eps = float(cr.get("effective_epsilon", elim_check.epsilon))
+        pred_frac = float(cr.get("predictable_tail_fraction", 0.0))
         elimination_decision = (
             {
                 "candidate_id": candidate_id,
                 "prior_candidate_ids": priors_at_test,
                 "queries_scored": queries_scored,
                 "epsilon": float(elim_check.epsilon),
+                "effective_epsilon": eff_eps,
+                "predictable_tail_fraction": pred_frac,
                 "n_min": int(elim_check.n_min),
                 "round_num": round_num,
                 "recorded_p_best": recorded_p_best,
@@ -574,6 +581,12 @@ async def score_population(
             callbacks.on_sample_order_preview(
                 round_num, idx, n, preview, n_priors=len(elim_check.priors_by_sample)
             )
+            # Hand δ + the candidate's hard-first order to PoBBCheck so
+            # ``check()`` can scale ε on the predictable-tail fraction.
+            # See ``PoBBCheck.set_deltas`` + ``_predictable_tail_fraction``.
+            elim_check.set_deltas(delta, sample_order)
+        else:
+            elim_check.set_deltas(None, None)
 
         cr_result = await score_one_candidate(
             idx=idx,
