@@ -483,6 +483,13 @@ async def score_population(
         Used by PoBBCheck to fill in missing (prior, sample) pairs so paired
         comparison can run on identical sample sets. ``degradation_checks=None``
         so the backfill cannot recursively trip PoBB on its own measurements.
+
+        Per-sample callbacks ride the same callback objects the main loop
+        uses, with ``candidate_idx=-1`` as the "this is a backfill row"
+        sentinel so the display layer can prefix the row distinctively and
+        skip the main-loop counter. Without this the operator sees only the
+        opaque "deprecated retry: resuming" stderr lines while the backfill
+        burns LLM credits in silence.
         """
         bf_results, _bf_scores, _was_cached, _signal = await score_search_point(
             sp,
@@ -494,6 +501,8 @@ async def score_population(
             n_total_candidates=0,
             axes=cycle.axes,
             l1_diversity=0.0,
+            on_sample_scored=partial(callbacks.on_sample_scored, -1, 0),
+            on_sample_starting=partial(callbacks.on_sample_started, -1, 0),
         )
         return bf_results
 
@@ -610,6 +619,28 @@ async def score_population(
     return all_candidate_results, candidate_scores, escalation_signal
 
 
+def is_leader_eligible(cs: CandidateScore) -> bool:
+    """Whether *cs* may be elected the round leader.
+
+    Two disjoint disqualifications:
+
+    (a) Escalation-aborted without a PoBB stop — a true mid-run failure
+        outside the measured-comparison surface.
+    (b) Any candidate whose run halted on a degradation or
+        ``scoring_error_abort`` check (``degradation_context`` is
+        populated only by those two check names). Their accuracy is
+        computed over a partial valid subset and can inflate above
+        origin on a 6/20 run — paired PoBB doesn't help because the
+        candidate never produced comparable measurements.
+
+    PoBB-elimination is NOT a disqualification — those candidates went
+    through fair paired comparison on real samples and stay in the pool.
+    """
+    if cs.escalation_aborted and not cs.elimination_stopped:
+        return False
+    return not cs.degradation_context
+
+
 async def l1_score(
     cycle: Cycle,
     candidates: list[CandidateProposal],
@@ -656,11 +687,7 @@ async def l1_score(
         l1_diversity=yield_stats.l1_yield,
     )
 
-    aborted_ids = {
-        cs.candidate_id
-        for cs in candidate_scores
-        if cs.escalation_aborted and not cs.elimination_stopped
-    }
+    aborted_ids = {cs.candidate_id for cs in candidate_scores if not is_leader_eligible(cs)}
     scored = [
         ind
         for ind in osp_population

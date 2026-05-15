@@ -8,6 +8,7 @@ during network blips); setup + post-retry failures log at WARNING.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import uuid
 from typing import Any
@@ -18,6 +19,13 @@ from promptpotter.config.settings import settings
 from promptpotter.shared.errors import graceful
 
 logger = logging.getLogger(__name__)
+
+# Upper bound on Langfuse flush during teardown. The SDK's flush blocks on
+# an internal queue.join() that drains over HTTPS; on Ctrl+C the first
+# signal lands inside ``waiter.acquire()`` (uninterruptible until a second
+# SIGINT). Bounding the flush in a daemon thread keeps the shutdown path
+# responsive — drop spans on the floor before deadlocking the operator.
+FLUSH_TIMEOUT_SEC: float = 5.0
 
 
 class LangfuseLogger:
@@ -420,9 +428,30 @@ class LangfuseLogger:
             return False
 
     def flush(self) -> None:
-        if self.enabled and self.client:
-            with graceful("Failed to flush Langfuse events"):
-                self.client.flush()
+        if not (self.enabled and self.client):
+            return
+        # Daemon thread so a still-running flush can't keep the
+        # interpreter alive past the operator's Ctrl+C, and so the
+        # bounded ``Event.wait`` below can't be defeated by an implicit
+        # ``ThreadPoolExecutor.__exit__`` wait. Pending spans are the
+        # acceptable loss when the SDK's queue won't drain in time.
+        done = threading.Event()
+        client = self.client  # narrow Any|None for the closure capture
+
+        def _flush() -> None:
+            try:
+                with graceful("Failed to flush Langfuse events"):
+                    client.flush()
+            finally:
+                done.set()
+
+        threading.Thread(target=_flush, name="langfuse-flush", daemon=True).start()
+        if not done.wait(timeout=FLUSH_TIMEOUT_SEC):
+            logger.warning(
+                "Langfuse flush exceeded %.0fs — dropping pending spans to "
+                "keep the shutdown path responsive",
+                FLUSH_TIMEOUT_SEC,
+            )
 
 
 __all__ = ["LangfuseLogger"]

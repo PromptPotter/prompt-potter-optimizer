@@ -279,8 +279,18 @@ class LiveDisplay(DerivedView):
     def on_sample_scored(
         self, cand_idx: int, n_cands: int, result: dict, sample_idx: int, n_samples: int
     ) -> None:
-        self.sample_counter += 1
-        prefix = f"  [{self.sample_counter:>3d}] "
+        # ``cand_idx < 0`` is the paired-PoBB backfill sentinel — these
+        # measurements are on the leader, not the current candidate, so
+        # they ride a distinct prefix and don't advance the main-loop
+        # counter. Without this branch the only signal an operator gets
+        # during a 14-sample backfill was the opaque "deprecated retry:
+        # resuming" stderr line; here each backfill measurement lands
+        # as its own row so the LLM spend is visible.
+        if cand_idx < 0:
+            prefix = "  ↻ bf "
+        else:
+            self.sample_counter += 1
+            prefix = f"  [{self.sample_counter:>3d}] "
         self._write(
             fmt_query_result(
                 result,
@@ -402,8 +412,12 @@ class LiveDisplay(DerivedView):
         # Mid-round leader scoreboard — one tight line so the operator can read
         # "is anything beating origin yet" without scrolling through 100+
         # query lines to find the round-summary box. Skip invalid candidates
-        # (no comparable accuracy).
-        if summary.status != "invalid":
+        # and any candidate whose run halted on a degradation/scoring-error
+        # check — partial-measurement accuracy on the valid subset can inflate
+        # above origin on a 6/20 abort. Mirrors the leader-pick exclusion in
+        # ``l1/score.py`` so the live ★ leader pointer can't crown a
+        # candidate the round-summary would never elect.
+        if summary.status != "invalid" and not scores.get("degradation_context"):
             acc = scores.get("accuracy")
             if isinstance(acc, int | float):
                 self._write(self._fmt_round_leader(label, float(acc), origin_acc))

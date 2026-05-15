@@ -65,12 +65,13 @@ from promptpotter.application.optimization.validators.l2_l3 import (
 )
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint, WoundChannels
-from promptpotter.domain.results import CandidateProposal
+from promptpotter.domain.results import CandidateProposal, CandidateScore
 from promptpotter.domain.run_records import ForkPayload, ForkTrigger, ResumeCheckpointKind
 from promptpotter.domain.search_point import TaskDecomposition
 
 scipy = pytest.importorskip("scipy")  # transitively required by other math helpers
 
+from promptpotter.application.optimization.l1.score import is_leader_eligible  # noqa: E402
 from promptpotter.application.optimization.pobb.elimination import (  # noqa: E402
     PoBBCheck,
     PoBBConfig,
@@ -469,6 +470,67 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
             "after backfill exposes the leader's true hard-sample performance, the "
             f"candidate must clear ε=0.05 (got p_best={sig.check_result['p_best']:.3f})"
         )
+
+
+def _cs(
+    *,
+    candidate_id: str,
+    accuracy: float,
+    escalation_aborted: bool = False,
+    elimination_stopped: bool = False,
+    degradation_context: dict | None = None,
+) -> CandidateScore:
+    """Minimal CandidateScore for leader-eligibility tests."""
+    return CandidateScore(
+        candidate_id=candidate_id,
+        label=candidate_id,
+        changes_description="",
+        accuracy=accuracy,
+        composite_fitness=accuracy,
+        hits=int(accuracy * 20),
+        total=20,
+        evaluators={},
+        escalation_aborted=escalation_aborted,
+        elimination_stopped=elimination_stopped,
+        degradation_context=degradation_context or {},
+    )
+
+
+def test_leader_eligibility_excludes_fatal_degradation_and_keeps_pobb_eliminated():
+    """Winner-selection must not crown a candidate whose run halted on fatal degradation.
+
+    The AIME cycle pathology: C1.3 hit a fatal ``llm_only:empty_response`` at
+    q6/20, leaving 5 HIT + 1 DEPR. Accuracy on the valid subset (5/5 or 5/6)
+    sits well above origin, so the old ``escalation_aborted AND NOT
+    elimination_stopped`` filter let it through — fatal degradation also
+    flips ``elimination_stopped`` so the second leg cancelled the first.
+    The disqualifier must be ``degradation_context`` (set only by degradation
+    + scoring_error_abort checks). PoBB-eliminated candidates stay eligible —
+    they went through fair paired comparison.
+    """
+    fatal = _cs(
+        candidate_id="C1.3",
+        accuracy=0.8333,
+        escalation_aborted=True,
+        elimination_stopped=True,
+        degradation_context={"fatal": True, "dominant_warning": "llm_only:empty_response"},
+    )
+    pobb_eliminated = _cs(
+        candidate_id="C1.2",
+        accuracy=0.40,
+        escalation_aborted=True,
+        elimination_stopped=True,
+        degradation_context={},  # PoBB elimination doesn't populate degradation_context
+    )
+    clean_loser = _cs(candidate_id="C1.4", accuracy=0.45)
+
+    assert not is_leader_eligible(fatal), (
+        "fatal degradation halt must disqualify regardless of partial accuracy"
+    )
+    assert is_leader_eligible(pobb_eliminated), (
+        "PoBB-eliminated candidate is a measured comparison — keep it eligible"
+    )
+    assert is_leader_eligible(clean_loser), "fully-scored low-accuracy candidate is eligible"
 
 
 # ===========================================================================

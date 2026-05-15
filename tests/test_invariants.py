@@ -452,6 +452,60 @@ def test_no_direct_artifact_writes_outside_stores() -> None:
     )
 
 
+def test_score_search_point_callers_explicit_per_sample_visibility() -> None:
+    """Every ``score_search_point()`` call must explicitly pass ``on_sample_scored``.
+
+    Class of bug guarded: backend runs ``measure_sample`` for many seconds
+    (sometimes minutes, across many samples) while the CLI shows nothing.
+    The operator sees silence, panics, kills the process — and the LLM
+    credits already burned are real money. The function's signature now
+    declares these keywords without defaults (mypy catches the omission at
+    the call site as you type); this test backs it up structurally so the
+    invariant survives a future signature drift.
+
+    Two real instances caught the day this test was added:
+
+    * ``_pobb_backfill`` (``application/optimization/l1/score.py``) silently
+      ran 5+ deprecated-cache backfill measurements per round.
+    * ``elevate_to_decisive`` (``application/optimization/pobb/elevation.py``)
+      silently ran every top-up sample.
+
+    Both are wired now. ``elevation.py`` passes ``on_sample_scored=None``
+    deliberately (the ``compare`` CLI verb has its own per-topup stream),
+    with the reasoning inline. Future ``=None`` call sites are allowed
+    — the keyword being PRESENT is what we enforce — but the explicit
+    ``None`` is grep-able and code review can audit the reasoning.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    offenders: list[str] = []
+    for src_path in (repo_root / "promptpotter").rglob("*.py"):
+        try:
+            tree = ast.parse(src_path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover — defensive against partial edits
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if isinstance(fn, ast.Attribute):
+                name = fn.attr
+            elif isinstance(fn, ast.Name):
+                name = fn.id
+            else:
+                continue
+            if name != "score_search_point":
+                continue
+            kwargs = {kw.arg for kw in node.keywords if kw.arg is not None}
+            if "on_sample_scored" not in kwargs:
+                rel = src_path.relative_to(repo_root)
+                offenders.append(
+                    f"{rel}:{node.lineno}: score_search_point() must pass "
+                    "on_sample_scored=... explicitly (wire a callback, or "
+                    "pass None with a reasoning comment for intentional silence)"
+                )
+    assert not offenders, "Silent measure_sample regressions detected:\n" + "\n".join(offenders)
+
+
 def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
     """FileSink's Langfuse shadow must be wire-format compatible: camelCase
     fields on observations/scores, and nested spans carry parentObservationId.

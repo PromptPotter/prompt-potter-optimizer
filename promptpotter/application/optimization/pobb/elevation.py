@@ -298,8 +298,21 @@ async def elevate_to_decisive(
         logger.info("elevate: arm=%s topup sample_id=%d", chosen, sample.id)
 
         try:
+            # ``on_sample_scored=None`` is deliberate, not an omission — the
+            # ``elevate_to_decisive`` flow is driven by ``promptpotter compare``
+            # (a one-shot CLI verb outside the optimize loop). Its operator
+            # signal is the per-topup ``stream`` line below (line 317+) plus
+            # the ``logger.info("elevate: arm=… topup sample_id=…")`` line
+            # above. The required-keyword guardrail on ``score_search_point``
+            # forces this site to declare its intent explicitly so the
+            # silence is documented, not accidental.
             results, _scores, _flag, _esc = await score_search_point(
-                arms[chosen], [sample], session, label="elevate"
+                arms[chosen],
+                [sample],
+                session,
+                label="elevate",
+                on_sample_scored=None,
+                on_sample_starting=None,
             )
         except (KeyboardInterrupt, asyncio.CancelledError):
             return ElevationResult(

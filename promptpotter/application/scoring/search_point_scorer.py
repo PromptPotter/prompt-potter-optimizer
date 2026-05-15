@@ -326,6 +326,9 @@ async def _run_query_loop(
     deprecated_samples: dict[str, QueryMeasurement],
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
     on_sample_starting: Callable[[str, int, int], None] | None,
+    # ``on_sample_scored`` is required (no default) so every call site
+    # declares its per-sample visibility intent. See ``score_search_point``
+    # docstring for the bug class this guards.
     degradation_checks: list[StopRule] | None,
     candidate_idx: int,
     n_total_candidates: int,
@@ -427,8 +430,8 @@ async def score_search_point(
     session: Session,
     *,
     label: str = "Score",
-    on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None = None,
-    on_sample_starting: Callable[[str, int, int], None] | None = None,
+    on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
+    on_sample_starting: Callable[[str, int, int], None] | None,
     source: str = "",
     degradation_checks: list[StopRule] | None = None,
     candidate_idx: int = 0,
@@ -437,7 +440,18 @@ async def score_search_point(
     l1_diversity: float = 1.0,
     sample_order: list[int] | None = None,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], bool, EscalationSignal | None]:
-    """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe)."""
+    """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe).
+
+    Per-sample callbacks ``on_sample_scored`` and ``on_sample_starting`` are
+    **required keywords without a default** — every call site must declare its
+    visibility choice (wire a callback, or pass ``None`` with documented
+    intent). The class of bug being guarded: a backend running
+    ``measure_sample`` for tens of seconds while the CLI stays silent,
+    burning LLM credits with the operator unable to tell the front-end
+    apart from a frozen process. ``tests/test_invariants.py::
+    test_score_search_point_callers_explicit_per_sample_visibility``
+    statically enforces the same invariant.
+    """
     store = session.store
     backend_id = session.backend_id
     pipeline_schema = session.pipeline_schema
