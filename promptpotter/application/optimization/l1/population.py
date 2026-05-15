@@ -157,12 +157,26 @@ def build_score_report(
     )
 
 
-def pobb_decision_data(candidate_score: dict) -> dict[str, Any]:
-    """Shared archival data for PoBB elimination + leader-lock decisions."""
+def pobb_decision_data(
+    candidate_score: dict,
+    *,
+    candidate_sample_ids: list[str] | None = None,
+    prior_histories: dict[str, dict[str, float]] | None = None,
+) -> dict[str, Any]:
+    """Shared archival data for PoBB elimination + leader-lock decisions.
+
+    ``candidate_sample_ids`` + ``prior_histories`` are the paired-PoBB
+    snapshot at decision time: the ordered sample IDs the candidate had
+    measured, and each prior's fitness map restricted to those samples.
+    Replay reconstructs the paired vectors directly from these without
+    needing to crawl prior rounds or backfill the archive.
+    """
     return {
         "p_best": float(candidate_score.get("p_best", 0.0)),
         "leader_id": str(candidate_score.get("leader_id", "")),
         "p_best_snapshot": dict(candidate_score.get("p_best_snapshot") or {}),
+        "candidate_sample_ids": list(candidate_sample_ids or []),
+        "prior_histories": dict(prior_histories or {}),
     }
 
 

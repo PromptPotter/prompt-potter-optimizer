@@ -60,6 +60,7 @@ from promptpotter.shared.statistics import proportion_test
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.domain.search_point import JobSearchPoint
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +202,15 @@ def decode_signal_effect(
 
     queries_scored = int(cr.get("queries_scored", len(results)))
     recorded_p_best = float(cr.get("p_best", 0.0))
+    # Paired-PoBB decision snapshot — the sample IDs in play at decision
+    # time + each prior's fitness on exactly those samples. Replay reads
+    # these directly (no cross-round crawl, no backfill replay).
+    candidate_sample_ids = [
+        str(r.get("sample_id", ""))
+        for r in results[:queries_scored]
+        if r.get("sample_id") is not None
+    ]
+    prior_histories_snapshot = elim_check.snapshot_priors(candidate_sample_ids)
     elimination_decision: tuple[dict, dict] | None = None
     if elimination_stopped and signal.check_name == elim_check.name:
         elimination_decision = (
@@ -213,7 +223,11 @@ def decode_signal_effect(
                 "round_num": round_num,
                 "recorded_p_best": recorded_p_best,
             },
-            pobb_decision_data(cr),
+            pobb_decision_data(
+                cr,
+                candidate_sample_ids=candidate_sample_ids,
+                prior_histories=prior_histories_snapshot,
+            ),
         )
     leader_lock_decision: tuple[dict, dict] | None = None
     if leader_locked:
@@ -227,7 +241,11 @@ def decode_signal_effect(
                 "round_num": round_num,
                 "recorded_p_best": recorded_p_best,
             },
-            pobb_decision_data(cr),
+            pobb_decision_data(
+                cr,
+                candidate_sample_ids=candidate_sample_ids,
+                prior_histories=prior_histories_snapshot,
+            ),
         )
 
     return SignalEffect(
@@ -291,10 +309,20 @@ async def score_one_candidate(
             ),
         )
 
+    candidate_sp = osp_c.to_job_search_point(
+        base_pipeline_params=merged_pp, schema=cycle.session.pipeline_schema
+    )
+    # Backfill paired priors on the candidate's upcoming sample order BEFORE
+    # eval starts. This is what restores PoBB's iid premise: every prior in
+    # the pool gets measured on the same samples this candidate is about to
+    # see (cache-first via per-sample archive; fresh LLM call on miss). See
+    # docs/concepts/paired-sample-pobb.md for the full mechanism.
+    if sample_order:
+        samples_by_id = {str(s.id): s for s in dataset}
+        await elim_check.backfill_priors(list(sample_order), samples_by_id)
+
     results, scores, was_cached, signal = await score_search_point(
-        osp_c.to_job_search_point(
-            base_pipeline_params=merged_pp, schema=cycle.session.pipeline_schema
-        ),
+        candidate_sp,
         dataset,
         cycle.session,
         label=f"candidate_{idx}",
@@ -310,9 +338,7 @@ async def score_one_candidate(
 
     # Path 2 — full-run cache replay.
     if was_cached:
-        elim_check.register_completed(
-            [r.get("fitness", 0.0) for r in results], candidate_id=osp_c.lineage.id
-        )
+        elim_check.register_completed(results, candidate_id=osp_c.lineage.id, sp=candidate_sp)
         return CandidateRunResult(
             outcome=CandidateOutcome.REPLAYED_FROM_CACHE,
             results=results,
@@ -343,9 +369,7 @@ async def score_one_candidate(
     )
     # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
     if len(results) == len(dataset) and not effect.aborted:
-        elim_check.register_completed(
-            [r.get("fitness", 0.0) for r in results], candidate_id=osp_c.lineage.id
-        )
+        elim_check.register_completed(results, candidate_id=osp_c.lineage.id, sp=candidate_sp)
 
     report = build_score_report(
         osp_c,
@@ -451,20 +475,47 @@ async def score_population(
     all_candidate_results: dict[str, list[QueryMeasurement]] = {}
     candidate_scores: list[CandidateScore] = []
     escalation_signal: EscalationSignal | None = None
-    elim_check = PoBBCheck(pobb_config, n_samples=len(dataset), round_num=round_num)
+
+    async def _pobb_backfill(sp: JobSearchPoint, samples: list) -> list[QueryMeasurement]:
+        """Score *sp* on *samples* and return the measurements.
+
+        Used by PoBBCheck to fill in missing (prior, sample) pairs so paired
+        comparison can run on identical sample sets. ``degradation_checks=None``
+        so the backfill cannot recursively trip PoBB on its own measurements.
+        """
+        bf_results, _bf_scores, _was_cached, _signal = await score_search_point(
+            sp,
+            samples,
+            cycle.session,
+            label="pobb_backfill",
+            degradation_checks=None,
+            candidate_idx=-1,
+            n_total_candidates=0,
+            axes=cycle.axes,
+            l1_diversity=0.0,
+        )
+        return bf_results
+
+    elim_check = PoBBCheck(
+        pobb_config,
+        n_samples=len(dataset),
+        round_num=round_num,
+        backfill_fn=_pobb_backfill,
+    )
 
     # Seed PoBB priors so candidate #1 of every round has a comparator
     # to lose against. Without this, ``PoBBCheck.check()`` short-circuits
     # on empty priors and the mechanism never fires until candidate #2
     # — round 1 candidate #1 was un-eliminable. ``current_results`` is
     # the round's "best-so-far" per-sample fitness history (campaign
-    # origin in round 1, prior round winner in round 2+).
+    # origin in round 1, prior round winner in round 2+). The seed SP
+    # is ``tracking.current_sp`` so the leader is backfill-able on the
+    # candidate's hard samples when needed.
     seed_results = cycle.tracking.current_results
-    if seed_results:
-        seed_scores = [r.get("fitness", 0.0) for r in seed_results]
-        if seed_scores:
-            seed_id = f"R{cycle.rounds[-1].round}_winner" if cycle.rounds else "origin"
-            elim_check.register_completed(seed_scores, candidate_id=seed_id)
+    seed_sp = cycle.tracking.current_sp
+    if seed_results and seed_sp is not None:
+        seed_id = f"R{cycle.rounds[-1].round}_winner" if cycle.rounds else "origin"
+        elim_check.register_completed(seed_results, candidate_id=seed_id, sp=seed_sp)
 
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
@@ -511,7 +562,7 @@ async def score_population(
                 for sid in sample_order[: min(3, len(sample_order))]
             ]
             callbacks.on_sample_order_preview(
-                round_num, idx, n, preview, n_priors=len(elim_check.priors)
+                round_num, idx, n, preview, n_priors=len(elim_check.priors_by_sample)
             )
 
         cr_result = await score_one_candidate(

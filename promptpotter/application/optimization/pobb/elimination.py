@@ -20,7 +20,7 @@ posterior, MC argmax, stop when current's P(best) < ε.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -34,7 +34,11 @@ from promptpotter.shared.statistics import pobb_should_stop, posterior_best_prob
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.domain.search_point import JobSearchPoint
+
+    BackfillFn = Callable[[JobSearchPoint, list[Sample]], Awaitable[list[QueryMeasurement]]]
 
 __all__ = [
     "DegradationCheck",
@@ -313,21 +317,48 @@ class PoBBConfig:
 
 
 class PoBBCheck:
-    """Bayesian Posterior-of-Being-Best stop rule (Russo 2016)."""
+    """Bayesian Posterior-of-Being-Best stop rule (Russo 2016) — paired-sample.
+
+    Priors are stored sample-keyed (``priors_by_sample[cid][sample_id] →
+    fitness``) so that comparison against any candidate is always on the
+    same sample set. The hard-sample sorter intentionally violates iid
+    by reordering samples per candidate (hardest first for cheap
+    elimination of losers); paired comparison restores PoBB's statistical
+    validity by re-deriving the leader's posterior on whatever sample set
+    the candidate-under-test actually saw.
+
+    When the candidate has measured samples the leader has not, the
+    operator-injected ``backfill_fn`` scores the leader on those missing
+    samples (cache-first via the per-sample archive; fresh LLM call on
+    miss). The result is appended to the leader's sample-keyed history
+    before ``check()`` runs, so every PoBB comparison is over identical
+    sample IDs. See ``docs/concepts/paired-sample-pobb.md``.
+    """
 
     name = "elimination"
 
-    def __init__(self, config: PoBBConfig, *, n_samples: int, round_num: int = 0) -> None:
+    def __init__(
+        self,
+        config: PoBBConfig,
+        *,
+        n_samples: int,
+        round_num: int = 0,
+        backfill_fn: BackfillFn | None = None,
+    ) -> None:
         self.n_min = config.n_min
         self.epsilon = config.epsilon
         self.lock_in = config.lock_in
         self.lock_in_n_min = config.lock_in_n_min
         self.n_samples = n_samples
         self.round_num = int(round_num)
-        self.priors: dict[str, list[float]] = {}
+        # Sample-keyed prior fitness — cid → sample_id (str) → fitness.
+        self.priors_by_sample: dict[str, dict[str, float]] = {}
+        # Prior SearchPoints, used to backfill missing (prior, sample) pairs.
+        self.prior_sps: dict[str, JobSearchPoint] = {}
         self.prior_ids: list[str] = []
         self._current_id: str = ""
         self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
+        self._backfill_fn = backfill_fn
 
     def set_current(
         self,
@@ -338,26 +369,103 @@ class PoBBCheck:
         self._current_id = candidate_id
         self._on_snapshot = on_snapshot
 
-    def register_completed(self, scores: list[float], candidate_id: str = "") -> None:
-        """Add a completed candidate's score history to the priors pool."""
-        self.priors[candidate_id] = list(scores)
-        self.prior_ids.append(candidate_id)
+    def register_completed(
+        self,
+        results: list[QueryMeasurement],
+        *,
+        candidate_id: str,
+        sp: JobSearchPoint,
+    ) -> None:
+        """Add a completed candidate's per-sample fitness map to the priors pool.
+
+        ``sp`` is retained so missing (prior, sample) pairs can be backfilled
+        on demand when a future candidate touches samples this prior never saw.
+        """
+        scores_by_sample: dict[str, float] = {}
+        for r in results:
+            sid = r.get("sample_id")
+            if sid is None:
+                continue
+            scores_by_sample[str(sid)] = float(r.get("fitness", 0.0))
+        self.priors_by_sample[candidate_id] = scores_by_sample
+        self.prior_sps[candidate_id] = sp
+        if candidate_id not in self.prior_ids:
+            self.prior_ids.append(candidate_id)
+
+    async def backfill_priors(
+        self,
+        target_sample_ids: list[int | str],
+        samples_by_id: dict[str, Sample],
+    ) -> None:
+        """Ensure every prior has fitness on each target sample; score on miss.
+
+        Idempotent: priors that already cover ``target_sample_ids`` are
+        skipped. When ``backfill_fn`` is None (e.g. unit tests), this is
+        a no-op — paired ``check()`` will see incomplete priors and skip
+        them, which surfaces the gap rather than silently substituting 0.
+        """
+        if not self._backfill_fn or not target_sample_ids:
+            return
+        targets = [str(sid) for sid in target_sample_ids]
+        for cid in self.prior_ids:
+            existing = self.priors_by_sample[cid]
+            missing_sids = [sid for sid in targets if sid not in existing]
+            if not missing_sids:
+                continue
+            missing_samples = [samples_by_id[sid] for sid in missing_sids if sid in samples_by_id]
+            if not missing_samples:
+                continue
+            new_results = await self._backfill_fn(self.prior_sps[cid], missing_samples)
+            for r in new_results:
+                sid_new = r.get("sample_id")
+                if sid_new is None:
+                    continue
+                existing[str(sid_new)] = float(r.get("fitness", 0.0))
+
+    def snapshot_priors(self, sample_ids: list[int | str]) -> dict[str, dict[str, float]]:
+        """Return the per-prior fitness map over ``sample_ids``; for decision archival.
+
+        Only sample IDs the prior actually covers are emitted (the caller
+        is asking "what did we know at decision time?"); missing entries
+        are omitted rather than zero-filled.
+        """
+        keys = [str(sid) for sid in sample_ids]
+        out: dict[str, dict[str, float]] = {}
+        for cid in self.prior_ids:
+            prior_map = self.priors_by_sample.get(cid) or {}
+            out[cid] = {sid: prior_map[sid] for sid in keys if sid in prior_map}
+        return out
 
     def check(
         self, results: list[QueryMeasurement], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
-        if not self.priors:
+        if not self.priors_by_sample:
             return None
         n = len(results)
         if n < self.n_min:
             return None
 
-        scores = [r.get("fitness", 0.0) for r in results]
+        candidate_samples = [str(r.get("sample_id", "")) for r in results]
+        scores = [float(r.get("fitness", 0.0)) for r in results]
+
+        # Paired vectors — a prior is included only when it covers every
+        # sample the candidate has measured. ``backfill_priors`` is supposed
+        # to have closed any gaps before this fires; an incomplete prior
+        # here means backfill was skipped (no backfill_fn) or failed, in
+        # which case we exclude rather than silently 0-fill.
+        paired_priors: dict[str, list[float]] = {}
+        for cid in self.prior_ids:
+            prior_map = self.priors_by_sample[cid]
+            if all(sid in prior_map for sid in candidate_samples):
+                paired_priors[cid] = [prior_map[sid] for sid in candidate_samples]
+        if not paired_priors:
+            return None
+
         cid = self._current_id or "__current__"
-        histories: dict[str, list[float]] = {**self.priors, cid: scores}
+        histories: dict[str, list[float]] = {**paired_priors, cid: scores}
         snapshot = posterior_best_probabilities(
             histories,
-            rng=pobb_rng(self.round_num, cid, self.prior_ids, n),
+            rng=pobb_rng(self.round_num, cid, list(paired_priors.keys()), n),
         )
         snap = PoBBSnapshot(p_best=snapshot, current_id=cid, n_samples=n)
         if self._on_snapshot is not None:
@@ -380,7 +488,7 @@ class PoBBCheck:
                 {
                     "queries_scored": n,
                     "total_samples": self.n_samples,
-                    "n_priors": len(self.priors),
+                    "n_priors": len(paired_priors),
                     "p_best": float(p_best_current),
                     "lock_in": float(self.lock_in),
                     "lock_in_n_min": int(self.lock_in_n_min),
@@ -399,7 +507,7 @@ class PoBBCheck:
             {
                 "queries_scored": n,
                 "total_samples": self.n_samples,
-                "n_priors": len(self.priors),
+                "n_priors": len(paired_priors),
                 "p_best": float(p_best_current),
                 "epsilon": float(self.epsilon),
                 "p_best_snapshot": snapshot,

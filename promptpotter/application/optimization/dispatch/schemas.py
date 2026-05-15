@@ -162,7 +162,11 @@ class L1Variant(BaseModel):
     )
     target_axis: str = ""
     reasoning: str = ""
-    evidence_grounding: VariantEvidenceGrounding
+    # Optional at parse time so providers that omit it on a single variant
+    # don't crash the entire round — the ``evidence_grounding_present`` behavior
+    # check is the canonical enforcement point and flags missing/malformed
+    # entries as wounds without burning the LLM call.
+    evidence_grounding: VariantEvidenceGrounding | None = None
 
 
 class L1GenerateOutput(BaseModel):

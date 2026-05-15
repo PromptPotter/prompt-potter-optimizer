@@ -54,7 +54,7 @@ class ReplayContext(NamedTuple):
     origin_results: list[dict[str, Any]]
 
 
-Replayer = Callable[[ReplayContext, dict[str, Any]], Any]
+Replayer = Callable[[ReplayContext, dict[str, Any], dict[str, Any]], Any]
 
 
 def replay_decisions(
@@ -74,7 +74,7 @@ def replay_decisions(
         if fn is None:
             continue
         try:
-            current = fn(ctx, rec.get("inputs_ref") or {})
+            current = fn(ctx, rec.get("inputs_ref") or {}, rec.get("data") or {})
         except Exception:
             # Replayer failure shouldn't poison resume — treat as non-divergence.
             continue
@@ -97,7 +97,9 @@ def _mean_score(results: list[dict]) -> float:
     return sum(float(r.get("fitness", 0.0)) for r in results) / len(results)
 
 
-def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
+def _replay_round_winner(
+    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
+) -> str:
     """Re-derive round winner from rescored per-candidate results; beat-threshold derived, not read."""
     all_results: dict[str, list[dict]] = ctx.round_data.get("all_candidate_results") or {}
     if ctx.prior_rounds:
@@ -113,69 +115,64 @@ def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     return winner_id
 
 
-def _resolve_prior_history(
-    pid: str, ctx: ReplayContext, all_results: dict[str, list[dict]]
-) -> list[float]:
-    """Resolve a PoBB prior id to its rescored fitness vector.
-
-    Priors carry one of three id shapes (mirrors ``score.py::score_population``'s
-    seeding + ``register_completed`` accumulation):
-      * ``"origin"`` — round-0 origin run; lives on ``ctx.origin_results``.
-      * ``"R{N}_winner"`` — round N's winner; lives on prior round N's ``results``.
-      * content-hash — a within-round prior already evaluated this round; lives
-        on the current round's ``all_candidate_results``.
-    """
-    if pid == "origin":
-        return [float(r.get("fitness", 0.0)) for r in ctx.origin_results]
-    if pid.startswith("R") and pid.endswith("_winner"):
-        try:
-            target_round = int(pid[1 : -len("_winner")])
-        except ValueError:
-            return []
-        for t in ctx.prior_rounds:
-            if int(t.get("round", -1)) == target_round:
-                return [float(r.get("fitness", 0.0)) for r in (t.get("results") or [])]
-        return []
-    return [float(r.get("fitness", 0.0)) for r in (all_results.get(pid) or [])]
-
-
 def _pobb_replay_snapshot(
-    ctx: ReplayContext, inputs_ref: dict[str, Any]
-) -> tuple[str, dict[str, float], list[float]] | None:
-    """Build (candidate_id, posterior snapshot, current scores) for PoBB replay; None when underspecified.
+    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
+) -> tuple[str, dict[str, float]] | None:
+    """Build (candidate_id, posterior snapshot) for paired PoBB replay.
 
-    Seeds the MC with the same inputs the live `PoBBCheck.check()` used, so
-    record/replay agree bit-for-bit on cycles minted after the seed landed.
-    Older cycles (where the live call was unseeded) take the tolerance branch
-    in `_replay_elimination_cut` / `_replay_leader_lock_in`.
+    Paired comparison: candidate vector is the rescored per-sample fitness on
+    ``data.candidate_sample_ids`` (lookup into the round's ``all_candidate_results``);
+    each prior vector is ``data.prior_histories[cid]`` mapped over the same sample
+    IDs. Both arms are over identical sample sets, so the seeded MC matches the
+    record-time draws bit-for-bit when no scorer change occurred.
+
+    Returns None when the record predates paired snapshots or the candidate's
+    rescored measurements aren't available.
     """
-    all_results: dict[str, list[dict]] = ctx.round_data.get("all_candidate_results") or {}
     candidate_id = str(inputs_ref.get("candidate_id", ""))
-    prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
-    n = int(inputs_ref.get("queries_scored", 0))
-    current = [float(r.get("fitness", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]
-    priors = {pid: _resolve_prior_history(pid, ctx, all_results) for pid in prior_ids}
-    priors = {pid: p for pid, p in priors.items() if p}
-    if not priors or len(current) < 2:
+    candidate_sample_ids = [str(s) for s in (data.get("candidate_sample_ids") or [])]
+    prior_histories: dict[str, dict[str, float]] = data.get("prior_histories") or {}
+    if not candidate_sample_ids or not prior_histories:
         return None
+
+    all_results: dict[str, list[dict]] = ctx.round_data.get("all_candidate_results") or {}
+    cur_results = all_results.get(candidate_id) or []
+    cur_by_sample = {
+        str(r.get("sample_id")): float(r.get("fitness", 0.0))
+        for r in cur_results
+        if r.get("sample_id") is not None
+    }
+    current = [cur_by_sample.get(sid, 0.0) for sid in candidate_sample_ids]
+    if not all(sid in cur_by_sample for sid in candidate_sample_ids):
+        return None
+
+    paired_priors: dict[str, list[float]] = {}
+    for cid, hist in prior_histories.items():
+        if all(sid in hist for sid in candidate_sample_ids):
+            paired_priors[cid] = [float(hist[sid]) for sid in candidate_sample_ids]
+    if not paired_priors:
+        return None
+
     round_num = int(inputs_ref.get("round_num", ctx.round_data.get("round", 0)))
-    rng = pobb_rng(round_num, candidate_id, list(priors.keys()), len(current))
-    snapshot = posterior_best_probabilities({**priors, candidate_id: current}, rng=rng)
-    return candidate_id, snapshot, current
+    rng = pobb_rng(round_num, candidate_id, list(paired_priors.keys()), len(current))
+    snapshot = posterior_best_probabilities({**paired_priors, candidate_id: current}, rng=rng)
+    return candidate_id, snapshot
 
 
 # 3× the MC standard error (≈0.7% per `posterior_best_probabilities`) — within
-# this band, a P(best) shift between record and replay is MC noise from a
-# pre-seed cycle, not real scorer drift, so trust the recorded outcome.
+# this band, a P(best) shift between record and replay is MC noise rather
+# than real scorer drift, so trust the recorded outcome.
 _POBB_REPLAY_TOLERANCE = 0.03
 
 
-def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """PoBB gate under rescored scores; tolerant of MC noise for pre-seed cycles."""
-    snap = _pobb_replay_snapshot(ctx, inputs_ref)
+def _replay_elimination_cut(
+    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
+) -> bool:
+    """PoBB gate under rescored paired scores; tolerant of MC noise."""
+    snap = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if snap is None:
         return False
-    candidate_id, snapshot, _ = snap
+    candidate_id, snapshot = snap
     fresh = float(snapshot.get(candidate_id, 1.0))
     eps = float(inputs_ref["epsilon"])
     recorded = inputs_ref.get("recorded_p_best")
@@ -184,14 +181,16 @@ def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> b
     return pobb_should_stop(fresh, eps)
 
 
-def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """PoBB leader-lock under rescored scores; tolerant of MC noise for pre-seed cycles."""
+def _replay_leader_lock_in(
+    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
+) -> bool:
+    """PoBB leader-lock under rescored paired scores; tolerant of MC noise."""
     if int(inputs_ref.get("queries_scored", 0)) < int(inputs_ref.get("lock_in_n_min", 8)):
         return False
-    snap = _pobb_replay_snapshot(ctx, inputs_ref)
+    snap = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if snap is None:
         return False
-    candidate_id, snapshot, _ = snap
+    candidate_id, snapshot = snap
     leader = max(snapshot.items(), key=lambda kv: kv[1])[0]
     if leader != candidate_id:
         return False
@@ -235,7 +234,7 @@ def _derive_stall_count(
 def _replay_layer_trigger(patience_key: str) -> Replayer:
     """Build a replayer that re-derives `triggered = stalls < patience` from prior rounds."""
 
-    def _replay(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
+    def _replay(ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]) -> bool:
         patience = inputs_ref.get(patience_key)
         if patience is None:
             return True

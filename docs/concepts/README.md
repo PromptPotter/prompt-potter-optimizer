@@ -30,6 +30,7 @@ CONTEXT and PLAN live on disk inside each round file — the loop's actual confi
 | [Optimizer of the optimizer](optimizer-of-the-optimizer.md) | PromptPotter optimizing its own meta-prompts (M12) |
 | [Glossary](glossary.md) | Terms used across the docs |
 | [Mid-round elimination (PoBB)](../methods/candidate-elimination.md) | "Search-only-with-evidence" in detail |
+| [Paired-sample PoBB](paired-sample-pobb.md) | How sample-keyed priors + leader backfill restore PoBB's iid premise under hard-sample-first ordering |
 | [Hard-sample leaderboard](../methods/exploration-exploitation.md) | Sample selection in detail |
 
 Implementation: [`../developer/`](../developer/README.md).
