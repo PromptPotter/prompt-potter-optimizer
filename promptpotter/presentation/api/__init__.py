@@ -1,6 +1,6 @@
 """HTTP read API — backend storage + campaign registry + per-cycle live reads.
 
-Four router objects mounted at ``/api/v1`` from ``main.py``:
+Five router objects mounted at ``/api/v1`` from ``main.py``:
 
 1. **Backend storage** (``backends_router``) — manages backend connections,
    syncs experiments from backends in their native format, and exposes
@@ -19,7 +19,10 @@ Four router objects mounted at ``/api/v1`` from ``main.py``:
 4. **Datasets** (``_datasets_router``) — campaign-sourced dataset preview
    for the New Job view.
 
-``main.py`` imports the four router names directly; this ``__init__.py``
+5. **Measurements** (``_measurements_router``) — cross-campaign measurement
+   leverage aggregation for the M13 leverage panel.
+
+``main.py`` imports the router names directly; this ``__init__.py``
 re-exports them.
 """
 
@@ -31,12 +34,14 @@ from promptpotter.presentation.api.routers.campaigns import (
     campaigns_router,
 )
 from promptpotter.presentation.api.routers.datasets import _datasets_router
+from promptpotter.presentation.api.routers.measurements import _measurements_router
 
 __all__ = [
     "_MAX_FILE_ENTRIES",
     "_MAX_PREVIEW_BYTES",
     "_active_router",
     "_datasets_router",
+    "_measurements_router",
     "backends_router",
     "campaigns_router",
 ]

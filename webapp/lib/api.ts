@@ -162,3 +162,30 @@ export async function postStopCycle(cycleId: string): Promise<StopCycleResponse>
   if (!r.ok) throw new Error(`${r.status} POST /stop`);
   return (await r.json()) as StopCycleResponse;
 }
+
+// Cross-campaign measurement leverage — read-only aggregation over the
+// tenant's archive. Backs the M13 leverage panel ("your data accumulates").
+
+export interface PerQueryRow {
+  query: string;
+  sample_id: number;
+  n_measurements: number;
+  n_unique_configs: number;
+  mean_fitness: number | null;
+  hit_rate: number;
+  last_seen: string;
+}
+
+export interface LeverageResponse {
+  n_runs: number;
+  n_measurements: number;
+  n_unique_queries: number;
+  per_query: PerQueryRow[];
+}
+
+export function fetchLeverage(
+  limit = 200,
+  signal?: AbortSignal,
+): Promise<LeverageResponse> {
+  return jget<LeverageResponse>(`${API}/measurements/leverage?limit=${limit}`, signal);
+}

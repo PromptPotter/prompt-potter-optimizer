@@ -2,11 +2,11 @@
 import { ThemeToggle } from "./ThemeToggle";
 import type { Theme } from "@/lib/theme";
 
-// Per-cycle sub-tabs (Replit-style): the sidebar carries the cycle
+// Per-cycle sub-tabs (Replit-style): the sidebar carries the campaign
 // library; the topbar carries the views over the *currently-selected*
-// cycle. Three views: Chat (conversational interface), Dashboard
-// (live metrics + lineage + inspector), Files (filesystem browser).
-export type Tab = "chat" | "dashboard" | "files";
+// campaign. Plus install-wide Leverage tab (cross-campaign measurement
+// reuse — not scoped to a single campaign).
+export type Tab = "chat" | "dashboard" | "files" | "leverage";
 
 interface Props {
   tab: Tab;
@@ -18,6 +18,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "dashboard", label: "Dashboard" },
   { id: "files", label: "Files" },
+  { id: "leverage", label: "Leverage" },
 ];
 
 export function Topbar({ tab, onTabChange, onThemeChange }: Props) {

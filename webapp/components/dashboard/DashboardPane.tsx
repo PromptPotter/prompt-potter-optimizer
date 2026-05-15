@@ -37,6 +37,7 @@ import { EditModeToggle } from "./EditModeToggle";
 import { SelectionProvider } from "./SelectionContext";
 import { SharedInspector } from "./SharedInspector";
 import { FilesPane } from "@/components/tree/FilesPane";
+import { LeveragePanel } from "@/components/leverage/LeveragePanel";
 
 interface PipelineDoc {
   view?: { nodes: { id: string; label: string; kind?: string }[]; edges: { from: string; to: string }[] };
@@ -341,8 +342,10 @@ function DashboardPaneInner({
               </NarrowSpine>
             </Lane>
           </div>
-        ) : (
+        ) : tab === "files" ? (
           <FilesPane cycleId={cycleId} />
+        ) : (
+          <LeveragePanel />
         )}
         <ConsolePane cycleId={cycleId} />
       </main>
