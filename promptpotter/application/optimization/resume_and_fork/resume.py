@@ -94,8 +94,7 @@ def resume_with_divergence_check(
                     ),
                     surviving_rounds=survivors,
                 )
-                if survivors:
-                    cycle.restore_from_trial(survivors[-1])
+                cycle.replay_priors(survivors)
                 cycle.escalation = EscalationState.from_ledger(session.state.ledger)
                 logger.warning(
                     "Resume diverged at round %d (%s); forked → %s",
@@ -121,7 +120,6 @@ def resume_with_divergence_check(
                 },
             )
 
-    if prior:
-        cycle.restore_from_trial(prior[-1])
+    cycle.replay_priors(prior)
     cycle.escalation = EscalationState.from_ledger(session.state.ledger)
     return None

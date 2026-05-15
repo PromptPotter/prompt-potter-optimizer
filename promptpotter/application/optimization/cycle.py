@@ -204,14 +204,53 @@ class Cycle:
             opt_sp=opt_sp,
         )
 
-    def restore_from_trial(self, round_data: dict[str, Any]) -> None:
-        """Restore optimizer state from a campaign checkpoint dict (in-place).
+    def replay_priors(self, priors: list[dict[str, Any]]) -> None:
+        """Reconstruct round-loop state from persisted prior rounds (in-place).
 
-        ``EscalationState`` is NOT read from the round_data — it's a projection of
-        the ledger and must be rebuilt by the resume path via
-        ``EscalationState.from_ledger``.
+        Rebuilds ``rounds`` (typed :class:`RoundResult`), ``tracking``
+        (current = last round, best = highest-composite across priors),
+        ``opt_sp`` (last round's snapshot), and ``warned_queries``
+        (accumulated across all priors). Callers feed the full ordered
+        prior list — resume passes ``prior``; divergence-fork passes the
+        ``survivors`` slice. Empty ``priors`` is a no-op (fresh cycle).
+
+        ``EscalationState`` is NOT touched — it's a projection of the
+        ledger and the caller rebuilds it via
+        ``EscalationState.from_ledger`` after this returns.
         """
-        self.opt_sp = OptSearchPoint(**round_data["opt_search_point"])
+        if not priors:
+            return
+        schema = self.session.pipeline_schema
+        tr = self.tracking
+        for round_data in priors:
+            rr = RoundResult.model_validate(round_data)
+            self.rounds.append(rr)
+            for r in rr.results or []:
+                if extract_warning_types(r) and (q := r.get("query")):
+                    self.warned_queries.add(q)
+        last = priors[-1]
+        self.opt_sp = OptSearchPoint(**last["opt_search_point"])
+        last_rr = self.rounds[-1]
+        for f in PROMPT_STRING_FIELDS:
+            setattr(self.opt_sp, f, last_rr.prompt_fields.get(f, ""))
+        assert tr.current_sp is not None
+        last_pp = (
+            last_rr.pipeline_params
+            if last_rr.pipeline_params is not None
+            else tr.current_sp.pipeline_params
+        )
+        tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=last_pp, schema=schema)
+        tr.current_accuracy = last_rr.accuracy
+        tr.current_composite_fitness = last_rr.composite_fitness
+        tr.current_results = list(last_rr.results)
+        for i, rr in enumerate(self.rounds, start=1):
+            if rr.composite_fitness > tr.best_composite_fitness:
+                tr.best_composite_fitness = rr.composite_fitness
+                tr.best_accuracy = rr.accuracy
+                tr.best_round = i
+                tr.best_sp = self.opt_sp.to_job_search_point(
+                    base_pipeline_params=(rr.pipeline_params or last_pp), schema=schema
+                )
 
     def absorb_round(
         self,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -106,10 +107,20 @@ class CampaignStore(EntityStore):
         backend_id: str,
         cycle_id: str,
         updates: dict[str, Any],
+        *,
+        remove: Sequence[str] = (),
     ) -> None:
-        """Merge *updates* into the campaign file and write back (+ timestamp)."""
+        """Merge *updates* into the campaign file and write back (+ timestamp).
+
+        ``remove`` is the set of top-level keys to drop from the stored
+        record before merging. Used by ``mark_finished`` to clear stale
+        crash bookkeeping (``interrupted_round`` / ``crash_traceback``)
+        when a previously interrupted cycle later completes cleanly.
+        """
         path = self._entity_path(backend_id, cycle_id)
         data = read_json(path)
+        for key in remove:
+            data.pop(key, None)
         data.update(updates)
         data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(path, data)
@@ -268,12 +279,18 @@ class CampaignStore(EntityStore):
             "n_rounds": n_rounds,
             "finished_at": finished_at,
         }
-        if status in {"interrupted", "crashed"} and interrupted_round is not None:
-            updates["interrupted_round"] = interrupted_round
-        if crash_traceback:
-            updates["crash_traceback"] = crash_traceback
+        remove_keys: list[str] = []
+        if status in {"interrupted", "crashed"}:
+            if interrupted_round is not None:
+                updates["interrupted_round"] = interrupted_round
+            if crash_traceback:
+                updates["crash_traceback"] = crash_traceback
+        else:
+            # Clean completion clears any stale crash bookkeeping written by
+            # a prior interrupted / crashed run of the same cycle.
+            remove_keys = ["interrupted_round", "crash_traceback"]
         with graceful("Campaign completion update failed"):
-            self.update(backend_id, cycle_id, updates)
+            self.update(backend_id, cycle_id, updates, remove=remove_keys)
 
     def load_many(
         self,

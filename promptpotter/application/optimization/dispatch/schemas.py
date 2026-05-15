@@ -44,6 +44,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
+from promptpotter.domain.opt_search_point import EVIDENCE_GROUNDING_FIELDS
+
 
 def _truncate(max_len: int):
     """Silent string truncation for LLM outputs that overshoot a Field max_length.
@@ -79,31 +81,27 @@ __all__ = [
 # l1_generate — proposes candidate variants for the next round.
 # ---------------------------------------------------------------------------
 
-EvidenceGroundingField = Literal[
-    "parent_panel",
-    "sibling_yield",
-    "axis_memory",
-    "escalation_panel",
-    "task_context",
-    "plan",
-    "critique",
-    "stall_exploration",
-]
-
 
 class VariantEvidenceGrounding(BaseModel):
     """One row of evidence justifying a variant's chosen mutation.
 
-    ``field`` names the panel entry the LLM is grounding on;
-    ``stall_exploration`` is the escape hatch and is only valid when
-    ``escalation_panel.exploration_budget`` is ``normal`` or ``wide``
-    (enforced downstream in :mod:`l1_behavior_checks`, not here — that's
-    a cycle-state check, not a parse check).
+    ``field`` names the panel entry the LLM is grounding on. The JSON
+    Schema exported to the provider lists the allowed values as an
+    ``enum`` hint so structured-output-aware models stay in-set, but the
+    parse boundary is permissive — providers like Groq don't honor the
+    enum and a single off-script value would otherwise crash the round.
+    The canonical enforcement is the ``evidence_grounding_present``
+    behavior check (see :mod:`l1_behavior`); ``stall_exploration`` is the
+    escape hatch and is only valid when
+    ``escalation_panel.exploration_budget`` is ``normal`` or ``wide``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    field: EvidenceGroundingField
+    field: str = Field(
+        description="One of EVIDENCE_GROUNDING_FIELDS — panel entry cited.",
+        json_schema_extra={"enum": sorted(EVIDENCE_GROUNDING_FIELDS)},
+    )
     citation: str
 
 

@@ -59,7 +59,7 @@ Realistic candidates — production tier (not `:free`), priced ≤ ~$0.05 in / ~
 
 **Per-row timing caveat observed during these tests.** The `[ N] XX.Ys` per-sample line in the PromptPotter CLI reports only the duration of the **successful** backend HTTP call, not cumulative wall-clock including retries. The tqdm ETA (`X.YYs/q`) is the honest aggregate. If you see tqdm's `s/q` rate >> the displayed per-row durations, retries are eating your wall-clock silently. Filed as a UX issue, not a correctness issue.
 
-**Operator-recalled baselines (not re-measured this session):**
+**Operator-recalled origins (not re-measured this session):**
 - `mistralai/mistral-small-3.2-24b-instruct` — operator's prior favorite, "almost on par with gpt-oss-120b" on accuracy, but observed unstable on OpenRouter routing.
 - `google/gemini-2.5-flash` — stable, but **~8× too expensive on output tokens** even at `reasoning_effort: low` (verbose thinking traces). Abandoned.
 - `openai/gpt-oss-120b` (Groq, `reasoning_effort: high`) — original AIME default; hit Groq daily quota, prompted the OpenRouter migration.

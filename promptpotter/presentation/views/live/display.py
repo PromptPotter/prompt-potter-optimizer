@@ -119,7 +119,7 @@ class LiveDisplay(DerivedView):
         Also seeds ``campaign_rounds`` with an origin row at index 0 so
         the round-summary trend table reads as ``Origin → 1 → 2 → …``
         instead of treating the first L1 round as round 0 and dropping
-        the baseline.
+        the origin.
         """
         self._core.origin_acc = fresh
         if fresh > self._core.best_acc:
@@ -236,6 +236,22 @@ class LiveDisplay(DerivedView):
             and event.data["env"].state.resumed_from_round > 0
         ):
             del self.campaign_rounds[self.initial_len :]
+            cycle_state = event.data.get("state")
+            for rr in getattr(cycle_state, "rounds", None) or []:
+                self.campaign_rounds.append(
+                    {
+                        "round": len(self.campaign_rounds),
+                        "label": rr.label,
+                        "accuracy": rr.accuracy,
+                        "composite_fitness": rr.composite_fitness,
+                        "hits": rr.hits,
+                        "total": rr.total,
+                        "improved": rr.improved,
+                        "results": rr.results,
+                        "candidates_scored": rr.candidates_scored,
+                        "candidate_scores": list(rr.candidate_scores),
+                    }
+                )
         # Mirror an interactive-steer formula swap onto the shared phase
         # ctx so the next round's renderers print the new formula.
         if event.phase == "scoring_steer" and event.event == "applied":

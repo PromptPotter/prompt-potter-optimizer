@@ -32,11 +32,11 @@ logger = logging.getLogger(__name__)
 def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceGrounding | None:
     """Build an ``EvidenceGrounding`` from one Pydantic-typed variant entry.
 
-    The Pydantic boundary already guarantees ``field`` is in
-    :data:`EVIDENCE_GROUNDING_FIELDS` (via :class:`EvidenceGroundingField`'s
-    ``Literal`` constraint). An empty citation still surfaces as a per-round
-    behavior-check failure downstream — ``evidence_grounding_present`` flags
-    it in ``review.md`` and ``round_NNNN.json``.
+    The parse boundary is permissive on ``field`` (plain ``str``) — providers
+    that ignore the JSON-Schema ``enum`` hint would otherwise crash the round.
+    Invalid ``field`` values and empty citations both surface as per-round
+    behavior-check failures downstream — ``evidence_grounding_present`` flags
+    them in ``review.md`` and ``round_NNNN.json``.
     """
     if raw is None:
         return None

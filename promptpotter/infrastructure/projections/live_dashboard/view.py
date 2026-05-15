@@ -208,7 +208,7 @@ class LiveDashboardView(DerivedView):
         recorder: AuditTrailView | None = None,
     ) -> LiveDashboardView | None:
         """Build projection, or ``None`` if ids missing. Carries prior UI counters
-        across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
+        across resumes; optimizer resume is separate (``Cycle.replay_priors``).
         On ``--from N`` rewind, the ``best`` counter past the surviving rounds
         is clamped to avoid a phantom value.
 

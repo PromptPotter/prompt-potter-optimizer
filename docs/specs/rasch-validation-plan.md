@@ -19,7 +19,7 @@ Close OSP/persistence trace gaps. Order: 1a + 1b + 1c additive; 1d + 1e together
 | 1b | `application/optimization/pipeline.py` | Populate `lineage.source` at the 3 mint sites + origin | ~6 LOC |
 | 1c | `application/optimization/pipeline.py::load_optimizer_prompt` | Compute SHA-256 per template, stash `prompt_hashes: dict[str, str]` on `Session`, persist to `index.json::final.prompt_hashes` | ~10 LOC |
 | 1d | `domain/opt_search_point.py` | Set `model_config = ConfigDict(extra="forbid")` on `OptSearchPoint` | ~1 LOC |
-| 1e | `application/optimization/cycle.py::restore_from_trial` | Migration shim: detect legacy flat `id`/`parent_id`/`memory` keys, re-pack into `lineage` + memory fields before construct. Log warning per migrated trial | ~15 LOC |
+| 1e | `application/optimization/cycle.py::replay_priors` | Migration shim: detect legacy flat `id`/`parent_id`/`memory` keys, re-pack into `lineage` + memory fields before construct. Log warning per migrated trial | ~15 LOC |
 | 1f | `infrastructure/store/stores.py::_migrate_legacy_fork_dirs` | Extend (rename to `_migrate_legacy_layout`): also rename `rounds/`→`.cache/rounds/`, `candidates/`→`.cache/candidates/`; unlink `phase_events.jsonl`, `optimize_result.json`. Idempotent | ~15 LOC |
 
 Verify 1d+1e by resuming any pre-2026-03 cycle and confirming the shim log fires + load succeeds.

@@ -111,7 +111,7 @@ One JSON object per node that ran. Fields: `round`, `started_at`, `finished_at`,
 
 ### `rounds/round_NNNN.json`
 
-The resume source of truth. On resume, `Cycle.restore_from_trial` rehydrates the exact optimizer state — no separate write-ahead log. You can edit a trial by hand between runs to modify optimizer state; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`.
+The resume source of truth. On resume, `Cycle.replay_priors` walks every prior `round_NNNN.json` in order and reconstructs `cycle.rounds` (typed `RoundResult` list), `cycle.tracking` (current = last round, best = highest-composite across priors), and `cycle.opt_sp` (last round's snapshot) — no separate write-ahead log. You can edit a trial by hand between runs to modify optimizer state; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`.
 
 ---
 
