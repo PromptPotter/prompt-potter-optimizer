@@ -38,6 +38,7 @@ import { SelectionProvider } from "./SelectionContext";
 import { SharedInspector } from "./SharedInspector";
 import { FilesPane } from "@/components/tree/FilesPane";
 import { LeveragePanel } from "@/components/leverage/LeveragePanel";
+import { ComparePane } from "@/components/compare/ComparePane";
 
 interface PipelineDoc {
   view?: { nodes: { id: string; label: string; kind?: string }[]; edges: { from: string; to: string }[] };
@@ -344,6 +345,8 @@ function DashboardPaneInner({
           </div>
         ) : tab === "files" ? (
           <FilesPane cycleId={cycleId} />
+        ) : tab === "compare" ? (
+          <ComparePane themeKey={themeKey} />
         ) : (
           <LeveragePanel />
         )}

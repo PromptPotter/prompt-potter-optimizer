@@ -189,3 +189,40 @@ export function fetchLeverage(
 ): Promise<LeverageResponse> {
   return jget<LeverageResponse>(`${API}/measurements/leverage?limit=${limit}`, signal);
 }
+
+// Campaign detail — feeds the M13 compare-campaigns view. Reads
+// index.json via the generic cycle-file endpoint (the backend-scoped
+// detail route's response schema doesn't always match the on-disk
+// shape; reading the raw file dodges that mismatch).
+
+export interface CampaignRoundSummary {
+  round: number;
+  round_id?: string;
+  label?: string;
+  accuracy: number | null;
+  hits?: number | null;
+  total?: number | null;
+  improved?: boolean;
+  created_at?: string;
+}
+
+export interface CampaignDetail {
+  campaign_id: string;
+  status: string;
+  best_accuracy: number | null;
+  origin_accuracy: number | null;
+  n_rounds: number;
+  rounds: CampaignRoundSummary[];
+  header?: { dataset_name?: string; dataset_size?: number };
+  created_at?: string;
+  updated_at?: string;
+  finished_at?: string;
+}
+
+export async function fetchCampaignDetail(
+  cycleId: string,
+  signal?: AbortSignal,
+): Promise<CampaignDetail> {
+  const file = await fetchCycleFile(cycleId, "cycle", "index.json", signal);
+  return JSON.parse(file.content) as CampaignDetail;
+}

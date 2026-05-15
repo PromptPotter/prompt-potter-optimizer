@@ -6,7 +6,7 @@ import type { Theme } from "@/lib/theme";
 // library; the topbar carries the views over the *currently-selected*
 // campaign. Plus install-wide Leverage tab (cross-campaign measurement
 // reuse — not scoped to a single campaign).
-export type Tab = "chat" | "dashboard" | "files" | "leverage";
+export type Tab = "chat" | "dashboard" | "files" | "leverage" | "compare";
 
 interface Props {
   tab: Tab;
@@ -18,6 +18,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "dashboard", label: "Dashboard" },
   { id: "files", label: "Files" },
+  { id: "compare", label: "Compare" },
   { id: "leverage", label: "Leverage" },
 ];
 
