@@ -63,6 +63,25 @@ class CampaignStore(EntityStore):
 
     # -- Campaign CRUD --------------------------------------------------------
 
+    def load(self, backend_id: str, entity_id: str) -> dict[str, Any] | None:
+        """Load index.json with cycle_id derived from the directory name.
+
+        ``campaign_id`` is injected from ``entity_id`` (the dir name)
+        rather than read from the JSON blob. This makes the
+        directory-name authoritative: a manual ``mv`` of a cycle dir
+        cannot cause a downstream caller to see a stale embedded id.
+        New index.json writes (see ``create``) omit the field entirely;
+        the migration in ``scripts/migrate_state_sync_v1.py`` strips
+        it from existing files. The injection here is the read-side
+        bridge that keeps callers (datasets.py, review.py, writers.py)
+        working without per-caller changes.
+        """
+        data = read_json_optional(self._entity_path(backend_id, entity_id))
+        if data is None:
+            return None
+        data["campaign_id"] = entity_id
+        return data
+
     def create(
         self,
         backend_id: str,
@@ -78,9 +97,11 @@ class CampaignStore(EntityStore):
         """
         path = self._entity_path(backend_id, cycle_id)
         existing = read_json_optional(path) or {}
+        # Strip any stale embedded campaign_id from prior writes — the
+        # dir name is authoritative now (see ``load``). Idempotent.
+        existing.pop("campaign_id", None)
         now = datetime.now(UTC).isoformat()
         defaults: dict[str, Any] = {
-            "campaign_id": cycle_id,
             "created_at": existing.get("created_at", now),
             "updated_at": now,
             "status": "active",
@@ -349,13 +370,11 @@ class CampaignStore(EntityStore):
         results = []
         for index_path in self._index_files():
             data = read_json(index_path)
-            if "campaign_id" not in data:
-                continue
             if backend_id and data.get("backend_id") and data["backend_id"] != backend_id:
                 continue
             results.append(
                 {
-                    "campaign_id": data["campaign_id"],
+                    "campaign_id": index_path.parent.name,
                     "name": data.get("name", ""),
                     "status": data["status"],
                     "n_rounds": data["n_rounds"],
@@ -382,21 +401,21 @@ class CampaignStore(EntityStore):
         """
         results: list[dict[str, Any]] = []
         for index_path in self._index_files():
-            cycle_id_from_dir = index_path.parent.name
+            cycle_id = index_path.parent.name
             try:
                 data = read_json_optional(index_path)
             except Exception:  # corrupt JSON, encoding error, etc.
                 data = None
-            if not isinstance(data, dict) or "campaign_id" not in data:
+            if not isinstance(data, dict):
                 # stub entry for unreadable indexes — directory name is the cycle_id by construction
                 results.append(
                     {
-                        "cycle_id": cycle_id_from_dir,
+                        "cycle_id": cycle_id,
                         "parent_session_id": "",
                         "dataset_name": "",
                         "backend_id": "",
-                        "sibling_kind": sibling_kind(cycle_id_from_dir),
-                        "is_root": sibling_kind(cycle_id_from_dir) == "root",
+                        "sibling_kind": sibling_kind(cycle_id),
+                        "is_root": sibling_kind(cycle_id) == "root",
                         "status": "unreadable",
                         "best_accuracy": None,
                         "n_rounds": 0,
@@ -405,7 +424,6 @@ class CampaignStore(EntityStore):
                     }
                 )
                 continue
-            cycle_id = data["campaign_id"]
             header_raw = data.get("header")
             header: dict[str, Any] = header_raw if isinstance(header_raw, dict) else {}
             kind = sibling_kind(cycle_id)
@@ -458,7 +476,6 @@ class CampaignStore(EntityStore):
         )
         index = {
             **parent_index,
-            "campaign_id": new_cycle_id,
             "parent_cycle_id": parent_cycle_id,
             "forked_from_round": forked_from_round,
             "forked_at": forked_at,
@@ -469,6 +486,9 @@ class CampaignStore(EntityStore):
             "status": "resumed",
             "updated_at": forked_at,
         }
+        # parent_index may carry a stale embedded campaign_id from a
+        # pre-migration on-disk file; strip it so we don't perpetuate.
+        index.pop("campaign_id", None)
         path = self._campaign_dir("", new_cycle_id) / "index.json"
         write_json(path, index)
         return path

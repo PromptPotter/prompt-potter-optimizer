@@ -537,6 +537,9 @@ async def _run_panel_verb(
     if multi:
         # _mint_fork retargeted the active pointer per iteration; put it
         # back so subsequent operator commands hit the parent cycle.
+        # dashboard.json no longer carries cycle_id (active identity
+        # lives only in active_session.json), so the pointer restore
+        # is sufficient — no sidecar dashboard rewrite needed.
         save_active_pointer(getattr(args, "tenant", "default"), ctx.session_id, parent_cycle_id)
 
     human_lines = [f"Sweep {verb}: {len(results)} variant(s); sweep_id={sweep_id}"]

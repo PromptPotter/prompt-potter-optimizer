@@ -11,6 +11,7 @@
 - [ ] **L2 Imagination (5th LLM call).** Read-forward rollout; would amend §0's four-LLM-call invariant. → [`m10-prompt-iteration-framework.md#track-8--l2-imagination`](m10-prompt-iteration-framework.md#track-8--l2-imagination)
 - [ ] **L2 self-diagnosis panels.** Option-set / axis-exhaustion / sample-delta / verbosity stats — L2 today reads winner only. → [`m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface`](m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface)
 - [x] **L1 evidence-grounding validator.** Shipped: `evidence_grounding` is a required L1-output field; `evidence_grounding_present` behavior check + `EvidenceGrounding` lineage carry. Healing rule (`l2_unjustified_mutations`) ships with Track 4. → [`m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface`](m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface)
+- [ ] **State-sync cleanup.** Five drifting state surfaces (`active_session.json`, `dashboard.json`, `index.json::campaign_id`, dir name, in-memory CLI) need to collapse into two clean ones before whitelabel. Pre-M12 foundation. → [`state-sync-cleanup.md`](state-sync-cleanup.md)
 - [ ] **Webapp control plane + multi-cycle.** Read-only ships (M11); control plane is M12. → [`m12-multi-connector.md`](m12-multi-connector.md)
 - [ ] **Chat-first multi-user web.** End-state product surface: one admin self-hosts; casual web users sign in; chat is the constant control surface; install-scoped shared measurements. Spec-only, no code. → [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md)
 - [ ] **Publication benchmarks + ablation.** BBEH headline + ablation studies not yet published. → [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md)
@@ -34,6 +35,7 @@
 | Item | Status |
 |------|--------|
 | [Hard-Sample Sorter](hard-sample-sorter.md) | capability spec, unscheduled — `promptpotter/application/intelligence/{hard_sample_sorter,exploration}.py`, `docs/methods/exploration-exploitation.md` |
+| [State-Sync Cleanup](state-sync-cleanup.md) | pre-whitelabel foundation, 4 phases — `promptpotter/infrastructure/store/`, `promptpotter/infrastructure/projections/live_dashboard/`, `promptpotter/presentation/api/routers/active.py`, `webapp-react/` |
 | [Security audit](security-audit.md) | first hardening pass complete 2026-05-05 — `promptpotter/application/scoring/formula/`, `promptpotter/config/log_redaction.py`, `promptpotter/application/optimization/dispatch/hub/` |
 | M10 cleanup | archived → [`archive/m10-cleanup.md`](archive/m10-cleanup.md) + sub-audits |
 

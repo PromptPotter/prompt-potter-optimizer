@@ -142,8 +142,9 @@ async def create_fork(
     fork_dir.mkdir(parents=True, exist_ok=True)
 
     parent_session_id = parent_index.get("parent_session_id", "")
+    # No ``campaign_id`` field — directory name is the authoritative
+    # cycle identity. ``CampaignStore.load`` injects it on read.
     fork_index = {
-        "campaign_id": fork_id,
         "type": parent_index.get("type", "optimization_loop"),
         "config": parent_index.get("config", {}),
         "connector_type": parent_index.get("connector_type", ""),

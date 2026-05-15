@@ -1,20 +1,22 @@
 """``LiveDashboardView`` — operator-facing ``dashboard.json`` writer.
 
-Family-root-bound: one ``dashboard.json`` per cycle family, shared across
-all forks (the active fork is identified by ``dashboard.json::cycle_id``).
+Family-root-bound: one ``dashboard.json`` per cycle family, shared
+across all forks. The active cycle id is **NOT** stored in this file —
+it lives in ``active_session.json`` alone (one writer, one source).
+Readers that need to know "what cycle does this data describe?" read
+the active pointer; this file describes whatever the active cycle's
+loop has produced so far.
+
 The constructor takes :data:`RootCycleDir` so a per-cycle audit block
-cannot accidentally land here. ``for_session`` is the standard factory —
-it derives the root from ``cycle_id`` via ``stores.root_dir_for`` and
-wraps in the newtype before delegating to ``__init__``. A runtime
-assertion in ``__init__`` rejects any path that contains a ``forks/``
-segment.
+cannot accidentally land here. A runtime assertion in ``__init__``
+rejects any path that contains a ``forks/`` segment.
 
 Single ingress: the projection consumes only via ``on_record`` from the
 per-cycle ``CycleEventLog``. The runner emits typed ``PhaseRecord`` /
-``SnapshotRecord`` / ``ResumeCheckpointRecord`` records; this class is one flat
-router that mutates the ``state`` scalars + the ``_round`` candidate dict
-in place, then merges both into one ``dashboard.json`` write through
-``_persist``.
+``SnapshotRecord`` / ``ResumeCheckpointRecord`` records; this class is
+one flat router that mutates the ``state`` scalars + the ``_round``
+candidate dict in place, then merges both into one ``dashboard.json``
+write through ``_persist``.
 """
 
 from __future__ import annotations
@@ -51,7 +53,6 @@ from promptpotter.infrastructure.store import (
     campaign_dir_for,
     root_dir_for,
     session_dir_for,
-    walk_cycle_lineage,
 )
 from promptpotter.shared.errors import is_degraded
 
@@ -115,6 +116,14 @@ class LiveDashboardView(DerivedView):
         # Forks share one continuous dashboard.json; per-fork audit
         # (index.json, log.md, rounds/, .runtime/) stays in each cycle's
         # own dir, written through dynamic ``session.state.cycle_id`` paths.
+        #
+        # ``cycle_id`` is accepted for symmetry with the prior contract but
+        # is no longer persisted into the file. Active-cycle identity comes
+        # from ``active_session.json`` (one writer, one source); the file's
+        # data describes whatever the active cycle's loop has produced.
+        # Branch-tree rendering uses ``walk_cycle_lineage`` at API read
+        # time, not a stale field embedded here.
+        del cycle_id  # accepted for back-compat call sites; identity lives elsewhere
         root_path = Path(root_dir)
         sibling_kinds = {"forks", "diag", "sweeps"}
         if sibling_kinds & set(root_path.parts):
@@ -128,13 +137,6 @@ class LiveDashboardView(DerivedView):
         self._recorder = recorder
         self.patience_max = l1_patience
         r = resume_from or {}
-        # cycle_id_path: family-root → … → active fork. Walked from disk
-        # via parent_cycle_id chain so the webapp + branch-tree renderer
-        # don't reverse-engineer the cycle-id string encoding.
-        cycle_id_path: list[str] = []
-        if cycle_id:
-            tenant_root = root_path.parents[1]  # campaigns/<root>/.. → tenant root
-            cycle_id_path = walk_cycle_lineage(tenant_root, cycle_id)
         self.state: dict[str, Any] = {
             "state": r.get("state", "init"),
             "state_since": datetime.now(UTC).isoformat(),
@@ -153,8 +155,6 @@ class LiveDashboardView(DerivedView):
             "best": r.get("best", 0.0),
             "current_acc": 0.0,
             "composite_fitness_formula": r.get("composite_fitness_formula"),
-            "cycle_id": cycle_id,
-            "cycle_id_path": cycle_id_path,
             "degraded_count": 0,
             "error_count": 0,
             # Backend transport / retry visibility. Bumped by
@@ -283,17 +283,18 @@ class LiveDashboardView(DerivedView):
         self._persist()
 
     def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:
-        """Update ``dashboard.json::cycle_id`` + ``cycle_id_path`` so live
-        readers see the new fork as the active cycle and can render the
-        branch tree. The structured FORK_CUT decision is appended to the
-        ledger by the runner."""
-        del old_cycle_id, from_round
-        self.state["cycle_id"] = new_cycle_id
-        path: list[str] = list(self.state.get("cycle_id_path") or [])
-        if not path or path[-1] != new_cycle_id:
-            path.append(new_cycle_id)
-        self.state["cycle_id_path"] = path
-        self._persist()
+        """No-op since active-cycle identity moved entirely to ``active_session.json``.
+
+        Kept as a hook for the runner's fork bootstrap call site
+        (``application/run_observers.py``) so the call doesn't have to
+        change. The structured FORK_CUT decision is still appended to
+        the ledger by the runner; the active pointer is retargeted by
+        ``_fork_sibling_setup`` via ``save_active_pointer``. The webapp
+        reads ``/api/v1/active`` for the live cycle id and walks
+        lineage server-side via ``walk_cycle_lineage`` when it needs
+        the branch tree.
+        """
+        del old_cycle_id, new_cycle_id, from_round
 
     # -- Ledger subscription (sole ingress) -----------------------------------
     #
@@ -455,7 +456,10 @@ class LiveDashboardView(DerivedView):
             cycle = data["state"]
             loop_env = data["env"]
             config = data["config"]
-            s["cycle_id"] = loop_env.state.cycle_id
+            # No cycle_id write — active-cycle identity lives in
+            # active_session.json; this projection only records what
+            # the active cycle's loop produced.
+            del loop_env
             s["origin"] = cycle.tracking.current_accuracy
             self.patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self.patience_max}"

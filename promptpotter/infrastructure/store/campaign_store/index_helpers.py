@@ -34,9 +34,14 @@ def fresh_sibling_index_blob(
     forked_at: str,
     **extras: Any,
 ) -> dict[str, Any]:
-    """Clean-slate sibling index inheriting type/config/backend from the parent."""
+    """Clean-slate sibling index inheriting type/config/backend from the parent.
+
+    No ``campaign_id`` field — directory name (``new_cycle_id``) is the
+    authoritative identity. See ``CampaignStore.load`` for the read-side
+    injection.
+    """
+    del new_cycle_id  # accepted for symmetry; identity lives in the dir name
     return {
-        "campaign_id": new_cycle_id,
         "type": parent_index.get("type", "optimization_loop"),
         "config": parent_index.get("config", {}),
         "connector_type": parent_index.get("connector_type", ""),

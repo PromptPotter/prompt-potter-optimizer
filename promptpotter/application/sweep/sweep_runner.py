@@ -255,6 +255,9 @@ async def run_sweep_batch(
         )
 
     save_active_pointer(tenant_id, root_ctx.session_id, parent_cycle_id)
+    # dashboard.json no longer carries cycle_id (active identity lives
+    # only in active_session.json), so the pointer restore is the
+    # entire sync — no sidecar dashboard rewrite needed.
 
     completed_at = datetime.now(UTC).isoformat()
     cycle_by_source = {
