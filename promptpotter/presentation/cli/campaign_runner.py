@@ -33,7 +33,12 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
-from promptpotter.presentation.cli.commands import cmd_compare, cmd_optimize, cmd_sweep
+from promptpotter.presentation.cli.commands import (
+    cmd_compare,
+    cmd_optimize,
+    cmd_reset,
+    cmd_sweep,
+)
 from promptpotter.presentation.cli.commands._shared import _DIVERGENCE_HINT, set_verbose
 from promptpotter.presentation.cli.parsers import build_parser
 
@@ -44,6 +49,7 @@ COMMANDS = {
     "optimize": cmd_optimize,
     "compare": cmd_compare,
     "sweep": cmd_sweep,
+    "reset": cmd_reset,
 }
 
 

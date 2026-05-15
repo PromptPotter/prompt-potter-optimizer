@@ -106,7 +106,7 @@ def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
         "--sweep",
         dest="sweep",
         action="store_true",
-        help="M10 cheap-round_data mode: origin → 1 full scored round → "
+        help="Cheap-round_data mode: origin → 1 full scored round → "
         "1 generation-only round (variants emitted, no scoring) → halt. "
         "index.json::final.mode lands as 'sweep' so the leaderboard can "
         "pair sweep cycles with their full counterparts.",
@@ -115,9 +115,9 @@ def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
         "--diag",
         dest="diag",
         action="store_true",
-        help="M10 diagnostic mode: origin → 1 full scored round → "
-        "force L2-context (regardless of stall) → 1 generation-only "
-        "round 2 (with L2 overrides applied, no scoring) → halt. "
+        help="Diagnostic mode: origin → 1 full scored round → force "
+        "L2-context (regardless of stall) → 1 generation-only round 2 "
+        "(with L2 overrides applied, no scoring) → halt. "
         "index.json::final.mode lands as 'diag' and final.diag carries "
         "L2's evolved L1 surface for the operator to promote.",
     )
@@ -179,10 +179,9 @@ def _add_sweep_l1_prompt_args(p: argparse.ArgumentParser, *, allow_multi: bool =
 
 
 def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
-    """M10 sweep-toolkit verbs. Wraps ``optimize`` with halt gates +
-    per-round panel stats and persists one result JSON per run under
-    ``archive/sweeps/{l1_meta_prompt_hash}/{dataset}/``. See
-    ``docs/specs/m10-prompt-iteration-framework.md``.
+    """Sweep-toolkit verbs. Wraps ``optimize`` with halt gates + per-round
+    panel stats and persists one result JSON per run under
+    ``archive/sweeps/{l1_meta_prompt_hash}/{dataset}/``.
     """
     sweep_sub = p_sweep.add_subparsers(dest="sweep_verb", required=True)
 
@@ -319,6 +318,34 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
+    """Tenant scope + safety flags for ``reset``.
+
+    Drops ``campaigns/`` + ``sessions/`` + ``active_session.json`` under the
+    selected tenant; ``archive/`` (measurements + optimizer_calls + sweeps)
+    is preserved. ``--dry-run`` is the recommended first step.
+    """
+    scope = p_reset.add_mutually_exclusive_group()
+    scope.add_argument(
+        "--all-tenants",
+        dest="all_tenants",
+        action="store_true",
+        help="Reset every tenant under .promptpotter/projects/ "
+        "(default: only the tenant named by --tenant).",
+    )
+    p_reset.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the y/N confirmation prompt. Required for non-interactive use.",
+    )
+    p_reset.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="List the paths that would be removed; touch nothing. Recommended first run.",
+    )
+
+
 def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
     """Cycle list + PoBB knobs for ``compare``."""
     p_cmp.add_argument(
@@ -385,9 +412,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_sweep_args(
         sub.add_parser(
             "sweep",
-            help="M10 sweep-toolkit verbs — cheap-grade L1 meta-prompt edits. "
+            help="Sweep-toolkit verbs — cheap-grade L1 meta-prompt edits. "
             "Each verb wraps optimize with halt gates and persists one result "
-            "JSON; see docs/specs/m10-prompt-iteration-framework.md.",
+            "JSON.",
+        )
+    )
+
+    _add_reset_args(
+        sub.add_parser(
+            "reset",
+            help="Drop campaigns/ + sessions/ + active_session.json for the "
+            "selected tenant; preserve archive/ (measurements + optimizer_calls "
+            "+ sweeps). The escape hatch for cycles obsoleted by code changes "
+            "— per-sample measurements survive so the next optimize hits cache "
+            "immediately.",
         )
     )
 

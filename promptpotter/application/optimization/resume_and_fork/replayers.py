@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
+from promptpotter.application.optimization.pobb.seeding import pobb_rng
 from promptpotter.application.optimization.resume_and_fork.decisions import (
     RESUME_CHECKPOINT_GATING,
     GatingMode,
@@ -112,36 +113,79 @@ def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     return winner_id
 
 
+def _resolve_prior_history(
+    pid: str, ctx: ReplayContext, all_results: dict[str, list[dict]]
+) -> list[float]:
+    """Resolve a PoBB prior id to its rescored fitness vector.
+
+    Priors carry one of three id shapes (mirrors ``score.py::score_population``'s
+    seeding + ``register_completed`` accumulation):
+      * ``"origin"`` — round-0 origin run; lives on ``ctx.origin_results``.
+      * ``"R{N}_winner"`` — round N's winner; lives on prior round N's ``results``.
+      * content-hash — a within-round prior already evaluated this round; lives
+        on the current round's ``all_candidate_results``.
+    """
+    if pid == "origin":
+        return [float(r.get("fitness", 0.0)) for r in ctx.origin_results]
+    if pid.startswith("R") and pid.endswith("_winner"):
+        try:
+            target_round = int(pid[1 : -len("_winner")])
+        except ValueError:
+            return []
+        for t in ctx.prior_rounds:
+            if int(t.get("round", -1)) == target_round:
+                return [float(r.get("fitness", 0.0)) for r in (t.get("results") or [])]
+        return []
+    return [float(r.get("fitness", 0.0)) for r in (all_results.get(pid) or [])]
+
+
 def _pobb_replay_snapshot(
     ctx: ReplayContext, inputs_ref: dict[str, Any]
 ) -> tuple[str, dict[str, float], list[float]] | None:
-    """Build (candidate_id, posterior snapshot, current scores) for PoBB replay; None when underspecified."""
+    """Build (candidate_id, posterior snapshot, current scores) for PoBB replay; None when underspecified.
+
+    Seeds the MC with the same inputs the live `PoBBCheck.check()` used, so
+    record/replay agree bit-for-bit on cycles minted after the seed landed.
+    Older cycles (where the live call was unseeded) take the tolerance branch
+    in `_replay_elimination_cut` / `_replay_leader_lock_in`.
+    """
     all_results: dict[str, list[dict]] = ctx.round_data.get("all_candidate_results") or {}
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
     n = int(inputs_ref.get("queries_scored", 0))
     current = [float(r.get("fitness", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]
-    priors = {
-        pid: [float(r.get("fitness", 0.0)) for r in (all_results.get(pid) or [])]
-        for pid in prior_ids
-    }
+    priors = {pid: _resolve_prior_history(pid, ctx, all_results) for pid in prior_ids}
     priors = {pid: p for pid, p in priors.items() if p}
     if not priors or len(current) < 2:
         return None
-    return candidate_id, posterior_best_probabilities({**priors, candidate_id: current}), current
+    round_num = int(inputs_ref.get("round_num", ctx.round_data.get("round", 0)))
+    rng = pobb_rng(round_num, candidate_id, list(priors.keys()), len(current))
+    snapshot = posterior_best_probabilities({**priors, candidate_id: current}, rng=rng)
+    return candidate_id, snapshot, current
+
+
+# 3× the MC standard error (≈0.7% per `posterior_best_probabilities`) — within
+# this band, a P(best) shift between record and replay is MC noise from a
+# pre-seed cycle, not real scorer drift, so trust the recorded outcome.
+_POBB_REPLAY_TOLERANCE = 0.03
 
 
 def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """PoBB gate under rescored scores."""
+    """PoBB gate under rescored scores; tolerant of MC noise for pre-seed cycles."""
     snap = _pobb_replay_snapshot(ctx, inputs_ref)
     if snap is None:
         return False
     candidate_id, snapshot, _ = snap
-    return pobb_should_stop(snapshot.get(candidate_id, 1.0), float(inputs_ref["epsilon"]))
+    fresh = float(snapshot.get(candidate_id, 1.0))
+    eps = float(inputs_ref["epsilon"])
+    recorded = inputs_ref.get("recorded_p_best")
+    if recorded is not None and abs(fresh - float(recorded)) < _POBB_REPLAY_TOLERANCE:
+        return pobb_should_stop(float(recorded), eps)
+    return pobb_should_stop(fresh, eps)
 
 
 def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """PoBB leader-lock under rescored scores; argmax + P(best) ≥ lock_in + n ≥ lock_in_n_min."""
+    """PoBB leader-lock under rescored scores; tolerant of MC noise for pre-seed cycles."""
     if int(inputs_ref.get("queries_scored", 0)) < int(inputs_ref.get("lock_in_n_min", 8)):
         return False
     snap = _pobb_replay_snapshot(ctx, inputs_ref)
@@ -149,9 +193,14 @@ def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bo
         return False
     candidate_id, snapshot, _ = snap
     leader = max(snapshot.items(), key=lambda kv: kv[1])[0]
-    return leader == candidate_id and snapshot.get(candidate_id, 0.0) >= float(
-        inputs_ref.get("lock_in", 0.95)
-    )
+    if leader != candidate_id:
+        return False
+    fresh = float(snapshot.get(candidate_id, 0.0))
+    threshold = float(inputs_ref.get("lock_in", 0.95))
+    recorded = inputs_ref.get("recorded_p_best")
+    if recorded is not None and abs(fresh - float(recorded)) < _POBB_REPLAY_TOLERANCE:
+        return float(recorded) >= threshold
+    return fresh >= threshold
 
 
 def _derive_stall_count(

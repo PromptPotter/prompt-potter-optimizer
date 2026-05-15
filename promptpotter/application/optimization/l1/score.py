@@ -200,6 +200,7 @@ def decode_signal_effect(
         }
 
     queries_scored = int(cr.get("queries_scored", len(results)))
+    recorded_p_best = float(cr.get("p_best", 0.0))
     elimination_decision: tuple[dict, dict] | None = None
     if elimination_stopped and signal.check_name == elim_check.name:
         elimination_decision = (
@@ -210,6 +211,7 @@ def decode_signal_effect(
                 "epsilon": float(elim_check.epsilon),
                 "n_min": int(elim_check.n_min),
                 "round_num": round_num,
+                "recorded_p_best": recorded_p_best,
             },
             pobb_decision_data(cr),
         )
@@ -223,6 +225,7 @@ def decode_signal_effect(
                 "lock_in": float(elim_check.lock_in),
                 "lock_in_n_min": int(elim_check.lock_in_n_min),
                 "round_num": round_num,
+                "recorded_p_best": recorded_p_best,
             },
             pobb_decision_data(cr),
         )
@@ -376,10 +379,7 @@ async def score_one_candidate(
         )
         if not prior_label and (
             effect.leader_id == "origin"
-            or (
-                effect.leader_id.startswith("R")
-                and effect.leader_id.endswith("_winner")
-            )
+            or (effect.leader_id.startswith("R") and effect.leader_id.endswith("_winner"))
         ):
             prior_label = effect.leader_id
         if prior_label:
@@ -451,7 +451,7 @@ async def score_population(
     all_candidate_results: dict[str, list[QueryMeasurement]] = {}
     candidate_scores: list[CandidateScore] = []
     escalation_signal: EscalationSignal | None = None
-    elim_check = PoBBCheck(pobb_config, n_samples=len(dataset))
+    elim_check = PoBBCheck(pobb_config, n_samples=len(dataset), round_num=round_num)
 
     # Seed PoBB priors so candidate #1 of every round has a comparator
     # to lose against. Without this, ``PoBBCheck.check()`` short-circuits
@@ -463,9 +463,7 @@ async def score_population(
     if seed_results:
         seed_scores = [r.get("fitness", 0.0) for r in seed_results]
         if seed_scores:
-            seed_id = (
-                f"R{cycle.rounds[-1].round}_winner" if cycle.rounds else "origin"
-            )
+            seed_id = f"R{cycle.rounds[-1].round}_winner" if cycle.rounds else "origin"
             elim_check.register_completed(seed_scores, candidate_id=seed_id)
 
     for idx, osp_c in enumerate(population):

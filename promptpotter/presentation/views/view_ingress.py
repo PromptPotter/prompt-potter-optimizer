@@ -158,7 +158,7 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
             ctx["original_sp_flat"][field_name] = str(value)
 
     return InitExitView(
-        origin_acc=cycle.tracking.current_accuracy,
+        origin_acc=cycle.tracking.origin_accuracy,
         cycle_id_short=(session.state.cycle_id or "?")[:12],
         samples=len(session.scoring.scoring_set),
         obs_on=session.state.obs is not None,

@@ -24,6 +24,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimization.pobb.seeding import pobb_rng
 from promptpotter.application.scoring.metrics import count_degraded_samples
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.validators import StopRule
@@ -316,12 +317,13 @@ class PoBBCheck:
 
     name = "elimination"
 
-    def __init__(self, config: PoBBConfig, *, n_samples: int) -> None:
+    def __init__(self, config: PoBBConfig, *, n_samples: int, round_num: int = 0) -> None:
         self.n_min = config.n_min
         self.epsilon = config.epsilon
         self.lock_in = config.lock_in
         self.lock_in_n_min = config.lock_in_n_min
         self.n_samples = n_samples
+        self.round_num = int(round_num)
         self.priors: dict[str, list[float]] = {}
         self.prior_ids: list[str] = []
         self._current_id: str = ""
@@ -353,7 +355,10 @@ class PoBBCheck:
         scores = [r.get("fitness", 0.0) for r in results]
         cid = self._current_id or "__current__"
         histories: dict[str, list[float]] = {**self.priors, cid: scores}
-        snapshot = posterior_best_probabilities(histories)
+        snapshot = posterior_best_probabilities(
+            histories,
+            rng=pobb_rng(self.round_num, cid, self.prior_ids, n),
+        )
         snap = PoBBSnapshot(p_best=snapshot, current_id=cid, n_samples=n)
         if self._on_snapshot is not None:
             self._on_snapshot(snap)

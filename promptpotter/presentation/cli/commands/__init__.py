@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from promptpotter.presentation.cli.commands.compare import cmd_compare
 from promptpotter.presentation.cli.commands.optimize import cmd_optimize
+from promptpotter.presentation.cli.commands.reset import cmd_reset
 from promptpotter.presentation.cli.commands.sweep import cmd_sweep
 
-__all__ = ["cmd_compare", "cmd_optimize", "cmd_sweep"]
+__all__ = ["cmd_compare", "cmd_optimize", "cmd_reset", "cmd_sweep"]

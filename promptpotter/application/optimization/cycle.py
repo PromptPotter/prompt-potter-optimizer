@@ -88,7 +88,13 @@ def _rf_dedup_key(rf_dict: dict) -> tuple:
 
 @dataclass
 class TrackingState:
-    """Current/best searchpoint trajectory + frozen origin composite_fitness."""
+    """Current/best searchpoint trajectory + frozen origin scores.
+
+    ``origin_*`` fields snapshot the round-0 baseline and are never
+    overwritten — ``current_*`` and ``best_*`` move with the round
+    loop, but the operator-facing "origin=" banner must point back
+    to the actual round-0 measurement even on resume.
+    """
 
     current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
@@ -98,6 +104,7 @@ class TrackingState:
     best_composite_fitness: float = 0.0
     best_round: int = -1
     best_sp: JobSearchPoint | None = None
+    origin_accuracy: float = 0.0
     origin_composite_fitness: float = 0.0
 
 
@@ -199,6 +206,7 @@ class Cycle:
                 best_accuracy=origin_accuracy,
                 best_composite_fitness=composite_fitness,
                 best_sp=sp,
+                origin_accuracy=origin_accuracy,
                 origin_composite_fitness=composite_fitness,
             ),
             opt_sp=opt_sp,
