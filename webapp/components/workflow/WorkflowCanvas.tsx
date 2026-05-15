@@ -146,46 +146,43 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
                 </g>
               );
             })}
+            {view.nodes.map((n) => {
+              const pos = LAYOUT[n.id];
+              if (!pos) return null;
+              const data = currentNodes[n.id];
+              const hasData = !!data;
+              const isActive = activeId === n.id;
+              const cls = ["wf-box", `kind-${n.kind || "llm"}`];
+              if (isActive) cls.push("active");
+              if (!hasData && !isActive && n.kind === "llm") cls.push("dim");
+              if (selected === n.id) cls.push("selected");
+              const sub = n.kind === "io" ? ""
+                : n.kind === "measurement" ? "system step"
+                : hasData ? (data?.model || "—") : "idle";
+              const tip = TERMS[`node_${n.id}`] || "";
+              return (
+                <foreignObject key={n.id} x={pos.x} y={pos.y} width={pos.w} height={pos.h} style={{ overflow: "visible" }}>
+                  <div style={{ width: "100%", height: "100%" }}>
+                    <button
+                      type="button"
+                      className="wf-node"
+                      aria-label={n.kind === "io" ? `${n.label} (I/O)` : `Node: ${n.label}`}
+                      aria-pressed={selected === n.id ? "true" : undefined}
+                      tabIndex={n.kind === "io" ? -1 : 0}
+                      disabled={n.kind === "io"}
+                      onClick={() => n.kind !== "io" && setSelected(n.id)}
+                      title={tip || undefined}
+                    >
+                      <div className={cls.join(" ")}>
+                        <div className="wf-node-title">{n.label}</div>
+                        {sub && <div className="wf-node-sub">{sub}</div>}
+                      </div>
+                    </button>
+                  </div>
+                </foreignObject>
+              );
+            })}
           </svg>
-          {view.nodes.map((n) => {
-            const pos = LAYOUT[n.id];
-            if (!pos) return null;
-            const data = currentNodes[n.id];
-            const hasData = !!data;
-            const isActive = activeId === n.id;
-            const cls = ["wf-box", `kind-${n.kind || "llm"}`];
-            if (isActive) cls.push("active");
-            if (!hasData && !isActive && n.kind === "llm") cls.push("dim");
-            if (selected === n.id) cls.push("selected");
-            const sub = n.kind === "io" ? ""
-              : n.kind === "measurement" ? "system step"
-              : hasData ? (data?.model || "—") : "idle";
-            const tip = TERMS[`node_${n.id}`] || "";
-            return (
-              <button
-                key={n.id}
-                type="button"
-                className="wf-node"
-                style={{
-                  left: `${(pos.x / CANVAS_W) * 100}%`,
-                  top: `${(pos.y / CANVAS_H) * 100}%`,
-                  width: `${(pos.w / CANVAS_W) * 100}%`,
-                  height: `${(pos.h / CANVAS_H) * 100}%`,
-                }}
-                aria-label={n.kind === "io" ? `${n.label} (I/O)` : `Node: ${n.label}`}
-                aria-pressed={selected === n.id ? "true" : undefined}
-                tabIndex={n.kind === "io" ? -1 : 0}
-                disabled={n.kind === "io"}
-                onClick={() => n.kind !== "io" && setSelected(n.id)}
-                title={tip || undefined}
-              >
-                <div className={cls.join(" ")}>
-                  <div className="wf-node-title">{n.label}</div>
-                  {sub && <div className="wf-node-sub">{sub}</div>}
-                </div>
-              </button>
-            );
-          })}
         </div>
       </div>
     </div>

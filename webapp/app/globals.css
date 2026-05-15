@@ -91,9 +91,23 @@
 
 body{font-family:var(--font-sans);background:var(--color-background-tertiary);color:var(--color-text-primary);font-size:13px}
 
-/* Shell + sidebar + main + topbar */
-.shell{display:flex;height:100vh;min-height:700px}
-.sidebar{width:200px;flex-shrink:0;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column;padding:16px 0;transition:transform .25s ease}
+/* Shell + sidebar + main + topbar.
+   --sidebar-width drives both the sidebar's flex slot and the
+   viewport-centering compensation on .dash-spine-narrow below.
+   Toggle the .sidebar-collapsed class on .shell to switch widths;
+   CSS transitions handle the animation. */
+.shell{--sidebar-width:200px;display:flex;height:100vh;min-height:700px}
+.shell.sidebar-collapsed{--sidebar-width:36px}
+.shell.sidebar-hidden{--sidebar-width:0px}
+.shell.sidebar-hidden > .sidebar{display:none}
+.sidebar{width:var(--sidebar-width);flex-shrink:0;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column;padding:16px 0;overflow:hidden}
+.sidebar-toggle{position:absolute;top:8px;right:6px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;cursor:pointer;color:var(--color-text-tertiary);font-size:14px;font-family:inherit;border-radius:4px}
+.sidebar-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
+.sidebar > .sidebar-toggle{position:relative;align-self:flex-end;margin-right:6px;margin-bottom:8px}
+.shell.sidebar-collapsed .sidebar > .brand,
+.shell.sidebar-collapsed .sidebar > .sidebar-primary,
+.shell.sidebar-collapsed .sidebar > .cycle-library,
+.shell.sidebar-collapsed .sidebar > .sidebar-footer{display:none}
 .brand{padding:8px 16px 20px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:8px}
 .brand-name{font-size:16px;font-weight:500}
 .brand-sub{font-size:11px;letter-spacing:.1em;color:var(--color-text-tertiary)}
@@ -168,8 +182,15 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 /* Dashboard spines — DashboardLayout exports two width tiers. Narrow
    (980px) wraps the header + diagnostics; wide (1400px) wraps the panel
    grids so lineage + fitness + workflow get the room to spread out. */
-.dash-spine-narrow,.dash-spine-wide{margin-left:auto;margin-right:auto;margin-bottom:var(--dash-zone-gap)}
-.dash-spine-narrow{max-width:var(--dash-narrow-max)}
+.dash-spine-narrow,.dash-spine-wide{width:100%;margin-left:auto;margin-right:auto;margin-bottom:var(--dash-zone-gap)}
+/* Narrow stripe stays viewport-centered (not main-area-centered) so
+   collapsing/expanding the sidebar doesn't shift the cards. main is
+   offset by --sidebar-width inside .shell's flex; translateX by
+   -sidebar-width/2 re-centres the element against the viewport.
+   No transition — layout-property `width` reflow and composite-thread
+   `transform` desync mid-animation and the stripe wobbles. Snap is
+   exact in a single frame. */
+.dash-spine-narrow{max-width:var(--dash-narrow-max);transform:translateX(calc(var(--sidebar-width, 0px) / -2))}
 .dash-spine-wide{max-width:var(--dash-wide-max)}
 .dash-spine-narrow:last-child,.dash-spine-wide:last-child{margin-bottom:0}
 /* Sticky status strip stays glued to the scroll top even though it sits
@@ -234,20 +255,22 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 /* NOW lane — workflow + live-state side-by-side. The workflow column is
    pinned at the compact 460px box; live-state takes the rest and scrolls
    when its KV grid overflows. */
-.dash-row-now{--row-h:280px;max-width:1340px;margin-left:auto;margin-right:auto;display:grid;grid-template-columns:460px auto;gap:18px;align-items:start;justify-content:center}
-.dash-row-now > *{min-width:0}
-.dash-row-now > .workflow-card{max-width:460px;height:var(--row-h);display:flex;flex-direction:column;margin-bottom:0}
-.dash-row-now > .workflow-card .workflow-canvas-bg{flex:1;min-height:0;display:flex}
-.dash-row-now > .workflow-card .workflow-canvas{max-width:none;aspect-ratio:auto;width:100%;height:100%;flex:1}
+.dash-row-now{--row-h:280px;width:100%}
 .dash-row-now > .live-state-card{height:var(--row-h);overflow:auto;margin-bottom:0}
-@media (max-width:960px){.dash-row-now{grid-template-columns:1fr;max-width:none}.dash-row-now > .live-state-card{height:auto;max-height:400px}}
+.dash-row-verdict > .workflow-card,
+.dash-row-verdict > .workflow-card.collapsed{width:100%;max-width:none;display:flex;flex-direction:column;margin:0}
+.dash-row-verdict > .workflow-card .workflow-canvas-bg{display:flex;align-items:center;justify-content:center}
+.dash-row-verdict > .workflow-card .workflow-canvas,
+.dash-row-verdict > .workflow-card.collapsed .workflow-canvas{width:100%;height:auto;max-width:100%;aspect-ratio:500/290;flex:none}
 
 /* VERDICT lane — lineage + fitness side-by-side. Same height knob as the
    prior three-card row; the third (workflow) slot moved to NOW. */
-.dash-row-verdict{--row-h:240px;max-width:1340px;margin-left:auto;margin-right:auto;display:grid;grid-template-columns:auto 380px;gap:18px;align-items:start;justify-content:center}
+.dash-row-verdict{--row-h:240px;width:100%;display:grid;grid-template-columns:minmax(0,1fr) 320px minmax(0,1fr);gap:18px;align-items:start}
 .dash-row-verdict > *{min-width:0}
 .dash-row-verdict > .lineage-card,
-.dash-row-verdict > .fitness-card{height:var(--row-h);display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
+.dash-row-verdict > .fitness-card,
+.dash-row-verdict > .workflow-card{height:var(--row-h);display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
+.dash-row-verdict > .workflow-card{padding:0}
 .dash-row-verdict .lineage-scroll{flex:1;max-height:200px;min-height:0}
 .dash-row-verdict .fitness-chart-frame{flex:1;height:160px;min-height:0}
 .dash-row-verdict .fitness-body{flex:1;display:flex;flex-direction:column;min-height:0}
@@ -565,8 +588,8 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .workflow-card.expanded{max-width:none}
 .workflow-toolbar{padding:10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:13px;color:var(--color-text-secondary)}
 .workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%}
-.workflow-canvas{position:relative;width:100%;max-width:960px;aspect-ratio:800/274;margin:0 auto;overflow:hidden}
-.wf-node{position:absolute;cursor:pointer;user-select:none;background:transparent;border:0;padding:0;font-family:inherit;color:inherit}
+.workflow-canvas{position:relative;width:100%;max-width:960px;aspect-ratio:500/290;margin:0 auto;overflow:hidden}
+.wf-node{cursor:pointer;user-select:none;background:transparent;border:0;padding:0;font-family:inherit;color:inherit;width:100%;height:100%;display:block}
 .wf-node:disabled{cursor:default}
 .wf-box{position:relative;background:var(--color-background-primary);color:var(--color-text-primary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;padding:6px 10px;transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;justify-content:center;height:100%;width:100%}
 .wf-box:hover{border-color:var(--color-accent)}
@@ -829,9 +852,9 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .toggle.on::after{left:16px;background:var(--color-text-on-accent)}
 .toggle.locked{cursor:not-allowed;opacity:.4;pointer-events:none}
 .beta-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;padding:1px 6px;border-radius:4px;background:var(--color-accent);color:var(--color-text-on-accent);margin-left:8px;text-transform:uppercase;vertical-align:middle}
-/* Chat-mode collapses the sidebar — vanilla used display:none; the React port
-   keeps it transform-based so prefers-reduced-motion can fall through. */
-.shell.chat-mode > .sidebar{display:none}
+/* Sidebar stays mounted across tab switches so toggling Chat ↔ Dashboard
+   doesn't reflow the entire page width. If you want chat to feel
+   immersive, collapse the sidebar — don't unmount it. */
 
 /* Lineage tree — paper-cladogram aesthetic: horizontal child stubs and
    slanted parent-to-child branches, sharp corners, no dots. Winner gets

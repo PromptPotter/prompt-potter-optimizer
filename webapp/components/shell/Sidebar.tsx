@@ -4,18 +4,14 @@ import { fetchCycles, type CycleListEntry } from "@/lib/api";
 import { TERMS } from "@/lib/terms";
 
 interface Props {
-  // Persistent across all top-tab views (Chat / Dashboard / Files) —
-  // Replit-style navigation. The pane-level sub-views moved into the
-  // Topbar; the sidebar is now scoped to cycle navigation: a primary
-  // "New cycle" action and the cycle library beneath it. Currently-
-  // viewed cycle is highlighted; the active cycle (per
-  // active_session.json) is bullet-marked.
   cycleId: string | null;
   onSelectCycle: (id: string) => void;
   onNewCycle: () => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
-export function Sidebar({ cycleId, onSelectCycle, onNewCycle }: Props) {
+export function Sidebar({ cycleId, onSelectCycle, onNewCycle, collapsed, onToggleCollapse }: Props) {
   const [cycles, setCycles] = useState<CycleListEntry[] | null>(null);
   const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
   // Bumped manually and on `window` focus to pick up cycles the CLI minted
@@ -44,6 +40,16 @@ export function Sidebar({ cycleId, onSelectCycle, onNewCycle }: Props) {
 
   return (
     <nav className="sidebar" aria-label="Primary">
+      <button
+        type="button"
+        className="sidebar-toggle"
+        onClick={onToggleCollapse}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-expanded={!collapsed}
+      >
+        {collapsed ? "›" : "‹"}
+      </button>
       <div className="brand">
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
           <div style={{ width: 22, height: 22, background: "var(--color-accent)", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center" }}>

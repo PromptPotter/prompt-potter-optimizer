@@ -84,6 +84,29 @@ function DashboardPaneInner({
   // persisted across reloads (no URL param, no localStorage) so the
   // operator never finds risky affordances quietly enabled.
   const [editMode, setEditMode] = useState(false);
+  // Sidebar collapse — user-driven, persistent across reloads. Default
+  // expanded; once the user collapses it, that sticks until they toggle
+  // again. Tab switches never touch this state — that's the whole point
+  // of the manual control.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setSidebarCollapsed(window.localStorage.getItem("promptpotter.sidebar.collapsed") === "1");
+    } catch {
+      /* private mode etc. */
+    }
+  }, []);
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("promptpotter.sidebar.collapsed", next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
 
   const dashState = useCycleStream();
   const dash: DashboardSnapshot | null = dashState.dash;
@@ -245,7 +268,7 @@ function DashboardPaneInner({
 
   return (
     <SelectionProvider cycleId={cycleId}>
-    <div className={`shell${tab === "chat" ? " chat-mode" : ""}`}>
+    <div className={`shell${tab === "chat" ? " chat-mode sidebar-hidden" : sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <Sidebar
         cycleId={cycleId}
         onSelectCycle={(id) => {
@@ -253,6 +276,8 @@ function DashboardPaneInner({
           setTab("dashboard");
         }}
         onNewCycle={() => setTab("chat")}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebar}
       />
       <main className="main">
         <Topbar tab={tab} onTabChange={setTab} onThemeChange={onThemeChange} />
@@ -308,12 +333,16 @@ function DashboardPaneInner({
               <NarrowSpine>
                 <TopStrip dash={dash} dashRound={dashRound} />
               </NarrowSpine>
-              <WideSpine>
-                <div className="dash-row-now">
+              <NarrowSpine>
+                <div className="dash-row-verdict">
+                  <LineageTree dash={dash} />
+                  <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
                   <WorkflowCanvas pipeline={pipeline} dash={dash} />
-                  <LiveStateCard dash={dash} />
                 </div>
-              </WideSpine>
+              </NarrowSpine>
+              <NarrowSpine>
+                <LiveStateCard dash={dash} />
+              </NarrowSpine>
               <WideSpine>
                 <section className="dash-samples-wide" aria-label="Live samples">
                   <LiveSamplesCard dash={dash} dashRound={dashRound} status={dashState.status} />
@@ -321,18 +350,12 @@ function DashboardPaneInner({
               </WideSpine>
             </Lane>
             <Lane id="verdict" title="Verdict" subtitle="Has it improved? By how much?" defaultOpen>
-              <WideSpine>
-                <div className="dash-row-verdict">
-                  <LineageTree dash={dash} />
-                  <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
-                </div>
-              </WideSpine>
-              <WideSpine>
+              <NarrowSpine>
                 <div className="dash-charts">
                   <FreqChart dash={dash} themeKey={themeKey} />
                   <TrendChart themeKey={themeKey} />
                 </div>
-              </WideSpine>
+              </NarrowSpine>
             </Lane>
             <Lane id="why" title="Why" subtitle="Drill into a candidate or node" defaultOpen={false}>
               <WideSpine>
