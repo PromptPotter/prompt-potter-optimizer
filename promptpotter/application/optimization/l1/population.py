@@ -116,6 +116,7 @@ def build_score_report(
     aborted: bool = False,
     elimination_stopped: bool = False,
     elimination_context: dict | None = None,
+    degradation_context: dict | None = None,
     resumed_from_cache: bool = False,
     invalid: bool = False,
     new_runtime_failure: RuntimeFailure | None = None,
@@ -125,6 +126,12 @@ def build_score_report(
 
     ``label`` is the persisted display identity (``"C0"`` for origin,
     ``"CN.M"`` for L1 candidates). See ``domain.results.candidate_label``.
+
+    ``elimination_context`` is populated for PoBB-driven cuts (Bayesian
+    posterior comparison vs prior candidates); ``degradation_context`` is
+    populated for DegradationCheck-driven aborts (fatal classification or
+    threshold-rate degradation). The two are mutually exclusive at the
+    decode site — the renderer branches on which one is non-empty.
     """
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
     return CandidateScore(
@@ -146,6 +153,7 @@ def build_score_report(
         validation_failures=[vf.to_dict() for vf in osp.wounds.validation_failures],
         runtime_failures=[new_runtime_failure.to_dict()] if new_runtime_failure else [],
         elimination_context=dict(elimination_context) if elimination_context else {},
+        degradation_context=dict(degradation_context) if degradation_context else {},
     )
 
 

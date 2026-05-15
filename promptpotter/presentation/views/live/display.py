@@ -104,6 +104,12 @@ class LiveDisplay(DerivedView):
         # "no measurement yet" (resume points, pre-origin) — render
         # falls back to omitting the elapsed field.
         self._round_started_at: float | None = None
+        # PoBB first-fire-per-candidate guard — tracks the candidate_id
+        # most recently surfaced in a ``pobb:`` snapshot line so each
+        # candidate prints exactly one (the first time `check()` produces
+        # a posterior with non-empty priors). Resets implicitly when a
+        # new candidate_id appears on the stream.
+        self._pobb_printed_for: str = ""
 
     def _write(self, line: str) -> None:
         print(line, flush=True)
@@ -185,6 +191,12 @@ class LiveDisplay(DerivedView):
                 int(payload.get("n_samples") or 0),
                 {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
             )
+        elif ev == "sample_order_preview":
+            preview_raw = payload.get("preview") or []
+            preview: list[tuple[int, float]] = [
+                (int(p[0]), float(p[1])) for p in preview_raw if len(p) >= 2
+            ]
+            self.on_sample_order_preview(preview, int(payload.get("n_priors") or 0))
 
     # --- Public callback API ------------------------------------------
     #
@@ -278,9 +290,46 @@ class LiveDisplay(DerivedView):
 
         Per-sample mid-round detail lives in ``dashboard.json``; the
         terminal sees one consolidated p_best line in the round-summary
-        box (rendered by ``_render_p_best_line``).
+        box (rendered by ``_render_p_best_line``). First fire for each
+        candidate also prints a one-line "the check is alive" snapshot —
+        the operator's evidence that PoBB sees non-empty priors and is
+        actively comparing this candidate against them.
         """
         apply_p_best_update(self._core, current_id, n_samples, p_best)
+        if current_id and current_id != self._pobb_printed_for:
+            self._pobb_printed_for = current_id
+            current_p = p_best.get(current_id, 0.0)
+            leader_id, leader_p = (
+                max(p_best.items(), key=lambda kv: kv[1]) if p_best else (current_id, current_p)
+            )
+            leader_tag = "*self*" if leader_id == current_id else leader_id[:6]
+            n_priors = max(0, len(p_best) - 1)
+            prior_s = "" if n_priors == 1 else "s"
+            self._write(
+                f"  {DIM}pobb:{RESET} P(best)={current_p:.1%} @ q{n_samples}  "
+                f"leader={leader_tag} ({leader_p:.1%})  "
+                f"(of {n_priors} prior{prior_s})"
+            )
+
+    def on_sample_order_preview(
+        self, preview: list[tuple[int, float]], n_priors: int
+    ) -> None:
+        """Print the hard-sample-sorter's next-3 picks for this candidate.
+
+        Fires after ``on_candidate_started`` and before any sample
+        scoring. Empty ``preview`` means the sorter had no observations
+        to fit (e.g. round-1 candidate-1 with no in-round priors and an
+        empty cycle); the line is suppressed in that case so the
+        operator isn't told "next: " over an empty list.
+        """
+        if not preview:
+            return
+        prior_s = "" if n_priors == 1 else "s"
+        picks = ", ".join(f"#{sid:03d} (δ={delta:+.2f})" for sid, delta in preview)
+        self._write(
+            f"  {DIM}next samples:{RESET} {picks}  "
+            f"({n_priors} candidate prior{prior_s})"
+        )
 
     def _render_p_best_line(self) -> str | None:
         """Top-5 P(best) snapshot with cross-round arrow glyphs (▲/▼).

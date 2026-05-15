@@ -156,6 +156,32 @@ class RunCallbacks:
             sample_idx=int(snapshot.n_samples) - 1,
         )
 
+    def on_sample_order_preview(
+        self,
+        round_num: int,
+        ci: int,
+        ct: int,
+        preview: list[tuple[int, float]],
+        n_priors: int,
+    ) -> None:
+        """Hard-sample-sorter preview — top-3 next samples by Rasch difficulty.
+
+        Fired at the start of each candidate before scoring begins. The
+        ``preview`` list is the head of the sorter's ``sample_order``
+        with each sample's ``δ_s`` posterior; ``n_priors`` is the number
+        of completed candidate histories that fed the Rasch fit.
+        """
+        self._snapshot(
+            "sample_order_preview",
+            ci,
+            ct,
+            {
+                "preview": [[int(sid), float(delta)] for sid, delta in preview],
+                "n_priors": int(n_priors),
+            },
+            round_num=round_num,
+        )
+
     def set_round(self, round_num: int) -> None:
         self._current_round = round_num
 

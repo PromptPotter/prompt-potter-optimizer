@@ -371,6 +371,37 @@ def test_pobb_locks_in_dominant_leader():
     assert sig.candidates_skipped == 1
 
 
+def test_pobb_eliminates_round_one_candidate_zero_against_seeded_origin():
+    """Seeded origin prior lets round-1 candidate #0 be eliminated.
+
+    Without the round-start seeding the optimizer now performs, ``priors``
+    is empty at the start of every round; ``check()`` short-circuits
+    (``elimination.py:347``) and the very first candidate of round 1 is
+    un-eliminable regardless of how clearly inferior it is. Seeding the
+    pool with the campaign origin's per-sample fitness history at round
+    start restores the comparison and PoBB fires within ``n_min``
+    samples on a clear miss vs origin — the invariant the operator's
+    "elimination doesn't fire" report turned on.
+    """
+    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
+    # Seed: origin's per-sample fitness — same shape score_population
+    # registers from ``cycle.tracking.current_results`` at round start.
+    check.register_completed([1.0] * 20, candidate_id="origin")
+    check.set_current("R1.0_inferior")
+    sig = check.check(
+        [{"fitness": 0.0}] * 5, candidate_idx=0, n_total_candidates=6
+    )
+    assert sig is not None, (
+        "round-1 candidate #0 must be eliminable when origin is seeded as prior"
+    )
+    assert sig.check_name == "elimination"
+    assert sig.target == EscalationTarget.ELIMINATE_CANDIDATE
+    cr = sig.check_result
+    assert cr["leader_id"] == "origin"
+    assert cr["n_priors"] == 1
+    assert cr["p_best"] < 0.05
+
+
 # ===========================================================================
 # ForkPayload → OSP round-trip
 # ===========================================================================

@@ -331,8 +331,16 @@ async def _run_query_loop(
     n_total_candidates: int,
     axes: AxisIndex | None,
     persist_fresh: Callable[[list[QueryMeasurement]], None],
+    sample_order: list[int] | None = None,
 ) -> QueryLoopResult:
-    """Score dataset samples, reusing prior results where available."""
+    """Score dataset samples, reusing prior results where available.
+
+    ``sample_order`` is the hard-sample-sorter's δ_s-ranked sample-id
+    list — when supplied, the loop iterates in that order so the most
+    diagnostic samples land first. Samples not present in ``sample_order``
+    (e.g. fresh additions the sorter hasn't seen) are appended in their
+    original order. Empty / None falls back to ``dataset`` as-is.
+    """
     assert session.scoring.scorer is not None, "session.scoring.scorer required for scoring"
     state = _LoopState(results=[])
     ctx = _LoopContext(
@@ -356,8 +364,20 @@ async def _run_query_loop(
                 return signal
         return None
 
+    # δ_s-ranked iteration when the sorter supplied an order. The dataset
+    # itself is never mutated — content-hash identity stays the property
+    # of (search_point, full dataset), not the iteration order.
+    if sample_order:
+        by_id = {s.id: s for s in dataset}
+        ranked = [by_id[sid] for sid in sample_order if sid in by_id]
+        ranked_ids = {s.id for s in ranked}
+        rest = [s for s in dataset if s.id not in ranked_ids]
+        ordered_dataset = ranked + rest
+    else:
+        ordered_dataset = dataset
+
     try:
-        for i, sample in enumerate(dataset):
+        for i, sample in enumerate(ordered_dataset):
             if session.stop_check and session.stop_check():
                 logger.debug("Graceful stop after query %d/%d.", len(state.results), len(dataset))
                 return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
@@ -387,7 +407,7 @@ async def _run_query_loop(
                     len(dataset) - i - 1,
                 )
                 state.results.extend(
-                    _error_result(rq, outcome.abort_reason) for rq in dataset[i + 1 :]
+                    _error_result(rq, outcome.abort_reason) for rq in ordered_dataset[i + 1 :]
                 )
                 return QueryLoopResult(
                     state.results, completed=False, stop_reason=outcome.abort_reason
@@ -415,6 +435,7 @@ async def score_search_point(
     n_total_candidates: int = 1,
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
+    sample_order: list[int] | None = None,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], bool, EscalationSignal | None]:
     """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe)."""
     store = session.store
@@ -525,6 +546,7 @@ async def score_search_point(
         n_total_candidates=n_total_candidates,
         axes=axes,
         persist_fresh=_persist_fresh,
+        sample_order=sample_order,
     )
     results = batch.results
     escalation_signal = batch.escalation_signal

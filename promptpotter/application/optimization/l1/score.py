@@ -16,6 +16,13 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING
 
+from promptpotter.application.intelligence.exploration import (
+    Observation,
+    build_observations,
+)
+from promptpotter.application.intelligence.hard_sample_sorter import (
+    build_hard_samples_artifact_from_observations,
+)
 from promptpotter.application.optimization.l1.population import (
     INVALID_SCORES,
     build_score_report,
@@ -106,6 +113,7 @@ class SignalEffect:
     leader_id: str
     runtime_failure: RuntimeFailure | None
     elim_context: dict | None
+    degradation_context: dict | None
     elimination_decision: tuple[dict, dict] | None
     leader_lock_decision: tuple[dict, dict] | None
 
@@ -124,7 +132,7 @@ def decode_signal_effect(
 ) -> SignalEffect:
     """Decode all per-candidate signal effects in one pass over ``check_result``."""
     if signal is None:
-        return SignalEffect(False, False, False, False, "", None, None, None, None)
+        return SignalEffect(False, False, False, False, "", None, None, None, None, None)
 
     elimination_stopped = signal.is_elimination
     leader_locked_loose = signal.is_leader_lock
@@ -171,9 +179,24 @@ def decode_signal_effect(
             "epsilon": float(cr.get("epsilon", 0.05)),
             "leader_id": leader_id,
             "queries_scored": int(cr.get("queries_scored", len(results))),
-            "total_queries": int(cr.get("total_queries", len(dataset))),
+            "total_queries": int(cr.get("total_samples", len(dataset))),
             "n_priors": int(cr.get("n_priors", 0)),
             "leader_locked": leader_locked_loose,
+        }
+
+    # Degradation context — populated when DegradationCheck (or scoring-
+    # error abort) fires. Disjoint from elim_ctx: the renderer reads one
+    # or the other based on which check name attached to the signal.
+    degrad_ctx: dict | None = None
+    if elimination_stopped and signal.check_name in ("degradation", "scoring_error_abort"):
+        degrad_ctx = {
+            "degraded_rate": float(cr.get("degraded_rate", 0.0)),
+            "degraded_count": int(cr.get("degraded_count", 0)),
+            "total_scored": int(cr.get("total_scored", len(results))),
+            "dominant_warning": str(cr.get("dominant_warning", "unknown")),
+            "fatal": bool(cr.get("fatal", False)),
+            "warning_types": dict(cr.get("warning_types") or {}),
+            "source": signal.check_name,
         }
 
     queries_scored = int(cr.get("queries_scored", len(results)))
@@ -212,6 +235,7 @@ def decode_signal_effect(
         leader_id=leader_id,
         runtime_failure=new_rf,
         elim_context=elim_ctx,
+        degradation_context=degrad_ctx,
         elimination_decision=elimination_decision,
         leader_lock_decision=leader_lock_decision,
     )
@@ -233,6 +257,7 @@ async def score_one_candidate(
     candidate_scores: list[CandidateScore],
     round_num: int,
     l1_diversity: float,
+    sample_order: list[int] | None = None,
 ) -> CandidateRunResult:
     """Run one candidate through the three-exit-path lifecycle.
 
@@ -277,6 +302,7 @@ async def score_one_candidate(
         n_total_candidates=n_total,
         axes=cycle.axes,
         l1_diversity=l1_diversity,
+        sample_order=sample_order,
     )
 
     # Path 2 — full-run cache replay.
@@ -328,11 +354,17 @@ async def score_one_candidate(
         aborted=effect.aborted,
         elimination_stopped=effect.elimination_stopped,
         elimination_context=dict(effect.elim_context) if effect.elim_context else None,
+        degradation_context=(
+            dict(effect.degradation_context) if effect.degradation_context else None
+        ),
         new_runtime_failure=effect.runtime_failure,
         l1_diversity=l1_diversity,
     )
 
-    # Decorate elim_ctx with prior label when the leader was a prior candidate.
+    # Decorate elim_ctx with prior label when the leader was a prior
+    # candidate. Seeded priors (``"origin"`` / ``"R{N}_winner"``) carry
+    # operator-readable ids; current-round priors resolve through the
+    # accumulated ``candidate_scores`` (labels like ``C2.3``).
     if (
         effect.leader_id
         and effect.leader_id in priors_at_test
@@ -342,6 +374,14 @@ async def score_one_candidate(
             (r.label for r in candidate_scores if r.candidate_id == effect.leader_id),
             None,
         )
+        if not prior_label and (
+            effect.leader_id == "origin"
+            or (
+                effect.leader_id.startswith("R")
+                and effect.leader_id.endswith("_winner")
+            )
+        ):
+            prior_label = effect.leader_id
         if prior_label:
             report.elimination_context["leader_label"] = prior_label
 
@@ -413,6 +453,21 @@ async def score_population(
     escalation_signal: EscalationSignal | None = None
     elim_check = PoBBCheck(pobb_config, n_samples=len(dataset))
 
+    # Seed PoBB priors so candidate #1 of every round has a comparator
+    # to lose against. Without this, ``PoBBCheck.check()`` short-circuits
+    # on empty priors and the mechanism never fires until candidate #2
+    # — round 1 candidate #1 was un-eliminable. ``current_results`` is
+    # the round's "best-so-far" per-sample fitness history (campaign
+    # origin in round 1, prior round winner in round 2+).
+    seed_results = cycle.tracking.current_results
+    if seed_results:
+        seed_scores = [r.get("fitness", 0.0) for r in seed_results]
+        if seed_scores:
+            seed_id = (
+                f"R{cycle.rounds[-1].round}_winner" if cycle.rounds else "origin"
+            )
+            elim_check.register_completed(seed_scores, candidate_id=seed_id)
+
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
         callbacks.on_candidate_started(
@@ -424,6 +479,42 @@ async def score_population(
             osp_c.lineage.id,
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
+
+        # Hard-sample sort per candidate: fit Rasch on prior rounds plus
+        # the in-progress round's already-scored candidates, then iterate
+        # samples in descending δ_s (hardest first) so the most
+        # diagnostic samples land first and PoBB can eliminate dominated
+        # candidates without spending the full sample budget.
+        sorter_obs = build_observations(cycle.rounds)
+        for cid_seen, results_seen in all_candidate_results.items():
+            for r in results_seen:
+                sid = r.get("sample_id")
+                if sid is None or r.get("error"):
+                    continue
+                sorter_obs.append(
+                    Observation(
+                        candidate_id=cid_seen,
+                        sample_id=int(sid),
+                        hit=bool(r.get("hit")),
+                    )
+                )
+        sample_order: list[int] | None = None
+        if sorter_obs:
+            artifact = build_hard_samples_artifact_from_observations(
+                sorter_obs,
+                cycle_id=session.state.cycle_id,
+                top_k_candidates=None,
+                top_k_samples=None,
+            )
+            sample_order = list(artifact["sample_order"])
+            delta = artifact["rasch"]["delta"]
+            preview = [
+                (sid, float(delta.get(str(sid), 0.0)))
+                for sid in sample_order[: min(3, len(sample_order))]
+            ]
+            callbacks.on_sample_order_preview(
+                round_num, idx, n, preview, n_priors=len(elim_check.priors)
+            )
 
         cr_result = await score_one_candidate(
             idx=idx,
@@ -440,6 +531,7 @@ async def score_population(
             candidate_scores=candidate_scores,
             round_num=round_num,
             l1_diversity=l1_diversity,
+            sample_order=sample_order,
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
         if cr_result.runtime_failure is not None:

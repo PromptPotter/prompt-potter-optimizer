@@ -23,7 +23,6 @@ from promptpotter.presentation.views.display import (
     _fmt_delta,
     _pp_val,
     fmt_ci,
-    fmt_pvalue,
 )
 from promptpotter.shared.composite import render_composite_fitness_oneliner
 from promptpotter.shared.statistics import wilson_ci
@@ -155,26 +154,45 @@ def individual_summary_from_dict(
 
     detail_lines: list[str] = []
     elim = scores.get("elimination_context") or {}
-    if scores.get("elimination_stopped") or elim.get("leader_locked"):
+    degrad = scores.get("degradation_context") or {}
+
+    # Three disjoint exit branches — each renders only the fields its
+    # source check actually wrote, so the operator can tell at a glance
+    # whether a candidate was cut by Bayesian posterior (PoBB) or by
+    # degradation / scoring error (DegradationCheck / scoring_error_abort).
+    if elim.get("leader_locked"):
         eq = int(elim.get("queries_scored", 0))
         eqt = int(elim.get("total_queries", 0))
         n_priors = int(elim.get("n_priors", 0))
         prior_s = "" if n_priors == 1 else "s"
-        if scores.get("elimination_stopped"):
-            label = elim.get("triggered_by_prior_label")
-            if label is None:
-                pi = elim.get("triggered_by_prior_idx", -1)
-                label = f"prior #{pi}" if isinstance(pi, int) and pi >= 0 else "prior"
-            detail_lines.append(
-                f"{YELLOW}✂ eliminated q{eq}/{eqt}{RESET}  "
-                f"{fmt_pvalue(float(elim.get('triggered_p', 1.0)))}  "
-                f"vs {label} (of {n_priors} prior{prior_s})"
-            )
-        else:
-            detail_lines.append(
-                f"{GREEN}✓ leader locked q{eq}/{eqt}{RESET}  "
-                f"p_best={float(elim.get('p_best', 0.0)):.1%} (of {n_priors} prior{prior_s})"
-            )
+        detail_lines.append(
+            f"{GREEN}✓ leader locked q{eq}/{eqt}{RESET}  "
+            f"p_best={float(elim.get('p_best', 0.0)):.1%} (of {n_priors} prior{prior_s})"
+        )
+    elif scores.get("elimination_stopped") and elim:
+        eq = int(elim.get("queries_scored", 0))
+        eqt = int(elim.get("total_queries", 0))
+        n_priors = int(elim.get("n_priors", 0))
+        prior_s = "" if n_priors == 1 else "s"
+        leader_label = elim.get("leader_label") or (elim.get("leader_id", "?") or "?")[:8]
+        p_best_pct = float(elim.get("p_best", 0.0))
+        eps_pct = float(elim.get("epsilon", 0.05))
+        detail_lines.append(
+            f"{YELLOW}✂ eliminated q{eq}/{eqt}{RESET}  "
+            f"p_best={p_best_pct:.1%} < eps={eps_pct:.0%}  "
+            f"vs {leader_label} (of {n_priors} prior{prior_s})"
+        )
+    elif scores.get("elimination_stopped") and degrad:
+        dc = int(degrad.get("degraded_count", 0))
+        ts = int(degrad.get("total_scored", 0))
+        rate = float(degrad.get("degraded_rate", 0.0))
+        fatal = bool(degrad.get("fatal", False))
+        reason = degrad.get("dominant_warning", "unknown")
+        source = degrad.get("source", "degradation")
+        tag = "fatal" if fatal else f"{rate:.0%} degraded"
+        detail_lines.append(
+            f"{YELLOW}✂ {source} q{dc}/{ts}{RESET}  {tag}  ({reason})"
+        )
 
     comp = scores.get("composite_fitness")
     degraded = scores.get("degraded_samples", 0)

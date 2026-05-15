@@ -70,6 +70,7 @@ class CandidateScore:
     validation_failures: list[dict] = field(default_factory=list)
     runtime_failures: list[dict] = field(default_factory=list)
     elimination_context: dict = field(default_factory=dict)
+    degradation_context: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Flat dict representation for wire format / JSON serialization."""
@@ -97,6 +98,7 @@ class CandidateScore:
             "validation_failures": list(self.validation_failures),
             "runtime_failures": list(self.runtime_failures),
             "elimination_context": dict(self.elimination_context),
+            "degradation_context": dict(self.degradation_context),
         }
 
 
