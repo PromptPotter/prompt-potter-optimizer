@@ -55,7 +55,7 @@ export function TrendChart({ themeKey }: Props) {
     <div className="card">
       <div className="card-title">
         <span>Trend</span>
-        <span className="badge">cycle</span>
+        <span className="badge">campaign</span>
       </div>
       <div style={{ position: "relative", height: 140 }}>
         {points.length === 0 ? (

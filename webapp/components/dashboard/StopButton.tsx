@@ -48,11 +48,11 @@ export function StopButton({ cycleId, isLive }: Props) {
       {err && <span className="stop-err">stop: {err}</span>}
       <Modal
         open={confirming}
-        title={isLive ? "Stop this cycle?" : "Write stop.flag for this cycle?"}
+        title={isLive ? "Stop this campaign?" : "Write stop.flag for this campaign?"}
         message={
           isLive
             ? `${cycleId} is currently running. Writing .runtime/stop.flag — the optimizer exits at the next round boundary. Round-in-progress measurements are preserved.`
-            : `${cycleId} is not currently running. Writing the stop.flag now will cause the next \`optimize\` invocation against this cycle to halt immediately.`
+            : `${cycleId} is not currently running. Writing the stop.flag now will cause the next \`optimize\` invocation against this campaign to halt immediately.`
         }
         actions={[
           { label: "Cancel", onClick: () => setConfirming(false) },

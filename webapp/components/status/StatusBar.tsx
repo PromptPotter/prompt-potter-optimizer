@@ -77,7 +77,7 @@ interface SpendBlock {
 // token-count display so the operator still has a concrete number.
 function readSpend(dash: DashboardSnapshot | null): { chip: string; tooltip: string } {
   const block = (dash as Record<string, unknown> | null)?.spend as SpendBlock | undefined;
-  const fallbackTip = TERMS.newjob_bar_spend ?? "Cycle spend";
+  const fallbackTip = TERMS.newjob_bar_spend ?? "Campaign spend";
   if (!block) return { chip: "—", tooltip: fallbackTip };
   const backend = block.backend ?? {};
   const loop = block.loop ?? {};
@@ -141,7 +141,7 @@ export function StatusBar({
         ·
       </span>
       <span className="dash-strip-cell" title={cycleId ?? ""}>
-        <span className="dash-strip-label">cycle</span>
+        <span className="dash-strip-label">campaign</span>
         <code>{shortCycleId(cycleId)}</code>
       </span>
       <span className="dash-strip-cell">

@@ -6,7 +6,7 @@ export const TERMS: Record<string, string> = {
   // Status banner — thresholds match ageBucket() in lib/poll.ts
   status_live:        "Optimizer wrote dashboard.json in the last 30 seconds — running.",
   status_idle:        "Last write 30s–5m ago. Round between phases or paused.",
-  status_snapshot:    "Last write >5m ago. No live optimizer — viewing a frozen cycle.",
+  status_snapshot:    "Last write >5m ago. No live optimizer — viewing a frozen campaign.",
   status_offline:     "No active session, or dashboard.json unreachable. Run `python -m promptpotter optimize`.",
   status_nowall:      "Dashboard has no wallclock yet — optimizer probably has not started.",
 
@@ -45,8 +45,8 @@ export const TERMS: Record<string, string> = {
   // New Job status / spend bar — collapsed chips + expand-down panel
   newjob_bar_best:   "Best composite-fitness accuracy / origin. '62% / 50%' reads as 'best 62%, origin 50%' — the gain is the spend's return.",
   newjob_bar_round:  "Current round number. The campaign's progress through its round budget.",
-  newjob_bar_spend:  "Total LLM cost on this cycle: backend (per-sample wire calls) + loop (optimizer L1/L2/L3/critique). USD when the provider returns it (OpenRouter) or the model resolves in the bundled rate table; falls back to a token count otherwise. Tooltip splits Backend vs Loop. Source: dashboard.json::spend.",
-  newjob_bar_budget: "Spend ceiling for the cycle. Currently always uncapped — operator-set budgets land with the M11 spend-tracking spec.",
+  newjob_bar_spend:  "Total LLM cost on this campaign: backend (per-sample wire calls) + loop (optimizer L1/L2/L3/critique). USD when the provider returns it (OpenRouter) or the model resolves in the bundled rate table; falls back to a token count otherwise. Tooltip splits Backend vs Loop. Source: dashboard.json::spend.",
+  newjob_bar_budget: "Spend ceiling for the campaign. Currently always uncapped — operator-set budgets land with the M11 spend-tracking spec.",
   newjob_bar_eta:    "Estimated time until spend hits the budget at the current burn rate. Renders '—' until spend tracking is wired or the budget is uncapped.",
   newjob_bar_eff:    "Improvement-per-spend overall: (best − origin) / spend_used, in percentage points per dollar. The headline efficiency number.",
   newjob_bar_adjust: "Adjusting spend or finishing criteria from the UI is wired in M12. For now, edit campaign.json and resume `python -m promptpotter optimize`.",

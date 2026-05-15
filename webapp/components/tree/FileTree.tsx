@@ -74,7 +74,7 @@ export function FileTree({ cycleId, selected, onSelect }: Props) {
   const tree = useMemo(() => (entries ? buildTree(entries) : null), [entries]);
 
   if (!cycleId) {
-    return <div style={{ padding: 8, color: "var(--color-text-tertiary)", fontSize: 13 }}>No active session.</div>;
+    return <div style={{ padding: 8, color: "var(--color-text-tertiary)", fontSize: 13 }}>No active campaign.</div>;
   }
   if (error) {
     return <div style={{ padding: 8, color: "var(--color-danger)", fontSize: 13 }}>Failed to load files: {error}</div>;

@@ -181,9 +181,9 @@ export function ChatPane({
           <div className="chat-job-dropdown" role="region" aria-label="Job status and configuration">
             <div className="job-section">
               <div className="section-title">Identity</div>
-              <div className="row"><span className="lbl">Cycle</span><span className="val">{fmt(cycleId)}</span></div>
+              <div className="row"><span className="lbl">Campaign</span><span className="val">{fmt(cycleId)}</span></div>
               <div className="row"><span className="lbl">Session</span><span className="val">{fmt(sessionId)}</span></div>
-              <div className="row"><span className="lbl">Dataset</span><span className="val">{fmt(datasetTitle)}</span></div>
+              <div className="row"><span className="lbl">Project</span><span className="val">{fmt(datasetTitle)}</span></div>
               <div className="row"><span className="lbl">Updated</span><span className="val">{fmt(dash?.wallclock_serialized_at)}</span></div>
               <div className="section-title" style={{ marginTop: 12 }}>Spend</div>
               <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${(backendBucket.input_tokens ?? 0) + (backendBucket.output_tokens ?? 0)} tok`}</span></div>
@@ -211,7 +211,7 @@ export function ChatPane({
             type="button"
             className="wf-hero-node wf-hero-node-toggle"
             aria-pressed={samplesOpen}
-            aria-label={samplesOpen ? "Hide dataset preview" : "Show dataset preview"}
+            aria-label={samplesOpen ? "Hide project preview" : "Show project preview"}
             onClick={toggleSamples}
           >
             <div className="ico">
@@ -243,7 +243,7 @@ export function ChatPane({
             type="button"
             className="wf-hero-node wf-hero-node-toggle"
             aria-pressed={samplesOpen}
-            aria-label={samplesOpen ? "Hide dataset preview" : "Show dataset preview"}
+            aria-label={samplesOpen ? "Hide project preview" : "Show project preview"}
             onClick={toggleSamples}
           >
             <div className="ico">
@@ -287,7 +287,7 @@ export function ChatPane({
                 <span className="meta">· 500 rows</span>
               </div>
             </div>
-            <div className="chat-msg ai">Got your pipeline + the dataset. Flip on Auto-tune (BETA) — I&apos;ll find a better prompt for it. Want me to turn it on?</div>
+            <div className="chat-msg ai">Got your pipeline + the project. Flip on Auto-tune (BETA) — I&apos;ll find a better prompt for it. Want me to turn it on?</div>
             <div className="chat-msg ai">Which parameter do you want to explore?</div>
             <div className="chat-msg ai">
               Few things to tune this right:<br />
@@ -298,7 +298,7 @@ export function ChatPane({
             </div>
           </div>
           <div className="chat-input-row">
-            <button className="chat-attach" type="button" title="Attach dataset" disabled aria-label="Attach dataset">
+            <button className="chat-attach" type="button" title="Attach project" disabled aria-label="Attach project">
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14.5 7.5 8 14a3.5 3.5 0 0 1-4.95-4.95L9.5 2.6a2.4 2.4 0 0 1 3.4 3.4L6.4 12.5a1.3 1.3 0 0 1-1.83-1.83L11 4.2" />
               </svg>
@@ -360,7 +360,7 @@ export function ChatPane({
                 </span>
                 <div className="row-body">
                   <div className="name">Optimize prompt while using<span className="beta-tag">Beta</span></div>
-                  <div className="desc">Quietly evolves parameters across your dataset</div>
+                  <div className="desc">Quietly evolves parameters across your project</div>
                 </div>
               </div>
               <button

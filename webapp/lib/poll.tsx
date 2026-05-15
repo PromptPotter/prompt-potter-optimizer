@@ -215,9 +215,9 @@ function useCycleStreamSource(
     if (!cycleId) {
       setState({
         ...INITIAL_STATE,
-        statusText: "No active session",
+        statusText: "No active campaign",
         statusHint:
-          "Start a cycle: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal.",
+          "Start a campaign: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal.",
       });
       return;
     }

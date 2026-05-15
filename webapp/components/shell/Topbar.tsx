@@ -24,7 +24,7 @@ export function Topbar({ tab, onTabChange, onThemeChange }: Props) {
   return (
     <header className="topbar">
       <input className="search" placeholder="Search analytics..." disabled aria-label="Search analytics" />
-      <div className="tabs" role="tablist" aria-label="Cycle view">
+      <div className="tabs" role="tablist" aria-label="Campaign view">
         {TABS.map((t) => (
           <button
             key={t.id}

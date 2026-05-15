@@ -256,10 +256,10 @@ function DashboardPaneInner({
         <Topbar tab={tab} onTabChange={setTab} onThemeChange={onThemeChange} />
         <StatusBar
           status={dashState.status}
-          statusText={activeError && !cycleId ? "No active session" : dashState.statusText}
+          statusText={activeError && !cycleId ? "No active campaign" : dashState.statusText}
           statusHint={
             activeError && !cycleId
-              ? "Start a cycle: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal."
+              ? "Start a campaign: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal."
               : dashState.statusHint
           }
           termKey={dashState.termKey}
@@ -288,10 +288,10 @@ function DashboardPaneInner({
               <header className="dash-hero">
                 <div className="page-header">
                   <div className="breadcrumb">
-                    Cycle »{" "}
+                    Campaign »{" "}
                     <CyclePicker cycleId={cycleId} onChange={handleCycleChange} />
                     {isLive && (
-                      <span className="live-badge" title="Cycle is actively running — dashboard updated in the last 60s">
+                      <span className="live-badge" title="Campaign is actively running — dashboard updated in the last 60s">
                         ● Live
                       </span>
                     )}

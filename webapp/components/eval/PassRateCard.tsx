@@ -36,7 +36,7 @@ export function PassRateCard({ round }: Props) {
         <div style={{ color: "var(--color-text-tertiary)", fontSize: 13 }}>
           {round
             ? "No candidates this round."
-            : "First round in progress. Each round mutates the prompt, scores it on the dataset, then critiques. Hold tight (~10–60s depending on dataset size)."}
+            : "First round in progress. Each round mutates the prompt, scores it on the project, then critiques. Hold tight (~10–60s depending on project size)."}
         </div>
       ) : (
         top.map((c, i) => {

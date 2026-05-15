@@ -42,7 +42,7 @@ export function LiveSamplesCard({ dash, dashRound, status }: Props) {
       <div className="samples-list" role="log" aria-live="polite" aria-atomic="false">
         {latest.length === 0 ? (
           <div className="samples-empty">
-            No samples scored yet this round. They&apos;ll appear here as the optimizer runs the dataset against the current candidate.
+            No samples scored yet this round. They&apos;ll appear here as the optimizer runs the project against the current candidate.
           </div>
         ) : (
           latest.map((r, i) => {

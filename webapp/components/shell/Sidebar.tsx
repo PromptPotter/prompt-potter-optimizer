@@ -63,20 +63,20 @@ export function Sidebar({ cycleId, onSelectCycle, onNewCycle }: Props) {
           type="button"
           className="sidebar-cta"
           onClick={onNewCycle}
-          title="Start a new cycle"
+          title="Start a new campaign"
         >
-          + New cycle
+          + New campaign
         </button>
       </div>
       <div className="cycle-library">
         <div className="cycle-library-head">
-          <span>Cycles</span>
+          <span>Campaigns</span>
           <button
             type="button"
             className="cycle-library-refresh"
             onClick={() => setTick((t) => t + 1)}
-            title="Refresh cycle list"
-            aria-label="Refresh cycle list"
+            title="Refresh campaign list"
+            aria-label="Refresh campaign list"
           >
             ↻
           </button>
@@ -112,7 +112,7 @@ export function Sidebar({ cycleId, onSelectCycle, onNewCycle }: Props) {
                       <span className="cycle-library-row">
                         <span className="cycle-library-name">
                           {c.dataset_name || c.cycle_id}
-                          {live && <span className="cycle-library-live" title="Cycle status is running">●</span>}
+                          {live && <span className="cycle-library-live" title="Campaign status is running">●</span>}
                         </span>
                         <span className="cycle-library-meta">
                           {c.sibling_kind === "root" ? "" : `${c.sibling_kind} · `}

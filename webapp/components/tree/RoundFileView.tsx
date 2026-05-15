@@ -125,11 +125,11 @@ export function RoundFileView({ doc, raw }: Props) {
             <table>
               <thead>
                 <tr>
-                  <th title="Sample ID — stable identifier from the dataset.">ID</th>
+                  <th title="Sample ID — stable identifier from the project.">ID</th>
                   <th title="Hit / miss for this sample.">Status</th>
                   <th title="Input given to the pipeline for this sample.">Query</th>
                   <th title="Top-1 prediction returned by the pipeline.">Predicted</th>
-                  <th title="Ground-truth answer from the dataset.">Ground</th>
+                  <th title="Ground-truth answer from the project.">Ground</th>
                 </tr>
               </thead>
               <tbody>

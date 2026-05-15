@@ -43,9 +43,9 @@ export function CyclePicker({ cycleId, onChange }: Props) {
     };
   }, [refreshTick]);
 
-  if (err) return <span className="cycle-picker-err">cycles: {err}</span>;
+  if (err) return <span className="cycle-picker-err">campaigns: {err}</span>;
   if (!cycles || cycles.length === 0) {
-    return <span>{cycleId || "no cycles"}</span>;
+    return <span>{cycleId || "no campaigns"}</span>;
   }
 
   // Group by dataset_name (alpha), within each group sort by updated_at desc.
@@ -71,7 +71,7 @@ export function CyclePicker({ cycleId, onChange }: Props) {
       <select
         value={cycleId ?? ""}
         onChange={(e) => onChange(e.target.value)}
-        aria-label="Switch cycle"
+        aria-label="Switch campaign"
       >
         {!selectedKnown && cycleId && (
           <option value={cycleId} disabled>
@@ -93,8 +93,8 @@ export function CyclePicker({ cycleId, onChange }: Props) {
         type="button"
         className="cycle-picker-refresh"
         onClick={() => setRefreshTick((t) => t + 1)}
-        title="Refresh cycle list"
-        aria-label="Refresh cycle list"
+        title="Refresh campaign list"
+        aria-label="Refresh campaign list"
       >
         ↻
       </button>
