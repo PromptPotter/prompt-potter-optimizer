@@ -12,6 +12,7 @@
 - [ ] **L2 self-diagnosis panels.** Option-set / axis-exhaustion / sample-delta / verbosity stats — L2 today reads winner only. → [`m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface`](m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface)
 - [x] **L1 evidence-grounding validator.** Shipped: `evidence_grounding` is a required L1-output field; `evidence_grounding_present` behavior check + `EvidenceGrounding` lineage carry. Healing rule (`l2_unjustified_mutations`) ships with Track 4. → [`m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface`](m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface)
 - [ ] **Webapp control plane + multi-cycle.** Read-only ships (M11); control plane is M12. → [`m12-multi-connector.md`](m12-multi-connector.md)
+- [ ] **Chat-first multi-user web.** End-state product surface: one admin self-hosts; casual web users sign in; chat is the constant control surface; install-scoped shared measurements. Spec-only, no code. → [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md)
 - [ ] **Publication benchmarks + ablation.** BBEH headline + ablation studies not yet published. → [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md)
 - [ ] **L4 outer loop.** Sequenced M10 partial → M11 Track 5 → M12 Track 4. → [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.md)
 - [ ] **Spend-loop operator doc.** Define spend → compute → review → redefine not documented as workflow. → [`m11-spend-tracking.md`](m11-spend-tracking.md)
@@ -23,6 +24,7 @@
 | Spec | Pre-reading |
 |------|-------------|
 | [![m12-multi-connector](https://img.shields.io/badge/m12--multi--connector-red?style=for-the-badge)](m12-multi-connector.md) | `promptpotter/infrastructure/backend.py`, `promptpotter/connectors/protocol.py`, `webapp/app/` |
+| [![m13-chat-first-user-web](https://img.shields.io/badge/m13--chat--first--web-orange?style=for-the-badge)](m13-chat-first-user-web.md) | `webapp/app/page.tsx`, `promptpotter/presentation/cli/`, `archive/measurements/` |
 | [![m12-plus-backlog](https://img.shields.io/badge/m12--plus--backlog-black?style=for-the-badge)](m12-plus-backlog.md) | — |
 | [![m11-publication-benchmarks](https://img.shields.io/badge/m11--publication--benchmarks-red?style=for-the-badge)](m11-publication-benchmarks.md) — subs: [`m11-spend-tracking.md`](m11-spend-tracking.md) | `docs/research/benchmarks.md`, `datasets/{hotpotqa,gsm8k}/`, `promptpotter/application/datasets.py`, `webapp/app/` |
 | [![m10-prompt-iteration-framework](https://img.shields.io/badge/m10--prompt--iteration--framework-black?style=for-the-badge)](m10-prompt-iteration-framework.md) | `promptpotter/application/optimization/{optimizer_pipeline.json,pipeline.py}`, `promptpotter/application/runner/`, `tests/test_invariants.py` |

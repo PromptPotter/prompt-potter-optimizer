@@ -46,6 +46,16 @@ def try_parse_json(content: str, provider: str) -> Any | None:
         return None
 
 
+def _unwrap_single_element_list(parsed: Any) -> Any:
+    # Groq/openai-oss occasionally wraps the top-level structured-output
+    # object in a single-element list — strip parallel to the code-fence
+    # strip in try_parse_json. Every optimizer response_model is a
+    # root-object Pydantic model, so this is unambiguous.
+    if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
+        return parsed[0]
+    return parsed
+
+
 def extract_parsed_json(response: Any) -> Any:
     """Return the parsed JSON object from an ``LLMResponse``.
 
@@ -99,6 +109,7 @@ def parse_response_content(
             f"{provider_name} returned unparseable JSON for {response_model.__name__}: "
             f"{content[:500]!r}"
         )
+    parsed = _unwrap_single_element_list(parsed)
     return response_model.model_validate(parsed)
 
 
@@ -139,6 +150,7 @@ def try_groq_json_validate_repair(
         return None
     fg_text, parsed = repaired
     if response_model is not None:
+        parsed = _unwrap_single_element_list(parsed)
         parsed = response_model.model_validate(parsed)
     logger.info("%s: salvaged failed_generation via JSON repair", provider_name)
     return LLMResponse(
