@@ -19,6 +19,7 @@ posterior, MC argmax, stop when current's P(best) < ε.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -98,6 +99,38 @@ class ResultClassification:
         return next(iter(sorted(self.fatal_codes)), None)
 
 
+_REFUSAL_PATTERN = re.compile(
+    r"^\s*(?:i'?m\s+sorry|i\s+apologi[sz]e|i\s+cannot|i\s+can'?t|i'?m\s+(?:not\s+able|unable))\b",
+    re.IGNORECASE,
+)
+"""Head-anchored regex for LLM refusal prefixes. Anchored to ``^`` so
+mid-text apologies inside genuine reasoning don't false-positive — a
+real refusal opens with the apology, not buries it."""
+
+
+def _is_refusal(result: Mapping[str, Any]) -> bool:
+    """Detect head-anchored refusal patterns in the predicted answer.
+
+    The model occasionally returns a refusal as its full output (e.g.
+    ``"I'm sorry, but I cannot solve this problem."``) instead of an
+    actual answer. These slip past every existing advisory channel
+    because ``finish_reason=stop`` and there's no diagnostics warning —
+    the model "completed" normally, it just completed with a refusal.
+
+    L2 needs to see these as a distinct failure mode to propose
+    mitigations (different model, rephrased instruction). Plain ``MISS``
+    classification loses that signal.
+    """
+    predicted = str(result.get("predicted") or "")
+    if not predicted:
+        return False
+    # Cap the matched prefix at the first sentence/120 chars — refusals
+    # are short; a 500-char prediction that opens with apology framing
+    # is likely a real reasoning chain that started with hedging.
+    head = predicted[:120]
+    return bool(_REFUSAL_PATTERN.match(head))
+
+
 def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
     pd = result.get("pipeline_data") or {}
     advisories: set[str] = set()
@@ -108,6 +141,9 @@ def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
             advisories.add(w)
     if not advisories and is_error_result(result):
         advisories.add(f"{pd.get('terminated_at', 'unknown')}:error")
+    if _is_refusal(result):
+        terminated_at = pd.get("terminated_at") or "llm_only"
+        advisories.add(f"{terminated_at}:model_refusal")
     return advisories
 
 
@@ -152,6 +188,14 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
     for adv in advisories:
         if adv.endswith(":content_filtered"):
             fatals.add(adv)
+        elif adv.endswith(":model_refusal"):
+            # Refusal routes to infra (not fatal): the same query at a
+            # different temperature / rephrased instruction can recover,
+            # so don't fast-path eliminate the candidate at n=1. But
+            # surfacing it in infra_codes routes it to RUNTIME FAILURES
+            # so L2 sees the pattern and can propose mitigations
+            # (different model, less safety-triggering instruction).
+            infra.add(adv)
 
     if is_error_result(result) and error_category(result.get("error")) == ErrorCategory.CLIENT:
         fatals.add("backend:client_error")

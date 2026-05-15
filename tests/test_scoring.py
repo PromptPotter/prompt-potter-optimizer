@@ -451,5 +451,89 @@ def test_evolve_scoring_set_respects_min_size() -> None:
 
 
 # ===========================================================================
+# Stale-data protocol — config-fundamental short-circuit
+# ===========================================================================
+
+
+def test_rerun_short_circuits_when_max_tokens_le_cached_completion() -> None:
+    """When the cached failure is a token-budget exhaustion AND the rerun's
+    ``max_tokens`` would be no larger than the cached run's actual output,
+    the rerun branch must short-circuit — running it would burn an LLM call
+    against the same (or tighter) budget for an identical DEPR result.
+    """
+    from promptpotter.application.scoring.sample_measurement import (
+        _rerun_would_repeat_token_budget_failure,
+    )
+
+    cached = {
+        "pipeline_data": {
+            "diagnostics": {
+                "warnings": [{"step": "llm_only", "code": "content_empty"}],
+            },
+            "step_tokens": {
+                "llm_only": {
+                    "input": 212,
+                    "output": 3072,  # actual emitted == max_tokens cap
+                    "finish_reason": "length",
+                    "reasoning": 12226,  # reasoning chars > completion → budget exhausted
+                },
+            },
+        },
+    }
+    # rerun at tighter budget: short-circuit
+    assert _rerun_would_repeat_token_budget_failure(cached, {"llm_only": {"max_tokens": 1536}})
+    # rerun at equal budget: short-circuit
+    assert _rerun_would_repeat_token_budget_failure(cached, {"llm_only": {"max_tokens": 3072}})
+    # rerun at larger budget: let it try
+    assert not _rerun_would_repeat_token_budget_failure(cached, {"llm_only": {"max_tokens": 8192}})
+    # non-budget failure: regular rerun logic applies
+    non_budget = {"pipeline_data": {"diagnostics": {"warnings": []}, "step_tokens": {}}}
+    assert not _rerun_would_repeat_token_budget_failure(
+        non_budget, {"llm_only": {"max_tokens": 1536}}
+    )
+
+
+# ===========================================================================
+# Failure-mode classification — model refusals
+# ===========================================================================
+
+
+def test_classify_result_routes_refusal_to_infra() -> None:
+    """LLM refusal patterns (``I'm sorry, but I cannot...``) must surface as a
+    distinct ``llm_only:model_refusal`` advisory in ``infra_codes`` so L2 sees
+    them as a runtime-failure category — not plain MISS. Without this signal
+    the optimizer can't propose mitigations (different model, rephrase) for
+    queries where the model literally refuses to engage.
+    """
+    from promptpotter.application.optimization.pobb.elimination import classify_result
+
+    cases_route_to_infra = [
+        "I'm sorry, but I cannot solve this problem.",
+        "I'm sorry, but I'm unable to provide a definitive answer.",
+        "I apologize, but I can't help with that.",
+        "I cannot provide a solution to this question.",
+    ]
+    for predicted in cases_route_to_infra:
+        cls = classify_result(
+            {"predicted": predicted, "pipeline_data": {"terminated_at": "llm_only"}}
+        )
+        assert "llm_only:model_refusal" in cls.infra_codes, (
+            f"expected refusal classification for {predicted!r}, got {sorted(cls.all_codes)}"
+        )
+        assert "llm_only:model_refusal" not in cls.fatal_codes  # intermittent, not one-strike-fatal
+
+    # Negative: a mid-text apology inside genuine reasoning must NOT trigger.
+    real_reasoning = (
+        "Let me work through this. First I'll consider the symmetry. "
+        "Sorry, I made an arithmetic slip earlier — recomputing: 7 * 9 = 63. "
+        "Therefore the answer is \\boxed{63}."
+    )
+    cls = classify_result(
+        {"predicted": real_reasoning, "pipeline_data": {"terminated_at": "llm_only"}}
+    )
+    assert "llm_only:model_refusal" not in cls.infra_codes
+
+
+# ===========================================================================
 # Interactive scoring-steer
 # ===========================================================================

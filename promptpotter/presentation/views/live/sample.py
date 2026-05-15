@@ -170,6 +170,15 @@ def fmt_query_result(
             "query degrades ≥50% of the time historically → using cached answer "
             "(resampling would likely degrade again)",
         )
+    elif r.get("config_fundamental_skip"):
+        line = _append_annotation(
+            line,
+            _ann_indent,
+            RED,
+            "⚠",
+            "cached failure was token-budget exhaustion + rerun max_tokens "
+            "≤ cached output → skipped LLM rerun (would repeat); marked fatal",
+        )
     elif r.get("persistently_degraded"):
         line = _append_annotation(
             line,

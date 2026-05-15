@@ -109,6 +109,59 @@ async def test_happy_path_calls_sdk_once(llm_client):
     assert resp.content == '{"result": "ok"}'
 
 
+@pytest.mark.asyncio
+async def test_pydantic_validation_failure_retries_once_then_raises(llm_client):
+    """Wire-contract guard: when a response fails Pydantic validation against
+    ``response_model``, ``chat()`` retries exactly once with a repair-hint
+    user turn appended. Two malformed replies in a row raise
+    :class:`MetaPromptParseError` with ``attempts=2`` — the L1 catch site
+    converts that into a ``ValidationFailure`` wound so L2 can heal next round.
+    """
+    from pydantic import BaseModel
+
+    from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
+
+    class _Strict(BaseModel):
+        required_field: str
+
+    client, mock_async = llm_client
+    bad = type(
+        "Bad",
+        (),
+        {
+            "choices": [
+                type(
+                    "C",
+                    (),
+                    {
+                        "message": type("M", (), {"content": '{"wrong_field": "x"}'})(),
+                        "finish_reason": "stop",
+                    },
+                )()
+            ],
+            "usage": None,
+            "model": "test-model",
+        },
+    )()
+    mock_async.chat.completions.with_raw_response.create = AsyncMock(return_value=_RawResponse(bad))
+    with pytest.raises(MetaPromptParseError) as excinfo:
+        await client.chat(
+            messages=[{"role": "user", "content": "x"}],
+            response_model=_Strict,
+        )
+    assert excinfo.value.attempts == 2
+    # The repair-hint retry fired exactly once on top of the original call.
+    assert mock_async.chat.completions.with_raw_response.create.await_count == 2
+    # The retry must have appended the bad output + repair hint to the
+    # message list — the original system/user turn stays intact.
+    second_call_messages = mock_async.chat.completions.with_raw_response.create.await_args_list[
+        1
+    ].kwargs["messages"]
+    assert second_call_messages[0] == {"role": "user", "content": "x"}
+    assert second_call_messages[-2]["role"] == "assistant"
+    assert "schema validation" in second_call_messages[-1]["content"]
+
+
 # ===========================================================================
 # RateLimiter — rolling-window RPM + TPM
 # ===========================================================================

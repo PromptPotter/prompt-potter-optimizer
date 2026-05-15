@@ -412,6 +412,54 @@ def compare_rerun(cached_result: Mapping[str, Any], rerun_result: Mapping[str, A
     return {"hit_change": hit_change, "rank_change": rank_change, "improved": improved}
 
 
+def _rerun_would_repeat_token_budget_failure(
+    cached_result: Mapping[str, Any],
+    rerun_pipeline_params: dict | None,
+) -> bool:
+    """Short-circuit gate: skip the rerun branch when the cached failure was
+    a token-budget exhaustion (``finish_reason=length``) AND the rerun's
+    ``llm_only.max_tokens`` is no larger than the cached run's actual
+    output token count.
+
+    Rationale: when the LLM emits exactly its ``max_tokens`` budget and
+    still finishes ``length`` (with reasoning tokens > 0, or just truncated
+    output), the cap was binding. A rerun at the same-or-tighter budget
+    will exhaust at least as fast — burning another LLM call for the
+    same DEPR result. The stale-data ladder is built for *transient*
+    failures (rate-limit flake, model glitch); config-fundamental
+    failures don't recover and don't deserve the retry budget. The
+    ``samplescan`` branch is not gated because it runs with the schema
+    defaults, which can carry a larger ``max_tokens`` than the
+    candidate's pinch.
+    """
+    from promptpotter.application.optimization.pobb.elimination import classify_result
+
+    cl = classify_result(cached_result)
+    budget_exhausted = (
+        "llm_only:reasoning_budget_exhausted" in cl.infra_codes
+        or "llm_only:output_truncated" in cl.infra_codes
+    )
+    if not budget_exhausted:
+        return False
+
+    cached_step = ((cached_result.get("pipeline_data") or {}).get("step_tokens") or {}).get(
+        "llm_only"
+    ) or {}
+    cached_completion = int(cached_step.get("output", 0))
+    if cached_completion <= 0:
+        # No reliable cap signal — be conservative and let the rerun happen.
+        return False
+
+    rerun_max_tokens = ((rerun_pipeline_params or {}).get("llm_only") or {}).get("max_tokens")
+    if rerun_max_tokens is None:
+        # No explicit override in the rerun — runs at backend default which
+        # could be larger or smaller than the cached cap. Conservative: don't
+        # skip; let the rerun run and see.
+        return False
+
+    return int(rerun_max_tokens) <= cached_completion
+
+
 async def execute_stale_data_protocol(
     protocol_steps: list[str],
     sample: Sample,
@@ -450,6 +498,14 @@ async def execute_stale_data_protocol(
                     "degraded_obs_count": effective_count,
                     "degraded_obs_threshold": RERUN_TRIGGER_COUNT,
                 }, "below_threshold"
+
+            if _rerun_would_repeat_token_budget_failure(cached_result, pipeline_params):
+                return {
+                    **cached_result,
+                    "cached": cached_result.get("cached", False),
+                    "config_fundamental_skip": True,
+                    "skip_reason": "rerun_max_tokens_le_cached_completion",
+                }, "skipped_config_fundamental"
 
             result = dict(await measure_sample(sample, session, pipeline_params=pipeline_params))
             result["retry_of_degraded"] = True

@@ -189,17 +189,25 @@ def _r_diagnostics(b: InjectionBundle) -> str:
 
     if d.n_valid:
         rb = d.rank_buckets
-        rank_line = (
-            f"RANK DISTRIBUTION ({d.n_valid} queries): "
-            f"r=1: {rb.get('1', 0)} | r=2-5: {rb.get('2-5', 0)} | "
-            f"r=6-10: {rb.get('6-10', 0)} | r=11-20: {rb.get('11-20', 0)} | "
-            f"not_found: {rb.get('not_found', 0)}"
-        )
-        if d.top_k_accuracy:
-            rank_line += "\n  " + " | ".join(
-                f"top-{k}: {v:.0%}" for k, v in sorted(d.top_k_accuracy.items())
+        # Suppress the rank block when every query is ``not_found`` —
+        # the pipeline has no ranker / candidate_source node so ``rank``
+        # is structurally undefined for this schema. Reporting
+        # ``top-1: 0% top-3: 0% ... not_found: 20`` only steers L2
+        # toward hallucinated "fix the ranker" advice. The block is
+        # only meaningful when at least one query landed at a real rank.
+        all_not_found = rb.get("not_found", 0) == d.n_valid
+        if not all_not_found:
+            rank_line = (
+                f"RANK DISTRIBUTION ({d.n_valid} queries): "
+                f"r=1: {rb.get('1', 0)} | r=2-5: {rb.get('2-5', 0)} | "
+                f"r=6-10: {rb.get('6-10', 0)} | r=11-20: {rb.get('11-20', 0)} | "
+                f"not_found: {rb.get('not_found', 0)}"
             )
-        parts.append(rank_line)
+            if d.top_k_accuracy:
+                rank_line += "\n  " + " | ".join(
+                    f"top-{k}: {v:.0%}" for k, v in sorted(d.top_k_accuracy.items())
+                )
+            parts.append(rank_line)
 
     if d.termination_dist:
         td_lines = ["PIPELINE HEALTH:"]

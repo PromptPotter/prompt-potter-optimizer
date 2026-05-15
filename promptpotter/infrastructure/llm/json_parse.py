@@ -14,11 +14,35 @@ import logging
 from typing import Any
 
 from json_repair import repair_json
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from promptpotter.infrastructure.llm.models import LLMResponse
 
 logger = logging.getLogger(__name__)
+
+
+class MetaPromptParseError(RuntimeError):
+    """LLM returned content that failed Pydantic validation against a response_model.
+
+    Raised by :func:`OpenAICompatibleClient.chat` after one repair-hint
+    retry. Carries the raw content + the last validation error so the
+    L1-layer can record a ``ValidationFailure`` wound and L2 can heal the
+    meta-prompt on the next round.
+    """
+
+    def __init__(self, raw: str, error: ValidationError, *, attempts: int = 2):
+        super().__init__(
+            f"Meta-prompt response failed Pydantic validation after {attempts} attempt(s): "
+            f"{error.error_count()} errors"
+        )
+        self.raw = raw
+        self.error = error
+        self.attempts = attempts
+
+    def short_summary(self, max_chars: int = 500) -> str:
+        """Compact error string for prompt-injection / log lines."""
+        s = str(self.error)
+        return s if len(s) <= max_chars else s[: max_chars - 1] + "…"
 
 
 def try_parse_json(content: str, provider: str) -> Any | None:
@@ -162,6 +186,7 @@ def try_groq_json_validate_repair(
 
 
 __all__ = [
+    "MetaPromptParseError",
     "extract_parsed_json",
     "parse_response_content",
     "try_groq_json_validate_repair",

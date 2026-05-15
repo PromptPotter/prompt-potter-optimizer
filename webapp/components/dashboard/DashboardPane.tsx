@@ -47,9 +47,18 @@ interface PipelineDoc {
 
 export function DashboardPane() {
   const [cycleId, setCycleId] = useState<string | null>(null);
+  // Auto-follow the server's active cycle pointer until the operator picks
+  // one manually. URL ?cycle=… deep-link counts as a manual pick (set on
+  // mount in the initial-fetch effect below).
+  const [autoFollow, setAutoFollow] = useState(true);
   return (
     <CycleStreamProvider cycleId={cycleId}>
-      <DashboardPaneInner cycleId={cycleId} setCycleId={setCycleId} />
+      <DashboardPaneInner
+        cycleId={cycleId}
+        setCycleId={setCycleId}
+        autoFollow={autoFollow}
+        setAutoFollow={setAutoFollow}
+      />
     </CycleStreamProvider>
   );
 }
@@ -57,9 +66,13 @@ export function DashboardPane() {
 function DashboardPaneInner({
   cycleId,
   setCycleId,
+  autoFollow,
+  setAutoFollow,
 }: {
   cycleId: string | null;
   setCycleId: (id: string | null) => void;
+  autoFollow: boolean;
+  setAutoFollow: (v: boolean) => void;
 }) {
   // Replit-style sub-tabs (Chat / Dashboard / Files) scoped to the
   // currently-selected cycle. The sidebar is persistent across all
@@ -123,8 +136,19 @@ function DashboardPaneInner({
   // of inventing a second one.
   const isLive = dashState.status === "live";
 
-  // Initial cycle selection — precedence: URL `?cycle=…` > /api/v1/active
-  // > null. `sessionId` still comes from /active (the workspace pointer is
+  // Initial cycle selection + auto-follow poll. Precedence on mount:
+  //   URL `?cycle=…` > /api/v1/active > null
+  // A URL deep-link pins the view (autoFollow flipped off on first tick);
+  // otherwise we track the server's active pointer every 3 s so a CLI-side
+  // mint / fork moves the main panel in lock-step with the sidebar's orange
+  // dot. The sidebar (CyclePicker) already follows active_cycle_id; this
+  // closes the last source-of-truth gap between it and the dashboard.
+  //
+  // Effect deps include `cycleId` + `autoFollow` so each manual pick / auto-
+  // follow swap rebuilds the interval with fresh closures. That's one extra
+  // fetch per rare cycle change — cheap.
+  //
+  // `sessionId` still comes from /active (the workspace pointer is
   // CLI-owned and doesn't move when the operator browses a different cycle).
   useEffect(() => {
     let cancelled = false;
@@ -132,28 +156,39 @@ function DashboardPaneInner({
       typeof window !== "undefined"
         ? new URLSearchParams(window.location.search).get("cycle")
         : null;
-    (async () => {
+    const tick = async () => {
       try {
         const a = await fetchActive();
         if (cancelled) return;
         setSessionId(a.session_id);
-        setCycleId(urlCycle || a.cycle_id);
+        setActiveError(null);
+        if (cycleId === null) {
+          // Mount path: seed cycleId from /active (or the URL pin). A URL
+          // deep-link counts as a manual pick — drop out of auto-follow.
+          if (urlCycle) setAutoFollow(false);
+          setCycleId(urlCycle || a.cycle_id);
+        } else if (autoFollow && a.cycle_id && a.cycle_id !== cycleId) {
+          // Server-side active pointer moved (CLI mint / fork) while we
+          // were still auto-following — swing the view to follow it.
+          setCycleId(a.cycle_id);
+        }
       } catch (e) {
         if (cancelled) return;
-        if (urlCycle) {
+        if (cycleId === null && urlCycle) {
+          setAutoFollow(false);
           setCycleId(urlCycle); // honour deep-link even when no active session
-        } else {
+        } else if (cycleId === null) {
           setActiveError((e as Error).message);
         }
       }
-    })();
+    };
+    void tick();
+    const handle = window.setInterval(() => void tick(), 3000);
     return () => {
       cancelled = true;
+      window.clearInterval(handle);
     };
-    // `setCycleId` is the stable useState setter forwarded from the outer
-    // DashboardPane wrapper; including it as a dep is harmless but eslint
-    // can't see through the prop boundary.
-  }, [setCycleId]);
+  }, [setCycleId, setAutoFollow, cycleId, autoFollow]);
 
   // Keep ?cycle=… in the URL so reloads stick to the currently-viewed cycle.
   // replaceState (not pushState) — switching cycles isn't a navigation event,
@@ -167,12 +202,15 @@ function DashboardPaneInner({
   }, [cycleId]);
 
   // Picker handoff. SelectionProvider auto-clears its slot on cycleId
-  // change (prev-prop pattern); no need to plumb that here.
+  // change (prev-prop pattern); no need to plumb that here. Picking a
+  // cycle manually pins the view — `autoFollow` flips off so subsequent
+  // CLI-side mints don't yank the operator off whatever they're inspecting.
   const handleCycleChange = useCallback(
     (next: string) => {
+      setAutoFollow(false);
       setCycleId(next);
     },
-    [setCycleId],
+    [setCycleId, setAutoFollow],
   );
 
   // One-shot pipeline (topology) lookup

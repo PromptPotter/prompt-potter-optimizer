@@ -311,7 +311,18 @@ class LiveDisplay(DerivedView):
         actively comparing this candidate against them.
         """
         apply_p_best_update(self._core, current_id, n_samples, p_best)
-        if current_id and current_id != self._pobb_printed_for:
+        # Suppress the per-candidate snapshot below the lock-in floor.
+        # PoBB at q<8 with hard-sample-sorted draws is too noisy to act
+        # on — a candidate read P(best)=73.6% at q6 then finished
+        # ±0.0% vs origin at q20 in the cycle that motivated this gate.
+        # Matches ``lock_in_n_min`` in ``pobb/elimination.py`` so display
+        # tracks the same authoritative-read threshold the optimizer uses.
+        POBB_DISPLAY_MIN_SAMPLES = 8
+        if (
+            current_id
+            and current_id != self._pobb_printed_for
+            and n_samples >= POBB_DISPLAY_MIN_SAMPLES
+        ):
             self._pobb_printed_for = current_id
             current_p = p_best.get(current_id, 0.0)
             leader_id, leader_p = (

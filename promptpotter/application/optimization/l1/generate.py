@@ -14,9 +14,11 @@ from promptpotter.application.optimization.validators.l1_strict import (
     build_l1_output_schema,
     filter_pipeline_params_override,
 )
+from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import EvidenceGrounding
 from promptpotter.domain.results import CandidateProposal, candidate_label
 from promptpotter.infrastructure.llm import LLMClientBase
+from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
 from promptpotter.infrastructure.tracing import CandidateCreated
 from promptpotter.shared.errors import graceful
 
@@ -102,18 +104,38 @@ async def l1_generate(
     prompt_vars: dict[str, str] = {"n_variants": str(n_variants)}
 
     output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
-    generated, meta_prompt = await run_optimizer_node(
-        template_name="l1_generate",
-        prompt_vars=prompt_vars,
-        llm_client=llm_client,
-        model=model,
-        temperature=creativity,
-        response_schema=output_schema,
-        ledger=cycle.session.state.ledger,
-        round_num=round_num,
-        template=template,
-        optimizer_call_cache=cycle.session.store.optimizer_calls,
-    )
+    try:
+        generated, meta_prompt = await run_optimizer_node(
+            template_name="l1_generate",
+            prompt_vars=prompt_vars,
+            llm_client=llm_client,
+            model=model,
+            temperature=creativity,
+            response_schema=output_schema,
+            ledger=cycle.session.state.ledger,
+            round_num=round_num,
+            template=template,
+            optimizer_call_cache=cycle.session.store.optimizer_calls,
+        )
+    except MetaPromptParseError as parse_err:
+        # The meta-prompt LLM returned content that didn't validate against
+        # L1GenerateOutput even after one repair-hint retry. Record this on
+        # the wound channel L2 already reads (validation_failures), then
+        # return zero candidates so the round completes cleanly. Next round
+        # L2 sees the failure on its surface and heals the framing.
+        logger.error(
+            "L1 R%d: meta-prompt parse failure after retry — zero candidates this round",
+            round_num,
+        )
+        opt_sp.wounds.validation_failures.append(
+            ValidationFailure(
+                axis="l1_generate.output",
+                value=_truncate_raw(parse_err.raw, 300),
+                allowed=[],
+                reason="meta_prompt_parse_failure",
+            )
+        )
+        return []
     slot_sizes = sorted(
         (
             (slot, len(slot_text.rstrip()))
@@ -171,6 +193,10 @@ async def l1_generate(
                 )
 
     return population
+
+
+def _truncate_raw(s: str, n: int) -> str:
+    return s if len(s) <= n else s[: n - 1] + "…"
 
 
 __all__ = ["L1_CREATIVITY", "candidate_summaries", "l1_generate"]
