@@ -197,6 +197,11 @@ class LiveDisplay(DerivedView):
                 (int(p[0]), float(p[1])) for p in preview_raw if len(p) >= 2
             ]
             self.on_sample_order_preview(preview, int(payload.get("n_priors") or 0))
+        elif ev == "pobb_backfill":
+            backfilled = payload.get("backfilled") or {}
+            self.on_pobb_backfill(
+                {str(k): [str(s) for s in (v or [])] for k, v in backfilled.items()}
+            )
 
     # --- Public callback API ------------------------------------------
     #
@@ -311,9 +316,7 @@ class LiveDisplay(DerivedView):
                 f"(of {n_priors} prior{prior_s})"
             )
 
-    def on_sample_order_preview(
-        self, preview: list[tuple[int, float]], n_priors: int
-    ) -> None:
+    def on_sample_order_preview(self, preview: list[tuple[int, float]], n_priors: int) -> None:
         """Print the hard-sample-sorter's next-3 picks for this candidate.
 
         Fires after ``on_candidate_started`` and before any sample
@@ -326,10 +329,24 @@ class LiveDisplay(DerivedView):
             return
         prior_s = "" if n_priors == 1 else "s"
         picks = ", ".join(f"#{sid:03d} (δ={delta:+.2f})" for sid, delta in preview)
-        self._write(
-            f"  {DIM}next samples:{RESET} {picks}  "
-            f"({n_priors} candidate prior{prior_s})"
-        )
+        self._write(f"  {DIM}next samples:{RESET} {picks}  ({n_priors} candidate prior{prior_s})")
+
+    def on_pobb_backfill(self, backfilled: dict[str, list[str]]) -> None:
+        """Print which priors got fresh leader-on-hard-sample measurements.
+
+        Fires only when backfill actually measured something (the
+        ``RunCallbacks`` constructor suppresses no-op events). Empty
+        priors-with-zero-additions are filtered upstream so a quiet
+        line here means every prior was already cached on this
+        candidate's sample set.
+        """
+        if not backfilled:
+            return
+        parts = []
+        for cid, sids in backfilled.items():
+            tag = cid if cid in ("origin",) or cid.endswith("_winner") else cid[:6]
+            parts.append(f"{tag} +{len(sids)} ({','.join('#' + s for s in sids[:5])})")
+        self._write(f"  {DIM}↻ pobb backfill:{RESET} " + "  ".join(parts))
 
     def _render_p_best_line(self) -> str | None:
         """Top-5 P(best) snapshot with cross-round arrow glyphs (▲/▼).

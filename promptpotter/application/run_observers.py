@@ -182,6 +182,31 @@ class RunCallbacks:
             round_num=round_num,
         )
 
+    def on_pobb_backfill(
+        self,
+        round_num: int,
+        ci: int,
+        ct: int,
+        backfilled: dict[str, list[str]],
+    ) -> None:
+        """Paired-PoBB leader backfill — per-prior list of newly-measured samples.
+
+        Fired after ``PoBBCheck.backfill_priors`` resolves, only when at
+        least one prior gained new measurements. Empty/no-op backfills
+        (all priors already cover the candidate's sample order) are NOT
+        emitted — the absence of an event means the cache covered it.
+        Payload shape: ``{prior_id: [sample_id, ...]}``.
+        """
+        if not backfilled:
+            return
+        self._snapshot(
+            "pobb_backfill",
+            ci,
+            ct,
+            {"backfilled": {str(k): [str(s) for s in v] for k, v in backfilled.items()}},
+            round_num=round_num,
+        )
+
     def set_round(self, round_num: int) -> None:
         self._current_round = round_num
 

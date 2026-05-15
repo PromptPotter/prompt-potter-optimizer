@@ -319,7 +319,8 @@ async def score_one_candidate(
     # docs/concepts/paired-sample-pobb.md for the full mechanism.
     if sample_order:
         samples_by_id = {str(s.id): s for s in dataset}
-        await elim_check.backfill_priors(list(sample_order), samples_by_id)
+        backfilled = await elim_check.backfill_priors(list(sample_order), samples_by_id)
+        callbacks.on_pobb_backfill(round_num, idx, n_total, backfilled)
 
     results, scores, was_cached, signal = await score_search_point(
         candidate_sp,

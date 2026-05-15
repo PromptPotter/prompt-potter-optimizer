@@ -415,6 +415,17 @@ class LiveDashboardView(DerivedView):
                 {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
             )
             self._persist()
+        elif ev == "pobb_backfill":
+            self._append_backfill(
+                int(record.round or 0),
+                ci,
+                ct,
+                {
+                    str(k): [str(s) for s in (v or [])]
+                    for k, v in (payload.get("backfilled") or {}).items()
+                },
+            )
+            self._persist()
 
     # -- Scalar mutations -----------------------------------------------------
 
@@ -639,6 +650,36 @@ class LiveDashboardView(DerivedView):
 
         # Round-wide leaderboard (top-5 by P(best)).
         self._round["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(p_best)]
+
+    def _append_backfill(
+        self,
+        round_num: int,
+        idx: int,
+        total: int,
+        backfilled: dict[str, list[str]],
+    ) -> None:
+        """Append a paired-PoBB backfill event to the dashboard's rolling log.
+
+        Webapp + notebook readers see this under ``dashboard.json::backfill_log``.
+        Each entry names the round/candidate the backfill ran ahead of and the
+        per-prior list of newly-measured sample IDs — so the operator can tell
+        when "the leader got measured on the hard samples" vs "everything was
+        already cached" (no entry = cached). Capped at 64 entries for size.
+        """
+        log: list[dict[str, Any]] = list(self.state.get("backfill_log") or [])
+        log.append(
+            {
+                "round": int(round_num),
+                "candidate_idx": int(idx),
+                "candidate_total": int(total),
+                "backfilled": backfilled,
+                "n_priors": len(backfilled),
+                "n_measurements": sum(len(v) for v in backfilled.values()),
+            }
+        )
+        if len(log) > 64:
+            log = log[-64:]
+        self.state["backfill_log"] = log
 
     # -- Internal --------------------------------------------------------------
 

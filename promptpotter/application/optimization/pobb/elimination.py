@@ -396,17 +396,22 @@ class PoBBCheck:
         self,
         target_sample_ids: list[int | str],
         samples_by_id: dict[str, Sample],
-    ) -> None:
+    ) -> dict[str, list[str]]:
         """Ensure every prior has fitness on each target sample; score on miss.
 
         Idempotent: priors that already cover ``target_sample_ids`` are
         skipped. When ``backfill_fn`` is None (e.g. unit tests), this is
         a no-op — paired ``check()`` will see incomplete priors and skip
         them, which surfaces the gap rather than silently substituting 0.
+
+        Returns ``{prior_id: [newly_measured_sample_ids]}`` so the caller
+        can surface backfill activity through the telemetry channel.
+        Priors with zero new measurements are omitted from the return.
         """
         if not self._backfill_fn or not target_sample_ids:
-            return
+            return {}
         targets = [str(sid) for sid in target_sample_ids]
+        fresh: dict[str, list[str]] = {}
         for cid in self.prior_ids:
             existing = self.priors_by_sample[cid]
             missing_sids = [sid for sid in targets if sid not in existing]
@@ -416,11 +421,17 @@ class PoBBCheck:
             if not missing_samples:
                 continue
             new_results = await self._backfill_fn(self.prior_sps[cid], missing_samples)
+            added: list[str] = []
             for r in new_results:
                 sid_new = r.get("sample_id")
                 if sid_new is None:
                     continue
-                existing[str(sid_new)] = float(r.get("fitness", 0.0))
+                key = str(sid_new)
+                existing[key] = float(r.get("fitness", 0.0))
+                added.append(key)
+            if added:
+                fresh[cid] = added
+        return fresh
 
     def snapshot_priors(self, sample_ids: list[int | str]) -> dict[str, dict[str, float]]:
         """Return the per-prior fitness map over ``sample_ids``; for decision archival.
