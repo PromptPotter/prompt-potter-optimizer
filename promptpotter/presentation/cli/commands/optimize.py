@@ -252,8 +252,7 @@ async def _run_normal_optimize(
     ctx.save_phase("optimizing")
 
     # Wire the webapp's "Stop run" channel: presence of .runtime/stop.flag
-    # signals the loop to exit at the next stop_check point. Pre-M12; the
-    # M12 daemon will replace the flag with a proper control channel. See
+    # signals the loop to exit at the next stop_check point. See
     # docs/operations/human-in-the-loop.md.
     stop_flag = session.store.campaigns.campaign_dir(ctx.cycle_id) / ".runtime" / "stop.flag"
     session.stop_check = stop_flag.is_file

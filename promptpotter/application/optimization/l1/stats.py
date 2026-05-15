@@ -1,4 +1,4 @@
-"""L1Stats — per-cycle L1 fitness statistics for the M10 review surface.
+"""L1Stats — per-cycle L1 fitness statistics for the review surface.
 
 Pure aggregation over a list of round_data dicts (loaded from
 ``campaigns/{cycle_id}/rounds/trial_NNNN.json``) plus the per-round
@@ -24,7 +24,7 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 __all__ = ["L1Stats", "compute_l1_stats", "compute_round_1_verdict"]
 
 
-# Round-1 verdict thresholds (M10 spec § Track 5 rule table).
+# Round-1 verdict thresholds.
 HEALTHY_YIELD_RATE = 0.20
 HEADLINE_ACC = 0.95
 

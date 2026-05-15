@@ -1,4 +1,4 @@
-"""``review.md`` per-cycle renderer — M10's prompt-iteration feedback surface.
+"""``review.md`` per-cycle renderer — prompt-iteration feedback surface.
 
 Pure function over loaded dicts (peer of ``presentation/views/log_md.py``).
 No I/O. Wiring + write site live in ``runner.py`` so the renderer stays

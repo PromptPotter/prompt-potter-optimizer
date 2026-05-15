@@ -10,8 +10,8 @@ an LLM node's parsed output dict; emits a :class:`ValidatorOutcome` whose
     L2's output --[L2 validator]--> ValidatorOutcome (nurse_target="l3") --> L3 heals L2
 
 The ``score`` field mirrors ``Evaluator.compute``'s return shape (1.0 = clean,
-0.0 = full failure) so future L4 composite_fitness scoring can read validator outcomes
-through the same channel as evaluators.
+0.0 = full failure) so composite_fitness can read validator outcomes through
+the same channel as evaluators.
 
 **Stop rule** — :class:`StopRule`. Mid-round check on the running result stream
 of a candidate-under-evaluation; emits an :class:`EscalationSignal` carrying

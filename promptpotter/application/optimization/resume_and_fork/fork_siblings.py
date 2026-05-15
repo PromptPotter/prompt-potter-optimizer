@@ -1,14 +1,10 @@
 """Unified fork-mint primitive — :func:`_mint_fork` dispatches on trigger.
 
-Three triggers are wired (``SCORING_DIVERGENCE``, ``OPERATOR_DIAG``,
-``OPERATOR_SWEEP``); the rest reserve their enum slot and raise from the
-dispatch until M11 wires emission. Each trigger differs in inheritance,
-cycle-id encoding, and dir routing — the match arm below owns those
-mechanics; everything else is shared via :func:`_fork_sibling_setup`.
-
-Cycle-id encoding (``{root}_fork_{hex}`` / ``{root}_diag_NNN`` /
-``{parent}_sweep_{batch}_{hex}``) and dir layout (``forks/`` / ``diag/``
-/ ``sweeps/``) are owned by :mod:`promptpotter.infrastructure.store.paths`.
+Wired triggers: ``SCORING_DIVERGENCE``, ``OPERATOR_DIAG``,
+``OPERATOR_SWEEP``. Each differs in inheritance, cycle-id encoding, and
+dir routing — the match arm below owns those mechanics; shared setup
+lives in :func:`_fork_sibling_setup`. Cycle-id encoding and dir layout
+are owned by :mod:`promptpotter.infrastructure.store.paths`.
 """
 
 from __future__ import annotations
@@ -131,7 +127,7 @@ def _mint_fork(
     ``SCORING_DIVERGENCE`` requires ``surviving_rounds`` (parent rounds <
     ``fork_from_round`` to inherit). ``OPERATOR_SWEEP`` requires
     ``sweep_batch_id`` + ``sweep_source_file`` for idempotent dedup.
-    ``OPERATOR_DIAG`` takes neither. M11 triggers raise NotImplementedError.
+    ``OPERATOR_DIAG`` takes neither.
 
     After per-trigger mint, ``index.json::fork.trigger`` is stamped for
     cross-fork lineage queries.
@@ -213,9 +209,7 @@ def _mint_fork(
             forked_at=now,
         )
     else:
-        raise NotImplementedError(
-            f"ForkTrigger.{payload.trigger.name} not wired in M10 — see Track 5b (M11)"
-        )
+        raise NotImplementedError(f"ForkTrigger.{payload.trigger.name} not wired")
 
     campaign_store.update("", new_cycle_id, {"fork": {"trigger": payload.trigger.value}})
     return new_cycle_id

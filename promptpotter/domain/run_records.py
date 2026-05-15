@@ -189,8 +189,8 @@ class LLMCallRecord(BaseModel):
 
     ``call_id`` pairs the record with a prior :class:`LLMCallStartRecord`
     so the live dashboard's in-flight projection can clear the slot.
-    Empty string when no start record was emitted (synthesized calls,
-    legacy replay).
+    Empty string when no start record was emitted (synthesized or
+    replayed calls).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -226,11 +226,7 @@ CycleRecord = Annotated[
 
 
 class ForkTrigger(enum.StrEnum):
-    """Why a fork was minted — one value per caller of :func:`_mint_fork`.
-
-    Three are wired today; the rest are M11 deliverables. Adding a trigger
-    is an enum addition; the mint mechanism does not change.
-    """
+    """Why a fork was minted — one value per caller of :func:`_mint_fork`."""
 
     OPERATOR_SWEEP = "operator_sweep"
     OPERATOR_DIAG = "operator_diag"
@@ -244,9 +240,7 @@ class ForkPayload(BaseModel):
     """Why + what-changed at a fork cut. Lands on ``FORK_CUT.data.fork``.
 
     Optional delta fields (today: ``l1_layout``) are populated only by
-    triggers that carry that kind of change. M11 LLM-rebase emission adds
-    its delta fields here when wiring lands; M10 keeps the surface to
-    what's actually written.
+    triggers that carry that kind of change.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

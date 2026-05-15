@@ -1,8 +1,8 @@
 """Connector protocol — bundles the four backend-specific hooks under one shape.
 
 A connector packages everything PromptPotter needs to talk to a specific
-backend kind. Today only TermNorm is registered (``connectors/termnorm.py``);
-M12 adds a second connector by writing one new file in this package.
+backend kind. Additional connectors are added by writing one new file in
+this package.
 
 The four hooks:
 

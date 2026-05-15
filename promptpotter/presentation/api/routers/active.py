@@ -1,8 +1,8 @@
 """Active-session pointer + sanctioned mutating control endpoints.
 
 Read-only surface that lets the static webapp pin to the currently active
-cycle, plus the two sanctioned pre-M12 mutating endpoints (operator-initiated
-fork via ``CycleEventLog.inherit_from``, stop flag via ``.runtime/stop.flag``).
+cycle, plus the two sanctioned mutating endpoints (operator-initiated fork
+via ``CycleEventLog.inherit_from``, stop flag via ``.runtime/stop.flag``).
 Both ride existing I/O kinds (Persistence + Control-local) — they do not
 introduce a new I/O kind.
 """
@@ -92,8 +92,7 @@ async def get_cycles(store: StoreDep) -> CyclesResponse:
 # Sanctioned mutating endpoints — see promptpotter/presentation/CLAUDE.md
 # for the charter. Both ride existing I/O kinds (Persistence's `inherit_from`
 # for forks, Control-local's `stop_check` for stop) — they do not introduce
-# a new I/O kind. The M12 daemon will replace both with one typed control
-# surface.
+# a new I/O kind.
 
 
 class CreateForkRequest(BaseModel):
@@ -118,12 +117,11 @@ async def create_fork(
 ) -> CreateForkResponse:
     """Operator-initiated fork via the lineage inspector — endorse path.
 
-    MVP scope (pre-M12): the new fork inherits the parent's ledger up to the
-    parent's *current* `next_offset` (i.e., "fork from now, endorse the
-    parent's present state"). The selected ``round`` + ``candidate_id`` are
-    recorded in the fork's ``index.json::fork`` block for the audit trail
-    but do not yet drive offset selection — that's M12 work along with the
-    substitute-candidates form. The active pointer is retargeted to the new
+    The new fork inherits the parent's ledger up to the parent's *current*
+    `next_offset` (i.e., "fork from now, endorse the parent's present
+    state"). The selected ``round`` + ``candidate_id`` are recorded in the
+    fork's ``index.json::fork`` block for the audit trail but do not yet
+    drive offset selection. The active pointer is retargeted to the new
     fork so a subsequent ``python -m promptpotter optimize`` picks it up.
     """
     parent_dir = store.campaigns.campaign_dir(cycle_id)

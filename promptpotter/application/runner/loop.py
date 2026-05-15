@@ -2,8 +2,8 @@
 
 The single async loop ``run_round_loop`` is the heart of every cycle.
 Sweep / diag mode short-circuits after one scored round; ``halt_at_accuracy``
-and ``max_spend_usd`` are M10 sweep-toolkit halts checked after every
-clean round.
+and ``max_spend_usd`` are sweep-toolkit halts checked after every clean
+round.
 """
 
 from __future__ import annotations
@@ -67,9 +67,9 @@ async def run_round_loop(
 ) -> StopReason:
     """Round loop: generate → score → escalate → stop. sweep/diag halt after round 2.
 
-    ``halt_at_accuracy`` / ``max_spend_usd`` are M10 sweep-toolkit
-    halts checked after every clean round: best_accuracy ≥ target halts
-    with ``TARGET_HIT``; cumulative cycle spend ≥ ceiling halts with
+    ``halt_at_accuracy`` / ``max_spend_usd`` are sweep-toolkit halts
+    checked after every clean round: best_accuracy ≥ target halts with
+    ``TARGET_HIT``; cumulative cycle spend ≥ ceiling halts with
     ``MAX_SPEND``. ``spend_probe`` returns the current cycle USD spend
     (typically bound to the LiveDashboardView's in-memory state); when
     omitted, ``max_spend_usd`` has no effect.

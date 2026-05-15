@@ -1,8 +1,8 @@
 """Connector registry — single lookup point for backend-specific hooks.
 
-Connectors are declared as data in :data:`CONNECTORS`. Adding a connector
-for M12: write ``connectors/<name>.py`` exporting a ``Connector(...)``
-binding, then add an import + dict entry below. No import-side-effects.
+Connectors are declared as data in :data:`CONNECTORS`. To add one, write
+``connectors/<name>.py`` exporting a ``Connector(...)`` binding, then add
+an import + dict entry below. No import-side-effects.
 """
 
 from __future__ import annotations

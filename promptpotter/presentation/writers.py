@@ -237,7 +237,7 @@ def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
         status=str(fork_index.get("status", "active")),
         best_accuracy=float(fork_index.get("best_accuracy", 0.0)),
         origin_accuracy=float(fork_index.get("origin_accuracy", 0.0)),
-        n_rounds=int(fork_index.get("n_rounds") or fork_index.get("n_rounds", 0) or 0),
+        n_rounds=int(fork_index.get("n_rounds", 0) or 0),
         stop_reason=str(final.get("stop_reason") or fork_index.get("stop_reason") or ""),
         finished_at=final.get("finished_at") or fork_index.get("finished_at"),
     )
@@ -314,7 +314,7 @@ def _load_fork_indices(cycle_dir: Path) -> list[dict] | None:
 
 
 def write_review_md(session: Session, cycle: Cycle) -> None:
-    """Render review.md from index + rounds + per-round audit JSONs (M10 surface)."""
+    """Render review.md from index + rounds + per-round audit JSONs."""
     if not session.state.cycle_id or session.store is None:
         return
     with graceful("review.md render failed"):

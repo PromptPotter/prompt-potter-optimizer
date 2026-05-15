@@ -1,4 +1,4 @@
-"""Connector protocols — the M12 boundary for "talk to a backend over the wire".
+"""Connector protocols — the boundary for "talk to a backend over the wire".
 
 Two seams that capture what's currently TermNorm-shaped inside
 ``infrastructure/backend.py``:
@@ -6,9 +6,9 @@ Two seams that capture what's currently TermNorm-shaped inside
 1. **WireAdapter** — the outbound payload-shaping callable. Translates
    ``(query, pipeline_params)`` into the HTTP request body the backend
    expects. The default TermNorm shape (``{"query", "steps", "node_config"}``)
-   lives in ``infrastructure/backend.termnorm_wire_adapter``; M12 can swap
-   it for a different connector without touching ``BackendClient`` or any
-   of its callers.
+   lives in ``infrastructure/backend.termnorm_wire_adapter``; alternative
+   connectors swap it without touching ``BackendClient`` or any of its
+   callers.
 
 2. **SessionProtocol** — the session-lifecycle contract for stateful
    backends that need a ``POST /sessions`` handshake before queries are

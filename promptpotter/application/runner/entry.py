@@ -225,27 +225,16 @@ async def run_optimization(
             session_id=session.session_id or None,
             resumed_from_round=session.state.resumed_from_round,
         )
-    _finalize_run(cycle, session, observers, cycle_result, campaign_config, sweep=sweep, diag=diag)
+    _finalize_run(session, observers, cycle_result)
     return cycle_result
 
 
 def _finalize_run(
-    cycle: Cycle | None,
     session: Session,
     observers: RunObservers,
     cycle_result: CycleResult,
-    campaign_config: CampaignConfig,
-    *,
-    sweep: bool = False,
-    diag: bool = False,
 ) -> None:
-    """Mark cycle finished, fold summary into index.json::final, render log.md, drain projections.
-
-    ``cycle`` is ``None`` when init crashed before a Cycle could be built;
-    the body doesn't dereference it (kept in the signature for future
-    hooks, same shape as ``campaign_config``/``sweep``/``diag``).
-    """
-    del cycle, campaign_config, sweep, diag  # reserved for future hooks
+    """Mark cycle finished, fold summary into index.json::final, render log.md, drain projections."""
     stop_reason = cycle_result.stop_reason
     is_interrupted = stop_reason == StopReason.INTERRUPTED
     is_crashed = stop_reason == StopReason.CRASHED

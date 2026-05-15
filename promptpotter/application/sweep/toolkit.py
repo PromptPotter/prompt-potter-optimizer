@@ -1,4 +1,4 @@
-"""M10 sweep-toolkit — result JSON, L1 swap, slicing, rank table.
+"""Sweep-toolkit — result JSON, L1 swap, slicing, rank table.
 
 The toolkit verbs (`time-to`, `round1`, `round2`) each persist one result
 JSON under ``{tenant_root}/archive/sweeps/{l1_meta_prompt_hash}/{dataset}/``.
@@ -7,8 +7,7 @@ that produced it, so an operator (or `potter-l1-meta-campaign`) can read
 the directory directly to see "what does this L1 edit measure to?"
 without grepping campaign artifacts.
 
-Single result shape across verbs; only some fields populated per verb —
-see ``docs/specs/m10-prompt-iteration-framework.md::Result JSON format``.
+Single result shape across verbs; only some fields populated per verb.
 """
 
 from __future__ import annotations

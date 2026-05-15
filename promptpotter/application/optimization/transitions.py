@@ -9,7 +9,6 @@ fan-out and the L3 ``pipeline_params`` channel.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -31,12 +30,6 @@ __all__ = [
 ]
 
 
-# TODO M11 (Track 5b): when L2/L3 rebase emission lands, promote this to a
-# Pydantic ``OptimizerAction(BaseModel)`` with an optional ``rebase`` field
-# carrying ``target_round`` + ``ForkPayload``-shaped deltas. The runner
-# converts the rebase action to a ``ForkPayload(trigger=L2_REBASE|L3_REBASE,
-# ...)`` and calls ``_mint_fork``. See ``docs/specs/m10-prompt-iteration-framework.md``
-# Track 5b.
 OptimizerAction = Literal["normal_round", "probe_round"]
 
 
@@ -96,8 +89,3 @@ async def run_layer_transition(
         optimizer_call_cache=cycle.session.store.optimizer_calls,
     )
     return transition.build_result(raw, cycle.opt_sp, prompt)
-
-
-# logger reserved for future diagnostic hooks; declared once so callers can
-# `from .transitions import logger` without re-deriving it.
-logger = logging.getLogger(__name__)

@@ -127,11 +127,11 @@ def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
 def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkPayload) -> None:
     """Stamp a fork payload's L1-surface deltas on the OSP — same shape L2 writes.
 
-    Called by the runner when an operator-issued or LLM-issued fork carries
-    OSP deltas (today: ``OPERATOR_SWEEP``; M11: ``L2_REBASE`` /
-    ``L3_REBASE``). Triggers without OSP deltas (e.g. ``SCORING_DIVERGENCE``)
-    are filtered out at the call site by guarding on ``payload.l1_layout is
-    not None`` — this function assumes the layout is set.
+    Called by the runner when a fork carries OSP deltas (today:
+    ``OPERATOR_SWEEP``). Triggers without OSP deltas (e.g.
+    ``SCORING_DIVERGENCE``) are filtered out at the call site by guarding
+    on ``payload.l1_layout is not None`` — this function assumes the
+    layout is set.
     """
     if payload.l1_layout is not None:
         layout = coerce_l1_layout(payload.l1_layout)
