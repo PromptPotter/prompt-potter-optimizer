@@ -124,20 +124,31 @@ interface PersistedState {
   widths: Partial<Record<ColId, number>>;
   folded: ColId[];
   wrapped: ColId[];
+  // When true, the table sort follows ``dash.hard_sample_order`` (the
+  // Rasch δ_s ranking refreshed per-candidate by the optimizer) and
+  // header-click sorting is suppressed. Default ON — operator opted into
+  // the "real time mirror" framing.
+  syncLive: boolean;
 }
 
-const EMPTY_PERSISTED: PersistedState = { widths: {}, folded: [], wrapped: [] };
+const EMPTY_PERSISTED: PersistedState = {
+  widths: {},
+  folded: [],
+  wrapped: [],
+  syncLive: true,
+};
 
 function loadPersisted(): PersistedState {
   if (typeof window === "undefined") return EMPTY_PERSISTED;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return EMPTY_PERSISTED;
-    const p = JSON.parse(raw) as PersistedState;
+    const p = JSON.parse(raw) as Partial<PersistedState>;
     return {
       widths:  p.widths  ?? {},
       folded:  p.folded  ?? [],
       wrapped: p.wrapped ?? [],
+      syncLive: p.syncLive ?? true,
     };
   } catch {
     return EMPTY_PERSISTED;
@@ -354,7 +365,26 @@ export function HardSamplesTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, liveSignature, columns, perSampleSig]);
 
+  // Live-sort: when the operator's "sync with live sort" tick is on and
+  // the loop has emitted at least one Rasch fit, mirror that ordering
+  // verbatim. Samples missing from ``hard_sample_order`` (fresh additions
+  // the sorter hasn't seen yet) sink to the end in sample_id order.
+  const hardOrder = dash?.hard_sample_order;
+  const liveSortActive =
+    persisted.syncLive && Array.isArray(hardOrder) && hardOrder.length > 0;
   const sortedItems = useMemo(() => {
+    if (liveSortActive) {
+      const rank = new Map<number, number>();
+      const order = hardOrder ?? [];
+      for (let i = 0; i < order.length; i++) rank.set(order[i], i);
+      const sink = order.length;
+      return [...items].sort((a, b) => {
+        const ra = rank.get(a.sample_id) ?? sink;
+        const rb = rank.get(b.sample_id) ?? sink;
+        if (ra !== rb) return ra - rb;
+        return a.sample_id - b.sample_id;
+      });
+    }
     if (!sortBy) return items;
     const { col, dir } = sortBy;
     const sign = dir === "asc" ? 1 : -1;
@@ -371,7 +401,7 @@ export function HardSamplesTable({
       if (typeof ka === "number" && typeof kb === "number") return (ka - kb) * sign;
       return String(ka).localeCompare(String(kb)) * sign;
     });
-  }, [items, sortBy, live, perSample]);
+  }, [items, sortBy, live, perSample, liveSortActive, hardOrder]);
 
   const widthFor = (col: ColDef): number => {
     if (persisted.folded.includes(col.id)) return FOLDED_WIDTH;
@@ -430,6 +460,12 @@ export function HardSamplesTable({
       toggleFold(col);
       return;
     }
+    if (liveSortActive) {
+      // Live-sort owns the order — column-click sorting is a no-op until
+      // the operator unlocks it via the sync chip. The header still
+      // reacts to fold/wrap/resize controls; just the sort cycle is mute.
+      return;
+    }
     if (col === "rank") {
       // Rank header is a "clear sort" affordance — sorting by rank itself is
       // either a no-op (current order) or its inverse, neither useful.
@@ -455,7 +491,7 @@ export function HardSamplesTable({
       <div className={`hs-block${compact ? " compact" : ""}`}>
         <div className="hs-scroll">
           <div
-            className="hs-grid"
+            className={`hs-grid${liveSortActive ? " sync-live" : ""}`}
             style={{
               gridTemplateColumns: gridTemplate,
               minWidth: `${totalWidth}px`,
@@ -463,17 +499,19 @@ export function HardSamplesTable({
           >
             {columns.map((col) => {
               const folded = persisted.folded.includes(col.id);
-              const sorted = sortBy?.col === col.id ? sortBy.dir : null;
+              const sorted = !liveSortActive && sortBy?.col === col.id ? sortBy.dir : null;
               const isRank = col.id === "rank";
               const headerTitle = folded
                 ? "Unfold column"
-                : isRank
-                  ? RANK_HINT
-                  : `Sort by ${col.label}`;
+                : liveSortActive
+                  ? "Synced to live Rasch sort — toggle off the sync chip to sort manually"
+                  : isRank
+                    ? RANK_HINT
+                    : `Sort by ${col.label}`;
               return (
                 <div
                   key={col.id}
-                  className={`hs-header${folded ? " folded" : ""}${sorted ? " sorted" : ""}${isRank ? " rank" : ""}`}
+                  className={`hs-header${folded ? " folded" : ""}${sorted ? " sorted" : ""}${isRank ? " rank" : ""}${liveSortActive && !folded ? " sort-locked" : ""}`}
                   data-align={col.align}
                 >
                   <button
@@ -525,6 +563,14 @@ export function HardSamplesTable({
             {sortedItems.map((item, idx) => {
               const liveEntry = live.get(item.sample_id);
               const meas = perSample?.get(item.sample_id) ?? [];
+              // Mark every cell in the row currently being scored so the
+              // soft-blink keyframe (globals.css) animates the whole row,
+              // not just one cell. Independent of the sort-sync toggle —
+              // operators sorting manually still want to see "this is the
+              // row the loop is on right now".
+              const isRunning =
+                typeof dash?.current_sample_id === "number" &&
+                item.sample_id === dash.current_sample_id;
               return columns.map((col) => {
                 const folded = persisted.folded.includes(col.id);
                 const wrapped = persisted.wrapped.includes(col.id) && wrappable(col);
@@ -554,22 +600,30 @@ export function HardSamplesTable({
                     key={`${item.sample_id}-${col.id}`}
                     className={`hs-cell${folded ? " folded" : ""}${wrapped ? " wrapped" : ""}${isRank ? " rank" : ""}${isMeas ? " meas" : ""}${cell.className ? ` ${cell.className}` : ""}`}
                     data-align={col.align}
+                    data-running={isRunning ? "true" : undefined}
                     style={cell.style}
                     title={folded ? undefined : cell.title}
                     onClick={onClick}
                   >
                     {folded ? "" : isMeas ? (
-                      meas.length === 0 ? (
+                      meas.length === 0 && !isRunning ? (
                         <span className="hs-heat-empty">—</span>
                       ) : (
                         <span className="hs-cell-meas-strip">
                           {meas.map((m, i) => (
                             <span
-                              key={i}
+                              key={`${m.ord}:${m.hit ? 1 : 0}`}
                               className={`hs-heat-dot ${m.hit ? "hit" : "miss"}`}
                               title={`R${Math.floor(m.ord / 1000)} cand ${m.ord % 1000} · ${m.hit ? "HIT" : "MISS"}`}
                             />
                           ))}
+                          {isRunning && (
+                            <span
+                              key="pending"
+                              className="hs-heat-dot pending"
+                              title="Currently scoring"
+                            />
+                          )}
                         </span>
                       )
                     ) : (
@@ -582,6 +636,23 @@ export function HardSamplesTable({
           </div>
         </div>
         <div className="hs-footer">
+          <label
+            className="hs-sync-toggle"
+            title={
+              persisted.syncLive
+                ? "Table mirrors the optimizer's live difficulty sort. Untick to sort columns manually."
+                : "Sort with column headers. Tick to follow the optimizer's live difficulty sort."
+            }
+          >
+            <input
+              type="checkbox"
+              checked={persisted.syncLive}
+              onChange={() =>
+                setPersisted((p) => ({ ...p, syncLive: !p.syncLive }))
+              }
+            />
+            Auto-sort
+          </label>
           <span className="hs-counts">
             {tag}Train {trainCount} · Test {testCount} · Total {total}
           </span>

@@ -177,7 +177,7 @@ class _LoopContext:
     session: Session
     cached_sample_results: dict[str, QueryMeasurement]
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
-    on_sample_starting: Callable[[str, int, int], None] | None
+    on_sample_starting: Callable[[str, int, int, int], None] | None
     axes: AxisIndex | None
     scorer: Scorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
     scorer_id: str
@@ -325,7 +325,7 @@ async def _run_query_loop(
     cached_sample_results: dict[str, QueryMeasurement],
     deprecated_samples: dict[str, QueryMeasurement],
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
-    on_sample_starting: Callable[[str, int, int], None] | None,
+    on_sample_starting: Callable[[str, int, int, int], None] | None,
     # ``on_sample_scored`` is required (no default) so every call site
     # declares its per-sample visibility intent. See ``score_search_point``
     # docstring for the bug class this guards.
@@ -386,7 +386,7 @@ async def _run_query_loop(
                 return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
 
             if on_sample_starting is not None:
-                on_sample_starting(sample.query, i, len(dataset))
+                on_sample_starting(sample.query, i, len(dataset), sample.id)
 
             handler = (
                 _process_cache_hit
@@ -431,7 +431,7 @@ async def score_search_point(
     *,
     label: str = "Score",
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
-    on_sample_starting: Callable[[str, int, int], None] | None,
+    on_sample_starting: Callable[[str, int, int, int], None] | None,
     source: str = "",
     degradation_checks: list[StopRule] | None = None,
     candidate_idx: int = 0,

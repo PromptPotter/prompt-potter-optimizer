@@ -579,7 +579,12 @@ async def score_population(
                 for sid in sample_order[: min(3, len(sample_order))]
             ]
             callbacks.on_sample_order_preview(
-                round_num, idx, n, preview, n_priors=len(elim_check.priors_by_sample)
+                round_num,
+                idx,
+                n,
+                preview,
+                n_priors=len(elim_check.priors_by_sample),
+                sample_order=sample_order,
             )
             # Hand δ + the candidate's hard-first order to PoBBCheck so
             # ``check()`` can scale ε on the predictable-tail fraction.

@@ -193,7 +193,12 @@ class LiveDashboardView(DerivedView):
             "candidate": "",
             "query": "",
             "patience": f"0/{l1_patience}",
-            "origin_accuracy": r.get("origin_accuracy", 0.0),
+            # ``origin`` and ``origin_accuracy`` are two names for the same
+            # value. INIT:exit now writes both, but existing dashboards have
+            # ``origin_accuracy: 0.0`` from older runs where only ``origin``
+            # was written. Backfill on load so the webapp's LineageTree
+            # doesn't render "origin 0%" until the next INIT:exit fires.
+            "origin_accuracy": r.get("origin_accuracy") or r.get("origin") or 0.0,
             "best": r.get("best", 0.0),
             "current_acc": 0.0,
             "composite_fitness_formula": r.get("composite_fitness_formula"),
@@ -520,6 +525,12 @@ class LiveDashboardView(DerivedView):
             # the active cycle's loop produced.
             del loop_env
             s["origin"] = cycle.tracking.current_accuracy
+            # ``origin`` and ``origin_accuracy`` are two names for the same
+            # value — TopStrip reads ``origin`` (works) while LineageTree
+            # reads ``origin_accuracy`` (rendered as "origin 0%" because
+            # nothing updated it). Keep both in sync at the single write
+            # site so subscribers never see a drift between them.
+            s["origin_accuracy"] = cycle.tracking.current_accuracy
             self.patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self.patience_max}"
             if view is not None:

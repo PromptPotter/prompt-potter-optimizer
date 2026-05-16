@@ -30,8 +30,17 @@ def trim(text: str, n: int) -> str:
 def fmt_sample_line(s: dict[str, Any]) -> str:
     """One compact line per query for ``dashboard.json::current_round.nodes
     .l1_score.output.candidates[].samples`` — keeps the live dashboard
-    scannable instead of bloating it with full ~2 kB query strings."""
+    scannable instead of bloating it with full ~2 kB query strings.
+
+    ``#qi`` is the iteration position within the candidate's scoring loop;
+    ``sid:N`` is the dataset sample_id. These diverge once the hard-sample
+    sorter starts driving iteration order — the webapp heatmap parser
+    reads ``sid`` to place each measurement dot on the right row, while
+    the operator's CLI eye still tracks ``#qi`` for round progress.
+    """
     qi = int(s.get("qi", 0))
+    sid = s.get("sample_id")
+    sid_seg = f" sid:{int(sid):03d}" if sid is not None else ""
     hit = bool(s.get("hit"))
     cached = bool(s.get("cached"))
     time_s = float(s.get("time_s") or 0.0)
@@ -49,7 +58,7 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
             f" io={in_tok if in_tok is not None else '-'}/{out_tok if out_tok is not None else '-'}"
         )
     return (
-        f"  {time_s:4.1f}s #{qi:03d} {mark} [{badge}]{cache_icon}"
+        f"  {time_s:4.1f}s #{qi:03d}{sid_seg} {mark} [{badge}]{cache_icon}"
         f"{tok_seg} -> '{pred}' gt:'{gt}' q:'{query}'"
     )
 

@@ -748,6 +748,26 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .hs-counts{font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap}
 .hs-reset{font-family:var(--font-mono);font-size:11px;background:transparent;border:1px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 8px;border-radius:4px;cursor:pointer}
 .hs-reset:hover{border-color:var(--color-accent);color:var(--color-accent)}
+/* Live-sort lock — when persisted.syncLive is on, header sort-cycle is
+   muted. Keep fold/wrap/resize affordances usable; only the label's
+   sort hint fades. */
+.hs-header.sort-locked .hs-header-label{color:var(--color-text-tertiary);cursor:default}
+.hs-header.sort-locked .hs-header-label:hover{color:var(--color-text-tertiary)}
+/* Auto-sort toggle — canonical checkbox on the left of the footer.
+   No chrome around the label; ``accent-color`` tints the native tick
+   to match the app palette so theme follows naturally. */
+.hs-sync-toggle{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);letter-spacing:.04em;cursor:pointer;user-select:none}
+.hs-sync-toggle input[type="checkbox"]{accent-color:var(--color-accent);margin:0;cursor:pointer}
+.hs-sync-toggle:hover{color:var(--color-text-primary)}
+/* Soft pulse for the row currently being scored. Marker is per-cell
+   (rows aren't wrapped in HardSamplesTable — every column is a direct
+   grid child), so the keyframe runs on each cell of the active row.
+   Background-only — text stays legible the whole cycle. */
+.hs-cell[data-running="true"]{animation:hs-soft-blink 1.4s ease-in-out infinite}
+@keyframes hs-soft-blink{0%,100%{background-color:transparent}50%{background-color:rgba(var(--color-accent-rgb),0.18)}}
+@media (prefers-reduced-motion:reduce){
+  .hs-cell[data-running="true"]{animation:none;background-color:rgba(var(--color-accent-rgb),0.12)}
+}
 .hs-popover-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px}
 .hs-popover{background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:10px;max-width:80vw;max-height:80vh;min-width:320px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
 .hs-popover-header{padding:10px 14px;border-bottom:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--color-text-secondary);letter-spacing:.04em}
@@ -880,10 +900,17 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .hs-heat-toggle{background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:3px 10px;font-size:11px;cursor:pointer;font-family:inherit;letter-spacing:.04em}
 .hs-heat-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
 .hs-heat-empty{color:var(--color-text-tertiary);font-style:italic}
-.hs-heat-dot{display:inline-block;width:8px;height:8px;border-radius:1px;flex-shrink:0;transition:transform .1s}
+.hs-heat-dot{display:inline-block;width:8px;height:8px;border-radius:1px;flex-shrink:0;transition:transform .1s;animation:hs-dot-pop .35s ease-out}
 .hs-heat-dot:hover{transform:scale(1.6);position:relative;z-index:1}
 .hs-heat-dot.hit{background:var(--color-success)}
 .hs-heat-dot.miss{background:var(--color-danger)}
+.hs-heat-dot.pending{background:transparent;border:1px dashed var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);animation:hs-dot-pending 1.2s ease-in-out infinite}
+@keyframes hs-dot-pop{0%{transform:scale(2.4);opacity:.2}60%{transform:scale(1.1);opacity:1}100%{transform:scale(1);opacity:1}}
+@keyframes hs-dot-pending{0%,100%{opacity:.45}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){
+  .hs-heat-dot{animation:none}
+  .hs-heat-dot.pending{animation:none;opacity:.7}
+}
 /* Compact preset: ~3 rows visible (header + 3 × 26 px ≈ 100 px). User
    drags the bottom edge to grow it. Larger preset (Grow button) drops
    the compact class so .hs-block falls back to its 320 px default. */

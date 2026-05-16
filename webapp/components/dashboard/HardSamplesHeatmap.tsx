@@ -42,8 +42,13 @@ function liveMeasurements(
       let hit: boolean | null = null;
       if (typeof s === "string") {
         const p = parseSampleLine(s);
-        if (p.idx != null && p.status) {
-          sid = p.idx;
+        // ``sampleId`` is the dataset id — what the heatmap rows are
+        // keyed by. ``idx`` (qi) is iteration position and only matches
+        // sample_id when the loop runs in dataset order, so we strictly
+        // require sampleId here. Old-format lines without ``sid:`` just
+        // skip — the round-complete flush will fill them in.
+        if (p.sampleId != null && p.status) {
+          sid = p.sampleId;
           hit = p.status === "HIT";
         }
       } else if (s && typeof s === "object") {

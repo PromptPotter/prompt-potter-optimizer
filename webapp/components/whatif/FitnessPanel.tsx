@@ -267,11 +267,20 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
 
     // Origin — take from any round file (they all carry origin_accuracy)
     // or fall back to the dash field. No evaluator breakdown for origin.
+    // Prefer ``dash.origin`` over ``dash.origin_accuracy``: both are the same
+    // scalar at the source, but legacy backend writes left
+    // ``origin_accuracy`` at 0.0 while populating ``origin``. The prior
+    // ``typeof === number`` check accepted the 0.0 and rendered C0 at 0%.
     let originAccuracy: number | null = null;
-    if (typeof dash?.origin_accuracy === "number") {
+    const dashOrigin = (dash as { origin?: number } | null)?.origin;
+    if (typeof dashOrigin === "number" && dashOrigin > 0) {
+      originAccuracy = dashOrigin;
+    } else if (typeof dash?.origin_accuracy === "number" && dash.origin_accuracy > 0) {
       originAccuracy = dash.origin_accuracy;
     } else {
-      const firstWithOrigin = history.find((h) => typeof h.origin_accuracy === "number");
+      const firstWithOrigin = history.find(
+        (h) => typeof h.origin_accuracy === "number" && (h.origin_accuracy ?? 0) > 0,
+      );
       if (firstWithOrigin) originAccuracy = firstWithOrigin.origin_accuracy ?? null;
     }
     if (originAccuracy != null || history.length > 0 || inflightCandidates.length > 0) {

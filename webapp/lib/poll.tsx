@@ -42,6 +42,15 @@ export interface DashboardSnapshot {
   origin_accuracy?: number;
   evaluators?: unknown[];
   scoring?: unknown;
+  // Set on ``sample_started``, cleared on ``sample_scored``. The dataset
+  // table pulses the row whose ``sample_id`` matches; ``null`` between
+  // samples (no row pulses).
+  current_sample_id?: number | null;
+  // Hardest-first sample_id list from the most recent Rasch fit
+  // (refreshed per-candidate). The dataset table sorts by this when the
+  // operator's "sync with live sort" tick is on. ``null`` before the
+  // first sorter fit lands.
+  hard_sample_order?: number[] | null;
   [key: string]: unknown;
 }
 

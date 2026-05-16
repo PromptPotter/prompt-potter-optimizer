@@ -133,9 +133,16 @@ class RunCallbacks:
             {"scores": scores, "phase_ctx": dict(self._phase_ctx)},
         )
 
-    def on_sample_started(self, ci: int, ct: int, query_text: str, qi: int, qt: int) -> None:
+    def on_sample_started(
+        self, ci: int, ct: int, query_text: str, qi: int, qt: int, sample_id: int
+    ) -> None:
         self._snapshot(
-            "sample_started", ci, ct, {"query_text": query_text}, sample_idx=qi, sample_total=qt
+            "sample_started",
+            ci,
+            ct,
+            {"query_text": query_text, "sample_id": int(sample_id)},
+            sample_idx=qi,
+            sample_total=qt,
         )
 
     def on_sample_scored(self, ci: int, ct: int, result: dict, qi: int, qt: int) -> None:
@@ -163,13 +170,18 @@ class RunCallbacks:
         ct: int,
         preview: list[tuple[int, float]],
         n_priors: int,
+        sample_order: list[int],
     ) -> None:
-        """Hard-sample-sorter preview — top-3 next samples by Rasch difficulty.
+        """Hard-sample-sorter preview — top-3 next samples by Rasch difficulty,
+        plus the full hardest-first ``sample_order`` so the webapp dataset
+        table can re-sort live to mirror what the loop is iterating.
 
         Fired at the start of each candidate before scoring begins. The
         ``preview`` list is the head of the sorter's ``sample_order``
         with each sample's ``δ_s`` posterior; ``n_priors`` is the number
-        of completed candidate histories that fed the Rasch fit.
+        of completed candidate histories that fed the Rasch fit;
+        ``sample_order`` is the full list, surfaced verbatim on
+        ``dashboard.json::hard_sample_order``.
         """
         self._snapshot(
             "sample_order_preview",
@@ -178,6 +190,7 @@ class RunCallbacks:
             {
                 "preview": [[int(sid), float(delta)] for sid, delta in preview],
                 "n_priors": int(n_priors),
+                "sample_order": [int(sid) for sid in sample_order],
             },
             round_num=round_num,
         )
