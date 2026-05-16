@@ -431,6 +431,18 @@ async def get_cycle_file(
     if not scope_root.exists():
         raise HTTPException(404, f"Cycle '{cycle_id}' not found")
 
+    # Family-rooted artifacts (currently just ``dashboard.json``) live only
+    # at the family root by design — ``LiveDashboardView`` is bound there
+    # and forks share that one stream. When a fork is asked for one of
+    # these via scope=cycle, auto-fall-back to the family root so the
+    # webapp doesn't 404 on every fork in the sidebar.
+    if scope == "cycle" and path in _FAMILY_FILE_LEVEL_ARTIFACTS:
+        cycle_path = scope_root / path
+        if not cycle_path.is_file():
+            family_root = root_dir_for(store.base_dir, cycle_id)
+            if family_root.exists() and family_root.resolve() != scope_root.resolve():
+                scope_root = family_root
+
     resolved = _resolve_safe_file(scope_root, path)
     size = resolved.stat().st_size
     mtime = _iso_mtime(resolved)

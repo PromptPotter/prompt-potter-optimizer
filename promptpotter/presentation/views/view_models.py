@@ -155,6 +155,11 @@ class ScoreEntry:
     ci_lo: float
     ci_hi: float
     escalation_aborted: bool = False
+    # First-validation-failure reason for synthetic-zeroed variants
+    # (e.g. ``"no_op_variant"``, ``"duplicate_variant"``). Used by the
+    # scoreboard to suppress rows that didn't burn an LLM call so the
+    # ranking reflects mutated candidates only.
+    invalid_reason: str | None = None
 
 
 @dataclass(frozen=True)

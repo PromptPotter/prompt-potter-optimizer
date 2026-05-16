@@ -117,6 +117,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             "hits": s.hits,
             "total": s.total,
             "escalation_aborted": s.escalation_aborted,
+            "invalid_reason": s.invalid_reason,
         }
         for s in v.scores
     ]

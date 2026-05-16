@@ -184,7 +184,7 @@ async def execute_round(
                     ledger=session.state.ledger,
                 )
             round_result.critique = critique_result
-            critique_text = format_l1_critique_for_prompt(critique_result)
+            critique_text = format_l1_critique_for_prompt(critique_result, session.pipeline_schema)
     if obs and critique_text:
         with graceful("L1CritiqueWritten emit failed"):
             obs.emit_write_point(

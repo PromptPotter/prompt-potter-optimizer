@@ -144,27 +144,30 @@ def render_round_stats(
             lines.append(_node_line(f"Degradation: {degraded / n_results:.0%}"))
 
         # Recall@k requires a ranker / candidate_source node to produce
-        # ranked_items; for llm_only-style pipelines there is no rank to
-        # miss, so the previous unconditional "Recall: top-1=0% top-5=0%"
-        # was misleading. Skip the block entirely when the schema has no
-        # ranked-item-emitting node.
+        # ranked_items; for llm_only-style pipelines (single-shot
+        # generation tagged ``node_role: ranker``) the item shape can't be
+        # matched against ground_truth, so the previous unconditional
+        # "Recall: top-1=0% top-5=0%" was misleading. Skip when no
+        # ranked-item-emitting node exists, OR when find_rank could not
+        # place ground_truth for any valid sample (rank-shaped data
+        # missing).
         valid = [r for r in results if not is_error_result(r)]
         if valid and ranked_item_keys:
+            ranks = [
+                find_rank(
+                    get_ranked_items(r, ranked_item_keys),
+                    r.get("ground_truth", ""),
+                )
+                for r in valid
+            ]
+            if any(rk is not None for rk in ranks):
 
-            def recall_at_k(k: int) -> float:
-                hit_count = 0
-                for r in valid:
-                    rank = find_rank(
-                        get_ranked_items(r, ranked_item_keys),
-                        r.get("ground_truth", ""),
-                    )
-                    if rank is not None and rank <= k:
-                        hit_count += 1
-                return hit_count / len(valid)
+                def recall_at_k(k: int) -> float:
+                    return sum(1 for rk in ranks if rk is not None and rk <= k) / len(valid)
 
-            lines.append(
-                _node_line(f"Recall: top-1={recall_at_k(1):.0%} top-5={recall_at_k(5):.0%}")
-            )
+                lines.append(
+                    _node_line(f"Recall: top-1={recall_at_k(1):.0%} top-5={recall_at_k(5):.0%}")
+                )
     except Exception:
         pass
 

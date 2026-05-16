@@ -213,11 +213,18 @@ def _scoreboard(
     ``candidate_scores`` items: {candidate_id, accuracy, composite_fitness?, hits, total}.
     Returns multi-line string ready to print.
     """
-    if not candidate_scores:
+    # Filter synthetic-zeroed variants (no_op / duplicate) — they did not
+    # burn an LLM call and ranking them as 0.0% delta distorts the verdict.
+    scored = [
+        s
+        for s in candidate_scores
+        if s.get("invalid_reason") not in ("no_op_variant", "duplicate_variant")
+    ]
+    if not scored:
         return ""
 
     ranked = sorted(
-        candidate_scores,
+        scored,
         key=lambda s: (s.get("composite_fitness", s["accuracy"]), s["accuracy"]),
         reverse=True,
     )

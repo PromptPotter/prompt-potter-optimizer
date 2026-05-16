@@ -395,12 +395,39 @@ def _r_task_context(b: InjectionBundle) -> str:
     return "TASK CONTEXT:\n" + "\n".join(f"  {k}: {v}" for k, v in pairs)
 
 
-def format_l1_critique_for_prompt(critique: dict) -> str:
+def _valid_axis_set(schema: Any) -> set[str]:
+    """Axes the schema legitimately exposes: prompt fields + node names + param keys.
+
+    L2's free-form ``suggested_axes`` may hallucinate names that aren't in
+    the pipeline (e.g. ``prompt_size``); rendering those into the next
+    round's prompt seeds the cycle with a non-existent mutation target.
+    Match the union the operator can actually act on.
+    """
+    from promptpotter.config.settings import PROMPT_STRING_FIELDS
+
+    out: set[str] = set(PROMPT_STRING_FIELDS) | {"few_shot_examples", "plan"}
+    if schema is None:
+        return out
+    for node in getattr(schema, "nodes", ()):
+        name = getattr(node, "name", "")
+        if name:
+            out.add(name)
+        for pk in getattr(node, "param_keys", ()) or ():
+            out.add(pk)
+            if name:
+                out.add(f"{name}.{pk}")
+    return out
+
+
+def format_l1_critique_for_prompt(critique: dict, pipeline_schema: Any = None) -> str:
     """L1 critique dict → compact text (summary + priority_fix + axes + top-5 highlights).
 
-    Shared between the ``critique`` dispatch signal (which feeds it the raw
-    round dict) and downstream display sites (tracing emit, view factories,
-    review). One formatter — same wire shape everywhere.
+    When ``pipeline_schema`` is provided, ``suggested_axes`` is filtered
+    against the schema's known axis names so a hallucinated axis (e.g.
+    ``prompt_size``) doesn't get re-rendered into the next round's L2
+    brief. Display call sites without a schema in hand pass None and
+    behave as before — the operator-facing surface is unchanged for
+    static review.md / log.md renders.
     """
     if not critique:
         return ""
@@ -409,8 +436,13 @@ def format_l1_critique_for_prompt(critique: dict) -> str:
         parts.append(s)
     if pf := critique.get("priority_fix"):
         parts.append(f"Priority fix: {pf}")
-    if sa := critique.get("suggested_axes"):
-        parts.append(f"Suggested axes: {', '.join(sa)}")
+    sa = critique.get("suggested_axes") or []
+    if sa:
+        if pipeline_schema is not None:
+            valid = _valid_axis_set(pipeline_schema)
+            sa = [a for a in sa if a in valid]
+        if sa:
+            parts.append(f"Suggested axes: {', '.join(sa)}")
     if fh := critique.get("failure_highlights"):
         parts.append("Key failures:")
         for h in fh[:5]:
@@ -420,7 +452,7 @@ def format_l1_critique_for_prompt(critique: dict) -> str:
 
 def _r_critique(b: InjectionBundle) -> str:
     """Compact view of the most recent L1_CRITIQUE output dict."""
-    return format_l1_critique_for_prompt(b.digest.critique or {})
+    return format_l1_critique_for_prompt(b.digest.critique or {}, b.pipeline_schema)
 
 
 def _r_l1_overrides(b: InjectionBundle) -> str:

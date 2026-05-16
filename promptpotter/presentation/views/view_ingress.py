@@ -446,6 +446,17 @@ def score_entry_from_dict(s: dict) -> ScoreEntry:
         ci_lo, ci_hi = float(s["ci_lo"]), float(s["ci_hi"])
     else:
         ci_lo, ci_hi = wilson_ci(hits, total)
+    # Two source shapes feed this:
+    #  - ``CandidateScore.to_dict()`` (event.data["candidate_scores"]) — has
+    #    ``invalid`` + ``validation_failures``; derive the reason.
+    #  - ``asdict(ScoreEntry)`` (wire round-trip via view_to_wire_dict) — already
+    #    carries ``invalid_reason`` as a top-level field.
+    invalid_reason: str | None = s.get("invalid_reason")
+    if invalid_reason is None and s.get("invalid"):
+        vfs = s.get("validation_failures") or []
+        if vfs and isinstance(vfs[0], dict):
+            reason = vfs[0].get("reason")
+            invalid_reason = str(reason) if reason else None
     return ScoreEntry(
         label=s.get("label", ""),
         accuracy=float(s.get("accuracy", 0.0)),
@@ -455,6 +466,7 @@ def score_entry_from_dict(s: dict) -> ScoreEntry:
         ci_lo=ci_lo,
         ci_hi=ci_hi,
         escalation_aborted=bool(s.get("escalation_aborted", False)),
+        invalid_reason=invalid_reason,
     )
 
 

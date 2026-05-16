@@ -378,7 +378,14 @@ def _variant_to_result(
 
     rounds = list(cycle_result.rounds or [])
     spend_state = observers.dashboard.state.get("spend") or {}
-    spend_usd = float(spend_state.get("total_used_usd") or 0.0)
+    spend_usd_raw = float(spend_state.get("total_used_usd") or 0.0)
+    # ``StopReason.INTERRUPTED`` (Ctrl+C / asyncio cancel) lands the cycle
+    # without a fair round-1 reading: either no rounds at all or a partial
+    # panel cut mid-candidate. Rendering it as r1=0.000 / $0.0000 falsely
+    # ranks the variant as a loser and hides the partial spend. Mark both
+    # as None so the print loop shows ``incomplete``.
+    interrupted = cycle_result.stop_reason == "interrupted"
+    cost_usd: float | None = None if interrupted else spend_usd_raw
     if not rounds:
         return build_sweep_result(
             verb=verb,
@@ -390,20 +397,20 @@ def _variant_to_result(
             sweep_id=sweep_id,
             slice_name=resolved_slice,
             panel_size=panel_size,
-            cost_usd=spend_usd,
-            final_accuracy=cycle_result.best_accuracy,
+            cost_usd=cost_usd,
+            final_accuracy=None if interrupted else cycle_result.best_accuracy,
             notes=f"no rounds; stop_reason={cycle_result.stop_reason}",
         )
 
     r1 = _panel_stats_from_round(rounds[0], panel_size)
     fields: dict[str, Any] = {
         "panel_size": panel_size,
-        "round1_accuracy": r1["round1_accuracy"],
-        "round1_best": r1["round1_best"],
+        "round1_accuracy": None if interrupted else r1["round1_accuracy"],
+        "round1_best": None if interrupted else r1["round1_best"],
         "parse_fail_rate": r1["parse_fail_rate"],
         "pipeline_params_entropy": r1["pipeline_params_entropy"],
-        "cost_usd": spend_usd,
-        "final_accuracy": cycle_result.best_accuracy,
+        "cost_usd": cost_usd,
+        "final_accuracy": None if interrupted else cycle_result.best_accuracy,
     }
     if verb == "round2" and len(rounds) >= 2:
         r2 = _panel_stats_from_round(rounds[1], panel_size)
@@ -544,14 +551,16 @@ async def _run_panel_verb(
 
     human_lines = [f"Sweep {verb}: {len(results)} variant(s); sweep_id={sweep_id}"]
     for r in results:
+        r1_val = r.get("round1_accuracy")
+        cost_val = r.get("cost_usd")
         bits = [
             f"  {r.get('l1_meta_prompt_label') or 'current'}:",
-            f"r1={r.get('round1_accuracy') or 0:.3f}",
+            f"r1={r1_val:.3f}" if r1_val is not None else "r1=incomplete",
         ]
         if r.get("round2_accuracy") is not None:
             bits.append(f"r2={r['round2_accuracy']:.3f}")
             bits.append(f"lift={r['round2_lift']:+.3f}")
-        bits.append(f"${r.get('cost_usd') or 0:.4f}")
+        bits.append(f"${cost_val:.4f}" if cost_val is not None else "$incomplete")
         human_lines.append(" ".join(bits))
     human_lines.extend(f"  → {p}" for p in out_paths)
     return CommandResult(

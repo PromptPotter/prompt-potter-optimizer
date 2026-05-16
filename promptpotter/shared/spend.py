@@ -215,13 +215,34 @@ def lookup_rate(model: str | None) -> tuple[float, float] | None:
     rates = load_rates()
     if needle in rates:
         return rates[needle]
-    # Drop a leading "provider:" colon prefix.
+    # Wire form "provider:model" → LiteLLM's "provider/model". Try the
+    # slash-normalised whole and the post-colon tail, so e.g.
+    # "groq:openai/gpt-oss-120b" resolves to "groq/openai/gpt-oss-120b" and
+    # "openai:gpt-4o" resolves to "gpt-4o".
     if ":" in needle:
+        normalised = needle.replace(":", "/")
+        if normalised in rates:
+            return rates[normalised]
         tail = needle.split(":", 1)[1]
         if tail in rates:
             return rates[tail]
+    else:
+        normalised = needle
+    # Provider-less wire form: Groq returns ``response.model =
+    # "openai/gpt-oss-120b"`` while LiteLLM keys it ``groq/openai/gpt-oss-120b``.
+    # Match any registered key whose suffix is the needle (or its
+    # colon-normalised form); pick the shortest such key so a bare
+    # "openai/gpt-oss-120b" prefers a 2-segment match over a deeper one.
+    suffix_matches: list[tuple[int, str]] = [
+        (len(key), key)
+        for key in rates
+        if key.endswith("/" + needle) or key.endswith("/" + normalised)
+    ]
+    if suffix_matches:
+        suffix_matches.sort()
+        return rates[suffix_matches[0][1]]
     for key, rate in rates.items():
-        if key in needle or needle.endswith(key):
+        if key in needle or needle.endswith(key) or key in normalised or normalised.endswith(key):
             return rate
     return None
 
