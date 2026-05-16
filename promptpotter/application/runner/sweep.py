@@ -12,7 +12,11 @@ from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.l1 import generate_or_load_candidates
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.domain.run_records import PhaseRecord
-from promptpotter.presentation.writers import write_log_md, write_review_md
+from promptpotter.presentation.writers import (
+    write_hard_samples_artifacts,
+    write_log_md,
+    write_review_md,
+)
 from promptpotter.shared.errors import graceful
 
 
@@ -63,7 +67,8 @@ async def run_sweep_generation_only(
                     "opt_search_point": cycle.opt_sp.model_dump(),
                 },
             )
-        write_log_md(session)
+        hard_samples_artifact = write_hard_samples_artifacts(session, cycle)
+        write_log_md(session, hard_samples_artifact=hard_samples_artifact)
         write_review_md(session, cycle)
 
     if (ledger := session.state.ledger) is not None:

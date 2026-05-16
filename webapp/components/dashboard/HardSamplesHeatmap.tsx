@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import { type DatasetItem } from "@/lib/api";
+import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
 import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 import { HardSamplesTable } from "./HardSamplesTable";
@@ -12,6 +12,8 @@ interface Props {
   datasetItems: DatasetItem[];
   datasetTrainCount: number;
   datasetTestCount: number;
+  hardSamplesScope: HardSamplesScope;
+  onHardSamplesScopeChange: (s: HardSamplesScope) => void;
 }
 
 interface Measurement {
@@ -73,6 +75,8 @@ export function HardSamplesHeatmap({
   datasetItems,
   datasetTrainCount,
   datasetTestCount,
+  hardSamplesScope,
+  onHardSamplesScopeChange,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const { rounds: historyDocs } = useCycleStream();
@@ -172,6 +176,8 @@ export function HardSamplesHeatmap({
             datasetItems={datasetItems}
             datasetTrainCount={datasetTrainCount}
             datasetTestCount={datasetTestCount}
+            scope={hardSamplesScope}
+            onScopeChange={onHardSamplesScopeChange}
           />
         </div>
       ) : (

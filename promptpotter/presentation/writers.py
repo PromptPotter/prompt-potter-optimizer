@@ -16,12 +16,21 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.intelligence.exploration import build_observations
+from promptpotter.application.intelligence.hard_sample_archive import (
+    build_archive_hard_samples_artifact,
+)
+from promptpotter.application.intelligence.hard_sample_sorter import (
+    build_hard_samples_artifact,
+    build_hard_samples_artifact_from_observations,
+)
 from promptpotter.application.optimization.dispatch.hub import (
     format_l1_critique_for_prompt,
 )
 from promptpotter.application.review import render_review_md
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store import root_cycle_id
+from promptpotter.infrastructure.store.base import write_json
 from promptpotter.presentation.views.render import to_markdown
 from promptpotter.presentation.views.view_ingress import (
     pick_round_winner,
@@ -42,7 +51,116 @@ if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.optimization.cycle import Cycle
 
-__all__ = ["from_disk_log", "from_disk_round", "write_log_md", "write_review_md"]
+__all__ = [
+    "from_disk_log",
+    "from_disk_round",
+    "write_hard_samples_artifacts",
+    "write_log_md",
+    "write_review_md",
+]
+
+
+def _filter_artifact_to_live_candidates(artifact: dict, live_cids: set[str]) -> dict:
+    """Restrict candidate_order + cells to ``live_cids`` (Y-axis hygiene).
+
+    The Rasch fit stays joint (archive observations still contribute to
+    ``δ_s``); only the displayed candidate axis is filtered. ``rasch.theta``
+    and friends are trimmed in lock-step so the rendered artifact is
+    internally consistent.
+    """
+    filtered_order = [cid for cid in artifact["candidate_order"] if cid in live_cids]
+    filtered_cells = [c for c in artifact["cells"] if c["c"] in live_cids]
+    rasch = dict(artifact["rasch"])
+    rasch["theta"] = {cid: rasch["theta"][cid] for cid in filtered_order if cid in rasch["theta"]}
+    rasch["theta_se"] = {
+        cid: rasch["theta_se"][cid] for cid in filtered_order if cid in rasch["theta_se"]
+    }
+    rasch["n_obs_per_candidate"] = {
+        cid: rasch["n_obs_per_candidate"][cid]
+        for cid in filtered_order
+        if cid in rasch["n_obs_per_candidate"]
+    }
+    out = dict(artifact)
+    out["candidate_order"] = filtered_order
+    out["cells"] = filtered_cells
+    out["rasch"] = rasch
+    out["n_candidates"] = len(filtered_order)
+    out["n_observations"] = len(filtered_cells)
+    return out
+
+
+def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict | None:
+    """Build campaign-only + workspace hard-sample artifacts; persist all three JSON variants.
+
+    Three files are always written, regardless of any ``seed_*_from_archive``
+    flag — display variants are part of the operator-AI parity surface and
+    must be available unconditionally:
+
+    - ``campaigns/{cycle_id}/hard_samples_campaign.json`` — fit over
+      ``cycle.rounds`` only.
+    - ``campaigns/{cycle_id}/hard_samples_workspace.json`` — fit over
+      ``cycle.rounds + cycle.archive_observations``. Y-axis filtered to
+      this cycle's candidate IDs unless
+      ``exploration.heatmap_show_archive_candidates`` is on.
+    - ``archive/measurements/hard_samples_workspace_{backend_id}.json`` —
+      tenant-wide archive snapshot for this backend.
+
+    Returns the artifact selected for inline log.md rendering: the workspace
+    one when ``exploration.seed_heatmap_from_archive`` is on, otherwise the
+    campaign one. Returns ``None`` when no observations exist yet (empty
+    cycle on round 0 with no archive).
+    """
+    if not session.state.cycle_id or session.store is None:
+        return None
+
+    cycle_dir = session.store.campaigns.campaign_dir(session.state.cycle_id)
+
+    campaign_artifact = build_hard_samples_artifact(
+        cycle.rounds,
+        cycle_id=session.state.cycle_id,
+        top_k_candidates=None,
+        top_k_samples=None,
+        posterior=cycle.last_rasch_posterior,
+    )
+
+    live_obs = build_observations(cycle.rounds)
+    workspace_obs = list(cycle.archive_observations) + live_obs
+    workspace_artifact = build_hard_samples_artifact_from_observations(
+        workspace_obs,
+        cycle_id=session.state.cycle_id,
+        top_k_candidates=None,
+        top_k_samples=None,
+    )
+
+    exp_cfg = cycle.config.optimization.exploration
+    if not exp_cfg.heatmap_show_archive_candidates:
+        live_cids = {cid for rr in cycle.rounds for cid in rr.all_candidate_results}
+        if live_cids:
+            workspace_artifact = _filter_artifact_to_live_candidates(
+                workspace_artifact, live_cids
+            )
+
+    with graceful("hard_samples_campaign.json write failed"):
+        write_json(cycle_dir / "hard_samples_campaign.json", campaign_artifact)
+    with graceful("hard_samples_workspace.json write failed"):
+        write_json(cycle_dir / "hard_samples_workspace.json", workspace_artifact)
+
+    tenant_path = (
+        session.store.base_dir
+        / "archive"
+        / "measurements"
+        / f"hard_samples_workspace_{session.backend_id}.json"
+    )
+    with graceful("tenant hard_samples_workspace write failed"):
+        archive_artifact = build_archive_hard_samples_artifact(
+            session.store,
+            session.backend_id,
+            top_k_candidates=None,
+            top_k_samples=None,
+        )
+        write_json(tenant_path, archive_artifact)
+
+    return workspace_artifact if exp_cfg.seed_heatmap_from_archive else campaign_artifact
 
 
 def from_disk_round(

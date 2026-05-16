@@ -76,13 +76,19 @@ export interface DatasetPreview {
   items: DatasetItem[];
 }
 
+export type HardSamplesScope = "workspace" | "campaign";
+
 export function fetchDatasetPreview(
   name: string,
   limit = 25,
   signal?: AbortSignal,
+  scope: HardSamplesScope = "workspace",
+  cycleId?: string,
 ): Promise<DatasetPreview> {
+  const params = new URLSearchParams({ limit: String(limit), scope });
+  if (scope === "campaign" && cycleId) params.set("cycle_id", cycleId);
   return jget<DatasetPreview>(
-    `${API}/datasets/${encodeURIComponent(name)}/preview?limit=${limit}`,
+    `${API}/datasets/${encodeURIComponent(name)}/preview?${params.toString()}`,
     signal,
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
-import type { DatasetItem } from "@/lib/api";
+import type { DatasetItem, HardSamplesScope } from "@/lib/api";
 import { TERMS } from "@/lib/terms";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
@@ -18,6 +18,8 @@ interface Props {
   datasetItems: DatasetItem[];
   datasetTrainCount: number;
   datasetTestCount: number;
+  hardSamplesScope: HardSamplesScope;
+  onHardSamplesScopeChange: (s: HardSamplesScope) => void;
 }
 
 function fmt(v: unknown): string {
@@ -52,6 +54,8 @@ export function ChatPane({
   datasetItems,
   datasetTrainCount,
   datasetTestCount,
+  hardSamplesScope,
+  onHardSamplesScopeChange,
 }: Props) {
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
@@ -265,6 +269,8 @@ export function ChatPane({
             datasetItems={datasetItems}
             datasetTrainCount={datasetTrainCount}
             datasetTestCount={datasetTestCount}
+            hardSamplesScope={hardSamplesScope}
+            onHardSamplesScopeChange={onHardSamplesScopeChange}
           />
         )}
       </div>

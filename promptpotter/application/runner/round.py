@@ -18,7 +18,11 @@ from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
-from promptpotter.presentation.writers import write_log_md, write_review_md
+from promptpotter.presentation.writers import (
+    write_hard_samples_artifacts,
+    write_log_md,
+    write_review_md,
+)
 from promptpotter.shared.errors import graceful
 
 logger = logging.getLogger(__name__)
@@ -102,7 +106,8 @@ def persist_round(
                 session.state.cycle_id,
                 trial_dict,
             )
-        write_log_md(session)
+        hard_samples_artifact = write_hard_samples_artifacts(session, cycle)
+        write_log_md(session, hard_samples_artifact=hard_samples_artifact)
         write_review_md(session, cycle)
 
     if _rr := session.state.audit_projection:

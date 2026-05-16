@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent } from "react";
-import { type DatasetItem } from "@/lib/api";
+import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 
 const STORAGE_KEY = "hs-grid:v1";
@@ -33,6 +33,12 @@ interface Props {
   datasetItems: DatasetItem[];
   datasetTrainCount: number;
   datasetTestCount: number;
+  // Data scope toggle. Workspace = cross-cycle archive Rasch (default,
+  // matches /datasets/{name}/preview's old behaviour). Campaign = this
+  // cycle only, read from campaigns/{cycle_id}/hard_samples_campaign.json.
+  // Owner (DashboardPane) refetches the preview when scope changes.
+  scope?: HardSamplesScope;
+  onScopeChange?: (s: HardSamplesScope) => void;
 }
 
 type ColId =
@@ -304,6 +310,8 @@ export function HardSamplesTable({
   datasetItems,
   datasetTrainCount,
   datasetTestCount,
+  scope,
+  onScopeChange,
 }: Props) {
   // When perSample is undefined (legacy callers), drop the dots column
   // entirely so the table renders exactly as before.
@@ -636,6 +644,37 @@ export function HardSamplesTable({
           </div>
         </div>
         <div className="hs-footer">
+          {scope && onScopeChange ? (
+            <div
+              className="hs-scope-toggle"
+              role="radiogroup"
+              aria-label="Hard-sample data scope"
+              title={
+                scope === "workspace"
+                  ? "Showing cross-cycle archive evidence. Toggle to this cycle's evidence only."
+                  : "Showing this cycle's evidence only. Toggle to cross-cycle archive."
+              }
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={scope === "campaign"}
+                className={`hs-scope-opt${scope === "campaign" ? " on" : ""}`}
+                onClick={() => onScopeChange("campaign")}
+              >
+                Campaign
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={scope === "workspace"}
+                className={`hs-scope-opt${scope === "workspace" ? " on" : ""}`}
+                onClick={() => onScopeChange("workspace")}
+              >
+                Workspace
+              </button>
+            </div>
+          ) : null}
           <label
             className="hs-sync-toggle"
             title={

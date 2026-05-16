@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import math
 import re
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from promptpotter.infrastructure.store import campaign_dir_for
 from promptpotter.infrastructure.store.paths import DEFAULT_DATASETS_ROOT
 from promptpotter.presentation.api.deps import StoreDep
 
@@ -47,15 +48,32 @@ async def get_dataset_preview(
     store: StoreDep,
     backend_id: str = Query(default="local"),
     limit: int = Query(default=50, ge=1, le=1000),
+    scope: Literal["workspace", "campaign"] = Query(
+        default="workspace",
+        description=(
+            "workspace = cross-cycle Rasch over the whole MeasurementArchive. "
+            "campaign = single-cycle Rasch (requires cycle_id)."
+        ),
+    ),
+    cycle_id: str | None = Query(
+        default=None,
+        description="Required when scope=campaign; ignored when scope=workspace.",
+    ),
 ) -> DatasetPreviewResponse:
     """Hard-sample leaderboard for ``{name}`` — every dataset row in Rasch
     difficulty order (hardest first), with unmeasured samples appended at the
     bottom in ``sample_id`` order.
 
-    ``train_count`` = samples with at least one measurement in the archive for
-    ``backend_id``. ``test_count`` = samples in the dataset cache that have no
-    measurements yet (held out for evaluation). The split is implicit in the
-    archive — no separate test cache needed.
+    Two scopes:
+
+    - ``workspace`` (default): cross-cycle Rasch fit over the whole
+      ``MeasurementArchive`` for ``backend_id``.
+    - ``campaign``: per-cycle fit, read from
+      ``campaigns/{cycle_id}/hard_samples_campaign.json``. Reflects only the
+      cycle's own observations — useful for "what does THIS run look like?"
+
+    ``train_count`` = samples with at least one measurement in the selected
+    scope. ``test_count`` = samples in the dataset cache that have none.
     """
     from promptpotter.application.intelligence.hard_sample_archive import (
         build_archive_hard_samples_artifact,
@@ -78,7 +96,20 @@ async def get_dataset_preview(
         sid = int(item["sample_id"] if "sample_id" in item else item["id"])
         sample_lookup[sid] = item
 
-    artifact = build_archive_hard_samples_artifact(store, backend_id, top_k_samples=None)
+    if scope == "campaign":
+        if not cycle_id:
+            raise HTTPException(400, "scope=campaign requires cycle_id")
+        cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
+        if not cycle_dir.exists():
+            raise HTTPException(404, f"Cycle '{cycle_id}' not found")
+        path = cycle_dir / "hard_samples_campaign.json"
+        if not path.is_file():
+            raise HTTPException(
+                404, "hard_samples_campaign.json not present (cycle has no rounds yet)"
+            )
+        artifact = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        artifact = build_archive_hard_samples_artifact(store, backend_id, top_k_samples=None)
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
     n_obs_map: dict[int, int] = {

@@ -327,9 +327,22 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             if set_
         ]
         if bad:
+            mint_target = (
+                f"--config {args.config}"
+                if args.config
+                else f"--dataset-name {args.dataset_name}"
+            )
             raise SystemExit(
                 f"ERROR: {', '.join(bad)} is resume-path only and cannot be combined "
-                "with --config / --dataset-name (those mint a fresh cycle at round 0)."
+                "with --config / --dataset-name (those mint a fresh cycle at round 0).\n"
+                "\n"
+                "campaign.json edits are loaded on EVERY `optimize` run — you do "
+                "not need --config to pick them up. To continue the active cycle "
+                "with the new config (forking on divergence):\n"
+                "  python -m promptpotter optimize --fork-on-divergence\n"
+                "To start a brand-new cycle from round 0 with the new config "
+                "(parent stays intact):\n"
+                f"  python -m promptpotter optimize {mint_target}"
             )
         _info, fresh_session = await _run_init_body(args)
 

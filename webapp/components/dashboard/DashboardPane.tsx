@@ -7,6 +7,7 @@ import {
   fetchDatasetPreview,
   fetchPipeline,
   type DatasetItem,
+  type HardSamplesScope,
 } from "@/lib/api";
 import {
   CycleStreamProvider,
@@ -91,6 +92,27 @@ function DashboardPaneInner({
   const [datasetItems, setDatasetItems] = useState<DatasetItem[]>([]);
   const [datasetTrainCount, setDatasetTrainCount] = useState(0);
   const [datasetTestCount, setDatasetTestCount] = useState(0);
+  // Hard-sample view scope — workspace = cross-cycle archive, campaign =
+  // this cycle only. Default workspace (matches the original always-archive
+  // behaviour); persisted in localStorage so the operator's choice survives
+  // reloads. Re-fetches the dataset preview when toggled.
+  const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("workspace");
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("promptpotter.hardSamples.scope");
+      if (raw === "campaign" || raw === "workspace") setHardSamplesScope(raw);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const updateHardSamplesScope = useCallback((next: HardSamplesScope) => {
+    setHardSamplesScope(next);
+    try {
+      window.localStorage.setItem("promptpotter.hardSamples.scope", next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const [themeKey, setThemeKey] = useState<string>("init");
   const [activeError, setActiveError] = useState<string | null>(null);
   // Edit mode — off by default; gates Stop run + Fork-from-here. Never
@@ -263,20 +285,28 @@ function DashboardPaneInner({
         const name = await fetchActiveDatasetName(cycleId, ac.signal);
         if (cancelled || !name) return;
         setDatasetName(name);
-        const preview = await fetchDatasetPreview(name, 1000, ac.signal);
+        const preview = await fetchDatasetPreview(
+          name,
+          1000,
+          ac.signal,
+          hardSamplesScope,
+          cycleId,
+        );
         if (cancelled) return;
         setDatasetItems(preview.items);
         setDatasetTrainCount(preview.train_count);
         setDatasetTestCount(preview.test_count);
       } catch {
-        // load may race with cycle-mint; retry on next cycle change
+        // load may race with cycle-mint; retry on next cycle change.
+        // Also fires on scope=campaign before round 1 lands the artifact —
+        // table degrades to empty until the file appears, no crash.
       }
     })();
     return () => {
       cancelled = true;
       ac.abort();
     };
-  }, [cycleId]);
+  }, [cycleId, hardSamplesScope]);
 
   // Cycle change ⇒ clear per-cycle derived state. Prev-prop pattern (React's
   // documented "adjusting state when a prop changes" recipe) avoids the
@@ -346,6 +376,8 @@ function DashboardPaneInner({
             datasetItems={datasetItems}
             datasetTrainCount={datasetTrainCount}
             datasetTestCount={datasetTestCount}
+            hardSamplesScope={hardSamplesScope}
+            onHardSamplesScopeChange={updateHardSamplesScope}
           />
         ) : tab === "dashboard" ? (
           <div className="content" id="content-dashboard">

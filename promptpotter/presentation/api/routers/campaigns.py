@@ -210,6 +210,35 @@ async def get_cycle_log_md(store: StoreDep, cycle_id: str) -> LogMdResponse:
     return LogMdResponse(cycle_id=cycle_id, markdown=text)
 
 
+@campaigns_router.get("/campaigns/{cycle_id}/hard_samples")
+async def get_cycle_hard_samples(
+    store: StoreDep,
+    cycle_id: str,
+    view: Literal["campaign", "workspace"] = Query(
+        "campaign",
+        description=(
+            "campaign = Rasch fit over this cycle's rounds only. "
+            "workspace = fit over this cycle + cross-cycle MeasurementArchive."
+        ),
+    ),
+) -> dict[str, Any]:
+    """Thin pass-through of the per-cycle hard-sample artifact JSON.
+
+    Two on-disk files, both written at every round-end finalize and
+    parity-readable by Claude without uvicorn:
+    ``hard_samples_campaign.json`` and ``hard_samples_workspace.json``.
+    """
+    cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
+    if not cycle_dir.exists():
+        raise HTTPException(404, f"Cycle '{cycle_id}' not found")
+    path = cycle_dir / f"hard_samples_{view}.json"
+    if not path.is_file():
+        raise HTTPException(404, f"hard_samples_{view}.json not present (cycle has no rounds yet)")
+    import json as _json
+
+    return _json.loads(path.read_text(encoding="utf-8"))
+
+
 @campaigns_router.get(
     "/campaigns/{cycle_id}/ledger",
     response_model=LedgerSliceResponse,

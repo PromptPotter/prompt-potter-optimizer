@@ -759,6 +759,14 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .hs-sync-toggle{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);letter-spacing:.04em;cursor:pointer;user-select:none}
 .hs-sync-toggle input[type="checkbox"]{accent-color:var(--color-accent);margin:0;cursor:pointer}
 .hs-sync-toggle:hover{color:var(--color-text-primary)}
+/* Workspace / Campaign data-scope toggle — segmented control on the
+   footer's left side. Selecting Campaign hits the per-cycle
+   hard_samples_campaign.json; Workspace hits the cross-cycle archive. */
+.hs-scope-toggle{display:inline-flex;border:1px solid var(--color-border-tertiary);border-radius:4px;overflow:hidden;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em}
+.hs-scope-opt{background:transparent;border:0;color:var(--color-text-secondary);padding:3px 9px;cursor:pointer;border-right:1px solid var(--color-border-tertiary)}
+.hs-scope-opt:last-child{border-right:0}
+.hs-scope-opt:hover{color:var(--color-text-primary)}
+.hs-scope-opt.on{background:var(--color-accent);color:var(--color-background-primary)}
 /* Soft pulse for the row currently being scored. Marker is per-cell
    (rows aren't wrapped in HardSamplesTable — every column is a direct
    grid child), so the keyframe runs on each cell of the active row.

@@ -288,6 +288,8 @@ The word **`legacy`** in code = code smell. The word **`deprecated`** is only sa
 | Where is L1 generate? | `application/optimization/l1/generate.py::l1_generate` |
 | Where is the read-only HTTP API? | `presentation/api/` (routers: `backends`, `campaigns`, `active`, `datasets`) |
 | Where is the webapp Next.js source? | `webapp-react/` (static export at `webapp/out/`, served under `/ui`) |
+| Hard-sample views on disk (parity with the webapp toggle)? | Campaign-only: `campaigns/{cycle_id}/hard_samples_campaign.json`. Workspace (= campaign + cross-cycle archive): `campaigns/{cycle_id}/hard_samples_workspace.json`. Tenant-wide archive snapshot for one backend: `archive/measurements/hard_samples_workspace_{backend_id}.json`. All three written at every round-end finalize by `presentation/writers.py::write_hard_samples_artifacts`; webapp serves the per-cycle ones via `GET /campaigns/{cycle_id}/hard_samples?view=campaign|workspace`. |
+| Opt-in: seed a cycle's Rasch from the cross-cycle archive? | Four boolean flags on `application/config.py::ExplorationConfig`: `seed_initial_scoring_set_from_archive` (round-0 picks hardest from archive δ_s), `seed_evolve_from_archive` (per-candidate sorter folds archive in), `seed_heatmap_from_archive` (log.md heatmap uses workspace fit), `heatmap_show_archive_candidates` (whether to include archive `content_hash[:12]` IDs on the heatmap Y-axis). All default off; archive observations themselves are always harvested at `Cycle.start` for the always-written workspace JSON. |
 
 ## Per-layer deep dives (progressive disclosure)
 

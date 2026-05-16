@@ -76,7 +76,12 @@ def _render_init_exit(v: InitExitView) -> str:
 
 
 def _render_round_start(v: RoundStartView) -> str:
-    crit = "YES" if v.has_l1_critique else "NO"
+    if v.has_l1_critique:
+        crit = f"from R{v.round - 1}"
+    elif v.round <= 1:
+        crit = "none yet (first round)"
+    else:
+        crit = f"none (R{v.round - 1} produced none)"
     return "\n".join(
         [
             "",
@@ -89,7 +94,7 @@ def _render_round_start(v: RoundStartView) -> str:
                 "GENERATE",
                 f"Current best    {v.current_acc:.1%}",
                 f"Parent prompt   {v.prompt_preview}",
-                f"Candidates      {v.n_variants}   Critique: {crit}",
+                f"Candidates      {v.n_variants}   Prior critique: {crit}",
                 f"Model           {v.model}",
             ),
         ]
