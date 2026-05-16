@@ -57,6 +57,43 @@ class ExplorationConfig(BaseModel):
         description="Sigma on the N(0, sigma²) theta prior when no observations yet.",
     )
 
+    seed_initial_scoring_set_from_archive: bool = Field(
+        False,
+        description=(
+            "Round-0 scoring set is picked from archive δ_s (hardest first) "
+            "instead of `sample_dataset` dataset order. Falls back to dataset "
+            "order when the archive has fewer than `elimination_n_min` "
+            "observations for this backend."
+        ),
+    )
+    seed_evolve_from_archive: bool = Field(
+        False,
+        description=(
+            "`evolve_scoring_set` folds archive observations into its per-round "
+            "Rasch fit alongside live `build_observations(rounds)`. Affects "
+            "swap-out and swap-in decisions from round 1 onward."
+        ),
+    )
+    seed_heatmap_from_archive: bool = Field(
+        False,
+        description=(
+            "Round-end hard-sample artifact's Rasch fit folds in archive "
+            "observations. δ_s ordering on the heatmap X-axis reflects "
+            "cross-cycle evidence."
+        ),
+    )
+    heatmap_show_archive_candidates: bool = Field(
+        False,
+        description=(
+            "When `seed_heatmap_from_archive` is on: include archive candidate "
+            "IDs (content_hash[:12]) on the heatmap Y-axis alongside this "
+            "cycle's cand_NNN. Off → Y-axis filtered to current cycle only; "
+            "archive candidates still contribute to the joint Rasch fit but "
+            "stay hidden from display. Ignored when `seed_heatmap_from_archive` "
+            "is off."
+        ),
+    )
+
 
 class OptimizationConfig(BaseModel):
     """Optimization-loop knobs.

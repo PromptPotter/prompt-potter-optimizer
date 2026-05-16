@@ -31,6 +31,7 @@ from promptpotter.domain.search_point import JobSearchPoint
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.intelligence.exploration import Observation
     from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
@@ -140,6 +141,11 @@ class Cycle:
     state_version: int = 1
     # Round-end Rasch posterior; one fit per round, reused by finalize.
     last_rasch_posterior: Any = None
+    # Cross-cycle observations harvested once at Cycle.start. Threaded into
+    # the round-end workspace hard-samples JSON (always written for parity),
+    # plus the per-candidate sorter / initial-scoring-set picker when the
+    # respective `exploration.seed_*_from_archive` flags are on.
+    archive_observations: list[Observation] = field(default_factory=list)
 
     @classmethod
     def start(
@@ -195,6 +201,16 @@ class Cycle:
                 f"overlay keys stripped from {_node}: {sorted(_missing)} — "
                 "Cycle.start must pass session.pipeline_params, not a sparse schema view"
             )
+        # Always populated — the per-round display projection downstream
+        # writes a workspace hard-samples artifact (cycle obs + archive obs)
+        # regardless of any seed_* flag, so this list must be available.
+        # Disk walk is cheap (same pattern the FastAPI dataset preview uses
+        # on every request).
+        from promptpotter.application.intelligence.hard_sample_archive import (
+            build_archive_observations,
+        )
+
+        archive_obs = build_archive_observations(session.store, session.backend_id)
         return cls(
             session=session,
             config=config,
@@ -210,6 +226,7 @@ class Cycle:
                 origin_composite_fitness=composite_fitness,
             ),
             opt_sp=opt_sp,
+            archive_observations=archive_obs,
         )
 
     def replay_priors(self, priors: list[dict[str, Any]]) -> None:

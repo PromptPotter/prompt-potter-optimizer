@@ -349,6 +349,7 @@ def _finalize_loop_state(
     """Init AxisIndex, write final session/cycle state, emit ``INIT.exit``."""
     from promptpotter.application.bootstrap.session import _open_cycle_ledger
     from promptpotter.application.datasets import sample_dataset
+    from promptpotter.application.intelligence.exploration import seed_initial_scoring_set
     from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.application.optimization.pobb.elimination import build_degradation_checks
     from promptpotter.domain.phases import CampaignPhase, emit_phase
@@ -367,7 +368,16 @@ def _finalize_loop_state(
         if session.state.ledger is None:
             session.state.ledger = _open_cycle_ledger(session, resolved_cycle_id)
     session.state.tracing_campaign_id = tracing_campaign_id
-    session.scoring.scoring_set = sample_dataset(dataset, config.sp_budget_ttest)
+    exp_cfg = config.optimization.exploration
+    seeded: list[Sample] | None = None
+    if (
+        exp_cfg.seed_initial_scoring_set_from_archive
+        and len(cycle.archive_observations) >= config.optimization.elimination_n_min
+    ):
+        seeded = seed_initial_scoring_set(
+            cycle.archive_observations, dataset, config.sp_budget_ttest
+        )
+    session.scoring.scoring_set = seeded or sample_dataset(dataset, config.sp_budget_ttest)
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round
 

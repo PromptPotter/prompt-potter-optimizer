@@ -226,7 +226,51 @@ def sample_kg_max(
 # Round-level scoring-set evolution via Rasch + KG
 # ===========================================================================
 
-__all__ = ["EvolveResult", "build_observations", "build_scoring_set_event", "evolve_scoring_set"]
+__all__ = [
+    "EvolveResult",
+    "build_observations",
+    "build_scoring_set_event",
+    "evolve_scoring_set",
+    "seed_initial_scoring_set",
+]
+
+
+def seed_initial_scoring_set(
+    observations: list[Observation],
+    dataset: list[Sample],
+    n: int,
+) -> list[Sample] | None:
+    """Pick the ``n`` hardest samples in ``dataset`` by δ_s from a Rasch fit on ``observations``.
+
+    Returns ``None`` when ``observations`` is too shallow to yield a stable
+    fit (caller falls back to the dataset-order prefix). Pure: no I/O.
+    """
+    if n <= 0 or not dataset or not observations:
+        return None
+    posterior = fit_rasch(observations)
+    if not posterior.delta:
+        return None
+    by_id = {s.id: s for s in dataset}
+    ranked_ids = [sid for sid, _ in sorted(posterior.delta.items(), key=lambda kv: -kv[1])]
+    picked: list[Sample] = []
+    for sid in ranked_ids:
+        s = by_id.get(int(sid))
+        if s is None:
+            continue
+        picked.append(s)
+        if len(picked) >= n:
+            break
+    if not picked:
+        return None
+    if len(picked) < n:
+        seen = {s.id for s in picked}
+        for s in dataset:
+            if s.id in seen:
+                continue
+            picked.append(s)
+            if len(picked) >= n:
+                break
+    return picked
 
 
 @dataclass
@@ -367,17 +411,23 @@ def evolve_scoring_set(
     *,
     elimination_n_min: int,
     surviving_candidates: list[str] | None = None,
+    extra_observations: list[Observation] = (),  # type: ignore[assignment]
 ) -> EvolveResult:
     """Decide the next round's scoring set. Pure — no I/O, no mutation of inputs.
 
     When there are no completed rounds yet, or when the dataset has
     nothing left to swap in, returns the current scoring set unchanged
     with ``reason`` populated for telemetry.
+
+    ``extra_observations`` (default empty) is prepended to the live
+    observations before the Rasch fit — used to fold cross-cycle archive
+    evidence into the per-round swap decisions when
+    ``exploration.seed_evolve_from_archive`` is on.
     """
     if not rounds:
         return EvolveResult(new_scoring_set=list(current_scoring_set), reason="no_rounds_yet")
 
-    observations = build_observations(rounds)
+    observations = list(extra_observations) + build_observations(rounds)
     if not observations:
         return EvolveResult(new_scoring_set=list(current_scoring_set), reason="no_observations")
 

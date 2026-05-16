@@ -552,6 +552,10 @@ async def score_population(
         # diagnostic samples land first and PoBB can eliminate dominated
         # candidates without spending the full sample budget.
         sorter_obs = build_observations(cycle.rounds)
+        if cycle.config.optimization.exploration.seed_evolve_from_archive:
+            # Fold cross-cycle archive evidence into the per-candidate fit so
+            # round 1 lands diagnostic samples first instead of dataset order.
+            sorter_obs = list(cycle.archive_observations) + sorter_obs
         for cid_seen, results_seen in all_candidate_results.items():
             for r in results_seen:
                 sid = r.get("sample_id")
