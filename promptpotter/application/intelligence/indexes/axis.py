@@ -103,6 +103,17 @@ class AxisIndex:
 
     # ----- axis analytics -----
 
+    def peaked_axes(self) -> frozenset[str]:
+        """Axes whose value trend is ``peaked`` — i.e. the parent's current
+        value IS the measured peak. Mutating these without a sibling-yield
+        rebut or wide-exploration budget is regression by default. Read
+        by the L1-axis-memory rendering (inline tag in axis_rankings) and
+        by the post-round ``evidence_grounding_present`` behaviour check.
+        """
+        return frozenset(
+            axis for axis in self._axis_values if self._axis_value_trend(axis) == "peaked"
+        )
+
     def axis_rankings(self) -> list[AxisImpact]:
         """All axes ranked by effect size (descending).
 
@@ -189,11 +200,12 @@ class AxisIndex:
             if exhausted
             else None
         )
-        trend_parts = [
-            f"{a.axis}: {t}"
-            for a in rankings5[:3]
-            if (t := self._axis_value_trend(a.axis)) not in ("flat", "non_numeric")
-        ]
+        # Peaked tags are now inlined into the axis_rankings line itself
+        # (see ``_fmt_axis_rankings``); the separate ``value_trends`` line
+        # used to render alongside and let L1 read "highest effect" and
+        # "peaked" as two independent signals on the same axis. Collapsing
+        # to one annotated line removes the contradiction.
+        peaked = self.peaked_axes()
 
         fg_lines: list[str] = []
         for a in rankings5[:3]:
@@ -209,7 +221,7 @@ class AxisIndex:
         volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
 
         return _collect(
-            ("axis_rankings", _fmt_axis_rankings(rankings5) if rankings5 else None),
+            ("axis_rankings", _fmt_axis_rankings(rankings5, peaked) if rankings5 else None),
             ("top_values", top_vals_str),
             ("failure_clusters", _fmt_clusters(clusters, with_counts=True) if clusters else None),
             ("dead_queries", f"{len(dead)} queries never hit" if dead else None),
@@ -228,7 +240,6 @@ class AxisIndex:
                 "; ".join(f"{q[:50]} ({n} flips)" for q, n in volatile) if volatile else None,
             ),
             ("exhausted_axes", exhausted_str),
-            ("value_trends", "; ".join(trend_parts) if trend_parts else None),
             ("improvement_attribution", self._format_recent_attributions(limit=3)),
         )
 

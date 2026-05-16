@@ -14,8 +14,26 @@ def _value_preview(value: Any) -> str:
     return s[:80] if len(s) > 80 else s
 
 
-def _fmt_axis_rankings(rankings: list[AxisImpact]) -> str:
-    return "; ".join(f"{a.axis} (effect={a.effect_size:.3f}, {a.classification})" for a in rankings)
+def _fmt_axis_rankings(
+    rankings: list[AxisImpact], peaked_axes: frozenset[str] | None = None
+) -> str:
+    """Render the top-axes line. When ``peaked_axes`` is provided, axes whose
+    trend has converged on a measured peak are tagged inline so the LLM
+    consuming the digest can't read the effect rank without also seeing
+    the peakedness — the prior split (effect ranks here, ``value_trends``
+    line elsewhere) let L1 latch onto "highest effect → mutate" while
+    silently ignoring "peaked → don't mutate". Single annotated line
+    removes the contradiction.
+    """
+    peaked = peaked_axes or frozenset()
+    parts: list[str] = []
+    for a in rankings:
+        base = f"{a.axis} (effect={a.effect_size:.3f}, {a.classification}"
+        if a.axis in peaked:
+            base += ", PEAKED — do not mutate without sibling_yield>0 or exploration_budget=wide rebut"
+        base += ")"
+        parts.append(base)
+    return "; ".join(parts)
 
 
 def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:

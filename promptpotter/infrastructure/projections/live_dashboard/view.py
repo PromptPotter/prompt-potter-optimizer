@@ -210,6 +210,16 @@ class LiveDashboardView(DerivedView):
             "total_queries_scored": r.get("total_queries_scored", 0),
             "total_backend_calls": r.get("total_backend_calls", 0),
             "current_query_payload": None,
+            # Sample-id of the row the loop is scoring *right now*; cleared
+            # on ``sample_scored``. Lets the webapp dataset table pulse the
+            # in-flight row in lockstep with the per-sample dashboard rewrites.
+            "current_sample_id": None,
+            # Full hardest-first sample_id list from the most recent Rasch
+            # fit (refreshed per-candidate in ``score_population``). The
+            # webapp dataset table sorts on this when the operator's
+            # "sync with live sort" toggle is on. ``None`` until the first
+            # sorter fit lands (round 0 / pre-first-candidate fallback).
+            "hard_sample_order": None,
             "last_query_elapsed_s": 0.0,
             "wallclock_serialized_at": None,
             "n_variants": n_variants,
@@ -428,6 +438,8 @@ class LiveDashboardView(DerivedView):
         if ev == "sample_started":
             self._update_sample_markers(ci, ct, qi, qt)
             self.state["current_query_payload"] = (payload.get("query_text") or "")[:120]
+            sid = payload.get("sample_id")
+            self.state["current_sample_id"] = int(sid) if sid is not None else None
             self._set_state("scoring")
             self._persist()
         elif ev == "sample_scored":
@@ -458,6 +470,11 @@ class LiveDashboardView(DerivedView):
                 {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
             )
             self._persist()
+        elif ev == "sample_order_preview":
+            order_raw = payload.get("sample_order")
+            if isinstance(order_raw, list):
+                self.state["hard_sample_order"] = [int(sid) for sid in order_raw]
+                self._persist()
         elif ev == "pobb_backfill":
             self._append_backfill(
                 int(record.round or 0),
@@ -547,6 +564,7 @@ class LiveDashboardView(DerivedView):
             accumulate_backend_spend(s["spend"], pd)
 
         s["current_query_payload"] = None
+        s["current_sample_id"] = None
         s["last_query_elapsed_s"] = round(query_time, 2)
         self._set_state("between_candidates" if last_in_candidate else "between_samples")
 

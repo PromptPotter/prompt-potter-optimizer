@@ -86,6 +86,13 @@ class CheckContext:
     context_object: list[str] = field(default_factory=list)
     param_unlock_round: int = 3
     exploration_budget: str | None = None
+    # Axes the round-start AxisIndex flagged as ``peaked``. Used by
+    # ``evidence_grounding_present`` to reject variants that cite
+    # ``axis_memory`` to justify mutating a peaked axis without naming a
+    # rebut (sibling_yield>0 this round, or exploration_budget=wide).
+    # Populated by ``review.py`` from each round dict's
+    # ``axis_memory_peaked`` field, stashed by ``persist_round``.
+    peaked_axes: frozenset[str] = field(default_factory=frozenset)
 
 
 CheckFn = Callable[[dict[str, Any], CheckContext], CheckResult]
@@ -252,6 +259,11 @@ def _check_evidence_grounding_present(round_dict: dict[str, Any], ctx: CheckCont
             continue
         if field_name == "stall_exploration" and ctx.exploration_budget == "tight":
             offenders.append((label, "stall_exploration_when_tight"))
+            continue
+        peaked_hit = _cited_peaked_axis(v, citation, field_name, ctx)
+        if peaked_hit and not _has_peaked_rebut(v, citation, ctx):
+            offenders.append((label, f"axis_memory_peaked={peaked_hit}"))
+            continue
 
     if offenders:
         sample = ", ".join(f"{label}({reason})" for label, reason in offenders[:3])
@@ -306,6 +318,66 @@ def run_all_checks(round_dict: dict[str, Any], ctx: CheckContext) -> list[CheckR
 
 
 # --- support helpers used by checks ---------------------------------------
+
+
+_REBUT_SIGNALS: tuple[str, ...] = (
+    "sibling_yield",
+    "exploration_budget=wide",
+    "exploration_budget = wide",
+    "wide exploration",
+)
+
+
+def _cited_peaked_axis(
+    variant: dict[str, Any], citation: str, field_name: str, ctx: CheckContext
+) -> str | None:
+    """Return the first peaked axis that this variant's evidence_grounding
+    + target/override fields appear to mutate, or None.
+
+    The match is intentionally permissive: we look for the peaked-axis
+    name as a substring in the citation OR in ``target_axis`` OR as a key
+    inside ``pipeline_params_override`` (e.g. ``llm_only.temperature`` →
+    matches ``temperature`` keyed under ``llm_only``). The validator
+    only fires when ``field_name == "axis_memory"`` — citations grounded
+    in other panels (sibling_yield, parent_panel, etc.) are independent
+    evidence and not rejected by this rule.
+    """
+    if not ctx.peaked_axes or field_name != "axis_memory":
+        return None
+    target = str(variant.get("target_axis") or "")
+    pp = variant.get("pipeline_params_override") or {}
+    flat_pp_axes: set[str] = set()
+    if isinstance(pp, dict):
+        for node, params in pp.items():
+            if isinstance(params, dict):
+                for p in params:
+                    flat_pp_axes.add(f"{node}.{p}")
+                    flat_pp_axes.add(str(p))
+    for axis in ctx.peaked_axes:
+        if axis in citation or axis in target or axis in flat_pp_axes:
+            return axis
+        _, _, leaf = axis.partition(".")
+        if leaf and (leaf in citation or leaf in target or leaf in flat_pp_axes):
+            return axis
+    return None
+
+
+def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: CheckContext) -> bool:
+    """True iff the variant's reasoning/citation cites a real rebut for the
+    peaked-axis guard: a sibling_yield row this round, or an explicit
+    wide-exploration budget. Permissive substring match — the prompt
+    instructs L1 to name the rebut verbatim.
+    """
+    if ctx.exploration_budget == "wide":
+        return True
+    blob = " ".join(
+        [
+            citation,
+            str(variant.get("reasoning") or ""),
+            str(variant.get("changes_description") or ""),
+        ]
+    ).lower()
+    return any(sig in blob for sig in _REBUT_SIGNALS)
 
 
 def _touches_param_scope(pp_override: dict[str, Any]) -> bool:

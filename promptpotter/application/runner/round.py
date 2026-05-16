@@ -69,6 +69,14 @@ def persist_round(
         round_result.decisions.extend(d.to_dict() for d in flushed)
         trial_dict["decisions"] = list(round_result.decisions)
 
+    # Stash the axis-memory peaked set on the round dict so the post-round
+    # ``evidence_grounding_present`` behaviour check (run from review.py
+    # against on-disk round files) can reject variants citing axis_memory
+    # to justify mutating a peaked axis. AxisIndex isn't reconstructable
+    # from a round_NNNN.json alone, so we persist the derived set here.
+    if cycle.axes is not None:
+        trial_dict["axis_memory_peaked"] = sorted(cycle.axes.peaked_axes())
+
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
             ledger.append(d)

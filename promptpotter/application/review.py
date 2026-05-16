@@ -100,12 +100,15 @@ def _compute_behavior_per_round(
             out.append([])
             continue
         round_num = int(round_data.get("round") or i)
+        peaked_raw = round_data.get("axis_memory_peaked") or []
+        peaked_axes = frozenset(str(a) for a in peaked_raw if isinstance(a, str))
         ctx = CheckContext(
             round_num=round_num,
             prior_rounds=list(prior_audits),
             opt_search_point=dict(round_data.get("opt_search_point") or {}),
             context_object=context_object,
             param_unlock_round=param_unlock_round,
+            peaked_axes=peaked_axes,
         )
         out.append(run_all_checks(audit, ctx))
         prior_audits.append(audit)
