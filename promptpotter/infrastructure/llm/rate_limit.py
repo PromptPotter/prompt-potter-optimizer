@@ -55,6 +55,79 @@ def parse_retry_after(headers: object | None) -> float | None:
     return None
 
 
+# Groq/OpenAI 429 body scopes — order matters: check the longest window
+# first (e.g. "per day" before "per minute") so a body that mentions
+# multiple windows classifies as the bucket the server actually blocked on.
+_SCOPE_BODY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("TPD", re.compile(r"tokens?\s*per\s*day|TPD\b", re.IGNORECASE)),
+    ("RPD", re.compile(r"requests?\s*per\s*day|RPD\b", re.IGNORECASE)),
+    ("TPH", re.compile(r"tokens?\s*per\s*hour|TPH\b", re.IGNORECASE)),
+    ("RPH", re.compile(r"requests?\s*per\s*hour|RPH\b", re.IGNORECASE)),
+    ("TPM", re.compile(r"tokens?\s*per\s*minute|TPM\b", re.IGNORECASE)),
+    ("RPM", re.compile(r"requests?\s*per\s*minute|RPM\b", re.IGNORECASE)),
+    # Generic fallbacks — body says "per day/hour/minute" without
+    # specifying tokens vs requests.
+    ("daily", re.compile(r"per\s*day|daily\s*(?:limit|quota)", re.IGNORECASE)),
+    ("hourly", re.compile(r"per\s*hour|hourly\s*(?:limit|quota)", re.IGNORECASE)),
+    ("per-minute", re.compile(r"per\s*minute", re.IGNORECASE)),
+]
+
+
+_DURATION_RE = re.compile(
+    r"^(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m(?!s))?(?:(\d+(?:\.\d+)?)s)?$",
+    re.IGNORECASE,
+)
+
+
+def _parse_duration_seconds(s: str) -> float | None:
+    """Parse a Groq-style ``"1h2m3.5s"`` / ``"45s"`` / ``"30"`` duration into seconds."""
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    m = _DURATION_RE.match(s)
+    if not m or not any(m.groups()):
+        return None
+    h, mn, sc = m.groups()
+    return float(h or 0) * 3600 + float(mn or 0) * 60 + float(sc or 0)
+
+
+def diagnose_rate_limit_scope(headers: Any, body: str | None) -> str:
+    """Classify a 429 by which limit window was hit (TPD/RPD/TPH/RPH/TPM/RPM/…).
+
+    Looks at the error body first (Groq/OpenAI both name the bucket
+    explicitly — ``"Rate limit reached … on tokens per day (TPD)"``), then
+    falls back to the ``x-ratelimit-reset-*`` header magnitude (seconds →
+    per-minute, minutes → per-hour, hours+ → per-day). Returns ``"429"``
+    when no signal identifies the scope. Pure diagnostic — informs the
+    operator which limit they hit so they can judge whether to keep
+    waiting or Ctrl+C.
+    """
+    if body:
+        for label, pat in _SCOPE_BODY_PATTERNS:
+            if pat.search(body):
+                return label
+    for kind, hdr in (
+        ("R", "x-ratelimit-reset-requests"),
+        ("T", "x-ratelimit-reset-tokens"),
+    ):
+        val = headers.get(hdr) if headers is not None and hasattr(headers, "get") else None
+        if not val:
+            continue
+        sec = _parse_duration_seconds(str(val))
+        if sec is None:
+            continue
+        if sec > 3600:
+            return f"{kind}PD"
+        if sec > 60:
+            return f"{kind}PH"
+        return f"{kind}PM"
+    return "429"
+
+
 async def wait_with_countdown(total_sec: float, label: str) -> None:
     """Sleep `total_sec` while emitting a yellow single-line countdown to stderr."""
     end = time.monotonic() + total_sec
@@ -304,6 +377,7 @@ __all__ = [
     "acquire_reservation",
     "apply_discovered_caps",
     "build_rate_limiter",
+    "diagnose_rate_limit_scope",
     "estimate_tokens",
     "parse_retry_after",
     "raise_if_request_too_large",

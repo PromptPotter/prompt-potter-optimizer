@@ -36,6 +36,7 @@ from promptpotter.infrastructure.llm import (
     LLMClientBase,
     LLMResponse,
     TokenUsage,
+    diagnose_rate_limit_scope,
     emit_token_usage,
     extract_parsed_json,
     parse_retry_after,
@@ -247,19 +248,24 @@ async def llm_call(
                 if getattr(exc, "status_code", None) != 429:
                     raise
                 resp = getattr(exc, "response", None)
-                wait = parse_retry_after(
-                    getattr(resp, "headers", None) if resp is not None else None
-                )
+                headers = getattr(resp, "headers", None) if resp is not None else None
+                body = getattr(resp, "text", None) if resp is not None else None
+                if body is None:
+                    body = str(exc)
+                wait = parse_retry_after(headers)
                 if wait is None or wait <= 0 or attempt == MAX_429_ATTEMPTS - 1:
                     raise
+                kind = diagnose_rate_limit_scope(headers, body)
+                label = node or "llm_call"
                 logger.warning(
-                    "Rate limit on %s (attempt %d/%d); waiting %.1fs",
-                    node or "llm_call",
+                    "Rate limit on %s [%s] (attempt %d/%d); waiting %.1fs",
+                    label,
+                    kind,
                     attempt + 1,
                     MAX_429_ATTEMPTS,
                     wait,
                 )
-                await wait_with_countdown(wait + 1.0, node or "optimizer")
+                await wait_with_countdown(wait + 1.0, f"{label} {kind}")
 
         duration_s = round(time.monotonic() - _t0, 2)
 
