@@ -93,6 +93,12 @@ def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
         block["duration_s"] = action["duration_s"]
     if "timestamp" in action:
         block["timestamp"] = action["timestamp"]
+    # Schema-repair retry count: only surface when non-zero so the audit
+    # stays terse for the common (clean parse) case but the signal is
+    # immediately visible when the L1 prompt produced bad JSON.
+    repairs = action.get("schema_repair_attempts")
+    if repairs:
+        block["schema_repair_attempts"] = repairs
     return block
 
 

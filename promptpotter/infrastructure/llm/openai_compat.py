@@ -118,15 +118,22 @@ class OpenAICompatibleClient(LLMClientBase):
             # Groq json_validate_failed salvage — already parsed + typed.
             return result
         response, content, validation_err = result
+        schema_repair_attempts = 0
         if validation_err is not None:
             # First attempt failed Pydantic validation; retry once with the
             # bad output + a repair hint appended to the message list. Keeps
-            # the original system/user context intact.
+            # the original system/user context intact. The retry is a full
+            # second LLM round-trip — surface that to the operator so the
+            # extra wall-clock + spend isn't silent.
+            schema_name = response_model.__name__ if response_model else "<schema>"
             logger.warning(
-                "%s: response failed %s validation (%d errors); retrying with repair hint",
+                "%s: %s parse failed (%d errors) on %s — repair retry in flight "
+                "(second full call; cost + latency ~2x). Persistent failures "
+                "indicate the L1 prompt is producing schema-noncompliant JSON.",
                 self._provider_name,
-                response_model.__name__ if response_model else "<schema>",
+                schema_name,
                 validation_err.error_count(),
+                request_params.get("model", "?"),
             )
             repair_messages = [
                 *request_params["messages"],
@@ -144,14 +151,18 @@ class OpenAICompatibleClient(LLMClientBase):
             ]
             retry_params = {**request_params, "messages": repair_messages}
             result = await self._one_attempt(client, retry_params, response_model, response_schema)
+            schema_repair_attempts = 1
             if isinstance(result, LLMResponse):
+                result.schema_repair_attempts = schema_repair_attempts
                 return result
             response, content, validation_err = result
             if validation_err is not None:
                 logger.error(
-                    "%s: response failed %s validation after retry (%d errors)",
+                    "%s: %s parse failed AGAIN after repair retry (%d errors) — "
+                    "raising MetaPromptParseError. The L1 prompt is structurally "
+                    "wrong for this schema; do not silently swallow.",
                     self._provider_name,
-                    response_model.__name__ if response_model else "<schema>",
+                    schema_name,
                     validation_err.error_count(),
                 )
                 raise MetaPromptParseError(
@@ -174,6 +185,7 @@ class OpenAICompatibleClient(LLMClientBase):
             },
             finish_reason=response.choices[0].finish_reason,
             parsed=parsed,
+            schema_repair_attempts=schema_repair_attempts,
         )
 
     async def _one_attempt(

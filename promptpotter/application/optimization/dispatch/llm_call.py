@@ -231,6 +231,16 @@ async def llm_call(
                     started_at_ms=int(time.time() * 1000),
                 )
             )
+        # Pre-call info line — surfaces what we're waiting on so the operator
+        # can distinguish "in-flight LLM call" from "frozen process" without
+        # opening dashboard.json. Lands in terminal AND output.log.
+        prompt_chars = sum(len(m.get("content") or "") for m in messages)
+        logger.info(
+            "→ optimizer call: %s · %s · %d-char prompt",
+            node or "llm_call",
+            merged.get("model") or "(default)",
+            prompt_chars,
+        )
         # 429 honor-Retry-After loop, bounded. Server sets the header per RFC 7231;
         # if missing or attempts run out, surface the SDK exception unchanged.
         for attempt in range(MAX_429_ATTEMPTS):
@@ -300,6 +310,11 @@ async def llm_call(
             "usage": response.usage,
             "model": response.model,
             "duration_s": duration_s,
+            # Non-zero ⇒ the parsed JSON only landed after an extra
+            # round-trip; surfaces L1-prompt parse quality in the audit
+            # trail and feeds the per-cycle schema-repair roll-up in
+            # ``review.md``.
+            "schema_repair_attempts": response.schema_repair_attempts,
         }
         if cached_payload is not None:
             payload["cached"] = True

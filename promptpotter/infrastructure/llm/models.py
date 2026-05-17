@@ -38,6 +38,16 @@ class LLMResponse(BaseModel):
             "``response_schema`` was supplied; ``None`` for text-mode."
         ),
     )
+    schema_repair_attempts: int = Field(
+        0,
+        description=(
+            "Times the schema-validation repair-retry path fired before "
+            "the parsed response landed. 0 = clean first parse; 1 = one "
+            "repair round-trip. Surfaces L1-prompt parse-failure rate as a "
+            "quality signal — bad templates produce schema-noncompliant "
+            "JSON and silently double-up the LLM spend."
+        ),
+    )
 
 
 @dataclass(frozen=True)

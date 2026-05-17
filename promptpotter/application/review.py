@@ -63,9 +63,11 @@ def render_review_md(
         audits=audits,
     )
 
+    repairs_per_round = [_schema_repair_count(a) for a in audits]
+    calls_per_round = [_optimizer_call_count(a) for a in audits]
     parts: list[str] = []
     parts += _render_header(index, final, stats)
-    parts += _render_stats_block(stats)
+    parts += _render_stats_block(stats, repairs_per_round, calls_per_round)
     parts += _render_behavior_summary(behavior_per_round, stats)
     parts += ["## Rounds", ""]
 
@@ -78,9 +80,40 @@ def render_review_md(
             audits[i],
             behavior_per_round[i] if i < len(behavior_per_round) else [],
             is_peek=is_peek,
+            schema_repair_retries=repairs_per_round[i],
         )
 
     return "\n".join(parts).rstrip() + "\n"
+
+
+def _schema_repair_count(audit: dict[str, Any] | None) -> int:
+    """Sum ``schema_repair_attempts`` across every optimizer node in this round's audit.
+
+    Non-zero means an L1/L2/L3 LLM call returned schema-noncompliant JSON
+    on its first attempt and the client paid a second full round-trip to
+    repair. Cycle-wide rate is the cleanest single-number quality signal
+    for an L1 meta-prompt — bad templates produce silent 2x spend.
+    """
+    if not audit:
+        return 0
+    nodes = audit.get("nodes") or {}
+    if not isinstance(nodes, dict):
+        return 0
+    return sum(
+        int(block.get("schema_repair_attempts") or 0)
+        for block in nodes.values()
+        if isinstance(block, dict)
+    )
+
+
+def _optimizer_call_count(audit: dict[str, Any] | None) -> int:
+    """Count optimizer LLM nodes in this round's audit (excludes ``l1_score``)."""
+    if not audit:
+        return 0
+    nodes = audit.get("nodes") or {}
+    if not isinstance(nodes, dict):
+        return 0
+    return sum(1 for k, v in nodes.items() if k != "l1_score" and isinstance(v, dict))
 
 
 # --- behaviour-check evaluation -------------------------------------------
@@ -139,7 +172,11 @@ def _render_header(index: dict[str, Any], final: dict[str, Any], stats: L1Stats)
     return parts
 
 
-def _render_stats_block(stats: L1Stats) -> list[str]:
+def _render_stats_block(
+    stats: L1Stats,
+    repairs_per_round: list[int],
+    calls_per_round: list[int],
+) -> list[str]:
     rounds_to_95 = "—" if stats.rounds_to_95 is None else str(stats.rounds_to_95)
     lines = [
         "## L1Stats",
@@ -154,6 +191,14 @@ def _render_stats_block(stats: L1Stats) -> list[str]:
     if stats.forbidden_axis_attempts > 0:
         healed = "healed" if stats.forbidden_axis_healed else "NOT healed"
         lines.append(f"- forbidden_axis_attempts: {stats.forbidden_axis_attempts} ({healed})")
+    repairs_total = sum(repairs_per_round)
+    calls_total = sum(calls_per_round)
+    if calls_total:
+        rate_pct = 100.0 * repairs_total / calls_total
+        lines.append(
+            f"- schema_repair_retries: {repairs_total}/{calls_total} optimizer calls "
+            f"({rate_pct:.0f}% paid a second round-trip)"
+        )
     lines.append("")
     return lines
 
@@ -189,6 +234,7 @@ def _render_round(
     checks: list[CheckResult],
     *,
     is_peek: bool,
+    schema_repair_retries: int = 0,
 ) -> list[str]:
     round_num = round_data.get("round", "?")
     osp = round_data.get("opt_search_point") or {}
@@ -204,6 +250,8 @@ def _render_round(
             f"- composite_fitness: `{float(round_data.get('composite_fitness', 0.0) or 0.0):.4f}`",
             f"- improved: **{'yes' if round_data.get('improved') else 'no'}**",
         ]
+    if schema_repair_retries:
+        parts.append(f"- schema_repair_retries: {schema_repair_retries}")
     parts += _render_l1_inputs(osp, lineage)
     parts += _render_check_checklist(checks)
     parts += _render_variants_table(audit, scored=not is_peek)
