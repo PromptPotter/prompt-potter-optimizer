@@ -71,6 +71,14 @@ class CandidateScore:
     runtime_failures: list[dict] = field(default_factory=list)
     elimination_context: dict = field(default_factory=dict)
     degradation_context: dict = field(default_factory=dict)
+    # Origin's stats restricted to *this* candidate's measured samples — the
+    # apples-to-apples comparison surface for PoBB-locked candidates that
+    # only ran the hardest q8/20 before the lock fired. Equals the full-set
+    # origin numbers when the candidate scored every sample. Populated by
+    # ``l1_score`` after backfilling composite via ``matched_origin_stats``.
+    matched_origin_accuracy: float = 0.0
+    matched_origin_hits: int = 0
+    matched_origin_composite: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         """Flat dict representation for wire format / JSON serialization."""
@@ -99,6 +107,9 @@ class CandidateScore:
             "runtime_failures": list(self.runtime_failures),
             "elimination_context": dict(self.elimination_context),
             "degradation_context": dict(self.degradation_context),
+            "matched_origin_accuracy": self.matched_origin_accuracy,
+            "matched_origin_hits": self.matched_origin_hits,
+            "matched_origin_composite": self.matched_origin_composite,
         }
 
 
@@ -177,6 +188,22 @@ class RoundMetadata(BaseModel):
     # surfaced in round summary for operator transparency.
     deprecated: int = 0
     escalation_signal: EscalationSignal | None = None
+    # Round-winner's apples-to-apples comparison anchor: origin's stats
+    # restricted to the winner's measured samples. Drives the ``improved``
+    # gate, the p-value, and the verdict-line delta — keeps the comparison
+    # fair when PoBB leader-locks at q8/20 while origin has all 20. Equals
+    # ``origin_accuracy`` / origin's full hits / ``origin_composite_fitness``
+    # when the winner scored every sample.
+    matched_origin_accuracy: float = 0.0
+    matched_origin_hits: int = 0
+    matched_origin_composite: float = 0.0
+    # Cumulative pool snapshot after this round absorbed: per-sample best-so-
+    # far across every round to date. Surfaces what ``tr.current_*`` now
+    # tracks so dashboard / log.md don't have to re-walk priors to render
+    # "Current best on N measured samples." Equals the round's own accuracy
+    # / total when the round measured every sample; richer otherwise.
+    cumulative_total: int = 0
+    cumulative_accuracy: float = 0.0
 
 
 class RoundPayload(BaseModel):

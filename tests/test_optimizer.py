@@ -57,6 +57,7 @@ from promptpotter.application.optimization.escalation.firing import (
 from promptpotter.application.optimization.validators.l1_strict import detect_invariants
 from promptpotter.application.optimization.validators.l2_l3 import (
     L2_DUPLICATE_INSERT,
+    L2_TASK_CONTEXT_PARAPHRASE_REPEAT,
     L2_TASK_CONTEXT_VERBATIM_REPEAT,
     L3_PLAN_LENGTH_FLOOR,
     L3_PLAN_VERBATIM_REPEAT,
@@ -234,6 +235,125 @@ def test_duplicate_insert_quiet_below_threshold():
                 {"key_challenges": "line A\nline B\nline C"}
             ),
         },
+        opt_sp=osp,
+    )
+    assert out is None
+
+
+def test_paraphrase_repeat_fires_on_word_set_overlap_above_threshold():
+    """Paraphrase that shares ≥50% of words with prior framing ⇒ fire.
+
+    Catches the operator-observed case (cycle fork_80d0254d, L2 fire 1):
+    proposed key_challenges was a paraphrase of the prior — different
+    wording, same instruction, same target axis. Verbatim-repeat detector
+    (no-op merge) missed it; duplicate-insert (≥3 line overlap) missed it.
+    """
+    prior = (
+        "Problem misreading (2/N): targeting L1 axis 'instruction' to add "
+        "a mandatory problem-restate and constraint-check step before solving."
+    )
+    paraphrase = (
+        "Problem misreading (2/N): targeting L1 axis 'instruction' to add "
+        "an explicit problem restatement followed by a constraint extraction "
+        "and self-check step before any solving begins."
+    )
+    osp = _osp(task_context=TaskDecomposition(key_challenges=prior))
+    out = L2_TASK_CONTEXT_PARAPHRASE_REPEAT.run(
+        {
+            "task_context_proposed": {"key_challenges": paraphrase},
+            "task_context_applied": osp.task_context.merge(
+                {"key_challenges": paraphrase}
+            ),
+        },
+        opt_sp=osp,
+    )
+    assert out is not None
+    assert out.passed is False
+    assert out.nurse_target == "l3"
+    assert out.evidence["field"] == "key_challenges"
+    assert out.evidence["jaccard"] >= 0.5
+
+
+def test_paraphrase_repeat_quiet_on_genuine_refinement():
+    """Different words / different concept ⇒ no fire."""
+    prior = "Problem misreading on geometry: failing coordinate setup."
+    refinement = (
+        "Combinatorial enumeration failing: candidates skip casework on "
+        "the 27-cell grid; needs explicit decomposition by row pattern."
+    )
+    osp = _osp(task_context=TaskDecomposition(key_challenges=prior))
+    out = L2_TASK_CONTEXT_PARAPHRASE_REPEAT.run(
+        {
+            "task_context_proposed": {"key_challenges": refinement},
+            "task_context_applied": osp.task_context.merge(
+                {"key_challenges": refinement}
+            ),
+        },
+        opt_sp=osp,
+    )
+    assert out is None
+
+
+def test_l1_config_not_in_runtime_failures_fires_on_reproposal():
+    """L1 proposing a config whose (param, value) matches a known runtime
+    failure ⇒ ValidationFailure. Catches the operator-observed bug:
+    `max_tokens=1800` already recorded as `empty_response` in a sibling
+    fork's wounds (inherited at Cycle.start) — L1 re-proposes it anyway.
+    """
+    from promptpotter.application.optimization.validators.l1_strict import (
+        L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
+    )
+    from promptpotter.domain.escalation_signals import RuntimeFailure
+
+    osp = _osp()
+    osp.wounds.runtime_failures = [
+        RuntimeFailure(
+            source="degradation_check",
+            dominant_warning="llm_only:empty_response",
+            warning_types={"llm_only:empty_response": 6},
+            degraded_rate=1.0,
+            degraded_count=6,
+            total_scored=6,
+            observed_config={"max_tokens": 1800, "temperature": 0.7},
+            first_seen_round=1,
+        )
+    ]
+    out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
+        {"llm_only": {"max_tokens": 1800}},
+        opt_sp=osp,
+    )
+    assert out is not None
+    assert out.passed is False
+    assert out.nurse_target == "l2"
+    failures = out.evidence["failures"]
+    assert len(failures) == 1
+    assert failures[0].axis == "llm_only.max_tokens"
+    assert failures[0].reason == "reproposes_known_failing_config"
+
+
+def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
+    """Novel (param, value) ⇒ no fire. The check only catches exact reproposals."""
+    from promptpotter.application.optimization.validators.l1_strict import (
+        L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
+    )
+    from promptpotter.domain.escalation_signals import RuntimeFailure
+
+    osp = _osp()
+    osp.wounds.runtime_failures = [
+        RuntimeFailure(
+            source="degradation_check",
+            dominant_warning="llm_only:empty_response",
+            warning_types={"llm_only:empty_response": 3},
+            degraded_rate=1.0,
+            degraded_count=3,
+            total_scored=3,
+            observed_config={"max_tokens": 1800},
+            first_seen_round=1,
+        )
+    ]
+    # max_tokens=2400 differs from the failing 1800 ⇒ legitimate exploration
+    out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
+        {"llm_only": {"max_tokens": 2400}},
         opt_sp=osp,
     )
     assert out is None
@@ -1061,6 +1181,16 @@ def test_to_job_search_point_projects_prompt_fields_and_few_shot_block():
     assert OptSearchPoint(instruction="X").to_job_search_point().prompt_fields is None
 
 
+def test_render_does_not_leak_l3_plan_into_target_prompt():
+    """L3's strategic plan is meta-optimizer guidance — it MUST NOT be appended
+    to the target prompt fed to the task model. Plan reaches L1/L2/L3 prompts
+    via the dispatch hub's `_r_plan` injection only.
+    """
+    sentinel = "REVISED_OPTIMIZATION_FRAMEWORK_PLAN_SENTINEL"
+    osp = OptSearchPoint(persona="Expert", instruction="Solve.", plan=sentinel)
+    assert sentinel not in osp.render()
+
+
 def test_copy_memory_carries_l1_layout_into_adoption_target():
     """L2-written L1 layout must survive L2→L3 adoption."""
     custom = L1Layout(
@@ -1153,3 +1283,39 @@ def test_diag_probe_outcome_gated_by_probe_just_completed_flag():
     assert diag_probe.probe_outcome.target_subset_size == 4
     assert diag_probe.probe_outcome.hit_rate == 0.5
     assert diag_probe.probe_outcome.delta_vs_full == pytest.approx(-0.2)
+
+
+def test_merge_into_cumulative_preserves_prior_on_untouched_samples():
+    """Guards the round-over-round origin invariant: when a PoBB-locked
+    winner only measures a subset of samples, the cumulative pool must
+    retain the prior origin's measurements on samples the winner didn't
+    touch. Without this, ``tr.current_results`` shrinks after every
+    leader-lock — PoBB priors decohere, best-tracking compares
+    incommensurable composites, and L2/L3 stall detection falsely fires
+    on probe rounds."""
+    from promptpotter.application.optimization.cycle import _merge_into_cumulative
+
+    # Prior origin scored all 20 samples; hits on 0-9, misses on 10-19.
+    prior = [{"sample_id": i, "fitness": 1.0 if i < 10 else 0.0, "hit": i < 10} for i in range(20)]
+    # Winner was leader-locked at q8/20 on the hardest samples (10..17),
+    # hit 3 of them (samples 10, 12, 15).
+    winner_hits = {10, 12, 15}
+    winner = [
+        {"sample_id": sid, "fitness": 1.0 if sid in winner_hits else 0.0, "hit": sid in winner_hits}
+        for sid in range(10, 18)
+    ]
+    merged = _merge_into_cumulative(prior, winner)
+    by_sid = {r["sample_id"]: r for r in merged}
+
+    # All 20 samples present — cumulative pool DID NOT shrink to 8.
+    assert set(by_sid.keys()) == set(range(20))
+    # Winner overwrites for shared samples — sample 10 reflects the new HIT
+    # (prior had it as MISS); sample 11 stays MISS (winner also MISS).
+    assert by_sid[10]["hit"] is True
+    assert by_sid[11]["hit"] is False
+    # Samples 18-19 — winner didn't touch them, prior's MISS preserved.
+    assert by_sid[19]["hit"] is False
+    # Samples 0-9 — winner didn't touch them, prior's HITs preserved.
+    assert all(by_sid[i]["hit"] is True for i in range(10))
+    # Empty incoming → cumulative unchanged.
+    assert _merge_into_cumulative(prior, []) == prior

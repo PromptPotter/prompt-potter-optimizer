@@ -21,7 +21,10 @@ import copy
 import logging
 from typing import Any
 
-from promptpotter.application.optimization.validators.l1_strict import L1_SCHEMA_COMPLIANCE
+from promptpotter.application.optimization.validators.l1_strict import (
+    L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
+    L1_SCHEMA_COMPLIANCE,
+)
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -88,8 +91,20 @@ def parse_population(
                 pipeline_schema=schema,
                 forbidden_axes_strict=forbidden_axes_strict,
             )
+            failures: list[ValidationFailure] = []
             if outcome is not None:
-                failures: list[ValidationFailure] = outcome.evidence["failures"]
+                failures.extend(outcome.evidence["failures"])
+            # Re-propose check: rejects (param, value) tuples already in
+            # opt_sp.wounds.runtime_failures (intra-cycle or inherited from
+            # sibling forks via Cycle.start). Runs even when schema-compliance
+            # passes — different rejection class.
+            rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
+                pipeline_params_override,
+                opt_sp=osp,
+            )
+            if rf_outcome is not None:
+                failures.extend(rf_outcome.evidence["failures"])
+            if failures:
                 osp.wounds.validation_failures = failures
                 for vf in failures:
                     logger.warning(

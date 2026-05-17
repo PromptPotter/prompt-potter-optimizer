@@ -40,6 +40,7 @@ __all__ = [
     "extract_sample_diagnostics",
     "find_rank",
     "is_degraded",
+    "matched_origin_stats",
 ]
 
 
@@ -271,4 +272,38 @@ def compute_composite_fitness(
         "degraded_samples": degraded,
         "validation_failure_count": validation_failure_count,
         "runtime_failure_count": runtime_failure_count,
+    }
+
+
+def matched_origin_stats(
+    origin_results: list[QueryMeasurement],
+    candidate_results: list[QueryMeasurement],
+    pipeline_schema: PipelineSchema,
+    *,
+    round_scorer: RoundScorer | str | None = None,
+) -> dict[str, Any]:
+    """Origin's accuracy/hits/composite restricted to the candidate's measured samples.
+
+    When PoBB leader-locks a candidate at q8/20, returns origin's stats on
+    only those 8 samples — the apples-to-apples comparison PoBB's matched-pair
+    posterior is built on. Degenerates to full origin stats when the candidate
+    measured every sample. ``opt_sp=None`` for the origin composite so
+    opt_sp-aware evaluators (e.g. ``prompt_compactness``) take their vacuous
+    fallback in both numerator and denominator of the delta.
+    """
+    candidate_sids = {r.get("sample_id") for r in candidate_results}
+    matched = [r for r in origin_results if r.get("sample_id") in candidate_sids]
+    base = _compute_accuracy(matched)
+    composite = compute_composite_fitness(
+        matched,
+        pipeline_schema,
+        opt_sp=None,
+        round_scorer=round_scorer,
+        l1_diversity=1.0,
+    )
+    return {
+        "accuracy": base["accuracy"],
+        "hits": base["hits"],
+        "total": base["total"],
+        "composite_fitness": composite["composite_fitness"],
     }

@@ -31,6 +31,16 @@ Each emitted variant declares an `evidence_grounding: {field, citation}` naming 
 
 Channel: `task_context` (L2-refined task framing) and `plan` (L3-set strategy) arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill_l1` walking `opt_sp.l1_layout` over the `INJECTIONS` registry (`dispatch/hub/injections.py`).
 
+**Reviewing an L1 round trace.** Load
+[`docs/developer/l1-candidate-analysis-checklist.md`](../docs/developer/l1-candidate-analysis-checklist.md)
+before reporting findings on any operator-pasted round dump or
+meta-campaign cycle review. The checklist enumerates the eight checks
+that historically slipped past — evidence-availability in the rendered
+input, re-proposal of known-failing configs, PEAKED-axis violations,
+±50% envelope, param-axis overuse, intra-round paraphrase, citation
+hallucinations, output-format integrity — and notes which are enforced
+by validators today vs which are pure analysis responsibility.
+
 ## L2-layer — l2_context
 
 Fires on L1-layer stall (default) or yield drought (escalation rule `l2_axis_yield_drought` — fires when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor). Post-round transitions are decided by `decide_escalation(EscalationInputs)` over `DEFAULT_ESCALATION_RULES` (`application/optimization/escalation/decide.py`); the rule set is the policy and replaces the prior FSM.

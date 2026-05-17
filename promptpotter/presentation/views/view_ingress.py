@@ -264,7 +264,15 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
     w_acc = float(d.get("winner_accuracy", 0.0))
     improved = bool(d.get("improved", False))
     origin_acc = ctx.get("origin_accuracy", 0.0)
-    delta = w_acc - origin_acc
+    # Winner's matched-pair origin baseline (origin restricted to the
+    # winner's measured samples). Falls back to ``origin_acc`` for round 0
+    # / events emitted before the gate landed. Drives ``delta`` so the
+    # operator-visible Δ matches the ``improved`` gate, not the full-set
+    # comparison that systematically punishes PoBB-locked winners.
+    matched_origin_acc = float(d.get("winner_matched_origin_accuracy", origin_acc))
+    matched_origin_hits = int(d.get("winner_matched_origin_hits", 0))
+    matched_origin_composite = d.get("winner_matched_origin_composite")
+    delta = w_acc - matched_origin_acc
     # ``p_value`` is computed at gate time by l1_score and emitted directly
     # — the view trusts the emitter rather than recomputing here.
     p_value: float | None = d.get("p_value")
@@ -290,6 +298,9 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
         composite_fitness_formula=ctx.get("composite_fitness_formula"),
         composite_fitness_formula_short=ctx.get("composite_fitness_formula_short"),
         origin_composite_fitness=ctx.get("origin_composite_fitness"),
+        matched_origin_accuracy=matched_origin_acc,
+        matched_origin_hits=matched_origin_hits,
+        matched_origin_composite=matched_origin_composite,
     )
 
 
@@ -467,6 +478,8 @@ def score_entry_from_dict(s: dict) -> ScoreEntry:
         ci_hi=ci_hi,
         escalation_aborted=bool(s.get("escalation_aborted", False)),
         invalid_reason=invalid_reason,
+        matched_origin_accuracy=float(s.get("matched_origin_accuracy", 0.0)),
+        matched_origin_composite=s.get("matched_origin_composite"),
     )
 
 

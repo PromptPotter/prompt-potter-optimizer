@@ -210,7 +210,10 @@ def _scoreboard(
 ) -> str:
     """Format ranked candidate scoreboard as a box with 95% CI.
 
-    ``candidate_scores`` items: {candidate_id, accuracy, composite_fitness?, hits, total}.
+    ``candidate_scores`` items: {candidate_id, accuracy, composite_fitness?, hits, total,
+    matched_origin_accuracy?}. When a row carries ``matched_origin_accuracy`` (PoBB-locked
+    candidates only ran a subset), the Δ column compares against origin on that
+    same subset; otherwise the full-set ``origin_accuracy`` fallback applies.
     Returns multi-line string ready to print.
     """
     # Filter synthetic-zeroed variants (no_op / duplicate) — they did not
@@ -239,7 +242,12 @@ def _scoreboard(
         label = (s.get("label") or "")[:8]
         acc = s["accuracy"]
         ci_str = fmt_ci(*wilson_ci(s.get("hits", 0), s.get("total", 0)))
-        delta = acc - origin_accuracy
+        # Per-row matched-pair origin: when present, compares this candidate's
+        # accuracy against origin on the *same samples this candidate ran*
+        # (PoBB-locked rows). Falls back to the full-set origin for rows that
+        # ran every sample (matched == full) and for legacy rows missing the field.
+        row_origin = float(s.get("matched_origin_accuracy", origin_accuracy) or origin_accuracy)
+        delta = acc - row_origin
         delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"
         aborted = s.get("escalation_aborted", False)
         if aborted:

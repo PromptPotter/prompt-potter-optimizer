@@ -47,7 +47,10 @@ from promptpotter.application.scoring.formula.matchers import (
     _extract_gsm8k_number,
     _gsm8k_match,
 )
-from promptpotter.application.scoring.metrics import compute_composite_fitness
+from promptpotter.application.scoring.metrics import (
+    compute_composite_fitness,
+    matched_origin_stats,
+)
 from promptpotter.domain.pipeline_schema import (
     NodeType,
     ObservationMapping,
@@ -305,6 +308,38 @@ def test_composite_fitness_matches_default_formula():
         + 0.05 * 1.0
     )
     assert scored["composite_fitness"] == pytest.approx(expected, abs=1e-4)
+
+
+def test_matched_origin_stats_restricts_to_candidate_subset():
+    """Guards the round-winner gate: when PoBB leader-locks a candidate on a
+    subset of samples, the comparison must use origin's stats on the SAME
+    subset — not origin's full-set rate extrapolated onto the subset. The
+    bug we're guarding: the AIME C1.4 case where a candidate scored 3/8 on
+    the hardest samples (where origin scored 0/8) was being compared to
+    origin's full 10/20 and dismissed as "no improvement"."""
+    schema = _single_node_schema()
+    # Origin scored 20 samples: 10 hits (samples 0-9 hit, 10-19 miss).
+    origin_results = [
+        {**_eval_result(hit=i < 10, score=1.0 if i < 10 else 0.0), "sample_id": i}
+        for i in range(20)
+    ]
+    # Candidate measured only 8 of the *hardest* samples (the misses for
+    # origin — sample_ids 10..17) and hit 3 of them.
+    candidate_results = [
+        {**_eval_result(hit=i < 13, score=1.0 if i < 13 else 0.0), "sample_id": i}
+        for i in range(10, 18)
+    ]
+    matched = matched_origin_stats(origin_results, candidate_results, schema)
+    # Origin had ZERO hits on samples 10-17. The faked extrapolation
+    # (origin.accuracy * 8 = 0.5 * 8 = 4) would have invented 4 hits.
+    assert matched["hits"] == 0
+    assert matched["total"] == 8
+    assert matched["accuracy"] == 0.0
+    # Degenerate case: candidate measured all 20 → matches full-set stats.
+    full = matched_origin_stats(origin_results, origin_results, schema)
+    assert full["hits"] == 10
+    assert full["total"] == 20
+    assert full["accuracy"] == pytest.approx(0.5)
 
 
 def test_composite_fitness_zeroed_on_validation_failure():

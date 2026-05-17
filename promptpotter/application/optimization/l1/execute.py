@@ -141,6 +141,9 @@ async def execute_round(
         improved_reason=round_result.improved_reason,
         p_value=round_result.p_value,
         candidate_scores=round_result.candidate_scores,
+        winner_matched_origin_accuracy=round_result.matched_origin_accuracy,
+        winner_matched_origin_hits=round_result.matched_origin_hits,
+        winner_matched_origin_composite=round_result.matched_origin_composite,
     )
 
     # Compute deterministic post-scoring stats once and attach to the round

@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.intelligence.exploration import (
     Observation,
@@ -40,6 +40,7 @@ from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
     compute_composite_fitness,
     count_degraded_samples,
+    matched_origin_stats,
 )
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.escalation_signals import EscalationSignal, RuntimeFailure
@@ -715,12 +716,19 @@ async def l1_score(
         for ind in osp_population
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
     ]
+    # Origin's full-set stats — the no-candidate-wins fallback for the
+    # ``matched_origin`` quad below (every candidate ran every sample ⇒ matched
+    # collapses to full).
+    origin_base = _compute_accuracy(cast("list[QueryMeasurement]", origin.results))
     best_acc = origin.accuracy
     best_comp = origin.composite_fitness
     best_osp: OptSearchPoint = origin.osp
     best_results: list = list(origin.results)
     best_label = origin.label
     best_scores: dict[str, float] = dict(origin.evaluators)
+    best_matched_origin_acc = origin.accuracy
+    best_matched_origin_hits = origin_base["hits"]
+    best_matched_origin_composite = origin.composite_fitness
     winner_idx: int | None = None
     # ``score_population`` already populated each ``CandidateScore`` with the
     # ``opt_sp=None`` composite (per-sample scoring path is target-layer; it
@@ -731,12 +739,24 @@ async def l1_score(
     # back-fill the opt_sp-aware composite + evaluators in one pass.
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(candidate_scores)}
     for idx, ind in enumerate(scored):
+        cand_results = all_candidate_results[ind.lineage.id]
         s = compute_composite_fitness(
-            all_candidate_results[ind.lineage.id],
+            cand_results,
             schema,
             opt_sp=ind,
             round_scorer=session.scoring.round_scorer,
             l1_diversity=yield_stats.l1_yield,
+        )
+        # Matched-pair origin: PoBB-locked candidates may have only run the
+        # hardest q8/20; comparing their 8-sample accuracy to origin's full-set
+        # 20-sample accuracy systematically punishes the early-stop optimization.
+        # Restricting origin to the candidate's measured samples is the same
+        # comparison PoBB's posterior used to declare the lock.
+        matched = matched_origin_stats(
+            cast("list[QueryMeasurement]", origin.results),
+            cand_results,
+            schema,
+            round_scorer=session.scoring.round_scorer,
         )
         cs_idx = cs_by_id.get(ind.lineage.id)
         if cs_idx is not None:
@@ -745,14 +765,20 @@ async def l1_score(
                 candidate_scores[cs_idx],
                 composite_fitness=s["composite_fitness"],
                 evaluators=evaluators,
+                matched_origin_accuracy=matched["accuracy"],
+                matched_origin_hits=matched["hits"],
+                matched_origin_composite=matched["composite_fitness"],
             )
-        if s["accuracy"] > best_acc:
+        if s["accuracy"] > matched["accuracy"]:
             best_acc = s["accuracy"]
             best_comp = s["composite_fitness"]
             best_osp = ind
-            best_results = list(all_candidate_results[ind.lineage.id])
+            best_results = list(cand_results)
             best_label = ind.lineage.changes_description or ind.lineage.id[:12]
             best_scores = dict(s.get("evaluators") or {})
+            best_matched_origin_acc = matched["accuracy"]
+            best_matched_origin_hits = matched["hits"]
+            best_matched_origin_composite = matched["composite_fitness"]
             winner_idx = idx
 
     winner_id = scored[winner_idx].lineage.id if winner_idx is not None and scored else ""
@@ -771,10 +797,16 @@ async def l1_score(
     base = _compute_accuracy(best_results)
     p_value: float | None = None
     if base["total"] > 0:
-        origin_hits = round(origin.accuracy * base["total"])
-        p_value = proportion_test(base["hits"], base["total"], origin_hits, base["total"])
+        # Real matched-pair hits from the same sample subset the candidate ran.
+        # The prior ``round(origin.accuracy * base["total"])`` faked this by
+        # extrapolating origin's full-set rate onto the candidate's subset —
+        # exactly wrong for hard-first sampling where origin underperforms
+        # its full-set rate on the early samples.
+        p_value = proportion_test(
+            base["hits"], base["total"], best_matched_origin_hits, base["total"]
+        )
 
-    delta_ok = best_acc > origin.accuracy + improvement_threshold
+    delta_ok = best_acc > best_matched_origin_acc + improvement_threshold
     n_min = pobb_config.n_min
     n_ok = base["total"] >= n_min
     sig_ok = improvement_significance >= 1.0 or (
@@ -801,6 +833,9 @@ async def l1_score(
         p_value=p_value,
         improved_reason=improved_reason,
         origin_accuracy=origin.accuracy,
+        matched_origin_accuracy=best_matched_origin_acc,
+        matched_origin_hits=best_matched_origin_hits,
+        matched_origin_composite=best_matched_origin_composite,
         prompt_fields={
             **best_osp.prompt_field_dict(),
             "lineage": best_osp.lineage.model_dump(),

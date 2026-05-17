@@ -160,6 +160,13 @@ class ScoreEntry:
     # scoreboard to suppress rows that didn't burn an LLM call so the
     # ranking reflects mutated candidates only.
     invalid_reason: str | None = None
+    # Per-row matched-pair origin baseline — origin's accuracy and composite
+    # restricted to this candidate's measured samples. Equals the full-set
+    # origin numbers when the candidate ran every sample; differs when PoBB
+    # leader-locked the candidate early. Drives the scoreboard Delta column
+    # so a row's Δ is computed against the same samples the row was measured on.
+    matched_origin_accuracy: float = 0.0
+    matched_origin_composite: float | None = None
 
 
 @dataclass(frozen=True)
@@ -186,6 +193,15 @@ class RoundCompleteView:
     composite_fitness_formula: str | None
     composite_fitness_formula_short: str | None
     origin_composite_fitness: float | None
+    # Winner's matched-pair origin baseline — origin restricted to the
+    # samples the winner actually measured. Equals ``origin_acc`` /
+    # ``origin_composite_fitness`` when the winner ran the full set; differs
+    # when PoBB leader-locked the winner at q<N>. The verdict line + delta
+    # display read these so the operator-facing "Δ vs origin" matches the
+    # gate logic in ``l1_score``.
+    matched_origin_accuracy: float = 0.0
+    matched_origin_hits: int = 0
+    matched_origin_composite: float | None = None
 
 
 @dataclass(frozen=True)

@@ -68,6 +68,9 @@ def _build_scoreboard(
                 "ci_hi": c.get("ci_hi"),
                 "is_winner": is_winner,
                 "escalation_aborted": c.get("escalation_aborted", False),
+                "matched_origin_accuracy": c.get("matched_origin_accuracy", 0.0),
+                "matched_origin_hits": c.get("matched_origin_hits", 0),
+                "matched_origin_composite": c.get("matched_origin_composite"),
             }
         )
     return rows
@@ -85,6 +88,25 @@ def _rf_dedup_key(rf_dict: dict) -> tuple:
         rf_dict.get("dominant_warning", ""),
         json.dumps(cfg, sort_keys=True, default=str),
     )
+
+
+def _merge_into_cumulative(prior: list[dict], incoming: list[dict]) -> list[dict]:
+    """Merge ``incoming`` per-sample measurements into ``prior``, keyed by sample_id.
+
+    Winner overwrites for shared samples (the winner's measurement is the
+    most-recent under the most-relevant searchpoint); prior is preserved
+    for samples the winner didn't touch. Used by ``absorb_round`` and
+    ``replay_priors`` so ``tr.current_results`` is a non-shrinking
+    cumulative origin across rounds — fair to PoBB priors, best-tracking,
+    probe-round filtering, and L2/L3 stall detection. Entries without a
+    ``sample_id`` are dropped (the cumulative pool is sample-keyed).
+    """
+    by_sid: dict = {r.get("sample_id"): r for r in prior if r.get("sample_id") is not None}
+    for r in incoming:
+        sid = r.get("sample_id")
+        if sid is not None:
+            by_sid[sid] = r
+    return list(by_sid.values())
 
 
 @dataclass
@@ -209,8 +231,38 @@ class Cycle:
         from promptpotter.application.intelligence.hard_sample_archive import (
             build_archive_observations,
         )
+        from promptpotter.application.intelligence.sibling_wounds import (
+            gather_sibling_runtime_failures,
+        )
+        from promptpotter.infrastructure.store import root_cycle_id as _root_cycle_id
 
         archive_obs = build_archive_observations(session.store, session.backend_id)
+
+        # Inherit runtime_failures from sibling forks of this cycle's family
+        # root. A fresh fork otherwise starts with an empty failure list and
+        # L1 has no signal about configs that prior siblings already proved
+        # to fail (e.g. max_tokens=1800 → empty_response). The wire-level
+        # filter in `_r_runtime_failures` still drops entries that don't
+        # match the new pipeline config, so inheriting them is safe.
+        inherited_failures: list[RuntimeFailure] = []
+        if session.state.cycle_id:
+            try:
+                root_id = _root_cycle_id(session.state.cycle_id)
+                inherited_failures = gather_sibling_runtime_failures(
+                    session.store,
+                    root_id,
+                    session.backend_id,
+                    exclude_cycle_id=session.state.cycle_id,
+                )
+            except Exception:
+                logger.debug("sibling runtime_failures inheritance skipped", exc_info=True)
+        if inherited_failures:
+            opt_sp.wounds.runtime_failures.extend(inherited_failures)
+            logger.info(
+                "inherited %d runtime_failures from sibling forks of %s",
+                len(inherited_failures),
+                session.state.cycle_id,
+            )
         return cls(
             session=session,
             config=config,
@@ -265,17 +317,47 @@ class Cycle:
             else tr.current_sp.pipeline_params
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=last_pp, schema=schema)
-        tr.current_accuracy = last_rr.accuracy
-        tr.current_composite_fitness = last_rr.composite_fitness
-        tr.current_results = list(last_rr.results)
+        # Walk every prior round, accumulating per-sample measurements +
+        # recomputing cumulative composite — mirrors the per-round folding
+        # ``absorb_round`` does live. ``best_round`` is the cumulative-state
+        # high-water-mark, not whichever round happened to land the hardest
+        # leader-locked subset. Without this, resume/fork after a lock-in
+        # would reseed PoBB priors with whatever subset the last winner saw.
+        acc_cum: list[dict] = []
         for i, rr in enumerate(self.rounds, start=1):
-            if rr.composite_fitness > tr.best_composite_fitness:
-                tr.best_composite_fitness = rr.composite_fitness
-                tr.best_accuracy = rr.accuracy
+            acc_cum = _merge_into_cumulative(acc_cum, list(rr.results))
+            if schema is not None:
+                cumi = compute_composite_fitness(
+                    cast("list[QueryMeasurement]", acc_cum),
+                    schema,
+                    opt_sp=None,
+                    round_scorer=self.session.scoring.round_scorer,
+                )
+                cum_acc = cumi["accuracy"]
+                cum_comp = cumi["composite_fitness"]
+            else:
+                cum_acc = rr.accuracy
+                cum_comp = rr.composite_fitness
+            if cum_comp > tr.best_composite_fitness:
+                tr.best_composite_fitness = cum_comp
+                tr.best_accuracy = cum_acc
                 tr.best_round = i
                 tr.best_sp = self.opt_sp.to_job_search_point(
                     base_pipeline_params=(rr.pipeline_params or last_pp), schema=schema
                 )
+        tr.current_results = acc_cum
+        if schema is not None:
+            cum = compute_composite_fitness(
+                cast("list[QueryMeasurement]", tr.current_results),
+                schema,
+                opt_sp=None,
+                round_scorer=self.session.scoring.round_scorer,
+            )
+            tr.current_accuracy = cum["accuracy"]
+            tr.current_composite_fitness = cum["composite_fitness"]
+        else:
+            tr.current_accuracy = last_rr.accuracy
+            tr.current_composite_fitness = last_rr.composite_fitness
 
     def absorb_round(
         self,
@@ -318,14 +400,40 @@ class Cycle:
             rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
-        tr.current_accuracy = rr.accuracy
-        tr.current_composite_fitness = rr.composite_fitness
-        tr.current_results = list(rr.results)
+        # Cumulative origin: merge the winner's per-sample measurements onto
+        # the prior pool, recompute aggregates on the union. Previous code did
+        # ``tr.current_results = list(rr.results)`` which collapsed origin to
+        # the leader-locked subset (q8/20) and shrank for every future round.
+        # Cumulative pool stays fair to PoBB priors, best-tracking, probe-round
+        # filtering, and L2/L3 stall detection — all of which read from here.
+        tr.current_results = _merge_into_cumulative(tr.current_results, list(rr.results))
+        if schema is not None:
+            # opt_sp=None: cumulative mixes measurements taken under multiple
+            # searchpoints, so opt_sp-aware evaluators (prompt_compactness +
+            # wound rates) take their vacuous fallback — same convention as
+            # ``matched_origin_stats``. Decouples cumulative composite from
+            # any one candidate's lineage.
+            cum = compute_composite_fitness(
+                cast("list[QueryMeasurement]", tr.current_results),
+                schema,
+                opt_sp=None,
+                round_scorer=self.session.scoring.round_scorer,
+            )
+            tr.current_accuracy = cum["accuracy"]
+            tr.current_composite_fitness = cum["composite_fitness"]
+        else:
+            tr.current_accuracy = rr.accuracy
+            tr.current_composite_fitness = rr.composite_fitness
         if tr.current_composite_fitness > tr.best_composite_fitness:
             tr.best_composite_fitness = tr.current_composite_fitness
             tr.best_accuracy = tr.current_accuracy
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
+
+        # Stamp cumulative-pool size + accuracy on the round so disk readers
+        # don't need to re-walk priors to render "Current best on N samples."
+        rr.cumulative_total = len(tr.current_results)
+        rr.cumulative_accuracy = tr.current_accuracy
 
         # 3. trial dict — pure projection of post-mutation state.
         return {
@@ -339,6 +447,11 @@ class Cycle:
             "improved": rr.improved,
             "p_value": rr.p_value,
             "origin_accuracy": rr.origin_accuracy,
+            "matched_origin_accuracy": rr.matched_origin_accuracy,
+            "matched_origin_hits": rr.matched_origin_hits,
+            "matched_origin_composite": rr.matched_origin_composite,
+            "cumulative_total": rr.cumulative_total,
+            "cumulative_accuracy": rr.cumulative_accuracy,
             "scoreboard": _build_scoreboard(rr.candidate_scores, rr.label),
             "prompt_fields": rr.prompt_fields,
             "results": rr.results,

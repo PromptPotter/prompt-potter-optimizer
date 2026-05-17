@@ -371,15 +371,21 @@ def _r_l3_guard_breaches(b: InjectionBundle) -> str:
 
 
 def _format_runtime_failure_lines(rf: Any) -> list[str]:
-    """Two-line render of one RuntimeFailure for ``runtime_failures``."""
+    """Two-line render of one RuntimeFailure for ``runtime_failures``.
+
+    Each entry is prefixed with ``BLOCKED — already proven to fail:`` to
+    cue the L1 LLM that this is a hard signal, not background context.
+    The HARD BLOCKS section of the L1_GENERATE meta-prompt cites this
+    block by name (``KNOWN-FAILING CONFIGS`` rule).
+    """
     rate_pct = round(float(rf.degraded_rate) * 100)
     cfg_parts = [f"{k}={v}" for k, v in (rf.observed_config or {}).items() if k != "prompt"]
     cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
     label = (rf.candidate_label or "")[:60]
     head = (
-        f"    ⚠ {label} — {rate_pct}% degraded on {rf.total_scored}, dom={rf.dominant_warning}"
+        f"    BLOCKED — already proven to fail: {label} — {rate_pct}% degraded on {rf.total_scored}, dom={rf.dominant_warning}"
         if label
-        else f"    ⚠ {rf.dominant_warning} — {rate_pct}% degraded on {rf.total_scored}"
+        else f"    BLOCKED — already proven to fail: {rf.dominant_warning} — {rate_pct}% degraded on {rf.total_scored}"
     )
     return [head, f"      observed_config: {cfg_str}"]
 

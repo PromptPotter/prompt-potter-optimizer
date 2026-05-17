@@ -25,14 +25,18 @@ and ``l3_guard_breaches`` dispatch-hub signals.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 
+_WORD_RE = re.compile(r"\w+")
+
 PLAN_LENGTH_FLOOR_CHARS = 60
 DUPLICATE_INSERT_LINE_THRESHOLD = 3
+PARAPHRASE_REPEAT_JACCARD_THRESHOLD = 0.5
 
 
 def _check_task_context_verbatim_repeat(
@@ -61,6 +65,65 @@ def _check_task_context_verbatim_repeat(
         passed=False,
         score=0.0,
         evidence={"proposed_keys": sorted(proposed.keys())},
+        nurse_target="l3",
+    )
+
+
+def _check_task_context_paraphrase_repeat(
+    source_output: Mapping[str, Any],
+    *,
+    opt_sp: OptSearchPoint | None = None,
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """Fire when L2's proposed task_context paraphrases the prior framing.
+
+    Sibling of ``_check_task_context_verbatim_repeat`` (no-op merge) and
+    ``_check_duplicate_insert`` (≥3 verbatim lines). This catches the
+    middle ground: the proposed update *is* a new string, the merge
+    *succeeds*, but the word-set overlap with the prior framing is so
+    high that no real semantic delta lands. Same recovery as the other
+    two — surface as evidence; L3 force-trigger via
+    ``executor.py::escalate_l2`` reads ``l2_guard_breaches`` and replans.
+
+    Token-set Jaccard above
+    :data:`PARAPHRASE_REPEAT_JACCARD_THRESHOLD` on any single updated
+    field is sufficient to fire. Per-field rather than aggregate so a
+    legitimate refinement on one field isn't drowned by a stale repeat
+    on another.
+    """
+    if opt_sp is None:
+        return None
+    proposed = source_output.get("task_context_proposed")
+    if not isinstance(proposed, dict) or not proposed:
+        return None
+    prior = opt_sp.task_context.to_dict()
+    worst_overlap = 0.0
+    worst_field = ""
+    for field_name, new_value in proposed.items():
+        if not isinstance(new_value, str) or not new_value:
+            continue
+        prior_value = prior.get(field_name, "")
+        if not isinstance(prior_value, str) or not prior_value:
+            continue
+        new_words = {w for w in _WORD_RE.findall(new_value.lower()) if len(w) > 2}
+        prior_words = {w for w in _WORD_RE.findall(prior_value.lower()) if len(w) > 2}
+        if not new_words or not prior_words:
+            continue
+        overlap = len(new_words & prior_words) / len(new_words | prior_words)
+        if overlap > worst_overlap:
+            worst_overlap = overlap
+            worst_field = field_name
+    if worst_overlap < PARAPHRASE_REPEAT_JACCARD_THRESHOLD:
+        return None
+    return ValidatorOutcome(
+        validator_id=L2_TASK_CONTEXT_PARAPHRASE_REPEAT.id,
+        passed=False,
+        score=0.0,
+        evidence={
+            "field": worst_field,
+            "jaccard": round(worst_overlap, 3),
+            "threshold": PARAPHRASE_REPEAT_JACCARD_THRESHOLD,
+        },
         nurse_target="l3",
     )
 
@@ -175,6 +238,20 @@ L2_DUPLICATE_INSERT: LLMOutputValidator = LLMOutputValidator(
 )
 
 
+L2_TASK_CONTEXT_PARAPHRASE_REPEAT: LLMOutputValidator = LLMOutputValidator(
+    id="l2_task_context_paraphrase_repeat",
+    description=(
+        "L2's proposed ``task_context`` paraphrases the prior framing — "
+        "the merge succeeds with a new string, but per-field token-set "
+        "Jaccard ≥ 0.5 means no real semantic delta lands. Sibling of "
+        "verbatim_repeat (no-op merge) and duplicate_insert (≥3 verbatim "
+        "lines); catches the paraphrase middle ground. L3 must replan."
+    ),
+    nurse_target="l3",
+    check=_check_task_context_paraphrase_repeat,
+)
+
+
 L3_PLAN_LENGTH_FLOOR: LLMOutputValidator = LLMOutputValidator(
     id="l3_plan_length_floor",
     description=(
@@ -202,6 +279,7 @@ L3_PLAN_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
 L2_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (
     L2_TASK_CONTEXT_VERBATIM_REPEAT,
     L2_DUPLICATE_INSERT,
+    L2_TASK_CONTEXT_PARAPHRASE_REPEAT,
 )
 
 

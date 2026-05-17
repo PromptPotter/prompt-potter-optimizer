@@ -123,6 +123,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             "total": s.total,
             "escalation_aborted": s.escalation_aborted,
             "invalid_reason": s.invalid_reason,
+            "matched_origin_accuracy": s.matched_origin_accuracy,
         }
         for s in v.scores
     ]
@@ -150,11 +151,18 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         else ""
     )
 
+    # The verdict line displays the comparison the gate actually used —
+    # matched-pair origin (origin restricted to the winner's measured samples).
+    # When the winner ran the full set, ``matched_origin_accuracy == origin_acc``
+    # and the displayed value is unchanged. PoBB-locked winners get a fair
+    # subset baseline instead of being compared against origin's full 20.
+    matched_origin = v.matched_origin_accuracy or v.origin_acc
+
     if v.improved:
         sig_tag = f"  {fmt_pvalue(v.p_value)}" if v.p_value is not None else ""
         out.append(
             f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {v.winner_accuracy:.1%}"
-            f" (was {v.origin_acc:.1%}, {_fmt_delta(v.delta)}){comp_tag}{sig_tag}"
+            f" (was {matched_origin:.1%}, {_fmt_delta(v.delta)}){comp_tag}{sig_tag}"
             f"  ->  next: {v.next_action}"
         )
     elif v.improved_reason:
@@ -163,7 +171,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         # didn't graduate.
         out.append(
             f"  {YELLOW}{BOLD}✗ NOT PROMOTED{RESET}  {v.winner_accuracy:.1%}"
-            f" (was {v.origin_acc:.1%}, {_fmt_delta(v.delta)}, n={v.winner_total})"
+            f" (was {matched_origin:.1%}, {_fmt_delta(v.delta)}, n={v.winner_total})"
             f"  reason: {v.improved_reason}{comp_tag}"
         )
     else:
@@ -173,11 +181,18 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         )
 
     if not show_inline and v.winner_composite_fitness is not None:
+        # Composite block also compares against matched-pair origin composite
+        # so the displayed Δcomposite agrees with the gate.
+        origin_composite_for_display = (
+            v.matched_origin_composite
+            if v.matched_origin_composite is not None
+            else v.origin_composite_fitness
+        )
         for line in render_composite_fitness_block(
             v.winner_composite_fitness,
             v.winner_evaluators,
             formula,
-            origin=v.origin_composite_fitness,
+            origin=origin_composite_for_display,
             use_short_names=bool(v.composite_fitness_formula_short),
         ):
             out.append(f"  {line}")

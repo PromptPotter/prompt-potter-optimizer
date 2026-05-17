@@ -178,6 +178,12 @@ def from_disk_round(
 
     winner_acc = float(round_data.get("accuracy", 0.0))
     origin_acc = float(round_data.get("origin_accuracy", 0.0))
+    # Disk-replay rebuild: pull the matched-pair stats persisted by
+    # ``Cycle.absorb_round`` so the rendered verdict reads the same delta the
+    # live run computed. Fall back to full-set origin for older trial JSONs.
+    matched_origin_acc = float(round_data.get("matched_origin_accuracy", origin_acc))
+    matched_origin_hits = int(round_data.get("matched_origin_hits", 0))
+    matched_origin_composite = round_data.get("matched_origin_composite")
     improved = bool(round_data.get("improved", False))
     return RoundCompleteView(
         round=int(round_data.get("round", 0)),
@@ -190,7 +196,7 @@ def from_disk_round(
         winner_hits=int(round_data.get("hits", 0)),
         winner_total=int(round_data.get("total", 0)),
         improved=improved,
-        delta=winner_acc - origin_acc,
+        delta=winner_acc - matched_origin_acc,
         p_value=round_data.get("p_value"),
         improved_reason=round_data.get("improved_reason"),
         next_action=str(round_data.get("next_action", "")),
@@ -198,6 +204,9 @@ def from_disk_round(
         composite_fitness_formula=composite_fitness_formula,
         composite_fitness_formula_short=composite_fitness_formula_short,
         origin_composite_fitness=origin_composite_fitness,
+        matched_origin_accuracy=matched_origin_acc,
+        matched_origin_hits=matched_origin_hits,
+        matched_origin_composite=matched_origin_composite,
     )
 
 

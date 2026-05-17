@@ -34,6 +34,7 @@ from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "L1_CONFIG_NOT_IN_RUNTIME_FAILURES",
     "L1_SCHEMA_COMPLIANCE",
     "L1YieldStats",
     "build_l1_output_schema",
@@ -277,6 +278,71 @@ L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
     description="Verify L1's pipeline_params_override vs schema's allowed values.",
     nurse_target="l2",
     check=_check_l1_schema_compliance,
+)
+
+
+def _check_l1_config_in_runtime_failures(
+    source_output: Any,
+    *,
+    opt_sp: OptSearchPoint | None = None,
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """Reject candidates that re-propose a config already proven to fail.
+
+    Pure wire-level check — for each (param, value) in the candidate's
+    ``pipeline_params_override``, scan ``opt_sp.wounds.runtime_failures``
+    for an entry whose ``observed_config`` carries that same (param, value).
+    If matched, emit ``ValidationFailure(reason="reproposes_known_failing_config")``.
+    No LLM evidence judgment — just "we already proved this fails."
+
+    Sibling-fork inheritance (``Cycle.start`` → ``gather_sibling_runtime_failures``)
+    populates ``runtime_failures`` from prior cycles' terminal wounds, so
+    this check fires even on round 1 of a fresh fork when sibling evidence
+    exists.
+    """
+    if not source_output or opt_sp is None:
+        return None
+    failures_list = list(opt_sp.wounds.runtime_failures)
+    if not failures_list:
+        return None
+    out_failures: list[ValidationFailure] = []
+    for node_name, node_params in source_output.items():
+        if not isinstance(node_params, dict):
+            continue
+        for param, value in node_params.items():
+            for rf in failures_list:
+                obs_cfg = rf.observed_config or {}
+                if param in obs_cfg and obs_cfg[param] == value:
+                    out_failures.append(
+                        ValidationFailure(
+                            axis=f"{node_name}.{param}",
+                            value=str(value),
+                            allowed=[],
+                            reason="reproposes_known_failing_config",
+                        )
+                    )
+                    break
+    if not out_failures:
+        return None
+    return ValidatorOutcome(
+        validator_id=L1_CONFIG_NOT_IN_RUNTIME_FAILURES.id,
+        passed=False,
+        score=0.0,
+        evidence={"failures": out_failures},
+        nurse_target="l2",
+    )
+
+
+L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
+    id="l1_config_not_in_runtime_failures",
+    description=(
+        "Reject L1 candidates whose pipeline_params_override matches an "
+        "(axis, value) tuple already recorded as failing in "
+        "opt_sp.wounds.runtime_failures. Mechanical wire-level check; no "
+        "LLM citation required. Heals via Wound 1 (L2 absorbs)."
+    ),
+    nurse_target="l2",
+    check=_check_l1_config_in_runtime_failures,
 )
 
 
