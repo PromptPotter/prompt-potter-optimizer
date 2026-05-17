@@ -14,6 +14,7 @@ import {
   roundOf,
   useCycleStream,
   type DashboardSnapshot,
+  type RoundFileDoc,
 } from "@/lib/poll";
 import { applyChartDefaults } from "@/lib/theme";
 import { Chart as ChartJS } from "chart.js";
@@ -22,6 +23,7 @@ import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { StatusBar } from "@/components/status/StatusBar";
 import { ConsolePane } from "@/components/console/ConsolePane";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
+import { OptimizerNodeDetail } from "@/components/workflow/OptimizerNodeDetail";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { FreqChart } from "@/components/eval/FreqChart";
 import { TrendChart } from "@/components/eval/TrendChart";
@@ -35,7 +37,7 @@ import { LiveSamplesCard } from "./LiveSamplesCard";
 import { LineageTree } from "./LineageTree";
 import { CyclePicker } from "./CyclePicker";
 import { EditModeToggle } from "./EditModeToggle";
-import { SelectionProvider } from "./SelectionContext";
+import { SelectionProvider, useSelection } from "./SelectionContext";
 import { SharedInspector } from "./SharedInspector";
 import { FilesPane } from "@/components/tree/FilesPane";
 import { LeveragePanel } from "@/components/leverage/LeveragePanel";
@@ -404,11 +406,14 @@ function DashboardPaneInner({
                 <TopStrip dash={dash} dashRound={dashRound} />
               </NarrowSpine>
               <NarrowSpine>
-                <div className="dash-row-verdict">
-                  <LineageTree dash={dash} />
-                  <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
-                  <WorkflowCanvas pipeline={pipeline} dash={dash} />
-                </div>
+                <NowRow
+                  dash={dash}
+                  dashRound={dashRound}
+                  pipeline={pipeline}
+                  cycleId={cycleId}
+                  themeKey={themeKey}
+                  rounds={dashState.rounds}
+                />
               </NarrowSpine>
               <NarrowSpine>
                 <LiveStateCard dash={dash} />
@@ -427,9 +432,9 @@ function DashboardPaneInner({
                 </div>
               </NarrowSpine>
             </Lane>
-            <Lane id="why" title="Why" subtitle="Drill into a candidate or node" defaultOpen={false}>
+            <Lane id="why" title="Why" subtitle="Drill into a candidate" defaultOpen={false}>
               <WideSpine>
-                <SharedInspector cycleId={cycleId} dash={dash} pipeline={pipeline} isLive={isLive} />
+                <SharedInspector cycleId={cycleId} isLive={isLive} />
               </WideSpine>
               <NarrowSpine>
                 <RawJsonCard dash={dash} />
@@ -447,6 +452,48 @@ function DashboardPaneInner({
       </main>
     </div>
     </SelectionProvider>
+  );
+}
+
+// The Now lane's main row + drill-down. Always renders the 3-col
+// Lineage/Fitness/Optimizer strip so the operator can keep clicking
+// between optimizer nodes; when a node is selected, appends
+// OptimizerNodeDetail beneath the row as a slave content panel rather
+// than swapping the navigator out. Lives inside SelectionProvider so it
+// can call useSelection.
+function NowRow({
+  dash,
+  dashRound,
+  pipeline,
+  cycleId,
+  themeKey,
+  rounds,
+}: {
+  dash: DashboardSnapshot | null;
+  dashRound: number | null;
+  pipeline: PipelineDoc | null;
+  cycleId: string | null;
+  themeKey: string;
+  rounds: RoundFileDoc[];
+}) {
+  const { node, setNode } = useSelection();
+  return (
+    <>
+      <div className="dash-row-verdict">
+        <LineageTree dash={dash} />
+        <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
+        <WorkflowCanvas pipeline={pipeline} dash={dash} />
+      </div>
+      {node && (
+        <OptimizerNodeDetail
+          id={node}
+          pipeline={pipeline}
+          dash={dash}
+          rounds={rounds}
+          onClose={() => setNode(null)}
+        />
+      )}
+    </>
   );
 }
 

@@ -26,13 +26,6 @@ export interface NodeDataLike {
   output?: { candidates?: { idx?: number; stats?: Record<string, unknown> }[] };
 }
 
-function fmtSecs(s: number | undefined | null): string {
-  if (s == null) return "—";
-  if (s < 1) return `${(s * 1000).toFixed(0)}ms`;
-  if (s < 60) return `${s.toFixed(2)}s`;
-  return `${(s / 60).toFixed(1)}m`;
-}
-
 // Edge variants — collapses three parallel switches (stroke colour key,
 // dasharray, arrowhead marker id) into one row per kind. Add a kind:
 // extend the map, no other site changes.
@@ -52,9 +45,8 @@ interface Props {
 export function WorkflowCanvas({ pipeline, dash }: Props) {
   const view = pipeline?.view;
   const activeId = phaseToNodeId(dash?.state);
-  // Node selection rides the shared SelectionContext so SharedInspector
-  // (below the row) can render NodePanel details for the picked node.
-  // No internal state — clicking ✕ in the inspector clears the context.
+  // Node selection rides the shared SelectionContext so the Now lane can
+  // swap the 3-col row for OptimizerNodeDetail when a node is picked.
   const { node: selected, setNode: setSelected } = useSelection();
   // Bumped by the MutationObserver below on `data-theme` flips; drives the
   // `colors` memo so SVG strokes/labels re-derive from the new CSS vars.
@@ -84,9 +76,9 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
 
   if (!view) {
     return (
-      <div className={`workflow-card${selected ? " expanded" : " collapsed"}`}>
+      <div className="workflow-card">
         <div className="workflow-toolbar">
-          <span style={{ flex: 1 }}>Workflow</span>
+          <span style={{ flex: 1 }}>Optimizer</span>
           <span id="wf-status" style={{ color: "var(--color-text-tertiary)" }}>● topology pending</span>
         </div>
         <div className="workflow-canvas-bg" style={{ minHeight: 200 }} />
@@ -104,9 +96,9 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
   };
 
   return (
-    <div className={`workflow-card${selected ? " expanded" : " collapsed"}`}>
+    <div className="workflow-card">
       <div className="workflow-toolbar">
-        <span style={{ flex: 1 }}>Workflow</span>
+        <span style={{ flex: 1 }}>Optimizer</span>
         <span style={{ color: dash ? colors.ok : colors.txt }}>● {dash ? "live" : "pending"}</span>
         {(() => {
           const r = roundOf(dash);
@@ -170,7 +162,7 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
                       aria-pressed={selected === n.id ? "true" : undefined}
                       tabIndex={n.kind === "io" ? -1 : 0}
                       disabled={n.kind === "io"}
-                      onClick={() => n.kind !== "io" && setSelected(n.id)}
+                      onClick={() => n.kind !== "io" && setSelected(selected === n.id ? null : n.id)}
                       title={tip || undefined}
                     >
                       <div className={cls.join(" ")}>
@@ -189,78 +181,3 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
   );
 }
 
-interface PanelProps {
-  id: string;
-  view: PipelineView;
-  currentNodes: Record<string, NodeDataLike>;
-  pipeline: PipelineDoc | null;
-  phase: string | undefined;
-  round: number | undefined;
-  onClose: () => void;
-}
-
-export function NodePanel({ id, view, currentNodes, pipeline, phase, round, onClose }: PanelProps) {
-  const meta = view.nodes.find((n) => n.id === id);
-  const data = currentNodes[id];
-  const cfg = pipeline?.nodes?.[id];
-
-  let rows: [string, string][];
-  if (data) {
-    const tokens = data.usage
-      ? `${data.usage.prompt_tokens ?? "—"}p / ${data.usage.completion_tokens ?? "—"}c / ${data.usage.total_tokens ?? "—"}t`
-      : "—";
-    rows = [
-      ["status",    "live · this round"],
-      ["template",  data.input?.template_name || "—"],
-      ["model",     data.model || "—"],
-      ["duration",  fmtSecs(data.duration_s)],
-      ["tokens",    tokens],
-      ["round",     String(data.round ?? "—")],
-      ["timestamp", data.timestamp || "—"],
-    ];
-  } else if (meta?.kind === "measurement") {
-    rows = [
-      ["kind",  "system step"],
-      ["role",  "measure_sample (no LLM call)"],
-      ["phase", String(phase ?? "—")],
-    ];
-  } else if (meta?.kind === "phase") {
-    const isCurrent = phase === id || (id === "origin" && phase === "origin");
-    rows = [
-      ["kind",   "phase / system step"],
-      ["role",   id === "origin" ? "measure seed candidate (round 0 only)" : "—"],
-      ["status", isCurrent ? `active · ${phase}` : `idle (currently ${phase ?? "—"})`],
-    ];
-  } else if (meta?.kind === "io") {
-    rows = [
-      ["kind", "I/O"],
-      ["note", id === "input" ? "dataset feed-in" : "best-SP exit"],
-    ];
-  } else if (cfg) {
-    const c = (cfg.config ?? {}) as Record<string, unknown>;
-    rows = [
-      ["status",          phase === "origin" ? "idle · origin phase only fires l1_score" : `idle · has not fired in round ${round ?? "—"}`],
-      ["type",            (cfg.type as string) ?? "—"],
-      ["temperature",     String(c.temperature ?? "—")],
-      ["output_format",   String(c.output_format ?? "—")],
-      ["prompt_family",   String(c.prompt_family ?? "—")],
-      ["schema_family",   String(c.schema_family ?? "—")],
-      ["response_parser", String(c.response_parser ?? "—")],
-    ];
-  } else {
-    rows = [["status", "no data this round"]];
-  }
-
-  return (
-    <div className="sel-panel" role="region" aria-label={`Node detail: ${meta?.label ?? id}`}>
-      <button type="button" className="sel-close" onClick={onClose} aria-label="Close node detail">×</button>
-      <div className="sel-panel-title">{meta?.label || id}</div>
-      {rows.map(([k, v]) => (
-        <div key={k} className="sel-row">
-          <span>{k}</span>
-          <span className="sel-val">{v}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
