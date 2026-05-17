@@ -14,7 +14,12 @@ from typing import TYPE_CHECKING
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import candidate_label
-from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
+from promptpotter.domain.run_records import (
+    LLMCallRecord,
+    LLMCallStartRecord,
+    PhaseRecord,
+    SnapshotRecord,
+)
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
@@ -110,6 +115,13 @@ class LiveDisplay(DerivedView):
         # a posterior with non-empty priors). Resets implicitly when a
         # new candidate_id appears on the stream.
         self._pobb_printed_for: str = ""
+        # Pending-call register — ``call_id → started_at_ms`` for any
+        # optimizer LLM call whose start marker has printed but whose
+        # completion has not yet landed. Indexed so the completion
+        # handler can compute wall-clock duration and pair the line
+        # with the start. Same record types the dashboard's
+        # ``in_flight`` slot consumes; no new ledger writes.
+        self._pending_calls: dict[str, int] = {}
 
     def _write(self, line: str) -> None:
         print(line, flush=True)
@@ -166,6 +178,57 @@ class LiveDisplay(DerivedView):
             ),
             payload.get("view"),
         )
+
+    def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
+        """Surface an in-flight optimizer LLM call as a one-line CLI marker.
+
+        Closes the multi-minute blind spot between phase-boundary boxes
+        — after SCOREBOARD an L1_CRITIQUE call fires for 30-60s with no
+        terminal output today (the dashboard's ``in_flight`` slot
+        already carries this signal; the CLI just wasn't reading it).
+        Same record the dashboard projection consumes — no new ledger
+        writes. ``_pending_calls`` indexes the call so the paired
+        completion handler can compute and report wall-clock duration.
+        """
+        self._pending_calls[record.call_id] = record.started_at_ms
+        model = record.model or "(default)"
+        round_tag = f"r{record.round}" if record.round is not None else ""
+        node_label = f"{record.node}_{round_tag}" if round_tag else record.node
+        self._write(f"  {DIM}↻ optimizer call: {node_label} · {model}{RESET}")
+
+    def _handle_llm_call(self, record: LLMCallRecord) -> None:
+        """Surface optimizer LLM completion as a paired one-line CLI marker.
+
+        Pairs with :meth:`_handle_llm_call_start` via ``call_id`` so
+        duration is the operator-visible wall-clock between start and
+        completion. ``payload.duration_s`` is preferred (set by
+        ``llm_call``) — falls back to the start-to-now delta if the
+        payload omits it. ``payload.usage.total_tokens`` lands on the
+        line so the cost mental model is on the headline alongside
+        the time. Cached calls are tagged so a quiet cache replay isn't
+        confused with a real round-trip.
+        """
+        payload = record.payload or {}
+        # Cached replays usually carry no start marker (call short-circuits
+        # before LLMCallStartRecord) — render a one-line cache hit instead
+        # of pairing.
+        cached = bool(payload.get("cached"))
+        started = self._pending_calls.pop(record.call_id, None) if record.call_id else None
+        duration_s = payload.get("duration_s")
+        if duration_s is None and started is not None:
+            duration_s = max(0.0, (time.time() * 1000 - started) / 1000.0)
+        usage = payload.get("usage") or {}
+        total_tokens = usage.get("total_tokens")
+        round_tag = f"r{record.round}" if record.round is not None else ""
+        node_label = f"{record.node}_{round_tag}" if round_tag else record.node
+        bits: list[str] = [node_label]
+        if isinstance(duration_s, (int, float)):
+            bits.append(f"{duration_s:.1f}s")
+        if isinstance(total_tokens, int) and total_tokens > 0:
+            bits.append(f"{total_tokens} tok")
+        if cached:
+            bits.append("cached")
+        self._write(f"  {DIM}✓ {' · '.join(bits)}{RESET}")
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         payload = record.payload or {}

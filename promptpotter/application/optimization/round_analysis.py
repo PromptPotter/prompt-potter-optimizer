@@ -44,7 +44,6 @@ def compute_round_diagnostics(
     rounds_history: list[RoundResult],
     pipeline_schema: PipelineSchema | None,
     *,
-    prompt_chars: int = 0,
     probe_just_completed: bool = False,
     axis_tested: str = "",
     prior_full_accuracy: float = 0.0,
@@ -95,7 +94,6 @@ def compute_round_diagnostics(
         cross_candidate_diff=diff_lines,
         l1_diversity=float(round_result.l1_yield or 1.0),
         cache_share=0.0,
-        prompt_chars=prompt_chars,
         samples=samples,
         probe_outcome=probe_outcome,
     )

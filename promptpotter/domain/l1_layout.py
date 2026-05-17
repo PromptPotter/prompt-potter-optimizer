@@ -52,6 +52,8 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "task_context",
         "critique",
         "axis_memory",
+        "origin_strengths",
+        "intractable_samples",
     }
 )
 
@@ -100,7 +102,10 @@ def default_l1_layout() -> L1Layout:
     Mandatory placeholders are spread across ``task_intent`` (the
     persistent task framing L2 refines — front of mind for the LLM) and
     ``problem_description`` (parent prompt + mutation surface + plan +
-    post-scoring evidence).
+    post-scoring evidence). ``origin_strengths`` + ``intractable_samples``
+    are the trajectory-memory pair — origin's preserved hits next to the
+    cumulative miss cluster L1 must attack, both in
+    ``problem_description`` where the failure evidence already lives.
     """
     return L1Layout(
         task_intent=["task_context"],
@@ -113,6 +118,8 @@ def default_l1_layout() -> L1Layout:
             "runtime_failures",
             "critique",
             "axis_memory",
+            "origin_strengths",
+            "intractable_samples",
         ],
     )
 

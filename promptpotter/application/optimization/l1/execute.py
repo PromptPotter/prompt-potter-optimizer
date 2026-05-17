@@ -158,7 +158,6 @@ async def execute_round(
         round_result,
         rounds_history,
         session.pipeline_schema,
-        prompt_chars=len(cycle.opt_sp.render()),
         probe_just_completed=cycle.probe_next_round,
         axis_tested=cycle.last_l2_axis,
         prior_full_accuracy=prior_full_accuracy,

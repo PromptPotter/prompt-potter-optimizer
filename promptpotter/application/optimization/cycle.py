@@ -117,6 +117,14 @@ class TrackingState:
     overwritten — ``current_*`` and ``best_*`` move with the round
     loop, but the operator-facing "origin=" banner must point back
     to the actual round-0 measurement even on resume.
+
+    ``origin_per_sample_results`` snapshots the round-0 per-sample
+    measurement dicts (the same shape ``current_results`` carries) and
+    is never mutated after ``Cycle.start``. Feeds the dispatch hub's
+    ``origin_strengths`` injection so L1 can see which samples the
+    origin already converts and preserve the scaffolding that earns
+    them — independent of how ``current_results`` evolves as later
+    rounds fold in.
     """
 
     current_sp: JobSearchPoint | None = None
@@ -129,6 +137,7 @@ class TrackingState:
     best_sp: JobSearchPoint | None = None
     origin_accuracy: float = 0.0
     origin_composite_fitness: float = 0.0
+    origin_per_sample_results: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -276,6 +285,7 @@ class Cycle:
                 best_sp=sp,
                 origin_accuracy=origin_accuracy,
                 origin_composite_fitness=composite_fitness,
+                origin_per_sample_results=list(origin_results or []),
             ),
             opt_sp=opt_sp,
             archive_observations=archive_obs,

@@ -29,12 +29,18 @@ if TYPE_CHECKING:
 
 
 # Module-level format constants shared across renderers.
-PROMPT_BLOAT_CHARS = 3000
 AXES_ENUM_PREVIEW = 4
 NEAR_MISS_RENDER_CAP = 10
 SAMPLE_RENDER_CAP = 5
 FAILURE_WARNING_PREVIEW = 1
 PIPELINE_PARAM_CATALOGUE_MODEL_CAP = 8
+# Caps for the trajectory-memory panels — keep the cycle-wide miss list
+# and origin-hit list bounded so a long campaign or large dataset can't
+# bloat L1's prompt. Origin gets fewer slots (it's strongest-evidence,
+# fewer entries do the job); intractable gets more (every entry shifts
+# attention onto a specific failure cluster L1 should target).
+ORIGIN_STRENGTHS_RENDER_CAP = 8
+INTRACTABLE_SAMPLES_RENDER_CAP = 12
 # Runtime-failures stay on OptSearchPoint forever (trend visibility for the
 # state layer) but the ``runtime_failures`` signal only emits failures
 # first-seen in the last K rounds. Older entries collapse to a single
@@ -145,6 +151,14 @@ class InjectionBundle:
     Every signal renderer reads fields off this — nothing else. Built via
     :func:`build_bundle` once per transition; consumed by the hub's
     ``fill_*`` methods to produce the prompt text.
+
+    ``origin_per_sample`` snapshots the round-0 origin's per-sample
+    measurement dicts; it never mutates after cycle start. Drives the
+    ``origin_strengths`` signal — L1 must preserve the scaffolding that
+    converts these into hits. ``trajectory_misses`` is the live
+    cumulative miss set (``cycle.tracking.current_results`` filtered to
+    ``hit=False``); drives the ``intractable_samples`` signal — the
+    cluster L1 should attack next round.
     """
 
     opt_sp: OptSearchPoint
@@ -152,6 +166,8 @@ class InjectionBundle:
     cycle_slice: CycleSlice
     digest: RoundDigest
     axes: AxisIndex | None
+    origin_per_sample: list[dict] = field(default_factory=list)
+    trajectory_misses: list[dict] = field(default_factory=list)
     # Mirrors OptimizationConfig.forbidden_axes_strict — gates whether the
     # pipeline-param catalogue advertises locked-axis options (model list).
     # Default True matches the production OptimizationConfig default.
@@ -161,9 +177,10 @@ class InjectionBundle:
 __all__ = [
     "AXES_ENUM_PREVIEW",
     "FAILURE_WARNING_PREVIEW",
+    "INTRACTABLE_SAMPLES_RENDER_CAP",
     "NEAR_MISS_RENDER_CAP",
+    "ORIGIN_STRENGTHS_RENDER_CAP",
     "PIPELINE_PARAM_CATALOGUE_MODEL_CAP",
-    "PROMPT_BLOAT_CHARS",
     "RUNTIME_FAILURE_RECENCY_WINDOW",
     "SAMPLE_RENDER_CAP",
     "CycleSlice",

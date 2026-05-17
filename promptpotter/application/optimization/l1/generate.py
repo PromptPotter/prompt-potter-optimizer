@@ -9,7 +9,10 @@ from promptpotter.application.optimization.dispatch.llm_call import (
     load_optimizer_prompt,
     run_optimizer_node,
 )
-from promptpotter.application.optimization.dispatch.schemas import VariantEvidenceGrounding
+from promptpotter.application.optimization.dispatch.schemas import (
+    L1GenerateOutput,
+    VariantEvidenceGrounding,
+)
 from promptpotter.application.optimization.validators.l1_strict import (
     build_l1_output_schema,
     filter_pipeline_params_override,
@@ -150,6 +153,30 @@ async def l1_generate(
         len(meta_prompt),
         " | ".join(f"{n}={s}" for n, s in slot_sizes),
     )
+
+    # Defensive type guard — ``extract_parsed_json`` returns ``response.parsed``
+    # unconditionally, and the schema-repair retry path can leak a raw
+    # ``str`` (or dict, or list) past validation when the second attempt's
+    # content parses to JSON but doesn't bind to ``L1GenerateOutput``. Route
+    # unexpected types into the same wound channel as a true parse failure
+    # so the round completes cleanly (zero candidates, L2 sees the failure
+    # next round and heals) instead of crashing on ``.variants``.
+    if not isinstance(generated, L1GenerateOutput):
+        logger.error(
+            "L1 R%d: l1_generate response decoded as %s instead of L1GenerateOutput — "
+            "treating as parse failure, returning zero candidates",
+            round_num,
+            type(generated).__name__,
+        )
+        opt_sp.wounds.validation_failures.append(
+            ValidationFailure(
+                axis="l1_generate.output",
+                value=_truncate_raw(str(generated), 300),
+                allowed=[],
+                reason="meta_prompt_unexpected_type",
+            )
+        )
+        return []
 
     variants_list = generated.variants
 

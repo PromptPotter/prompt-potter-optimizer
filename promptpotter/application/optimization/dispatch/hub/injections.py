@@ -14,9 +14,10 @@ from typing import Any
 
 from promptpotter.application.optimization.dispatch.hub.bundle import (
     AXES_ENUM_PREVIEW,
+    INTRACTABLE_SAMPLES_RENDER_CAP,
     NEAR_MISS_RENDER_CAP,
+    ORIGIN_STRENGTHS_RENDER_CAP,
     PIPELINE_PARAM_CATALOGUE_MODEL_CAP,
-    PROMPT_BLOAT_CHARS,
     RUNTIME_FAILURE_RECENCY_WINDOW,
     SAMPLE_RENDER_CAP,
     InjectionBundle,
@@ -255,10 +256,6 @@ def _r_diagnostics(b: InjectionBundle) -> str:
             )
         parts.append("\n".join(s_lines))
 
-    if d.prompt_chars:
-        bloat = " — bloated; favour compression" if d.prompt_chars > PROMPT_BLOAT_CHARS else ""
-        parts.append(f"PROMPT SIZE: {d.prompt_chars} chars{bloat}")
-
     if (po := d.probe_outcome) is not None:
         parts.append(
             f"PROBE OUTCOME: axis={po.axis_tested} subset={po.target_subset_size} "
@@ -426,7 +423,15 @@ def _valid_axis_set(schema: Any) -> set[str]:
 
 
 def format_l1_critique_for_prompt(critique: dict, pipeline_schema: Any = None) -> str:
-    """L1 critique dict → compact text (summary + priority_fix + axes + top-5 highlights).
+    """L1 critique dict → compact text for L1_GENERATE + L2_CONTEXT consumption.
+
+    Order is deliberate: summary first (the headline steer), then the
+    paired positive/negative block (what L1's next round must preserve
+    vs. attack), then priority_fix + suggested_axes (the concrete
+    next-round directive), then per-sample failure_highlights (the
+    evidence). The positive/negative pair carries the two signals that
+    `priority_fix` alone elides — what's earning hits (preserve) and
+    what's failing beyond the top fix (still on the work list).
 
     When ``pipeline_schema`` is provided, ``suggested_axes`` is filtered
     against the schema's known axis names so a hallucinated axis (e.g.
@@ -440,6 +445,10 @@ def format_l1_critique_for_prompt(critique: dict, pipeline_schema: Any = None) -
     parts: list[str] = []
     if s := critique.get("summary"):
         parts.append(s)
+    if pos := critique.get("positive_critique"):
+        parts.append(f"Patterns working (preserve next round): {pos}")
+    if neg := critique.get("negative_critique"):
+        parts.append(f"Failure modes still open (beyond priority_fix): {neg}")
     if pf := critique.get("priority_fix"):
         parts.append(f"Priority fix: {pf}")
     sa = critique.get("suggested_axes") or []
@@ -498,6 +507,49 @@ _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
 )
 
 
+def _critique_is_all_prompt_field(critique: dict | None) -> bool:
+    """True when every entry in ``critique.suggested_axes`` is a prompt-field axis.
+
+    Drives the axis-memory filter: when the last L1_CRITIQUE flagged
+    only semantic failures (and therefore only prompt-field axes to
+    mutate), param-axis rankings in the cross-cycle digest are noise
+    that pulls L2 toward param mutations the critique already vetoed.
+    Empty / missing ``suggested_axes`` returns False — without an
+    explicit critique steer we keep all rows visible.
+    """
+    from promptpotter.config.settings import PROMPT_STRING_FIELDS
+
+    sa = (critique or {}).get("suggested_axes") or []
+    if not sa:
+        return False
+    prompt_axes = set(PROMPT_STRING_FIELDS)
+    return all(a in prompt_axes for a in sa)
+
+
+def _filter_axis_rankings_to_prompt(value: str) -> str:
+    """Keep only axis-rankings entries whose axis name maps to a prompt-field.
+
+    The digest's ``axis_rankings`` value is a semicolon-separated string
+    like ``"llm_only.prompt (effect=0.208, ...); llm_only.max_tokens
+    (PEAKED ...); steps (effect=0.000, dead)"``. We split on ``"; "``,
+    take the axis-name prefix before ``" ("``, and keep entries whose
+    last dotted component is ``"prompt"`` (the catch-all axis that
+    rolls up prompt-field mutations on single-node pipelines). All
+    scalar-param entries (``max_tokens``, ``temperature``,
+    ``reasoning_effort``, etc.) drop out. Returns empty string when no
+    entries survive — caller handles the empty case.
+    """
+    if not value:
+        return value
+    kept: list[str] = []
+    for entry in value.split("; "):
+        name = entry.split(" (", 1)[0].strip()
+        tail = name.rsplit(".", 1)[-1]
+        if tail == "prompt":
+            kept.append(entry)
+    return "; ".join(kept)
+
+
 def _r_axis_memory(b: InjectionBundle) -> str:
     """Cross-cycle axis & sample memory derived from the MeasurementArchive.
 
@@ -508,20 +560,109 @@ def _r_axis_memory(b: InjectionBundle) -> str:
     yields nothing. The formatters this signal aggregates already exist
     in ``intelligence/indexes/format.py``; the wiring here is the only
     new code — no new computation, no new query path.
+
+    Critique-aware filter: when the latest L1_CRITIQUE flagged only
+    semantic failures (suggested_axes all in PROMPT_STRING_FIELDS),
+    param-axis rankings in the digest are noise — they pull L2 toward
+    param mutations the critique already vetoed. We strip
+    ``axis_rankings`` to prompt-axis entries and suppress
+    ``top_values`` in that case, replacing the section header with a
+    note explaining the redaction. Sample-side rows
+    (persistent_failures, failure_clusters, etc.) stay visible — they
+    don't suggest axis mutations.
     """
     if b.axes is None:
         return ""
     digest = b.axes.digest()
     if not digest:
         return ""
-    lines = ["AXIS MEMORY (cross-cycle observations from MeasurementArchive):"]
+    semantic = _critique_is_all_prompt_field(b.digest.critique)
+    header = "AXIS MEMORY (cross-cycle observations from MeasurementArchive):"
+    if semantic:
+        header = (
+            "AXIS MEMORY (cross-cycle observations from MeasurementArchive — "
+            "CRITIQUE IS SEMANTIC: param-axis rankings hidden, target a prompt-field axis):"
+        )
+    lines = [header]
     for key in _AXIS_MEMORY_LABEL_ORDER:
         val = digest.get(key)
         if val is None:
             continue
+        if semantic:
+            if key == "top_values":
+                continue
+            if key == "axis_rankings":
+                val = _filter_axis_rankings_to_prompt(val)
+                if not val:
+                    continue
         label = key.replace("_", " ")
         lines.append(f"  {label}: {val}")
     return "\n".join(lines) if len(lines) > 1 else ""
+
+
+def _query_stem(row: dict, n: int = 70) -> str:
+    q = (row.get("query") or "").replace("\n", " ").strip()
+    return q[:n]
+
+
+def _r_origin_strengths(b: InjectionBundle) -> str:
+    """Samples the round-0 origin already hits.
+
+    The origin's parent scaffolding earned these — every L1 mutation
+    must preserve whatever in the parent fields is converting them or
+    risk regressing the floor. Sourced from
+    ``cycle.tracking.origin_per_sample_results`` (frozen at
+    ``Cycle.start``); empty until origin has been scored. Fenced
+    because the body echoes sample queries and ground truths.
+    """
+    rows = b.origin_per_sample
+    if not rows:
+        return ""
+    hits = [r for r in rows if r.get("hit")]
+    if not hits:
+        return ""
+    shown = hits[:ORIGIN_STRENGTHS_RENDER_CAP]
+    lines = [
+        f"ORIGIN STRENGTHS ({len(hits)}/{len(rows)} samples the origin hits — "
+        "do not strip the scaffolding earning these):"
+    ]
+    for r in shown:
+        sid = r.get("sample_id")
+        gt = (r.get("ground_truth") or "")[:30]
+        lines.append(f"  [#{sid}] {_query_stem(r)} → GT: {gt}")
+    if len(hits) > ORIGIN_STRENGTHS_RENDER_CAP:
+        lines.append(f"  … +{len(hits) - ORIGIN_STRENGTHS_RENDER_CAP} more origin hits not shown.")
+    return fence_untrusted("\n".join(lines))
+
+
+def _r_intractable_samples(b: InjectionBundle) -> str:
+    """Samples the cumulative best trajectory still misses.
+
+    Sourced from ``cycle.tracking.current_results`` (live, cycle-wide
+    cumulative per-sample state) filtered to ``hit=False`` — the set
+    of samples no candidate in any prior round has converted. L1 should
+    treat these as the next cluster to attack; mutations that don't
+    address any of them are unlikely to break the plateau. Empty when
+    every sample has been hit at least once. Fenced (echoes queries).
+    """
+    rows = b.trajectory_misses
+    if not rows:
+        return ""
+    shown = rows[:INTRACTABLE_SAMPLES_RENDER_CAP]
+    lines = [
+        f"INTRACTABLE SAMPLES ({len(rows)} samples the trajectory still misses — "
+        "the cluster the next mutation must attack):"
+    ]
+    for r in shown:
+        sid = r.get("sample_id")
+        gt = (r.get("ground_truth") or "")[:30]
+        pred = (r.get("predicted") or r.get("answer") or "")[:40]
+        lines.append(f"  [#{sid}] {_query_stem(r)} → predicted: {pred} (GT: {gt})")
+    if len(rows) > INTRACTABLE_SAMPLES_RENDER_CAP:
+        lines.append(
+            f"  … +{len(rows) - INTRACTABLE_SAMPLES_RENDER_CAP} more trajectory misses not shown."
+        )
+    return fence_untrusted("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
@@ -614,6 +755,18 @@ INJECTIONS: dict[str, _Injection] = {
         _r_axis_memory,
         "Cross-cycle axis-keyed digest from AxisIndex: rankings, persistent failures, "
         "failure clusters, value trends, exhausted axes.",
+    ),
+    "origin_strengths": _Injection(
+        "origin_strengths",
+        InjectionKind.MEASUREMENT,
+        _r_origin_strengths,
+        "Round-0 origin's per-sample hits — the floor variants must preserve.",
+    ),
+    "intractable_samples": _Injection(
+        "intractable_samples",
+        InjectionKind.MEASUREMENT,
+        _r_intractable_samples,
+        "Cumulative cycle-wide miss set — samples no candidate has solved yet this cycle.",
     ),
 }
 

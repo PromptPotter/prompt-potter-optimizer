@@ -61,6 +61,14 @@ def build_bundle(
         pipeline_params=dict(current_pp) if current_pp else {},
     )
 
+    # Trajectory-memory panels: origin's per-sample hits (frozen at start;
+    # tells L1 which samples the parent scaffolding already converts) +
+    # cumulative trajectory misses (live cycle-wide miss set from
+    # ``current_results``; tells L1 which samples nothing has solved yet
+    # this cycle). Both consumed by the two new L1 injections.
+    origin_per_sample = list(cycle.tracking.origin_per_sample_results)
+    trajectory_misses = [r for r in cycle.tracking.current_results if not r.get("hit")]
+
     return InjectionBundle(
         opt_sp=cycle.opt_sp,
         pipeline_schema=cycle.session.pipeline_schema,
@@ -70,6 +78,8 @@ def build_bundle(
             critique=latest_crit,
         ),
         axes=cycle.axes,
+        origin_per_sample=origin_per_sample,
+        trajectory_misses=trajectory_misses,
         forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
     )
 
