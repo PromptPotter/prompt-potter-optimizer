@@ -93,6 +93,38 @@ export function fetchDatasetPreview(
   );
 }
 
+export interface MeasurementDot {
+  ord: string;
+  hit: boolean;
+  label: string;
+}
+
+export interface SampleSeries {
+  sample_id: number;
+  measurements: MeasurementDot[];
+}
+
+export interface MeasurementSeriesResponse {
+  name: string;
+  scope: HardSamplesScope;
+  items: SampleSeries[];
+}
+
+export function fetchMeasurementSeries(
+  name: string,
+  limit = 1000,
+  signal?: AbortSignal,
+  scope: HardSamplesScope = "workspace",
+  cycleId?: string,
+): Promise<MeasurementSeriesResponse> {
+  const params = new URLSearchParams({ limit: String(limit), scope });
+  if (scope === "campaign" && cycleId) params.set("cycle_id", cycleId);
+  return jget<MeasurementSeriesResponse>(
+    `${API}/datasets/${encodeURIComponent(name)}/measurement-series?${params.toString()}`,
+    signal,
+  );
+}
+
 export async function fetchActiveDatasetName(
   cycleId: string,
   signal?: AbortSignal,

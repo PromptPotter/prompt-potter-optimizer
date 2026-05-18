@@ -1,5 +1,13 @@
 "use client";
-import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent,
+  type UIEvent,
+} from "react";
 import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 
@@ -15,9 +23,19 @@ const CELL_PADDING_PX = 22;
 const HEADER_PADDING_CH = 4;
 const MAX_AUTO_CH = 50;
 
+// Heat-map cell sizing. Cells flex between MIN_CELL_PX (vertical lines
+// when the column is squeezed) and MAX_CELL_PX (the natural square). When
+// the column is narrower than ``N × MIN_CELL_PX`` the strip overflows and
+// a single sticky scrollbar at the column's bottom scrolls every row in
+// sync — never let a measurement disappear.
+const MIN_CELL_PX = 1;
+const MAX_CELL_PX = 8;
+
 export interface MeasurementDot {
   hit: boolean;
-  ord: number;
+  // Composite lex-sortable key. Equal ``ord`` values across rows share
+  // a roster column so the Meas heat-map aligns vertically.
+  ord: string;
 }
 
 interface Props {
@@ -272,6 +290,7 @@ function autoWidthFor(
   items: DatasetItem[],
   live: Map<number, LiveEntry>,
   perSample: Map<number, MeasurementDot[]> | undefined,
+  ordColsCount: number,
 ): number {
   const headerCh = col.label.length + HEADER_PADDING_CH;
   let maxCh = headerCh;
@@ -279,16 +298,14 @@ function autoWidthFor(
     // Rank shows row position; longest is items.length digits.
     maxCh = Math.max(headerCh, String(Math.max(1, items.length)).length + 1);
   } else if (col.id === "measurements") {
-    // Dots column — sized by dot count (12 px stride incl. gap), capped
-    // so the column stays narrow. We measure in *pixels* directly here
-    // instead of in characters; return early to skip the char→px math.
-    let maxDots = 0;
-    for (const item of items) {
-      const n = perSample?.get(item.sample_id)?.length ?? 0;
-      if (n > maxDots) maxDots = n;
-    }
-    const cappedDots = Math.min(maxDots, 20);
-    return Math.max(60, 16 + cappedDots * 8);
+    // Roster: cells flex into whatever width the column has — 8 px max
+    // (set in the inline ``maxWidth`` below) so wide columns don't bloat
+    // the squares, down to 1 px vertical lines when crowded. Auto-width
+    // here only sets the initial column size: target 8 px per cell up to
+    // a 280 px ceiling so the Meas column doesn't dominate the layout
+    // when ``ordCols`` runs into the hundreds. Operator-resizable from
+    // there via the header drag handle.
+    return Math.max(60, Math.min(12 + ordColsCount * 8, 280));
   } else {
     for (const item of items) {
       const count = perSample?.get(item.sample_id)?.length ?? 0;
@@ -326,6 +343,9 @@ export function HardSamplesTable({
   const [persisted, setPersisted] = useState<PersistedState>(() => loadPersisted());
   const [sortBy, setSortBy] = useState<{ col: ColId; dir: "asc" | "desc" } | null>(null);
   const [popover, setPopover] = useState<{ col: ColId; sampleId: number; text: string } | null>(null);
+  // Currently-highlighted Meas roster column. Click a cell → its ``ord``
+  // lights up across every row; arrows pan left/right; Escape clears.
+  const [selectedOrd, setSelectedOrd] = useState<string | null>(null);
 
   useEffect(() => savePersisted(persisted), [persisted]);
 
@@ -360,18 +380,60 @@ export function HardSamplesTable({
       .join(",");
   }, [perSample]);
 
+  // Global ordinal universe — the union of every ord present across rows,
+  // sorted lex. Each ord becomes one column in the Meas roster so rows
+  // missing a given measurement show a blank cell at the same X as rows
+  // that have it. This is what turns the old left-packed strip into a
+  // proper heat-map.
+  const ordCols = useMemo(() => {
+    if (!perSample) return [] as string[];
+    const all = new Set<string>();
+    for (const ms of perSample.values()) for (const m of ms) all.add(m.ord);
+    return [...all].sort();
+  }, [perSample]);
+
+  // Arrow-key nav for the Meas column highlight. Active only while an
+  // ord is selected. Escape clears; arrows pan with wrap-around so the
+  // operator can step off either end without snagging.
+  useEffect(() => {
+    if (selectedOrd == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedOrd(null);
+        return;
+      }
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (ordCols.length === 0) return;
+      e.preventDefault();
+      const i = ordCols.indexOf(selectedOrd);
+      const step = e.key === "ArrowRight" ? 1 : -1;
+      const next = i < 0 ? 0 : (i + step + ordCols.length) % ordCols.length;
+      setSelectedOrd(ordCols[next]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedOrd, ordCols]);
+
+  // Drop the selection silently when the underlying ord vanishes (scope
+  // toggle, cycle change). Avoids a stale highlight pinned to nothing.
+  useEffect(() => {
+    if (selectedOrd != null && !ordCols.includes(selectedOrd)) {
+      setSelectedOrd(null);
+    }
+  }, [selectedOrd, ordCols]);
+
   const autoWidths = useMemo<Partial<Record<ColId, number>>>(() => {
     if (items.length === 0) return {};
     const w: Partial<Record<ColId, number>> = {};
     for (const col of columns) {
-      w[col.id] = autoWidthFor(col, items, live, perSample);
+      w[col.id] = autoWidthFor(col, items, live, perSample, ordCols.length);
     }
     return w;
     // `live` is read inside via cellFor; `liveSignature` captures the set of
     // measured samples so we recompute on cardinality change but not on every
     // value tick. Suppress the exhaustive-deps lint for this trade-off.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, liveSignature, columns, perSampleSig]);
+  }, [items, liveSignature, columns, perSampleSig, ordCols.length]);
 
   // Live-sort: when the operator's "sync with live sort" tick is on and
   // the loop has emitted at least one Rasch fit, mirror that ordering
@@ -414,6 +476,55 @@ export function HardSamplesTable({
   const widthFor = (col: ColDef): number => {
     if (persisted.folded.includes(col.id)) return FOLDED_WIDTH;
     return persisted.widths[col.id] ?? autoWidths[col.id] ?? 80;
+  };
+
+  // Heat-map gap: 1 px between cells when the Meas column has room for
+  // every cell at the natural MAX_CELL_PX width, 0 px when squeezed.
+  // Without this the squares run together once cells start shrinking —
+  // but with it always on, the gaps eat the budget at narrow widths and
+  // force cells to 0 px before the column is actually full. The
+  // breakpoint is ``N × (MAX + 1) − 1`` (N cells + N−1 1-px gaps).
+  const measCol = columns.find((c) => c.id === "measurements");
+  const measColIdx = columns.findIndex((c) => c.id === "measurements");
+  const measColWidth = measCol ? widthFor(measCol) : 0;
+  const measGapPx =
+    ordCols.length > 1 && measColWidth >= ordCols.length * (MAX_CELL_PX + 1) - 1 ? 1 : 0;
+  const measMaxWidthPx =
+    ordCols.length * MAX_CELL_PX + Math.max(0, ordCols.length - 1) * measGapPx;
+  // Width every cell needs at its minimum size; if the column is
+  // narrower, strips overflow and the master scrollbar takes over.
+  const measMinStripPx =
+    ordCols.length * MIN_CELL_PX + Math.max(0, ordCols.length - 1) * measGapPx;
+  const needsHScroll = ordCols.length > 0 && measMinStripPx > measColWidth;
+
+  // Sticky-bottom master scrollbar synced with every row strip. Each
+  // strip is overflow-x:auto with the native scrollbar hidden; wheel /
+  // touch / keyboard scroll on any strip propagates here, and the
+  // master's scrollbar drag propagates back. ``isSyncingRef`` breaks
+  // the would-be feedback loop without throttling actual user input.
+  const stripRefs = useRef<Map<number, HTMLSpanElement>>(new Map());
+  const masterScrollRef = useRef<HTMLDivElement>(null);
+  const isSyncingRef = useRef(false);
+  const setStripRef = (sid: number) => (el: HTMLSpanElement | null) => {
+    if (el) stripRefs.current.set(sid, el);
+    else stripRefs.current.delete(sid);
+  };
+  const onMeasScroll = (e: UIEvent<HTMLElement>) => {
+    if (isSyncingRef.current) return;
+    isSyncingRef.current = true;
+    const sx = e.currentTarget.scrollLeft;
+    for (const el of stripRefs.current.values()) {
+      if (el !== e.currentTarget && Math.abs(el.scrollLeft - sx) > 0.5) {
+        el.scrollLeft = sx;
+      }
+    }
+    const m = masterScrollRef.current;
+    if (m && m !== e.currentTarget && Math.abs(m.scrollLeft - sx) > 0.5) {
+      m.scrollLeft = sx;
+    }
+    requestAnimationFrame(() => {
+      isSyncingRef.current = false;
+    });
   };
 
   const gridTemplate = columns.map((c) => `${widthFor(c)}px`).join(" ");
@@ -571,6 +682,10 @@ export function HardSamplesTable({
             {sortedItems.map((item, idx) => {
               const liveEntry = live.get(item.sample_id);
               const meas = perSample?.get(item.sample_id) ?? [];
+              // Build the per-row ord → dot lookup once so the Meas
+              // render below is O(ordCols) without an inner .find().
+              const byOrd = new Map<string, MeasurementDot>();
+              for (const m of meas) byOrd.set(m.ord, m);
               // Mark every cell in the row currently being scored so the
               // soft-blink keyframe (globals.css) animates the whole row,
               // not just one cell. Independent of the sort-sync toggle —
@@ -614,21 +729,46 @@ export function HardSamplesTable({
                     onClick={onClick}
                   >
                     {folded ? "" : isMeas ? (
-                      meas.length === 0 && !isRunning ? (
+                      ordCols.length === 0 && !isRunning ? (
                         <span className="hs-heat-empty">—</span>
                       ) : (
-                        <span className="hs-cell-meas-strip">
-                          {meas.map((m, i) => (
-                            <span
-                              key={`${m.ord}:${m.hit ? 1 : 0}`}
-                              className={`hs-heat-dot ${m.hit ? "hit" : "miss"}`}
-                              title={`R${Math.floor(m.ord / 1000)} cand ${m.ord % 1000} · ${m.hit ? "HIT" : "MISS"}`}
-                            />
-                          ))}
+                        <span
+                          ref={setStripRef(item.sample_id)}
+                          onScroll={onMeasScroll}
+                          className="hs-cell-meas-strip"
+                          style={{
+                            // ``minmax(MIN, 1fr)`` floors every cell at
+                            // MIN_CELL_PX so cells never disappear when
+                            // squeezed — the strip overflows the column
+                            // instead and the sticky master scrollbar
+                            // below scrolls every row in sync.
+                            // ``maxWidth`` caps the strip at the natural
+                            // MAX_CELL_PX/cell width so wide columns
+                            // don't stretch the squares.
+                            gridTemplateColumns: `repeat(${ordCols.length}, minmax(${MIN_CELL_PX}px, 1fr))`,
+                            maxWidth: `${measMaxWidthPx}px`,
+                            gap: `${measGapPx}px`,
+                          }}
+                        >
+                          {ordCols.map((ord) => {
+                            const m = byOrd.get(ord);
+                            const sel = ord === selectedOrd;
+                            return (
+                              <span
+                                key={ord}
+                                className={`hs-heat-cell ${m ? (m.hit ? "hit" : "miss") : "empty"}${sel ? " selected" : ""}`}
+                                title={m ? `${m.hit ? "HIT" : "MISS"} · ${ord}` : ord}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedOrd((cur) => (cur === ord ? null : ord));
+                                }}
+                              />
+                            );
+                          })}
                           {isRunning && (
                             <span
                               key="pending"
-                              className="hs-heat-dot pending"
+                              className="hs-heat-cell pending"
                               title="Currently scoring"
                             />
                           )}
@@ -641,6 +781,25 @@ export function HardSamplesTable({
                 );
               });
             })}
+
+            {needsHScroll && measColIdx >= 0 && (
+              <div
+                className="hs-meas-master-scroll-wrap"
+                style={{ gridColumn: `${measColIdx + 1} / span 1` }}
+              >
+                <div
+                  ref={masterScrollRef}
+                  className="hs-meas-master-scroll"
+                  onScroll={onMeasScroll}
+                  aria-label="Heat-map horizontal scroll"
+                >
+                  <div
+                    className="hs-meas-master-scroll-inner"
+                    style={{ width: `${measMinStripPx}px` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <div className="hs-footer">

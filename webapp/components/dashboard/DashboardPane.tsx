@@ -5,9 +5,11 @@ import {
   fetchActiveDatasetName,
   fetchCycleFile,
   fetchDatasetPreview,
+  fetchMeasurementSeries,
   fetchPipeline,
   type DatasetItem,
   type HardSamplesScope,
+  type MeasurementDot,
 } from "@/lib/api";
 import {
   CycleStreamProvider,
@@ -94,6 +96,13 @@ function DashboardPaneInner({
   const [datasetItems, setDatasetItems] = useState<DatasetItem[]>([]);
   const [datasetTrainCount, setDatasetTrainCount] = useState(0);
   const [datasetTestCount, setDatasetTestCount] = useState(0);
+  // Per-sample measurement series feeding the Meas heat-map column. Sourced
+  // from the new /datasets/{name}/measurement-series endpoint, refreshed
+  // whenever the scope toggle flips so workspace/campaign actually swap the
+  // dot history (not just surprise).
+  const [archivePerSample, setArchivePerSample] = useState<Map<number, MeasurementDot[]>>(
+    () => new Map(),
+  );
   // Hard-sample view scope — workspace = cross-cycle archive, campaign =
   // this cycle only. Default workspace (matches the original always-archive
   // behaviour); persisted in localStorage so the operator's choice survives
@@ -287,17 +296,22 @@ function DashboardPaneInner({
         const name = await fetchActiveDatasetName(cycleId, ac.signal);
         if (cancelled || !name) return;
         setDatasetName(name);
-        const preview = await fetchDatasetPreview(
-          name,
-          1000,
-          ac.signal,
-          hardSamplesScope,
-          cycleId,
-        );
+        const [preview, seriesRes] = await Promise.all([
+          fetchDatasetPreview(name, 1000, ac.signal, hardSamplesScope, cycleId),
+          fetchMeasurementSeries(name, 1000, ac.signal, hardSamplesScope, cycleId).catch(
+            // Campaign scope before round 1 returns 404 (no
+            // hard_samples_campaign.json yet) — fall back to an empty map
+            // rather than dropping the whole preview alongside it.
+            () => null,
+          ),
+        ]);
         if (cancelled) return;
         setDatasetItems(preview.items);
         setDatasetTrainCount(preview.train_count);
         setDatasetTestCount(preview.test_count);
+        const m = new Map<number, MeasurementDot[]>();
+        for (const s of seriesRes?.items ?? []) m.set(s.sample_id, s.measurements);
+        setArchivePerSample(m);
       } catch {
         // load may race with cycle-mint; retry on next cycle change.
         // Also fires on scope=campaign before round 1 lands the artifact —
@@ -322,6 +336,7 @@ function DashboardPaneInner({
     setDatasetItems([]);
     setDatasetTrainCount(0);
     setDatasetTestCount(0);
+    setArchivePerSample(new Map());
   }
 
   // Re-applies chart defaults on theme swap; the themeKey bump forces all
@@ -378,6 +393,7 @@ function DashboardPaneInner({
             datasetItems={datasetItems}
             datasetTrainCount={datasetTrainCount}
             datasetTestCount={datasetTestCount}
+            archivePerSample={archivePerSample}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={updateHardSamplesScope}
           />

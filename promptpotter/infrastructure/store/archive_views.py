@@ -43,6 +43,7 @@ __all__ = [
     "find_by_prefix",
     "list_runs",
     "load_run",
+    "measurement_series_for_samples",
     "measurements_for_config",
     "measurements_for_sample",
     "record_measurement_run",
@@ -65,6 +66,49 @@ def measurements_for_sample(
 ) -> list[Measurement]:
     """Every measurement of one training example, across all configs."""
     return stores.archive.measurements_for_sample(backend_id, sample_id, run_ids=run_ids)
+
+
+def measurement_series_for_samples(
+    stores: Stores,
+    backend_id: str,
+    sample_ids: list[int],
+) -> dict[int, list[dict[str, Any]]]:
+    """Per-sample chronological measurement series, one archive walk for the whole set.
+
+    Returns ``{sample_id: [{ord, hit, run_id, created_at}, ...]}`` with each
+    list sorted ascending by ``ord`` — a stable composite of
+    ``created_at`` + ``run_id`` + per-run item index. Samples in *sample_ids*
+    with no archive measurements come back as empty lists; samples
+    outside *sample_ids* are skipped.
+
+    Powers the read-only ``/datasets/{name}/measurement-series`` endpoint:
+    the hard-sample leaderboard's Meas heat-map column needs the full series
+    per visible sample under the workspace scope, and walking the archive
+    once is O(runs) instead of O(samples × runs).
+    """
+    wanted = set(sample_ids)
+    out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in wanted}
+    for entry in stores.archive.list_all(backend_id):
+        run_id = entry["run_id"]
+        detail = stores.archive.load_by_id(backend_id, run_id)
+        if detail is None:
+            continue
+        created_at = str(detail.get("created_at", ""))
+        for idx, item in enumerate(detail.get("measurements", [])):
+            sid = item.get("sample_id")
+            if not isinstance(sid, int) or sid not in wanted:
+                continue
+            out[sid].append(
+                {
+                    "ord": f"{created_at}/{run_id}/{idx:04d}",
+                    "hit": bool(item.get("hit", False)),
+                    "run_id": run_id,
+                    "created_at": created_at,
+                }
+            )
+    for bucket in out.values():
+        bucket.sort(key=lambda m: m["ord"])
+    return out
 
 
 def measurements_for_config(

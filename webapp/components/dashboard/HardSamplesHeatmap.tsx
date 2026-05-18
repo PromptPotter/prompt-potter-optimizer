@@ -1,8 +1,12 @@
 "use client";
 import { useMemo, useState } from "react";
-import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
+import {
+  type DatasetItem,
+  type HardSamplesScope,
+  type MeasurementDot as ArchiveDot,
+} from "@/lib/api";
 import { parseSampleLine } from "@/lib/sample-line";
-import { liveL1Candidates, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
+import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { HardSamplesTable } from "./HardSamplesTable";
 
 interface Props {
@@ -12,26 +16,27 @@ interface Props {
   datasetItems: DatasetItem[];
   datasetTrainCount: number;
   datasetTestCount: number;
+  // Per-sample archive measurement series, fetched server-side from
+  // /datasets/{name}/measurement-series. Scope toggle (workspace vs
+  // campaign) is owned by DashboardPane and re-fetches this map; the
+  // heat-map merges live mid-round samples on top.
+  archivePerSample: Map<number, ArchiveDot[]>;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
 }
 
 interface Measurement {
   hit: boolean;
-  // Ordering key: round * 1000 + candidate idx → stable chronological sort.
-  ord: number;
+  // Stable composite key — server-derived for archive rows
+  // ("created_at/run_id/idx") or client-derived for in-flight live samples
+  // ("live/{round:04d}/{cand_idx:02d}"). Lex-sortable; the table aligns
+  // rows on this key so equal ords share a column.
+  ord: string;
 }
 
-interface RoundDoc {
-  round: number;
-  scoreboard?: { candidate_id?: string }[];
-  all_candidate_results?: Record<string, { sample_id: number; hit?: boolean }[]>;
-}
-
-// Fold in live mid-round measurements that haven't been written to a round
-// file yet. Live samples are compact strings ("0.0s #000 HIT ..."); the
-// parser yields idx + status. We append them as the highest ord so they
-// sit at the right edge of each row.
+// Fold in live mid-round measurements that haven't landed in the archive
+// yet. Live samples are compact strings ("0.0s #000 HIT ..."); the parser
+// yields idx + status. They sit at the right edge of each row.
 function liveMeasurements(
   dash: DashboardSnapshot | null,
   dashRound: number | null,
@@ -44,11 +49,6 @@ function liveMeasurements(
       let hit: boolean | null = null;
       if (typeof s === "string") {
         const p = parseSampleLine(s);
-        // ``sampleId`` is the dataset id — what the heatmap rows are
-        // keyed by. ``idx`` (qi) is iteration position and only matches
-        // sample_id when the loop runs in dataset order, so we strictly
-        // require sampleId here. Old-format lines without ``sid:`` just
-        // skip — the round-complete flush will fill them in.
         if (p.sampleId != null && p.status) {
           sid = p.sampleId;
           hit = p.status === "HIT";
@@ -60,7 +60,10 @@ function liveMeasurements(
         }
       }
       if (sid == null || hit == null) continue;
-      const ord = round * 1000 + ci;
+      // ``live/…`` prefix sorts after every archive ord (timestamps + 04d
+      // round numbers start with digits) so in-flight cells land at the
+      // right edge of the roster.
+      const ord = `live/${round.toString().padStart(4, "0")}/${ci.toString().padStart(2, "0")}`;
       if (!out.has(sid)) out.set(sid, []);
       out.get(sid)!.push({ hit, ord });
     }
@@ -75,59 +78,30 @@ export function HardSamplesHeatmap({
   datasetItems,
   datasetTrainCount,
   datasetTestCount,
+  archivePerSample,
   hardSamplesScope,
   onHardSamplesScopeChange,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const { rounds: historyDocs } = useCycleStream();
-  const rounds: RoundDoc[] = useMemo(() => {
-    const out: RoundDoc[] = [];
-    for (const d of historyDocs) {
-      if (typeof d.round !== "number") continue;
-      out.push({
-        round: d.round,
-        scoreboard: d.scoreboard as { candidate_id?: string }[] | undefined,
-        all_candidate_results:
-          d.all_candidate_results as Record<string, { sample_id: number; hit?: boolean }[]> | undefined,
-      });
-    }
-    return out;
-  }, [historyDocs]);
 
-  // Aggregate per-sample measurement history: rows = samples, columns =
-  // chronological candidate measurements. Ordering is round * 1000 + the
-  // candidate's scoreboard index so the strip reads left-to-right in time.
+  // Merge archive series (scope-aware, server-sourced) with the live
+  // mid-round samples (client-only, current cycle). De-dupe on (ord, hit)
+  // in case a live measurement has already landed in the archive.
   const perSample = useMemo(() => {
     const out = new Map<number, Measurement[]>();
-    for (const r of rounds) {
-      const scoreboard = r.scoreboard ?? [];
-      const acr = r.all_candidate_results ?? {};
-      // Map candidate_id → scoreboard idx so order in the row matches
-      // the round's ranking. Unknown ids fall to the end (idx = 99).
-      const idxOf = new Map<string, number>();
-      scoreboard.forEach((c, i) => {
-        if (c.candidate_id) idxOf.set(c.candidate_id, i);
-      });
-      for (const [candId, results] of Object.entries(acr)) {
-        const ci = idxOf.get(candId) ?? 99;
-        const ord = (r.round ?? 0) * 1000 + ci;
-        for (const s of results) {
-          if (typeof s.sample_id !== "number" || typeof s.hit !== "boolean") continue;
-          if (!out.has(s.sample_id)) out.set(s.sample_id, []);
-          out.get(s.sample_id)!.push({ hit: s.hit, ord });
-        }
-      }
+    for (const [sid, ms] of archivePerSample) {
+      out.set(
+        sid,
+        ms.map((m) => ({ hit: m.hit, ord: m.ord })),
+      );
     }
-    // Fold in live mid-round
     const live = liveMeasurements(dash, dashRound);
     for (const [sid, ms] of live) {
       if (!out.has(sid)) out.set(sid, []);
       out.get(sid)!.push(...ms);
     }
-    // Sort each row by ord and de-dupe (live can overlap with the round
-    // file once it lands) on (ord, hit) pairs.
     for (const ms of out.values()) {
-      ms.sort((a, b) => a.ord - b.ord);
+      ms.sort((a, b) => (a.ord < b.ord ? -1 : a.ord > b.ord ? 1 : 0));
       const seen = new Set<string>();
       let w = 0;
       for (let i = 0; i < ms.length; i++) {
@@ -139,7 +113,7 @@ export function HardSamplesHeatmap({
       ms.length = w;
     }
     return out;
-  }, [rounds, dash, dashRound]);
+  }, [archivePerSample, dash, dashRound]);
 
   if (datasetItems.length === 0) return null;
 

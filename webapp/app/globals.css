@@ -793,8 +793,23 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .hs-cell.hs-cell-miss{color:var(--color-danger)}
 .hs-cell.hs-cell-cached{color:var(--color-text-tertiary)}
 .hs-cell.meas{padding:3px 6px;overflow:hidden}
-.hs-cell-meas-strip{display:flex;gap:1px;align-items:center;min-width:0;overflow-x:auto;max-width:100%}
-.hs-cell-meas-strip::-webkit-scrollbar{height:4px}
+/* Roster grid: each row places its measurements on a shared ordinal axis
+   (one column per global ord) so vertically aligned cells represent the
+   same measurement across samples; empty cells leave blanks. Cells flex
+   into the column width — at most 8 px each (capped via inline
+   ``maxWidth``), down to MIN_CELL_PX vertical lines when the column is
+   too narrow for all cells at full size. Beyond that the strip
+   overflows and the sticky master scrollbar below scrolls every row in
+   sync; the native per-row scrollbar is hidden so only the master one
+   shows. ``gap`` is set inline (1 px with room, 0 px squeezed). */
+.hs-cell-meas-strip{display:grid;align-items:center;width:100%;min-width:0;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+.hs-cell-meas-strip::-webkit-scrollbar{width:0;height:0;display:none}
+/* Single shared horizontal scrollbar for the Meas column. Stretches the
+   full natural strip width inside the wrap so the scrollbar's thumb
+   reflects how much of the heat-map is visible. */
+.hs-meas-master-scroll-wrap{position:sticky;bottom:0;z-index:3;background:var(--color-background-secondary);border-top:1px solid var(--color-border-tertiary)}
+.hs-meas-master-scroll{overflow-x:scroll;overflow-y:hidden;height:12px}
+.hs-meas-master-scroll-inner{height:1px}
 .hs-footer{padding:6px 10px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-primary);font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center;gap:12px}
 .hs-counts{font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap}
 .hs-reset{font-family:var(--font-mono);font-size:11px;background:transparent;border:1px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 8px;border-radius:4px;cursor:pointer}
@@ -964,11 +979,31 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .hs-heat-dot.hit{background:var(--color-success)}
 .hs-heat-dot.miss{background:var(--color-danger)}
 .hs-heat-dot.pending{background:transparent;border:1px dashed var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);animation:hs-dot-pending 1.2s ease-in-out infinite}
+/* Roster cells: one per global ord, aligned across rows. .empty stays
+   transparent so unmeasured columns read as blanks (the alignment is the
+   information, not a fill). Width comes from the grid template — no
+   fixed width, so cells squeeze to fit narrower columns and stretch to
+   the 8 px ceiling on wider ones. No arrival animation — at hundreds of
+   cells per row .hs-dot-pop reads as noise; the pending cell keeps its
+   throbber via the shared keyframe. */
+.hs-heat-cell{display:block;width:100%;height:8px;border-radius:1px;cursor:pointer;transition:transform .1s}
+.hs-heat-cell:hover{transform:scale(1.6);position:relative;z-index:1}
+.hs-heat-cell.hit{background:var(--color-success)}
+.hs-heat-cell.miss{background:var(--color-danger)}
+.hs-heat-cell.empty{background:transparent;cursor:pointer}
+.hs-heat-cell.pending{background:transparent;border:1px dashed var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);animation:hs-dot-pending 1.2s ease-in-out infinite}
+/* Click a cell → its ord lights up across every row. Inset ring keeps
+   the hit/miss colour visible underneath; empty cells in the selected
+   column tint with the accent so the column reads as a continuous
+   vertical band. Arrows pan the selection; Escape clears. */
+.hs-heat-cell.selected{box-shadow:0 0 0 1px var(--color-accent);z-index:2;position:relative}
+.hs-heat-cell.empty.selected{background:rgba(var(--color-accent-rgb),0.28)}
 @keyframes hs-dot-pop{0%{transform:scale(2.4);opacity:.2}60%{transform:scale(1.1);opacity:1}100%{transform:scale(1);opacity:1}}
 @keyframes hs-dot-pending{0%,100%{opacity:.45}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){
   .hs-heat-dot{animation:none}
   .hs-heat-dot.pending{animation:none;opacity:.7}
+  .hs-heat-cell.pending{animation:none;opacity:.7}
 }
 /* Compact preset: ~3 rows visible (header + 3 × 26 px ≈ 100 px). User
    drags the bottom edge to grow it. Larger preset (Grow button) drops

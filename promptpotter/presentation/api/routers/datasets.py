@@ -11,6 +11,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.store import campaign_dir_for
+from promptpotter.infrastructure.store.archive_views import (
+    measurement_series_for_samples,
+)
 from promptpotter.infrastructure.store.paths import DEFAULT_DATASETS_ROOT
 from promptpotter.presentation.api.deps import StoreDep
 
@@ -148,4 +151,192 @@ async def get_dataset_preview(
     )
 
 
-__all__ = ["DatasetItem", "DatasetPreviewResponse"]
+class MeasurementDot(BaseModel):
+    ord: str = Field(
+        description=(
+            "Stable composite ordinal — opaque string the client only uses "
+            "for lexicographic sort + uniqueness. Workspace scope encodes "
+            "created_at + run_id + index; campaign scope encodes round + "
+            "scoreboard idx."
+        ),
+    )
+    hit: bool
+    label: str = Field(description="Short human label, e.g. 'R3 cand 2'.")
+
+
+class SampleSeries(BaseModel):
+    sample_id: int
+    measurements: list[MeasurementDot]
+
+
+class MeasurementSeriesResponse(BaseModel):
+    name: str
+    scope: Literal["workspace", "campaign"]
+    items: list[SampleSeries]
+
+
+def _campaign_series(
+    store: Any, cycle_id: str, sample_ids: set[int]
+) -> dict[int, list[dict[str, Any]]]:
+    """Walk ``rounds/round_*.json`` for *cycle_id*, returning per-sample series.
+
+    Ord = ``{round:04d}/{cand_idx:02d}`` so series sort chronologically by
+    round then by scoreboard position within the round. Candidates not
+    appearing in the round's scoreboard sink to slot 99.
+    """
+    cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
+    rounds_dir = cycle_dir / "rounds"
+    out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
+    if not rounds_dir.is_dir():
+        return out
+    for round_path in sorted(rounds_dir.glob("round_*.json")):
+        try:
+            doc = json.loads(round_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        round_no = doc.get("round")
+        if not isinstance(round_no, int):
+            continue
+        idx_of: dict[str, int] = {}
+        for i, c in enumerate(doc.get("scoreboard") or []):
+            cid = c.get("candidate_id") if isinstance(c, dict) else None
+            if isinstance(cid, str):
+                idx_of[cid] = i
+        acr = doc.get("all_candidate_results") or {}
+        if not isinstance(acr, dict):
+            continue
+        for cand_id, results in acr.items():
+            ci = idx_of.get(cand_id, 99)
+            if not isinstance(results, list):
+                continue
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                sid = item.get("sample_id")
+                hit = item.get("hit")
+                if not isinstance(sid, int) or not isinstance(hit, bool):
+                    continue
+                if sid not in sample_ids:
+                    continue
+                out[sid].append(
+                    {
+                        "ord": f"{round_no:04d}/{ci:02d}",
+                        "hit": hit,
+                        "label": f"R{round_no} cand {ci}",
+                    }
+                )
+    for bucket in out.values():
+        bucket.sort(key=lambda m: m["ord"])
+    return out
+
+
+@_datasets_router.get(
+    "/{name}/measurement-series",
+    response_model=MeasurementSeriesResponse,
+)
+async def get_dataset_measurement_series(
+    name: str,
+    store: StoreDep,
+    backend_id: str = Query(default="local"),
+    limit: int = Query(default=50, ge=1, le=1000),
+    scope: Literal["workspace", "campaign"] = Query(
+        default="workspace",
+        description=(
+            "workspace = cross-cycle MeasurementArchive series per sample. "
+            "campaign = walk this cycle's round files."
+        ),
+    ),
+    cycle_id: str | None = Query(
+        default=None,
+        description="Required when scope=campaign; ignored when scope=workspace.",
+    ),
+) -> MeasurementSeriesResponse:
+    """Per-sample chronological measurement series feeding the hard-sample
+    leaderboard's Meas heat-map column.
+
+    Returns measurements for the same top-``limit`` samples (in the same
+    Rasch-difficulty order) as ``/preview`` — clients can zip the two
+    responses by ``sample_id`` without re-sorting. ``ord`` is opaque and
+    only used for the roster's left-to-right alignment across rows.
+    """
+    from promptpotter.application.intelligence.hard_sample_archive import (
+        build_archive_hard_samples_artifact,
+    )
+
+    if not _DATASET_NAME_RE.match(name):
+        raise HTTPException(400, "Invalid dataset name")
+    datasets_root = DEFAULT_DATASETS_ROOT.resolve()
+    cache_path = (datasets_root / name / "cache.json").resolve()
+    if not cache_path.is_relative_to(datasets_root):
+        raise HTTPException(400, "Invalid dataset name")
+    if not cache_path.is_file():
+        raise HTTPException(404, f"Dataset '{name}' not found")
+    raw = json.loads(cache_path.read_text(encoding="utf-8"))
+
+    sample_lookup: dict[int, dict[str, Any]] = {}
+    for item in raw["items"]:
+        sid = int(item["sample_id"] if "sample_id" in item else item["id"])
+        sample_lookup[sid] = item
+
+    if scope == "campaign":
+        if not cycle_id:
+            raise HTTPException(400, "scope=campaign requires cycle_id")
+        cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
+        if not cycle_dir.exists():
+            raise HTTPException(404, f"Cycle '{cycle_id}' not found")
+        path = cycle_dir / "hard_samples_campaign.json"
+        if not path.is_file():
+            raise HTTPException(
+                404, "hard_samples_campaign.json not present (cycle has no rounds yet)"
+            )
+        artifact = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        artifact = build_archive_hard_samples_artifact(store, backend_id, top_k_samples=None)
+    rasch = artifact.get("rasch", {})
+    delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
+
+    def surprise_of(sid: int) -> float:
+        if sid in delta_map:
+            return 1.0 / (1.0 + math.exp(-delta_map[sid]))
+        return 0.5
+
+    full_order = sorted(sample_lookup.keys(), key=lambda s: (-surprise_of(s), s))
+    selected = full_order[:limit]
+    selected_set = set(selected)
+
+    if scope == "campaign":
+        assert cycle_id is not None  # checked above; appeases mypy
+        series = _campaign_series(store, cycle_id, selected_set)
+    else:
+        raw_series = measurement_series_for_samples(store, backend_id, selected)
+        # Workspace ord already carries timestamp + run_id + idx; label is a
+        # short "run abbrev" — first 8 chars of run_id is plenty for tooltips.
+        series = {
+            sid: [
+                {
+                    "ord": m["ord"],
+                    "hit": m["hit"],
+                    "label": f"run {str(m.get('run_id', ''))[:8]}",
+                }
+                for m in ms
+            ]
+            for sid, ms in raw_series.items()
+        }
+
+    items = [
+        SampleSeries(
+            sample_id=sid,
+            measurements=[MeasurementDot(**m) for m in series.get(sid, [])],
+        )
+        for sid in selected
+    ]
+    return MeasurementSeriesResponse(name=raw["name"], scope=scope, items=items)
+
+
+__all__ = [
+    "DatasetItem",
+    "DatasetPreviewResponse",
+    "MeasurementDot",
+    "MeasurementSeriesResponse",
+    "SampleSeries",
+]

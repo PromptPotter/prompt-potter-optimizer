@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
-import type { DatasetItem, HardSamplesScope } from "@/lib/api";
+import type { DatasetItem, HardSamplesScope, MeasurementDot } from "@/lib/api";
 import { TERMS } from "@/lib/terms";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
@@ -18,6 +18,7 @@ interface Props {
   datasetItems: DatasetItem[];
   datasetTrainCount: number;
   datasetTestCount: number;
+  archivePerSample: Map<number, MeasurementDot[]>;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
 }
@@ -54,6 +55,7 @@ export function ChatPane({
   datasetItems,
   datasetTrainCount,
   datasetTestCount,
+  archivePerSample,
   hardSamplesScope,
   onHardSamplesScopeChange,
 }: Props) {
@@ -269,6 +271,7 @@ export function ChatPane({
             datasetItems={datasetItems}
             datasetTrainCount={datasetTrainCount}
             datasetTestCount={datasetTestCount}
+            archivePerSample={archivePerSample}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={onHardSamplesScopeChange}
           />
