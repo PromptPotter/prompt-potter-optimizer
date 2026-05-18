@@ -141,7 +141,9 @@ async def l1_generate(
         logger.error(
             "L1 R%d: %s — zero candidates this round (raw=%d chars)",
             round_num,
-            "provider returned empty/truncated content" if is_empty else "meta-prompt parse failure after retry",
+            "provider returned empty/truncated content"
+            if is_empty
+            else "meta-prompt parse failure after retry",
             len(raw),
         )
         opt_sp.wounds.validation_failures.append(

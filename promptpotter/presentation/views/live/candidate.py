@@ -190,9 +190,7 @@ def individual_summary_from_dict(
         reason = degrad.get("dominant_warning", "unknown")
         source = degrad.get("source", "degradation")
         tag = "fatal" if fatal else f"{rate:.0%} degraded"
-        detail_lines.append(
-            f"{YELLOW}✂ {source} q{dc}/{ts}{RESET}  {tag}  ({reason})"
-        )
+        detail_lines.append(f"{YELLOW}✂ {source} q{dc}/{ts}{RESET}  {tag}  ({reason})")
 
     comp = scores.get("composite_fitness")
     degraded = scores.get("degraded_samples", 0)

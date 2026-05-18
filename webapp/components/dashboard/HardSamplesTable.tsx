@@ -63,7 +63,8 @@ type ColId =
   | "rank"
   | "sample_id"
   | "measurements"
-  | "surprise"
+  | "miss_prob"
+  | "pick_score"
   | "n_obs"
   | "task"
   | "query"
@@ -90,7 +91,8 @@ const COLUMNS: ColDef[] = [
   { id: "rank",          label: "#",          align: "right",  numeric: true  },
   { id: "sample_id",     label: "ID",         align: "right",  numeric: true  },
   { id: "measurements",  label: "Meas",       align: "left",   numeric: true  },
-  { id: "surprise",      label: "Surprise",   align: "right",  numeric: true  },
+  { id: "miss_prob",     label: "P(miss)",    align: "right",  numeric: true  },
+  { id: "pick_score",    label: "Pick",       align: "right",  numeric: true  },
   { id: "n_obs",         label: "Tries",      align: "right",  numeric: true  },
   { id: "task",          label: "Task",       align: "left",   numeric: false },
   { id: "query",         label: "Input",      align: "left",   numeric: false },
@@ -188,9 +190,9 @@ function savePersisted(s: PersistedState): void {
   }
 }
 
-// Surprise (miss-probability) → hue. 0 = cool green (always-hit), 0.5 =
+// Miss-probability → hue. 0 = cool green (always-hit), 0.5 =
 // neutral grey (no signal yet), 1 = warm red (always-miss).
-function surpriseStyle(s: number): CSSProperties {
+function missProbStyle(s: number): CSSProperties {
   const clamped = Math.max(0, Math.min(1, s));
   const hue = 130 - clamped * 125;
   const alpha = 0.18 + Math.abs(clamped - 0.5) * 0.4;
@@ -232,11 +234,20 @@ function cellFor(
       // Sort key is the measurement count; visual rendering happens
       // separately in the cell render loop (dots JSX, not text).
       return { text: measCount > 0 ? String(measCount) : "—", raw: measCount };
-    case "surprise":
+    case "miss_prob":
       return {
-        text: item.surprise.toFixed(2),
-        raw: item.surprise,
-        style: surpriseStyle(item.surprise),
+        text: item.miss_prob.toFixed(2),
+        raw: item.miss_prob,
+        style: missProbStyle(item.miss_prob),
+      };
+    case "pick_score":
+      // Chernoff info in nats — fit's typically in (0, ~0.7). Three
+      // decimals so equal-looking-but-actually-different values don't
+      // collapse visually. ``—`` when scope=workspace (no seed concept)
+      // or the sample is unmeasured.
+      return {
+        text: item.pick_score !== null ? item.pick_score.toFixed(3) : "—",
+        raw: item.pick_score,
       };
     case "n_obs":
       // ``item.n_obs`` is the lifetime archive count for this backend_id

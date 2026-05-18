@@ -99,7 +99,7 @@ function DashboardPaneInner({
   // Per-sample measurement series feeding the Meas heat-map column. Sourced
   // from the new /datasets/{name}/measurement-series endpoint, refreshed
   // whenever the scope toggle flips so workspace/campaign actually swap the
-  // dot history (not just surprise).
+  // dot history (not just miss_prob).
   const [archivePerSample, setArchivePerSample] = useState<Map<number, MeasurementDot[]>>(
     () => new Map(),
   );

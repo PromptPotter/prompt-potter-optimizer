@@ -28,11 +28,21 @@ class DatasetItem(BaseModel):
     ground_truth: str
     task: str | None = None
     n_obs: int = Field(description="Times this sample has been tried")
-    surprise: float = Field(
+    miss_prob: float = Field(
         description=(
-            "Miss-probability for an average candidate, derived from Rasch "
-            "delta via sigmoid. 0.5 prior for unmeasured samples (no signal "
-            "yet — coin flip)."
+            "Miss-probability for an average candidate (θ=0), derived from "
+            "Rasch δ_s via sigmoid. 0.5 prior for unmeasured samples (no "
+            "signal yet — coin flip). Drives the static-mode sort."
+        ),
+    )
+    pick_score: float | None = Field(
+        default=None,
+        description=(
+            "Chernoff information vs the seed prior (Bernoulli, "
+            "Garivier-Kaufmann 2016). Drives PoBB's live sample-iteration "
+            "order — what dashboard.json::hard_sample_order ranks by. "
+            "None when the cross-cycle workspace scope is in use (no seed "
+            "concept across cycles) or when the sample has no measurement."
         ),
     )
 
@@ -118,17 +128,21 @@ async def get_dataset_preview(
     n_obs_map: dict[int, int] = {
         int(k): int(v) for k, v in rasch.get("n_obs_per_sample", {}).items()
     }
+    # Pick-score (Chernoff info vs seed prior) is only populated for the
+    # per-cycle artifact — the cross-cycle archive has no seed concept.
+    pick_score_block = artifact.get("pick_score", {}).get("per_sample", {})
+    pick_score_map: dict[int, float] = {int(k): float(v) for k, v in pick_score_block.items()}
     measured = {sid for sid in delta_map if sid in sample_lookup}
 
-    # Surprise = miss-probability for an average candidate (theta=0), via
+    # Miss-prob = miss-probability for an average candidate (theta=0), via
     # sigmoid(delta). Unmeasured samples get the 0.5 prior (no signal yet —
     # genuinely a coin flip for the optimizer).
-    def surprise_of(sid: int) -> float:
+    def miss_prob_of(sid: int) -> float:
         if sid in delta_map:
             return 1.0 / (1.0 + math.exp(-delta_map[sid]))
         return 0.5
 
-    full_order = sorted(sample_lookup.keys(), key=lambda s: (-surprise_of(s), s))
+    full_order = sorted(sample_lookup.keys(), key=lambda s: (-miss_prob_of(s), s))
 
     items = [
         DatasetItem(
@@ -137,7 +151,8 @@ async def get_dataset_preview(
             ground_truth=sample_lookup[sid]["ground_truth"],
             task=sample_lookup[sid].get("task"),
             n_obs=n_obs_map.get(sid, 0),
-            surprise=surprise_of(sid),
+            miss_prob=miss_prob_of(sid),
+            pick_score=pick_score_map.get(sid),
         )
         for sid in full_order[:limit]
     ]
@@ -295,12 +310,12 @@ async def get_dataset_measurement_series(
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
 
-    def surprise_of(sid: int) -> float:
+    def miss_prob_of(sid: int) -> float:
         if sid in delta_map:
             return 1.0 / (1.0 + math.exp(-delta_map[sid]))
         return 0.5
 
-    full_order = sorted(sample_lookup.keys(), key=lambda s: (-surprise_of(s), s))
+    full_order = sorted(sample_lookup.keys(), key=lambda s: (-miss_prob_of(s), s))
     selected = full_order[:limit]
     selected_set = set(selected)
 

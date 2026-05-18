@@ -726,8 +726,7 @@ def _r_archive_top_runs(b: InjectionBundle) -> str:
     for i, r in enumerate(runs, 1):
         label = r.name or r.run_id
         lines.append(
-            f"  #{i}  acc={r.accuracy:.1%}  comp={r.composite:.3f}  "
-            f"{r.hits}/{r.total}  run={label}"
+            f"  #{i}  acc={r.accuracy:.1%}  comp={r.composite:.3f}  {r.hits}/{r.total}  run={label}"
         )
     return "\n".join(lines)
 

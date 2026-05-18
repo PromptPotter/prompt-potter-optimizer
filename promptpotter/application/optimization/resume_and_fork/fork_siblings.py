@@ -22,7 +22,11 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import ForkPayload, ForkTrigger
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.store import root_cycle_id, save_active_pointer
+from promptpotter.infrastructure.store import (
+    read_active_pointer,
+    root_cycle_id,
+    save_active_pointer,
+)
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -30,7 +34,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ForkResult", "_mint_fork"]
+__all__ = ["ForkResult", "_mint_fork", "cleanup_stub_fork_if_empty"]
 
 
 class ForkResult(NamedTuple):
@@ -110,18 +114,16 @@ def _next_diag_sibling_id(campaign_store: CampaignStore, parent_cycle_id: str) -
     return f"{root_id}_diag_{max_n + 1:03d}"
 
 
-# KNOWN BUG (interim cleanup workaround in webapp): `_mint_fork` writes
-# the fork's dir + index.json + ledger inheritance + active-pointer
-# retarget BEFORE the fork actually runs a round. If the operator
-# interrupts (Ctrl+C, crash, sweep batch abort) after mint but before
-# round 1 completes, the fork dir survives as a stub with `n_rounds=0`
-# and the index's `rounds[]` = parent's surviving_rounds. Same shape for
-# operator HITL (api/routers/active.py::create_fork) and sweep
-# (sweep_runner.py::run_sweep_batch). The webapp surfaces these via the
-# Family-lineage panel's "Clean up N stubs" button +
-# POST /api/v1/campaigns/{cycle_id}/cleanup-empty. The real fix is
-# lazy-mint here: defer dir creation until round 1 actually starts, OR
-# add an "if minted-but-never-ran" cleanup pass at orchestrator shutdown.
+# Fork mint creates the on-disk dir + index.json + ledger inheritance +
+# active-pointer retarget BEFORE the fork's first round runs. An
+# interrupt between this call and round-1-commit would leave a stub
+# (n_rounds=0). The orchestration layer guards against that via
+# ``cleanup_stub_fork_if_empty`` below — wrapped around every fork run
+# site (``runner/entry.py::run_optimization`` for divergence,
+# ``sweep/sweep_runner.py`` for sweep batches). HITL forks minted via
+# the API endpoint don't go through orchestration; the operator owns
+# their lifecycle and the webapp's "Clean up N stubs" button is the
+# escape hatch for abandoned HITL forks.
 def _mint_fork(
     campaign_store: CampaignStore,
     tenant_id: str,
@@ -225,3 +227,54 @@ def _mint_fork(
 
     campaign_store.update("", new_cycle_id, {"fork": {"trigger": payload.trigger.value}})
     return new_cycle_id
+
+
+def cleanup_stub_fork_if_empty(
+    *,
+    campaign_store: CampaignStore,
+    tenant_id: str,
+    session_id: str,
+    cycle_id: str,
+    parent_cycle_id: str,
+) -> tuple[bool, str]:
+    """Delete a freshly-minted fork's dir if it never advanced past
+    round 0; retarget the active pointer back to *parent_cycle_id* when
+    the fork was the active cycle. Returns ``(deleted, reason)``.
+
+    The inverse of :func:`_mint_fork` for the stub case — invoked by
+    orchestration cleanup paths (``runner/entry.py::run_optimization``
+    for divergence forks, ``sweep/sweep_runner.py`` per sweep payload)
+    so an interrupt between fork-mint and round-1-commit doesn't leave
+    a stub on disk. ``CampaignStore.try_delete_stub_cycle`` enforces
+    the file-system guards (n_rounds=0, no descendants, not root); this
+    helper layers active-pointer policy on top.
+
+    Pointer policy: if the active pointer is on *cycle_id*, retarget it
+    to *parent_cycle_id* before attempting the delete (the store guard
+    doesn't check the pointer; if we didn't retarget, a follow-up
+    ``resume`` would point at a deleted dir). If the delete fails for a
+    reason other than active-cycle (e.g., descendants), revert the
+    pointer so the fork stays reachable.
+    """
+    _, _, active_cid = read_active_pointer()
+    was_active = active_cid == cycle_id
+    if was_active:
+        save_active_pointer(tenant_id, session_id, parent_cycle_id)
+    try:
+        deleted, reason = campaign_store.try_delete_stub_cycle(cycle_id)
+    except Exception as exc:
+        # Don't mask the caller's finally — log and return False.
+        logger.warning("Stub cleanup raised for %s: %s", cycle_id, exc)
+        if was_active:
+            save_active_pointer(tenant_id, session_id, cycle_id)
+        return False, str(exc)
+    if not deleted and was_active:
+        save_active_pointer(tenant_id, session_id, cycle_id)
+        logger.info(
+            "Stub cleanup skipped for %s (%s); active pointer restored",
+            cycle_id,
+            reason,
+        )
+    elif deleted:
+        logger.info("Stub fork cleaned up: %s (parent=%s)", cycle_id, parent_cycle_id)
+    return deleted, reason

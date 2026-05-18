@@ -107,11 +107,7 @@ def _backfill_spend_rates(spend: dict[str, Any]) -> dict[str, Any]:
         b["used_usd"] = round(float(usd), 6)
         b["rate_known"] = True
     spend["total_used_usd"] = round(
-        sum(
-            float(b.get("used_usd") or 0.0)
-            for b in spend.values()
-            if isinstance(b, dict)
-        ),
+        sum(float(b.get("used_usd") or 0.0) for b in spend.values() if isinstance(b, dict)),
         6,
     )
     return spend

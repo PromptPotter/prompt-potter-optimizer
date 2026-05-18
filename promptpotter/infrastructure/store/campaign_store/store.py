@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import shutil
+import stat
+import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,6 +35,46 @@ from promptpotter.infrastructure.store.paths import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _rmtree_robust(path: Path) -> None:
+    """``shutil.rmtree`` that survives Windows-isms.
+
+    Three failure modes handled:
+    - Long paths (>260 chars) → prefix with ``\\\\?\\`` to bypass
+      ``MAX_PATH``. Without this, ``os.rmdir`` of a non-empty-looking
+      dir under a deep cycle tree (langfuse/datasets/ground_truth) hits
+      ``WinError 145`` even though shutil deleted the contents.
+    - Read-only files → chmod write, retry.
+    - Transient handles (AV / indexer) → small backoff, retry a few
+      times.
+
+    Linux/macOS take the same code path; the prefix is a no-op (paths
+    on those systems have no MAX_PATH equivalent).
+    """
+    target_str = str(path.resolve())
+    if os.name == "nt" and not target_str.startswith("\\\\?\\"):
+        target_str = "\\\\?\\" + target_str
+
+    def _onexc(func, target, exc):
+        if isinstance(exc, PermissionError):
+            try:
+                os.chmod(target, stat.S_IWRITE)
+                func(target)
+                return
+            except OSError:
+                pass
+        raise exc
+
+    for attempt in range(4):
+        try:
+            shutil.rmtree(target_str, onexc=_onexc)
+            return
+        except OSError as exc:
+            if attempt == 3:
+                raise
+            logger.debug("rmtree retry %d for %s after %s", attempt + 1, path, exc)
+            time.sleep(0.1 * (attempt + 1))
 
 
 class CampaignStore(EntityStore):
@@ -465,6 +509,44 @@ class CampaignStore(EntityStore):
                 if inherited:
                     e["dataset_name"] = inherited
         return results
+
+    def try_delete_stub_cycle(self, cycle_id: str) -> tuple[bool, str]:
+        """Delete a stub cycle dir; return ``(deleted, reason)``.
+
+        Guards (all must hold for a delete to fire):
+
+        - dir exists on disk
+        - ``n_rounds == 0`` — the cycle's own work is empty
+          (``rounds[]`` may carry inherited parent rounds; ``n_rounds``
+          counts only the cycle's own rounds)
+        - cycle is not a family root (roots own family telemetry shared
+          across the tree)
+        - no descendants under ``forks/``, ``sweeps/``, ``diag/``
+
+        Active-pointer check is the caller's job — this method doesn't
+        read ``active_session.json``. The orchestration cleanup path
+        retargets the pointer to the parent BEFORE calling here; the
+        API endpoint refuses the request earlier when active matches.
+        """
+        cycle_dir = self.campaign_dir(cycle_id)
+        index_path = cycle_dir / "index.json"
+        if not index_path.is_file():
+            return False, "not on disk"
+        if root_cycle_id(cycle_id) == cycle_id:
+            return False, "family root — deletion is for sibling stubs only"
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return False, f"index.json unreadable: {exc}"
+        n_rounds = index.get("n_rounds", 0)
+        if not isinstance(n_rounds, int) or n_rounds != 0:
+            return False, f"n_rounds={n_rounds} — cycle ran real work"
+        for sub in ("forks", "sweeps", "diag"):
+            sub_dir = cycle_dir / sub
+            if sub_dir.is_dir() and any(sub_dir.iterdir()):
+                return False, f"has descendants under {sub}/"
+        _rmtree_robust(cycle_dir)
+        return True, ""
 
     # -- Fork helpers ---------------------------------------------------------
 

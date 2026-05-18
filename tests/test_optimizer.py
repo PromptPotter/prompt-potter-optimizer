@@ -261,9 +261,7 @@ def test_paraphrase_repeat_fires_on_word_set_overlap_above_threshold():
     out = L2_TASK_CONTEXT_PARAPHRASE_REPEAT.run(
         {
             "task_context_proposed": {"key_challenges": paraphrase},
-            "task_context_applied": osp.task_context.merge(
-                {"key_challenges": paraphrase}
-            ),
+            "task_context_applied": osp.task_context.merge({"key_challenges": paraphrase}),
         },
         opt_sp=osp,
     )
@@ -285,9 +283,7 @@ def test_paraphrase_repeat_quiet_on_genuine_refinement():
     out = L2_TASK_CONTEXT_PARAPHRASE_REPEAT.run(
         {
             "task_context_proposed": {"key_challenges": refinement},
-            "task_context_applied": osp.task_context.merge(
-                {"key_challenges": refinement}
-            ),
+            "task_context_applied": osp.task_context.merge({"key_challenges": refinement}),
         },
         opt_sp=osp,
     )
@@ -470,23 +466,54 @@ def _measurements(scores: list[float], sample_ids: list[int] | None = None) -> l
 _DUMMY_SP = types.SimpleNamespace()  # tests never invoke backfill; SP is opaque storage
 
 
-def test_pobb_check_high_signal_stops_inferior():
-    """Loser candidate vs strong prior fires within ≤5 queries at ε=0.05."""
-    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
-    # Leader scored on samples 0..19 with fitness 1.0; paired check looks up
-    # only the candidate's sample IDs (0..4), so leader's full coverage is fine.
-    check.register_completed(_measurements([1.0] * 20), candidate_id="winner", sp=_DUMMY_SP)
-    check.set_current("loser")
-    sig = check.check(_measurements([0.0] * 5), candidate_idx=1, n_total_candidates=2)
+def test_pobb_check_gates_elimination_on_posterior_and_separability():
+    """PoBB.check() must clear BOTH gates to eliminate.
+
+    Part 1 — posterior gate fires on a separated loser. Leader 20/20 vs
+    candidate 0/5 at ε=0.05: Wilson CIs ([0.83,1.00] vs [0.00,0.43]) do
+    NOT overlap, so the separability floor stays out of the way and the
+    Bayesian gate is the deciding signal.
+
+    Part 2 — separability floor blocks elimination on small-n noise.
+    Pins the AIME `cycle_926e2029d11a_r2/round_0002` failure: leader
+    has 11/20 hits with 2/4 on samples 0-3, candidate runs samples 0-3
+    at 0/4. Posterior P(cand>leader) ≈ 0.05–0.10 < ε=0.20 so the
+    Bayesian gate WOULD fire — but Wilson CIs ([0.00,0.49] vs [0.15,
+    0.85]) overlap, so the apparent gap is noise. Floor must refuse.
+    """
+    # Part 1 — separated arms, posterior gate fires
+    check_sep = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
+    check_sep.register_completed(_measurements([1.0] * 20), candidate_id="winner", sp=_DUMMY_SP)
+    check_sep.set_current("loser")
+    sig = check_sep.check(_measurements([0.0] * 5), candidate_idx=1, n_total_candidates=2)
     assert sig is not None
     assert sig.check_name == "elimination"
     cr = sig.check_result
     assert cr["leader_id"] == "winner"
-    # Dominance check fires first when budget is known via set_sample_order —
-    # here it isn't, so we fall through to the Bayesian branch.
     assert cr["p_best"] < 0.05
     assert "p_best_snapshot" in cr
     assert cr["epsilon"] == pytest.approx(0.05)
+
+    # Part 2 — overlapping CIs, floor refuses elimination
+    check_noise = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.20), n_samples=20)
+    leader_scores = [1.0, 0.0, 1.0, 0.0] + [1.0] * 9 + [0.0] * 7
+    check_noise.register_completed(
+        _measurements(leader_scores, sample_ids=list(range(20))),
+        candidate_id="leader",
+        sp=_DUMMY_SP,
+    )
+    # Disarm the dominance gate (cand_max = 0 + 16 = 16 ≥ leader's 11).
+    check_noise.set_sample_order(list(range(20)))
+    check_noise.set_current("equivalent_candidate")
+    sig_noise = check_noise.check(
+        _measurements([0.0, 0.0, 0.0, 0.0], sample_ids=[0, 1, 2, 3]),
+        candidate_idx=1,
+        n_total_candidates=6,
+    )
+    assert sig_noise is None, (
+        "Wilson floor must refuse elimination at 0/4 vs 2/4 — CIs overlap, "
+        "gap is binomial noise. Got eliminated."
+    )
 
 
 def test_pobb_dominance_aborts_when_catch_up_impossible():

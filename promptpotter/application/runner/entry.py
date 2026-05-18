@@ -19,6 +19,9 @@ from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation import apply_fork_payload_to_osp
+from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+    cleanup_stub_fork_if_empty,
+)
 from promptpotter.application.origin import (
     CampaignOrigin,
     extract_campaign_origin,
@@ -234,6 +237,24 @@ async def run_optimization(
             resumed_from_round=session.state.resumed_from_round,
         )
     _finalize_run(session, observers, cycle_result)
+
+    # Stub-fork cleanup. If this run forked during init (divergence
+    # detection on resume) and the fork never completed a round, the
+    # mint left an empty dir on disk — delete it now so an interrupt
+    # between fork-mint and round-1-commit doesn't accumulate stubs
+    # over time. The HITL fork path goes through the API endpoint and
+    # never reaches this funnel; the operator owns those.
+    forked_in_this_run = (
+        pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
+    )
+    if forked_in_this_run and cycle_result.n_rounds == 0:
+        cleanup_stub_fork_if_empty(
+            campaign_store=session.store.campaigns,
+            tenant_id=session.store.tenant_id,
+            session_id=session.session_id or "",
+            cycle_id=session.state.cycle_id,
+            parent_cycle_id=pre_loop_cycle_id,
+        )
     return cycle_result
 
 

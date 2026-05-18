@@ -136,9 +136,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict | None:
     if not exp_cfg.heatmap_show_archive_candidates:
         live_cids = {cid for rr in cycle.rounds for cid in rr.all_candidate_results}
         if live_cids:
-            workspace_artifact = _filter_artifact_to_live_candidates(
-                workspace_artifact, live_cids
-            )
+            workspace_artifact = _filter_artifact_to_live_candidates(workspace_artifact, live_cids)
 
     with graceful("hard_samples_campaign.json write failed"):
         write_json(cycle_dir / "hard_samples_campaign.json", campaign_artifact)

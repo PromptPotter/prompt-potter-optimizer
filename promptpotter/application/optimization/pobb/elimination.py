@@ -30,7 +30,11 @@ from promptpotter.application.scoring.metrics import count_degraded_samples
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
-from promptpotter.shared.statistics import pobb_should_stop, posterior_best_probabilities
+from promptpotter.shared.statistics import (
+    pobb_should_stop,
+    posterior_best_probabilities,
+    wilson_overlap,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
@@ -583,6 +587,20 @@ class PoBBCheck:
             )
 
         if not pobb_should_stop(p_best_current, self.epsilon):
+            return None
+
+        # Separability floor — don't eliminate while the candidate's
+        # hit-rate CI overlaps the leader's. At the picker's preferred
+        # samples (high seed-vs-population discrimination, p ≈ 0.5),
+        # binomial noise alone produces 0/4 vs 2/4 outcomes for arms
+        # that are actually equivalent. The Chernoff-info picker is
+        # asymptotic (Garivier-Kaufmann 2016); at small n the posterior
+        # gate can fire on noise before the CI separates. The floor
+        # keeps the picker honest until the binomial actually splits
+        # the two arms. See ``project_pobb_separability_floor`` memory.
+        if leader_id in paired_priors and wilson_overlap(
+            scores, paired_priors[leader_id], alpha=0.05
+        ):
             return None
 
         return _eliminate(

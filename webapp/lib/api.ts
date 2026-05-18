@@ -65,7 +65,13 @@ export interface DatasetItem {
   ground_truth: string;
   task?: string | null;
   n_obs: number;
-  surprise: number;
+  // Miss-probability for an average candidate, sigmoid(δ_s) from Rasch.
+  // 0.5 prior for unmeasured samples. Drives the static-mode sort.
+  miss_prob: number;
+  // Chernoff information vs the seed prior. Drives the live PoBB
+  // sample-iteration order. null when scope=workspace (no seed concept
+  // across cycles) or when the sample has no measurement.
+  pick_score: number | null;
 }
 
 export interface DatasetPreview {

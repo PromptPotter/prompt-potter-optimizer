@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -233,45 +232,11 @@ class CleanupEmptyResponse(BaseModel):
     )
 
 
-# Stubs accumulate because the fork-creation paths (divergence + sweep +
-# operator HITL) mint the cycle directory BEFORE the first round runs;
-# an interrupt between dir-mint and first-round-run leaves the dir on
-# disk forever. Root-cause fix is a lazy-mint refactor in
-# ``application/optimization/resume_and_fork/`` and
-# ``application/sweep/sweep_runner.py``. Until that lands, the cleanup
-# endpoints below are how stubs get pruned.
-
-
-def _try_delete_stub_cycle(
-    cycle_id: str, store: Any, active_cid: str | None
-) -> tuple[bool, str]:
-    """Best-effort stub deletion with all five safety guards.
-
-    Returns ``(deleted, reason)``. When ``deleted=True``, ``reason`` is
-    empty. Used by both the single-cycle DELETE and the family batch
-    cleanup so the guards stay in lockstep.
-    """
-    cycle_dir = store.campaigns.campaign_dir(cycle_id)
-    index_path = cycle_dir / "index.json"
-    if not index_path.is_file():
-        return False, "not on disk"
-    if active_cid == cycle_id:
-        return False, "active cycle — switch first"
-    if root_cycle_id(cycle_id) == cycle_id:
-        return False, "family root — deletion is for sibling stubs only"
-    try:
-        index = json.loads(index_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return False, f"index.json unreadable: {exc}"
-    n_rounds = index.get("n_rounds", 0)
-    if not isinstance(n_rounds, int) or n_rounds != 0:
-        return False, f"n_rounds={n_rounds} — cycle ran real work"
-    for sub in ("forks", "sweeps", "diag"):
-        sub_dir = cycle_dir / sub
-        if sub_dir.is_dir() and any(sub_dir.iterdir()):
-            return False, f"has descendants under {sub}/"
-    shutil.rmtree(cycle_dir)
-    return True, ""
+# Stub-deletion guard lives on CampaignStore.try_delete_stub_cycle so
+# the orchestration cleanup (entry.py + sweep_runner.py) and the API
+# share one source of truth. The store method does NOT read the active
+# pointer — both callers wrap it with their own pointer policy
+# (API refuses when active matches; orchestration retargets first).
 
 
 @_active_router.delete("/cycles/{cycle_id}", response_model=DeleteCycleResponse)
@@ -279,27 +244,23 @@ async def delete_cycle(cycle_id: str, store: StoreDep) -> DeleteCycleResponse:
     """Delete a single stub cycle dir from disk.
 
     Refuses unless cycle exists, ``n_rounds == 0``, has no on-disk
-    children, isn't the active cycle, and isn't a family root. See
-    ``_try_delete_stub_cycle`` for the guard chain. Backed by
-    ``shutil.rmtree``; cross-cycle archives (``archive/measurements/``)
-    are untouched — they live above the per-cycle tree by design.
+    children, isn't the active cycle, and isn't a family root. The
+    n_rounds + descendants + root guards come from
+    ``CampaignStore.try_delete_stub_cycle``; the active-pointer guard
+    is enforced here so the API never silently retargets.
     """
     _, _, active_cid = read_active_pointer()
-    deleted, reason = _try_delete_stub_cycle(cycle_id, store, active_cid or None)
+    if active_cid == cycle_id:
+        raise HTTPException(409, f"refusing to delete {cycle_id}: active cycle — switch first")
+    deleted, reason = store.campaigns.try_delete_stub_cycle(cycle_id)
     if not deleted:
-        # "not on disk" is the only 404-shaped reason; everything else
-        # is a 409 (precondition failed).
         status = 404 if reason == "not on disk" else 409
         raise HTTPException(status, f"refusing to delete {cycle_id}: {reason}")
     return DeleteCycleResponse(cycle_id=cycle_id, deleted=True)
 
 
-@_active_router.post(
-    "/campaigns/{cycle_id}/cleanup-empty", response_model=CleanupEmptyResponse
-)
-async def cleanup_empty_stubs(
-    cycle_id: str, store: StoreDep
-) -> CleanupEmptyResponse:
+@_active_router.post("/campaigns/{cycle_id}/cleanup-empty", response_model=CleanupEmptyResponse)
+async def cleanup_empty_stubs(cycle_id: str, store: StoreDep) -> CleanupEmptyResponse:
     """Batch-delete every empty-stub sibling in the family rooted at *cycle_id*.
 
     Walks the family-root once, identifies all cycles whose own work is
@@ -328,14 +289,17 @@ async def cleanup_empty_stubs(
         for cid in family_ids:
             if cid in deleted_ids:
                 continue
-            deleted, reason = _try_delete_stub_cycle(cid, store, active_cid or None)
+            if cid == active_cid:
+                # Active-pointer guard — refuse here so the API's policy
+                # matches the single-cycle DELETE endpoint above.
+                if _pass == 1:
+                    skipped.append({"cycle_id": cid, "reason": "active cycle — switch first"})
+                continue
+            deleted, reason = store.campaigns.try_delete_stub_cycle(cid)
             if deleted:
                 deleted_ids.append(cid)
                 progress = True
             elif _pass == 1:
-                # Only record the reason on the final pass — the first
-                # pass's "has descendants" reasons get resolved by the
-                # second pass clearing the children.
                 skipped.append({"cycle_id": cid, "reason": reason})
         if not progress:
             break

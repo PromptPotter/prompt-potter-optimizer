@@ -24,6 +24,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.resume_and_fork import _mint_fork
+from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+    cleanup_stub_fork_if_empty,
+)
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkPayload, ForkTrigger, OperatorSweepFile
@@ -180,12 +183,10 @@ async def run_sweep_batch(
             issued_by=tenant_id,
             l1_layout=payload.l1_layout,
         )
-        # KNOWN BUG (interim cleanup workaround in webapp): _mint_fork
-        # creates the fork dir + index.json BEFORE we run anything for
-        # it. If this batch is interrupted between the mint here and
-        # the run-start below, the fork dir stays on disk forever as a
-        # stub (n_rounds=0). See `fork_siblings.py::_mint_fork` for the
-        # full diagnosis and the cleanup endpoint that prunes stubs.
+        # _mint_fork creates dir + index.json + ledger inheritance +
+        # active-pointer retarget up-front. The try/finally below
+        # guards against the dir surviving as a stub if the operator
+        # interrupts before _orch_run_optimization commits round 1.
         new_cycle_id = _mint_fork(
             store.campaigns,
             tenant_id,
@@ -196,49 +197,98 @@ async def run_sweep_batch(
             sweep_batch_id=batch_id,
             sweep_source_file=path.name,
         )
-        # _mint_fork retargeted the active pointer to new_cycle_id.
-        # Re-load context for this fork and build a fresh session bound to it.
-        fork_ctx = load_session(args)
-        fork_session = await init_services(
-            **fork_ctx.init_params,
-            tenant_id=tenant_id,
-            on_status=(lambda msg: logger.info(msg) if verbose else None),
-        )
-        fork_session.session_id = fork_ctx.session_id
-        fork_session.state.cycle_id = fork_ctx.cycle_id
-        # init_services builds the pipeline_schema but leaves
-        # session.pipeline_params empty until configure_and_apply_pipeline
-        # runs. Without this, the backend receives no per-node model
-        # override and falls back to its llm_defaults.
-        configure_and_apply_pipeline(
-            fork_session,
-            campaign_config,
-            log=logger.info if verbose else (lambda *_a, **_k: None),
-        )
-        logger.info(
-            "Sweep fork session bound: session_id=%s cycle_id=%s pp.llm_only.model=%s",
-            fork_session.session_id,
-            fork_session.state.cycle_id,
-            (fork_session.pipeline_params or {}).get("llm_only", {}).get("model"),
-        )
+        fork_result = None
+        try:
+            # _mint_fork retargeted the active pointer to new_cycle_id.
+            # Re-load context for this fork and build a fresh session bound to it.
+            fork_ctx = load_session(args)
+            fork_session = await init_services(
+                **fork_ctx.init_params,
+                tenant_id=tenant_id,
+                on_status=(lambda msg: logger.info(msg) if verbose else None),
+            )
+            fork_session.session_id = fork_ctx.session_id
+            fork_session.state.cycle_id = fork_ctx.cycle_id
+            # init_services builds the pipeline_schema but leaves
+            # session.pipeline_params empty until configure_and_apply_pipeline
+            # runs. Without this, the backend receives no per-node model
+            # override and falls back to its llm_defaults.
+            configure_and_apply_pipeline(
+                fork_session,
+                campaign_config,
+                log=logger.info if verbose else (lambda *_a, **_k: None),
+            )
+            logger.info(
+                "Sweep fork session bound: session_id=%s cycle_id=%s pp.llm_only.model=%s",
+                fork_session.session_id,
+                fork_session.state.cycle_id,
+                (fork_session.pipeline_params or {}).get("llm_only", {}).get("model"),
+            )
 
-        observers = observer_factory(fork_session, 0.0)
-        fork_result = await _orch_run_optimization(
-            train_data,
-            campaign_config,
-            session=fork_session,
-            observers=observers,
-            experiment_id=fork_ctx.state["experiment_id"],
-            task_context=fork_ctx.task_context,
-            sweep=True,
-            fork_payload=fork_payload,
-        )
+            observers = observer_factory(fork_session, 0.0)
+            fork_result = await _orch_run_optimization(
+                train_data,
+                campaign_config,
+                session=fork_session,
+                observers=observers,
+                experiment_id=fork_ctx.state["experiment_id"],
+                task_context=fork_ctx.task_context,
+                sweep=True,
+                fork_payload=fork_payload,
+            )
+        finally:
+            # Drop the fork dir if the run never produced its own
+            # round — catches Ctrl+C between mint and round-1-commit,
+            # mid-init crashes, and the operator changing their mind
+            # before round 1. ``run_optimization`` already finalised
+            # index.json before we get here so the n_rounds check reads
+            # the authoritative on-disk value.
+            n_rounds = fork_result.n_rounds if fork_result is not None else 0
+            if n_rounds == 0:
+                cleanup_stub_fork_if_empty(
+                    campaign_store=store.campaigns,
+                    tenant_id=tenant_id,
+                    session_id=root_ctx.session_id,
+                    cycle_id=new_cycle_id,
+                    parent_cycle_id=parent_cycle_id,
+                )
+
+        # Three outcomes:
+        #   crashed-in-init: fork_result is None (exception propagated
+        #     through finally; fork already cleaned up). Halt the batch.
+        #   cleaned:         fork_result.n_rounds == 0 (fork minted but
+        #     never produced a round; cleaned up in finally). Don't add
+        #     to new_cycle_ids — the dir is gone. Halt iff INTERRUPTED.
+        #   lived:           fork_result.n_rounds > 0. Record + continue.
+        if fork_result is None:
+            status_by_source[path.name] = "crashed"
+            logger.warning(
+                "Sweep fork init crashed for payload=%s; stub cleaned, halting batch",
+                path.name,
+            )
+            interrupted = True
+            break
+
+        if fork_result.n_rounds == 0:
+            stopped_by_operator = fork_result.stop_reason == StopReason.INTERRUPTED
+            status_by_source[path.name] = "interrupted" if stopped_by_operator else "cleaned"
+            logger.info(
+                "Sweep fork %s never ran a round (payload=%s, stop_reason=%s); cleaned up",
+                new_cycle_id,
+                path.name,
+                fork_result.stop_reason,
+            )
+            if stopped_by_operator:
+                interrupted = True
+                break
+            continue
+
         new_cycle_ids.append(new_cycle_id)
         if fork_result.stop_reason == StopReason.INTERRUPTED:
             # Ctrl+C inside _run_round_loop is caught + returned as
             # INTERRUPTED instead of propagating; without this break the
-            # batch silently rolls into the next fork and the operator has
-            # to Ctrl+C once per remaining payload.
+            # batch silently rolls into the next fork and the operator
+            # has to Ctrl+C once per remaining payload.
             status_by_source[path.name] = "interrupted"
             logger.warning(
                 "Sweep fork %d/%d interrupted: %s (payload=%s) — halting "

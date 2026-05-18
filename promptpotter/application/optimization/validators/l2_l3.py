@@ -352,8 +352,7 @@ def _check_situational_example_dangling_trigger(
     rules_proposed = source_output.get("l1_supplemental_rules_proposed")
     if isinstance(rules_proposed, list) and rules_proposed:
         rule_ids = {
-            getattr(r, "rule_id", None)
-            or (r.get("rule_id") if isinstance(r, dict) else None)
+            getattr(r, "rule_id", None) or (r.get("rule_id") if isinstance(r, dict) else None)
             for r in rules_proposed
         }
     elif opt_sp is not None:
@@ -426,8 +425,7 @@ def _check_supplemental_rule_duplicates_auto_trigger(
         score=0.0,
         evidence={
             "duplicates": [
-                {"rule_id": rid, "auto_trigger": atid, "jaccard": j}
-                for rid, atid, j in offenders
+                {"rule_id": rid, "auto_trigger": atid, "jaccard": j} for rid, atid, j in offenders
             ],
             "threshold": PARAPHRASE_REPEAT_JACCARD_THRESHOLD,
         },

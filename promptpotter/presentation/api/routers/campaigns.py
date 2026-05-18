@@ -399,9 +399,7 @@ def _extract_candidates(scoreboard: list[Any]) -> list[FamilyLineageCandidate]:
                 candidate_id=str(c.get("candidate_id") or ""),
                 label=str(c.get("label") or ""),
                 accuracy=(
-                    float(c["accuracy"])
-                    if isinstance(c.get("accuracy"), int | float)
-                    else None
+                    float(c["accuracy"]) if isinstance(c.get("accuracy"), int | float) else None
                 ),
                 rank=(int(c["rank"]) if isinstance(c.get("rank"), int) else None),
                 is_winner=bool(c.get("is_winner", False)),
@@ -410,9 +408,7 @@ def _extract_candidates(scoreboard: list[Any]) -> list[FamilyLineageCandidate]:
     return out
 
 
-def _fork_from_round_from_ledger(
-    parent_dir: Path, child_cycle_id: str
-) -> int | None:
+def _fork_from_round_from_ledger(parent_dir: Path, child_cycle_id: str) -> int | None:
     """Find the FORK_CUT record in *parent_dir* whose outcome is *child_cycle_id*.
 
     Final fallback when neither index.json::forked_from_round nor
@@ -489,9 +485,7 @@ async def get_family_lineage(store: StoreDep, cycle_id: str) -> FamilyLineageRes
                 FamilyLineageCycle(
                     cycle_id=cid,
                     sibling_kind=sibling_kind(cid),
-                    immediate_parent_cycle_id=(
-                        None if cid == root_id else root_id
-                    ),
+                    immediate_parent_cycle_id=(None if cid == root_id else root_id),
                     fork_from_round=None,
                     fork_from_candidate_id=None,
                     trigger="",
@@ -530,9 +524,7 @@ async def get_family_lineage(store: StoreDep, cycle_id: str) -> FamilyLineageRes
 
         from_candidate = fork_block.get("from_candidate")
         from_candidate_str = (
-            str(from_candidate)
-            if isinstance(from_candidate, str) and from_candidate
-            else None
+            str(from_candidate) if isinstance(from_candidate, str) and from_candidate else None
         )
 
         rounds_raw = index.get("rounds")
@@ -560,18 +552,12 @@ async def get_family_lineage(store: StoreDep, cycle_id: str) -> FamilyLineageRes
         # Drop pre-divergence rounds for forks whose rounds[] inherits
         # parent numbering — they'd visually duplicate parent's rounds in
         # the fork's lane.
-        rounds_out = _filter_post_divergence_rounds(
-            rounds_out, trigger, from_round
-        )
+        rounds_out = _filter_post_divergence_rounds(rounds_out, trigger, from_round)
 
         # Column offset per trigger — operator HITL restarts numbering at
         # 1 so its rounds need to shift right by the cut point; every
         # other trigger keeps parent numbering so offset stays 0.
-        col_offset = (
-            from_round
-            if trigger == "operator_hitl" and isinstance(from_round, int)
-            else 0
-        )
+        col_offset = from_round if trigger == "operator_hitl" and isinstance(from_round, int) else 0
 
         header_raw = index.get("header")
         header = header_raw if isinstance(header_raw, dict) else {}
