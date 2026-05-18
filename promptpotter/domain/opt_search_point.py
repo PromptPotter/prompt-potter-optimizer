@@ -180,6 +180,44 @@ class EvidenceGrounding(BaseModel):
     citation: str = Field(description="Short string naming the panel entry cited.")
 
 
+class L1SupplementalRule(BaseModel):
+    """One situational rule appended to L1's instruction next round.
+
+    Authored by L2 when the panels show a recurring L1 failure mode that
+    L1's static instruction does not address and the dispatch hub's
+    auto-trigger registry (`dispatch/hub/auto_rules.py::AUTO_RULES`)
+    does not already cover. Renders inline via the
+    ``l1_supplemental_rules`` dispatch-hub injection — the rule body
+    appears in L1's prompt prefixed with its ``rule_id`` and tagged with
+    the citation L2 used to motivate it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    rule_id: str = Field(min_length=1, max_length=40)
+    body: str = Field(min_length=20, max_length=400)
+    citation: str = Field(min_length=1, max_length=200)
+
+
+class L1SituationalExample(BaseModel):
+    """One worked example pinned to an active trigger.
+
+    Renders in L1's prompt only when ``trigger_id`` matches either an
+    auto-trigger that fired this round (PEAKED axis, runtime_failure,
+    chain_bind, continuous_envelope, latex_repair, l2_stall_diversity)
+    or the ``rule_id`` of a currently-authored
+    :class:`L1SupplementalRule`. Empty trigger ⇒ silent.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    trigger_id: str = Field(min_length=1, max_length=40)
+    parent_excerpt: str = Field(default="", max_length=300)
+    rejected: str = Field(default="", max_length=300)
+    accepted: str = Field(default="", max_length=300)
+    why: str = Field(default="", max_length=200)
+
+
 class WoundChannels(BaseModel):
     """Self-healing surface — the four wound channels plus the sticky L3→L2 note.
 
@@ -284,14 +322,31 @@ class OptSearchPoint(PromptTemplate):
     # forcing L2 to write a layout on every fire.
     l1_layout: L1Layout = Field(default_factory=default_l1_layout)
 
+    # Situational rules L2 appended to L1's instruction. Rendered inline by
+    # the ``l1_supplemental_rules`` dispatch-hub injection. Full-replace each
+    # L2 fire — L2 re-authors the list every fire (empty list = drop all
+    # prior L2-authored rules; auto-triggered rules from auto_rules.py still
+    # render independently when their triggers fire).
+    l1_supplemental_rules: list[L1SupplementalRule] = Field(default_factory=list)
+
+    # Worked examples pinned to active triggers. Same full-replace semantics
+    # as ``l1_supplemental_rules``. An entry whose ``trigger_id`` is not
+    # currently active (no auto-trigger AND no L2-authored rule with that ID)
+    # is silently filtered by the renderer.
+    l1_situational_examples: list[L1SituationalExample] = Field(default_factory=list)
+
     # Fields preserved across L2/L3 transitions via copy_memory_to.
     # L1's layout + L1 runtime overrides MUST be in here so L3-spawned
     # children inherit in-flight L2 surface edits instead of being
-    # silently merged from a stale OSP.
+    # silently merged from a stale OSP. Same for the L2-authored
+    # supplemental-rule / situational-example layers — they're stateful
+    # across L2 fires until L2 replaces them.
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
         "wounds",
         "l1_layout",
         "l1_overrides",
+        "l1_supplemental_rules",
+        "l1_situational_examples",
     )
 
     def copy_memory_to(self, target: OptSearchPoint) -> None:
@@ -450,6 +505,8 @@ __all__ = [
     "EvidenceGrounding",
     "FewShotExample",
     "IndividualLineage",
+    "L1SituationalExample",
+    "L1SupplementalRule",
     "OptSearchPoint",
     "PromptTemplate",
     "WoundChannels",

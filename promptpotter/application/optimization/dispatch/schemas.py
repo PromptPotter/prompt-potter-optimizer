@@ -44,7 +44,11 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
-from promptpotter.domain.opt_search_point import EVIDENCE_GROUNDING_FIELDS
+from promptpotter.domain.opt_search_point import (
+    EVIDENCE_GROUNDING_FIELDS,
+    L1SituationalExample,
+    L1SupplementalRule,
+)
 
 
 def _truncate(max_len: int):
@@ -68,6 +72,8 @@ __all__ = [
     "OPTIMIZER_RESPONSE_MODELS",
     "L1CritiqueOutput",
     "L1GenerateOutput",
+    "L1SituationalExample",
+    "L1SupplementalRule",
     "L1Variant",
     "L2ContextOutput",
     "L3PlanOutput",
@@ -229,6 +235,13 @@ class L2ContextOutput(BaseModel):
     :meth:`TaskDecomposition.merge`. ``l1_layout`` is a similarly
     flexible ``{slot: [placeholder, ...]}`` map validated downstream by
     :func:`validate_l1_layout`.
+
+    ``l1_supplemental_rules`` + ``l1_situational_examples`` are
+    full-replace layers that L2 re-authors every fire. Auto-triggered
+    rules (PEAKED, runtime_failure, chain_bind, continuous_envelope,
+    latex_repair, l2_stall_diversity) render independently via the
+    dispatch hub's auto-rules registry — L2 only adds rules that
+    auto-triggers don't already cover.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -238,6 +251,8 @@ class L2ContextOutput(BaseModel):
     axis_targeted: str = ""
     l1_layout: dict[str, list[str]] = Field(default_factory=dict)
     l1_overrides: dict[str, Any] = Field(default_factory=dict)
+    l1_supplemental_rules: list[L1SupplementalRule] = Field(default_factory=list, max_length=4)
+    l1_situational_examples: list[L1SituationalExample] = Field(default_factory=list, max_length=4)
     rationale: str = ""
 
 

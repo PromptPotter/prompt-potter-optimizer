@@ -50,13 +50,24 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
     layout_outcomes: list = []
     accepted_layout: L1Layout | None = None
     if proposed_layout is not None:
-        result = validate_l1_layout(proposed_layout, prior_layout=opt_sp.l1_layout)
-        layout_outcomes = list(result.outcomes)
-        if result.is_valid:
+        layout_result = validate_l1_layout(proposed_layout, prior_layout=opt_sp.l1_layout)
+        layout_outcomes = list(layout_result.outcomes)
+        if layout_result.is_valid:
             accepted_layout = proposed_layout
 
+    # Supplemental rules + situational examples: full-replace semantics — a
+    # non-empty list ⇒ replace the L2-authored layer; omitted / empty ⇒
+    # keep current (auto-triggered rules still render independently).
+    new_supplemental = list(raw.l1_supplemental_rules) if raw.l1_supplemental_rules else None
+    new_examples = list(raw.l1_situational_examples) if raw.l1_situational_examples else None
+
     failures = run_l2_output_validators(
-        {"task_context_proposed": proposed_tc, "task_context_applied": new_task_context},
+        {
+            "task_context_proposed": proposed_tc,
+            "task_context_applied": new_task_context,
+            "l1_supplemental_rules_proposed": new_supplemental,
+            "l1_situational_examples_proposed": new_examples,
+        },
         opt_sp,
     )
     failures.extend(layout_outcomes)
@@ -73,6 +84,8 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
         action=raw.action,
         axis_targeted=raw.axis_targeted,
         l1_layout=accepted_layout,
+        l1_supplemental_rules=new_supplemental,
+        l1_situational_examples=new_examples,
         l2_guard_breaches=failures,
         debug_prompt=prompt,
         debug_response=raw.model_dump(),
@@ -85,6 +98,10 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         osp.task_context = result.task_context
     if result.l1_layout is not None:
         osp.l1_layout = result.l1_layout
+    if result.l1_supplemental_rules is not None:
+        osp.l1_supplemental_rules = result.l1_supplemental_rules
+    if result.l1_situational_examples is not None:
+        osp.l1_situational_examples = result.l1_situational_examples
     osp.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
     cycle.escalation.record_l2_fired(
         best_accuracy=cycle.tracking.best_accuracy,
@@ -134,6 +151,14 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "param_changes_count": len(result.opt_search_point.l1_overrides),
         "task_context_changed": result.task_context is not None,
         "l1_layout_changed": result.l1_layout is not None,
+        "l1_supplemental_rules_n": (
+            len(result.l1_supplemental_rules) if result.l1_supplemental_rules is not None else None
+        ),
+        "l1_situational_examples_n": (
+            len(result.l1_situational_examples)
+            if result.l1_situational_examples is not None
+            else None
+        ),
         "changes_description": result.opt_search_point.lineage.changes_description or "",
         "action": result.action,
         "axis_targeted": result.axis_targeted,

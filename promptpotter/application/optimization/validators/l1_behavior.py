@@ -104,8 +104,25 @@ _WORD_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 
 def _variant_text_blob(variant: dict[str, Any]) -> str:
-    """All free-form variant text checks may scan against."""
-    parts = [str(variant.get("changes_description") or "")]
+    """All free-form variant text checks may scan against.
+
+    Includes changes_description plus the textual content of every mutation
+    slot the schema split exposes: ``prompt_fields_override`` (the six
+    PROMPT_STRING_FIELDS as a flat dict), ``task_context_override`` (the
+    two splice strings as a flat dict), and ``reasoning`` (LLM-side
+    rationale). The legacy ``pipeline_params_override`` walk is kept for
+    backward compatibility with any historic round dump where prompt
+    fields landed under a node — modern variants emit them under
+    ``prompt_fields_override`` instead.
+    """
+    parts = [
+        str(variant.get("changes_description") or ""),
+        str(variant.get("reasoning") or ""),
+    ]
+    for value in (variant.get("prompt_fields_override") or {}).values():
+        parts.append(str(value or ""))
+    for value in (variant.get("task_context_override") or {}).values():
+        parts.append(str(value or ""))
     pp = variant.get("pipeline_params_override") or {}
     for key, value in pp.items():
         if key in PROMPT_STRING_FIELDS or key in TASK_CONTEXT_OVERRIDES:
@@ -280,19 +297,33 @@ def _check_evidence_grounding_present(round_dict: dict[str, Any], ctx: CheckCont
 
 
 def _check_not_only_param_variants(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
-    """≥1 variant per round must mutate a ``PROMPT_STRING_FIELDS`` field."""
+    """≥1 variant per round must mutate a prompt-field axis.
+
+    A variant counts as touching a prompt-field axis when ANY of these
+    is true:
+      - ``prompt_fields_override`` is non-empty (canonical slot since the
+        schema split — keys are PROMPT_STRING_FIELDS members),
+      - ``pipeline_params_override`` carries a key that's a prompt-field
+        name (legacy / belt-and-braces — modern variants don't land here).
+    """
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("not_only_param_variants", True, "no variants emitted")
 
     prompt_field_set = set(PROMPT_STRING_FIELDS)
     for v in variants:
+        if v.get("prompt_fields_override"):
+            return CheckResult(
+                "not_only_param_variants",
+                True,
+                "≥1 variant mutates a prompt-field axis (prompt_fields_override)",
+            )
         pp = v.get("pipeline_params_override") or {}
         if any(k in prompt_field_set for k in pp):
             return CheckResult(
                 "not_only_param_variants",
                 True,
-                "≥1 variant mutates a prompt field",
+                "≥1 variant mutates a prompt-field axis (legacy pipeline_params_override path)",
             )
     return CheckResult(
         "not_only_param_variants",

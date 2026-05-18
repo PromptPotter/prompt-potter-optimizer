@@ -20,7 +20,7 @@
       "zero_signal_filter_enabled": true,
       "elimination_n_min": 4,
       "pobb_epsilon": 0.10,
-      "pobb_predictable_tail_delta": 0.4,
+      "pobb_predictable_tail_delta": 0.8,
       "pobb_predictable_tail_boost": 5.0,
       "exploration": {
         "seed_initial_scoring_set_from_archive": true,

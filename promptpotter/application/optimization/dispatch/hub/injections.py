@@ -10,8 +10,14 @@ To add an input to any prompt, add an entry here. Anything else is drift.
 from __future__ import annotations
 
 import json
+import re
+from collections import defaultdict
 from typing import Any
 
+from promptpotter.application.optimization.dispatch.hub.auto_rules import (
+    AUTO_RULES,
+    BUILTIN_EXAMPLES,
+)
 from promptpotter.application.optimization.dispatch.hub.bundle import (
     AXES_ENUM_PREVIEW,
     INTRACTABLE_SAMPLES_RENDER_CAP,
@@ -28,6 +34,17 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.l1_layout import L1_POSSIBLE
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+
+# Param-axis names recognised by the continuous_envelope auto-trigger.
+# When L1_CRITIQUE.suggested_axes names one of these, render the envelope rule.
+_NUMERIC_PARAM_AXES: frozenset[str] = frozenset(
+    {"temperature", "max_tokens", "top_p", "reasoning_effort"}
+)
+
+# LaTeX corruption markers — match 'oxed{' NOT preceded by '\b' (legitimate
+# `\boxed{` is preceded by '\b' so the lookbehind skips it) OR 'athematical'
+# at a word boundary NOT preceded by 'm' (so 'mathematical' is skipped).
+_LATEX_CORRUPTION_RE = re.compile(r"(?<!\\b)oxed\{|(?<![a-zA-Z])athematical")
 
 
 def _rf_matches_current_config(rf: RuntimeFailure, pipeline_params: dict[str, dict]) -> bool:
@@ -300,39 +317,31 @@ def _r_runtime_failures(b: InjectionBundle) -> str:
     being heard right now.
     """
     runtime_failures = b.opt_sp.wounds.runtime_failures
-    parts: list[str] = []
-
-    if runtime_failures:
-        round_num = b.cycle_slice.round_num
-        cutoff = round_num - RUNTIME_FAILURE_RECENCY_WINDOW + 1
-        new_rfs = [rf for rf in runtime_failures if rf.first_seen_round == round_num]
-        acc_rfs = [
-            rf
-            for rf in runtime_failures
-            if rf.first_seen_round != round_num
-            and rf.first_seen_round >= cutoff
-            and _rf_matches_current_config(rf, b.cycle_slice.pipeline_params)
-        ]
-        dropped = sum(1 for rf in runtime_failures if rf.first_seen_round < cutoff)
-        sec = ["RUNTIME FAILURES (candidates ran but degraded):"]
-        if new_rfs:
-            sec.append("  NEW (this round):")
-            for rf in new_rfs:
-                sec.extend(_format_runtime_failure_lines(rf))
-        if acc_rfs:
-            sec.append(f"  ACCUMULATED ({len(acc_rfs)} surviving from earlier rounds):")
-            for rf in acc_rfs:
-                sec.extend(_format_runtime_failure_lines(rf))
-        if dropped:
-            sec.append(
-                f"  … {dropped} older failures suppressed "
-                f"(first-seen >{RUNTIME_FAILURE_RECENCY_WINDOW} rounds ago)."
-            )
-        parts.append("\n".join(sec))
-
-    if not parts:
+    if not runtime_failures:
         return ""
-    return fence_untrusted("\n\n".join(parts))
+    round_num = b.cycle_slice.round_num
+    cutoff = round_num - RUNTIME_FAILURE_RECENCY_WINDOW + 1
+    new_rfs = [rf for rf in runtime_failures if rf.first_seen_round == round_num]
+    acc_rfs = [
+        rf
+        for rf in runtime_failures
+        if rf.first_seen_round != round_num
+        and rf.first_seen_round >= cutoff
+        and _rf_matches_current_config(rf, b.cycle_slice.pipeline_params)
+    ]
+    dropped = sum(1 for rf in runtime_failures if rf.first_seen_round < cutoff)
+    if not (new_rfs or acc_rfs or dropped):
+        return ""
+    sec = ["RUNTIME FAILURES (do not re-propose):"]
+    if new_rfs:
+        sec.append("  NEW:")
+        sec.extend(_format_runtime_failure_group(new_rfs))
+    if acc_rfs:
+        sec.append(f"  ACCUMULATED ({len(acc_rfs)} from earlier rounds):")
+        sec.extend(_format_runtime_failure_group(acc_rfs))
+    if dropped:
+        sec.append(f"  … {dropped} older suppressed (>{RUNTIME_FAILURE_RECENCY_WINDOW} rounds).")
+    return fence_untrusted("\n".join(sec))
 
 
 def _r_l2_guard_breaches(b: InjectionBundle) -> str:
@@ -368,23 +377,74 @@ def _r_l3_guard_breaches(b: InjectionBundle) -> str:
 
 
 def _format_runtime_failure_lines(rf: Any) -> list[str]:
-    """Two-line render of one RuntimeFailure for ``runtime_failures``.
+    """Two-line render of one RuntimeFailure.
 
-    Each entry is prefixed with ``BLOCKED — already proven to fail:`` to
-    cue the L1 LLM that this is a hard signal, not background context.
-    The HARD BLOCKS section of the L1_GENERATE meta-prompt cites this
-    block by name (``KNOWN-FAILING CONFIGS`` rule).
+    Used for single-entry groups; multi-entry groups collapse via
+    :func:`_format_runtime_failure_group` to keep small-model prompts lean.
     """
     rate_pct = round(float(rf.degraded_rate) * 100)
     cfg_parts = [f"{k}={v}" for k, v in (rf.observed_config or {}).items() if k != "prompt"]
     cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
     label = (rf.candidate_label or "")[:60]
     head = (
-        f"    BLOCKED — already proven to fail: {label} — {rate_pct}% degraded on {rf.total_scored}, dom={rf.dominant_warning}"
+        f"    BLOCKED: {label} — {rate_pct}% degraded on {rf.total_scored}, dom={rf.dominant_warning}"
         if label
-        else f"    BLOCKED — already proven to fail: {rf.dominant_warning} — {rate_pct}% degraded on {rf.total_scored}"
+        else f"    BLOCKED: {rf.dominant_warning} — {rate_pct}% degraded on {rf.total_scored}"
     )
-    return [head, f"      observed_config: {cfg_str}"]
+    return [head, f"      cfg: {cfg_str}"]
+
+
+def _format_runtime_failure_group(rfs: list[Any]) -> list[str]:
+    """Cluster RFs by (dominant_warning, provider, model); compact-render clusters of 2+.
+
+    Each accumulated failure carries the same warning + same provider/model on
+    different param-axis values is one discovery, not five. Rendering each as
+    its own two-line entry wastes ~70% of the runtime_failures block on small
+    models. We group, keep one representative label, and list the varying
+    params with their distinct values.
+
+    Single-entry groups fall through to :func:`_format_runtime_failure_lines`
+    unchanged.
+    """
+    clusters: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
+    for rf in rfs:
+        cfg = rf.observed_config or {}
+        key = (
+            rf.dominant_warning or "",
+            str(cfg.get("provider", "")),
+            str(cfg.get("model", "")),
+        )
+        clusters[key].append(rf)
+
+    out: list[str] = []
+    for (warning, provider, model), group in clusters.items():
+        if len(group) == 1:
+            out.extend(_format_runtime_failure_lines(group[0]))
+            continue
+        backend = f"{provider}/{model}" if (provider or model) else "(backend n/a)"
+        out.append(f"    BLOCKED x{len(group)} — dom={warning}, model={backend}")
+        label = next((rf.candidate_label for rf in group if rf.candidate_label), "")[:80]
+        if label:
+            out.append(f'      e.g. "{label}"')
+        varied: dict[str, set[str]] = defaultdict(set)
+        for rf in group:
+            for k, v in (rf.observed_config or {}).items():
+                if k in ("provider", "model", "prompt"):
+                    continue
+                varied[k].add(str(v))
+        varied_parts: list[str] = []
+        for k, vs in varied.items():
+            if len(vs) == 1:
+                varied_parts.append(f"{k}={next(iter(vs))}")
+                continue
+            try:
+                sorted_vs = sorted(vs, key=float)
+            except (ValueError, TypeError):
+                sorted_vs = sorted(vs)
+            varied_parts.append(f"{k}∈{{{','.join(sorted_vs)}}}")
+        if varied_parts:
+            out.append(f"      varied: {', '.join(varied_parts)}")
+    return out
 
 
 def _r_task_context(b: InjectionBundle) -> str:
@@ -446,21 +506,21 @@ def format_l1_critique_for_prompt(critique: dict, pipeline_schema: Any = None) -
     if s := critique.get("summary"):
         parts.append(s)
     if pos := critique.get("positive_critique"):
-        parts.append(f"Patterns working (preserve next round): {pos}")
+        parts.append(f"Working: {pos}")
     if neg := critique.get("negative_critique"):
-        parts.append(f"Failure modes still open (beyond priority_fix): {neg}")
+        parts.append(f"Open: {neg}")
     if pf := critique.get("priority_fix"):
-        parts.append(f"Priority fix: {pf}")
+        parts.append(f"Fix: {pf}")
     sa = critique.get("suggested_axes") or []
     if sa:
         if pipeline_schema is not None:
             valid = _valid_axis_set(pipeline_schema)
             sa = [a for a in sa if a in valid]
         if sa:
-            parts.append(f"Suggested axes: {', '.join(sa)}")
+            parts.append(f"Axes: {', '.join(sa)}")
     if fh := critique.get("failure_highlights"):
-        parts.append("Key failures:")
-        for h in fh[:5]:
+        parts.append("Failures:")
+        for h in fh[:3]:
             parts.append(f"  {h}")
     return "\n".join(parts)
 
@@ -498,11 +558,7 @@ _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
     "exhausted_axes",
     "persistent_failures",
     "failure_clusters",
-    "bottleneck_distribution",
     "failure_group_insights",
-    "dead_queries",
-    "discriminating_queries",
-    "volatile_queries",
     "improvement_attribution",
 )
 
@@ -665,6 +721,107 @@ def _r_intractable_samples(b: InjectionBundle) -> str:
     return fence_untrusted("\n".join(lines))
 
 
+def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
+    """Walk the deterministic auto-trigger conditions in fixed order.
+
+    The order is the order the rules render in L1's prompt. Each clause
+    is a cheap read off the bundle — no allocation beyond the small
+    intermediate strings.
+    """
+    triggers: list[str] = []
+    if b.axes is not None and b.axes.peaked_axes():
+        triggers.append("peaked_axis")
+    if b.opt_sp.wounds.runtime_failures:
+        triggers.append("runtime_failure")
+    sa = (b.digest.critique or {}).get("suggested_axes") or []
+    if any(a in _NUMERIC_PARAM_AXES for a in sa):
+        triggers.append("continuous_envelope")
+    key_challenges = b.opt_sp.task_context.key_challenges or ""
+    if "targeting L1 axis" in key_challenges:
+        triggers.append("chain_bind")
+    if b.opt_sp.wounds.l2_guard_breaches:
+        triggers.append("l2_stall_diversity")
+    if _LATEX_CORRUPTION_RE.search(b.opt_sp.render()):
+        triggers.append("latex_repair")
+    return triggers
+
+
+def _r_l1_supplemental_rules(b: InjectionBundle) -> str:
+    """Auto-triggered situational rules + L2-authored rules.
+
+    Renders each active auto-trigger's canonical rule body (from
+    :data:`AUTO_RULES`) followed by every L2-authored
+    :class:`L1SupplementalRule` on ``opt_sp.l1_supplemental_rules`` with
+    its citation in brackets. Returns empty when neither source has
+    anything to say — variable absent ⇒ L1's instruction omits the
+    block entirely.
+    """
+    rendered: list[tuple[str, str]] = []
+    for trigger_id in _detect_auto_triggers(b):
+        body = AUTO_RULES.get(trigger_id)
+        if body:
+            rendered.append((trigger_id, body))
+    for rule in b.opt_sp.l1_supplemental_rules:
+        body = f"{rule.body} [citation: {rule.citation}]"
+        rendered.append((rule.rule_id, body))
+    if not rendered:
+        return ""
+    lines = ["SITUATIONAL RULES (apply only when the cited evidence is present):"]
+    for trigger_id, body in rendered:
+        lines.append(f"  • [{trigger_id}] {body}")
+    return "\n".join(lines)
+
+
+def _r_l1_situational_examples(b: InjectionBundle) -> str:
+    """Built-in + L2-authored worked examples for currently-active triggers.
+
+    L2-authored examples whose ``trigger_id`` matches neither an
+    auto-trigger that fired this round nor a currently-authored
+    supplemental rule are silently filtered — the example would land in
+    L1's prompt without the rule it illustrates, which is worse than
+    omitting it.
+
+    When the same ``trigger_id`` exists in both built-ins and L2-authored
+    entries, L2's entry wins (overrides the built-in).
+    """
+    auto_triggers = _detect_auto_triggers(b)
+    l2_rule_ids = {r.rule_id for r in b.opt_sp.l1_supplemental_rules}
+    active = set(auto_triggers) | l2_rule_ids
+    l2_example_triggers = {ex.trigger_id for ex in b.opt_sp.l1_situational_examples}
+
+    blocks: list[str] = []
+    for trigger_id in auto_triggers:
+        if trigger_id in l2_example_triggers:
+            continue  # L2's entry overrides the built-in
+        builtin = BUILTIN_EXAMPLES.get(trigger_id)
+        if builtin:
+            blocks.append(_format_example(trigger_id, builtin))
+    for l2_ex in b.opt_sp.l1_situational_examples:
+        if l2_ex.trigger_id not in active:
+            continue
+        blocks.append(_format_example(l2_ex.trigger_id, l2_ex.model_dump()))
+    if not blocks:
+        return ""
+    return "WORKED EXAMPLES:\n" + "\n".join(blocks)
+
+
+def _format_example(trigger_id: str, ex: dict) -> str:
+    """Compact worked-example block — trigger header + ✗/✓/→ lines.
+
+    Parent excerpt is dropped: it almost always duplicates the rule body
+    rendered immediately above in SITUATIONAL RULES. The ✗/✓/→ symbols
+    replace verbose REJECTED/ACCEPTED/Why labels for small-model legibility.
+    """
+    lines = [f"  [{trigger_id}]"]
+    if rej := (ex.get("rejected") or "").strip():
+        lines.append(f"    ✗ {rej}")
+    if acc := (ex.get("accepted") or "").strip():
+        lines.append(f"    ✓ {acc}")
+    if why := (ex.get("why") or "").strip():
+        lines.append(f"    → {why}")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Signal registry — lookup by name from layouts / templates / fill_*.
 # ---------------------------------------------------------------------------
@@ -767,6 +924,22 @@ INJECTIONS: dict[str, _Injection] = {
         InjectionKind.MEASUREMENT,
         _r_intractable_samples,
         "Cumulative cycle-wide miss set — samples no candidate has solved yet this cycle.",
+    ),
+    "l1_supplemental_rules": _Injection(
+        "l1_supplemental_rules",
+        InjectionKind.DIRECTIVE,
+        _r_l1_supplemental_rules,
+        "Situational rules appended to L1's instruction — auto-triggered from "
+        "bundle state (PEAKED axes, runtime failures, chain-bind, continuous-axis, "
+        "L2 stall, LaTeX corruption) plus L2-authored entries on opt_sp.",
+    ),
+    "l1_situational_examples": _Injection(
+        "l1_situational_examples",
+        InjectionKind.DIRECTIVE,
+        _r_l1_situational_examples,
+        "Worked examples pinned to currently-active triggers — built-ins shipped "
+        "in auto_rules.py plus L2-authored entries on opt_sp. Examples whose "
+        "trigger is not active this round are silently filtered.",
     ),
 }
 

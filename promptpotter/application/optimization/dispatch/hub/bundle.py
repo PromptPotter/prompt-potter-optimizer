@@ -30,8 +30,8 @@ if TYPE_CHECKING:
 
 # Module-level format constants shared across renderers.
 AXES_ENUM_PREVIEW = 4
-NEAR_MISS_RENDER_CAP = 10
-SAMPLE_RENDER_CAP = 5
+NEAR_MISS_RENDER_CAP = 6
+SAMPLE_RENDER_CAP = 3
 FAILURE_WARNING_PREVIEW = 1
 PIPELINE_PARAM_CATALOGUE_MODEL_CAP = 8
 # Caps for the trajectory-memory panels — keep the cycle-wide miss list

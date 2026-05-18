@@ -104,7 +104,15 @@ async def l1_generate(
 
     bundle = build_bundle(cycle)
     template = DispatchHub.fill_l1(load_optimizer_prompt("l1_generate"), opt_sp.l1_layout, bundle)
-    prompt_vars: dict[str, str] = {"n_variants": str(n_variants)}
+    # L1's instruction slot carries {{l1_supplemental_rules}} +
+    # {{l1_situational_examples}} placeholders (registered injections, but
+    # filled here because fill_l1 only walks L1_LAYOUT_SLOTS and instruction
+    # isn't one). compile_prompt substitutes via kwargs.
+    prompt_vars: dict[str, str] = {
+        "n_variants": str(n_variants),
+        "l1_supplemental_rules": DispatchHub.render("l1_supplemental_rules", bundle),
+        "l1_situational_examples": DispatchHub.render("l1_situational_examples", bundle),
+    }
 
     output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
     try:

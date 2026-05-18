@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING, Literal
 
 from promptpotter.application.optimization.dispatch.llm_call import run_optimizer_node
 from promptpotter.domain.l1_layout import L1Layout
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import (
+    L1SituationalExample,
+    L1SupplementalRule,
+    OptSearchPoint,
+)
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm import LLMClientBase
@@ -56,6 +60,11 @@ class TransitionResult:
     action: OptimizerAction = "normal_round"
     axis_targeted: str = ""
     l1_layout: L1Layout | None = None
+    # L2 may also full-replace the L1 supplemental-rules + situational-examples
+    # layers. ``None`` ⇒ keep current (L2 didn't author this fire); a list
+    # (including ``[]``) ⇒ replace. The driver only writes when not None.
+    l1_supplemental_rules: list[L1SupplementalRule] | None = None
+    l1_situational_examples: list[L1SituationalExample] | None = None
     l2_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     debug_prompt: str = ""
