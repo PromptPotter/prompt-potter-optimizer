@@ -14,6 +14,8 @@ model is configured for the node.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import functools
 import hashlib
 import json
@@ -30,7 +32,11 @@ from promptpotter.application.optimization.dispatch.schemas import (
 )
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.run_records import LLMCallRecord, LLMCallStartRecord
+from promptpotter.domain.run_records import (
+    LLMCallProgressRecord,
+    LLMCallRecord,
+    LLMCallStartRecord,
+)
 from promptpotter.infrastructure.llm import (
     MAX_429_ATTEMPTS,
     LLMClientBase,
@@ -120,6 +126,44 @@ def get_optimizer_schema() -> PipelineSchema:
 
 
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
+
+
+HEARTBEAT_INTERVAL_S = 15.0
+"""Seconds between in-flight progress ticks.
+
+15s is a compromise: short enough that the operator sees a fresh
+counter several times during a typical 60-120s optimizer call, long
+enough that 5-15s critique calls finish without ever emitting one. The
+ledger pays one append per tick - at four optimizer calls/round and
+~90s average call duration that's ~24 records/round, negligible."""
+
+
+async def _heartbeat(
+    ledger: CycleEventLog,
+    *,
+    call_id: str,
+    node: str,
+    round_num: int | None,
+    start_monotonic: float,
+) -> None:
+    """Periodically append :class:`LLMCallProgressRecord` while a call is open.
+
+    Cancelled by the ``finally`` block in :func:`llm_call` when the SDK
+    call returns (success, last 429 retry, or raise). The
+    :class:`asyncio.CancelledError` is swallowed at the cancel site so
+    cancellation looks like a clean exit.
+    """
+    while True:
+        await asyncio.sleep(HEARTBEAT_INTERVAL_S)
+        elapsed = time.monotonic() - start_monotonic
+        ledger.append(
+            LLMCallProgressRecord(
+                call_id=call_id,
+                node=node,
+                round=round_num,
+                elapsed_s=elapsed,
+            )
+        )
 
 
 def _ledger_response_payload(response: LLMResponse) -> Any:
@@ -220,6 +264,7 @@ async def llm_call(
         duration_s = round(time.monotonic() - _t0, 2)
         logger.debug("OptimizerCallCache hit for %s (%s)", node or "llm_call", cache_key)
     else:
+        prompt_chars = sum(len(m.get("content") or "") for m in messages)
         if ledger is not None:
             ledger.append(
                 LLMCallStartRecord(
@@ -229,53 +274,78 @@ async def llm_call(
                     candidate_idx=candidate_idx,
                     model=merged.get("model"),
                     started_at_ms=int(time.time() * 1000),
+                    prompt_chars=prompt_chars,
                 )
             )
         # Pre-call info line — surfaces what we're waiting on so the operator
         # can distinguish "in-flight LLM call" from "frozen process" without
         # opening dashboard.json. Lands in terminal AND output.log.
-        prompt_chars = sum(len(m.get("content") or "") for m in messages)
         logger.info(
             "→ optimizer call: %s · %s · %d-char prompt",
             node or "llm_call",
             merged.get("model") or "(default)",
             prompt_chars,
         )
+        # Heartbeat task — appends LLMCallProgressRecord every
+        # HEARTBEAT_INTERVAL_S so the CLI display + webapp dashboard
+        # show a live elapsed counter while the SDK call blocks for
+        # 30-200s. Cancelled on completion (any path) by the finally
+        # block below; short calls under HEARTBEAT_INTERVAL_S never tick.
+        heartbeat_task: asyncio.Task[None] | None = None
+        if ledger is not None:
+            heartbeat_task = asyncio.create_task(
+                _heartbeat(
+                    ledger,
+                    call_id=call_id,
+                    node=node or "llm_call",
+                    round_num=round_num,
+                    start_monotonic=_t0,
+                )
+            )
         # 429 honor-Retry-After loop, bounded. Server sets the header per RFC 7231;
         # if missing or attempts run out, surface the SDK exception unchanged.
-        for attempt in range(MAX_429_ATTEMPTS):
-            try:
-                response = await llm_client.chat(
-                    messages=messages,
-                    model=merged.get("model"),
-                    temperature=merged["temperature"],
-                    max_tokens=merged.get("max_tokens"),
-                    response_model=response_model,
-                    response_schema=response_schema,
-                )
-                break
-            except Exception as exc:
-                if getattr(exc, "status_code", None) != 429:
-                    raise
-                resp = getattr(exc, "response", None)
-                headers = getattr(resp, "headers", None) if resp is not None else None
-                body = getattr(resp, "text", None) if resp is not None else None
-                if body is None:
-                    body = str(exc)
-                wait = parse_retry_after(headers)
-                if wait is None or wait <= 0 or attempt == MAX_429_ATTEMPTS - 1:
-                    raise
-                kind = diagnose_rate_limit_scope(headers, body)
-                label = node or "llm_call"
-                logger.warning(
-                    "Rate limit on %s [%s] (attempt %d/%d); waiting %.1fs",
-                    label,
-                    kind,
-                    attempt + 1,
-                    MAX_429_ATTEMPTS,
-                    wait,
-                )
-                await wait_with_countdown(wait + 1.0, f"{label} {kind}")
+        try:
+            for attempt in range(MAX_429_ATTEMPTS):
+                try:
+                    response = await llm_client.chat(
+                        messages=messages,
+                        model=merged.get("model"),
+                        temperature=merged["temperature"],
+                        max_tokens=merged.get("max_tokens"),
+                        response_model=response_model,
+                        response_schema=response_schema,
+                    )
+                    break
+                except Exception as exc:
+                    if getattr(exc, "status_code", None) != 429:
+                        raise
+                    resp = getattr(exc, "response", None)
+                    headers = getattr(resp, "headers", None) if resp is not None else None
+                    body = getattr(resp, "text", None) if resp is not None else None
+                    if body is None:
+                        body = str(exc)
+                    wait = parse_retry_after(headers)
+                    if wait is None or wait <= 0 or attempt == MAX_429_ATTEMPTS - 1:
+                        raise
+                    kind = diagnose_rate_limit_scope(headers, body)
+                    label = node or "llm_call"
+                    logger.warning(
+                        "Rate limit on %s [%s] (attempt %d/%d); waiting %.1fs",
+                        label,
+                        kind,
+                        attempt + 1,
+                        MAX_429_ATTEMPTS,
+                        wait,
+                    )
+                    await wait_with_countdown(wait + 1.0, f"{label} {kind}")
+        finally:
+            # Cancel the heartbeat whether the call succeeded or raised —
+            # an in-flight task would otherwise survive the function exit
+            # and keep appending progress records against a closed call.
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await heartbeat_task
 
         duration_s = round(time.monotonic() - _t0, 2)
 

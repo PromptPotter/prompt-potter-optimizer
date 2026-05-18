@@ -15,6 +15,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import (
+    LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
     PhaseRecord,
@@ -189,12 +190,37 @@ class LiveDisplay(DerivedView):
         Same record the dashboard projection consumes — no new ledger
         writes. ``_pending_calls`` indexes the call so the paired
         completion handler can compute and report wall-clock duration.
+
+        ``record.prompt_chars`` is on the line so the operator sees the
+        input size upfront — a 12k-char l1_generate vs an 800-char l3_plan
+        have very different latency expectations. Char count is shown
+        verbatim (not converted to tokens) because the tokenizer isn't
+        on this path; total tokens land on the completion line.
         """
         self._pending_calls[record.call_id] = record.started_at_ms
         model = record.model or "(default)"
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
-        self._write(f"  {DIM}↻ optimizer call: {node_label} · {model}{RESET}")
+        bits = [f"↻ optimizer call: {node_label} · {model}"]
+        if record.prompt_chars > 0:
+            bits.append(f"{record.prompt_chars:,}c prompt")
+        self._write(f"  {DIM}{' · '.join(bits)}{RESET}")
+
+    def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
+        """Render an elapsed-time heartbeat while an LLM call is in flight.
+
+        Fires every ``HEARTBEAT_INTERVAL_S`` (15s) for the duration of
+        the call, so the operator sees a live counter — `... 15s`, `...
+        30s`, `... 45s` — instead of staring at the static start line.
+        Cached replays short-circuit before the heartbeat coroutine
+        starts (in ``llm_call``), so this only fires for real network
+        round-trips. The pairing call_id isn't shown to keep the line
+        terse; node + round are enough for the operator to map the tick
+        back to the start line two lines above.
+        """
+        round_tag = f"r{record.round}" if record.round is not None else ""
+        node_label = f"{record.node}_{round_tag}" if round_tag else record.node
+        self._write(f"  {DIM}  · {node_label} still waiting · {record.elapsed_s:.0f}s{RESET}")
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
         """Surface optimizer LLM completion as a paired one-line CLI marker.
@@ -401,7 +427,8 @@ class LiveDisplay(DerivedView):
             )
 
     def on_sample_order_preview(self, preview: list[tuple[int, float]], n_priors: int) -> None:
-        """Print the hard-sample-sorter's next-3 picks for this candidate.
+        """Print PoBB's next-3 picks for this candidate by cross-candidate
+        discrimination (``p*(1-p)``, max 0.25 at 50/50 hit rate).
 
         Fires after ``on_candidate_started`` and before any sample
         scoring. Empty ``preview`` means the sorter had no observations
@@ -412,7 +439,7 @@ class LiveDisplay(DerivedView):
         if not preview:
             return
         prior_s = "" if n_priors == 1 else "s"
-        picks = ", ".join(f"#{sid:03d} (δ={delta:+.2f})" for sid, delta in preview)
+        picks = ", ".join(f"#{sid:03d} (disc={val:.3f})" for sid, val in preview)
         self._write(f"  {DIM}next samples:{RESET} {picks}  ({n_priors} candidate prior{prior_s})")
 
     def on_pobb_backfill(self, backfilled: dict[str, list[str]]) -> None:

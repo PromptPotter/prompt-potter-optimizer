@@ -24,6 +24,7 @@ __all__ = [
     "CycleRecord",
     "ForkPayload",
     "ForkTrigger",
+    "LLMCallProgressRecord",
     "LLMCallRecord",
     "LLMCallStartRecord",
     "OperatorSweepFile",
@@ -169,6 +170,35 @@ class LLMCallStartRecord(BaseModel):
     candidate_idx: int | None = None
     model: str | None = None
     started_at_ms: int
+    # Total characters across all message contents — surfaces the
+    # input-size mental model on the in-flight start line so the
+    # operator knows what they're waiting on (a 12k-char l1_generate
+    # vs a 800-char l3_plan have very different latency expectations).
+    # 0 only on records minted before this field existed.
+    prompt_chars: int = 0
+    timestamp: str = Field(default_factory=_utcnow_iso)
+
+
+class LLMCallProgressRecord(BaseModel):
+    """Periodic heartbeat appended while an LLM call is in flight.
+
+    Emitted by ``llm_call`` every ``HEARTBEAT_INTERVAL_S`` seconds while
+    the SDK call is blocked, so the CLI display and the dashboard's
+    ``in_flight.elapsed_s`` slot can show a live elapsed counter instead
+    of leaving the operator staring at the static start line for two
+    minutes. Pairs with :class:`LLMCallStartRecord` and
+    :class:`LLMCallRecord` via ``call_id``. Cached LLM responses
+    short-circuit before the heartbeat starts, so cache replays never
+    emit progress records.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["llm_call_progress"] = "llm_call_progress"
+    call_id: str
+    node: str
+    round: int | None = None
+    elapsed_s: float
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
@@ -216,6 +246,7 @@ class LLMCallRecord(BaseModel):
 # stable across additions.
 CycleRecord = Annotated[
     ResumeCheckpointRecord
+    | LLMCallProgressRecord
     | LLMCallRecord
     | LLMCallStartRecord
     | PhaseRecord

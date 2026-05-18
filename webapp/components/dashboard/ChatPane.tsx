@@ -5,6 +5,7 @@ import type { DatasetItem, HardSamplesScope, MeasurementDot } from "@/lib/api";
 import { TERMS } from "@/lib/terms";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
+import { ConfigMenu } from "@/components/dashboard/ConfigMenu";
 
 interface Props {
   cycleId: string | null;
@@ -208,9 +209,12 @@ export function ChatPane({
       </div>
 
       <div className="wf-hero">
-        <div className="wf-hero-status">
-          <span className="dot" />
-          <span>production · {accPct}</span>
+        <div className="wf-hero-status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <span className="dot" />
+            <span>production · {accPct}</span>
+          </div>
+          <ConfigMenu datasetName={datasetName} />
         </div>
         <div className="wf-hero-flow">
           <button
