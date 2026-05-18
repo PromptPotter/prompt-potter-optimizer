@@ -36,7 +36,8 @@ calling them out-of-order leaves the session under-wired.
 │    ├─ resolve cycle_id      (from override or content-hash)          │
 │    ├─ store.campaigns.load(cycle_id)                                 │
 │    ├─ rewind_to_round?      (when --from N)                          │
-│    ├─ HIT  → refresh hot-updateable config; resumed_from_round = N+1 │
+│    ├─ HIT  → resumed_from_round = N+1  (snapshot refresh lives in   │
+│    │           resume_with_divergence_check, classifier-driven)      │
 │    └─ MISS → store.create(...) at round 0; resumed_from_round = 1    │
 │    ↓                                                                │
 │  postcondition: cycle exists in store; resumed_from_round is next L1 │

@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CampaignConfig",
+    "DiffScope",
     "ExplorationConfig",
     "OptimizationConfig",
     "OptimizerLLMConfig",
@@ -31,6 +33,81 @@ __all__ = [
     "load_campaign_config",
     "run_preflight_checks",
 ]
+
+
+class DiffScope(StrEnum):
+    """How a CampaignConfig diff should be handled on resume.
+
+    - ``NONE``: no differences.
+    - ``POLICY_ONLY``: only decision-policy knobs differ (PoBB ε / boost / δ
+      / n_min, patience, thresholds, n_variants). Past per-sample
+      measurements and L1 candidates are still valid; past decision records
+      stay as the audit of what the policy decided at the time. New policy
+      governs unevaluated rounds. Safe to resume in-place — no fork.
+    - ``DATA_AFFECTING``: at least one field that influences the data trace
+      differs (JobSearchPoint inputs, scoring formula, optimizer LLM). Cached
+      measurements may not apply; resume must run divergence detection (and
+      fork if the operator opted into ``--fork-on-divergence``).
+    """
+
+    NONE = "none"
+    POLICY_ONLY = "policy_only"
+    DATA_AFFECTING = "data_affecting"
+
+
+# Classification of every CampaignConfig leaf path. Subtree entries (e.g.
+# ``("optimization", "exploration")``) apply to all descendants and stop the
+# diff walk at that depth. Unknown paths default to DATA_AFFECTING with a
+# warning — a newly-added knob is treated as data-affecting until classified.
+_FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
+    # Top-level
+    ("dataset_name",): "data",
+    ("sp_budget_ttest",): "policy",
+    ("exclude_nodes",): "data",
+    ("pipeline_overrides",): "data",
+    ("scoring",): "data",
+    # OptimizationConfig
+    ("optimization", "max_rounds"): "policy",
+    ("optimization", "l1_patience"): "policy",
+    ("optimization", "n_variants"): "policy",
+    ("optimization", "improvement_threshold"): "policy",
+    ("optimization", "l2_patience"): "policy",
+    ("optimization", "l3_patience"): "policy",
+    ("optimization", "degradation_threshold"): "policy",
+    ("optimization", "elimination_n_min"): "policy",
+    ("optimization", "pobb_epsilon"): "policy",
+    ("optimization", "pobb_predictable_tail_delta"): "policy",
+    ("optimization", "pobb_predictable_tail_boost"): "policy",
+    ("optimization", "improvement_significance"): "policy",
+    ("optimization", "zero_signal_filter_enabled"): "policy",
+    ("optimization", "forbidden_axes_strict"): "policy",
+    ("optimization", "exploration"): "policy",  # entire subtree
+    # OptimizerLLMConfig — changing the optimizer LLM provider or model would
+    # produce different L1/L2/L3 candidates for future rounds; treat as
+    # data-affecting so the operator gets a fork on lineage.
+    ("optimizer_llm", "provider"): "data",
+    ("optimizer_llm", "model"): "data",
+}
+
+
+def _diff_paths(
+    active: Any,
+    frozen: Any,
+    prefix: tuple[str, ...] = (),
+) -> list[tuple[str, ...]]:
+    """Walk active vs frozen and return paths where they differ.
+
+    Stops descending at any path registered in :data:`_FIELD_SCOPES` so that
+    subtree entries classify the whole subtree as one unit.
+    """
+    if prefix in _FIELD_SCOPES:
+        return [prefix] if active != frozen else []
+    if isinstance(active, dict) and isinstance(frozen, dict):
+        out: list[tuple[str, ...]] = []
+        for key in set(active.keys()) | set(frozen.keys()):
+            out.extend(_diff_paths(active.get(key), frozen.get(key), (*prefix, key)))
+        return out
+    return [prefix] if active != frozen else []
 
 
 class ExplorationConfig(BaseModel):
@@ -194,6 +271,37 @@ class CampaignConfig(BaseModel):
 
     optimization: OptimizationConfig
     optimizer_llm: OptimizerLLMConfig = Field(default_factory=OptimizerLLMConfig)
+
+    def classify_diff_against(self, frozen: dict) -> tuple[DiffScope, list[str]]:
+        """Classify the diff between this active config and a frozen snapshot.
+
+        Returns ``(scope, diffed_paths)`` where ``diffed_paths`` are
+        dot-strings suitable for logging. See :class:`DiffScope` for
+        semantics. Unknown leaf paths trigger a warning and classify as
+        DATA_AFFECTING (safe default).
+        """
+        active = self.model_dump(mode="json")
+        diffs = _diff_paths(active, frozen)
+        if not diffs:
+            return DiffScope.NONE, []
+        has_data = False
+        diff_strs: list[str] = []
+        for path in diffs:
+            scope = _FIELD_SCOPES.get(path)
+            if scope is None:
+                logger.warning(
+                    "classify_diff_against: unclassified config path %r — "
+                    "treating as DATA_AFFECTING. Add an entry to _FIELD_SCOPES "
+                    "in promptpotter/application/config.py to silence this.",
+                    ".".join(path),
+                )
+                has_data = True
+            elif scope == "data":
+                has_data = True
+            diff_strs.append(".".join(path))
+        if has_data:
+            return DiffScope.DATA_AFFECTING, diff_strs
+        return DiffScope.POLICY_ONLY, diff_strs
 
 
 def load_campaign_config(raw: dict | CampaignConfig) -> CampaignConfig:

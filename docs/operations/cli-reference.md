@@ -61,7 +61,7 @@ While `optimize` runs, the live in-flight round mirrors into `campaigns/{root_cy
 |---|---|
 | `--from <round>` | Rewind the active cycle to after round N before resuming |
 | `--no-divergence-check` | On resume, rescore but skip the decision-replay halt |
-| `--fork-on-divergence` | On divergence, mint a sibling cycle (with `parent_cycle_id`) and re-run the divergent round under the current scorer |
+| `--fork-on-divergence` | On *data-affecting* config divergence (scoring, optimizer_llm, pipeline_overrides, exclude_nodes, dataset_name), mint a sibling cycle (with `parent_cycle_id`) and re-run the divergent round under the current scorer. Policy-only edits (PoBB knobs, patience, thresholds, n_variants, exploration) continue in-place — no fork, the flag is a no-op. See `CampaignConfig.classify_diff_against` for the field-by-field split. |
 
 ---
 

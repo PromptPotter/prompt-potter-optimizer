@@ -1,12 +1,15 @@
-"""ScoringContext build + hot-update reconciliation + cycle bootstrap.
+"""ScoringContext build + cycle bootstrap.
 
 Three concerns live here:
 
 * ``populate_session_scoring`` — builds the ``ScoringContext`` block on a
   freshly-wired ``Session``: scorer + per-round scorer, observability
   bridge, error-tolerance dials.
-* ``bootstrap_cycle`` — resume an existing cycle or create one, refreshing
-  the ``HOT_UPDATEABLE_KEYS`` config keys against the active snapshot.
+* ``bootstrap_cycle`` — resume an existing cycle or create one. Snapshot
+  maintenance (refresh on policy-only diff, leave alone on data-affecting
+  fork) lives in ``resume_with_divergence_check`` —
+  :meth:`CampaignConfig.classify_diff_against` is the single source of
+  truth for which fields are policy vs data.
 * ``init_optimization_loop`` — the optimization-loop entry point used by
   :mod:`runner`: preflight, origin OSP build, ``Cycle.start``, fork on
   divergence, observability + scoring + axes, ``INIT.exit`` emit.
@@ -38,22 +41,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Hot-updateable on resume — these don't change WHAT the cycle solves, only HOW it searches.
-HOT_UPDATEABLE_KEYS: frozenset[str] = frozenset(
-    {
-        "max_rounds",
-        "l1_patience",
-        "l2_patience",
-        "l3_patience",
-        "degradation_threshold",
-        "model",
-        "n_variants",
-        "improvement_threshold",
-        "sp_budget_ttest",
-    }
-)
-
-
 def bootstrap_cycle(
     config: CampaignConfig,
     session: Session,
@@ -76,10 +63,10 @@ def bootstrap_cycle(
 
     **Postconditions:**
     - On hit: cycle exists in ``store.campaigns``; ``resumed_from_round`` =
-      ``len(rounds) + 1``.
+      ``len(rounds) + 1``. The stored ``config`` snapshot stays untouched
+      here — ``resume_with_divergence_check`` owns refresh decisions based
+      on :meth:`CampaignConfig.classify_diff_against`.
     - On miss: cycle freshly created at round 0; ``resumed_from_round = 1``.
-    - Hot-updateable config keys refresh from the current snapshot when
-      ``cycle_id_override`` is set.
 
     ``resumed_from_round`` is the next L1 round_num to execute. Origin is
     round 0 (always already scored by the time this returns); the first L1
@@ -94,20 +81,8 @@ def bootstrap_cycle(
         resolved = cycle_id_override or cycle_config_identity(origin_jsp, dataset)
         if resume_from_round_override is not None:
             store.rewind_to_round(session.backend_id, resolved, resume_from_round_override)
-        config_snapshot = config.model_dump(mode="json")
         existing = store.load(session.backend_id, resolved)
         if existing is not None:
-            if cycle_id_override:
-                stored_cfg = existing.get("config", {}) or {}
-                changed = {
-                    k: config_snapshot.get(k)
-                    for k in HOT_UPDATEABLE_KEYS
-                    if stored_cfg.get(k) != config_snapshot.get(k)
-                }
-                if changed:
-                    stored_cfg.update(changed)
-                    store.update(session.backend_id, resolved, {"config": stored_cfg})
-                    logger.info("Updated loop-control config for %s", resolved)
             # Diag forks inherit parent's origin_accuracy but re-measure
             # against their own JSP — refresh top-level field if drift.
             if existing.get("origin_accuracy") != origin_accuracy:
@@ -118,7 +93,7 @@ def bootstrap_cycle(
             resolved,
             {
                 "type": "optimization_loop",
-                "config": config_snapshot,
+                "config": config.model_dump(mode="json"),
                 "origin_accuracy": origin_accuracy,
                 "parent_session_id": parent_session_id,
             },
@@ -464,7 +439,6 @@ async def init_optimization_loop(
 
 
 __all__ = [
-    "HOT_UPDATEABLE_KEYS",
     "bootstrap_cycle",
     "init_optimization_loop",
     "populate_session_scoring",

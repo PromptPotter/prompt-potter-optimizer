@@ -155,13 +155,15 @@ If you Ctrl+C mid-round, the ledger has the partial events but the round never r
 
 ### Fork — `optimize --fork-on-divergence`
 
-Use when the scoring formula changed and resume detects that decisions recorded under the old scorer don't match rescored results under the new scorer. The optimizer halts rather than drift silently. Two choices: revert the scoring change, or commit by rerunning with `--fork-on-divergence`.
+Use when a **data-affecting** config edit (scoring formula, `optimizer_llm.provider`/`model`, `pipeline_overrides`, `exclude_nodes`, `dataset_name`) causes resume's decision-replayer to detect that recorded decisions don't match rederived ones. The optimizer halts rather than drift silently. Two choices: revert the change, or commit by rerunning with `--fork-on-divergence`.
+
+Policy-only edits (PoBB knobs, patience, thresholds, `n_variants`, `exploration.*`) take a different path: `resume_with_divergence_check` classifies the diff via `CampaignConfig.classify_diff_against`, recognizes the change can't have affected the data trace, and continues in-place on the same cycle. Past decisions stay as the audit record of the policy that decided them; the new policy governs unevaluated rounds. The `--fork-on-divergence` flag is a no-op for this case.
 
 ```bash
 python -m promptpotter optimize --fork-on-divergence
 ```
 
-Mints a new `cycle_id` rooted at the divergence point, copies pre-divergence trials into the new cycle, records `parent_cycle_id`, retargets the active session pointer, re-runs the divergent round under the current scorer. The shared `archive/measurements/` archive is **not duplicated** — both cycles read the same measurements, each through their own scoring ledger.
+Mints a new `cycle_id` rooted at the divergence point, copies pre-divergence trials into the new cycle, records `parent_cycle_id`, refreshes the new cycle's frozen `config` snapshot to the active config, retargets the active session pointer, re-runs the divergent round under the current scorer. The shared `archive/measurements/` archive is **not duplicated** — both cycles read the same measurements, each through their own scoring ledger.
 
 **Layout after a fork:**
 

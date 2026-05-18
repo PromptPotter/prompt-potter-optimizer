@@ -9,9 +9,9 @@ Two entry points are re-exported here:
 
 Internals (``Session``, ``ScoringContext``, ``CycleState``,
 ``auto_mint_session``, ``populate_session_scoring``, ``bootstrap_cycle``,
-``_open_cycle_ledger``, ``HOT_UPDATEABLE_KEYS``) are NOT re-exported.
-Callers either need an entry point above or the relevant submodule
-directly: ``from promptpotter.application.bootstrap.session import Session``.
+``_open_cycle_ledger``) are NOT re-exported. Callers either need an entry
+point above or the relevant submodule directly: ``from
+promptpotter.application.bootstrap.session import Session``.
 """
 
 from promptpotter.application.bootstrap.scoring_context import init_optimization_loop

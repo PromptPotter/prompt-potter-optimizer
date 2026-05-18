@@ -26,7 +26,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from promptpotter.application.config import CampaignConfig, load_campaign_config
+from promptpotter.application.config import (
+    _FIELD_SCOPES as _CFG_FIELD_SCOPES,
+)
+from promptpotter.application.config import (
+    CampaignConfig,
+    DiffScope,
+    load_campaign_config,
+)
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     NodePromptMeta,
@@ -239,6 +246,104 @@ def test_required_optimization_fields_must_be_explicit() -> None:
     dataset configs are self-describing."""
     with pytest.raises(ValidationError):
         CampaignConfig.model_validate({"optimization": {"l1_patience": 3}})
+
+
+# ---------------------------------------------------------------------------
+# DiffScope classifier — resume-safety contract
+# ---------------------------------------------------------------------------
+
+
+def _cfg(**opt_overrides: object) -> CampaignConfig:
+    opt = {"improvement_threshold": 0.01, "degradation_threshold": 0.4, **opt_overrides}
+    return CampaignConfig.model_validate({"optimization": opt})
+
+
+def test_classify_diff_scopes() -> None:
+    """Per-scenario classifier contract: policy-only changes don't fork."""
+    base = _cfg().model_dump(mode="json")
+
+    # No diff
+    assert _cfg().classify_diff_against(base) == (DiffScope.NONE, [])
+
+    # Policy-only: PoBB boost change (the operator's exact scenario)
+    scope, diffed = _cfg(pobb_predictable_tail_boost=5.0).classify_diff_against(base)
+    assert scope is DiffScope.POLICY_ONLY
+    assert diffed == ["optimization.pobb_predictable_tail_boost"]
+
+    # Data-affecting: scoring formula change rescores past fitness
+    scope, _ = CampaignConfig.model_validate(
+        {
+            "optimization": {"improvement_threshold": 0.01, "degradation_threshold": 0.4},
+            "scoring": "score(top1_hit)",
+        }
+    ).classify_diff_against(base)
+    assert scope is DiffScope.DATA_AFFECTING
+
+    # Mixed: data wins (forks even if a policy field also moved)
+    mixed_base = CampaignConfig.model_validate(
+        {
+            "optimization": {"improvement_threshold": 0.01, "degradation_threshold": 0.4},
+            "scoring": "old",
+        }
+    ).model_dump(mode="json")
+    mixed = CampaignConfig.model_validate(
+        {
+            "optimization": {
+                "improvement_threshold": 0.01,
+                "degradation_threshold": 0.4,
+                "pobb_predictable_tail_boost": 5.0,
+            },
+            "scoring": "new",
+        }
+    )
+    scope, _ = mixed.classify_diff_against(mixed_base)
+    assert scope is DiffScope.DATA_AFFECTING
+
+
+def test_classify_unknown_path_defaults_to_data_affecting(caplog) -> None:
+    """A path missing from _FIELD_SCOPES classifies as DATA_AFFECTING with a
+    warning — adding a new knob without an entry can't silently downgrade
+    resume safety."""
+    base = _cfg().model_dump(mode="json")
+    base.setdefault("optimization", {})["unknown_new_knob"] = "old"
+    # Active dump doesn't have unknown_new_knob — the diff lands at that path
+    # and looks up as unclassified.
+    with caplog.at_level("WARNING"):
+        scope, _ = _cfg().classify_diff_against(base)
+    assert scope is DiffScope.DATA_AFFECTING
+    assert "unclassified config path" in caplog.text
+
+
+def test_every_config_leaf_is_classified() -> None:
+    """Every leaf field in CampaignConfig must be classified in _FIELD_SCOPES
+    (either directly or as a descendant of a subtree entry). Catches new
+    knobs added without a scope at PR time — the alternative is silent
+    DATA_AFFECTING fallback that breaks the operator's 'don't fork for
+    policy changes' contract."""
+
+    def _leaves(model_cls, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+        from pydantic import BaseModel
+
+        out: list[tuple[str, ...]] = []
+        for name, field in model_cls.model_fields.items():
+            path = (*prefix, name)
+            ann = field.annotation
+            # Subtree match short-circuits (the registry classifies the whole subtree)
+            if path in _CFG_FIELD_SCOPES:
+                out.append(path)
+                continue
+            if isinstance(ann, type) and issubclass(ann, BaseModel):
+                out.extend(_leaves(ann, path))
+            else:
+                out.append(path)
+        return out
+
+    unclassified = [".".join(p) for p in _leaves(CampaignConfig) if p not in _CFG_FIELD_SCOPES]
+    assert not unclassified, (
+        f"CampaignConfig leaves missing from _FIELD_SCOPES: {unclassified}. "
+        "Add an entry classifying each as 'policy' or 'data' in "
+        "promptpotter/application/config.py."
+    )
 
 
 # ---------------------------------------------------------------------------

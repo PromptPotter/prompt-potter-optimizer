@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.config import DiffScope
 from promptpotter.application.optimization.escalation.state import EscalationState
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,
@@ -52,7 +53,15 @@ def resume_with_divergence_check(
     skip_divergence_check: bool,
     fork_on_divergence: bool = False,
 ) -> ForkResult | None:
-    """Rescore prior rounds under the active scorer; halt or fork on divergence."""
+    """Rescore prior rounds under the active scorer; halt or fork on divergence.
+
+    Short-circuits when the diff between the active ``cycle.config`` and the
+    cycle's frozen snapshot (``index.json::config``) classifies as
+    :attr:`DiffScope.POLICY_ONLY`: the parent's data trace is fully valid,
+    past decisions stay as the audit record of the policy in effect at the
+    time, and the new policy governs unevaluated rounds. No fork, no
+    divergence walk. See :meth:`CampaignConfig.classify_diff_against`.
+    """
     sc = session.scoring
     scorer = sc.scorer
     assert scorer is not None, "session.scoring.scorer required for divergence replay"
@@ -71,6 +80,27 @@ def resume_with_divergence_check(
     origin_results_rescored = _rescore(cycle.tracking.current_results)
 
     if not skip_divergence_check:
+        frozen = (campaign_store.load(backend_id, cycle_id) or {}).get("config") or {}
+        scope, diffed = cycle.config.classify_diff_against(frozen)
+        if scope is DiffScope.POLICY_ONLY:
+            logger.info(
+                "Resume: policy-only config diff (%s); skipping divergence check, "
+                "continuing on cycle %s in-place",
+                ", ".join(diffed),
+                cycle_id,
+            )
+            # Refresh the snapshot so future resumes diff against current state.
+            campaign_store.update(
+                backend_id, cycle_id, {"config": cycle.config.model_dump(mode="json")}
+            )
+            cycle.replay_priors(prior)
+            cycle.escalation = EscalationState.from_ledger(session.state.ledger)
+            return None
+        if scope is DiffScope.DATA_AFFECTING and diffed:
+            logger.info(
+                "Resume: data-affecting config diff (%s); running divergence check",
+                ", ".join(diffed),
+            )
         for i, t in enumerate(prior):
             div = replay_decisions(
                 t,
@@ -93,6 +123,15 @@ def resume_with_divergence_check(
                         issued_by="system",
                     ),
                     surviving_rounds=survivors,
+                )
+                # The fork inherits the parent's stale ``config`` snapshot
+                # via ``save_divergence_fork``; refresh it to the active
+                # config so subsequent resumes on the fork diff against the
+                # baseline that minted them.
+                campaign_store.update(
+                    backend_id,
+                    new_cycle_id,
+                    {"config": cycle.config.model_dump(mode="json")},
                 )
                 cycle.replay_priors(survivors)
                 cycle.escalation = EscalationState.from_ledger(session.state.ledger)
