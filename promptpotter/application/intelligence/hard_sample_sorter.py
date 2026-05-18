@@ -16,6 +16,7 @@ so the error-flag and missing-sample-id policy is defined in exactly one place.
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -32,7 +33,7 @@ __all__ = [
     "empty_artifact",
 ]
 
-ARTIFACT_SCHEMA_VERSION = 2
+ARTIFACT_SCHEMA_VERSION = 3
 
 
 def _candidate_hit_rates(observations: list[Observation]) -> dict[str, float]:
@@ -57,29 +58,75 @@ def _sample_miss_rates(observations: list[Observation]) -> dict[int, float]:
     return {sid: misses.get(sid, 0) / n for sid, n in totals.items() if n > 0}
 
 
-def _sample_discrimination(observations: list[Observation]) -> dict[int, float]:
-    """Per-sample cross-candidate hit-rate variance — ``p*(1-p)``, max at p=0.5.
+def _chernoff_bernoulli(p: float, q: float) -> float:
+    """Chernoff information between two Bernoulli distributions.
 
-    The PoBB consumer iterates samples in descending-discrimination order
-    so paired posteriors separate fast: samples where candidates split
-    ~50/50 carry the most information about which prompt is better.
-    Always-hit and always-miss samples produce 0 — scoring them yields
-    zero between-candidate signal and the posterior stays overlapping.
+    ``C(p, q) = max_{λ∈[0,1]} -log[ p^λ q^{1-λ} + (1-p)^λ (1-q)^{1-λ} ]``.
 
-    A sample observed only once still gets ``p*(1-p)`` (often 0); the
-    tie-breaker by |δ_s| in :func:`_resolve_discrimination_order` keeps
-    those samples behind anything with real variance.
+    Zero iff ``p == q``; positive otherwise. The exponent of the
+    asymptotic error rate in optimal binary hypothesis testing — the
+    Track-and-Stop (Garivier-Kaufmann 2016) information measure for
+    best-arm identification on Bernoulli arms. No closed form for λ*;
+    99-point grid is sub-1% precision and trivially cheap at the
+    per-candidate fire rate.
     """
-    totals: dict[int, int] = {}
-    hits: dict[int, int] = {}
+    if abs(p - q) < 1e-9:
+        return 0.0
+    p = min(max(p, 1e-9), 1.0 - 1e-9)
+    q = min(max(q, 1e-9), 1.0 - 1e-9)
+    best = 0.0
+    for i in range(1, 100):
+        lam = i / 100.0
+        mix = p**lam * q ** (1.0 - lam) + (1.0 - p) ** lam * (1.0 - q) ** (1.0 - lam)
+        val = -math.log(mix)
+        if val > best:
+            best = val
+    return best
+
+
+def _chernoff_information(
+    observations: list[Observation],
+    seed_hits: dict[int, list[bool]] | None,
+) -> dict[int, float]:
+    """Per-sample Chernoff info distinguishing the seed prior from the population.
+
+    For each sample, we ask: how much does measuring this sample
+    discriminate "this new candidate behaves like the seed prior" from
+    "this new candidate behaves like the cross-candidate population"?
+    That is the Bernoulli Chernoff information ``C(p_seed, p_pop)``.
+
+    Both rates use a Laplace ``Beta(1,1)`` prior so always-miss + never-
+    seen samples still carry signal (Nieena: an always-miss sample where
+    a new candidate hits is a huge surprise; the smoothed estimate
+    preserves that asymmetry). Without smoothing the formula collapses
+    to 0 on the always-miss tier — which is the bug the old
+    ``p*(1-p)`` formula encoded and that this picker exists to fix.
+
+    Cold-start fallback: when no seed history is provided (``seed_hits``
+    empty or ``None``), drops to ``p_pop·(1-p_pop)`` — the population-
+    variance picker, equivalent to the old behaviour. Origin is always
+    scored before R1's candidates so the live loop never hits this path;
+    it's there for standalone artifact builds with no seed declared.
+    """
+    pop_totals: dict[int, int] = {}
+    pop_hits: dict[int, int] = {}
     for o in observations:
-        totals[o.sample_id] = totals.get(o.sample_id, 0) + 1
+        pop_totals[o.sample_id] = pop_totals.get(o.sample_id, 0) + 1
         if o.hit:
-            hits[o.sample_id] = hits.get(o.sample_id, 0) + 1
+            pop_hits[o.sample_id] = pop_hits.get(o.sample_id, 0) + 1
+
     out: dict[int, float] = {}
-    for sid, n in totals.items():
-        p = hits.get(sid, 0) / n
-        out[sid] = p * (1.0 - p)
+    if not seed_hits:
+        for sid, n in pop_totals.items():
+            p = pop_hits.get(sid, 0) / n
+            out[sid] = p * (1.0 - p)
+        return out
+
+    for sid, n in pop_totals.items():
+        p_pop = (pop_hits.get(sid, 0) + 1.0) / (n + 2.0)
+        seq = seed_hits.get(sid, [])
+        p_seed = (sum(1 for h in seq if h) + 1.0) / (len(seq) + 2.0)
+        out[sid] = _chernoff_bernoulli(p_seed, p_pop)
     return out
 
 
@@ -105,23 +152,24 @@ def _resolve_sample_order(
     )
 
 
-def _resolve_discrimination_order(
-    discrimination: dict[int, float],
+def _resolve_pick_order(
+    pick_score: dict[int, float],
     rasch_delta: dict[int, float],
 ) -> list[int]:
-    """Sort sample IDs by descending discrimination (``p*(1-p)``).
+    """Sort sample IDs by descending Chernoff info against the seed prior.
 
-    Ties break by descending |δ_s| (hardest within the same discrimination
+    Ties break by descending |δ_s| (hardest within the same pick-score
     bucket — preserves the diagnostic-first intent for samples no prior
     has split yet), then by ascending sample id for determinism.
 
     Consumed by ``score_population`` to drive PoBB's iteration order;
     distinct from the heatmap's hardest-first ``sample_order`` because
-    PoBB needs between-candidate variance, not absolute difficulty.
+    PoBB needs sample-by-sample evidence that separates the candidate
+    from the seed prior, not absolute difficulty.
     """
     return sorted(
-        discrimination.keys(),
-        key=lambda sid: (-discrimination[sid], -abs(rasch_delta.get(sid, 0.0)), sid),
+        pick_score.keys(),
+        key=lambda sid: (-pick_score[sid], -abs(rasch_delta.get(sid, 0.0)), sid),
     )
 
 
@@ -149,7 +197,7 @@ def empty_artifact(
         "candidate_order": [],
         "sample_order": [],
         "rasch": {},
-        "discrimination": {"per_sample": {}, "sample_order": []},
+        "pick_score": {"per_sample": {}, "sample_order": []},
         "cells": [],
     }
 
@@ -161,6 +209,7 @@ def build_hard_samples_artifact(
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
     posterior: RaschPosterior | None = None,
+    seed_hits: dict[int, list[bool]] | None = None,
 ) -> dict:
     """Build the hard-samples artifact dict from round observations.
 
@@ -171,6 +220,11 @@ def build_hard_samples_artifact(
     refit is skipped — the heatmap and the scoring-set evolution share one
     Rasch fit per round.
 
+    ``seed_hits`` is the seed prior's per-sample hit history (origin in
+    R1, prior round winner R2+); when supplied, the ``pick_score`` block
+    carries Chernoff info against the seed instead of the cold-start
+    ``p·(1-p)`` fallback.
+
     Pure function: no I/O.
     """
     return build_hard_samples_artifact_from_observations(
@@ -179,6 +233,7 @@ def build_hard_samples_artifact(
         top_k_candidates=top_k_candidates,
         top_k_samples=top_k_samples,
         posterior=posterior,
+        seed_hits=seed_hits,
     )
 
 
@@ -189,6 +244,7 @@ def build_hard_samples_artifact_from_observations(
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
     posterior: RaschPosterior | None = None,
+    seed_hits: dict[int, list[bool]] | None = None,
 ) -> dict:
     """Same as :func:`build_hard_samples_artifact` but takes pre-built
     observations directly. Used by the cross-cycle archive aggregator
@@ -211,11 +267,11 @@ def build_hard_samples_artifact_from_observations(
         posterior = fit_rasch(observations)
     hit_rates = _candidate_hit_rates(observations)
     miss_rates = _sample_miss_rates(observations)
-    discrimination_map = _sample_discrimination(observations)
+    pick_score_map = _chernoff_information(observations, seed_hits)
 
     full_candidate_order = _resolve_candidate_order(posterior, hit_rates)
     full_sample_order = _resolve_sample_order(posterior, miss_rates)
-    full_discrimination_order = _resolve_discrimination_order(discrimination_map, posterior.delta)
+    full_pick_order = _resolve_pick_order(pick_score_map, posterior.delta)
 
     total_candidates = len(full_candidate_order)
     total_samples = len(full_sample_order)
@@ -226,11 +282,7 @@ def build_hard_samples_artifact_from_observations(
         else full_candidate_order[:top_k_candidates]
     )
     sample_order = full_sample_order if top_k_samples is None else full_sample_order[:top_k_samples]
-    discrimination_order = (
-        full_discrimination_order
-        if top_k_samples is None
-        else full_discrimination_order[:top_k_samples]
-    )
+    pick_order = full_pick_order if top_k_samples is None else full_pick_order[:top_k_samples]
 
     cand_set = set(candidate_order)
     samp_set = set(sample_order)
@@ -273,11 +325,9 @@ def build_hard_samples_artifact_from_observations(
         "candidate_order": candidate_order,
         "sample_order": sample_order,
         "rasch": rasch_view,
-        "discrimination": {
-            "per_sample": {
-                str(sid): float(discrimination_map.get(sid, 0.0)) for sid in sample_order
-            },
-            "sample_order": [int(sid) for sid in discrimination_order],
+        "pick_score": {
+            "per_sample": {str(sid): float(pick_score_map.get(sid, 0.0)) for sid in sample_order},
+            "sample_order": [int(sid) for sid in pick_order],
         },
         "cells": cells,
     }

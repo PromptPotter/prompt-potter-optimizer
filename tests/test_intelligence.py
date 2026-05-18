@@ -430,19 +430,19 @@ def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
 
 
 # ===========================================================================
-# Hard-sample sorter — discrimination order (PoBB sample-selection driver)
+# Hard-sample sorter — pick-score order (PoBB sample-selection driver)
 # ===========================================================================
 
 
-def test_discrimination_order_ranks_split_samples_first() -> None:
-    """``discrimination.sample_order`` puts 50/50-hit samples ahead of always-hit
-    and always-miss samples.
+def test_pick_score_chernoff_ranks_seed_vs_pop_information() -> None:
+    """``pick_score.sample_order`` uses Bernoulli Chernoff information against
+    the seed prior — the Track-and-Stop (Garivier-Kaufmann 2016) measure for
+    optimal best-arm identification.
 
-    PoBB iterates this order; max-variance samples first means paired
-    posteriors separate fast and dominated candidates can be eliminated
-    before the full sample budget is spent. Hardest-first (the heatmap's
-    ``sample_order``) violates this — it clumps all candidates at ~0 hit
-    rate on the same hard samples and the paired posteriors overlap.
+    The old ``p*(1-p)`` formula was symmetric and zeroed always-miss
+    samples; the new picker correctly ranks always-miss-with-split-pop
+    high (a candidate hitting where the seed always missed is a huge
+    signal) and zeros only samples where seed and population agree.
     """
     from promptpotter.application.intelligence.exploration import Observation
     from promptpotter.application.intelligence.hard_sample_sorter import (
@@ -450,36 +450,70 @@ def test_discrimination_order_ranks_split_samples_first() -> None:
         build_hard_samples_artifact_from_observations,
     )
 
+    # Sample 1: seed always hit, pop split → moderate-high info.
+    # Sample 2: seed always missed, pop split → moderate-high info.
+    # Sample 3: seed always hit, pop always hit → ~0 info (agreement).
+    # Sample 4: seed always missed, pop always missed → ~0 info (agreement).
+    # Sample 5: seed hit, pop almost always missed → near-max info.
     obs = [
-        # sample 1: always hit (p=1, var=0)
+        Observation(candidate_id="a", sample_id=1, hit=True),
+        Observation(candidate_id="b", sample_id=1, hit=False),
+        Observation(candidate_id="c", sample_id=2, hit=True),
+        Observation(candidate_id="d", sample_id=2, hit=False),
+        *[Observation(candidate_id=c, sample_id=3, hit=True) for c in "abcd"],
+        *[Observation(candidate_id=c, sample_id=4, hit=False) for c in "abcd"],
+        *[Observation(candidate_id=c, sample_id=5, hit=False) for c in "abcd"],
+    ]
+    seed_hits = {
+        1: [True, True],
+        2: [False, False],
+        3: [True, True],
+        4: [False, False],
+        5: [True, True],
+    }
+    artifact = build_hard_samples_artifact_from_observations(obs, seed_hits=seed_hits)
+    assert artifact["schema_version"] == ARTIFACT_SCHEMA_VERSION == 3
+
+    per_sample = artifact["pick_score"]["per_sample"]
+    # Agreement samples land near zero.
+    assert per_sample["3"] < 0.05
+    assert per_sample["4"] < 0.05
+    # Disagreement samples land well above zero.
+    assert per_sample["1"] > per_sample["3"]
+    assert per_sample["2"] > per_sample["4"]
+    # Seed-hit-vs-population-all-miss is the cleanest separation.
+    assert per_sample["5"] > per_sample["1"]
+
+    pick_order = artifact["pick_score"]["sample_order"]
+    assert pick_order[0] == 5, "max-separation sample must lead"
+    assert pick_order[-1] in {3, 4}, "agreement samples tail the order"
+
+    # The hardest-first sample_order is independent of the picker order —
+    # always-miss samples (high δ) dominate it.
+    assert artifact["sample_order"][0] in {2, 4, 5}
+
+
+def test_pick_score_cold_start_falls_back_to_population_variance() -> None:
+    """With no seed history, the picker falls back to ``p·(1-p)`` over the
+    population — the standalone-artifact path that runs without a declared
+    seed prior."""
+    from promptpotter.application.intelligence.exploration import Observation
+    from promptpotter.application.intelligence.hard_sample_sorter import (
+        build_hard_samples_artifact_from_observations,
+    )
+
+    obs = [
         *[Observation(candidate_id=c, sample_id=1, hit=True) for c in "abcd"],
-        # sample 2: 50/50 split (p=0.5, var=0.25 — max)
         Observation(candidate_id="a", sample_id=2, hit=True),
         Observation(candidate_id="b", sample_id=2, hit=False),
         Observation(candidate_id="c", sample_id=2, hit=True),
         Observation(candidate_id="d", sample_id=2, hit=False),
-        # sample 3: always miss (p=0, var=0)
         *[Observation(candidate_id=c, sample_id=3, hit=False) for c in "abcd"],
-        # sample 4: 75/25 (p=0.75, var=0.1875)
-        Observation(candidate_id="a", sample_id=4, hit=True),
-        Observation(candidate_id="b", sample_id=4, hit=True),
-        Observation(candidate_id="c", sample_id=4, hit=True),
-        Observation(candidate_id="d", sample_id=4, hit=False),
     ]
-    artifact = build_hard_samples_artifact_from_observations(obs)
-    assert artifact["schema_version"] == ARTIFACT_SCHEMA_VERSION == 2
+    artifact = build_hard_samples_artifact_from_observations(obs, seed_hits=None)
 
-    disc_order = artifact["discrimination"]["sample_order"]
-    assert disc_order[0] == 2, "50/50 sample must lead"
-    assert disc_order[1] == 4, "75/25 sample must come before zero-variance samples"
-    assert set(disc_order[2:]) == {1, 3}, "always-hit and always-miss tail"
-
-    per_sample = artifact["discrimination"]["per_sample"]
+    per_sample = artifact["pick_score"]["per_sample"]
     assert per_sample["2"] == pytest.approx(0.25)
-    assert per_sample["4"] == pytest.approx(0.1875)
     assert per_sample["1"] == pytest.approx(0.0)
     assert per_sample["3"] == pytest.approx(0.0)
-
-    # The hardest-first sample_order is independent of the discrimination
-    # order — always-miss samples (high δ) dominate it.
-    assert artifact["sample_order"][0] == 3
+    assert artifact["pick_score"]["sample_order"][0] == 2

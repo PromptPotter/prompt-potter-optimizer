@@ -36,6 +36,7 @@ from promptpotter.domain.results import CycleResult
 from promptpotter.domain.run_records import ForkPayload
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.shared.errors import ResumeDivergenceError
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,13 @@ async def run_optimization(
         )
         logger.warning("Optimization interrupted before round loop entered (%s).", cause)
         stop_reason = StopReason.INTERRUPTED
+    except ResumeDivergenceError as exc:
+        # Operator-recoverable: the saved decision trail doesn't match
+        # what the current scorer/picker/etc. would produce. Print the
+        # formatted message + fork hint, no traceback — the fix is a
+        # one-flag rerun (``optimize --fork-on-divergence``).
+        logger.warning("Resume halted on divergence:\n%s", exc)
+        stop_reason = StopReason.DIVERGED
     except Exception:
         session.state.crash_traceback = traceback.format_exc()
         logger.exception("Optimization crashed before round loop entered.")
@@ -243,6 +251,7 @@ def _finalize_run(
         status_map = {
             str(StopReason.INTERRUPTED): "interrupted",
             str(StopReason.CRASHED): "crashed",
+            str(StopReason.DIVERGED): "diverged",
         }
         # The active round number when the loop tore down lives on the
         # callbacks (set by ``cb.set_round`` at each iteration). Surfacing

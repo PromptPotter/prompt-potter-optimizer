@@ -172,20 +172,22 @@ class RunCallbacks:
         n_priors: int,
         sample_order: list[int],
     ) -> None:
-        """PoBB sample-order preview — top-3 next samples by cross-candidate
-        discrimination (``p*(1-p)``), plus the full discrimination-first
-        ``sample_order`` so the webapp dataset table can re-sort live to
-        mirror what the loop is iterating.
+        """PoBB sample-order preview — top-3 next samples by Chernoff info
+        against the seed prior (Track-and-Stop, Garivier-Kaufmann 2016),
+        plus the full pick-score-first ``sample_order`` so the webapp
+        dataset table can re-sort live to mirror what the loop is
+        iterating.
 
         Fired at the start of each candidate before scoring begins. The
         ``preview`` list is the head of PoBB's iteration order with each
-        sample's discrimination score; ``n_priors`` is the number of
-        completed candidate histories that fed the score; ``sample_order``
-        is the full list, surfaced verbatim on
+        sample's pick-score; ``n_priors`` is the number of completed
+        candidate histories that fed the score; ``sample_order`` is the
+        full list, surfaced verbatim on
         ``dashboard.json::hard_sample_order``. The artifact's hardest-first
         ``sample_order`` lives next to this on disk for the heatmap; the
-        two diverge by design — PoBB needs between-candidate variance,
-        the heatmap needs absolute difficulty.
+        two diverge by design — PoBB needs evidence that separates the
+        candidate from the seed prior, the heatmap needs absolute
+        difficulty.
         """
         self._snapshot(
             "sample_order_preview",

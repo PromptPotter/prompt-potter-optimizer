@@ -37,13 +37,17 @@ class StopReason(enum.StrEnum):
     (user-initiated or programmatic cancellation). ``CRASHED`` is the
     catch-all for any other unhandled exception inside the round loop —
     distinguished so the operator can tell "I hit Ctrl+C" from "the run
-    died and the traceback was swallowed."
+    died and the traceback was swallowed." ``DIVERGED`` is the clean
+    operator-recoverable case where resume detected a recorded-vs-current
+    decision mismatch under a changed policy — the fix is a one-flag
+    rerun, not a debug session, so no traceback is stashed.
     """
 
     PERFECT = "perfect_score"
     MAX_ROUNDS = "max_rounds"
     INTERRUPTED = "interrupted"
     CRASHED = "crashed"
+    DIVERGED = "diverged"
     ABORT = "escalation_abort"
     L3_PATIENCE = "l3_patience_exhausted"
     HARD_CAP = "hard_cap_reached"

@@ -233,28 +233,38 @@ priors will surface as divergence via the candidate side).
 | `promptpotter/application/optimization/l1/population.py::pobb_decision_data` | Embeds `candidate_sample_ids` + `prior_histories` into the decision record |
 | `promptpotter/application/optimization/resume_and_fork/replayers.py::_pobb_replay_snapshot` | Reads paired snapshot from `data`; no cross-round resolver |
 
-## Sample-selection: discrimination, not hardness
+## Sample-selection: Chernoff info, not hardness
 
 Backfill makes the paired comparison statistically valid; the per-candidate
 **iteration order** is what makes it cheap. PoBB iterates samples in
-descending **cross-candidate discrimination** — `p·(1−p)` where `p` is the
-sample's hit rate across all prior candidates, maximized at 50/50. The
-heatmap's hardest-first `sample_order` (the spec's `|δ_s|` sort) is kept
-on the same artifact under `sample_order`; the picker's order lives next
-to it as `discrimination.sample_order`. The two diverge by design.
+descending **Chernoff information against the seed prior** — the
+Track-and-Stop (Garivier & Kaufmann, 2016) information measure for
+optimal best-arm identification on Bernoulli arms:
+`C(p_seed, p_pop) = max_λ -log[ p_seed^λ p_pop^{1-λ} + (1-p_seed)^λ (1-p_pop)^{1-λ} ]`.
+Both rates use a smoothed `Beta(1,1)` posterior so always-miss + never-
+seen samples still carry signal. Seed = origin in R1, prior round winner
+R2+. The heatmap's hardest-first `sample_order` (the spec's `|δ_s|`
+sort) is kept on the same artifact under `sample_order`; the picker's
+order lives next to it as `pick_score.sample_order`. The two diverge by
+design.
 
-Why discrimination wins for elimination: hardest-first clusters every
-candidate at ~0% on the same hard samples — paired posteriors overlap and
-PoBB sees no signal. 50/50 samples are exactly where candidates split, so
-paired posteriors separate fast and dominated candidates fall out before
-the full sample budget is spent.
+Why Chernoff info wins for elimination: the picker asks "how much does
+measuring this sample distinguish 'this candidate behaves like the seed
+prior' from 'this candidate behaves like the cross-candidate
+population'?" Samples where seed and population agree (always-hit-
+everywhere, always-miss-everywhere) yield ~0 info — no measurement can
+flip the comparison. Samples where they disagree — especially the
+always-miss-with-seed-hit tier (a candidate hitting where the seed
+always missed is a huge surprise) — carry maximum information per
+backend call. Dominated candidates fall out before the full sample
+budget is spent.
 
-This is the Rasch CAT / Fisher-information-max picker, using population
-variance as a proxy for per-candidate Fisher info. The proxy holds when
-candidates evolve from a shared parent — empirically R1↔R3 difficulty
-rank Spearman ρ≈0.83 on the AIME cycle we measured; the rank a sample
-gets from the population is close enough to the rank any one candidate
-would assign.
+Why this beats the prior `p·(1−p)` formula: that formula was symmetric
+and treated always-miss-with-split-pop ≡ always-hit-with-split-pop ≡ 0,
+which is wrong — the always-miss-with-seed-hit case is where the seed
+beats most candidates and is exactly the kind of sample whose measurement
+locks in elimination. Chernoff info encodes the asymmetry; population
+variance does not.
 
 ## Elimination ladder: dominance before posterior
 
@@ -293,4 +303,4 @@ approximating it via a tunable multiplier.
   divergence + fork behavior.
 * `docs/specs/hard-sample-sorter.md` — the artifact contract carrying
   both the heatmap's `sample_order` and PoBB's
-  `discrimination.sample_order`.
+  `pick_score.sample_order`.

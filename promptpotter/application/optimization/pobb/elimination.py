@@ -403,7 +403,7 @@ class PoBBCheck:
         self._current_id: str = ""
         self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
         self._backfill_fn = backfill_fn
-        # Full discrimination-first sample order for the active candidate,
+        # Full pick-score-first sample order for the active candidate,
         # set per candidate via ``set_sample_order``. ``check()`` uses
         # ``len(_sample_order)`` as the candidate's intended sample budget
         # for the deterministic dominance check (cand_max_hits =
@@ -420,7 +420,7 @@ class PoBBCheck:
         self._on_snapshot = on_snapshot
 
     def set_sample_order(self, sample_order: Sequence[int | str] | None) -> None:
-        """Bind the candidate's discrimination-first sample order.
+        """Bind the candidate's pick-score-first sample order.
 
         Called by ``score_population`` once per candidate so the
         dominance check inside ``check()`` knows the candidate's

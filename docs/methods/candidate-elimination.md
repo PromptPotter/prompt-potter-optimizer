@@ -6,13 +6,13 @@
 
 Each round evolves *N* individuals (default *N* = 5) via an LLM meta-prompt. Each is measured on a shared query set **Q** of size *K* (50–500), producing a per-sample score in `[0, 1]` aggregated as a mean composite. Evaluation budget per round is *N* × *K* backend calls, dominating wall-clock. Population is pre-enumerated — there's no parameter space to search, only a fixed set to compare.
 
-## Sample iteration order — discrimination, not hardness
+## Sample iteration order — Chernoff info against the seed prior
 
-Within each candidate, samples are evaluated in descending **cross-candidate discrimination** — `p·(1−p)` over prior candidates' hit rates, maximized at p=0.5. This is the Rasch CAT / Fisher-info picker, using population variance as a proxy for per-candidate Fisher info. 50/50 samples carry the most between-candidate signal; always-hit and always-miss samples carry zero. The heatmap's hardest-first sort lives on the same artifact as a peer field (`sample_order`); PoBB consumes `discrimination.sample_order`. Detail: [`../concepts/paired-sample-pobb.md`](../concepts/paired-sample-pobb.md#sample-selection-discrimination-not-hardness).
+Within each candidate, samples are evaluated in descending **Chernoff information against the seed prior** — `C(p_seed, p_pop)`, the Track-and-Stop (Garivier-Kaufmann 2016) optimal information measure for Bernoulli best-arm identification. Both rates are smoothed with a `Beta(1,1)` prior so always-miss-with-seed-hit samples (a candidate hitting where the seed always missed) still rank high; only true seed-vs-population agreement zeros out. The heatmap's hardest-first sort lives on the same artifact as a peer field (`sample_order`); PoBB consumes `pick_score.sample_order`. Seed = origin in R1, prior round winner R2+. Detail: [`../concepts/paired-sample-pobb.md`](../concepts/paired-sample-pobb.md#sample-selection-chernoff-info-not-hardness).
 
 ## Bayesian PoBB
 
-Individuals are evaluated sequentially on **Q** in discrimination-first order. The first runs to completion, establishing a reference. Each subsequent candidate is measured query by query; once `n_min` (default 4) is reached, after every query we recompute each candidate's **Posterior-of-Being-Best** probability and stop the current candidate when its P(best) drops below ε (default 0.05).
+Individuals are evaluated sequentially on **Q** in pick-score-first order. The first runs to completion, establishing a reference. Each subsequent candidate is measured query by query; once `n_min` (default 4) is reached, after every query we recompute each candidate's **Posterior-of-Being-Best** probability and stop the current candidate when its P(best) drops below ε (default 0.05).
 
 A pure-arithmetic **dominance gate** fires before the Bayesian posterior: if `cand_hits + (budget − queries_scored) < seed_total_hits`, the candidate can't catch the seed prior even by hitting every remaining sample. Eliminate immediately. This is SPRT's deterministic corner (probability of catching up = 0) — stronger than the posterior gate, so it's checked first.
 

@@ -427,8 +427,8 @@ class LiveDisplay(DerivedView):
             )
 
     def on_sample_order_preview(self, preview: list[tuple[int, float]], n_priors: int) -> None:
-        """Print PoBB's next-3 picks for this candidate by cross-candidate
-        discrimination (``p*(1-p)``, max 0.25 at 50/50 hit rate).
+        """Print PoBB's next-3 picks for this candidate by Chernoff info
+        against the seed prior (Track-and-Stop information measure).
 
         Fires after ``on_candidate_started`` and before any sample
         scoring. Empty ``preview`` means the sorter had no observations
@@ -439,7 +439,7 @@ class LiveDisplay(DerivedView):
         if not preview:
             return
         prior_s = "" if n_priors == 1 else "s"
-        picks = ", ".join(f"#{sid:03d} (disc={val:.3f})" for sid, val in preview)
+        picks = ", ".join(f"#{sid:03d} (info={val:.3f})" for sid, val in preview)
         self._write(f"  {DIM}next samples:{RESET} {picks}  ({n_priors} candidate prior{prior_s})")
 
     def on_pobb_backfill(self, backfilled: dict[str, list[str]]) -> None:

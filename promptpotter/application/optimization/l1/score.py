@@ -542,12 +542,13 @@ async def score_population(
 
         # Sample order per candidate: fit Rasch on prior rounds plus the
         # in-progress round's already-scored candidates, then iterate
-        # samples in descending cross-candidate discrimination (``p*(1-p)``,
-        # max at 50/50 hit rate) so paired posteriors separate fast and
-        # PoBB can eliminate dominated candidates without spending the
-        # full sample budget. The heatmap artifact's hardest-first
-        # ``sample_order`` stays as the display sort; PoBB consumes the
-        # ``discrimination.sample_order`` peer field.
+        # samples in descending Chernoff information against the seed
+        # prior (Track-and-Stop / Garivier-Kaufmann 2016) so paired
+        # posteriors separate fast and PoBB can eliminate dominated
+        # candidates without spending the full sample budget. The
+        # heatmap artifact's hardest-first ``sample_order`` stays as
+        # the display sort; PoBB consumes the ``pick_score.sample_order``
+        # peer field. Seed = origin in R1, prior round winner R2+.
         sorter_obs = build_observations(cycle.rounds)
         if cycle.config.optimization.exploration.seed_evolve_from_archive:
             # Fold cross-cycle archive evidence into the per-candidate fit so
@@ -567,16 +568,26 @@ async def score_population(
                 )
         sample_order: list[int] | None = None
         if sorter_obs:
+            # Build seed hit history (origin in R1, prior winner R2+) so
+            # the picker measures Chernoff info between the seed prior
+            # and the population, not just population variance.
+            seed_hits: dict[int, list[bool]] = {}
+            for sr in seed_results or []:
+                ssid = sr.get("sample_id")
+                if ssid is None or sr.get("error"):
+                    continue
+                seed_hits.setdefault(int(ssid), []).append(bool(sr.get("hit")))
             artifact = build_hard_samples_artifact_from_observations(
                 sorter_obs,
                 cycle_id=session.state.cycle_id,
                 top_k_candidates=None,
                 top_k_samples=None,
+                seed_hits=seed_hits or None,
             )
-            sample_order = list(artifact["discrimination"]["sample_order"])
-            disc_per_sample = artifact["discrimination"]["per_sample"]
+            sample_order = list(artifact["pick_score"]["sample_order"])
+            pick_per_sample = artifact["pick_score"]["per_sample"]
             preview = [
-                (sid, float(disc_per_sample.get(str(sid), 0.0)))
+                (sid, float(pick_per_sample.get(str(sid), 0.0)))
                 for sid in sample_order[: min(3, len(sample_order))]
             ]
             callbacks.on_sample_order_preview(
@@ -587,7 +598,7 @@ async def score_population(
                 n_priors=len(elim_check.priors_by_sample),
                 sample_order=sample_order,
             )
-            # Hand the discrimination-first order to PoBBCheck so the
+            # Hand the pick-score-first order to PoBBCheck so the
             # dominance check inside ``check()`` knows the candidate's
             # intended sample budget (== ``len(sample_order)``) and can
             # bound the max-possible final-hit count against the seed
