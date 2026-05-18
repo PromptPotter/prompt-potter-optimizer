@@ -56,6 +56,13 @@ AUTO_RULES: dict[str, str] = {
         "restructure, or swap a verify/restate framing for a different solution "
         "method."
     ),
+    "forbidden_axis_attempted": (
+        "OPERATOR LOCK: a prior round proposed a forbidden axis "
+        "(model/provider) — validator rejected it. Do NOT re-propose any of "
+        "{model, provider} this round. They are operator-fixed at the dataset "
+        "overlay; mutating them is impossible by policy. Route the budget to "
+        "prompt-field or other param axes instead."
+    ),
 }
 
 

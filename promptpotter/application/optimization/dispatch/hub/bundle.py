@@ -30,17 +30,15 @@ if TYPE_CHECKING:
 
 # Module-level format constants shared across renderers.
 AXES_ENUM_PREVIEW = 4
-NEAR_MISS_RENDER_CAP = 6
-SAMPLE_RENDER_CAP = 3
+NEAR_MISS_RENDER_CAP = 3
+SAMPLE_RENDER_CAP = 2
 FAILURE_WARNING_PREVIEW = 1
 PIPELINE_PARAM_CATALOGUE_MODEL_CAP = 8
-# Caps for the trajectory-memory panels — keep the cycle-wide miss list
-# and origin-hit list bounded so a long campaign or large dataset can't
-# bloat L1's prompt. Origin gets fewer slots (it's strongest-evidence,
-# fewer entries do the job); intractable gets more (every entry shifts
-# attention onto a specific failure cluster L1 should target).
-ORIGIN_STRENGTHS_RENDER_CAP = 8
-INTRACTABLE_SAMPLES_RENDER_CAP = 12
+# Caps for the trajectory-memory panels — bounded so a long campaign or
+# large dataset can't bloat L1's prompt. 3 samples each is enough to
+# signal a cluster without paying the per-sample cost (~110 chars each).
+ORIGIN_STRENGTHS_RENDER_CAP = 3
+INTRACTABLE_SAMPLES_RENDER_CAP = 4
 # Runtime-failures stay on OptSearchPoint forever (trend visibility for the
 # state layer) but the ``runtime_failures`` signal only emits failures
 # first-seen in the last K rounds. Older entries collapse to a single

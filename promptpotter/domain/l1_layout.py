@@ -54,6 +54,8 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "axis_memory",
         "origin_strengths",
         "intractable_samples",
+        "archive_top_runs",
+        "rare_hit_samples",
     }
 )
 
@@ -118,8 +120,9 @@ def default_l1_layout() -> L1Layout:
             "runtime_failures",
             "critique",
             "axis_memory",
+            "archive_top_runs",
+            "rare_hit_samples",
             "origin_strengths",
-            "intractable_samples",
         ],
     )
 

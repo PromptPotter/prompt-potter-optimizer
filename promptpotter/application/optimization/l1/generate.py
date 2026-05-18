@@ -130,20 +130,26 @@ async def l1_generate(
         )
     except MetaPromptParseError as parse_err:
         # The meta-prompt LLM returned content that didn't validate against
-        # L1GenerateOutput even after one repair-hint retry. Record this on
-        # the wound channel L2 already reads (validation_failures), then
-        # return zero candidates so the round completes cleanly. Next round
-        # L2 sees the failure on its surface and heals the framing.
+        # L1GenerateOutput even after one repair-hint retry. Distinguish
+        # truly-empty (provider degraded) from schema-noncompliant (prompt
+        # structurally wrong) so L2 sees the right signal — both feed the
+        # validation_failures wound channel but the reason field steers the
+        # heal direction.
+        raw = (parse_err.raw or "").strip()
+        is_empty = len(raw) < 20
+        reason = "l1_provider_empty_response" if is_empty else "meta_prompt_parse_failure"
         logger.error(
-            "L1 R%d: meta-prompt parse failure after retry — zero candidates this round",
+            "L1 R%d: %s — zero candidates this round (raw=%d chars)",
             round_num,
+            "provider returned empty/truncated content" if is_empty else "meta-prompt parse failure after retry",
+            len(raw),
         )
         opt_sp.wounds.validation_failures.append(
             ValidationFailure(
                 axis="l1_generate.output",
                 value=_truncate_raw(parse_err.raw, 300),
                 allowed=[],
-                reason="meta_prompt_parse_failure",
+                reason=reason,
             )
         )
         return []

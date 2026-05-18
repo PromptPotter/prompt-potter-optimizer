@@ -23,10 +23,8 @@
         "description": "System prompt for AIME 2025 competition math evaluation"
       },
       "optimizer": {
-        "param_keys": ["temperature", "max_tokens", "model", "reasoning_effort", "persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
-        "param_allowed_values": {
-          "reasoning_effort": ["none", "default", "low", "medium", "high"]
-        },
+        "param_keys": ["temperature", "max_tokens", "model", "persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
+        "param_allowed_values": {},
         "observation_name": "llm_only",
         "observation_mappings": [
           {

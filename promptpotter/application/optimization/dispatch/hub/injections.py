@@ -22,7 +22,6 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     AXES_ENUM_PREVIEW,
     INTRACTABLE_SAMPLES_RENDER_CAP,
     NEAR_MISS_RENDER_CAP,
-    ORIGIN_STRENGTHS_RENDER_CAP,
     PIPELINE_PARAM_CATALOGUE_MODEL_CAP,
     RUNTIME_FAILURE_RECENCY_WINDOW,
     SAMPLE_RENDER_CAP,
@@ -189,18 +188,21 @@ def _r_diagnostics(b: InjectionBundle) -> str:
         return "\n\n".join(sections)
     parts: list[str] = []
 
-    if d.evolution_rows:
+    # TRAJECTORY line: skip when only 1 evolution row — the "Too few rounds
+    # to classify" trajectory_description carries no signal and the EVOLUTION
+    # table also requires len>1 to render anything useful, so the whole block
+    # is dead weight on R1.
+    if len(d.evolution_rows) > 1:
         line = f"TRAJECTORY: {d.trajectory}"
         if d.trajectory_description:
             line += f" — {d.trajectory_description}"
         parts.append(line)
-        if len(d.evolution_rows) > 1:
-            tbl = ["EVOLUTION (last rounds):", "  round  acc      Δ       degraded"]
-            for row in d.evolution_rows[-5:]:
-                tbl.append(
-                    f"  {row.round:>5}  {row.accuracy:>6.1%}  {row.delta:>+6.1%}  {row.degraded:>5}"
-                )
-            parts.append("\n".join(tbl))
+        tbl = ["EVOLUTION (last rounds):", "  round  acc      Δ       degraded"]
+        for row in d.evolution_rows[-5:]:
+            tbl.append(
+                f"  {row.round:>5}  {row.accuracy:>6.1%}  {row.delta:>+6.1%}  {row.degraded:>5}"
+            )
+        parts.append("\n".join(tbl))
 
     if d.anomalies:
         parts.append("ANOMALIES:\n  " + "\n  ".join(d.anomalies))
@@ -227,11 +229,21 @@ def _r_diagnostics(b: InjectionBundle) -> str:
                 )
             parts.append(rank_line)
 
-    if d.termination_dist:
+    # PIPELINE HEALTH: skip when nothing's wrong AND only one terminator —
+    # a single-node pipeline with 0% errors / 0% warnings is the default
+    # success state, no signal to surface. Re-emit when error_rate or
+    # warning_rate is non-zero OR multiple termination steps appear (pipeline
+    # is branching across nodes, useful telemetry).
+    if d.termination_dist and (
+        d.error_rate > 0 or d.warning_rate > 0 or len(d.termination_dist) > 1
+    ):
         td_lines = ["PIPELINE HEALTH:"]
         for step, count in sorted(d.termination_dist.items(), key=lambda x: -x[1]):
             td_lines.append(f"  terminate@{step}: {count}")
-        td_lines.append(f"  error_rate: {d.error_rate:.0%} | warning_rate: {d.warning_rate:.0%}")
+        if d.error_rate > 0 or d.warning_rate > 0:
+            td_lines.append(
+                f"  error_rate: {d.error_rate:.0%} | warning_rate: {d.warning_rate:.0%}"
+            )
         parts.append("\n".join(td_lines))
 
     if d.near_misses:
@@ -423,9 +435,6 @@ def _format_runtime_failure_group(rfs: list[Any]) -> list[str]:
             continue
         backend = f"{provider}/{model}" if (provider or model) else "(backend n/a)"
         out.append(f"    BLOCKED x{len(group)} — dom={warning}, model={backend}")
-        label = next((rf.candidate_label for rf in group if rf.candidate_label), "")[:80]
-        if label:
-            out.append(f'      e.g. "{label}"')
         varied: dict[str, set[str]] = defaultdict(set)
         for rf in group:
             for k, v in (rf.observed_config or {}).items():
@@ -485,30 +494,19 @@ def _valid_axis_set(schema: Any) -> set[str]:
 def format_l1_critique_for_prompt(critique: dict, pipeline_schema: Any = None) -> str:
     """L1 critique dict → compact text for L1_GENERATE + L2_CONTEXT consumption.
 
-    Order is deliberate: summary first (the headline steer), then the
-    paired positive/negative block (what L1's next round must preserve
-    vs. attack), then priority_fix + suggested_axes (the concrete
-    next-round directive), then per-sample failure_highlights (the
-    evidence). The positive/negative pair carries the two signals that
-    `priority_fix` alone elides — what's earning hits (preserve) and
-    what's failing beyond the top fix (still on the work list).
+    Three load-bearing fields only: ``priority_fix`` (axis+change+quoted
+    failure), ``suggested_axes`` (schema-filtered), ``failure_highlights``
+    (per-sample evidence). Prose summary / positive_critique /
+    negative_critique were dropped from the schema — see L1CritiqueOutput.
 
     When ``pipeline_schema`` is provided, ``suggested_axes`` is filtered
     against the schema's known axis names so a hallucinated axis (e.g.
     ``prompt_size``) doesn't get re-rendered into the next round's L2
-    brief. Display call sites without a schema in hand pass None and
-    behave as before — the operator-facing surface is unchanged for
-    static review.md / log.md renders.
+    brief.
     """
     if not critique:
         return ""
     parts: list[str] = []
-    if s := critique.get("summary"):
-        parts.append(s)
-    if pos := critique.get("positive_critique"):
-        parts.append(f"Working: {pos}")
-    if neg := critique.get("negative_critique"):
-        parts.append(f"Open: {neg}")
     if pf := critique.get("priority_fix"):
         parts.append(f"Fix: {pf}")
     sa = critique.get("suggested_axes") or []
@@ -531,6 +529,8 @@ def _r_critique(b: InjectionBundle) -> str:
 
 
 def _r_l1_overrides(b: InjectionBundle) -> str:
+    if not b.opt_sp.l1_overrides:
+        return ""
     return f"CURRENT L1 CONFIG: {json.dumps(b.opt_sp.l1_overrides)}"
 
 
@@ -558,8 +558,6 @@ _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
     "exhausted_axes",
     "persistent_failures",
     "failure_clusters",
-    "failure_group_insights",
-    "improvement_attribution",
 )
 
 
@@ -662,14 +660,13 @@ def _query_stem(row: dict, n: int = 70) -> str:
 
 
 def _r_origin_strengths(b: InjectionBundle) -> str:
-    """Samples the round-0 origin already hits.
+    """Origin-hit count — one-line summary.
 
-    The origin's parent scaffolding earned these — every L1 mutation
-    must preserve whatever in the parent fields is converting them or
-    risk regressing the floor. Sourced from
-    ``cycle.tracking.origin_per_sample_results`` (frozen at
-    ``Cycle.start``); empty until origin has been scored. Fenced
-    because the body echoes sample queries and ground truths.
+    The hit count is the actionable signal ("don't strip scaffolding
+    earning these N"). Enumerated samples added bytes without adding
+    decision input — L1 doesn't pick which origin-hit to preserve, it
+    preserves all of them. Cited from
+    ``cycle.tracking.origin_per_sample_results``.
     """
     rows = b.origin_per_sample
     if not rows:
@@ -677,18 +674,10 @@ def _r_origin_strengths(b: InjectionBundle) -> str:
     hits = [r for r in rows if r.get("hit")]
     if not hits:
         return ""
-    shown = hits[:ORIGIN_STRENGTHS_RENDER_CAP]
-    lines = [
-        f"ORIGIN STRENGTHS ({len(hits)}/{len(rows)} samples the origin hits — "
-        "do not strip the scaffolding earning these):"
-    ]
-    for r in shown:
-        sid = r.get("sample_id")
-        gt = (r.get("ground_truth") or "")[:30]
-        lines.append(f"  [#{sid}] {_query_stem(r)} → GT: {gt}")
-    if len(hits) > ORIGIN_STRENGTHS_RENDER_CAP:
-        lines.append(f"  … +{len(hits) - ORIGIN_STRENGTHS_RENDER_CAP} more origin hits not shown.")
-    return fence_untrusted("\n".join(lines))
+    return (
+        f"ORIGIN STRENGTHS: {len(hits)}/{len(rows)} samples solved by origin "
+        "— preserve the parent scaffolding earning these."
+    )
 
 
 def _r_intractable_samples(b: InjectionBundle) -> str:
@@ -712,12 +701,57 @@ def _r_intractable_samples(b: InjectionBundle) -> str:
     for r in shown:
         sid = r.get("sample_id")
         gt = (r.get("ground_truth") or "")[:30]
-        pred = (r.get("predicted") or r.get("answer") or "")[:40]
-        lines.append(f"  [#{sid}] {_query_stem(r)} → predicted: {pred} (GT: {gt})")
+        lines.append(f"  [#{sid}] {_query_stem(r)} → GT: {gt}")
     if len(rows) > INTRACTABLE_SAMPLES_RENDER_CAP:
         lines.append(
             f"  … +{len(rows) - INTRACTABLE_SAMPLES_RENDER_CAP} more trajectory misses not shown."
         )
+    return fence_untrusted("\n".join(lines))
+
+
+def _r_archive_top_runs(b: InjectionBundle) -> str:
+    """Top historical runs across the dataset's archive — anchor against the best.
+
+    Surfaces the highest-composite runs ever scored on this dataset so the
+    optimizer reasons "beat run X (acc=Y%, comp=Z)" instead of re-discovering
+    a peak that's already on disk. Empty until ``AxisIndex.refresh`` has
+    folded at least one run.
+    """
+    if b.axes is None:
+        return ""
+    runs = b.axes.top_runs(3)
+    if not runs:
+        return ""
+    lines = [f"HISTORICAL BEST (top {len(runs)} runs across the dataset's archive):"]
+    for i, r in enumerate(runs, 1):
+        label = r.name or r.run_id
+        lines.append(
+            f"  #{i}  acc={r.accuracy:.1%}  comp={r.composite:.3f}  "
+            f"{r.hits}/{r.total}  run={label}"
+        )
+    return "\n".join(lines)
+
+
+def _r_rare_hit_samples(b: InjectionBundle) -> str:
+    """Samples cracked by ≤3 of ≥10 attempts — the unlock-pattern pointers.
+
+    Each rare hit names the run(s) that cracked the sample. Samples with
+    zero hits surface as ``capacity-bound`` (the optimizer should stop
+    engineering for them). Empty until the archive has accumulated at
+    least 10 measurements per sample.
+    """
+    if b.axes is None:
+        return ""
+    rare = b.axes.sample_index.rare_hit_samples(max_hits=3, min_observations=10)
+    if not rare:
+        return ""
+    lines = ["RARE-HIT SAMPLES (cracked by ≤3 of ≥10 attempts — replicate the unlock pattern):"]
+    for sid, query, hits, total, hit_run_ids in rare[:6]:
+        if hits == 0:
+            lines.append(f"  [#{sid}] {query}… → 0/{total} (capacity-bound; do not engineer for)")
+        else:
+            run_str = ", ".join(rid[:24] for rid in hit_run_ids[:2])
+            lines.append(f"  [#{sid}] {query}… → {hits}/{total} hit by {run_str}")
     return fence_untrusted("\n".join(lines))
 
 
@@ -743,6 +777,8 @@ def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
         triggers.append("l2_stall_diversity")
     if _LATEX_CORRUPTION_RE.search(b.opt_sp.render()):
         triggers.append("latex_repair")
+    if any(vf.reason == "forbidden_axis" for vf in b.opt_sp.wounds.validation_failures):
+        triggers.append("forbidden_axis_attempted")
     return triggers
 
 
@@ -924,6 +960,20 @@ INJECTIONS: dict[str, _Injection] = {
         InjectionKind.MEASUREMENT,
         _r_intractable_samples,
         "Cumulative cycle-wide miss set — samples no candidate has solved yet this cycle.",
+    ),
+    "archive_top_runs": _Injection(
+        "archive_top_runs",
+        InjectionKind.MEASUREMENT,
+        _r_archive_top_runs,
+        "Top-K historical runs across the dataset's archive — anchor the optimizer "
+        "against the best composite ever scored instead of re-discovering it.",
+    ),
+    "rare_hit_samples": _Injection(
+        "rare_hit_samples",
+        InjectionKind.MEASUREMENT,
+        _r_rare_hit_samples,
+        "Samples cracked by ≤3 of ≥10 attempts — names the run(s) that hit them "
+        "(recipe pointers). Zero-hit samples surface as capacity-bound.",
     ),
     "l1_supplemental_rules": _Injection(
         "l1_supplemental_rules",

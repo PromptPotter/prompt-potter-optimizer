@@ -159,6 +159,8 @@ EVIDENCE_GROUNDING_FIELDS: frozenset[str] = frozenset(
         "task_context",
         "plan",
         "critique",
+        "archive_top_runs",
+        "rare_hit_samples",
         "stall_exploration",
     }
 )

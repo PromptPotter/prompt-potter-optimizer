@@ -189,19 +189,16 @@ class L1GenerateOutput(BaseModel):
 
 
 class L1CritiqueOutput(BaseModel):
-    """Critique returned at round-end; the only required field is
-    ``summary`` — the others are best-effort enrichment the next round's
-    L1 may or may not get."""
+    """Critique returned at round-end. Three load-bearing fields only:
+    ``priority_fix`` (the headline steer), ``failure_highlights`` (per-
+    sample evidence quotes), ``suggested_axes`` (for L2's axis pick).
+    Prose ``summary`` + ``positive_critique`` + ``negative_critique``
+    were dropped — priority_fix already names axis+change, origin_strengths
+    panel carries the preserve signal, failure_highlights enumerates the
+    other open clusters."""
 
     model_config = ConfigDict(extra="forbid")
 
-    summary: Annotated[str, BeforeValidator(_truncate(400))] = Field(max_length=400)
-    positive_critique: Annotated[str, BeforeValidator(_truncate(300))] = Field(
-        default="", max_length=300
-    )
-    negative_critique: Annotated[str, BeforeValidator(_truncate(400))] = Field(
-        default="", max_length=400
-    )
     priority_fix: Annotated[str, BeforeValidator(_truncate(200))] = Field(
         default="", max_length=200
     )

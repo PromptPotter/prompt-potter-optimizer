@@ -50,6 +50,7 @@ class SampleIndex:
         self._samples: dict[int, Sample] = {}
         self._seen_runs: set[str] = set()
         self._hits: dict[int, list[bool]] = defaultdict(list)
+        self._hit_run_ids: dict[int, list[str]] = defaultdict(list)
         self._failure_modes: dict[int, list[str]] = defaultdict(list)
         self._degradation_counts: dict[int, int] = defaultdict(int)
         self._flips: list[dict[str, Any]] = []
@@ -104,6 +105,8 @@ class SampleIndex:
 
             hit = bool(item.get("hit"))
             self._hits[sid].append(hit)
+            if hit and run_id:
+                self._hit_run_ids[sid].append(run_id)
 
             pd = item.get("pipeline_data") or {}
             if (pd.get("diagnostics") or {}).get("warnings"):
@@ -234,6 +237,35 @@ class SampleIndex:
                 records.append(r)
         records.sort(key=lambda r: r.hit_rate)
         return records
+
+    def rare_hit_samples(
+        self,
+        *,
+        max_hits: int = 3,
+        min_observations: int = 10,
+    ) -> list[tuple[int, str, int, int, list[str]]]:
+        """Samples hit by ≤ ``max_hits`` candidates out of ≥ ``min_observations``.
+
+        Each rare hit is a *recipe pointer* — the one or two runs that cracked
+        a chronically-failing sample. Returns
+        ``(sample_id, query_stem, hit_count, total_observations, hit_run_ids)``
+        sorted by hit_count asc, then total desc. ``min_observations`` filters
+        out the cold-start case (one cycle, n=4) where every sample is "rare".
+        """
+        out: list[tuple[int, str, int, int, list[str]]] = []
+        for sid, hits in self._hits.items():
+            total = len(hits)
+            if total < min_observations:
+                continue
+            hit_count = sum(1 for h in hits if h)
+            if hit_count > max_hits:
+                continue
+            sample = self._samples.get(sid)
+            query = (sample.query if sample else "").replace("\n", " ").strip()[:60]
+            run_ids = list(self._hit_run_ids.get(sid, []))
+            out.append((sid, query, hit_count, total, run_ids))
+        out.sort(key=lambda t: (t[2], -t[3]))
+        return out
 
     def failure_clusters(self, max_clusters: int = 5) -> list[FailureCluster]:
         """Samples grouped by dominant failure mode."""

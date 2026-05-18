@@ -16,10 +16,11 @@ Solve competition-level math problems from the American Invitational Mathematics
 
 ## Key failure modes
 
-- Algebraic manipulation errors (polynomial expansion, factoring, simplification)
-- Modular arithmetic mistakes (wrong modulus, sign errors)
-- Combinatorial overcounting or undercounting
-- Number theory gaps (divisibility, prime factorization, Euler's totient)
-- Geometric reasoning errors (coordinate geometry, trigonometric identities)
-- Premature rounding or losing precision in intermediate steps
-- Not verifying the answer falls in [0, 999]
+Problems come from four distinct types and each one fails differently — a single generic "verify each step" instruction unlocks none of them. Mutations that address one type's failure mode (e.g. combinatorial overcounting) routinely regress on other types. Differentiate the verification step by problem type:
+
+- **Algebra**: polynomial expansion, factoring, simplification errors
+- **Number theory**: modular arithmetic mistakes (wrong modulus, sign errors), divisibility/prime factorization gaps
+- **Combinatorics**: overcounting or undercounting; decomposition into structured sub-cases (e.g. 3×3 blocks of a 3×9 grid) is often the unlock
+- **Geometry**: coordinate geometry errors, trigonometric identity misuse
+
+Format-level failures cut across all four types: premature rounding losing precision; answer outside [0, 999].

@@ -309,10 +309,25 @@ async def escalate_l2(
         # Wound 4: post-L2 validator failure force-triggers L3 to heal L2's
         # output. Trigger is deterministic from L2's output (rides on round_data
         # JSON), so resume reproduces it without a separate decision record.
-        if cycle.opt_sp.wounds.l2_guard_breaches:
+        #
+        # Exception: a *sole* "soft-reject" breach (the proposed task_context
+        # was a paraphrase or verbatim repeat — already discarded by the
+        # validator) doesn't need an L3 replan. L2 produced nothing usable
+        # this fire, the prior task_context stays in place, and L1 generates
+        # next round against that. Firing L3 on a single paraphrase reject
+        # caused the cascade we saw in fork_f13331ff: L3 produced a too-short
+        # plan, which failed l3_plan_length_floor, which seeded L1 with a
+        # malformed plan, which led to an empty L1 response. The skip lets
+        # the loop self-correct instead of layering escalations.
+        breaches = cycle.opt_sp.wounds.l2_guard_breaches
+        SOFT_REJECT_IDS = {
+            "l2_task_context_verbatim_repeat",
+            "l2_task_context_paraphrase_repeat",
+        }
+        if breaches and not all(b.validator_id in SOFT_REJECT_IDS for b in breaches):
             logger.warning(
                 "L3 force-triggered by %d L2-output validator failure(s) at round %d",
-                len(cycle.opt_sp.wounds.l2_guard_breaches),
+                len(breaches),
                 round_num,
             )
             await _run_transition(
@@ -324,6 +339,14 @@ async def escalate_l2(
                 on_phase,
                 obs=obs,
                 tracing_campaign_id=tracing_campaign_id,
+            )
+        elif breaches:
+            logger.info(
+                "L2 produced %d soft-reject breach(es) at round %d (%s) — skipping L3 "
+                "force-trigger; prior task_context retained, L1 continues next round",
+                len(breaches),
+                round_num,
+                ", ".join(b.validator_id for b in breaches),
             )
         return None
 

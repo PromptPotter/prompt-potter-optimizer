@@ -98,14 +98,19 @@ def _diff_paths(
     """Walk active vs frozen and return paths where they differ.
 
     Stops descending at any path registered in :data:`_FIELD_SCOPES` so that
-    subtree entries classify the whole subtree as one unit.
+    subtree entries classify the whole subtree as one unit. ``None`` on
+    either side is treated as ``{}`` when the other side is a dict — a new
+    config section added since the frozen snapshot was taken should diff at
+    the leaf level (where the classifications live), not at the parent.
     """
     if prefix in _FIELD_SCOPES:
         return [prefix] if active != frozen else []
-    if isinstance(active, dict) and isinstance(frozen, dict):
+    if isinstance(active, dict) or isinstance(frozen, dict):
+        a = active if isinstance(active, dict) else {}
+        f = frozen if isinstance(frozen, dict) else {}
         out: list[tuple[str, ...]] = []
-        for key in set(active.keys()) | set(frozen.keys()):
-            out.extend(_diff_paths(active.get(key), frozen.get(key), (*prefix, key)))
+        for key in set(a.keys()) | set(f.keys()):
+            out.extend(_diff_paths(a.get(key), f.get(key), (*prefix, key)))
         return out
     return [prefix] if active != frozen else []
 

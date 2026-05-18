@@ -64,6 +64,18 @@ class AxisImpact:
     sample_count: int = 0
 
 
+@dataclass
+class RunRecord:
+    """One archive run's summary for the historical-best leaderboard."""
+
+    run_id: str
+    name: str
+    accuracy: float
+    composite: float
+    hits: int
+    total: int
+
+
 def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
     """Build a dict from (key, value) pairs, dropping pairs whose value is falsy."""
     out = {k: v for k, v in items if v}
@@ -100,6 +112,7 @@ class AxisIndex:
         self._axis_seen_runs: set[str] = set()
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
         self._cache_axis_impacts: dict[str, AxisImpact | None] = {}
+        self._top_runs: list[RunRecord] = []
 
     # ----- axis analytics -----
 
@@ -347,7 +360,9 @@ class AxisIndex:
         # ``_axis_values``, tracking which axes the delta touched so we
         # can invalidate exactly those impact-cache slots.
         touched_axes: set[str] = set()
+        all_entries: list[dict[str, Any]] = []
         for entry in archive_views.list_runs(store, backend_id):
+            all_entries.append(entry)
             run_id = entry.get("run_id", "")
             if not run_id or run_id in self._axis_seen_runs:
                 continue
@@ -356,6 +371,7 @@ class AxisIndex:
         for axis in touched_axes:
             self._cache_axis_impacts.pop(axis, None)
         self._recompute_failure_group_correlations()
+        self._refresh_top_runs(all_entries)
 
         if added:
             logger.debug(
@@ -363,6 +379,57 @@ class AxisIndex:
                 added,
                 len(self.sample_index._seen_runs),
             )
+
+    def _refresh_top_runs(self, entries: list[dict[str, Any]], k: int = 10) -> None:
+        """Recompute the top-K runs leaderboard from archive index entries.
+
+        Sorted descending by composite_fitness, then accuracy. Cheap full
+        re-rank — index entries are summary-only (no detail load) and N is
+        the number of archive runs.
+
+        Filter: only runs whose ``total`` equals the modal (most common)
+        sample count survive. Partial-coverage runs — early sweep arms,
+        elimination-aborted candidates, pre-scoring-set-fix entries that
+        scored against an easy-samples slice — would inflate the
+        leaderboard with non-comparable composites (a 100% run on an
+        8-sample slice beats a 60% run on the full 20). The modal filter
+        keeps the leaderboard apples-to-apples without hardcoding a per-
+        dataset N.
+        """
+        from collections import Counter
+
+        all_totals = [
+            (entry.get("scores") or {}).get("total", 0)
+            for entry in entries
+            if (entry.get("scores") or {}).get("total", 0) > 0
+        ]
+        if not all_totals:
+            self._top_runs = []
+            return
+        modal_total = Counter(all_totals).most_common(1)[0][0]
+
+        scored: list[RunRecord] = []
+        for entry in entries:
+            scores = entry.get("scores") or {}
+            total = scores.get("total") or 0
+            if total != modal_total:
+                continue
+            scored.append(
+                RunRecord(
+                    run_id=entry.get("run_id", ""),
+                    name=entry.get("name", ""),
+                    accuracy=scores.get("accuracy", 0.0),
+                    composite=scores.get("composite_fitness", 0.0),
+                    hits=scores.get("hits", 0),
+                    total=total,
+                )
+            )
+        scored.sort(key=lambda r: (-r.composite, -r.accuracy))
+        self._top_runs = scored[:k]
+
+    def top_runs(self, k: int = 3) -> list[RunRecord]:
+        """Top-K historical runs across the archive, by composite_fitness."""
+        return self._top_runs[:k]
 
     def record_flips_from_rounds(self, rounds: list[Any], round_num: int) -> None:
         if len(rounds) < 2 or not (rounds[-2].results and rounds[-1].results):

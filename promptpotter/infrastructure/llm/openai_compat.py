@@ -126,14 +126,21 @@ class OpenAICompatibleClient(LLMClientBase):
             # second LLM round-trip — surface that to the operator so the
             # extra wall-clock + spend isn't silent.
             schema_name = response_model.__name__ if response_model else "<schema>"
+            content_len = len(content.strip())
+            cause = (
+                "provider returned empty/truncated content"
+                if content_len < 20
+                else "response is schema-noncompliant"
+            )
             logger.warning(
-                "%s: %s parse failed (%d errors) on %s — repair retry in flight "
-                "(second full call; cost + latency ~2x). Persistent failures "
-                "indicate the L1 prompt is producing schema-noncompliant JSON.",
+                "%s: %s parse failed (%d errors, %d content chars) on %s — %s. "
+                "Repair retry in flight (second full call; cost + latency ~2x).",
                 self._provider_name,
                 schema_name,
                 validation_err.error_count(),
+                content_len,
                 request_params.get("model", "?"),
+                cause,
             )
             repair_messages = [
                 *request_params["messages"],
@@ -157,13 +164,21 @@ class OpenAICompatibleClient(LLMClientBase):
                 return result
             response, content, validation_err = result
             if validation_err is not None:
+                content_len = len(content.strip())
+                cause = (
+                    "provider degraded — empty/truncated response after repair retry"
+                    if content_len < 20
+                    else "schema-noncompliant after repair retry"
+                )
                 logger.error(
-                    "%s: %s parse failed AGAIN after repair retry (%d errors) — "
-                    "raising MetaPromptParseError. The L1 prompt is structurally "
-                    "wrong for this schema; do not silently swallow.",
+                    "%s: %s parse failed AGAIN after repair retry (%d errors, "
+                    "%d content chars) — %s. Round will record the failure and "
+                    "continue with zero candidates.",
                     self._provider_name,
                     schema_name,
                     validation_err.error_count(),
+                    content_len,
+                    cause,
                 )
                 raise MetaPromptParseError(
                     raw=content, error=validation_err, attempts=2
