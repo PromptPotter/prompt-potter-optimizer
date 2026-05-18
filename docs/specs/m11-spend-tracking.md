@@ -22,7 +22,7 @@ warn-on-oversize check (`emit_token_usage`).
     rate table; matches the operator's invoice.
   - **Runtime cache** at `~/.promptpotter/rates.json`, wrapped as
     `{"fetched_at", "models"}` with a 24 h TTL. CLI calls
-    `refresh_rates()` on `optimize` start; no-op when fresh.
+    `refresh_rates()` on `new` / `resume` start; no-op when fresh.
     `--refresh-rates` forces.
   - **Bundled floor** at `promptpotter/shared/data/rates.json` —
     checked into the repo, same wrapped format, bumped via PR. Loaded

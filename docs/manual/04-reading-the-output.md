@@ -94,7 +94,7 @@ The optimizer has already handled it — these exist for audit, not to ask for i
   ```bash
   python -m uvicorn promptpotter.main:app --port 8001
   ```
-  then open <http://127.0.0.1:8001/ui/>. The page polls `dashboard.json` every 2 s. Reads `active_session.json` on load — `init` a new cycle ⇒ reload the page. Keep `python -m promptpotter optimize` running in another terminal for live refresh.
+  then open <http://127.0.0.1:8001/ui/>. The page polls `dashboard.json` every 2 s. Reads `active_session.json` on load — `new` a fresh cycle ⇒ reload the page. Keep `python -m promptpotter resume` running in another terminal for live refresh.
 - `output.log` — append-only HIT/MISS history, tail-friendly.
 
 Both live at the **root cycle's** dir (the cycle with no `parent_cycle_id`). When you fork, the fork's own dir nests under root at `campaigns/{root_cycle_id}/forks/{cycle_id}/`, but its dashboard / output.log stay at root. One place to tail covers the whole family.
@@ -117,9 +117,9 @@ After it stops: best config in `index.json::final::winner`; per-round digest in 
 
 ## Resuming and rewinding
 
-- `optimize` — resume from latest completed round.
-- `optimize --from N` — rewind: archive trials after N, restart from round N's state.
-- `optimize --fork-on-divergence` — on scorer divergence, mint a sibling cycle from the divergence point.
+- `resume` — resume from latest completed round.
+- `resume --from N` — rewind: archive trials after N, restart from round N's state.
+- `resume --fork-on-divergence` — on scorer divergence, mint a sibling cycle from the divergence point.
 
 Full mechanics: [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md).
 

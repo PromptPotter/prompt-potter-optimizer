@@ -7,7 +7,7 @@
 - Tests: `tests/test_api.py` covers active pointer (404 + 200), file listing, file content (json + traversal-reject + 404 + oversize), `/ui/` mount, and the optimizer-pipeline view shape.
 - View topology lives in `promptpotter/application/optimization/optimizer_pipeline.json::view` — flat `nodes` (id + label + kind) + `edges` (from/to/kind/label). Positions are **hardcoded in `webapp/index.html`** (`LAYOUT` + `EDGES`); the pipeline shape never changes.
 
-**How the operator runs it:** `python -m uvicorn promptpotter.main:app --port 8001` in one terminal; `python -m promptpotter optimize` in another; open `http://localhost:8001/ui/`. The page polls `dashboard.json` every 2 s. Reload the page to repin after `init`.
+**How the operator runs it:** `python -m uvicorn promptpotter.main:app --port 8001` in one terminal; `python -m promptpotter resume` in another; open `http://localhost:8001/ui/`. The page polls `dashboard.json` every 2 s. Reload the page to repin after `new`.
 
 **Depends on:** Parity (complete), FastAPI read endpoints in `promptpotter/presentation/api.py` (complete)
 **Blocks:** M11 Track 3 full read-only views; M12 webapp Phase 2 (launcher + live monitoring)

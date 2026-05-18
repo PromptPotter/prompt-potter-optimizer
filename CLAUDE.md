@@ -58,16 +58,16 @@ The word `legacy` in a comment or docstring is a code smell — either the path 
 ```bash
 pip install -e ".[all,dev]"
 ruff check . && ruff format --check . && deptry . && mypy promptpotter/ && pytest -q   # CI runs same chain
-python -m promptpotter optimize --config datasets/<name>/campaign.json  # fresh: mint session+cycle, run from round 0
-python -m promptpotter optimize                              # resume active; Ctrl+C: 1st saves, 2nd force-quits
-python -m promptpotter optimize --from N                     # resume: rewind in place
-python -m promptpotter optimize --fork-on-divergence         # resume: sibling cycle at divergence point
+python -m promptpotter new <name>                            # fresh: mint session+cycle from datasets/<name>/, run from round 0
+python -m promptpotter resume                                # resume active; Ctrl+C: 1st saves, 2nd force-quits
+python -m promptpotter resume --from N                       # resume: rewind in place
+python -m promptpotter resume --fork-on-divergence           # resume: sibling cycle at divergence point
 python -m uvicorn promptpotter.main:app --port 8001          # read-only API + /ui webapp preview
 ```
 
-`optimize` is the single write verb. Presence of `--config` (or `--dataset-name`) means "mint a fresh session+cycle and run from round 0"; absence means "resume the active session." Resume-only flags (`--from`, `--no-divergence-check`, `--fork-on-divergence`) are rejected when combined with `--config`/`--dataset-name`.
+`new` and `resume` are the two write verbs. `new <name>` mints a fresh session+cycle and runs from round 0; every invocation mints a fresh root cycle, and on content-hash collision with an existing root the cycle_id gets a `_r2` / `_r3` discriminator suffix so the new run lands in its own directory tree. `resume` (bare) picks up the active session.
 
-Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **When the operator mentions the dashboard / webapp / UI**: probe `GET /api/v1/health` on :8001 — if it answers, share the URL; if not, suggest the uvicorn line above and remind them to keep `python -m promptpotter optimize` running in another terminal so `dashboard.json` refreshes live. Page reads `active_session.json` on load — a fresh `optimize --config …` mint ⇒ reload the page.
+Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **When the operator mentions the dashboard / webapp / UI**: probe `GET /api/v1/health` on :8001 — if it answers, share the URL; if not, suggest the uvicorn line above and remind them to keep `python -m promptpotter resume` running in another terminal so `dashboard.json` refreshes live. Page reads `active_session.json` on load — a fresh `new <name>` mint ⇒ reload the page.
 
 `.env` with `GROQ_API_KEY` (or OPENAI/ANTHROPIC/OPENROUTER) required. Provider is per-campaign in `campaign.json::optimizer_llm.provider`.
 

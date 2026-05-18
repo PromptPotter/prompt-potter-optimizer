@@ -1,6 +1,6 @@
 # CLI Reference
 
-One write verb: `optimize`. Reads happen by opening the on-disk artifact tree — no read CLI.
+Two write verbs: `new` and `resume`. Reads happen by opening the on-disk artifact tree — no read CLI.
 
 ```bash
 python -m promptpotter [--tenant <id>] <subcommand> [options]
@@ -12,33 +12,31 @@ State files: [`persistence-and-state.md`](persistence-and-state.md). Rewind / fo
 
 ---
 
-## Two modes of optimize
+## The two write verbs
 
-| Mode | Trigger | Behavior |
-|------|---------|----------|
-| **Fresh** | `--config <path>` or `--dataset-name <name>` | Mint a new session+cycle, decompose the task description on first sight, run from round 0. |
-| **Resume** | No `--config` / `--dataset-name` | Pick up the active session at the latest completed round (or rewind/fork per the flags below). |
-
-The presence of `--config` / `--dataset-name` is the only switch. Resume-only flags (`--from`, `--no-divergence-check`, `--fork-on-divergence`) are rejected when combined with the fresh-mode flags.
+| Verb | Behavior |
+|------|----------|
+| **`new <name>`** | Mint a fresh session+cycle from `datasets/<name>/`, decompose the task description on first sight, run from round 0. Every invocation mints a fresh root cycle; on content-hash collision with an existing root, the `cycle_id` gets a `_r2` / `_r3` discriminator suffix so the new run lands in its own directory tree (separate dashboard, log, archive subtree). The prior campaign is preserved. |
+| **`resume`** | Pick up the active session at the latest completed round (or rewind/fork per the flags below). |
 
 ---
 
-## optimize — fresh mode
+## new — fresh mint
 
 ```bash
-python -m promptpotter optimize \
-    --backend-url http://127.0.0.1:8000 \
-    --config datasets/lca-termnorm/campaign.json
+python -m promptpotter new lca-termnorm \
+    --backend-url http://127.0.0.1:8000
 ```
 
 Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config, mints session+cycle, then runs the optimization loop from round 0.
 
-If `datasets/<name>/task_description.md` exists, the task is decomposed once into `task_context` and stored on the session. Disk-cached, so subsequent fresh-mode runs on the same dataset don't re-pay the decomposition cost.
+If `datasets/<name>/task_description.md` exists, the task is decomposed once into `task_context` and stored on the session. Disk-cached, so subsequent `new` runs on the same dataset don't re-pay the decomposition cost.
 
 | Flag | Purpose |
 |---|---|
-| `--config` | Campaign config JSON file — triggers fresh mode |
-| `--dataset-name` | Dataset under `./datasets/` — triggers fresh mode; auto-loads `datasets/<name>/campaign.json` when `--config` is omitted |
+| `<name>` (positional) | Dataset under `./datasets/` — auto-loads `datasets/<name>/campaign.json` |
+| `--config` | Campaign config JSON file — overrides the dataset's default `campaign.json` |
+| `--dataset-name` | Alternative to the positional `<name>` |
 | `--backend-url` | Backend service URL |
 | `--backend-id` | Override backend id (auto-derived from `dataset_name` otherwise) |
 | `--task-file` | Override `datasets/<name>/task_description.md` |
@@ -46,21 +44,21 @@ If `datasets/<name>/task_description.md` exists, the task is decomposed once int
 
 ---
 
-## optimize — resume mode
+## resume — pick up the active session
 
 ```bash
-python -m promptpotter optimize                 # resume from latest completed round
-python -m promptpotter optimize --from <round>  # rewind in place
+python -m promptpotter resume                 # resume from latest completed round
+python -m promptpotter resume --from <round>  # rewind in place
 ```
 
 Runs the full autonomous loop (L1 → L2 → L3 until convergence or `max_rounds`). State is checkpointed between rounds.
 
-While `optimize` runs, the live in-flight round mirrors into `campaigns/{root_cycle_id}/dashboard.json::current_round`. Each completed round is snapshotted to `campaigns/{cycle_id}/rounds/round_NNNN.json`.
+While `resume` runs, the live in-flight round mirrors into `campaigns/{root_cycle_id}/dashboard.json::current_round`. Each completed round is snapshotted to `campaigns/{cycle_id}/rounds/round_NNNN.json`.
 
 | Flag | Purpose |
 |---|---|
 | `--from <round>` | Rewind the active cycle to after round N before resuming |
-| `--no-divergence-check` | On resume, rescore but skip the decision-replay halt |
+| `--no-check` | On resume, rescore but skip the decision-replay halt |
 | `--fork-on-divergence` | On *data-affecting* config divergence (scoring, optimizer_llm, pipeline_overrides, exclude_nodes, dataset_name), mint a sibling cycle (with `parent_cycle_id`) and re-run the divergent round under the current scorer. Policy-only edits (PoBB knobs, patience, thresholds, n_variants, exploration) continue in-place — no fork, the flag is a no-op. See `CampaignConfig.classify_diff_against` for the field-by-field split. |
 
 ---
@@ -85,9 +83,8 @@ No read CLI. Two bands — telemetry at the family root, audit per cycle:
 ## Worked example
 
 ```bash
-python -m promptpotter optimize \
-    --backend-url http://127.0.0.1:8000 \
-    --config datasets/lca-termnorm/campaign.json
+python -m promptpotter new lca-termnorm \
+    --backend-url http://127.0.0.1:8000
 # Open campaigns/<cycle_id>/{dashboard.json, log.md, index.json} in your editor.
 ```
 
@@ -104,7 +101,7 @@ After an interrupted run, check for orphan processes (`tasklist | findstr python
 
 ## Pipeline params threading
 
-`configure_pipeline(svc, campaign_config)` applies `exclude_nodes` and `pipeline_overrides` and returns `pipeline_params`, which flows unchanged through both modes of `optimize` (fresh mint and resume). If `pipeline_params` is `None`, the backend runs the full pipeline.
+`configure_pipeline(svc, campaign_config)` applies `exclude_nodes` and `pipeline_overrides` and returns `pipeline_params`, which flows unchanged through both `new` and `resume`. If `pipeline_params` is `None`, the backend runs the full pipeline.
 
 ---
 

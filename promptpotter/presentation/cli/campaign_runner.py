@@ -2,22 +2,21 @@
 
 The per-command bodies live in ``commands/``:
 
-* ``commands/optimize.py`` — ``cmd_optimize`` (the single write verb)
+* ``commands/new.py`` — ``cmd_new`` (mint a fresh root campaign)
+* ``commands/resume.py`` — ``cmd_resume`` (continue active campaign)
 * ``commands/sweep.py`` — ``cmd_sweep`` (sweep toolkit verbs)
-* ``commands/compare.py`` — ``cmd_compare``
-* ``commands/init.py`` — fresh-init body invoked by ``cmd_optimize``
+* ``commands/compare.py`` — ``cmd_compare`` (PoBB cross-cycle comparison)
+* ``commands/reset.py`` — ``cmd_reset`` (escape hatch)
 * ``commands/_shared.py`` — ``CommandResult``, ``set_verbose``,
-  ``init_services_cli``, ``log_startup_summary``, and the shared
-  cycle-preparation helpers.
+  ``init_services_cli``, ``log_startup_summary``, the shared
+  cycle-preparation helpers, and the divergence hint text.
 
-``optimize`` is the single write verb. With ``--config`` (or
-``--dataset-name``) it mints a fresh session+cycle and runs from
-round 0; without, it resumes the active session. Reads happen by
-opening the on-disk artifact tree (``sessions/{id}/``,
-``campaigns/{cycle_id}/``) — ``dashboard.json`` for live state,
-``log.md`` for the digest, ``index.json`` for the final summary
-including ``stop_reason``. Stop with Ctrl+C — there is no mid-run
-pause/resume.
+Two write verbs: ``new [DATASET]`` mints a fresh root campaign (always);
+``resume`` continues the active session. Reads happen by opening the
+on-disk artifact tree (``sessions/{id}/``, ``campaigns/{cycle_id}/``) —
+``dashboard.json`` for live state, ``log.md`` for the digest,
+``index.json`` for the final summary including ``stop_reason``. Stop
+with Ctrl+C — there is no mid-run pause/resume.
 
 ``session.py`` carries ``SessionCtx``/``load_session``/``load_campaign_config``.
 """
@@ -35,8 +34,9 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 
 from promptpotter.presentation.cli.commands import (
     cmd_compare,
-    cmd_optimize,
+    cmd_new,
     cmd_reset,
+    cmd_resume,
     cmd_sweep,
 )
 from promptpotter.presentation.cli.commands._shared import _DIVERGENCE_HINT, set_verbose
@@ -46,7 +46,8 @@ __all__ = ["_DIVERGENCE_HINT", "main", "set_verbose"]
 
 
 COMMANDS = {
-    "optimize": cmd_optimize,
+    "new": cmd_new,
+    "resume": cmd_resume,
     "compare": cmd_compare,
     "sweep": cmd_sweep,
     "reset": cmd_reset,
@@ -56,8 +57,16 @@ COMMANDS = {
 def main() -> None:
     from promptpotter.shared.errors import RequestTooLargeError
 
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
     set_verbose(bool(getattr(args, "verbose", False)))
+
+    # Bare invocation defaults to `resume`. Re-parse with the verb injected
+    # so `resume`'s own defaults populate (--from, --fork-on-divergence,
+    # halt/spend, etc.) — otherwise the namespace is missing those attrs
+    # and cmd_resume's getattr-with-default catches it but loses CLI parity.
+    if args.command is None:
+        args = parser.parse_args(["resume"])
 
     try:
         result = asyncio.run(COMMANDS[args.command](args))

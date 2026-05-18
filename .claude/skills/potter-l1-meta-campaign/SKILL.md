@@ -1,6 +1,6 @@
 ---
 name: potter-l1-meta-campaign
-description: Long-running, idempotent strategist for evolving one L1-tier meta-prompt (`l1_generate`, `l1_critique`, `l2_context`, or `l3_plan` under `optimizer_pipeline.json::resolved_prompts['*/1']`). Same command every invocation — reads `.promptpotter/meta_campaigns/{prompt_id}/state.json`, advances one tick of the assess → per-cycle review → slate → screen → promote → record loop, exits. Subsumes `/potter-review` (per-cycle `healthy/degraded/broken` gate + one-edit-proposal per non-healthy cycle) and the prior `potter-dev-l1` proxy-validation skill (single-edit "did my change help?" — answered by Phase 4/5 against `active_hash` vs `parent_hash`). Invoke on cron, after each finished cycle, or when the developer says "continue the meta-campaign", "did my edit help", "next move on the L1 search", "screen the next batch", or pauses between sweeps. Distinct from `l4-improve-l1-gen` (per-round in-cycle review during a single cycle's pause). Never runs `optimize`; never applies a proposed edit — writes diffs only.
+description: Long-running, idempotent strategist for evolving one L1-tier meta-prompt (`l1_generate`, `l1_critique`, `l2_context`, or `l3_plan` under `optimizer_pipeline.json::resolved_prompts['*/1']`). Same command every invocation — reads `.promptpotter/meta_campaigns/{prompt_id}/state.json`, advances one tick of the assess → per-cycle review → slate → screen → promote → record loop, exits. Subsumes `/potter-review` (per-cycle `healthy/degraded/broken` gate + one-edit-proposal per non-healthy cycle) and the prior `potter-dev-l1` proxy-validation skill (single-edit "did my change help?" — answered by Phase 4/5 against `active_hash` vs `parent_hash`). Invoke on cron, after each finished cycle, or when the developer says "continue the meta-campaign", "did my edit help", "next move on the L1 search", "screen the next batch", or pauses between sweeps. Distinct from `l4-improve-l1-gen` (per-round in-cycle review during a single cycle's pause). Never runs `new` or `resume`; never applies a proposed edit — writes diffs only.
 ---
 
 # potter-l1-meta-campaign — Self-similar L1 meta-prompt search
@@ -118,7 +118,7 @@ Slate quality rules (reject silently if violated):
 - Each candidate touches **only** this campaign's `prompt_id` (not l1+l2 simultaneously).
 - No two candidates share `sha256(rendered template)`; deduplicate.
 
-When a real slate is locked (developer-supplied or operator-promoted from `proposed/`), append the candidate filenames + resolved `prompt_hash` to `pending_screen`, set `phase: "screen"`, recommend the exact `python -m promptpotter optimize --sweep …` invocation, exit.
+When a real slate is locked (developer-supplied or operator-promoted from `proposed/`), append the candidate filenames + resolved `prompt_hash` to `pending_screen`, set `phase: "screen"`, recommend the exact `python -m promptpotter new --sweep-batch …` invocation, exit.
 
 ### Phase 4 — Screen (cheap; rung 0 + rung 2; rung 3 when proxy collapsed)
 
@@ -257,7 +257,7 @@ ls    .promptpotter/meta_campaigns/l1_generate/proposed_edits/
 
 ## Boundaries
 
-- Never run `optimize`. Recommend the exact `python -m promptpotter optimize --sweep …` or `--from N` invocation; the operator executes.
+- Never run `new` or `resume`. Recommend the exact `python -m promptpotter new --sweep-batch …` or `python -m promptpotter resume --from N` invocation; the operator executes.
 - Never apply a proposed prompt edit. Skill writes the diff to `proposed_edits/`; the operator (or Claude, on operator request) applies it and clears `paused`.
 - Never propose more than one edit per cycle. Highest-ranked top-issue only; bundle hints go in the diff's leading comment, not as separate diffs.
 - Never mix prompt_ids in one campaign.

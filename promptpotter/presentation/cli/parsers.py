@@ -1,11 +1,16 @@
-"""Argparse schema for ``optimize`` / ``compare`` / ``sweep``.
+"""Argparse schema for ``new`` / ``resume`` / ``sweep`` / ``compare`` / ``reset``.
 
 Imported by ``campaign_runner.main()``. Help text is verbose by design — this
 is the operator-facing surface.
 
-``optimize`` is the single entry verb. With ``--config`` (or ``--dataset-name``)
-it mints a fresh session+cycle and runs from round 0. Without, it resumes
-the active session.
+Two write verbs:
+
+* ``new [DATASET]`` mints a fresh root campaign. Always. If the content hash
+  collides with an existing root, a ``_r2`` / ``_r3`` discriminator suffix
+  is appended so the new run lands in its own directory tree with its own
+  dashboard. The prior campaign is preserved untouched.
+* ``resume`` continues the active campaign (rewinds with ``--from``, forks
+  on divergence with ``--fork-on-divergence``, etc.).
 """
 
 from __future__ import annotations
@@ -41,87 +46,25 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_fresh_init_args(p: argparse.ArgumentParser) -> None:
-    """Backend + dataset + task overrides used when ``optimize`` mints a fresh
-    session+cycle.
-
-    Presence of ``--config`` or ``--dataset-name`` switches ``optimize`` into
-    fresh mode (run init body, then start at round 0). Absence keeps the
-    resume default.
-    """
-    p.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
-    p.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
-    p.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
+def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
+    """Shared --halt-at / --max-spend / --refresh-rates flags (new + resume)."""
     p.add_argument(
-        "--dataset-name",
+        "--halt-at",
+        dest="halt_at_accuracy",
+        type=float,
         default=None,
-        help="Dataset under ./datasets/. Triggers fresh-init mode "
-        "(mint new session+cycle, start at round 0). "
-        "Auto-loads datasets/<name>/campaign.json when --config is omitted.",
+        metavar="ACC",
+        help="Halt when best accuracy ≥ ACC (e.g. 0.66).",
     )
-    p.add_argument("--excel-path", default=None)
     p.add_argument(
-        "--config",
+        "--max-spend",
+        dest="max_spend_usd",
+        type=float,
         default=None,
-        help="Campaign config JSON file. Triggers fresh-init mode "
-        "(mint new session+cycle, start at round 0).",
+        metavar="USD",
+        help="Halt when cumulative cycle spend (optimizer + backend) ≥ USD.",
     )
-    p.add_argument("--task-file", default=None, help="Override datasets/<name>/task_description.md")
     p.add_argument(
-        "--task-text", default=None, help="Override datasets/<name>/task_description.md inline"
-    )
-
-
-def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
-    """Resume / divergence / mode flags for ``optimize``.
-
-    These are resume-path-only — combining any with ``--config`` /
-    ``--dataset-name`` is rejected at the top of ``cmd_optimize``.
-    """
-    p_opt.add_argument(
-        "--from",
-        dest="resume_from_round",
-        type=int,
-        default=None,
-        metavar="ROUND",
-        help="Resume after round N (archives rounds > N, reloads trial_N). "
-        "Omit to resume from the latest completed round. "
-        "Resume-path only — rejected with --config / --dataset-name.",
-    )
-    p_opt.add_argument(
-        "--no-divergence-check",
-        dest="no_divergence_check",
-        action="store_true",
-        help="On resume, rescore but skip the decision-replay halt.",
-    )
-    p_opt.add_argument(
-        "--fork-on-divergence",
-        dest="fork_on_divergence",
-        action="store_true",
-        help="On divergence, mint a sibling cycle (with parent_cycle_id) "
-        "and re-run the divergent round under the current scorer.",
-    )
-    mode_group = p_opt.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--sweep",
-        dest="sweep",
-        action="store_true",
-        help="Cheap-round_data mode: origin → 1 full scored round → "
-        "1 generation-only round (variants emitted, no scoring) → halt. "
-        "index.json::final.mode lands as 'sweep' so the leaderboard can "
-        "pair sweep cycles with their full counterparts.",
-    )
-    mode_group.add_argument(
-        "--diag",
-        dest="diag",
-        action="store_true",
-        help="Diagnostic mode: origin → 1 full scored round → force "
-        "L2-context (regardless of stall) → 1 generation-only round 2 "
-        "(with L2 overrides applied, no scoring) → halt. "
-        "index.json::final.mode lands as 'diag' and final.diag carries "
-        "L2's evolved L1 surface for the operator to promote.",
-    )
-    p_opt.add_argument(
         "--refresh-rates",
         dest="refresh_rates",
         action="store_true",
@@ -129,6 +72,106 @@ def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
         "(otherwise the cached table is reused for 24 h, with the "
         "in-repo bundled floor as fallback).",
     )
+
+
+def _add_new_args(p_new: argparse.ArgumentParser) -> None:
+    """Fresh-init flags for ``new``.
+
+    The positional ``dataset`` is the common path: ``new aime`` reads
+    ``datasets/aime/{pipeline,campaign}.json`` and starts the loop.
+    Explicit ``--config`` overrides ``datasets/<name>/campaign.json``.
+    """
+    p_new.add_argument(
+        "dataset",
+        nargs="?",
+        default=None,
+        help="Dataset under ./datasets/ (positional). "
+        "Reads datasets/<name>/{pipeline,campaign}.json. "
+        "Omit only if you pass --dataset-name explicitly.",
+    )
+    p_new.add_argument(
+        "--dataset-name",
+        default=None,
+        help="Explicit dataset name (alternative to positional). Required if "
+        "no positional dataset is given.",
+    )
+    p_new.add_argument(
+        "--config",
+        default=None,
+        help="Campaign config JSON override (defaults to datasets/<name>/campaign.json).",
+    )
+    p_new.add_argument(
+        "--task-file", default=None, help="Override datasets/<name>/task_description.md"
+    )
+    p_new.add_argument(
+        "--task-text", default=None, help="Override datasets/<name>/task_description.md inline"
+    )
+    p_new.add_argument(
+        "--excel-path",
+        default=None,
+        help="Build train/test datasets from an Excel ground-truth file before minting.",
+    )
+    p_new.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
+    p_new.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
+    p_new.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
+
+    mode_group = p_new.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--sweep-batch",
+        dest="sweep",
+        action="store_true",
+        help="Multi-fork dispatch from datasets/<name>/sweep/*.json: mint "
+        "one OPERATOR_SWEEP fork per payload, run each.",
+    )
+    mode_group.add_argument(
+        "--diag",
+        dest="diag",
+        action="store_true",
+        help="Diagnostic mode: origin → 1 full scored round → force "
+        "L2-context (regardless of stall) → 1 generation-only round 2 "
+        "(L2 overrides applied, no scoring) → halt. "
+        "index.json::final.mode lands as 'diag'.",
+    )
+
+    _add_runtime_halts(p_new)
+
+
+def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
+    """Resume / divergence / mode flags for ``resume``.
+
+    All operate on the active session pointed to by ``active_session.json``.
+    No fresh-init flags here — those moved to ``new``.
+    """
+    p_resume.add_argument(
+        "--from",
+        dest="resume_from_round",
+        type=int,
+        default=None,
+        metavar="ROUND",
+        help="Resume after round N (archives rounds > N, reloads trial_N). "
+        "Omit to pick up from the latest completed round.",
+    )
+    p_resume.add_argument(
+        "--no-check",
+        dest="no_divergence_check",
+        action="store_true",
+        help="On resume, rescore but skip the decision-replay halt.",
+    )
+    p_resume.add_argument(
+        "--fork-on-divergence",
+        dest="fork_on_divergence",
+        action="store_true",
+        help="On divergence, mint a sibling cycle (with parent_cycle_id) "
+        "and re-run the divergent round under the current scorer.",
+    )
+    p_resume.add_argument(
+        "--diag",
+        dest="diag",
+        action="store_true",
+        help="Diagnostic mode (see `new --diag`). On a previously-completed "
+        "diag cycle, branches off a counted sibling.",
+    )
+    _add_runtime_halts(p_resume)
 
 
 def _add_sweep_slice_args(p: argparse.ArgumentParser) -> None:
@@ -179,7 +222,7 @@ def _add_sweep_l1_prompt_args(p: argparse.ArgumentParser, *, allow_multi: bool =
 
 
 def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
-    """Sweep-toolkit verbs. Wraps ``optimize`` with halt gates + per-round
+    """Sweep-toolkit verbs. Wraps the optimizer with halt gates + per-round
     panel stats and persists one result JSON per run under
     ``archive/sweeps/{l1_meta_prompt_hash}/{dataset}/``.
     """
@@ -216,7 +259,7 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
         "--refresh-rates",
         dest="refresh_rates",
         action="store_true",
-        help="Force-refetch the LLM provider rate table (same semantics as ``optimize --refresh-rates``).",
+        help="Force-refetch the LLM provider rate table (same semantics as ``new --refresh-rates``).",
     )
 
     # round1 -----------------------------------------------------------------
@@ -380,25 +423,35 @@ def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Argparse schema for ``optimize`` + ``compare`` + ``sweep``."""
+    """Argparse schema for ``new`` / ``resume`` / ``sweep`` / ``compare`` / ``reset``.
+
+    Bare ``python -m promptpotter`` (no subcommand) defaults to ``resume`` —
+    the most common operator action gets the shortest invocation.
+    """
     parser = argparse.ArgumentParser(
         prog="python -m promptpotter",
-        description="PromptPotter optimization CLI — `optimize --config <path>` "
-        "mints a fresh session+cycle and runs from round 0; `optimize` alone "
-        "resumes the active session. Reads happen by opening the artifact tree "
+        description="PromptPotter optimization CLI. Bare invocation runs "
+        "`resume` (continue the active session). `new [DATASET]` mints a "
+        "fresh root campaign. Reads happen by opening the artifact tree "
         "(sessions/{id}/, campaigns/{cycle_id}/) directly.",
     )
     _add_global_args(parser)
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=False)
 
-    p_optimize = sub.add_parser(
-        "optimize",
-        help="Run optimization loop. With --config / --dataset-name: mint a "
-        "fresh session+cycle and start at round 0. Without: resume the active "
-        "session.",
+    p_new = sub.add_parser(
+        "new",
+        help="Mint a fresh root campaign on the named dataset. Always creates a "
+        "new root cycle dir — if the content hash collides with an existing "
+        "root, a `_r2` / `_r3` discriminator is appended.",
     )
-    _add_fresh_init_args(p_optimize)
-    _add_optimize_args(p_optimize)
+    _add_new_args(p_new)
+
+    p_resume = sub.add_parser(
+        "resume",
+        help="Continue the active campaign. Bare `resume` picks up where it "
+        "left off; flags handle rewind / divergence / diagnostic modes.",
+    )
+    _add_resume_args(p_resume)
 
     _add_compare_args(
         sub.add_parser(
@@ -413,8 +466,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_parser(
             "sweep",
             help="Sweep-toolkit verbs — cheap-grade L1 meta-prompt edits. "
-            "Each verb wraps optimize with halt gates and persists one result "
-            "JSON.",
+            "Each verb wraps the optimizer with halt gates and persists one "
+            "result JSON.",
         )
     )
 
@@ -424,7 +477,7 @@ def build_parser() -> argparse.ArgumentParser:
             help="Drop campaigns/ + sessions/ + active_session.json for the "
             "selected tenant; preserve archive/ (measurements + optimizer_calls "
             "+ sweeps). The escape hatch for cycles obsoleted by code changes "
-            "— per-sample measurements survive so the next optimize hits cache "
+            "— per-sample measurements survive so the next `new` hits cache "
             "immediately.",
         )
     )

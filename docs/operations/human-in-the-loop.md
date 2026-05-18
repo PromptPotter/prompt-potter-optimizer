@@ -7,7 +7,7 @@ into the existing fork primitive. The operator picks a ledger offset in
 the webapp's lineage inspector, hits "Fork from here," and the optimizer
 mints a sibling cycle rooted at that offset via
 `CycleEventLog.inherit_from(parent, offset)`. The fork inherits the
-parent's typed state at the cut; the operator re-runs `optimize` against
+parent's typed state at the cut; the operator re-runs `resume` against
 the new fork id.
 
 ## Status (pre-M12)

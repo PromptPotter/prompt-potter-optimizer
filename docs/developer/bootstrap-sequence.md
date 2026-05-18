@@ -68,7 +68,7 @@ Bootstrap writes to `Session`. The runner reads `Session` and the
 `CycleEventLog`; it never writes back to `Session` outside the per-round
 state-tracking bundle (`session.state`).
 
-If a piece of state must survive across `optimize` invocations, it goes
+If a piece of state must survive across `new` / `resume` invocations, it goes
 through the ledger (or its projections), not `Session`. If it's
 per-process per-cycle, it lives on `Session.state` or `Cycle`. The
 separation is enforced by
@@ -84,7 +84,7 @@ separation is enforced by
 - **`bootstrap_cycle` returns `(None, 1)`** → silent fallback when
   `session.backend_id` is empty. Means the runner runs without
   per-cycle persistence (useful for `compare` dry-runs; surprising in
-  `optimize`).
+  `new` / `resume`).
 - **`init_optimization_loop` fails origin scoring** → the backend
   doesn't accept the origin pipeline_params. Check
   `datasets/{name}/pipeline.json::nodes.{name}.config`.

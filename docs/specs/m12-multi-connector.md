@@ -69,7 +69,7 @@ Composed via `compile_scorer` (`promptpotter/shared/scoring.py`); example: `0.4 
 
 **Cost realism.** `outer_cost ≈ outer_n_samples × outer_n_candidates × inner_n_samples × inner_n_rounds × per_call_cost`. Typical `(4, 3, 10, 3)` config ⇒ ~360 inner candidate-evaluations per outer round. Sizing tiers: **dev** — `inner_n_rounds=1`, `first_round_delta` only (minutes/round) · **calibration** — `inner_n_rounds=3`, all proxies (tens of minutes) · **publication** — `inner_n_rounds=5`, `rounds_to_N`-weighted on target benchmark (hours). Outer dashboard's `dashboard.json::spend` surfaces it; operators read before extending.
 
-**Demo target — `datasets/promptpotter-self/`:** minimal cheap-proxy benchmark wired for dev iteration. `pipeline.json` (inner-cycle meta-prompt schema) · `campaign.json` (composite scoring formula combining all three proxies; small `inner_n_samples`; `inner_n_rounds=2`) · `task_description.md` (outer task framing: "improve PromptPotter's L1-generate meta-prompt for the GSM8K-small benchmark") · small inner-benchmark dataset. End-to-end demo: `python -m promptpotter optimize --config datasets/promptpotter-self/campaign.json`; outer dashboard at `:8001/ui/` shows PromptPotter optimizing PromptPotter.
+**Demo target — `datasets/promptpotter-self/`:** minimal cheap-proxy benchmark wired for dev iteration. `pipeline.json` (inner-cycle meta-prompt schema) · `campaign.json` (composite scoring formula combining all three proxies; small `inner_n_samples`; `inner_n_rounds=2`) · `task_description.md` (outer task framing: "improve PromptPotter's L1-generate meta-prompt for the GSM8K-small benchmark") · small inner-benchmark dataset. End-to-end demo: `python -m promptpotter new promptpotter-self`; outer dashboard at `:8001/ui/` shows PromptPotter optimizing PromptPotter.
 
 **Non-goals.** Distributed inner cycles (Track 3.5 work). Fixture-based trace replay (M11 Track 5's original design — superseded by real inner cycles). Pareto-aware composite scoring (Track 5 Phase 4). Outer-loop convergence proofs (Track 4 + findings doc).
 
@@ -106,7 +106,7 @@ M11 filled PromptPotter's rows; competitor rows are still empty.
 
 ### Track 3.5 — Orchestrator daemon (control plane structural shape)
 
-Track 3's launcher/control work describes REST endpoints — that's the half-step. The structural shape is an **orchestrator daemon**: `optimize` runs as a long-lived process owning `Session` and `LoopState`; CLI / notebook / webapp become HTTP clients of the same orchestrator. **Adds a fourth I/O kind** beyond §0's three (Persistence / Display / Control-local) — call it **Control-remote**.
+Track 3's launcher/control work describes REST endpoints — that's the half-step. The structural shape is an **orchestrator daemon**: `new` / `resume` runs as a long-lived process owning `Session` and `LoopState`; CLI / notebook / webapp become HTTP clients of the same orchestrator. **Adds a fourth I/O kind** beyond §0's three (Persistence / Display / Control-local) — call it **Control-remote**.
 
 Named explicitly so Track 3 doesn't accidentally ship a halfway-daemon (in-process-per-request orchestrator with no state coherence between requests). Decide: land as a sibling sub-spec `m12-orchestrator-daemon.md` or keep inline if the section stays small.
 
@@ -114,7 +114,7 @@ Named explicitly so Track 3 doesn't accidentally ship a halfway-daemon (in-proce
 
 - **The fourth I/O kind ("Control-remote") and what it can and can't do** — parallel to §0's three-kind invariant. **Allowed:** receive control commands, expose `Session`/`LoopState` snapshots, route campaign output. **Not allowed:** writing campaign artifacts directly (still through `CycleEventLog.append`); reading tracing data (still fan-out only).
 - **How `Session` becomes daemon-owned.** Either in-process-mutable (cheap; daemon owns lifetime) or projection-over-the-ledger (expensive; enables multi-process + trivial restart). Decide on whether multi-process state coherence is required.
-- **How CLI / notebook / webapp become clients.** Concrete: what does `python -m promptpotter optimize` do when the daemon is running? Spawn one if none, or hard-fail with "start the daemon first"?
+- **How CLI / notebook / webapp become clients.** Concrete: what does `python -m promptpotter resume` do when the daemon is running? Spawn one if none, or hard-fail with "start the daemon first"?
 - **State-authority decision.** If multi-process / restart-survival needed, pull §3.8's reconstructable-state invariant forward into a partial event-sourcing migration (Session-as-projection over ledger).
 - **Coupling with Tracks 1 + 4.** Daemon owns the connector instance (not per-request); L4 closure runs as a daemon-managed long-lived job.
 
@@ -126,7 +126,7 @@ Named explicitly so Track 3 doesn't accidentally ship a halfway-daemon (in-proce
 
 **Deliverables.**
 
-1. **Outer-loop campaign on PromptPotter dataset.** Point `python -m promptpotter optimize` at `datasets/promptpotter/` using the Track 1.5 connector. Run 5–10 rounds. The campaign optimizes PromptPotter's own meta-prompts.
+1. **Outer-loop campaign on PromptPotter dataset.** Point `python -m promptpotter new promptpotter` using the Track 1.5 connector. Run 5–10 rounds. The campaign optimizes PromptPotter's own meta-prompts.
 2. **`proxy_lift_corr` validation on the meta-loop.** M10 ships `proxy_lift_corr ≥ 0.6` as the L1-tuning gate. M12 confirms the same gate holds when the optimizer is optimizing itself. If correlation breaks, that's a finding worth publishing — meta-stability as positive or negative result.
 3. **Cross-cycle digest of meta-prompt evolution.** Same `archive/measurements/` mechanism as target-task campaigns. Operator reads meta-prompt history the same way they read TermNorm campaign history — no parallel infrastructure.
 4. **Findings doc — `docs/research/l4-self-optimization-results.md`.** Did meta-optimization improve target-task accuracy on a held-out benchmark? Cost? What changed in the meta-prompts? Pairs with Track 2 publication closure.

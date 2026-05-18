@@ -11,8 +11,8 @@ Companion to [`potter-l1-meta-campaign`](../../.claude/skills/potter-l1-meta-cam
 ### 🧭 Roles
 
 - Skill = strategist. Reads disk, decides, prints the next CLI.
-- `optimize` = executor. Produces cycle artifacts the skill reads.
-- Per SKILL.md: "Never run `optimize`. Recommend the exact invocation; the operator executes."
+- `new` / `resume` = executor. Produces cycle artifacts the skill reads.
+- Per SKILL.md: "Never run `new` or `resume`. Recommend the exact invocation; the operator executes."
 
 ### The alternation
 
@@ -29,12 +29,12 @@ call /potter-l1-meta-campaign  ->  reads new cycle, writes log row, prints next 
 
 | Step | Command |
 |---|---|
-| 1 | `python -m promptpotter optimize --config datasets/{name}/campaign.json` |
+| 1 | `python -m promptpotter new {name}` |
 | 2 | `/potter-l1-meta-campaign` |
 
 Step 2 reads `index.json::final.prompt_hashes.{prompt_id}` into `state.json::active_hash`, writes the first `review` row, clears `paused`.
 
-Calling the skill before step 1 finishes just prints the pause message and exits. Running `optimize` first saves one tick.
+Calling the skill before step 1 finishes just prints the pause message and exits. Running `new` first saves one tick.
 
 ### When to re-invoke
 

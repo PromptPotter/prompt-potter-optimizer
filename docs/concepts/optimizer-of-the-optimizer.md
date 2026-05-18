@@ -88,7 +88,7 @@ registry; the outer cycle doesn't change.
 The connector and dataset architecture are landed; inner-cycle execution
 (turning a wire payload into an actual inner campaign run) is the follow-up
 deliverable. Until then, the demo dataset loads, validates, and renders on
-the outer dashboard, but `optimize` raises a clear `NotImplementedError` at
+the outer dashboard, but `new` raises a clear `NotImplementedError` at
 the first inner match request. See
 `promptpotter/connectors/CLAUDE.md` § Inner-cycle execution for the two
 design options under consideration (localhost endpoint vs in-process

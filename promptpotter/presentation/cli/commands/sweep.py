@@ -15,10 +15,8 @@ from promptpotter.presentation.cli.commands._shared import (
     init_services_cli,
     log_startup_summary,
 )
-from promptpotter.presentation.cli.commands.optimize import (
-    _build_observers,
-    _prepare_cycle_for_optimize,
-)
+from promptpotter.presentation.cli.commands.new import _build_observers
+from promptpotter.presentation.cli.commands.resume import _prepare_cycle_for_resume
 from promptpotter.presentation.cli.session import load_session
 
 if TYPE_CHECKING:
@@ -98,8 +96,8 @@ async def _setup_sweep_cycle(
         return None, ctx, session
 
     train_data = session.samples or []
-    pipeline_params, _origin = _prepare_cycle_for_optimize(
-        args, ctx, session, campaign_config, train_data
+    pipeline_params = _prepare_cycle_for_resume(
+        args, ctx, session, campaign_config, train_data, pivot_prompt=False
     )
     session.session_id = ctx.session_id
     session.state.cycle_id = ctx.cycle_id

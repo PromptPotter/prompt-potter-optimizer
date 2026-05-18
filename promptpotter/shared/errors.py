@@ -33,9 +33,8 @@ class ActiveSessionMismatchError(RuntimeError):
     :func:`init_services` for a different ``tenant_id`` without explicitly
     passing ``take_over=True`` hits this error instead of silently drifting to
     a different workspace. Pass ``take_over=True`` to clear the pointer and
-    proceed, or run ``python -m promptpotter optimize --config datasets/.../campaign.json``
-    for the new dataset first (which rewrites the pointer as part of fresh
-    session creation).
+    proceed, or run ``python -m promptpotter new <dataset>`` for the new
+    dataset first (which rewrites the pointer as part of fresh root creation).
     """
 
     def __init__(
@@ -53,8 +52,7 @@ class ActiveSessionMismatchError(RuntimeError):
             f"(session {active_session_id!r}), but this call requested "
             f"tenant {requested_tenant_id!r}. "
             f"Pass take_over=True to clear the pointer and proceed, or run "
-            f"`python -m promptpotter optimize --config datasets/.../campaign.json` "
-            f"for the new dataset first."
+            f"`python -m promptpotter new <dataset>` for the new dataset first."
         )
 
 
@@ -94,9 +92,9 @@ class ResumeDivergenceError(RuntimeError):
     currently active scorer. The only mechanism: every recorded decision is
     a pure function of scored results, and rescoring changes the inputs.
 
-    Rerun ``optimize`` with ``--fork-on-divergence`` to branch a sibling
-    cycle from this point under the new policy, or revert
-    ``campaign.json::scoring`` to continue the original trajectory.
+    Rerun ``resume --fork-on-divergence`` to branch a sibling cycle from
+    this point under the new policy, or revert ``campaign.json::scoring``
+    to continue the original trajectory.
     """
 
     def __init__(

@@ -99,12 +99,13 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 ### Presentation
 | Symbol | File:line |
 |---|---|
-| `_run_init_body` (fresh-mode helper) | `promptpotter/presentation/cli/commands/init.py:78` |
-| `cmd_optimize` | `promptpotter/presentation/cli/commands/optimize.py:300` |
+| `_mint_fresh_session` (fresh-mint helper) | `promptpotter/presentation/cli/commands/new.py:78` |
+| `cmd_new` | `promptpotter/presentation/cli/commands/new.py:300` |
+| `cmd_resume` | `promptpotter/presentation/cli/commands/resume.py:300` |
 | `main()` (entry point) | `promptpotter/presentation/cli/campaign_runner.py:50` |
 | `--from` flag | `promptpotter/presentation/cli/parsers.py:84` |
 | `--fork-on-divergence` flag | `promptpotter/presentation/cli/parsers.py:100` |
-| `--sweep` flag | `promptpotter/presentation/cli/parsers.py:108` |
+| `--sweep-batch` flag | `promptpotter/presentation/cli/parsers.py:108` |
 | `LiveDisplay` | `promptpotter/presentation/views/live/display.py:58` |
 
 ### Config
@@ -151,7 +152,7 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 - `session.py` — `Session` container, `ScoringContext`
 - `wiring.py` — service init: stores, LLM clients, connectors → `Session`
 
-**`promptpotter/application/sweep/`** — cheap L1 candidate A/B (`--sweep` mode)
+**`promptpotter/application/sweep/`** — cheap L1 candidate A/B (`new --sweep-batch` mode)
 **`promptpotter/application/datasets/`** — dataset loaders + per-dataset pipeline overlay
 **`promptpotter/application/origin.py`** — origin cycle resolution
 
@@ -170,8 +171,8 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 - `__init__.py` — `CONNECTORS` dict + `get(name)`
 
 **`promptpotter/presentation/`**
-- `cli/campaign_runner.py` — `main()` entry; per-command bodies live in `cli/commands/{optimize,init,sweep,compare}.py`
-- `cli/parsers.py` — argparse schema (`--from`, `--fork-on-divergence`, `--sweep`)
+- `cli/campaign_runner.py` — `main()` entry; per-command bodies live in `cli/commands/{new,resume,sweep,compare}.py`
+- `cli/parsers.py` — argparse schema (`--from`, `--fork-on-divergence`, `--sweep-batch`)
 - `cli/session.py` — `SessionCtx`, `load_session`, `load_campaign_config`
 - `api/` — read-only FastAPI app (`routers/{backends,campaigns,active,datasets}.py`, `deps.py`)
 - `views/` — `live/` (`LiveDisplay` + per-sample/candidate/phase formatters), `render/` (text + markdown + heatmap + sweep + sp_diff), view models, `notebook_run.py`

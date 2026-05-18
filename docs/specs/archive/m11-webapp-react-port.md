@@ -201,7 +201,7 @@ If a bug is found in vanilla that *also* matters for the port, fix it in the por
 - **A11y parity (must improve)**: vanilla scored ~16-17/20 post-`/harden`. Port should hit 19-20/20 — touch targets ≥ 44px (charter previously deferred mobile; the port origin includes it), keyboard navigation already-equivalent via the lifted patterns, focus-visible already styled.
 - **Bundle size**: `out/` total < 500 KB gzipped excluding wizard PNG. Chart.js is ~70 KB gzipped; marked is ~15 KB. Plain CSS keeps the rest small.
 - **No regressions**: `pytest tests/test_api.py` still green (FastAPI surface unchanged). `tests/test_invariants.py` still green (no new campaign artifacts written).
-- **Operator smoke**: `npm run dev` on :3000, `uvicorn promptpotter.main:app --port 8001`, run `python -m promptpotter optimize` in a third terminal — dashboard live-updates, file tree works, theme toggle does not reload, keyboard tab order reaches every interactive element.
+- **Operator smoke**: `npm run dev` on :3000, `uvicorn promptpotter.main:app --port 8001`, run `python -m promptpotter resume` in a third terminal — dashboard live-updates, file tree works, theme toggle does not reload, keyboard tab order reaches every interactive element.
 
 ---
 

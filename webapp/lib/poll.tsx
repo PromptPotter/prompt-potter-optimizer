@@ -226,7 +226,7 @@ function useCycleStreamSource(
         ...INITIAL_STATE,
         statusText: "No active campaign",
         statusHint:
-          "Start a campaign: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal.",
+          "Start a campaign: `python -m promptpotter new <dataset>` in another terminal.",
       });
       return;
     }
@@ -307,7 +307,7 @@ function useCycleStreamSource(
           ...prev,
           status: "offline",
           statusText: `dashboard.json unreachable for ${id}`,
-          statusHint: "Start the optimizer: `python -m promptpotter optimize`",
+          statusHint: "Resume the active campaign: `python -m promptpotter resume`",
           termKey: "status_offline",
           error: (e as Error).message,
         }));

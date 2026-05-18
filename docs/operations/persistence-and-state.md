@@ -13,12 +13,12 @@ The rest of this page covers the active-session pointer, what each file holds, a
 
 PromptPotter remembers which campaign you're on via `.promptpotter/active_session.json` — `{tenant_id, session_id, cycle_id}`, like a browser's active tab.
 
-- **`init`** creates a new cycle and overwrites the pointer.
-- **`optimize`** operates on the active cycle automatically.
+- **`new`** mints a fresh cycle and overwrites the pointer. Every invocation mints a fresh root cycle; on content-hash collision with an existing root, the `cycle_id` gets a `_r2` / `_r3` discriminator suffix so the new run lands in its own directory tree.
+- **`resume`** operates on the active cycle automatically.
 - **`--session <id>`** overrides the pointer for one command.
 - **`--backend-id`** auto-derives from `dataset_name` when not passed.
 
-Resume = `python -m promptpotter optimize`. No re-`init` needed.
+Resume = `python -m promptpotter resume`. No re-`new` needed.
 
 ---
 
@@ -59,7 +59,7 @@ Sessions and campaigns are separate. Today the relation is 1:1; the layout suppo
         {root}_fork_xxx/               # per-cycle audit + .runtime/
       diag/                            # diagnostic-BFS auto-spawned
         {root}_diag_NNN/
-      sweeps/{batch_id}/               # --sweep batches, grouped by batch_id
+      sweeps/{batch_id}/               # --sweep-batch batches, grouped by batch_id
         index.json                     # batch metadata
         summary.md
         forks/{root}_sweep_{batch_id}_xxx/
@@ -127,19 +127,19 @@ Three workflows over the same fork primitive.
 
 | Workflow | Command | Effect |
 |----------|---------|--------|
-| **Resume** | `optimize` | Pick up from latest completed round of the active cycle. |
-| **Rewind** | `optimize --from N` | Same `cycle_id`; archive trials after round N; resume at round N+1. |
-| **Fork on divergence** | `optimize --fork-on-divergence` | On scorer divergence, mint a sibling `cycle_id` rooted at the divergence point and continue under the current scorer. |
-| **Sweep batch** | `optimize --sweep` (with payloads) | Mint N siblings under one root from operator-authored override files; run a 2-round sweep on each. |
+| **Resume** | `resume` | Pick up from latest completed round of the active cycle. |
+| **Rewind** | `resume --from N` | Same `cycle_id`; archive trials after round N; resume at round N+1. |
+| **Fork on divergence** | `resume --fork-on-divergence` | On scorer divergence, mint a sibling `cycle_id` rooted at the divergence point and continue under the current scorer. |
+| **Sweep batch** | `new --sweep-batch` (with payloads) | Mint N siblings under one root from operator-authored override files; run a 2-round sweep on each. |
 
 Conceptual picture: [`../concepts/campaign-tree.md`](../concepts/campaign-tree.md).
 
-### Rewind — `optimize --from N`
+### Rewind — `resume --from N`
 
 Use when the active campaign went down a path you don't want — e.g. a bad L3 replan, or you edited config and want to re-explore from a specific round. `cycle_id` stays the same; you're rolling back history inside it.
 
 ```bash
-python -m promptpotter optimize --from 2
+python -m promptpotter resume --from 2
 ```
 
 Archives `rounds/round_0003.json` onward into `campaigns/{cycle_id}/.runtime/archived/resumed_at_<ts>/`, rebuilds the round file index for rounds 0–2, restores optimizer state from round 2's trial, resumes at round 3.
@@ -147,20 +147,20 @@ Archives `rounds/round_0003.json` onward into `campaigns/{cycle_id}/.runtime/arc
 - **Preserved:** the content-addressed measurement archive. Per-sample results unchanged under the new search replay from `archive/measurements/` without backend calls.
 - **Discarded:** rounds after N are moved aside, not deleted. Inspectable in the archive directory.
 
-**Editing optimizer state by hand.** Open `campaigns/{cycle_id}/rounds/round_{N:04d}.json` and edit before `optimize --from N`. Keep the `opt_search_point` block shape round-trippable. Schema: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
+**Editing optimizer state by hand.** Open `campaigns/{cycle_id}/rounds/round_{N:04d}.json` and edit before `resume --from N`. Keep the `opt_search_point` block shape round-trippable. Schema: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
 #### Interrupted rounds
 
 If you Ctrl+C mid-round, the ledger has the partial events but the round never received `round:complete`. On teardown the runner drains projections: `.runtime/cache/rounds/round_NNNN.json` is written with `"interrupted": true` so post-mortem readers can see what landed. The public `rounds/round_NNNN.json` stays absent — a partial round is not a complete round — and `index.json` records `status: "interrupted"` + `interrupted_round: N`. `--from M` admissibility consults the ledger: `M` is valid iff round `M` has a closing PhaseRecord (`round:complete`, or `origin:exit` for round 0). After an interrupt mid-round-1, `--from 1` correctly refuses with `"ledger only has completed rounds 0..0"`; `--from 0` resumes cleanly.
 
-### Fork — `optimize --fork-on-divergence`
+### Fork — `resume --fork-on-divergence`
 
 Use when a **data-affecting** config edit (scoring formula, `optimizer_llm.provider`/`model`, `pipeline_overrides`, `exclude_nodes`, `dataset_name`) causes resume's decision-replayer to detect that recorded decisions don't match rederived ones. The optimizer halts rather than drift silently. Two choices: revert the change, or commit by rerunning with `--fork-on-divergence`.
 
 Policy-only edits (PoBB knobs, patience, thresholds, `n_variants`, `exploration.*`) take a different path: `resume_with_divergence_check` classifies the diff via `CampaignConfig.classify_diff_against`, recognizes the change can't have affected the data trace, and continues in-place on the same cycle. Past decisions stay as the audit record of the policy that decided them; the new policy governs unevaluated rounds. The `--fork-on-divergence` flag is a no-op for this case.
 
 ```bash
-python -m promptpotter optimize --fork-on-divergence
+python -m promptpotter resume --fork-on-divergence
 ```
 
 Mints a new `cycle_id` rooted at the divergence point, copies pre-divergence trials into the new cycle, records `parent_cycle_id`, refreshes the new cycle's frozen `config` snapshot to the active config, retargets the active session pointer, re-runs the divergent round under the current scorer. The shared `archive/measurements/` archive is **not duplicated** — both cycles read the same measurements, each through their own scoring ledger.
@@ -174,7 +174,7 @@ To monitor a forked run: tail the **root**, not the fork. To inspect a specific 
 
 **Why rewind is not enough:** rewind restarts under the same policy; fork restarts under a different policy. If scoring changed, rewind would re-run decisions the recorded history expects to match, and halt again on the same divergence. Fork cuts the cord. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
 
-### Sweep batch — `optimize --sweep` with payloads
+### Sweep batch — `new --sweep-batch` with payloads
 
 Breadth-first comparison of N L1-prompt hypotheses. Instead of one cheap-trial cycle on the active OSP, mints N cheap-trial siblings under one parent, each starting from a different operator-authored override.
 
@@ -203,10 +203,10 @@ This is the same L1-surface field L2 writes when it fires — sweep just lets th
 **Running a batch:**
 
 ```bash
-python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/bbeh/campaign.json
-# Active session now points at the freshly-minted bbeh cycle; --sweep on the
-# next call dispatches sweep-mode against it:
-python -m promptpotter optimize --sweep
+python -m promptpotter new bbeh --backend-url http://127.0.0.1:8000
+# Active session now points at the freshly-minted bbeh cycle; --sweep-batch on
+# the next call dispatches sweep-mode against it:
+python -m promptpotter new --sweep-batch
 ```
 
 The runner: parses every `*.json` under `datasets/{name}/sweep/` (sorted by filename), mints a fork per payload, stamps the payload's overrides onto the fork's starting OSP, runs round 1 scored + round 2 generation-only + halt, restores the active session pointer to root.
@@ -220,7 +220,7 @@ The runner: parses every `*.json` under `datasets/{name}/sweep/` (sorted by file
 
 Side-by-side: `python scripts/ppot_review.py --sweep`. Sweep view groups by parent root, sorts by `round_1_top_lift` desc, reports `proxy_lift_corr` once at least 4 paired (sweep, full) branches share an `l1_generate_hash`.
 
-**Sweep is screening, not validation.** Promote winners to a full `optimize` run. Sweep is for L1-surface overrides — pipeline / scoring changes are intentionally absent from the operator file shape (the unified `ForkPayload` reserves `pipeline_swap` / `scoring_swap` slots for M11/M12 LLM-rebase callers, but operators don't author those). Forks run sequentially (the active session pointer doesn't tolerate concurrent mints).
+**Sweep is screening, not validation.** Promote winners to a full `new` run. Sweep is for L1-surface overrides — pipeline / scoring changes are intentionally absent from the operator file shape (the unified `ForkPayload` reserves `pipeline_swap` / `scoring_swap` slots for M11/M12 LLM-rebase callers, but operators don't author those). Forks run sequentially (the active session pointer doesn't tolerate concurrent mints).
 
 ---
 
@@ -263,7 +263,7 @@ Helpers: `min`, `max`, `float`, `int`, `bool`, `abs`, `round`, `log`, `sqrt`, `e
 
 ### When NOT to steer
 
-Per-sample steering is intentionally not supported by file-drop. Changing `compile_scorer` mid-run rewrites recorded `hit`/`score` semantics on every prior trace, triggering the divergence-replay walker on next resume. The right tool there is `optimize --fork-on-divergence`, which forks a new cycle from the divergence point under the new policy.
+Per-sample steering is intentionally not supported by file-drop. Changing `compile_scorer` mid-run rewrites recorded `hit`/`score` semantics on every prior trace, triggering the divergence-replay walker on next resume. The right tool there is `resume --fork-on-divergence`, which forks a new cycle from the divergence point under the new policy.
 
 ### Composite block in operator surfaces
 

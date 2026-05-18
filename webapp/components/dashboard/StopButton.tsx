@@ -52,7 +52,7 @@ export function StopButton({ cycleId, isLive }: Props) {
         message={
           isLive
             ? `${cycleId} is currently running. Writing .runtime/stop.flag — the optimizer exits at the next round boundary. Round-in-progress measurements are preserved.`
-            : `${cycleId} is not currently running. Writing the stop.flag now will cause the next \`optimize\` invocation against this campaign to halt immediately.`
+            : `${cycleId} is not currently running. Writing the stop.flag now will cause the next \`resume\` invocation against this campaign to halt immediately.`
         }
         actions={[
           { label: "Cancel", onClick: () => setConfirming(false) },

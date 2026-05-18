@@ -68,7 +68,7 @@ LANGFUSE_SECRET_KEY=sk-...
 LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 
-Next `optimize` starts sending traces. To push historical traces uploaded later, the backfill helper in `infrastructure/tracing.py` reads the local shadow and replays it.
+Next `new` / `resume` starts sending traces. To push historical traces uploaded later, the backfill helper in `infrastructure/tracing.py` reads the local shadow and replays it.
 
 ## MLflow sink
 

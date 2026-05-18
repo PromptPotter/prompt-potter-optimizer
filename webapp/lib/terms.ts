@@ -7,7 +7,7 @@ export const TERMS: Record<string, string> = {
   status_live:        "Optimizer wrote dashboard.json in the last 30 seconds — running.",
   status_idle:        "Last write 30s–5m ago. Round between phases or paused.",
   status_snapshot:    "Last write >5m ago. No live optimizer — viewing a frozen campaign.",
-  status_offline:     "No active session, or dashboard.json unreachable. Run `python -m promptpotter optimize`.",
+  status_offline:     "No active session, or dashboard.json unreachable. Run `python -m promptpotter new <dataset>` or `resume`.",
   status_nowall:      "Dashboard has no wallclock yet — optimizer probably has not started.",
 
   // Phase tag (dash.state) → one-sentence definition
@@ -49,7 +49,7 @@ export const TERMS: Record<string, string> = {
   newjob_bar_budget: "Spend ceiling for the campaign. Currently always uncapped — operator-set budgets land with the M11 spend-tracking spec.",
   newjob_bar_eta:    "Estimated time until spend hits the budget at the current burn rate. Renders '—' until spend tracking is wired or the budget is uncapped.",
   newjob_bar_eff:    "Improvement-per-spend overall: (best − origin) / spend_used, in percentage points per dollar. The headline efficiency number.",
-  newjob_bar_adjust: "Adjusting spend or finishing criteria from the UI is wired in M12. For now, edit campaign.json and resume `python -m promptpotter optimize`.",
+  newjob_bar_adjust: "Adjusting spend or finishing criteria from the UI is wired in M12. For now, edit campaign.json and run `python -m promptpotter resume`.",
 };
 
 export type TermKey = keyof typeof TERMS;

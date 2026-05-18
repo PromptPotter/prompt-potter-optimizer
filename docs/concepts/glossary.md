@@ -6,7 +6,7 @@ One canonical name per concept. Code names live in the right column for cross-re
 |------|-------|-----------|------------|
 | **Active session** | Pointer at `.promptpotter/active_session.json` telling every command which campaign is current. | — | [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) |
 | **Backend** | The service PromptPotter sends queries to. Must expose `/matches`, `/pipeline`, `/status`. | `BackendClient` | [`../operations/backend-integration.md`](../operations/backend-integration.md) |
-| **Origin** | Fitness of the starting prompt on the scoring set; phase 0 of `optimize`. | `RoundOrigin` | [`../operations/cli-reference.md`](../operations/cli-reference.md) |
+| **Origin** | Fitness of the starting prompt on the scoring set; phase 0 of `new` / `resume`. | `RoundOrigin` | [`../operations/cli-reference.md`](../operations/cli-reference.md) |
 | **Campaign** | One complete optimization run as the operator sees it. | filesystem `campaigns/{root_cycle_id}/` | [`campaign-tree.md`](campaign-tree.md) |
 | **Candidate** | One member of a round's population. Prompt fields + pipeline parameters. | `OptSearchPoint` (`OSP`) | [`state-record.md`](state-record.md) |
 | **Catalogue** | Code-derived menu of signal names (`L1_POSSIBLE`) L2 may put in `l1_layout`; rendered into L2's prompt as the `l1_signal_catalogue` signal. | `L1_POSSIBLE` | [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md) |
@@ -28,7 +28,7 @@ One canonical name per concept. Code names live in the right column for cross-re
 | **Plan** | L3's strategic write onto the candidate. Persistent — survives `clear_volatile`. Read by both L1 and L2. | `OptSearchPoint.plan` | [`the-loop.md`](the-loop.md) |
 | **Probe round** | Round scoped to warned queries only. `action = "probe_round"`. | — | [`the-loop.md`](the-loop.md) |
 | **Prompt fields** | Six prompt-string fields plus two appended sections (few-shot, plan). | `PromptTemplate` | [`state-record.md`](state-record.md) |
-| **Rewind** | Restart an active campaign from an earlier round in place. `optimize --from N`. | — | [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) |
+| **Rewind** | Restart an active campaign from an earlier round in place. `resume --from N`. | — | [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) |
 | **Round** | One iteration of the loop. Generates, scores, picks a winner. | `RoundResult` | [`the-loop.md`](the-loop.md) |
 | **Round record** | The per-round file dump under `rounds/`. Captures the candidate's full state at end-of-round so resume + replay work. | filename `round_NNNN.json` | [`state-record.md`](state-record.md) |
 | **Scorer** | Per-dataset function turning pipeline output into a numeric fitness. | `Scorer`, `compile_scorer` | [`scoring-and-memory.md`](scoring-and-memory.md) |

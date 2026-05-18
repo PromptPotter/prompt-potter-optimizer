@@ -73,7 +73,7 @@ def existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, st
 
     Lets the batch dispatcher skip payloads that already minted a fork
     from this exact parent on a previous run, so re-invoking
-    ``optimize --sweep`` after an interrupt at the same active pointer
+    ``new --sweep-batch`` after an interrupt at the same active pointer
     picks up where it stopped. Scoped to the active pointer's current
     cycle — sweep can branch from a root, a fork, a fork-of-fork, or
     any deeper node; the branch point is whatever ``cycle_id`` the
@@ -168,8 +168,8 @@ async def run_sweep_batch(
     for path, payload in sweep_payloads:
         if path.name in existing:
             logger.info(
-                "Sweep payload %s already forked → %s; skipping (re-run optimize "
-                "without --sweep on that fork to resume it)",
+                "Sweep payload %s already forked → %s; skipping (run `resume` "
+                "against that fork to continue it)",
                 path.name,
                 existing[path.name],
             )
@@ -236,8 +236,9 @@ async def run_sweep_batch(
             status_by_source[path.name] = "interrupted"
             logger.warning(
                 "Sweep fork %d/%d interrupted: %s (payload=%s) — halting "
-                "batch. Resume the partial fork with `optimize` against "
-                "that cycle, or re-run --sweep to pick up remaining payloads.",
+                "batch. Resume the partial fork with `resume` against "
+                "that cycle, or re-run `new --sweep-batch` to pick up "
+                "remaining payloads.",
                 len(new_cycle_ids),
                 len(sweep_payloads),
                 new_cycle_id,

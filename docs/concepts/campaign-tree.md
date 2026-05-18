@@ -25,8 +25,8 @@ The mechanism is trigger-agnostic:
 
 | Caller | Trigger | Stored in |
 |--------|---------|-----------|
-| **Scoring divergence** | `optimize --fork-on-divergence` detects a recorded decision no longer holds under the current scorer | (no payload) |
-| **Operator sweep** | `optimize --sweep` with payloads under `datasets/{name}/sweep/` | `ResumeCheckpointRecord.data.fork.sweep_payload` |
+| **Scoring divergence** | `resume --fork-on-divergence` detects a recorded decision no longer holds under the current scorer | (no payload) |
+| **Operator sweep** | `new --sweep-batch` with payloads under `datasets/{name}/sweep/` | `ResumeCheckpointRecord.data.fork.sweep_payload` |
 | **Manual rewind** (M11, planned) | operator labels a fork from any round | (TBD) |
 
 The primitive does not know which caller fired. The caller passes a small `extra_data` blob into the FORK_CUT decision's archival `data` field. New callers add new `data.*` keys; the primitive stays small.
@@ -63,7 +63,7 @@ The roadmap calls full self-optimization "L4" — a layer above L3 proposing the
 
 1. Operator (or Claude via [`/potter-l1-meta-campaign`](../../.claude/skills/potter-l1-meta-campaign/SKILL.md)) reads `review.md` for the last sweep batch.
 2. Operator authors the next batch of `OperatorSweepFile` JSONs (one per candidate, narrow `reason` + `l1_layout` shape; the dispatcher widens each into a `ForkPayload(trigger=OPERATOR_SWEEP, ...)`).
-3. `optimize --sweep` runs the next generation.
+3. `new --sweep-batch` runs the next generation.
 4. Library cache means origin measurements don't repeat — each generation only pays for actual L1 variants.
 
 This is L4 with the operator as the policy. The data accumulating in `campaigns/{root}/forks/` plus the on-demand `MeasurementArchive` views are the substrate an automated policy would consume. Replacing the human policy with code reads the same trees, constructs the same `ForkPayload`, runs the same primitive.

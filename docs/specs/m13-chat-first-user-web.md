@@ -25,7 +25,7 @@ The directional shift, summarised:
 | **Tenant**         | per-customer isolation boundary   | the install. One per deploy. Invisible.|
 | **User**           | does not exist                    | casual web login. N per install.       |
 | **Project**        | implicit (`datasets/{name}/`)     | named first-class noun. Three-drop unit.|
-| **Campaign**       | `optimize --config …` invocation  | run inside a project. Multiple per project.|
+| **Campaign**       | `new <name>` invocation           | run inside a project. Multiple per project.|
 | **Cycle**          | persistence directory             | implementation detail. Hidden.         |
 | **Operator nav**   | sidebar tree (sessions → cycles)  | chat list (claude.ai-shape).           |
 | **Operator control** | CLI                             | chat (constant surface).               |

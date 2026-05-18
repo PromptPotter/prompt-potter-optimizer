@@ -134,25 +134,29 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 
 **Per-template extras** (caller-supplied via `compile_prompt(**hub_dict, **extras)`): `l1_generate` → `{n_variants}` · `l1_critique`/`l2_context`/`l3_plan` → `{}` · `restructure` → `{consultation_instruction}`.
 
-## 5. CLI flags — `optimize`
+## 5. CLI flags — `new` and `resume`
 
-`python -m promptpotter optimize` is the single write verb. Stable flag set:
+`python -m promptpotter new <name>` and `python -m promptpotter resume` are the two write verbs. Stable flag set:
 
-| Flag | Meaning |
-|---|---|
-| `--config <path>` | Fresh mint: load `<path>` as `campaign.json`, mint new session+cycle. |
-| `--dataset-name <name>` | Fresh mint by dataset directory name (alternative to `--config`). |
-| `--from <N>` | Resume rewind: archive rounds > N and resume from round N+1. |
-| `--no-divergence-check` | Resume only: skip the rescore-and-replay divergence check at boot. |
-| `--fork-on-divergence` | Resume only: on divergence, mint a sibling cycle rooted at the divergence point. |
-| `--sweep` | Sweep mode: round 1 scored, round 2 generation-only. Mints siblings under `sweeps/`. |
-| `--diag` | Diag mode: round 1 scored, force L2 on round-1 evidence, round 2 generation-only. |
-| `--halt-at-accuracy <float>` | Halt with `TARGET_HIT` once `best_accuracy ≥ X`. |
-| `--max-spend-usd <float>` | Halt with `MAX_SPEND` once cycle spend ≥ X. |
+| Verb | Flag | Meaning |
+|---|---|---|
+| `new` | `<name>` (positional) | Mint a fresh session+cycle from `datasets/<name>/`. |
+| `new` | `--config <path>` | Override the dataset's default `campaign.json`. |
+| `new` | `--dataset-name <name>` | Alternative to the positional `<name>`. |
+| `new` | `--sweep-batch` | Sweep mode: round 1 scored, round 2 generation-only. Mints siblings under `sweeps/`. |
+| `new` | `--diag` | Diag mode: round 1 scored, force L2 on round-1 evidence, round 2 generation-only. |
+| `new` / `resume` | `--halt-at-accuracy <float>` | Halt with `TARGET_HIT` once `best_accuracy ≥ X`. |
+| `new` / `resume` | `--max-spend-usd <float>` | Halt with `MAX_SPEND` once cycle spend ≥ X. |
+| `resume` | `--from <N>` | Resume rewind: archive rounds > N and resume from round N+1. |
+| `resume` | `--no-check` | Skip the rescore-and-replay divergence check at boot. |
+| `resume` | `--fork-on-divergence` | On divergence, mint a sibling cycle rooted at the divergence point. |
+| `resume` | `--diag` | Diag on the active cycle. |
 
-**Mutual exclusions:** `--from`/`--no-divergence-check`/`--fork-on-divergence` rejected with `--config`/`--dataset-name` (resume-only flags can't pair with a fresh mint) · `--sweep` and `--diag` mutually exclusive. Resume-vs-mint dispatch: presence of `--config` or `--dataset-name` means fresh mint; absence resumes the active session pointer.
+**Behavior note:** every `new` invocation mints a fresh root cycle; on content-hash collision with an existing root, the `cycle_id` gets a `_r2` / `_r3` discriminator suffix so the new run lands in its own directory tree (separate dashboard, log, archive subtree). The prior campaign is preserved.
 
-Other commands (`init`, `report`, `inspect`) have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them).
+**Mutual exclusions:** `--sweep-batch` and `--diag` mutually exclusive on `new`.
+
+Other commands (`report`, `inspect`) have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them).
 
 ## 6. Ledger event types
 

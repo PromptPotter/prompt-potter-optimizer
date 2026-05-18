@@ -59,7 +59,7 @@ export function ScoringInspector({
     try {
       if (alsoStop) {
         // Mid-run "Stop & fork" composes the two routes — stop the parent
-        // first so the operator's next `optimize` picks up the fork
+        // first so the operator's next `resume` picks up the fork
         // cleanly instead of racing the still-running loop.
         await postStopCycle(cycleId);
       }
@@ -87,8 +87,8 @@ export function ScoringInspector({
       ];
 
   const forkMessage = isLive
-    ? `${cycleId} is currently running. Forking from R${selected.round}.${selected.candidate_id} mints a sibling rooted at this candidate. "Stop & fork" halts the parent first (recommended) so your next \`optimize\` picks up the fork without racing the live loop. "Fork only" leaves the parent running.`
-    : `Endorses R${selected.round}.${selected.candidate_id}. The new fork inherits the parent's ledger and runs L1 generation fresh from this point. The active pointer retargets to the fork — your next \`optimize\` picks it up.`;
+    ? `${cycleId} is currently running. Forking from R${selected.round}.${selected.candidate_id} mints a sibling rooted at this candidate. "Stop & fork" halts the parent first (recommended) so your next \`resume\` picks up the fork without racing the live loop. "Fork only" leaves the parent running.`
+    : `Endorses R${selected.round}.${selected.candidate_id}. The new fork inherits the parent's ledger and runs L1 generation fresh from this point. The active pointer retargets to the fork — your next \`resume\` picks it up.`;
 
   return (
     <section className="scoring-inspector" aria-label="Scoring inspector">

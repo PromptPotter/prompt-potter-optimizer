@@ -190,7 +190,7 @@ Sibling: `docs/operations/operator-loop.md` (round stats per round, improvement 
 
 Biggest-blocker first — Track 5a (the fork primitive) gates the breadth-first sweep workflow on day one.
 
-1. **5a — fork primitive (M10).** Domain extension + `_mint_fork()` generalization + scoring-divergence retrofit + `optimize --sweep` as first caller. `OptimizerAction.rebase` schema added but unwired.
+1. **5a — fork primitive (M10).** Domain extension + `_mint_fork()` generalization + scoring-divergence retrofit + `new --sweep-batch` as first caller. `OptimizerAction.rebase` schema added but unwired.
 2. **7 verbosity rule (~30 LOC).** Pure observability, lowest risk.
 3. **1 evidence-grounding validator (~80 LOC).** Schema field additive; validator heal-able not fatal.
 4. **6 sweep toolkit verbs** — incremental: `time-to` day 1, `round1` day 2, `round2` day 3, `slice` day 4, `rank` day 5. `rank` slipping a day is fine — the four verbs are usable without it.
@@ -248,7 +248,7 @@ Biggest-blocker first — Track 5a (the fork primitive) gates the breadth-first 
 | Cycle finalize / round emission | `application/runner/` |
 | Operator skills | `.claude/skills/potter-run/SKILL.md`, `.claude/skills/potter-l1-meta-campaign/SKILL.md` |
 | Parity test | `tests/test_invariants.py::PER_CYCLE_OPERATOR_ARTIFACTS` |
-| **Fork substrate** | `domain/run_records.py::DecisionKind.FORK_CUT` + `DECISION_GATING`; `infrastructure/ledger.py::CycleEventLog.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner/entry.py::fork_on_divergence` plumbing; `presentation/cli/commands/optimize.py::--fork-on-divergence`; `presentation/api/` ForksResponse |
+| **Fork substrate** | `domain/run_records.py::DecisionKind.FORK_CUT` + `DECISION_GATING`; `infrastructure/ledger.py::CycleEventLog.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner/entry.py::fork_on_divergence` plumbing; `presentation/cli/commands/resume.py::--fork-on-divergence`; `presentation/api/` ForksResponse |
 | **Active-pointer + family-root binding** | `infrastructure/store/stores.py::save_active_pointer`; `infrastructure/projections/live_dashboard/view.py` (telemetry binds to root with no `parent_cycle_id`) |
 
 ## Risks

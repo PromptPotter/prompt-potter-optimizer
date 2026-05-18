@@ -11,7 +11,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 **Why:** Groq's free-tier rate limit. PromptPotter honors `Retry-After`, but a tight limit makes the campaign crawl.
 
 **What to try:**
-- Wait a few minutes and resume: `python -m promptpotter optimize`. No re-init needed.
+- Wait a few minutes and resume: `python -m promptpotter resume`. No re-mint needed.
 - Switch to a smaller model in `.env`: `LLM_MODEL=meta-llama/llama-4-scout-17b-16e-instruct`.
 - Upgrade to a paid tier.
 
@@ -47,13 +47,13 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ## Campaign won't resume — "active session mismatch"
 
-**What you see:** `ActiveSessionMismatchError` when you try to optimize.
+**What you see:** `ActiveSessionMismatchError` when you try to resume.
 
 **Why:** The active session pointer and the campaign on disk disagree about which cycle is current. Usually happens after editing session files by hand or copying a `.promptpotter/` tree between projects.
 
 **What to try:**
 - Open `.promptpotter/active_session.json` to see what the pointer thinks is active, and `campaigns/<cycle_id>/dashboard.json` to see what's actually on disk.
-- Start a new campaign with `/potter-run` — init overwrites the pointer.
+- Start a new campaign with `/potter-run` — `new` overwrites the pointer.
 - See [`operations/persistence-and-state.md`](../operations/persistence-and-state.md) for the pointer's format and how to reset it manually.
 
 ---

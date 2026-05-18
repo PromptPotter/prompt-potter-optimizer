@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -164,20 +165,45 @@ def _build_divergence_hint() -> str:
         f"Checked decisions: {', '.join(replayed)}.\n"
         f"(Archival, not divergence-gated: {', '.join(archival)}.)\n\n"
         "Options:\n"
-        "  • `optimize --config datasets/<name>/campaign.json` — start a fresh "
-        "cycle (most common: you wanted a new run, not a resume).\n"
-        "  • `optimize --fork-on-divergence` — branch a sibling cycle here "
-        "under the current scorer.\n"
+        "  • `python -m promptpotter new <dataset>` — start a fresh root "
+        "campaign (most common: you wanted a new run, not a resume).\n"
+        "  • `python -m promptpotter resume --fork-on-divergence` — branch "
+        "a sibling cycle here under the current scorer.\n"
         "  • Revert `campaign.json::scoring` — continue the original trajectory.\n"
-        "  • `optimize --no-divergence-check` — accept the divergence."
+        "  • `python -m promptpotter resume --no-check` — accept the divergence."
     )
 
 
 _DIVERGENCE_HINT = _build_divergence_hint()
 
 
+def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
+    """Ask y/N at the terminal. Returns:
+
+    * ``True`` if the operator typed y/Y/yes
+    * ``False`` if they typed n/N/no (or just Enter when ``default_no``)
+    * ``None`` if stdin is not a TTY (callers should fall back to a
+      non-interactive default — typically the same as ``no``).
+
+    Keeps interactive prompts at one shared site so non-TTY detection
+    (CI, piped invocations) is consistent across the CLI.
+    """
+    if not sys.stdin.isatty():
+        return None
+    suffix = " [y/N]: " if default_no else " [Y/n]: "
+    try:
+        raw = input(prompt + suffix).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    if not raw:
+        return not default_no
+    return raw in {"y", "yes"}
+
+
 __all__ = [
     "CommandResult",
+    "confirm_tty",
     "get_verbose",
     "init_services_cli",
     "log_startup_summary",

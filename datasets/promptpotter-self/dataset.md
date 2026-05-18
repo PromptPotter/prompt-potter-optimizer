@@ -40,12 +40,11 @@ The actual "run an inner cycle" path is the follow-up — see
 ## Run
 
 ```
-python -m promptpotter optimize \
-  --config datasets/promptpotter-self/campaign.json \
+python -m promptpotter new promptpotter-self \
   --backend-url http://127.0.0.1:8001/inner    # placeholder until execution wired
 ```
 
-Until inner-cycle execution lands, `optimize` will load the connector and
+Until inner-cycle execution lands, `new` will load the connector and
 fail at the first inner match request with a clear `NotImplementedError`
 referencing the spec.
 
