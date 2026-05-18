@@ -110,6 +110,18 @@ def _next_diag_sibling_id(campaign_store: CampaignStore, parent_cycle_id: str) -
     return f"{root_id}_diag_{max_n + 1:03d}"
 
 
+# KNOWN BUG (interim cleanup workaround in webapp): `_mint_fork` writes
+# the fork's dir + index.json + ledger inheritance + active-pointer
+# retarget BEFORE the fork actually runs a round. If the operator
+# interrupts (Ctrl+C, crash, sweep batch abort) after mint but before
+# round 1 completes, the fork dir survives as a stub with `n_rounds=0`
+# and the index's `rounds[]` = parent's surviving_rounds. Same shape for
+# operator HITL (api/routers/active.py::create_fork) and sweep
+# (sweep_runner.py::run_sweep_batch). The webapp surfaces these via the
+# Family-lineage panel's "Clean up N stubs" button +
+# POST /api/v1/campaigns/{cycle_id}/cleanup-empty. The real fix is
+# lazy-mint here: defer dir creation until round 1 actually starts, OR
+# add an "if minted-but-never-ran" cleanup pass at orchestrator shutdown.
 def _mint_fork(
     campaign_store: CampaignStore,
     tenant_id: str,

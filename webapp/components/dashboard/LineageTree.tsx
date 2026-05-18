@@ -6,8 +6,10 @@ import {
   useCycleStream,
   type DashboardSnapshot,
 } from "@/lib/poll";
+import { rootCycleId, shortFamilyTail } from "@/lib/ids";
 import { parseSampleLine } from "@/lib/sample-line";
 import { useSelection } from "./SelectionContext";
+import { FamilyTree } from "./FamilyTree";
 
 interface Candidate {
   candidate_id?: string;
@@ -24,6 +26,15 @@ interface RoundView {
 
 interface Props {
   dash: DashboardSnapshot | null;
+  // The cycle currently in view. Used to recognise inherited forks: when
+  // cycleId differs from rootCycleId(cycleId), the cycle is a sibling
+  // (fork/diag/sweep) and its empty rounds[] doesn't mean "fresh" — it
+  // means "no NEW rounds yet on top of inherited parent history."
+  cycleId: string | null;
+  // Re-select the parent cycle when the operator clicks the inheritance
+  // hint. Routed back to DashboardPane's handleCycleChange so the rest of
+  // the panels (sidebar selection, URL pin, breadcrumb) follow along.
+  onSelectCycle?: (id: string) => void;
 }
 
 // Minimal cladogram layout. Each round occupies a fixed column. Parent
@@ -51,7 +62,7 @@ function fmtPct(v: number | undefined | null): string {
   return `${(v * 100).toFixed(0)}%`;
 }
 
-export function LineageTree({ dash }: Props) {
+export function LineageTree({ dash, cycleId, onSelectCycle }: Props) {
   const { selected, setSelected } = useSelection();
   const { rounds: docs } = useCycleStream();
   // Same merge logic FitnessPanel uses: historical rounds from disk +
@@ -166,16 +177,52 @@ export function LineageTree({ dash }: Props) {
   const originAcc = originDash ?? rounds[0]?.origin_accuracy ?? null;
 
   if (rounds.length === 0) {
+    // Inherited fork: dashboard.json is shared at the family root, so
+    // origin / round / best surface the parent's state. The fork's own
+    // rounds dir is just empty because it hasn't run a new round yet —
+    // calling that "waiting for round 1" misleads. Detect via id shape
+    // (matches rootCycleId() in Python paths.py) and re-frame.
+    const parentId = cycleId ? rootCycleId(cycleId) : null;
+    const isInheritedSibling = parentId != null && parentId !== cycleId;
+    const inheritedBest =
+      (dash as { best_accuracy?: number } | null)?.best_accuracy ??
+      (dash as { best?: number } | null)?.best ??
+      null;
     return (
       <div className="card lineage-card">
         <div className="card-title">
           <span>Lineage</span>
-          <span className="badge">waiting</span>
+          <span className="badge">{isInheritedSibling ? "inherited" : "waiting"}</span>
         </div>
+        {/* Even when this cycle has no candidate rounds yet, the family
+            cladogram (root + descendants) is still informative — operator
+            can scan + click siblings. Self-hides when the family has no
+            descendants. */}
+        <FamilyTree cycleId={cycleId} onSelectCycle={onSelectCycle ?? (() => {})} />
         <div className="lineage-empty">
-          {originAcc != null
-            ? `origin ${fmtPct(originAcc)} · waiting for round 1`
-            : "No rounds on disk yet — the tree appears once round 1 lands."}
+          {isInheritedSibling && parentId ? (
+            <>
+              inherited from{" "}
+              {onSelectCycle ? (
+                <button
+                  type="button"
+                  className="lineage-inherit-link"
+                  onClick={() => onSelectCycle(parentId)}
+                  title={`Switch to ${parentId}`}
+                >
+                  {shortFamilyTail(parentId) || parentId}
+                </button>
+              ) : (
+                <span>{shortFamilyTail(parentId) || parentId}</span>
+              )}
+              {inheritedBest != null ? ` · best ${fmtPct(inheritedBest)}` : ""}
+              {" · no new rounds yet"}
+            </>
+          ) : originAcc != null ? (
+            `origin ${fmtPct(originAcc)} · waiting for round 1`
+          ) : (
+            "No rounds on disk yet — the tree appears once round 1 lands."
+          )}
         </div>
       </div>
     );
@@ -187,6 +234,10 @@ export function LineageTree({ dash }: Props) {
         <span>Lineage</span>
         <span className="badge">{branches.children.length} candidates · {rounds.length} round{rounds.length === 1 ? "" : "s"}</span>
       </div>
+      {/* Family cladogram sits above the candidate cladogram — same
+          visual language, different scale (cross-cycle vs within-cycle).
+          Self-hides for single-cycle families so it stays out of the way. */}
+      <FamilyTree cycleId={cycleId} onSelectCycle={onSelectCycle ?? (() => {})} />
       <div className="lineage-scroll">
         <svg
           width={totalW}

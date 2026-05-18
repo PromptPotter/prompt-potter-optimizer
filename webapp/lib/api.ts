@@ -139,6 +139,10 @@ export type SiblingKind = "root" | "fork" | "diag" | "sweep";
 export interface CycleListEntry {
   cycle_id: string;
   parent_session_id: string;
+  // Family-root id for siblings (forks/sweeps/diag); null for roots. The
+  // sidebar uses this to nest sibling rows under their root entry instead
+  // of scattering them as 60+ top-level rows.
+  parent_cycle_id: string | null;
   dataset_name: string;
   backend_id: string;
   sibling_kind: SiblingKind;
@@ -158,6 +162,59 @@ export interface CyclesResponse {
 
 export function fetchCycles(signal?: AbortSignal): Promise<CyclesResponse> {
   return jget<CyclesResponse>(`${API}/cycles`, signal);
+}
+
+// Family lineage — the cross-cycle search-point graph rooted at the
+// family root. One request returns every cycle in the family + each
+// cycle's per-round candidates + the parent-round each fork was cut at.
+// Mirrors the server's FamilyLineageResponse pydantic models verbatim.
+
+export interface FamilyLineageCandidate {
+  candidate_id: string;
+  label: string;
+  accuracy: number | null;
+  rank: number | null;
+  is_winner: boolean;
+}
+
+export interface FamilyLineageRound {
+  round: number;
+  label: string;
+  accuracy: number | null;
+  candidates: FamilyLineageCandidate[];
+}
+
+export interface FamilyLineageCycle {
+  cycle_id: string;
+  sibling_kind: SiblingKind;
+  immediate_parent_cycle_id: string | null;
+  fork_from_round: number | null;
+  fork_from_candidate_id: string | null;
+  // Fork creation trigger — drives the round-numbering convention.
+  trigger: string;
+  // Add this to each round's `round` number to get its absolute column
+  // in the family cladogram. The server computes per-trigger so the
+  // client doesn't need to know HITL-vs-divergence semantics itself.
+  round_column_offset: number;
+  status: string;
+  dataset_name: string;
+  best_accuracy: number | null;
+  rounds: FamilyLineageRound[];
+}
+
+export interface FamilyLineageResponse {
+  root_cycle_id: string;
+  cycles: FamilyLineageCycle[];
+}
+
+export function fetchFamilyLineage(
+  cycleId: string,
+  signal?: AbortSignal,
+): Promise<FamilyLineageResponse> {
+  return jget<FamilyLineageResponse>(
+    `${API}/campaigns/${encodeURIComponent(cycleId)}/family-lineage`,
+    signal,
+  );
 }
 
 // Sanctioned mutating endpoints — see promptpotter/presentation/CLAUDE.md
@@ -189,6 +246,56 @@ export async function postCreateFork(
 export interface StopCycleResponse {
   cycle_id: string;
   flag_written: boolean;
+}
+
+export interface DeleteCycleResponse {
+  cycle_id: string;
+  deleted: boolean;
+  reason: string;
+}
+
+export async function deleteCycle(cycleId: string): Promise<DeleteCycleResponse> {
+  const r = await fetch(`${API}/cycles/${encodeURIComponent(cycleId)}`, {
+    method: "DELETE",
+    cache: "no-store",
+  });
+  if (!r.ok) {
+    let msg = `${r.status} DELETE /cycles`;
+    try {
+      const body = (await r.json()) as { detail?: string };
+      if (body?.detail) msg = body.detail;
+    } catch {
+      /* keep status-only message */
+    }
+    throw new Error(msg);
+  }
+  return (await r.json()) as DeleteCycleResponse;
+}
+
+export interface CleanupEmptyResponse {
+  family_root_cycle_id: string;
+  deleted_cycle_ids: string[];
+  skipped: { cycle_id: string; reason: string }[];
+}
+
+export async function postCleanupEmpty(
+  cycleId: string,
+): Promise<CleanupEmptyResponse> {
+  const r = await fetch(
+    `${API}/campaigns/${encodeURIComponent(cycleId)}/cleanup-empty`,
+    { method: "POST", cache: "no-store" },
+  );
+  if (!r.ok) {
+    let msg = `${r.status} POST /cleanup-empty`;
+    try {
+      const body = (await r.json()) as { detail?: string };
+      if (body?.detail) msg = body.detail;
+    } catch {
+      /* keep status-only message */
+    }
+    throw new Error(msg);
+  }
+  return (await r.json()) as CleanupEmptyResponse;
 }
 
 export async function postStopCycle(cycleId: string): Promise<StopCycleResponse> {

@@ -41,9 +41,7 @@ export function LiveSamplesCard({ dash, dashRound, status }: Props) {
       </h2>
       <div className="samples-list" role="log" aria-live="polite" aria-atomic="false">
         {latest.length === 0 ? (
-          <div className="samples-empty">
-            No samples scored yet this round. They&apos;ll appear here as the optimizer runs the project against the current candidate.
-          </div>
+          <EmptyState status={status} dashRound={dashRound} />
         ) : (
           latest.map((r, i) => {
             const p = parseSampleLine(r.raw);
@@ -67,6 +65,33 @@ export function LiveSamplesCard({ dash, dashRound, status }: Props) {
           })
         )}
       </div>
+    </div>
+  );
+}
+
+// Three-way to stop conflating "loop is idle" with "no data exists." The
+// old single-message variant nagged the operator about a candidate run
+// even after they'd selected a stopped cycle whose verdict was already on
+// disk in earlier rounds.
+function EmptyState({ status, dashRound }: { status: StatusKind; dashRound: number | null }) {
+  if (status === "live") {
+    return (
+      <div className="samples-empty">
+        No samples scored yet this round. They&apos;ll appear here as the optimizer runs the project against the current candidate.
+      </div>
+    );
+  }
+  if (dashRound != null && dashRound > 0) {
+    return (
+      <div className="samples-empty">
+        Loop is idle. Earlier rounds&apos; samples are in the Verdict panel below.
+      </div>
+    );
+  }
+  return (
+    <div className="samples-empty">
+      This cycle hasn&apos;t run yet. Start it with{" "}
+      <code>python -m promptpotter resume</code>.
     </div>
   );
 }

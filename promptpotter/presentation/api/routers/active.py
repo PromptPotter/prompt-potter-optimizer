@@ -1,16 +1,18 @@
 """Active-session pointer + sanctioned mutating control endpoints.
 
 Read-only surface that lets the static webapp pin to the currently active
-cycle, plus the two sanctioned mutating endpoints (operator-initiated fork
-via ``CycleEventLog.inherit_from``, stop flag via ``.runtime/stop.flag``).
-Both ride existing I/O kinds (Persistence + Control-local) — they do not
-introduce a new I/O kind.
+cycle, plus the sanctioned mutating endpoints (operator-initiated fork
+via ``CycleEventLog.inherit_from``, stop flag via ``.runtime/stop.flag``,
+and stub-cycle cleanup via ``DELETE /cycles/{id}``). All three ride
+existing I/O kinds (Persistence + Control-local + Persistence-cleanup) —
+no new I/O kind.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -53,6 +55,14 @@ async def get_active_session() -> ActiveSessionResponse:
 class CycleListEntry(BaseModel):
     cycle_id: str
     parent_session_id: str = ""
+    parent_cycle_id: str | None = Field(
+        default=None,
+        description=(
+            "Family-root cycle id for siblings (forks, sweeps, diag); "
+            "null for roots. Derived via root_cycle_id() — pure id parse, "
+            "no I/O. Used by the sidebar to nest siblings under their root."
+        ),
+    )
     dataset_name: str = ""
     backend_id: str = ""
     sibling_kind: Literal["root", "fork", "diag", "sweep"]
@@ -106,7 +116,7 @@ class CreateForkResponse(BaseModel):
     fork_cycle_id: str
     cli_command: str = Field(
         description="CLI invocation the operator runs to launch the fork. The active pointer "
-        "has been retargeted to this fork, so a bare `optimize` picks it up."
+        "has been retargeted to this fork, so a bare `resume` picks it up."
     )
     active_pointer_retargeted: bool = True
 
@@ -122,7 +132,7 @@ async def create_fork(
     state"). The selected ``round`` + ``candidate_id`` are recorded in the
     fork's ``index.json::fork`` block for the audit trail but do not yet
     drive offset selection. The active pointer is retargeted to the new
-    fork so a subsequent ``python -m promptpotter optimize`` picks it up.
+    fork so a subsequent ``python -m promptpotter resume`` picks it up.
     """
     parent_dir = store.campaigns.campaign_dir(cycle_id)
     parent_index_path = parent_dir / "index.json"
@@ -176,7 +186,7 @@ async def create_fork(
 
     return CreateForkResponse(
         fork_cycle_id=fork_id,
-        cli_command="python -m promptpotter optimize",
+        cli_command="python -m promptpotter resume",
     )
 
 
@@ -204,6 +214,138 @@ async def stop_cycle(cycle_id: str, store: StoreDep) -> StopCycleResponse:
     return StopCycleResponse(cycle_id=cycle_id, flag_written=True)
 
 
+class DeleteCycleResponse(BaseModel):
+    cycle_id: str
+    deleted: bool
+    reason: str = Field(
+        default="",
+        description="Empty on success; populated only when the delete was a no-op",
+    )
+
+
+class CleanupEmptyResponse(BaseModel):
+    family_root_cycle_id: str
+    deleted_cycle_ids: list[str] = Field(
+        description="Cycles whose dirs were removed, in deletion order (leaves first)."
+    )
+    skipped: list[dict[str, str]] = Field(
+        description="Cycles considered but skipped, with a 'cycle_id' + 'reason' key each."
+    )
+
+
+# Stubs accumulate because the fork-creation paths (divergence + sweep +
+# operator HITL) mint the cycle directory BEFORE the first round runs;
+# an interrupt between dir-mint and first-round-run leaves the dir on
+# disk forever. Root-cause fix is a lazy-mint refactor in
+# ``application/optimization/resume_and_fork/`` and
+# ``application/sweep/sweep_runner.py``. Until that lands, the cleanup
+# endpoints below are how stubs get pruned.
+
+
+def _try_delete_stub_cycle(
+    cycle_id: str, store: Any, active_cid: str | None
+) -> tuple[bool, str]:
+    """Best-effort stub deletion with all five safety guards.
+
+    Returns ``(deleted, reason)``. When ``deleted=True``, ``reason`` is
+    empty. Used by both the single-cycle DELETE and the family batch
+    cleanup so the guards stay in lockstep.
+    """
+    cycle_dir = store.campaigns.campaign_dir(cycle_id)
+    index_path = cycle_dir / "index.json"
+    if not index_path.is_file():
+        return False, "not on disk"
+    if active_cid == cycle_id:
+        return False, "active cycle — switch first"
+    if root_cycle_id(cycle_id) == cycle_id:
+        return False, "family root — deletion is for sibling stubs only"
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"index.json unreadable: {exc}"
+    n_rounds = index.get("n_rounds", 0)
+    if not isinstance(n_rounds, int) or n_rounds != 0:
+        return False, f"n_rounds={n_rounds} — cycle ran real work"
+    for sub in ("forks", "sweeps", "diag"):
+        sub_dir = cycle_dir / sub
+        if sub_dir.is_dir() and any(sub_dir.iterdir()):
+            return False, f"has descendants under {sub}/"
+    shutil.rmtree(cycle_dir)
+    return True, ""
+
+
+@_active_router.delete("/cycles/{cycle_id}", response_model=DeleteCycleResponse)
+async def delete_cycle(cycle_id: str, store: StoreDep) -> DeleteCycleResponse:
+    """Delete a single stub cycle dir from disk.
+
+    Refuses unless cycle exists, ``n_rounds == 0``, has no on-disk
+    children, isn't the active cycle, and isn't a family root. See
+    ``_try_delete_stub_cycle`` for the guard chain. Backed by
+    ``shutil.rmtree``; cross-cycle archives (``archive/measurements/``)
+    are untouched — they live above the per-cycle tree by design.
+    """
+    _, _, active_cid = read_active_pointer()
+    deleted, reason = _try_delete_stub_cycle(cycle_id, store, active_cid or None)
+    if not deleted:
+        # "not on disk" is the only 404-shaped reason; everything else
+        # is a 409 (precondition failed).
+        status = 404 if reason == "not on disk" else 409
+        raise HTTPException(status, f"refusing to delete {cycle_id}: {reason}")
+    return DeleteCycleResponse(cycle_id=cycle_id, deleted=True)
+
+
+@_active_router.post(
+    "/campaigns/{cycle_id}/cleanup-empty", response_model=CleanupEmptyResponse
+)
+async def cleanup_empty_stubs(
+    cycle_id: str, store: StoreDep
+) -> CleanupEmptyResponse:
+    """Batch-delete every empty-stub sibling in the family rooted at *cycle_id*.
+
+    Walks the family-root once, identifies all cycles whose own work is
+    empty (``n_rounds == 0``) and have no descendants, and deletes them.
+    Iterates leaves-first via two passes so a stub whose parent is also
+    a stub still gets picked up on the second sweep.
+    """
+    root_id = root_cycle_id(cycle_id)
+    _, _, active_cid = read_active_pointer()
+    deleted_ids: list[str] = []
+    skipped: list[dict[str, str]] = []
+    # Two passes so we drain trees from the leaves up — a stub parent
+    # that has a stub child can only be deleted after the child's gone.
+    # Two passes is enough for two-generation stub chains, which is all
+    # the on-disk data exhibits today. Extend to a loop-until-stable if
+    # deeper stub trees become common.
+    for _pass in range(2):
+        progress = False
+        entries = store.campaigns.enumerate_cycles()
+        family_ids = [
+            e["cycle_id"]
+            for e in entries
+            if e["cycle_id"] != root_id
+            and (e["cycle_id"] == root_id or e["parent_cycle_id"] == root_id)
+        ]
+        for cid in family_ids:
+            if cid in deleted_ids:
+                continue
+            deleted, reason = _try_delete_stub_cycle(cid, store, active_cid or None)
+            if deleted:
+                deleted_ids.append(cid)
+                progress = True
+            elif _pass == 1:
+                # Only record the reason on the final pass — the first
+                # pass's "has descendants" reasons get resolved by the
+                # second pass clearing the children.
+                skipped.append({"cycle_id": cid, "reason": reason})
+        if not progress:
+            break
+    return CleanupEmptyResponse(
+        family_root_cycle_id=root_id,
+        deleted_cycle_ids=deleted_ids,
+        skipped=skipped,
+    )
+
+
 @_active_router.get("/optimizer/pipeline")
 async def get_optimizer_pipeline() -> dict[str, Any]:
     """Bundled ``optimizer_pipeline.json`` — nodes, pipelines, and ``view`` topology
@@ -226,9 +368,11 @@ async def get_evaluators_meta() -> list[dict[str, Any]]:
 
 __all__ = [
     "ActiveSessionResponse",
+    "CleanupEmptyResponse",
     "CreateForkRequest",
     "CreateForkResponse",
     "CycleListEntry",
     "CyclesResponse",
+    "DeleteCycleResponse",
     "StopCycleResponse",
 ]

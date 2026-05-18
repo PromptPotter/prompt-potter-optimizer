@@ -24,7 +24,11 @@ from promptpotter.infrastructure.store.campaign_store.index_helpers import (
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_max_round_complete,
 )
-from promptpotter.infrastructure.store.paths import campaign_dir_for, sibling_kind
+from promptpotter.infrastructure.store.paths import (
+    campaign_dir_for,
+    root_cycle_id,
+    sibling_kind,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -408,14 +412,18 @@ class CampaignStore(EntityStore):
                 data = None
             if not isinstance(data, dict):
                 # stub entry for unreadable indexes — directory name is the cycle_id by construction
+                stub_kind = sibling_kind(cycle_id)
                 results.append(
                     {
                         "cycle_id": cycle_id,
                         "parent_session_id": "",
+                        "parent_cycle_id": (
+                            None if stub_kind == "root" else root_cycle_id(cycle_id)
+                        ),
                         "dataset_name": "",
                         "backend_id": "",
-                        "sibling_kind": sibling_kind(cycle_id),
-                        "is_root": sibling_kind(cycle_id) == "root",
+                        "sibling_kind": stub_kind,
+                        "is_root": stub_kind == "root",
                         "status": "unreadable",
                         "best_accuracy": None,
                         "n_rounds": 0,
@@ -431,6 +439,7 @@ class CampaignStore(EntityStore):
                 {
                     "cycle_id": cycle_id,
                     "parent_session_id": data.get("parent_session_id", ""),
+                    "parent_cycle_id": None if kind == "root" else root_cycle_id(cycle_id),
                     "dataset_name": header.get("dataset_name", ""),
                     "backend_id": data.get("backend_id") or header.get("backend_id", ""),
                     "sibling_kind": kind,
@@ -442,6 +451,19 @@ class CampaignStore(EntityStore):
                     "updated_at": data.get("updated_at", ""),
                 }
             )
+        # Sweep + fork + diag cycles don't carry a ``header.dataset_name`` of
+        # their own (sweep forks have no header block at all). Without
+        # backfill the webapp picker dumps them all under an "(unknown)"
+        # optgroup. The root's dataset_name is the authoritative value for
+        # the whole family — copy it across.
+        root_dataset: dict[str, str] = {
+            e["cycle_id"]: e["dataset_name"] for e in results if e["is_root"] and e["dataset_name"]
+        }
+        for e in results:
+            if not e["dataset_name"] and e["parent_cycle_id"]:
+                inherited = root_dataset.get(e["parent_cycle_id"], "")
+                if inherited:
+                    e["dataset_name"] = inherited
         return results
 
     # -- Fork helpers ---------------------------------------------------------

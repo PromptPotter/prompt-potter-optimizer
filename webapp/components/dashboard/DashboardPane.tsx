@@ -371,7 +371,7 @@ function DashboardPaneInner({
           statusText={activeError && !cycleId ? "No active campaign" : dashState.statusText}
           statusHint={
             activeError && !cycleId
-              ? "Start a campaign: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal."
+              ? "Start a campaign: `python -m promptpotter new <dataset>` in another terminal."
               : dashState.statusHint
           }
           termKey={dashState.termKey}
@@ -429,6 +429,7 @@ function DashboardPaneInner({
                   cycleId={cycleId}
                   themeKey={themeKey}
                   rounds={dashState.rounds}
+                  onSelectCycle={handleCycleChange}
                 />
               </NarrowSpine>
               <NarrowSpine>
@@ -484,6 +485,7 @@ function NowRow({
   cycleId,
   themeKey,
   rounds,
+  onSelectCycle,
 }: {
   dash: DashboardSnapshot | null;
   dashRound: number | null;
@@ -491,13 +493,19 @@ function NowRow({
   cycleId: string | null;
   themeKey: string;
   rounds: RoundFileDoc[];
+  onSelectCycle: (id: string) => void;
 }) {
   const { node, setNode } = useSelection();
   return (
     <>
+      {/* Two-row grid via grid-areas in CSS:
+            row 1: FitnessPanel spans full width (over lineage + workflow)
+            row 2: LineageTree (2fr, content-height) + WorkflowCanvas (1fr)
+          Render order matches source order so the grid-area assignment
+          is the only thing that decides placement. */}
       <div className="dash-row-verdict">
-        <LineageTree dash={dash} />
         <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
+        <LineageTree dash={dash} cycleId={cycleId} onSelectCycle={onSelectCycle} />
         <WorkflowCanvas pipeline={pipeline} dash={dash} />
       </div>
       {node && (

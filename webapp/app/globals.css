@@ -143,6 +143,41 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .cycle-library-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cycle-library-meta{font-size:11px;color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cycle-library-live{color:var(--color-status-success,#16a34a);margin-left:4px;font-size:8px;vertical-align:middle}
+.cycle-library-missing{color:var(--color-text-tertiary);margin-left:4px;font-size:10px;vertical-align:middle}
+/* Tiny clickable chips alongside the % on a family row — one per child
+   kind (forks/sweeps/diag). Sits OUTSIDE the row's <button> so we don't
+   nest interactive elements; flex on the family wrapper keeps it on the
+   same baseline. Click = toggle the family's expand state. */
+.cycle-library-chips{display:inline-flex;gap:3px;align-items:center;margin-left:6px;flex-shrink:0}
+/* The chip needs to read as a button at a glance. Earlier styling stacked
+   three "subtle" tokens (hover-tint bg, tertiary text, 10px, 0.5px border)
+   and the chip was effectively invisible against the sidebar. Real chip
+   color + 1px border + secondary text + min-width gives a clear silhouette. */
+.cycle-library-chip{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:28px;padding:1px 5px;background:var(--color-background-secondary,rgba(127,127,127,0.18));border:1px solid var(--color-border);border-radius:4px;cursor:pointer;font-family:inherit;color:var(--color-text-secondary);font-size:11px;font-weight:500;line-height:1.3}
+.cycle-library-chip:hover{background:var(--color-background-tint-active);color:var(--color-accent);border-color:var(--color-accent)}
+.cycle-library-chip-glyph{font-weight:600;opacity:0.75}
+.cycle-library-chip-count{font-variant-numeric:tabular-nums}
+/* Family row = chevron + clickable label + count chips. Hover is unified
+   across the whole row (chevron + item + chips) so the operator sees one
+   continuous tint, not a three-region split. The `:not(.selected)` on the
+   hover rule is load-bearing — without it, hovering a selected row would
+   paint hover-grey over the accent tint and the row would flash deselected.
+   Inner `.cycle-library-item` hover keeps the brighter text color but
+   drops its own background so it doesn't paint over the family hover. */
+.cycle-library-family{display:flex;align-items:center;gap:2px;padding:0 4px;border-radius:6px}
+.cycle-library-family > .cycle-library-item{flex:1;min-width:0;width:auto}
+.cycle-library-family:not(.selected):hover{background:var(--color-background-hover)}
+.cycle-library-family > .cycle-library-item:hover{background:transparent;color:var(--color-text-primary)}
+.cycle-library-family.selected{background:var(--color-background-tint-active)}
+.cycle-library-family.selected .cycle-library-item.selected{background:transparent}
+.cycle-library-twist{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:9px;padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px}
+.cycle-library-twist:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
+.cycle-library-twist:disabled{cursor:default;visibility:hidden}
+.cycle-library-children{list-style:none;margin:2px 0 4px 14px;padding:0;border-left:1px solid var(--color-border-tertiary)}
+.cycle-library-group{margin:2px 0}
+.cycle-library-grouphead{padding:2px 8px;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
+.cycle-library-group ul{list-style:none;margin:0;padding:0}
+.cycle-library-child{padding-left:10px;font-size:12px}
 /* Live badge in the breadcrumb — passive indicator that the dashboard
    poll is seeing fresh writes. dashState.status === "live" drives it. */
 .live-badge{display:inline-flex;align-items:center;gap:3px;margin-left:8px;padding:1px 6px;border-radius:10px;background:var(--color-status-success,#16a34a);color:#fff;font-size:10px;font-weight:500;letter-spacing:0.03em}
@@ -261,18 +296,31 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .dash-row-verdict > .workflow-card .workflow-canvas-bg{display:flex;align-items:center;justify-content:center}
 .dash-row-verdict > .workflow-card .workflow-canvas{width:100%;height:auto;max-width:100%;aspect-ratio:500/290;flex:none}
 
-/* VERDICT lane — lineage + fitness side-by-side. Same height knob as the
-   prior three-card row; the third (workflow) slot moved to NOW. */
-.dash-row-verdict{--row-h:240px;width:100%;display:grid;grid-template-columns:minmax(0,1fr) 320px minmax(0,1fr);gap:18px;align-items:start}
+/* NOW-lane combo row — two-row grid via grid-areas:
+     row 1: FitnessPanel spans both columns (per-candidate panel sits OVER
+            lineage + optimizer)
+     row 2: Lineage (2fr, content-height — the family cladogram grows
+            with the number of descendants) + Workflow (1fr).
+   Lineage drops the prior fixed `--row-h` so the family tree can extend
+   the card down the page when there are dozens of forks; the inner
+   scrolls are uncapped so the SVG drives the height directly. */
+.dash-row-verdict{width:100%;display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);grid-template-areas:"fitness fitness" "lineage workflow";gap:18px;align-items:start}
 .dash-row-verdict > *{min-width:0}
+.dash-row-verdict > .fitness-card{grid-area:fitness}
+.dash-row-verdict > .lineage-card{grid-area:lineage}
+.dash-row-verdict > .workflow-card{grid-area:workflow}
 .dash-row-verdict > .lineage-card,
 .dash-row-verdict > .fitness-card,
-.dash-row-verdict > .workflow-card{height:var(--row-h);display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
+.dash-row-verdict > .workflow-card{display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
 .dash-row-verdict > .workflow-card{padding:0}
-.dash-row-verdict .lineage-scroll{flex:1;max-height:200px;min-height:0}
+.dash-row-verdict > .lineage-card{height:auto}
+.dash-row-verdict > .fitness-card{height:240px}
+.dash-row-verdict > .workflow-card{height:240px}
+.dash-row-verdict .lineage-scroll{flex:1;min-height:0}
+.dash-row-verdict .family-cladogram-scroll{max-height:none}
 .dash-row-verdict .fitness-chart-frame{flex:1;height:160px;min-height:0}
 .dash-row-verdict .fitness-body{flex:1;display:flex;flex-direction:column;min-height:0}
-@media (max-width:960px){.dash-row-verdict{grid-template-columns:1fr;max-width:none}}
+@media (max-width:960px){.dash-row-verdict{grid-template-columns:1fr;grid-template-areas:"fitness" "lineage" "workflow";max-width:none}}
 
 /* Shared inspector slot inside the WHY lane — ScoringInspector for the
    currently-picked candidate; shows a hint when nothing is picked. */
@@ -319,8 +367,14 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
    `Cycle » {id}` line stays one visual unit. Click expands the native
    dropdown; refresh button picks up new cycles minted by the CLI. */
 .cycle-picker{display:inline-flex;align-items:center;gap:4px}
-.cycle-picker select{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:inherit;font:inherit;padding:0 14px 0 0;margin:0;cursor:pointer;max-width:100%;text-overflow:ellipsis;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:right 4px center,right 0 center;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
-.cycle-picker select:hover,.cycle-picker select:focus{color:var(--color-text-primary);outline:none}
+/* The native <select> popup itself is browser-native and not CSS-styleable
+   on Windows. The trigger should read as a subtle background region — a
+   slightly tinted plate, not a button. No accent border on focus (that
+   was painting the trigger yellow after the first click and not letting
+   go until the operator clicked elsewhere). */
+.cycle-picker select{appearance:none;-webkit-appearance:none;background:var(--color-background-secondary,rgba(127,127,127,0.06));border:0;border-radius:4px;color:inherit;font:inherit;padding:3px 22px 3px 8px;margin:0;cursor:pointer;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:right 10px center,right 6px center;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
+.cycle-picker select:hover{color:var(--color-text-primary);background-color:var(--color-background-hover)}
+.cycle-picker select:focus{outline:none}
 .cycle-picker-refresh{background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:13px;padding:0 4px;line-height:1}
 .cycle-picker-refresh:hover{color:var(--color-text-primary)}
 .cycle-picker-err{color:var(--color-status-error,#c53030);font-size:13px}
@@ -962,6 +1016,50 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .lineage-label{fill:var(--color-text-secondary);font-size:11px;letter-spacing:.02em}
 .lineage-label.winner{fill:var(--color-text-primary);font-weight:600}
 .lineage-empty{color:var(--color-text-tertiary);font-style:italic;font-size:12px;padding:14px 0;text-align:center}
+.lineage-inherit-link{background:transparent;border:0;color:var(--color-accent);cursor:pointer;font:inherit;font-style:italic;text-decoration:underline;padding:0}
+.lineage-inherit-link:hover{color:var(--color-text-primary)}
+
+/* Family lineage cladogram — REAL search-point graph across the whole
+   family. One lane per cycle, one column per round, fork stems drawn
+   from parent.r{fork_from_round} to child.r1. Inside the Lineage card,
+   above the candidate cladogram. Self-hides for single-cycle families. */
+.family-cladogram{margin:8px 0 12px;padding:0 4px 8px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.family-cladogram-head{display:flex;align-items:center;justify-content:space-between;padding:0 2px 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
+.family-cladogram-scroll{max-height:none;overflow:auto}
+.family-cladogram-svg{display:block;font-family:var(--font-mono,inherit)}
+.family-cladogram-branch{stroke:var(--color-text-tertiary);stroke-width:1;opacity:0.55}
+.family-cladogram-branch.fork{stroke:var(--color-text-secondary);stroke-width:1;opacity:0.8;stroke-dasharray:2 2}
+.family-cladogram-origin{fill:var(--color-text-tertiary);font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+.family-cladogram-headerlabel{fill:var(--color-text-tertiary);font-size:10px;font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.family-cladogram-gridline{stroke:var(--color-border-tertiary);stroke-width:1;opacity:0.4;stroke-dasharray:1 3}
+.family-cladogram-roundlabel{fill:var(--color-text-tertiary);font-size:9px;font-variant-numeric:tabular-nums}
+.family-cladogram-cyclelabel{fill:var(--color-text-secondary);font-size:11px;letter-spacing:.02em}
+.family-cladogram-glyph{font-weight:600;fill:var(--color-text-tertiary)}
+.family-cladogram-dot{fill:var(--color-text-secondary);stroke:var(--color-background-primary);stroke-width:1}
+.family-cladogram-dot.kind-root{fill:var(--color-text-primary)}
+.family-cladogram-dot.kind-fork{fill:var(--color-accent)}
+.family-cladogram-dot.kind-sweep{fill:var(--color-text-secondary)}
+.family-cladogram-dot.kind-diag{fill:var(--color-status-success,#16a34a)}
+.family-cladogram-lane-selected{fill:var(--color-background-tint-active);opacity:0.45}
+.family-cladogram-node.selected .family-cladogram-dot{stroke:var(--color-accent);stroke-width:2}
+.family-cladogram-node.selected .family-cladogram-cyclelabel{fill:var(--color-accent);font-weight:600}
+.family-cladogram-node:hover .family-cladogram-dot{r:5}
+.family-cladogram-node:hover .family-cladogram-cyclelabel{fill:var(--color-text-primary)}
+/* Lane-hit overlay: invisible until hover, then a faint tint highlights
+   the whole row. Sits in front of branches but behind the node groups
+   so dot clicks still win. */
+.family-cladogram-lane-hit{fill:transparent}
+.family-cladogram-lane-hit:hover{fill:var(--color-background-hover);opacity:0.5}
+/* Header right-side cluster: badge + "Clean up N stubs" button. */
+.family-cladogram-head-meta{display:inline-flex;align-items:center;gap:8px}
+.family-cladogram-cleanup-btn{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:2px 8px;text-transform:none;letter-spacing:0}
+.family-cladogram-cleanup-btn:hover{color:var(--color-status-error,#c53030);border-color:var(--color-status-error,#c53030)}
+.family-cladogram-cleanup-done{font-size:11px;color:var(--color-text-tertiary);font-style:italic;text-transform:none;letter-spacing:0}
+/* Cleanup modal body + error. .modal-backdrop / .modal-card primitives
+   come from the existing modal styles further up this file. */
+.family-tree-modal-body{font-size:13px;color:var(--color-text-secondary);margin:0 0 12px;line-height:1.4}
+.family-tree-modal-body code{font-family:var(--font-mono,monospace);background:var(--color-background-hover);padding:1px 4px;border-radius:3px;font-size:12px}
+.family-tree-modal-error{font-size:12px;color:var(--color-status-error,#c53030);margin:0 0 12px}
 
 /* Hard-samples heat-map — full HardSamplesTable in both compact and
    expanded states. Compact = small default height showing ~3 rows; the

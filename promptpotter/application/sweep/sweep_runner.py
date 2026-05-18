@@ -180,6 +180,12 @@ async def run_sweep_batch(
             issued_by=tenant_id,
             l1_layout=payload.l1_layout,
         )
+        # KNOWN BUG (interim cleanup workaround in webapp): _mint_fork
+        # creates the fork dir + index.json BEFORE we run anything for
+        # it. If this batch is interrupted between the mint here and
+        # the run-start below, the fork dir stays on disk forever as a
+        # stub (n_rounds=0). See `fork_siblings.py::_mint_fork` for the
+        # full diagnosis and the cleanup endpoint that prunes stubs.
         new_cycle_id = _mint_fork(
             store.campaigns,
             tenant_id,
