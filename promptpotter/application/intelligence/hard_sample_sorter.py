@@ -32,7 +32,7 @@ __all__ = [
     "empty_artifact",
 ]
 
-ARTIFACT_SCHEMA_VERSION = 1
+ARTIFACT_SCHEMA_VERSION = 2
 
 
 def _candidate_hit_rates(observations: list[Observation]) -> dict[str, float]:
@@ -57,6 +57,32 @@ def _sample_miss_rates(observations: list[Observation]) -> dict[int, float]:
     return {sid: misses.get(sid, 0) / n for sid, n in totals.items() if n > 0}
 
 
+def _sample_discrimination(observations: list[Observation]) -> dict[int, float]:
+    """Per-sample cross-candidate hit-rate variance — ``p*(1-p)``, max at p=0.5.
+
+    The PoBB consumer iterates samples in descending-discrimination order
+    so paired posteriors separate fast: samples where candidates split
+    ~50/50 carry the most information about which prompt is better.
+    Always-hit and always-miss samples produce 0 — scoring them yields
+    zero between-candidate signal and the posterior stays overlapping.
+
+    A sample observed only once still gets ``p*(1-p)`` (often 0); the
+    tie-breaker by |δ_s| in :func:`_resolve_discrimination_order` keeps
+    those samples behind anything with real variance.
+    """
+    totals: dict[int, int] = {}
+    hits: dict[int, int] = {}
+    for o in observations:
+        totals[o.sample_id] = totals.get(o.sample_id, 0) + 1
+        if o.hit:
+            hits[o.sample_id] = hits.get(o.sample_id, 0) + 1
+    out: dict[int, float] = {}
+    for sid, n in totals.items():
+        p = hits.get(sid, 0) / n
+        out[sid] = p * (1.0 - p)
+    return out
+
+
 def _resolve_candidate_order(
     posterior: RaschPosterior,
     hit_rates: dict[str, float],
@@ -76,6 +102,26 @@ def _resolve_sample_order(
     return sorted(
         posterior.delta.keys(),
         key=lambda sid: (-posterior.delta[sid], -miss_rates.get(sid, 0.0), sid),
+    )
+
+
+def _resolve_discrimination_order(
+    discrimination: dict[int, float],
+    rasch_delta: dict[int, float],
+) -> list[int]:
+    """Sort sample IDs by descending discrimination (``p*(1-p)``).
+
+    Ties break by descending |δ_s| (hardest within the same discrimination
+    bucket — preserves the diagnostic-first intent for samples no prior
+    has split yet), then by ascending sample id for determinism.
+
+    Consumed by ``score_population`` to drive PoBB's iteration order;
+    distinct from the heatmap's hardest-first ``sample_order`` because
+    PoBB needs between-candidate variance, not absolute difficulty.
+    """
+    return sorted(
+        discrimination.keys(),
+        key=lambda sid: (-discrimination[sid], -abs(rasch_delta.get(sid, 0.0)), sid),
     )
 
 
@@ -103,6 +149,7 @@ def empty_artifact(
         "candidate_order": [],
         "sample_order": [],
         "rasch": {},
+        "discrimination": {"per_sample": {}, "sample_order": []},
         "cells": [],
     }
 
@@ -164,9 +211,11 @@ def build_hard_samples_artifact_from_observations(
         posterior = fit_rasch(observations)
     hit_rates = _candidate_hit_rates(observations)
     miss_rates = _sample_miss_rates(observations)
+    discrimination_map = _sample_discrimination(observations)
 
     full_candidate_order = _resolve_candidate_order(posterior, hit_rates)
     full_sample_order = _resolve_sample_order(posterior, miss_rates)
+    full_discrimination_order = _resolve_discrimination_order(discrimination_map, posterior.delta)
 
     total_candidates = len(full_candidate_order)
     total_samples = len(full_sample_order)
@@ -177,6 +226,11 @@ def build_hard_samples_artifact_from_observations(
         else full_candidate_order[:top_k_candidates]
     )
     sample_order = full_sample_order if top_k_samples is None else full_sample_order[:top_k_samples]
+    discrimination_order = (
+        full_discrimination_order
+        if top_k_samples is None
+        else full_discrimination_order[:top_k_samples]
+    )
 
     cand_set = set(candidate_order)
     samp_set = set(sample_order)
@@ -219,5 +273,11 @@ def build_hard_samples_artifact_from_observations(
         "candidate_order": candidate_order,
         "sample_order": sample_order,
         "rasch": rasch_view,
+        "discrimination": {
+            "per_sample": {
+                str(sid): float(discrimination_map.get(sid, 0.0)) for sid in sample_order
+            },
+            "sample_order": [int(sid) for sid in discrimination_order],
+        },
         "cells": cells,
     }

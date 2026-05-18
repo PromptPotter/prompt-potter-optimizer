@@ -219,11 +219,15 @@ class LiveDashboardView(DerivedView):
             # on ``sample_scored``. Lets the webapp dataset table pulse the
             # in-flight row in lockstep with the per-sample dashboard rewrites.
             "current_sample_id": None,
-            # Full hardest-first sample_id list from the most recent Rasch
-            # fit (refreshed per-candidate in ``score_population``). The
-            # webapp dataset table sorts on this when the operator's
-            # "sync with live sort" toggle is on. ``None`` until the first
-            # sorter fit lands (round 0 / pre-first-candidate fallback).
+            # Full sample_id list PoBB is iterating on for the current
+            # candidate — discrimination-first (``p*(1-p)``, max at 50/50
+            # hit rate across priors), refreshed per-candidate in
+            # ``score_population``. The webapp dataset table sorts on this
+            # when the operator's "sync with live sort" toggle is on.
+            # ``None`` until the first sorter fit lands (round 0 /
+            # pre-first-candidate fallback). The JSON key keeps the legacy
+            # name; hardest-first ordering lives on the per-cycle
+            # hard-samples artifact under ``sample_order`` for the heatmap.
             "hard_sample_order": None,
             "last_query_elapsed_s": 0.0,
             "wallclock_serialized_at": None,

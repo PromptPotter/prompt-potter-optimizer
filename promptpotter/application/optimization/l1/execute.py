@@ -110,8 +110,6 @@ async def execute_round(
                 epsilon=opt.pobb_epsilon,
                 lock_in=POBB_LOCK_IN,
                 lock_in_n_min=POBB_LOCK_IN_N_MIN,
-                predictable_tail_delta=opt.pobb_predictable_tail_delta,
-                predictable_tail_boost=opt.pobb_predictable_tail_boost,
             ),
             round_num=round_num,
             yield_stats=yield_stats,

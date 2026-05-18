@@ -265,10 +265,10 @@ def test_classify_diff_scopes() -> None:
     # No diff
     assert _cfg().classify_diff_against(base) == (DiffScope.NONE, [])
 
-    # Policy-only: PoBB boost change (the operator's exact scenario)
-    scope, diffed = _cfg(pobb_predictable_tail_boost=5.0).classify_diff_against(base)
+    # Policy-only: PoBB epsilon change (the operator's exact scenario)
+    scope, diffed = _cfg(pobb_epsilon=0.10).classify_diff_against(base)
     assert scope is DiffScope.POLICY_ONLY
-    assert diffed == ["optimization.pobb_predictable_tail_boost"]
+    assert diffed == ["optimization.pobb_epsilon"]
 
     # Data-affecting: scoring formula change rescores past fitness
     scope, _ = CampaignConfig.model_validate(
@@ -291,7 +291,7 @@ def test_classify_diff_scopes() -> None:
             "optimization": {
                 "improvement_threshold": 0.01,
                 "degradation_threshold": 0.4,
-                "pobb_predictable_tail_boost": 5.0,
+                "pobb_epsilon": 0.10,
             },
             "scoring": "new",
         }

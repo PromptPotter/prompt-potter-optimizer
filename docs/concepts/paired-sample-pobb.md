@@ -233,6 +233,57 @@ priors will surface as divergence via the candidate side).
 | `promptpotter/application/optimization/l1/population.py::pobb_decision_data` | Embeds `candidate_sample_ids` + `prior_histories` into the decision record |
 | `promptpotter/application/optimization/resume_and_fork/replayers.py::_pobb_replay_snapshot` | Reads paired snapshot from `data`; no cross-round resolver |
 
+## Sample-selection: discrimination, not hardness
+
+Backfill makes the paired comparison statistically valid; the per-candidate
+**iteration order** is what makes it cheap. PoBB iterates samples in
+descending **cross-candidate discrimination** — `p·(1−p)` where `p` is the
+sample's hit rate across all prior candidates, maximized at 50/50. The
+heatmap's hardest-first `sample_order` (the spec's `|δ_s|` sort) is kept
+on the same artifact under `sample_order`; the picker's order lives next
+to it as `discrimination.sample_order`. The two diverge by design.
+
+Why discrimination wins for elimination: hardest-first clusters every
+candidate at ~0% on the same hard samples — paired posteriors overlap and
+PoBB sees no signal. 50/50 samples are exactly where candidates split, so
+paired posteriors separate fast and dominated candidates fall out before
+the full sample budget is spent.
+
+This is the Rasch CAT / Fisher-information-max picker, using population
+variance as a proxy for per-candidate Fisher info. The proxy holds when
+candidates evolve from a shared parent — empirically R1↔R3 difficulty
+rank Spearman ρ≈0.83 on the AIME cycle we measured; the rank a sample
+gets from the population is close enough to the rank any one candidate
+would assign.
+
+## Elimination ladder: dominance before posterior
+
+`PoBBCheck.check()` runs two gates in order. The first is pure arithmetic:
+
+```
+cand_max_final_hits = cand_hits + (budget − queries_scored)
+if cand_max_final_hits < seed_total_hits → ELIMINATE
+```
+
+If even hitting every remaining sample can't tie the seed prior's
+already-known total on the candidate's intended sample budget, no further
+scoring can flip the comparison. Fires regardless of the latest sample's
+hit/miss outcome — the dominance is structural, not evidential. Seed is
+the origin (R1) or the prior round's winner (R2+); the seed's coverage
+across the candidate's budget is guaranteed by the backfill above.
+
+The second gate is the existing Bayesian posterior — `p_best < ε` on the
+paired vectors. The two gates are complementary: dominance is SPRT's
+deterministic corner (probability of catching up = 0); the posterior gate
+is sequential evidence accumulation against an ε threshold. Dominance
+fires first because "mathematically impossible" beats "probably won't."
+
+The `predictable_tail_*` δ-aware ε scaling that lived here previously
+was a heuristic version of this — loosen ε when the remaining samples are
+high-|δ| because no information is coming. Replaced because the dominance
+check states the same intuition exactly (`p=1` corner) instead of
+approximating it via a tunable multiplier.
+
 ## Related concepts
 
 * `docs/concepts/the-loop.md` — where PoBB fits in the round lifecycle.
@@ -240,3 +291,6 @@ priors will surface as divergence via the candidate side).
   catches every backfilled `(leader_sp, sample)` measurement.
 * `docs/operations/rewind-and-fork.md` — how decision replay drives
   divergence + fork behavior.
+* `docs/specs/hard-sample-sorter.md` — the artifact contract carrying
+  both the heatmap's `sample_order` and PoBB's
+  `discrimination.sample_order`.

@@ -45,11 +45,20 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
 )
 
 artifact = build_hard_samples_artifact(cycle.rounds, top_k_candidates=None, top_k_samples=None)
-# artifact["candidate_order"]: list[str]               (θ_c desc)
-# artifact["sample_order"]:    list[int]               (δ_s desc, hardest first)
-# artifact["cells"]:           list[{"c", "s", "hit"}]  (measured only)
-# artifact["rasch"]:           {"theta", "theta_se", "delta", "delta_se", ...}
+# artifact["candidate_order"]:        list[str]              (θ_c desc)
+# artifact["sample_order"]:           list[int]              (δ_s desc, hardest first — for the heatmap)
+# artifact["cells"]:                  list[{"c", "s", "hit"}] (measured only)
+# artifact["rasch"]:                  {"theta", "theta_se", "delta", "delta_se", ...}
+# artifact["discrimination"]["sample_order"]: list[int]      (p·(1−p) desc — for PoBB picker)
+# artifact["discrimination"]["per_sample"]:   dict[str,float] (p·(1−p) per sample, 0..0.25)
 ```
+
+The `discrimination` block is a peer of `sample_order`, not a replacement. Two consumers, two sorts:
+
+- **Heatmap (`sample_order`, δ_s desc):** hardest first — operator sees the failure cluster aligned left.
+- **PoBB picker (`discrimination.sample_order`, `p·(1−p)` desc):** 50/50 first — maximum Fisher info per sample, paired posteriors separate fast.
+
+Hardest-first wins for display, discrimination-first wins for elimination. Detail and rationale: [`../concepts/paired-sample-pobb.md#sample-selection-discrimination-not-hardness`](../concepts/paired-sample-pobb.md#sample-selection-discrimination-not-hardness).
 
 **Tri-state cell.** A cell is *measured & hit*, *measured & miss*, or *absent* (unmeasured). Heatmap renderers iterate `cells` for the measured pairs and treat any `(c ∈ candidate_order × s ∈ sample_order)` not present as the unmeasured tier.
 

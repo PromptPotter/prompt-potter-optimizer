@@ -214,19 +214,12 @@ def decode_signal_effect(
     prior_histories_snapshot = elim_check.snapshot_priors(candidate_sample_ids)
     elimination_decision: tuple[dict, dict] | None = None
     if elimination_stopped and signal.check_name == elim_check.name:
-        # effective_epsilon = ε × (1 + boost × predictable_tail_fraction).
-        # Falls back to ``epsilon`` when the check fired without
-        # δ-scaling info (older records or sorter-empty rounds).
-        eff_eps = float(cr.get("effective_epsilon", elim_check.epsilon))
-        pred_frac = float(cr.get("predictable_tail_fraction", 0.0))
         elimination_decision = (
             {
                 "candidate_id": candidate_id,
                 "prior_candidate_ids": priors_at_test,
                 "queries_scored": queries_scored,
                 "epsilon": float(elim_check.epsilon),
-                "effective_epsilon": eff_eps,
-                "predictable_tail_fraction": pred_frac,
                 "n_min": int(elim_check.n_min),
                 "round_num": round_num,
                 "recorded_p_best": recorded_p_best,
@@ -547,11 +540,14 @@ async def score_population(
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
 
-        # Hard-sample sort per candidate: fit Rasch on prior rounds plus
-        # the in-progress round's already-scored candidates, then iterate
-        # samples in descending δ_s (hardest first) so the most
-        # diagnostic samples land first and PoBB can eliminate dominated
-        # candidates without spending the full sample budget.
+        # Sample order per candidate: fit Rasch on prior rounds plus the
+        # in-progress round's already-scored candidates, then iterate
+        # samples in descending cross-candidate discrimination (``p*(1-p)``,
+        # max at 50/50 hit rate) so paired posteriors separate fast and
+        # PoBB can eliminate dominated candidates without spending the
+        # full sample budget. The heatmap artifact's hardest-first
+        # ``sample_order`` stays as the display sort; PoBB consumes the
+        # ``discrimination.sample_order`` peer field.
         sorter_obs = build_observations(cycle.rounds)
         if cycle.config.optimization.exploration.seed_evolve_from_archive:
             # Fold cross-cycle archive evidence into the per-candidate fit so
@@ -577,10 +573,10 @@ async def score_population(
                 top_k_candidates=None,
                 top_k_samples=None,
             )
-            sample_order = list(artifact["sample_order"])
-            delta = artifact["rasch"]["delta"]
+            sample_order = list(artifact["discrimination"]["sample_order"])
+            disc_per_sample = artifact["discrimination"]["per_sample"]
             preview = [
-                (sid, float(delta.get(str(sid), 0.0)))
+                (sid, float(disc_per_sample.get(str(sid), 0.0)))
                 for sid in sample_order[: min(3, len(sample_order))]
             ]
             callbacks.on_sample_order_preview(
@@ -591,12 +587,14 @@ async def score_population(
                 n_priors=len(elim_check.priors_by_sample),
                 sample_order=sample_order,
             )
-            # Hand δ + the candidate's hard-first order to PoBBCheck so
-            # ``check()`` can scale ε on the predictable-tail fraction.
-            # See ``PoBBCheck.set_deltas`` + ``_predictable_tail_fraction``.
-            elim_check.set_deltas(delta, sample_order)
+            # Hand the discrimination-first order to PoBBCheck so the
+            # dominance check inside ``check()`` knows the candidate's
+            # intended sample budget (== ``len(sample_order)``) and can
+            # bound the max-possible final-hit count against the seed
+            # prior's already-known total.
+            elim_check.set_sample_order(sample_order)
         else:
-            elim_check.set_deltas(None, None)
+            elim_check.set_sample_order(None)
 
         cr_result = await score_one_candidate(
             idx=idx,

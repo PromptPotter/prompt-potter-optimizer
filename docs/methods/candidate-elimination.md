@@ -6,9 +6,15 @@
 
 Each round evolves *N* individuals (default *N* = 5) via an LLM meta-prompt. Each is measured on a shared query set **Q** of size *K* (50–500), producing a per-sample score in `[0, 1]` aggregated as a mean composite. Evaluation budget per round is *N* × *K* backend calls, dominating wall-clock. Population is pre-enumerated — there's no parameter space to search, only a fixed set to compare.
 
+## Sample iteration order — discrimination, not hardness
+
+Within each candidate, samples are evaluated in descending **cross-candidate discrimination** — `p·(1−p)` over prior candidates' hit rates, maximized at p=0.5. This is the Rasch CAT / Fisher-info picker, using population variance as a proxy for per-candidate Fisher info. 50/50 samples carry the most between-candidate signal; always-hit and always-miss samples carry zero. The heatmap's hardest-first sort lives on the same artifact as a peer field (`sample_order`); PoBB consumes `discrimination.sample_order`. Detail: [`../concepts/paired-sample-pobb.md`](../concepts/paired-sample-pobb.md#sample-selection-discrimination-not-hardness).
+
 ## Bayesian PoBB
 
-Individuals are evaluated sequentially on **Q** in deterministic order. The first runs to completion, establishing a reference. Each subsequent candidate is measured query by query; once `n_min` (default 4) is reached, after every query we recompute each candidate's **Posterior-of-Being-Best** probability and stop the current candidate when its P(best) drops below ε (default 0.05).
+Individuals are evaluated sequentially on **Q** in discrimination-first order. The first runs to completion, establishing a reference. Each subsequent candidate is measured query by query; once `n_min` (default 4) is reached, after every query we recompute each candidate's **Posterior-of-Being-Best** probability and stop the current candidate when its P(best) drops below ε (default 0.05).
+
+A pure-arithmetic **dominance gate** fires before the Bayesian posterior: if `cand_hits + (budget − queries_scored) < seed_total_hits`, the candidate can't catch the seed prior even by hitting every remaining sample. Eliminate immediately. This is SPRT's deterministic corner (probability of catching up = 0) — stronger than the posterior gate, so it's checked first.
 
 Mechanics:
 
@@ -60,8 +66,9 @@ Five independent mechanisms can end a candidate's evaluation early or annotate a
 | 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | annotated + possibly re-measured / swapped | — | `application/scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
-| 5 | **`PoBBCheck`** | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
+| 5 | **`PoBBCheck` — dominance** — `cand_max_final_hits < seed_total_hits` | every query | **1** | eliminated; `elimination_cut` with `data.dominance` | — | `application/optimization/pobb/elimination.py::_dominance_check` |
+| 6 | **`PoBBCheck` — Bayesian** — paired `P(best) < ε` | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/pobb/elimination.py` |
 
-**Ordering inside the query loop.** For each query: (1) prior-result cache lookup; (2) if degraded → `execute_stale_data_protocol`; (3) `on_result` fires → display renders the line; (4) iterate every enabled check in `degradation_checks`; first to return a signal ends the candidate. Mechanisms 3–5 co-exist in that final list — fatal beats rate beats PoBB.
+**Ordering inside the query loop.** For each query: (1) prior-result cache lookup; (2) if degraded → `execute_stale_data_protocol`; (3) `on_result` fires → display renders the line; (4) iterate every enabled check in `degradation_checks`; first to return a signal ends the candidate. Mechanisms 3–6 co-exist in that final list — fatal beats rate beats dominance beats Bayesian PoBB. Inside `PoBBCheck.check()` the dominance gate runs first (pure arithmetic) and the Bayesian posterior runs only if dominance didn't fire.
 
 The `classify_result()` rule table and its three load-boundary effects: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result--fatal-classification). Operator framing: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).

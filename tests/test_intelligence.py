@@ -427,3 +427,59 @@ def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
     assert data is not None
     assert {d["query"] for d in data["items"]} == {"a", "b", "c"}
     assert data["excluded"] == []
+
+
+# ===========================================================================
+# Hard-sample sorter — discrimination order (PoBB sample-selection driver)
+# ===========================================================================
+
+
+def test_discrimination_order_ranks_split_samples_first() -> None:
+    """``discrimination.sample_order`` puts 50/50-hit samples ahead of always-hit
+    and always-miss samples.
+
+    PoBB iterates this order; max-variance samples first means paired
+    posteriors separate fast and dominated candidates can be eliminated
+    before the full sample budget is spent. Hardest-first (the heatmap's
+    ``sample_order``) violates this — it clumps all candidates at ~0 hit
+    rate on the same hard samples and the paired posteriors overlap.
+    """
+    from promptpotter.application.intelligence.exploration import Observation
+    from promptpotter.application.intelligence.hard_sample_sorter import (
+        ARTIFACT_SCHEMA_VERSION,
+        build_hard_samples_artifact_from_observations,
+    )
+
+    obs = [
+        # sample 1: always hit (p=1, var=0)
+        *[Observation(candidate_id=c, sample_id=1, hit=True) for c in "abcd"],
+        # sample 2: 50/50 split (p=0.5, var=0.25 — max)
+        Observation(candidate_id="a", sample_id=2, hit=True),
+        Observation(candidate_id="b", sample_id=2, hit=False),
+        Observation(candidate_id="c", sample_id=2, hit=True),
+        Observation(candidate_id="d", sample_id=2, hit=False),
+        # sample 3: always miss (p=0, var=0)
+        *[Observation(candidate_id=c, sample_id=3, hit=False) for c in "abcd"],
+        # sample 4: 75/25 (p=0.75, var=0.1875)
+        Observation(candidate_id="a", sample_id=4, hit=True),
+        Observation(candidate_id="b", sample_id=4, hit=True),
+        Observation(candidate_id="c", sample_id=4, hit=True),
+        Observation(candidate_id="d", sample_id=4, hit=False),
+    ]
+    artifact = build_hard_samples_artifact_from_observations(obs)
+    assert artifact["schema_version"] == ARTIFACT_SCHEMA_VERSION == 2
+
+    disc_order = artifact["discrimination"]["sample_order"]
+    assert disc_order[0] == 2, "50/50 sample must lead"
+    assert disc_order[1] == 4, "75/25 sample must come before zero-variance samples"
+    assert set(disc_order[2:]) == {1, 3}, "always-hit and always-miss tail"
+
+    per_sample = artifact["discrimination"]["per_sample"]
+    assert per_sample["2"] == pytest.approx(0.25)
+    assert per_sample["4"] == pytest.approx(0.1875)
+    assert per_sample["1"] == pytest.approx(0.0)
+    assert per_sample["3"] == pytest.approx(0.0)
+
+    # The hardest-first sample_order is independent of the discrimination
+    # order — always-miss samples (high δ) dominate it.
+    assert artifact["sample_order"][0] == 3

@@ -76,8 +76,6 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "degradation_threshold"): "policy",
     ("optimization", "elimination_n_min"): "policy",
     ("optimization", "pobb_epsilon"): "policy",
-    ("optimization", "pobb_predictable_tail_delta"): "policy",
-    ("optimization", "pobb_predictable_tail_boost"): "policy",
     ("optimization", "improvement_significance"): "policy",
     ("optimization", "zero_signal_filter_enabled"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
@@ -207,21 +205,6 @@ class OptimizationConfig(BaseModel):
         0.05,
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Default 5%; smaller → fewer stops.",
-    )
-    pobb_predictable_tail_delta: float = Field(
-        1.0,
-        description="Rasch |δ| threshold above which a remaining sample is treated as "
-        "predictable (always-hit or always-miss given prior data). The hard-sample "
-        "sorter pushes high-|δ| samples to the tail, so the predictable-tail fraction "
-        "rises monotonically as evaluation progresses — see ``pobb_predictable_tail_boost``.",
-    )
-    pobb_predictable_tail_boost: float = Field(
-        3.0,
-        description="Multiplier on the ``pobb_epsilon`` loser-elimination threshold "
-        "when the candidate's remaining tail is all predictable. ε_eff = ε * (1 + boost *"
-        "predictable_tail_fraction). With default ε=0.05 and boost=3.0, an all-predictable "
-        "tail loosens ε to 0.20 — eliminates candidates with P(best)<20% instead of <5%. "
-        "Set 0.0 to disable the δ-aware scaling and use a flat ε.",
     )
 
     improvement_significance: float = Field(

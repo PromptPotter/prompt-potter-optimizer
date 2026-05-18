@@ -172,16 +172,20 @@ class RunCallbacks:
         n_priors: int,
         sample_order: list[int],
     ) -> None:
-        """Hard-sample-sorter preview — top-3 next samples by Rasch difficulty,
-        plus the full hardest-first ``sample_order`` so the webapp dataset
-        table can re-sort live to mirror what the loop is iterating.
+        """PoBB sample-order preview — top-3 next samples by cross-candidate
+        discrimination (``p*(1-p)``), plus the full discrimination-first
+        ``sample_order`` so the webapp dataset table can re-sort live to
+        mirror what the loop is iterating.
 
         Fired at the start of each candidate before scoring begins. The
-        ``preview`` list is the head of the sorter's ``sample_order``
-        with each sample's ``δ_s`` posterior; ``n_priors`` is the number
-        of completed candidate histories that fed the Rasch fit;
-        ``sample_order`` is the full list, surfaced verbatim on
-        ``dashboard.json::hard_sample_order``.
+        ``preview`` list is the head of PoBB's iteration order with each
+        sample's discrimination score; ``n_priors`` is the number of
+        completed candidate histories that fed the score; ``sample_order``
+        is the full list, surfaced verbatim on
+        ``dashboard.json::hard_sample_order``. The artifact's hardest-first
+        ``sample_order`` lives next to this on disk for the heatmap; the
+        two diverge by design — PoBB needs between-candidate variance,
+        the heatmap needs absolute difficulty.
         """
         self._snapshot(
             "sample_order_preview",

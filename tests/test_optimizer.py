@@ -471,13 +471,7 @@ _DUMMY_SP = types.SimpleNamespace()  # tests never invoke backfill; SP is opaque
 
 
 def test_pobb_check_high_signal_stops_inferior():
-    """Loser candidate vs strong prior fires within ≤5 queries at ε=0.05.
-
-    Also exercises δ-aware ε-scaling: when the remaining tail is
-    predictable (high |δ|), ε loosens via the ``predictable_tail_*``
-    knobs, so a borderline candidate that survives at flat ε is
-    eliminated by the scaled threshold.
-    """
+    """Loser candidate vs strong prior fires within ≤5 queries at ε=0.05."""
     check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
     # Leader scored on samples 0..19 with fitness 1.0; paired check looks up
     # only the candidate's sample IDs (0..4), so leader's full coverage is fine.
@@ -488,62 +482,48 @@ def test_pobb_check_high_signal_stops_inferior():
     assert sig.check_name == "elimination"
     cr = sig.check_result
     assert cr["leader_id"] == "winner"
+    # Dominance check fires first when budget is known via set_sample_order —
+    # here it isn't, so we fall through to the Bayesian branch.
     assert cr["p_best"] < 0.05
     assert "p_best_snapshot" in cr
-    # Flat ε (no deltas set) → effective_epsilon == epsilon, predictable_tail==0.
-    assert cr["effective_epsilon"] == pytest.approx(0.05)
-    assert cr["predictable_tail_fraction"] == pytest.approx(0.0)
+    assert cr["epsilon"] == pytest.approx(0.05)
 
-    # δ-aware branch: borderline candidate at p_best ≈ 0.07 survives
-    # flat ε=0.05 but is eliminated when the predictable-tail fraction
-    # loosens ε to 0.20 (boost=3, all-predictable tail).
-    borderline = PoBBCheck(
-        PoBBConfig(
-            n_min=4,
-            epsilon=0.05,
-            predictable_tail_delta=1.0,
-            predictable_tail_boost=3.0,
-        ),
-        n_samples=20,
-    )
-    # Prior leader has a mild edge — 7 hits of 8 on a noisy candidate set —
-    # not the crushing 20/20 of the strong-prior case. This puts the
-    # candidate's p_best near 0.05 but not below, so flat ε just barely fails.
-    borderline.register_completed(
-        _measurements([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0], sample_ids=list(range(8))),
-        candidate_id="leader",
+
+def test_pobb_dominance_aborts_when_catch_up_impossible():
+    """Pure arithmetic abort: if cand can't match seed even hitting every
+    remaining sample, fire elimination before the Bayesian posterior runs.
+
+    Models the user-reported pattern: leader at 10/20, candidate runs the
+    first 11 samples at 0/11. Even hitting all 9 remaining samples caps
+    the candidate at 9/20 < 10/20 → abort. The deciding observation can
+    be a HIT or a MISS — dominance doesn't depend on the latest evidence,
+    only on the structural budget.
+    """
+    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
+    seed_scores = [1.0] * 10 + [0.0] * 10  # seed = 10/20 hits across full universe
+    check.register_completed(
+        _measurements(seed_scores, sample_ids=list(range(20))),
+        candidate_id="origin",
         sp=_DUMMY_SP,
     )
-    # Without deltas — candidate trailing but not eliminated at flat ε.
-    borderline.set_current("contender_no_delta")
-    sig_no_delta = borderline.check(
-        _measurements([0.0] * 8, sample_ids=list(range(8))),
+    # Tell PoBB the candidate's sample budget covers all 20 samples.
+    check.set_sample_order(list(range(20)))
+    check.set_current("doomed")
+    # Candidate ran 11 samples, all misses. Max possible final = 0 + 9 = 9 < 10.
+    sig = check.check(
+        _measurements([0.0] * 11, sample_ids=list(range(11))),
         candidate_idx=1,
-        n_total_candidates=4,
+        n_total_candidates=3,
     )
-    # Same scenario, now with deltas declaring the entire remaining tail
-    # is predictable (|δ| = 2.0 everywhere ≥ threshold 1.0).
-    full_order = list(range(20))
-    deltas_predictable = {str(sid): 2.0 for sid in full_order}
-    borderline.set_deltas(deltas_predictable, full_order)
-    borderline.set_current("contender_with_delta")
-    sig_with_delta = borderline.check(
-        _measurements([0.0] * 8, sample_ids=list(range(8))),
-        candidate_idx=2,
-        n_total_candidates=4,
-    )
-    # The scaled-ε branch must be at least as aggressive as flat ε — and
-    # for this borderline setup it's strictly more aggressive: deltas
-    # turn a "no eliminate" or "marginal eliminate" into a confident
-    # eliminate with ε_eff = 0.20.
-    if sig_no_delta is None:
-        assert sig_with_delta is not None, (
-            "predictable-tail δ scaling must eliminate the borderline candidate "
-            "that flat ε leaves alive"
-        )
-    if sig_with_delta is not None:
-        assert sig_with_delta.check_result["effective_epsilon"] == pytest.approx(0.20)
-        assert sig_with_delta.check_result["predictable_tail_fraction"] == pytest.approx(1.0)
+    assert sig is not None
+    assert sig.check_name == "elimination"
+    cr = sig.check_result
+    assert cr["leader_id"] == "origin"
+    dom = cr["dominance"]
+    assert dom["cand_hits"] == 0
+    assert dom["cand_max_hits"] == 9
+    assert dom["seed_total_hits"] == 10
+    assert dom["budget"] == 20
 
 
 def test_pobb_locks_in_dominant_leader():

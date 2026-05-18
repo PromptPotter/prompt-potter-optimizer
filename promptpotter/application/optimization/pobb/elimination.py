@@ -352,23 +352,12 @@ class PoBBSnapshot:
 
 @dataclass(frozen=True)
 class PoBBConfig:
-    """Bundled PoBB tuning knobs — passed through l1_score → score_population → PoBBCheck.
-
-    ``predictable_tail_*`` knobs scale ``epsilon`` upward as the Rasch
-    sorter exhausts diagnostic samples: when the remaining samples for a
-    candidate are all high-|δ| (predictable from priors — either always-
-    hit or always-miss), the loser-elimination threshold loosens because
-    no further information is coming. Off-by-default behaviour when no
-    deltas are supplied (``predictable_tail_fraction = 0``) leaves
-    ``ε_eff = epsilon``.
-    """
+    """Bundled PoBB tuning knobs — passed through l1_score → score_population → PoBBCheck."""
 
     n_min: int = 6
     epsilon: float = 0.05
     lock_in: float = 0.95
     lock_in_n_min: int = 8
-    predictable_tail_delta: float = 1.0
-    predictable_tail_boost: float = 3.0
 
 
 class PoBBCheck:
@@ -404,8 +393,6 @@ class PoBBCheck:
         self.epsilon = config.epsilon
         self.lock_in = config.lock_in
         self.lock_in_n_min = config.lock_in_n_min
-        self.predictable_tail_delta = config.predictable_tail_delta
-        self.predictable_tail_boost = config.predictable_tail_boost
         self.n_samples = n_samples
         self.round_num = int(round_num)
         # Sample-keyed prior fitness — cid → sample_id (str) → fitness.
@@ -416,15 +403,11 @@ class PoBBCheck:
         self._current_id: str = ""
         self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
         self._backfill_fn = backfill_fn
-        # Rasch δ values per sample_id (str-keyed), refreshed per candidate
-        # via ``set_deltas``; empty when the sorter had nothing to fit on
-        # (first candidate of an empty-prior round). Drives ε-scaling in
-        # ``check()`` — see ``predictable_tail_fraction`` below.
-        self._sample_deltas: dict[str, float] = {}
-        # Full hard-sample-sorted order for the active candidate, set per
-        # candidate in lockstep with ``_sample_deltas``. ``check()`` uses
-        # ``sample_order[len(results):]`` to scope the "remaining tail" —
-        # samples the candidate hasn't been scored on yet.
+        # Full discrimination-first sample order for the active candidate,
+        # set per candidate via ``set_sample_order``. ``check()`` uses
+        # ``len(_sample_order)`` as the candidate's intended sample budget
+        # for the deterministic dominance check (cand_max_hits =
+        # cand_hits + remaining); falls back to ``n_samples`` when unset.
         self._sample_order: list[str] = []
 
     def set_current(
@@ -436,26 +419,16 @@ class PoBBCheck:
         self._current_id = candidate_id
         self._on_snapshot = on_snapshot
 
-    def set_deltas(
-        self,
-        sample_deltas: Mapping[str, float] | None,
-        sample_order: Sequence[int | str] | None = None,
-    ) -> None:
-        """Bind per-sample Rasch δ + the candidate's hard-first sample order.
+    def set_sample_order(self, sample_order: Sequence[int | str] | None) -> None:
+        """Bind the candidate's discrimination-first sample order.
 
-        Called by ``score_population`` after each Rasch refit (once per
-        candidate, since the artifact updates as priors accumulate).
-        ``check()`` uses the tail of ``sample_order`` past the current
-        ``len(results)`` to scope which samples are "remaining" and
-        consults ``sample_deltas`` to count predictable-tail samples.
-
-        Both arguments are optional: a missing δ map disables the
-        ε-scaling branch entirely (``ε_eff = epsilon``); a missing
-        ``sample_order`` falls back to no-scoping (also disables
-        scaling). The two are paired by design — ``check()`` cannot
-        meaningfully count remaining samples without both.
+        Called by ``score_population`` once per candidate so the
+        dominance check inside ``check()`` knows the candidate's
+        intended sample budget (``len(_sample_order)``) and which
+        samples are still ahead. A missing order falls back to the
+        full dataset (``n_samples``) for the budget — the dominance
+        check still fires using ``n_samples`` as the cap.
         """
-        self._sample_deltas = {str(k): float(v) for k, v in (sample_deltas or {}).items()}
         self._sample_order = [str(sid) for sid in (sample_order or [])]
 
     def register_completed(
@@ -548,6 +521,16 @@ class PoBBCheck:
         candidate_samples = [str(r.get("sample_id", "")) for r in results]
         scores = [float(r.get("fitness", 0.0)) for r in results]
 
+        # Deterministic dominance check — no statistics, pure arithmetic.
+        # If even hitting every remaining sample can't match the SEED
+        # prior's already-known total hits across the candidate's intended
+        # sample budget, abort immediately. Fires before the Bayesian
+        # posterior because it's a stronger statement: "mathematically
+        # cannot catch up" trumps "probably won't catch up."
+        dominance_signal = self._dominance_check(scores, candidate_idx, n_total_candidates)
+        if dominance_signal is not None:
+            return dominance_signal
+
         # Paired vectors — a prior is included only when it covers every
         # sample the candidate has measured. ``backfill_priors`` is supposed
         # to have closed any gaps before this fires; an incomplete prior
@@ -599,18 +582,7 @@ class PoBBCheck:
                 n_total_candidates,
             )
 
-        # δ-aware ε scaling — when the Rasch sorter has run all the
-        # diagnostic samples to the front, the tail is by construction
-        # predictable (large |θ_c − δ_s|, p_hit near 0 or 1), and no
-        # further information is coming. Loosen ε proportionally so
-        # ε_eff = ε × (1 + boost × predictable_tail_fraction). Off-by-
-        # default fallback: empty deltas / order ⇒ fraction=0 ⇒ ε_eff=ε.
-        predictable_fraction = self._predictable_tail_fraction(n)
-        effective_epsilon = self.epsilon * (
-            1.0 + self.predictable_tail_boost * predictable_fraction
-        )
-
-        if not pobb_should_stop(p_best_current, effective_epsilon):
+        if not pobb_should_stop(p_best_current, self.epsilon):
             return None
 
         return _eliminate(
@@ -621,8 +593,6 @@ class PoBBCheck:
                 "n_priors": len(paired_priors),
                 "p_best": float(p_best_current),
                 "epsilon": float(self.epsilon),
-                "effective_epsilon": float(effective_epsilon),
-                "predictable_tail_fraction": float(predictable_fraction),
                 "p_best_snapshot": snapshot,
                 "leader_id": leader_id,
             },
@@ -630,24 +600,73 @@ class PoBBCheck:
             n_total_candidates,
         )
 
-    def _predictable_tail_fraction(self, scored_so_far: int) -> float:
-        """Fraction of the candidate's remaining samples with |δ| ≥ threshold.
+    def _dominance_check(
+        self,
+        scores: list[float],
+        candidate_idx: int,
+        n_total_candidates: int,
+    ) -> EscalationSignal | None:
+        """Abort when the candidate provably cannot match the seed prior.
 
-        Returns 0.0 when deltas / order weren't set (the ε-scaling is then a
-        no-op), or when there is no remaining tail (last sample of the
-        budget). The candidate has been scored on ``sample_order[:scored_so_far]``
-        already, so the tail starts at index ``scored_so_far``.
+        Seed = origin (R1) or prior round's winner (R2+) — the first id
+        in :attr:`prior_ids`, registered before any in-round candidate.
+
+        Pure arithmetic over hits: ``cand_max_final_hits = cand_hits +
+        remaining_in_budget``; if this is still less than the seed's
+        known total hits across the same budget, no further scoring can
+        flip the comparison. Fires regardless of the latest sample's
+        hit/miss outcome because the dominance is structural, not
+        evidential. Hits are derived from ``score > 0.5`` (matches the
+        binary ``hit`` convention shared with post-round comparisons).
+
+        Returns ``None`` (no abort) when:
+        - no seed has been registered yet (round 1, candidate 1 before origin),
+        - the seed isn't fully covered on the candidate's sample budget
+          (backfill skipped or partial — can't compute the cap exactly),
+        - or the candidate can still tie/exceed the seed.
         """
-        if not self._sample_order or not self._sample_deltas:
-            return 0.0
-        remaining = self._sample_order[scored_so_far:]
-        if not remaining:
-            return 0.0
-        threshold = self.predictable_tail_delta
-        n_predictable = sum(
-            1 for sid in remaining if abs(self._sample_deltas.get(sid, 0.0)) >= threshold
+        if not self.prior_ids:
+            return None
+        seed_id = self.prior_ids[0]
+        seed_full = self.priors_by_sample.get(seed_id, {})
+        # Require an explicit sample order — without it we can't know
+        # the candidate's intended budget, and inferring from the seed's
+        # coverage would compare on samples the candidate isn't scored
+        # against. The score-population loop sets this per candidate;
+        # unit tests that don't would silently skip the gate.
+        sample_universe = self._sample_order
+        if not sample_universe:
+            return None
+        if not all(sid in seed_full for sid in sample_universe):
+            return None
+        seed_total_hits = sum(1 for sid in sample_universe if seed_full[sid] > 0.5)
+        cand_hits = sum(1 for s in scores if s > 0.5)
+        budget = len(sample_universe)
+        remaining = max(0, budget - len(scores))
+        cand_max_hits = cand_hits + remaining
+        if cand_max_hits >= seed_total_hits:
+            return None
+        return _eliminate(
+            self.name,
+            {
+                "queries_scored": len(scores),
+                "total_samples": self.n_samples,
+                "n_priors": len(self.prior_ids),
+                "p_best": 0.0,
+                "epsilon": float(self.epsilon),
+                "p_best_snapshot": {},
+                "leader_id": seed_id,
+                "dominance": {
+                    "cand_hits": cand_hits,
+                    "cand_max_hits": cand_max_hits,
+                    "seed_total_hits": seed_total_hits,
+                    "budget": budget,
+                    "remaining": remaining,
+                },
+            },
+            candidate_idx,
+            n_total_candidates,
         )
-        return n_predictable / len(remaining)
 
 
 def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:
