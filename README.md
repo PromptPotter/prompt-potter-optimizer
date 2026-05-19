@@ -116,6 +116,18 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 
 PromptPotter is a **tree search over prompt programs**: an LLM proposes prompt variants, your evaluator scores them, and weak branches get pruned early. Algorithmically, it is evolutionary search with [Bayesian best-arm-identification](docs/research/related-work.md#best-arm-identification--sequential-testing) pruning (PoBB) — the same *statistical-confidence-guided tree-search* family as MCTS, but deterministic evaluation in place of random rollouts. Comparison: [`docs/research/related-work.md`](docs/research/related-work.md#comparison-to-mcts).
 
+**Structurally closest peer: AlphaEvolve.** Of the published systems in the LLM-driven-evolution family, **AlphaEvolve** is what PromptPotter sits closest to structurally — same generate → evaluate → select loop with cross-iteration memory, applied to prompts + pipeline parameters instead of source code. Attribute-by-attribute:
+
+| AlphaEvolve attribute | In PromptPotter | How |
+|---|:--:|---|
+| **Evolutionary search** | 🟢 shipped | Generate / score / select / mutate over a candidate population; explicit `population` + `individual` + `generation` vocabulary throughout the codebase. |
+| **Automated evaluation** | 🟢 shipped | `score_search_point()` is the single scoring gateway; per-dataset scoring formula in `campaign.json` is compiled once and injected into every eval path. No human-in-the-loop scoring. |
+| **Library learning** | 🟡 partial | PromptPotter's "library" is the cross-cycle **MeasurementArchive** (`archive/measurements/`) + `AxisIndex` / `SampleIndex` / `ConfigIndex` digests — a *measurement* library, not the *program* library AlphaEvolve carries. Informs every L1 mutation via `cycle.axes.digest()` + `sibling_yield`. |
+| **Meta-learning** | 🟡 partial | The optimizer can be pointed at its own meta-prompts (L4 outer loop) — concept: [`optimizer-of-the-optimizer.md`](docs/concepts/optimizer-of-the-optimizer.md); the `potter-l1-meta-campaign` skill ships the state machine that evolves `l1_generate` / `l1_critique` / `l2_context` / `l3_plan` over assess → screen → promote cycles. Full L4 loop sequenced across M10 → M11 → M12. |
+| **MCTS** | 🟡 selection-signal shipped | L3 emits an observation-only `fork_proposal` ({round_offset, reason}) when it judges the current subtree exhausted; the operator forks manually. Backprop up the lineage + UCB-style ancestor selection + auto-fork → M13+ (see Aspiration below). |
+
+Full capability table including AlphaEvolve and the prompt-tooling neighbors: [`docs/research/related-work.md#capability-matrix`](docs/research/related-work.md).
+
 **Aspiration — towards AlphaZero-shaped MCTS.** L3 (the strategic replan layer) is gaining MCTS-style selection in three steps. **Step 1 — shipped:** L3 may now emit an observation-only `fork_proposal` (`{round_offset, reason}`) alongside its `plan` rewrite when it judges the current subtree exhausted and a deferred ancestor more promising. The proposal lands in `round_NNNN.json::nodes[l3_plan].exit.fork_proposal`; the operator reads it and forks manually via `resume --from N` if they agree. **Step 2 — M13+:** propagate round outcomes as node statistics up the lineage tree. **Step 3 — M13+:** UCB-style ancestor-selection rule for automatic L3 forking. The three together = AlphaZero-shaped MCTS, categorically capable of *recovering from dead-end branches* that today the loop can only stall on. Backlog: [`docs/specs/roadmap.md`](docs/specs/roadmap.md#backlog-unscheduled).
 
 [![OpenEvolve: Towards Open Evolutionary Agents](https://img.youtube.com/vi/mWBT-szUutI/hqdefault.jpg)](https://www.youtube.com/watch?v=mWBT-szUutI)

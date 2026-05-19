@@ -8,7 +8,7 @@
 
 The exploration/exploitation sample-selection policy in [`../methods/exploration-exploitation.md`](../methods/exploration-exploitation.md) already fits a Rasch IRT posterior on every campaign, producing two first-class per-item quantities:
 
-- **`δ_s`** — per-sample difficulty. Surfaces today only as a top-5 compact `hardness_top` list inside each round's `scoring_set_events` entry, persisted as a field in `campaigns/{cycle_id}/rounds/round_NNNN.json`.
+- **`δ_s`** — per-sample difficulty. Surfaces today only at end-of-cycle in `campaigns/{cycle_id}/hard_samples_campaign.json`, computed by `build_hard_samples_artifact()` (`promptpotter/application/intelligence/hard_sample_sorter.py`).
 - **`θ_c`** — per-candidate ability. Surfaces today only inside the same Rasch fit, not exposed anywhere.
 
 These two arrays, plus the raw `(candidate_id, sample_id) → hit` matrix they are fit on, are the core outputs of a **standalone capability that stands on its own outside the optimizer**: feed it a dataset and a handful of candidate prompts, get back a difficulty-ranked sample list and a candidate×sample performance matrix. That is useful even to users who never want the full L1/L2/L3 loop. It is also a natural product surface — "point PromptPotter's sorter at your dataset and tell me which samples are genuinely hard and which prompts handle them" — sellable independently from the optimization engine.
@@ -29,7 +29,7 @@ Nothing else. No rendering. No CLI. No new persisted artifact. The primitive exi
 
 ### Phase 2 — CLI + notebook ASCII heatmap
 
-Intermediate checkpoint. The compact ASCII heatmap of the candidate×sample matrix is rendered inline into `log.md` at finalize (and at round boundaries when the digest regenerates). Reuses the phase-1 primitive plus the existing Rasch fit held in `EvolveResult.rasch`. Lives in `presentation/views/log_md.py::render_hard_sample_heatmap`. Optional promotion of the δ_s leaderboard from the compact `hardness_top` field into a standalone campaign artifact will be decided in this phase.
+Intermediate checkpoint. The compact ASCII heatmap of the candidate×sample matrix is rendered inline into `log.md` at finalize (and at round boundaries when the digest regenerates). Reuses the phase-1 primitive plus the existing Rasch fit held in `EvolveResult.rasch`. Lives in `presentation/views/log_md.py::render_hard_sample_heatmap`.
 
 ### Phase 3 — webapp heatmap
 
@@ -119,7 +119,7 @@ Licensing / packaging / pricing are out of scope for this spec; record here only
 
 ## Open questions
 
-- **δ_s persistence.** Today the full `rasch.delta` map is discarded after each round — only the top-5 survives as the `hardness_top` field on each round's `scoring_set_events` entry inside `rounds/round_NNNN.json`. The end-of-cycle artifact is computed in `runner._finalize_run` via `build_hard_samples_artifact()` and rendered inline into `log.md`; no standalone JSON is written. Phase 2 decides whether to also serialize a JSON for the M10 webapp to consume, or to keep the on-demand compute path. Either is cheap.
+- **δ_s persistence.** The full Rasch fit (incl. `delta` for every sample) is persisted at every round-end finalize as `campaigns/{cycle_id}/hard_samples_campaign.json` (this cycle's rounds) and `hard_samples_workspace.json` (cycle + archive observations), via `build_hard_samples_artifact()` from `presentation/writers.py`. Read by the webapp via `/datasets/{name}/preview` and rendered inline into `log.md`. No per-round in-trace persistence — the end-of-round artifact is the source of truth.
 - **Cold cells.** Unmeasured cells have no Rasch estimate. Phase 2/3 may add a uniform-exploration tier that forces coverage of a small fraction of unmeasured cells before declaring the matrix stable. Out of scope in phase 1.
 
 ---

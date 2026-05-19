@@ -229,7 +229,6 @@ def sample_kg_max(
 __all__ = [
     "EvolveResult",
     "build_observations",
-    "build_scoring_set_event",
     "evolve_scoring_set",
     "seed_initial_scoring_set",
 ]
@@ -362,45 +361,6 @@ def _select_swap_ins(
 
     scored.sort(reverse=True)
     return [sid for _, sid in scored[:n_slots]]
-
-
-def build_scoring_set_event(
-    *,
-    round_num: int,
-    result: EvolveResult,
-    hardness_top_k: int = 5,
-) -> dict:
-    """Serialize an ``EvolveResult`` into the persistable per-round event dict."""
-    rasch = result.rasch
-    hardness: list[dict] = []
-    rasch_summary: dict = {}
-    if rasch is not None:
-        sorted_by_delta = sorted(rasch.delta.items(), key=lambda kv: -kv[1])
-        for sid, d in sorted_by_delta[:hardness_top_k]:
-            se = rasch.delta_se.get(sid, 0.0)
-            hardness.append(
-                {
-                    "sample_id": int(sid),
-                    "delta": float(d),
-                    "ci_width": float(2.0 * 1.96 * se),
-                    "n_obs": int(rasch.n_obs_per_sample.get(sid, 0)),
-                }
-            )
-        rasch_summary = {
-            "n_candidates": len(rasch.theta),
-            "n_samples": len(rasch.delta),
-            "iterations": int(rasch.n_iterations),
-            "converged": bool(rasch.converged),
-        }
-    return {
-        "round": int(round_num),
-        "reason": result.reason,
-        "swapped_out": [int(s.id) for s in result.swapped_out],
-        "swapped_in": [int(s.id) for s in result.swapped_in],
-        "new_scoring_set_size": len(result.new_scoring_set),
-        "rasch": rasch_summary,
-        "hardness_top": hardness,
-    }
 
 
 def evolve_scoring_set(

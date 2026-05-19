@@ -5,7 +5,7 @@
 
 ## Why this gates M10
 
-M10's `review.md` and cross-cycle leaderboard read OSP traces and round JSONs directly. If those traces are correct AND Rasch produces a non-empty `scoring_set_events` log + a coherent hard-samples heatmap, M10 builds on that. If anything is broken, fix here, not in M10 Track 1.
+M10's `review.md` and cross-cycle leaderboard read OSP traces and round JSONs directly. If those traces are correct AND Rasch produces a non-empty `hard_samples_campaign.json` + a coherent hard-samples heatmap, M10 builds on that. If anything is broken, fix here, not in M10 Track 1.
 
 Litmus test: *"if OSP traces all correct, that's a good starting point."*
 
@@ -74,7 +74,8 @@ For forks (likely on a fresh notebook run that re-mints from an existing root): 
 |------|-----------|
 | `dashboard.json` (at root) | Live state — phase, round, current accuracy, current candidate's per-sample HIT/MISS lines |
 | `output.log` (at root) | Append-only HIT/MISS history, per query |
-| `rounds/round_0002.json` (round 2) | Smoking-gun source — `scoring_set_events`, `candidate_scores[].samples` |
+| `rounds/round_0002.json` (round 2) | Smoking-gun source — `candidate_scores[].samples` |
+| `hard_samples_campaign.json` (at leaf, rewritten every round-end finalize) | End-of-round Rasch fit — `sample_order`, `candidate_order`, `cells`, `rasch.{theta, delta, ...}` |
 | `log.md` (at leaf, regenerated each round) | Final digest with **Hard Samples** heatmap section |
 | `index.json` (at leaf) | `final.prompt_hashes` (Step 1c) + `final.stop_reason` |
 
@@ -84,18 +85,16 @@ For forks (likely on a fresh notebook run that re-mints from an existing root): 
 
 Open `rounds/round_0002.json` (= round 2). Round 1 lives in `rounds/round_0001.json`; origin in `rounds/round_0000.json`.
 
-**Check 1 — `scoring_set_events`:** look for the field at the top level. Should be a non-empty list. Each entry:
+**Check 1 — `hard_samples_campaign.json`:** open the cycle's `hard_samples_campaign.json` (rewritten every round-end finalize). Should carry:
 ```json
 {
-  "round": 1,
-  "swapped_in": [<sample_ids>],
-  "swapped_out": [<sample_ids>],
-  "reason": "rasch_kg",
-  "rasch": {"n_candidates": ..., "n_samples": ..., "iterations": ..., "converged": true},
-  "hardness_top": [...]
+  "sample_order": [<sample_ids, hardest-δ_s first>],
+  "candidate_order": [<candidate_ids, highest-θ_c first>],
+  "cells": [{"c": "...", "s": 0, "hit": true}, ...],
+  "rasch": {"theta": {...}, "delta": {...}, "theta_se": {...}, "delta_se": {...}, "converged": true}
 }
 ```
-If `swapped_in` and `swapped_out` are non-empty → swap fired. ✓
+If `sample_order` is non-empty AND `rasch.converged: true` → Rasch fit landed. ✓
 
 **Check 2 — sample IDs in scoring set:** scroll to `candidate_scores[i].samples` (per candidate). Each entry is a string like:
 ```
@@ -135,7 +134,7 @@ Same round file:
 ## Acceptance
 
 - Smoking gun: ≥ 1 sample_id ≥ 20 in round-2 scoring set.
-- `scoring_set_events` non-empty by round 3 (round 2 = stretch).
+- `hard_samples_campaign.json::sample_order` non-empty by round 3 (round 2 = stretch).
 - Hard Samples heatmap renders with ≥ 4 distinct δ_s values.
 - All Step 1 fixes verified by reading post-run round files and one legacy-cycle reload.
 
