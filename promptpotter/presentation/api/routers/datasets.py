@@ -22,6 +22,29 @@ _datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 _DATASET_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
+def _trim_unmeasured(
+    order: list[int],
+    measured: set[int],
+    cap: int,
+) -> list[int]:
+    """Walk *order*, keep every measured sample, keep at most *cap* unmeasured.
+
+    Preserves the sort position of the unmeasured samples that survive — the
+    cap drops the tail of the contiguous unmeasured block, not a random
+    slice. With *cap* = 0 the unmeasured rows vanish entirely; with
+    *cap* >= ``len(order)`` the function is a no-op.
+    """
+    kept_unmeasured = 0
+    out: list[int] = []
+    for sid in order:
+        if sid in measured:
+            out.append(sid)
+        elif kept_unmeasured < cap:
+            out.append(sid)
+            kept_unmeasured += 1
+    return out
+
+
 class DatasetItem(BaseModel):
     sample_id: int
     query: str
@@ -61,6 +84,17 @@ async def get_dataset_preview(
     store: StoreDep,
     backend_id: str = Query(default="local"),
     limit: int = Query(default=50, ge=1, le=1000),
+    max_unmeasured: int = Query(
+        default=20,
+        ge=0,
+        le=1000,
+        description=(
+            "Cap on unmeasured (miss_prob=0.5 prior) samples retained in the "
+            "Rasch-sorted output. Measured samples are always kept; the "
+            "unmeasured tail is truncated past this count so the heat-map "
+            "doesn't drown signal in 'no evidence yet' rows."
+        ),
+    ),
     scope: Literal["workspace", "campaign"] = Query(
         default="workspace",
         description=(
@@ -87,6 +121,8 @@ async def get_dataset_preview(
 
     ``train_count`` = samples with at least one measurement in the selected
     scope. ``test_count`` = samples in the dataset cache that have none.
+    Both counts always reflect the FULL dataset — ``max_unmeasured`` only
+    trims the rows returned in ``items``, not the totals.
     """
     from promptpotter.application.intelligence.hard_sample_archive import (
         build_archive_hard_samples_artifact,
@@ -143,6 +179,7 @@ async def get_dataset_preview(
         return 0.5
 
     full_order = sorted(sample_lookup.keys(), key=lambda s: (-miss_prob_of(s), s))
+    trimmed_order = _trim_unmeasured(full_order, measured, max_unmeasured)
 
     items = [
         DatasetItem(
@@ -154,7 +191,7 @@ async def get_dataset_preview(
             miss_prob=miss_prob_of(sid),
             pick_score=pick_score_map.get(sid),
         )
-        for sid in full_order[:limit]
+        for sid in trimmed_order[:limit]
     ]
 
     return DatasetPreviewResponse(
@@ -254,6 +291,16 @@ async def get_dataset_measurement_series(
     store: StoreDep,
     backend_id: str = Query(default="local"),
     limit: int = Query(default=50, ge=1, le=1000),
+    max_unmeasured: int = Query(
+        default=20,
+        ge=0,
+        le=1000,
+        description=(
+            "Mirrors ``/preview``: cap on unmeasured rows kept in the "
+            "Rasch-sorted output. Must match the value the client passed "
+            "to ``/preview`` so the two responses stay aligned by index."
+        ),
+    ),
     scope: Literal["workspace", "campaign"] = Query(
         default="workspace",
         description=(
@@ -316,7 +363,9 @@ async def get_dataset_measurement_series(
         return 0.5
 
     full_order = sorted(sample_lookup.keys(), key=lambda s: (-miss_prob_of(s), s))
-    selected = full_order[:limit]
+    measured = {sid for sid in delta_map if sid in sample_lookup}
+    trimmed_order = _trim_unmeasured(full_order, measured, max_unmeasured)
+    selected = trimmed_order[:limit]
     selected_set = set(selected)
 
     if scope == "campaign":

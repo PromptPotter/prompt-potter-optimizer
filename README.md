@@ -112,35 +112,18 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 > 
 > </details>
 
-## Relation to Karpathy's AutoResearch
+## Scientific framing
 
-If your use case is the simple one — a single agent editing one Python file against a fixed 5-min training run, no population, no statistics — go use [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch). It is purpose-built and minimal.
+PromptPotter is a **tree search over prompt programs**: an LLM proposes prompt variants, your evaluator scores them, and weak branches get pruned early.
 
-Otherwise: PromptPotter is the same idea generalized. The architecture maps cleanly:
+[![OpenEvolve: Towards Open Evolutionary Agents](https://img.youtube.com/vi/mWBT-szUutI/hqdefault.jpg)](https://www.youtube.com/watch?v=mWBT-szUutI)
 
-- AutoResearch's `train.py` (the artifact mutated each loop) ≈ PromptPotter's `OptSearchPoint` (the structured artifact L1 mutates each round — `PromptTemplate` fields + `pipeline_params`).
-- AutoResearch's `program.md` (agent meta-instructions) ≈ PromptPotter's L1 generate node prompt at [`promptpotter/application/optimization/nodes/l1/generate.py`](promptpotter/application/optimization/nodes/l1/generate.py) — the instructions telling the proposing LLM *how* to mutate. Karpathy's [issue #314](https://github.com/karpathy/autoresearch/issues/314) (evolve `program.md` itself) is the L4 / self-optimization direction PromptPotter has on its own roadmap ([`docs/specs/m12-plus-backlog.md`](docs/specs/m12-plus-backlog.md) § Self-optimization).
+*Background — Asankhaya Sharma on [OpenEvolve](https://www.youtube.com/watch?v=mWBT-szUutI).*
 
-Structurally, **AutoResearch is the degenerate case of PromptPotter**:
+Peer systems in the same family — full comparison + benchmark notes in [`docs/research/related-work.md`](docs/research/related-work.md#eight-systems-under-the-umbrella):
 
-- `n_variants = 1`
-- L2 / L3 / critique disabled
-- Elimination disabled (single noisy trial accepted as-is)
-- One sample, one scoring run = the 5-min training loss
-- Single PromptTemplate field, e.g. `program_md`
-
-It is *not literally* a configuration of PromptPotter today — running AutoResearch's workload on PromptPotter would require a `CodeExecutionConnector` (M12 multi-connector work). With that connector, PromptPotter strictly subsumes AutoResearch and adds population search, Bayesian Posterior-of-Being-Best elimination across seeds, L2/L3 escalation, self-healing, and the hard-sample sorter on top.
-
-| | AutoResearch | PromptPotter |
-|---|---|---|
-| Evolved artifact | Python source code (`train.py`) | Structured prompt fields + `pipeline_params` |
-| Fitness signal | 5-min nanochat training loss | Dataset accuracy (per-sample, scorer formula) |
-| Search | 1 agent, try-keep-revert | Population (`n_variants`), PoBB-eliminated rounds |
-| Loop layers | Flat — one agent, one loop | L1 generate/critique + L2 refine + L3 replan |
-| Recovery | None — agent reverts on regression | Self-healing (`ValidationFailure` / `RuntimeFailure`) per candidate |
-| Sample selection | Fixed nanochat run | Rasch + KG scoring-set evolution; hard-sample sorter |
-| Statistical guarantees | None — single noisy trial | Bayesian Posterior-of-Being-Best (population-aware best-arm-ID) |
-| Domain | ML training research | Prompt/pipeline optimization for production LLM apps |
+- Code evolution: [AlphaEvolve](docs/research/related-work.md#eight-systems-under-the-umbrella) · [OpenEvolve](docs/research/related-work.md#eight-systems-under-the-umbrella) · [AlgoTuner](docs/research/related-work.md#eight-systems-under-the-umbrella) · [AutoResearch](docs/research/related-work.md#eight-systems-under-the-umbrella)
+- Prompt evolution: [PromptWizard](docs/research/related-work.md#eight-systems-under-the-umbrella) · [MIPROv2](docs/research/related-work.md#eight-systems-under-the-umbrella) · [GEPA](docs/research/related-work.md#eight-systems-under-the-umbrella)
 
 # Citation
 

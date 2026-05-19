@@ -287,14 +287,25 @@ function DashboardPaneInner({
   // HardSamplesHeatmap → HardSamplesTable. Owning it here means a tab swap
   // (New Job ↔ View Results) doesn't re-fetch, and the heat-map and table
   // both read the same data instead of each running their own fetch chain.
+  //
+  // Bounded retry on transient failure: the active-cycle poll races
+  // `python -m promptpotter new <ds>` — the dashboard sees the new cycleId
+  // before `index.json` lands, fetchActiveDatasetName throws, and without a
+  // retry the heat-map icon stays hidden forever (HardSamplesHeatmap returns
+  // null on empty datasetItems). Retry on a 2 s timer until success or the
+  // cycle changes (cleanup clears the timer).
   useEffect(() => {
     if (!cycleId) return;
     let cancelled = false;
     const ac = new AbortController();
-    (async () => {
+    let retryHandle: number | null = null;
+    const attempt = async () => {
       try {
         const name = await fetchActiveDatasetName(cycleId, ac.signal);
-        if (cancelled || !name) return;
+        if (cancelled || !name) {
+          if (!cancelled && !name) scheduleRetry();
+          return;
+        }
         setDatasetName(name);
         const [preview, seriesRes] = await Promise.all([
           fetchDatasetPreview(name, 1000, ac.signal, hardSamplesScope, cycleId),
@@ -313,14 +324,23 @@ function DashboardPaneInner({
         for (const s of seriesRes?.items ?? []) m.set(s.sample_id, s.measurements);
         setArchivePerSample(m);
       } catch {
-        // load may race with cycle-mint; retry on next cycle change.
-        // Also fires on scope=campaign before round 1 lands the artifact —
-        // table degrades to empty until the file appears, no crash.
+        // Transient failure (mint race, 404 before index.json lands). Retry
+        // until the cycle changes; cleanup cancels the pending timer.
+        if (!cancelled) scheduleRetry();
       }
-    })();
+    };
+    const scheduleRetry = () => {
+      if (cancelled || retryHandle != null) return;
+      retryHandle = window.setTimeout(() => {
+        retryHandle = null;
+        void attempt();
+      }, 2000);
+    };
+    void attempt();
     return () => {
       cancelled = true;
       ac.abort();
+      if (retryHandle != null) window.clearTimeout(retryHandle);
     };
   }, [cycleId, hardSamplesScope]);
 
