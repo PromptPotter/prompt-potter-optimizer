@@ -10,6 +10,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.infrastructure.store import campaign_dir_for
 from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
@@ -397,8 +398,76 @@ async def get_dataset_measurement_series(
     return MeasurementSeriesResponse(name=raw["name"], scope=scope, items=items)
 
 
+class DatasetPipelineResponse(BaseModel):
+    """Target pipeline view for a dataset overlay.
+
+    The dataset's ``pipeline.json`` is the source of truth for which nodes
+    actually run for a campaign — different datasets sharing one backend
+    (e.g. JustLogic ⇒ ``llm_only`` only, lca-termnorm ⇒ the full 6-node
+    chain, both via the ``termnorm`` backend) carry distinct
+    ``pipelines.default`` lists. The webapp consumes ``view`` to render the
+    chat-pane hero; ``pipeline`` carries the full parsed schema for
+    consumers that need per-node config (kind, model, params).
+    ``connector`` is the original-cased connector name from the overlay
+    (e.g. "TermNorm Local") for elegant chip labelling.
+    """
+
+    name: str
+    connector: str
+    pipeline: dict[str, Any]
+    view: dict[str, Any] | None
+
+
+def _strip_lone_surrogates(obj: Any) -> Any:
+    """Recursively replace unpaired surrogate codepoints with ``?``.
+
+    Some dataset overlays (notably ``lca-termnorm/pipeline.json``) carry
+    description strings whose JSON escape sequences point at lone low
+    surrogates (e.g. ``\\udc9d``). Those codepoints are valid Python strings
+    but cannot encode to UTF-8 when FastAPI serializes the response — they
+    raise ``UnicodeEncodeError`` at the wire. Strip them at the boundary
+    so the rest of the (well-formed) payload still gets out the door.
+    """
+    if isinstance(obj, str):
+        return obj.encode("utf-8", errors="replace").decode("utf-8")
+    if isinstance(obj, dict):
+        return {k: _strip_lone_surrogates(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_strip_lone_surrogates(v) for v in obj]
+    return obj
+
+
+@_datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
+async def get_dataset_pipeline(name: str) -> DatasetPipelineResponse:
+    """Return the dataset overlay's parsed pipeline schema and graph view."""
+    if not _DATASET_NAME_RE.match(name):
+        raise HTTPException(400, "Invalid dataset name")
+    datasets_root = DEFAULT_DATASETS_ROOT.resolve()
+    pipeline_path = (datasets_root / name / "pipeline.json").resolve()
+    if not pipeline_path.is_relative_to(datasets_root):
+        raise HTTPException(400, "Invalid dataset name")
+    if not pipeline_path.is_file():
+        raise HTTPException(404, f"Dataset '{name}' has no pipeline.json")
+    raw = json.loads(pipeline_path.read_text(encoding="utf-8"))
+    schema = parse_pipeline_response(raw)
+    pipeline_dump = _strip_lone_surrogates(schema.model_dump(by_alias=True))
+    view_dump = (
+        _strip_lone_surrogates(schema.view.model_dump(by_alias=True))
+        if schema.view is not None
+        else None
+    )
+    connector = (raw.get("backend_name") or raw.get("name") or name).strip()
+    return DatasetPipelineResponse(
+        name=name,
+        connector=connector,
+        pipeline=pipeline_dump,
+        view=view_dump,
+    )
+
+
 __all__ = [
     "DatasetItem",
+    "DatasetPipelineResponse",
     "DatasetPreviewResponse",
     "MeasurementDot",
     "MeasurementSeriesResponse",

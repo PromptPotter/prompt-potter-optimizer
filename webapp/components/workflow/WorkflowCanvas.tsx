@@ -1,30 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
-import { CANVAS_W, CANVAS_H, EDGES, LAYOUT, phaseToNodeId } from "./layout";
+import { CANVAS_W, CANVAS_H, DOT_R, EDGES, LAYOUT, phaseToNodeId } from "./layout";
 import { TERMS } from "@/lib/terms";
 import { getCss } from "@/lib/theme";
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 import { useSelection } from "@/components/dashboard/SelectionContext";
-
-export interface PipelineView {
-  nodes: { id: string; label: string; kind?: string }[];
-  edges: { from: string; to: string }[];
-}
-
-export interface PipelineDoc {
-  view?: PipelineView;
-  nodes?: Record<string, { type?: string; config?: Record<string, unknown>; model?: string }>;
-}
-
-export interface NodeDataLike {
-  model?: string;
-  duration_s?: number;
-  round?: number;
-  timestamp?: string;
-  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-  input?: { template_name?: string };
-  output?: { candidates?: { idx?: number; stats?: Record<string, unknown> }[] };
-}
+import type { NodeDataLike, PipelineDoc } from "./types";
 
 // Edge variants — collapses three parallel switches (stroke colour key,
 // dasharray, arrowhead marker id) into one row per kind. Add a kind:
@@ -144,34 +125,65 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
               const data = currentNodes[n.id];
               const hasData = !!data;
               const isActive = activeId === n.id;
-              const cls = ["wf-box", `kind-${n.kind || "llm"}`];
-              if (isActive) cls.push("active");
-              if (!hasData && !isActive && n.kind === "llm") cls.push("dim");
-              if (selected === n.id) cls.push("selected");
-              const sub = n.kind === "io" ? ""
-                : n.kind === "measurement" ? "system step"
-                : hasData ? (data?.model || "—") : "idle";
-              const tip = TERMS[`node_${n.id}`] || "";
+              const isSelected = selected === n.id;
+              const isIo = n.kind === "io";
+              const dotCls = [
+                "wf-dot",
+                `kind-${n.kind || "llm"}`,
+                isActive ? "active" : "",
+                isSelected ? "selected" : "",
+                !hasData && !isActive && n.kind === "llm" ? "dim" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              const sub =
+                n.kind === "io"
+                  ? ""
+                  : n.kind === "measurement"
+                    ? "system step"
+                    : hasData
+                      ? data?.model || "—"
+                      : "idle";
+              const tip = TERMS[`node_${n.id}`] || undefined;
               return (
-                <foreignObject key={n.id} x={pos.x} y={pos.y} width={pos.w} height={pos.h} style={{ overflow: "visible" }}>
-                  <div style={{ width: "100%", height: "100%" }}>
-                    <button
-                      type="button"
-                      className="wf-node"
-                      aria-label={n.kind === "io" ? `${n.label} (I/O)` : `Node: ${n.label}`}
-                      aria-pressed={selected === n.id ? "true" : undefined}
-                      tabIndex={n.kind === "io" ? -1 : 0}
-                      disabled={n.kind === "io"}
-                      onClick={() => n.kind !== "io" && setSelected(selected === n.id ? null : n.id)}
-                      title={tip || undefined}
+                <g
+                  key={n.id}
+                  className="wf-node"
+                  role="button"
+                  tabIndex={isIo ? -1 : 0}
+                  aria-label={isIo ? `${n.label} (I/O)` : `Node: ${n.label}`}
+                  aria-pressed={isSelected || undefined}
+                  aria-disabled={isIo || undefined}
+                  onClick={() => !isIo && setSelected(isSelected ? null : n.id)}
+                  onKeyDown={(e) => {
+                    if (isIo) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelected(isSelected ? null : n.id);
+                    }
+                  }}
+                >
+                  {tip && <title>{tip}</title>}
+                  <circle className={dotCls} cx={pos.cx} cy={pos.cy} r={DOT_R} />
+                  <text
+                    className="wf-dot-label"
+                    x={pos.cx}
+                    y={pos.cy + DOT_R + 12}
+                    textAnchor="middle"
+                  >
+                    {n.label}
+                  </text>
+                  {sub && (
+                    <text
+                      className="wf-dot-sub"
+                      x={pos.cx}
+                      y={pos.cy + DOT_R + 24}
+                      textAnchor="middle"
                     >
-                      <div className={cls.join(" ")}>
-                        <div className="wf-node-title">{n.label}</div>
-                        {sub && <div className="wf-node-sub">{sub}</div>}
-                      </div>
-                    </button>
-                  </div>
-                </foreignObject>
+                      {sub}
+                    </text>
+                  )}
+                </g>
               );
             })}
           </svg>

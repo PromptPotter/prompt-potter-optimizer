@@ -9,7 +9,7 @@ import hashlib
 import json
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def stable_hash(value: Any) -> str:
@@ -60,6 +60,43 @@ class NodePromptMeta(BaseModel):
     family: str = ""
     template_variables: list[str] = Field(default_factory=list)
     description: str = ""
+
+
+class PipelineViewNode(BaseModel):
+    """One node in the webapp's pipeline-graph view (dots + labels)."""
+
+    model_config = {"frozen": True}
+
+    id: str
+    label: str
+    kind: str = ""  # "io" | "llm" | "tool" | "retriever" | "cache" | "measurement" | "phase"
+
+
+class PipelineViewEdge(BaseModel):
+    """One edge in the webapp's pipeline-graph view."""
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    from_: str = Field(alias="from")
+    to: str
+    kind: str = "forward"  # "forward" | "loop" | "directive" | "escalate"
+    label: str = ""
+
+
+class PipelineView(BaseModel):
+    """Webapp-facing graph projection of a pipeline (nodes + edges).
+
+    Consumed by ``webapp/components/workflow`` to render the dot-and-edge
+    graph in the chat-pane hero and the optimizer canvas. The shape mirrors
+    the explicit ``view`` block in ``datasets/_optimizer/pipeline.json`` and
+    the value derived by ``derive_pipeline_view`` for dataset overlays
+    without an explicit view.
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    nodes: list[PipelineViewNode] = Field(default_factory=list)
+    edges: list[PipelineViewEdge] = Field(default_factory=list)
 
 
 class PipelineNode(BaseModel):
@@ -128,6 +165,12 @@ class PipelineSchema(BaseModel):
     description: str = ""
     nodes: list[PipelineNode] = Field(default_factory=list)
     available_models: list[str] = Field(default_factory=list)
+    # Webapp-facing graph projection. Set by ``parse_pipeline_response`` —
+    # either passed through from an explicit ``view`` block in the source
+    # JSON (the optimizer pipeline ships one) or synthesized by
+    # ``derive_pipeline_view`` from ``pipelines.default`` so every dataset
+    # overlay can render without authoring view bookkeeping by hand.
+    view: PipelineView | None = None
 
     def model_post_init(self, __context: Any) -> None:
         object.__setattr__(self, "_node_map", {n.name: i for i, n in enumerate(self.nodes)})
@@ -264,5 +307,8 @@ __all__ = [
     "ObservationMapping",
     "PipelineNode",
     "PipelineSchema",
+    "PipelineView",
+    "PipelineViewEdge",
+    "PipelineViewNode",
     "stable_hash",
 ]

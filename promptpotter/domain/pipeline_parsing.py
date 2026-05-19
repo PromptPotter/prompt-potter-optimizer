@@ -20,11 +20,65 @@ from promptpotter.domain.pipeline_schema import (
     ObservationMapping,
     PipelineNode,
     PipelineSchema,
+    PipelineView,
+    PipelineViewEdge,
+    PipelineViewNode,
 )
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["parse_pipeline_response", "parse_resolved_schema"]
+__all__ = ["derive_pipeline_view", "parse_pipeline_response", "parse_resolved_schema"]
+
+
+def _derive_node_kind(node: PipelineNode | None) -> str:
+    """Pick a webapp render kind for one pipeline node.
+
+    Priority order: cache role wins because a hit short-circuits the
+    pipeline; an LLM-bearing node (any observation mapping with
+    ``is_llm``) is the next-most-specific signal; everything else falls
+    back to the connector's ``wire_type`` (``tool`` / ``retriever``) and
+    ultimately to a plain ``tool`` dot. ``node_role`` of ``"ranker"`` or
+    ``"candidate_source"`` is intentionally NOT checked here — those roles
+    can be implemented as LLM calls (``llm_ranking``) or pure algos
+    (``fuzzy_matching``); ``is_llm`` is what discriminates.
+    """
+    if node is None:
+        return "tool"
+    if str(node.node_type) == "cache":
+        return "cache"
+    if node.is_llm:
+        return "llm"
+    if node.wire_type == "retriever":
+        return "retriever"
+    if node.wire_type == "tool":
+        return "tool"
+    return "tool"
+
+
+def derive_pipeline_view(schema: PipelineSchema) -> PipelineView:
+    """Synthesize a webapp ``PipelineView`` from a ``PipelineSchema``.
+
+    Wraps ``schema.active_steps`` with synthetic ``input``/``output`` IO
+    bookends and chains a forward edge through them. ``kind`` per interior
+    node comes from ``_derive_node_kind`` so the dot styling matches what
+    the node actually does (LLM nodes glow accent; retrievers/tools/caches
+    each get a distinct fill).
+    """
+    interior_ids = list(schema.active_steps)
+    nodes: list[PipelineViewNode] = [
+        PipelineViewNode(id="input", label="Input", kind="io"),
+    ]
+    for name in interior_ids:
+        node = schema.get_node(name)
+        nodes.append(PipelineViewNode(id=name, label=name, kind=_derive_node_kind(node)))
+    nodes.append(PipelineViewNode(id="output", label="Output", kind="io"))
+
+    sequence = ["input", *interior_ids, "output"]
+    edges = [
+        PipelineViewEdge.model_validate({"from": sequence[i], "to": sequence[i + 1]})
+        for i in range(len(sequence) - 1)
+    ]
+    return PipelineView(nodes=nodes, edges=edges)
 
 
 def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
@@ -203,10 +257,24 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         len(steps),
     )
 
-    return PipelineSchema(
+    schema = PipelineSchema(
         name=config.get("name", "").lower(),
         version=config.get("version", ""),
         description=config.get("description", ""),
         nodes=steps,
         available_models=config.get("available_models", []),
     )
+
+    # View pass-through (explicit ``view`` block in the source JSON) or
+    # synthesized from ``pipelines.default`` so every dataset overlay
+    # renders without authoring graph bookkeeping by hand. The optimizer
+    # pipeline ships an explicit view; dataset overlays don't.
+    raw_view = config.get("view")
+    if isinstance(raw_view, dict):
+        view: PipelineView | None = PipelineView.model_validate(raw_view)
+    elif schema.active_steps:
+        view = derive_pipeline_view(schema)
+    else:
+        view = None
+
+    return schema.model_copy(update={"view": view})

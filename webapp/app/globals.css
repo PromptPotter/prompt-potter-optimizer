@@ -635,21 +635,21 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .workflow-toolbar{padding:10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:13px;color:var(--color-text-secondary)}
 .workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%}
 .workflow-canvas{position:relative;width:100%;max-width:960px;aspect-ratio:500/290;margin:0 auto;overflow:hidden}
-.wf-node{cursor:pointer;user-select:none;background:transparent;border:0;padding:0;font-family:inherit;color:inherit;width:100%;height:100%;display:block}
-.wf-node:disabled{cursor:default}
-.wf-box{position:relative;background:var(--color-background-primary);color:var(--color-text-primary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;padding:6px 10px;transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;justify-content:center;height:100%;width:100%}
-.wf-box:hover{border-color:var(--color-accent)}
-.wf-box.selected{border-color:var(--color-accent);box-shadow:0 0 0 2px var(--color-accent-glow)}
-.wf-box.active{border-color:var(--color-success);box-shadow:0 0 0 2px rgba(var(--color-success-rgb),0.25);animation:pulse-active 1.6s ease-in-out infinite}
-@keyframes pulse-active{0%,100%{box-shadow:0 0 0 2px rgba(var(--color-success-rgb),0.25)}50%{box-shadow:0 0 0 6px rgba(var(--color-success-rgb),0.40)}}
-.wf-box.active::after{content:"";position:absolute;top:-22px;right:-26px;width:40px;height:40px;background:url(/ui/wizard-64x64.png) center/contain no-repeat;image-rendering:pixelated;pointer-events:none;filter:drop-shadow(0 0 4px var(--color-accent-glow)) drop-shadow(0 0 9px rgba(var(--color-accent-rgb),0.55));animation:wizard-hover 2.6s ease-in-out infinite;z-index:4}
-@keyframes wizard-hover{0%,100%{transform:translate(0,0) scale(1)}25%{transform:translate(-1px,-2px) scale(1.02)}50%{transform:translate(0,-3px) scale(1.04)}75%{transform:translate(1px,-2px) scale(1.02)}}
-.wf-box.dim{opacity:.55}
-.wf-box.kind-io{background:var(--color-background-secondary);font-style:italic}
-.wf-box.kind-measurement{background:var(--color-background-tint-soft)}
-.wf-box.kind-phase{background:var(--color-background-tint-active);border-color:var(--color-accent)}
-.wf-node-title{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.wf-node-sub{font-size:11px;color:var(--color-text-tertiary);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* SVG `<g>` wrapping each node — keyboard focus + click affordance. */
+.wf-node{cursor:pointer;user-select:none;outline:none}
+.wf-node[aria-disabled="true"]{cursor:default}
+.wf-node:focus-visible .wf-dot{filter:drop-shadow(0 0 6px var(--color-accent-glow))}
+.wf-dot{fill:var(--color-accent);stroke:var(--color-accent);stroke-width:1;filter:drop-shadow(0 0 5px var(--color-accent-glow));transition:transform .15s,filter .15s,fill .15s}
+.wf-node:hover .wf-dot{transform-box:fill-box;transform-origin:center;transform:scale(1.12)}
+.wf-dot.selected{filter:drop-shadow(0 0 9px var(--color-accent-glow)) drop-shadow(0 0 14px var(--color-accent-glow))}
+.wf-dot.active{fill:var(--color-success);stroke:var(--color-success);filter:drop-shadow(0 0 7px rgba(var(--color-success-rgb),0.55));animation:pulse-active 1.6s ease-in-out infinite}
+@keyframes pulse-active{0%,100%{filter:drop-shadow(0 0 6px rgba(var(--color-success-rgb),0.40))}50%{filter:drop-shadow(0 0 12px rgba(var(--color-success-rgb),0.70))}}
+.wf-dot.dim{opacity:.45}
+.wf-dot.kind-io{fill:var(--color-background-secondary);stroke:var(--color-border-tertiary);stroke-width:1.5;filter:none}
+.wf-dot.kind-measurement{fill:var(--color-text-tertiary);stroke:var(--color-text-tertiary);filter:drop-shadow(0 0 3px rgba(var(--color-accent-rgb),0.25))}
+.wf-dot.kind-phase{fill:var(--color-accent);stroke:var(--color-accent);opacity:.85}
+.wf-dot-label{font-size:11px;font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
+.wf-dot-sub{font-size:10px;fill:var(--color-text-tertiary);font-family:var(--font-mono);pointer-events:none}
 /* Optimizer node detail — slave content panel appended BELOW the Now-lane
    row when a workflow node is picked. The 3-col row stays mounted so the
    operator can keep clicking between optimizer nodes; this panel just
@@ -813,6 +813,29 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 }
 .wf-hero-kb{display:flex;justify-content:center;margin-top:2px}
 .wf-hero-kb-pill{font-size:12px;padding:5px 14px;border-radius:999px;background:rgba(var(--color-accent-rgb),0.08);border:1px solid rgba(var(--color-accent-rgb),0.30);color:var(--color-accent);letter-spacing:.04em}
+/* Multi-node connector hero — reuses .wf-hero-node.llm chip frame for one
+   shared visual surface across 1-node and N-node datasets. Just slightly
+   wider/taller so the dot row fits, with smaller dots + label-wrap on
+   underscore so cells stay compact. */
+.wf-hero-node.llm.wf-hero-node-multi{
+  flex-direction:column;align-items:stretch;gap:0;
+  padding:10px 18px 8px;
+  min-width:280px;max-width:560px;
+  width:auto
+}
+.wf-hero-multi-svg{display:block;width:100%;height:70px}
+.wf-hero-multi-svg .edge{stroke:var(--color-accent);stroke-opacity:.55;stroke-width:1.5;fill:none;filter:drop-shadow(0 0 3px var(--color-accent-glow))}
+.wf-hero-multi-node{cursor:pointer;outline:none}
+.wf-hero-multi-node:focus-visible .node{filter:drop-shadow(0 0 6px var(--color-accent-glow))}
+.wf-hero-multi-node .node{fill:var(--color-accent);stroke:var(--color-accent);stroke-width:1;filter:drop-shadow(0 0 4px var(--color-accent-glow));transition:transform .15s,filter .15s}
+.wf-hero-multi-node:hover .node{transform-box:fill-box;transform-origin:center;transform:scale(1.18)}
+.wf-hero-multi-node .node.selected{filter:drop-shadow(0 0 7px var(--color-accent-glow)) drop-shadow(0 0 11px var(--color-accent-glow))}
+.wf-hero-multi-node .node.kind-tool{fill:var(--color-accent);opacity:.85}
+.wf-hero-multi-node .node.kind-retriever{fill:var(--color-accent);opacity:.85}
+.wf-hero-multi-node .node.kind-cache{fill:var(--color-text-tertiary);stroke:var(--color-text-tertiary);filter:drop-shadow(0 0 2px rgba(var(--color-accent-rgb),0.25))}
+.wf-hero-multi-node .node-label{font-size:10px;font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
+.wf-hero-multi-node .node-sub{font-size:9px;fill:var(--color-text-tertiary);font-family:var(--font-mono);pointer-events:none}
+.wf-hero-multi-tag{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--color-text-tertiary);text-align:center;padding-bottom:4px;font-family:var(--font-mono);opacity:.8}
 .hs-zone{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:24px;padding:0 8px}
 .hs-block{width:100%;max-width:1280px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:vertical;height:320px;min-height:200px;max-height:80vh}
 .hs-scroll{flex:1;min-height:0;overflow:auto}

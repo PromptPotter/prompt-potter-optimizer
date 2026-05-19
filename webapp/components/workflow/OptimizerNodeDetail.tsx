@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import type { PipelineDoc } from "./WorkflowCanvas";
+import type { PipelineDoc } from "./types";
 import { type DashboardSnapshot, roundOf, type RoundFileDoc } from "@/lib/poll";
 import { phaseToNodeId } from "./layout";
 

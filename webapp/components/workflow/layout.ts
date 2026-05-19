@@ -1,30 +1,32 @@
 // Workflow topology — pipeline shape never changes (per docs/specs/archive/m11-webapp-minimal-preview.md).
-// Lifted verbatim from webapp/index.html:1181 (LAYOUT) and :1199 (EDGES).
+// Dot-and-outside-label layout, matching the chat-pane hero aesthetic.
 // Three nested loops:
 //   L1 (innermost): l1_critique → l1_generate (bow under the row)
 //   L2 (middle):    l1_critique → l2_context → l1_generate (rounded square)
 //   L3 (outer):     l1_critique → l3_plan    → l1_generate (bigger rounded square)
+//
+// Edge endpoints sit at the dot edge (DOT_R from each centre), not the
+// centre, so the stroke never overlaps the dot or its glow.
 
 export const CANVAS_W = 500;
 export const CANVAS_H = 290;
+export const DOT_R = 11;
 
-export interface NodeBox {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+export interface NodePoint {
+  cx: number;
+  cy: number;
 }
 
-export const LAYOUT: Record<string, NodeBox> = {
-  input:       { x:  10, y:  50, w:  80, h: 30 },
-  restructure: { x:  10, y: 100, w:  80, h: 44 },
-  origin:    { x:  10, y: 170, w:  80, h: 44 },
-  l3_plan:     { x: 235, y:  10, w: 110, h: 44 },
-  l2_context:  { x: 235, y:  67, w: 110, h: 44 },
-  l1_generate: { x: 130, y: 170, w: 110, h: 44 },
-  l1_score:    { x: 260, y: 170, w:  70, h: 44 },
-  l1_critique: { x: 350, y: 170, w: 100, h: 44 },
-  output:      { x: 350, y: 245, w: 100, h: 40 },
+export const LAYOUT: Record<string, NodePoint> = {
+  input:       { cx:  50, cy:  60 },
+  restructure: { cx:  50, cy: 120 },
+  origin:      { cx:  50, cy: 192 },
+  l3_plan:     { cx: 290, cy:  32 },
+  l2_context:  { cx: 290, cy:  89 },
+  l1_generate: { cx: 185, cy: 192 },
+  l1_score:    { cx: 295, cy: 192 },
+  l1_critique: { cx: 400, cy: 192 },
+  output:      { cx: 400, cy: 255 },
 };
 
 export type EdgeKind = "forward" | "loop" | "directive" | "escalate";
@@ -37,28 +39,28 @@ export interface EdgeGeometry {
 }
 
 export const EDGES: Record<string, EdgeGeometry> = {
-  "input>restructure":        { kind: "forward",   d: "M50,80 L50,100" },
-  "restructure>origin":       { kind: "forward",   d: "M50,144 L50,170" },
-  "origin>l1_generate":       { kind: "forward",   d: "M90,192 L130,192" },
-  "l1_generate>l1_score":     { kind: "forward",   d: "M240,192 L260,192" },
-  "l1_score>l1_critique":     { kind: "forward",   d: "M330,192 L350,192" },
-  "l1_critique>output":       { kind: "forward",   d: "M400,214 L400,245",
-                                label: "converged", labelXY: [430, 232] },
-  "l1_critique>l1_generate":  { kind: "forward",
-                                d: "M400,170 C400,140 185,140 185,170",
-                                label: "next round", labelXY: [292, 144] },
+  "input>restructure":        { kind: "forward",   d: "M50,71 L50,109" },
+  "restructure>origin":       { kind: "forward",   d: "M50,131 L50,181" },
+  "origin>l1_generate":       { kind: "forward",   d: "M61,192 L174,192" },
+  "l1_generate>l1_score":     { kind: "forward",   d: "M196,192 L284,192" },
+  "l1_score>l1_critique":     { kind: "forward",   d: "M306,192 L389,192" },
+  "l1_critique>output":       { kind: "forward",   d: "M400,203 L400,244",
+                                label: "converged", labelXY: [435, 226] },
+  "l1_critique>l1_generate":  { kind: "loop",
+                                d: "M400,181 C400,132 185,132 185,181",
+                                label: "next round", labelXY: [292, 130] },
   "l1_critique>l2_context":   { kind: "escalate",
-                                d: "M415,170 Q415,89 345,89",
-                                label: "L1 stall", labelXY: [402, 130] },
+                                d: "M411,188 Q420,89 301,89",
+                                label: "L1 stall", labelXY: [400, 130] },
   "l2_context>l1_generate":   { kind: "directive",
-                                d: "M235,89 Q170,89 170,170",
-                                label: "brief",    labelXY: [185, 130] },
+                                d: "M279,89 Q170,89 170,182",
+                                label: "brief", labelXY: [185, 130] },
   "l1_critique>l3_plan":      { kind: "escalate",
-                                d: "M440,170 Q440,33 345,33",
-                                label: "L2 stall", labelXY: [428, 105] },
+                                d: "M411,184 Q448,32 301,32",
+                                label: "L2 stall", labelXY: [438, 100] },
   "l3_plan>l1_generate":      { kind: "directive",
-                                d: "M235,33 Q150,33 150,170",
-                                label: "plan",     labelXY: [163, 105] },
+                                d: "M279,32 Q140,32 140,182",
+                                label: "plan", labelXY: [155, 100] },
 };
 
 // dash.state → workflow node id

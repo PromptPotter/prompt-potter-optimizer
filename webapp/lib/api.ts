@@ -41,6 +41,15 @@ export function fetchPipeline(signal?: AbortSignal): Promise<unknown> {
   return jget(`${API}/optimizer/pipeline`, signal);
 }
 
+// Target connector pipeline for a dataset. One-shot — topology is bound at
+// cycle-identity hash time and doesn't mutate during the loop. The server
+// reads `datasets/{name}/pipeline.json` (dataset overlay = source of truth)
+// and synthesises a `view` block from `pipelines.default` when one isn't
+// explicit. Consumed by the ChatPane hero.
+export function fetchDatasetPipeline(name: string, signal?: AbortSignal): Promise<unknown> {
+  return jget(`${API}/datasets/${encodeURIComponent(name)}/pipeline`, signal);
+}
+
 export function fetchCycleFile(
   cycleId: string,
   scope: string,

@@ -6,6 +6,8 @@ import { TERMS } from "@/lib/terms";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
 import { ConfigMenu } from "@/components/dashboard/ConfigMenu";
+import { TargetPipelineHero } from "@/components/dashboard/TargetPipelineHero";
+import type { NodeDataLike, PipelineView } from "@/components/workflow/types";
 
 interface Props {
   cycleId: string | null;
@@ -22,6 +24,11 @@ interface Props {
   archivePerSample: Map<number, MeasurementDot[]>;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
+  // Connector pipeline view derived from datasets/{name}/pipeline.json's
+  // pipelines.default. Drives the data-driven hero: 1 node = original
+  // glassmorphic LLM chip; N nodes = dot+outside-label chain.
+  targetPipelineView: PipelineView | null;
+  targetConnector: string | null;
 }
 
 function fmt(v: unknown): string {
@@ -59,6 +66,8 @@ export function ChatPane({
   archivePerSample,
   hardSamplesScope,
   onHardSamplesScopeChange,
+  targetPipelineView,
+  targetConnector,
 }: Props) {
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
@@ -144,10 +153,8 @@ export function ChatPane({
     return fmtDuration(remainingSec);
   })();
 
-  const heroModel = (() => {
-    const nodes = (dash?.current_round?.nodes as Record<string, { model?: string }> | undefined) ?? {};
-    return nodes.l1_generate?.model ?? "idle";
-  })();
+  const currentNodes =
+    (dash?.current_round?.nodes as Record<string, NodeDataLike> | undefined) ?? {};
 
   return (
     <div className="content chat-content" id="content-chat">
@@ -216,57 +223,13 @@ export function ChatPane({
           </div>
           <ConfigMenu datasetName={datasetName} />
         </div>
-        <div className="wf-hero-flow">
-          <button
-            type="button"
-            className="wf-hero-node wf-hero-node-toggle"
-            aria-pressed={samplesOpen}
-            aria-label={samplesOpen ? "Hide project preview" : "Show project preview"}
-            onClick={toggleSamples}
-          >
-            <div className="ico">
-              <svg width="28" height="28" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="18 10 13 10 11.5 12.5 8.5 12.5 7 10 2 10" />
-                <path d="M4.6 4.4 2 10v5a1.5 1.5 0 0 0 1.5 1.5h13a1.5 1.5 0 0 0 1.5-1.5v-5l-2.6-5.6a1.5 1.5 0 0 0-1.36-.9H5.96a1.5 1.5 0 0 0-1.36.9Z" />
-              </svg>
-            </div>
-            <div className="text-col"><div className="lbl">Input</div><div className="val">Query</div></div>
-          </button>
-          <div className="wf-hero-arrow" />
-          <div className="wf-hero-node llm">
-            <div className="head">
-              <div className="ico">
-                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2.5 6.5 18h11Z" fill="currentColor" fillOpacity="0.18" />
-                  <path d="M5 18c2.4 1.6 4.7 2 7 2s4.6-.4 7-2" />
-                  <path d="M5 18h14" />
-                  <path d="m13.6 8.4.55 1.55 1.55.55-1.55.55-.55 1.55-.55-1.55-1.55-.55 1.55-.55Z" fill="currentColor" />
-                  <circle cx="10.2" cy="13.2" r="0.7" fill="currentColor" />
-                </svg>
-              </div>
-              <div className="lbl">LLM</div>
-            </div>
-            <div className="val">{heroModel}</div>
-          </div>
-          <div className="wf-hero-arrow" />
-          <button
-            type="button"
-            className="wf-hero-node wf-hero-node-toggle"
-            aria-pressed={samplesOpen}
-            aria-label={samplesOpen ? "Hide project preview" : "Show project preview"}
-            onClick={toggleSamples}
-          >
-            <div className="ico">
-              <svg width="28" height="28" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 2h6l4 4v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z" />
-                <path d="M11 2v5h4" />
-                <path d="M6.5 12.5h6" />
-                <path d="m10.5 10.5 2.5 2-2.5 2" />
-              </svg>
-            </div>
-            <div className="text-col"><div className="lbl">Output</div><div className="val">Answer</div></div>
-          </button>
-        </div>
+        <TargetPipelineHero
+          view={targetPipelineView}
+          connector={targetConnector}
+          currentNodes={currentNodes}
+          samplesOpen={samplesOpen}
+          onToggle={toggleSamples}
+        />
         {samplesOpen && (
           <HardSamplesHeatmap
             dash={dash}

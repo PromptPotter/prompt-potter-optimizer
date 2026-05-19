@@ -4,6 +4,7 @@ import {
   fetchActive,
   fetchActiveDatasetName,
   fetchCycleFile,
+  fetchDatasetPipeline,
   fetchDatasetPreview,
   fetchMeasurementSeries,
   fetchPipeline,
@@ -45,10 +46,7 @@ import { FilesPane } from "@/components/tree/FilesPane";
 import { LeveragePanel } from "@/components/leverage/LeveragePanel";
 import { ComparePane } from "@/components/compare/ComparePane";
 
-interface PipelineDoc {
-  view?: { nodes: { id: string; label: string; kind?: string }[]; edges: { from: string; to: string }[] };
-  nodes?: Record<string, { type?: string; config?: Record<string, unknown>; model?: string }>;
-}
+import type { PipelineDoc, PipelineView } from "@/components/workflow/types";
 
 export function DashboardPane() {
   const [cycleId, setCycleId] = useState<string | null>(null);
@@ -92,6 +90,14 @@ function DashboardPaneInner({
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<PipelineDoc | null>(null);
+  // Target connector pipeline view — what the dataset's `pipelines.default`
+  // actually wires up. Drives the data-driven chat-pane hero (N=1 keeps the
+  // single-LLM chip look; N≥2 renders dot+outside-label chain). Fetched once
+  // per datasetName change.
+  const [targetPipelineView, setTargetPipelineView] = useState<PipelineView | null>(null);
+  // Original-cased connector name (e.g. "TermNorm Local") rendered as a
+  // small uppercase tag inside the multi-node chip. Same fetch as the view.
+  const [targetConnector, setTargetConnector] = useState<string | null>(null);
   const [datasetName, setDatasetName] = useState<string | null>(null);
   const [datasetItems, setDatasetItems] = useState<DatasetItem[]>([]);
   const [datasetTrainCount, setDatasetTrainCount] = useState(0);
@@ -262,6 +268,38 @@ function DashboardPaneInner({
     };
   }, []);
 
+  // Target connector pipeline view per active dataset. Same one-shot pattern
+  // as the optimizer pipeline — the dataset's `pipelines.default` is bound
+  // at cycle-identity hash time and doesn't mutate mid-loop.
+  useEffect(() => {
+    if (!datasetName) {
+      setTargetPipelineView(null);
+      setTargetConnector(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = (await fetchDatasetPipeline(datasetName)) as {
+          view?: PipelineView | null;
+          connector?: string | null;
+        };
+        if (!cancelled) {
+          setTargetPipelineView(resp?.view ?? null);
+          setTargetConnector(resp?.connector ?? null);
+        }
+      } catch {
+        if (!cancelled) {
+          setTargetPipelineView(null);
+          setTargetConnector(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [datasetName]);
+
   // Cycle title (dataset name) from index.json
   useEffect(() => {
     if (!cycleId) return;
@@ -416,6 +454,8 @@ function DashboardPaneInner({
             archivePerSample={archivePerSample}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={updateHardSamplesScope}
+            targetPipelineView={targetPipelineView}
+            targetConnector={targetConnector}
           />
         ) : tab === "dashboard" ? (
           <div className="content" id="content-dashboard">
