@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from promptpotter.application.optimization.dispatch.llm_call import run_optimizer_node
+from promptpotter.application.optimization.dispatch.schemas import ForkProposal
 from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.opt_search_point import (
     L1SituationalExample,
@@ -47,11 +48,14 @@ class TransitionResult:
     ``normal_round`` (default) or ``probe_round`` (re-run only the
     warned-query subset under the same OSP). L3 writes ``plan`` and
     optionally ``l3_note`` — a sticky pointer to the L2-layer that
-    survives across L2 fires until the next L3 fire replaces it. The
-    validator outcomes ride alongside so the caller can persist them to
-    the OSP for cross-fire self-healing. ``axis_targeted`` names the axis
-    the L2 fire tests; required prose when ``action="probe_round"``,
-    optional otherwise.
+    survives across L2 fires until the next L3 fire replaces it. L3
+    may also emit ``fork_proposal`` to flag that the current subtree
+    is exhausted and a deferred ancestor looks more promising
+    (observation-only in v1; recorded to ``round_NNNN.json`` for the
+    operator to read and act on manually). The validator outcomes ride
+    alongside so the caller can persist them to the OSP for cross-fire
+    self-healing. ``axis_targeted`` names the axis the L2 fire tests;
+    required prose when ``action="probe_round"``, optional otherwise.
     """
 
     opt_search_point: OptSearchPoint
@@ -67,6 +71,7 @@ class TransitionResult:
     l1_situational_examples: list[L1SituationalExample] | None = None
     l2_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
+    fork_proposal: ForkProposal | None = None
     debug_prompt: str = ""
     debug_response: dict | None = None
 

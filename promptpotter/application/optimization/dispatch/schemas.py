@@ -258,6 +258,25 @@ class L2ContextOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ForkProposal(BaseModel):
+    """L3-emitted proposal to rewind the search to an earlier round.
+
+    Observation-only in v1: recorded to ``round_NNNN.json`` so the
+    operator can read it and manually fork via
+    ``python -m promptpotter resume --from N`` or
+    ``--fork-on-divergence`` if the proposal looks sound. No automatic
+    fork is triggered — this is the *selection* signal half of the
+    M13+ AlphaZero-shaped-MCTS arc, shipped without the backprop /
+    UCB-selection-rule halves. See
+    ``docs/research/related-work.md#comparison-to-mcts``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    round_offset: int
+    reason: str = ""
+
+
 class L3PlanOutput(BaseModel):
     """L3 strategic replan."""
 
@@ -266,6 +285,7 @@ class L3PlanOutput(BaseModel):
     plan: str
     note: str = ""
     rationale: str = ""
+    fork_proposal: ForkProposal | None = None
 
 
 # ---------------------------------------------------------------------------

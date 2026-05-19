@@ -41,6 +41,7 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> Transit
         ),
         l3_note=raw.note,
         l3_guard_breaches=failures,
+        fork_proposal=raw.fork_proposal,
         debug_prompt=prompt,
         debug_response=raw.model_dump(),
     )
@@ -70,7 +71,7 @@ def _l3_enter(cycle: Cycle) -> dict[str, Any]:
 def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
     # ``l3_*_at_entry`` are read by ``EscalationState.fold`` on resume —
     # ``record_l3_fired`` also resets L2 state to these same origins.
-    return {
+    payload: dict[str, Any] = {
         "l3_round": cycle.escalation.l3_round,
         "l3_stall_count": cycle.escalation.l3_stall_count,
         "l3_best_accuracy_at_entry": cycle.escalation.l3_best_accuracy_at_entry,
@@ -78,6 +79,9 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "new_plan_preview": str(result.opt_search_point.plan)[:120],
         "changes_description": result.opt_search_point.lineage.changes_description or "",
     }
+    if result.fork_proposal is not None:
+        payload["fork_proposal"] = result.fork_proposal.model_dump()
+    return payload
 
 
 L3 = LayerStrategy(
