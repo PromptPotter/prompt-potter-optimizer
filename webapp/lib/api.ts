@@ -77,9 +77,12 @@ export interface DatasetItem {
   // Miss-probability for an average candidate, sigmoid(δ_s) from Rasch.
   // 0.5 prior for unmeasured samples. Drives the static-mode sort.
   miss_prob: number;
-  // Chernoff information vs the seed prior. Drives the live PoBB
-  // sample-iteration order. null when scope=workspace (no seed concept
-  // across cycles) or when the sample has no measurement.
+  // 1PL Fisher information at the population-anchor θ=0 (descriptive
+  // snapshot). Indicates how informative measuring this sample would
+  // be on a brand-new candidate before any of its outcomes land. The
+  // live picker recomputes per step against the candidate's running
+  // θ̂_c posterior, so this is descriptive — not the iteration order.
+  // null when the sample has no measurement yet.
   pick_score: number | null;
 }
 

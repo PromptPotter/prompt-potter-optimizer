@@ -503,7 +503,7 @@ def test_pobb_check_gates_elimination_on_posterior_and_separability():
         sp=_DUMMY_SP,
     )
     # Disarm the dominance gate (cand_max = 0 + 16 = 16 ≥ leader's 11).
-    check_noise.set_sample_order(list(range(20)))
+    check_noise.set_sample_universe(list(range(20)))
     check_noise.set_current("equivalent_candidate")
     sig_noise = check_noise.check(
         _measurements([0.0, 0.0, 0.0, 0.0], sample_ids=[0, 1, 2, 3]),
@@ -534,7 +534,7 @@ def test_pobb_dominance_aborts_when_catch_up_impossible():
         sp=_DUMMY_SP,
     )
     # Tell PoBB the candidate's sample budget covers all 20 samples.
-    check.set_sample_order(list(range(20)))
+    check.set_sample_universe(list(range(20)))
     check.set_current("doomed")
     # Candidate ran 11 samples, all misses. Max possible final = 0 + 9 = 9 < 10.
     sig = check.check(

@@ -317,15 +317,6 @@ async def _process_fresh_sample(
     return _SampleOutcome(escalation=esc) if esc else _SampleOutcome()
 
 
-SAMPLE_ORDER_REFRESH_EVERY = 5
-"""Default cadence for in-flight pick-score re-ranking — every N scored
-samples, ``_run_query_loop`` calls ``refresh_sample_order`` to recompute
-the priority of the remaining pending queue. Lower = more responsive to
-in-candidate evidence, higher = less recompute overhead. Five is a
-compromise: pick-score artifact build is O(observations + samples) and
-runs in microseconds; over 30 samples it adds ~6 recomputes."""
-
-
 async def _run_query_loop(
     search_point: JobSearchPoint,
     dataset: list[Sample],
@@ -343,25 +334,17 @@ async def _run_query_loop(
     n_total_candidates: int,
     axes: AxisIndex | None,
     persist_fresh: Callable[[list[QueryMeasurement]], None],
-    sample_order: list[int] | None = None,
-    refresh_sample_order: Callable[[set[int]], list[int]] | None = None,
+    next_sample: Callable[[dict[int, bool]], int | None] | None = None,
 ) -> QueryLoopResult:
     """Score dataset samples, reusing prior results where available.
 
-    ``sample_order`` is the hard-sample-sorter's δ_s-ranked sample-id
-    list — when supplied, the loop iterates in that order so the most
-    diagnostic samples land first. Samples not present in ``sample_order``
-    (e.g. fresh additions the sorter hasn't seen) are appended in their
-    original order. Empty / None falls back to ``dataset`` as-is.
-
-    ``refresh_sample_order`` is the in-flight re-rank closure (Fix A) —
-    when supplied, the loop calls it every ``SAMPLE_ORDER_REFRESH_EVERY``
-    samples with the set of already-scored ``sample_id`` values, and the
-    callable returns a fresh priority order for the remaining pending
-    queue. This catches the case where early evidence on the current
-    candidate makes the static initial order obsolete (e.g. a hedge-
-    collapse signature emerging on q3-4 should re-rank the matching
-    gt-class queue down so PoBB can eliminate sooner).
+    ``next_sample`` is the online adaptive picker (Phase A Rasch CAT).
+    When supplied, the loop calls it before each iteration with the
+    candidate's accumulated ``scored_outcomes`` (sample_id → hit) and
+    receives the next sample id to measure. Returning ``None`` from
+    ``next_sample`` ends the loop. Without ``next_sample``, the loop
+    falls back to dataset insertion order — the path used by paths
+    that don't need adaptive selection (PoBB backfill, unit tests).
     """
     assert session.scoring.scorer is not None, "session.scoring.scorer required for scoring"
     state = _LoopState(results=[])
@@ -386,26 +369,30 @@ async def _run_query_loop(
                 return signal
         return None
 
-    # δ_s-ranked iteration when the sorter supplied an order. The dataset
-    # itself is never mutated — content-hash identity stays the property
-    # of (search_point, full dataset), not the iteration order. The
-    # pending queue is mutated in-place by ``refresh_sample_order`` when
-    # provided (Fix A).
+    # Per-step adaptive picking when ``next_sample`` is supplied;
+    # otherwise iterate the dataset as-given. ``scored_outcomes`` is the
+    # full (sample_id → hit) map the picker folds its posterior over.
     by_id: dict[int, Sample] = {s.id: s for s in dataset}
-    if sample_order:
-        ranked_ids = [sid for sid in sample_order if sid in by_id]
-        ranked_set = set(ranked_ids)
-        rest_ids = [s.id for s in dataset if s.id not in ranked_set]
-        pending: list[int] = ranked_ids + rest_ids
-    else:
-        pending = [s.id for s in dataset]
+    fallback_order: list[int] = [s.id for s in dataset]
+    scored_outcomes: dict[int, bool] = {}
 
-    scored_ids: set[int] = set()
+    def _pick_next() -> int | None:
+        if next_sample is not None:
+            return next_sample(scored_outcomes)
+        for sid in fallback_order:
+            if sid not in scored_outcomes:
+                return sid
+        return None
+
+    def _remaining_ids() -> list[int]:
+        return [sid for sid in fallback_order if sid not in scored_outcomes]
 
     try:
         i = 0
-        while pending:
-            sid = pending.pop(0)
+        while True:
+            sid = _pick_next()
+            if sid is None:
+                break
             sample = by_id[sid]
             if session.stop_check and session.stop_check():
                 logger.debug("Graceful stop after query %d/%d.", len(state.results), len(dataset))
@@ -429,34 +416,33 @@ async def _run_query_loop(
                     escalation_signal=outcome.escalation,
                 )
             if outcome.abort_reason:
+                remaining = _remaining_ids()
+                # The current sample also failed — mark it errored. The
+                # _process_* handler already appended the failed result,
+                # so synthesize errors only for the untouched tail.
+                remaining = [r for r in remaining if r != sid]
                 logger.warning(
                     "Aborting scoring: %s on query %d. Marking remaining %d as errors.",
                     outcome.abort_reason,
                     i + 1,
-                    len(pending),
+                    len(remaining),
                 )
                 state.results.extend(
-                    _error_result(by_id[rsid], outcome.abort_reason) for rsid in pending
+                    _error_result(by_id[rsid], outcome.abort_reason) for rsid in remaining
                 )
                 return QueryLoopResult(
                     state.results, completed=False, stop_reason=outcome.abort_reason
                 )
 
-            scored_ids.add(sid)
+            # Record the outcome (hit / non-hit) so the picker's
+            # posterior fold sees it on the next iteration. Errored
+            # results carry no ``hit`` field — treat them as miss for
+            # the posterior since the picker is about *capability*,
+            # not infrastructure; PoBB and DegradationCheck already
+            # gate elimination on the error class itself.
+            latest_hit: bool = bool(state.results[-1].get("hit")) if state.results else False
+            scored_outcomes[sid] = latest_hit
             i += 1
-
-            # Fix A — in-flight re-rank. Every refresh_every scored
-            # samples, ask the picker for a fresh order over the
-            # remaining pending queue. Samples missing from the new
-            # order keep their relative position at the tail (e.g. ones
-            # the picker filtered for any reason).
-            if refresh_sample_order is not None and pending and i % SAMPLE_ORDER_REFRESH_EVERY == 0:
-                new_order = refresh_sample_order(set(scored_ids))
-                pending_set = set(pending)
-                reordered = [s for s in new_order if s in pending_set]
-                reordered_set = set(reordered)
-                tail = [s for s in pending if s not in reordered_set]
-                pending = reordered + tail
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.warning(
             "Query loop force-interrupted at query %d/%d.", len(state.results), len(dataset)
@@ -480,8 +466,7 @@ async def score_search_point(
     n_total_candidates: int = 1,
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
-    sample_order: list[int] | None = None,
-    refresh_sample_order: Callable[[set[int]], list[int]] | None = None,
+    next_sample: Callable[[dict[int, bool]], int | None] | None = None,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], bool, EscalationSignal | None]:
     """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe).
 
@@ -610,8 +595,7 @@ async def score_search_point(
         n_total_candidates=n_total_candidates,
         axes=axes,
         persist_fresh=_persist_fresh,
-        sample_order=sample_order,
-        refresh_sample_order=refresh_sample_order,
+        next_sample=next_sample,
     )
     results = batch.results
     escalation_signal = batch.escalation_signal

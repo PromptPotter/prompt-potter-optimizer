@@ -79,6 +79,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "improvement_significance"): "policy",
     ("optimization", "zero_signal_filter_enabled"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
+    ("optimization", "picker_objective"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
     # OptimizerLLMConfig — changing the optimizer LLM provider or model would
     # produce different L1/L2/L3 candidates for future rounds; treat as
@@ -217,6 +218,21 @@ class OptimizationConfig(BaseModel):
     )
 
     zero_signal_filter_enabled: bool = Field(False)
+
+    picker_objective: Literal["mfi", "track_and_stop"] = Field(
+        "track_and_stop",
+        description=(
+            "Per-step sample selector inside the PoBB loop. "
+            "``mfi`` = Phase A Maximum Fisher Information at the "
+            "candidate's running θ̂_c posterior (Lord 1980 CAT) — picks "
+            "the sample whose outcome is most uncertain under current "
+            "beliefs; decision-agnostic. ``track_and_stop`` (default) = "
+            "Phase B Chernoff information between the candidate's and "
+            "seed's predictive Bernoulli on each sample "
+            "(Garivier-Kaufmann 2016) — picks the sample whose outcome "
+            "most pushes the keep/abort verdict; decision-aligned."
+        ),
+    )
 
     forbidden_axes_strict: bool = Field(
         True,

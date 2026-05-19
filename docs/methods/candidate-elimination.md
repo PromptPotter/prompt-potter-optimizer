@@ -6,13 +6,18 @@
 
 Each round evolves *N* individuals (default *N* = 5) via an LLM meta-prompt. Each is measured on a shared query set **Q** of size *K* (50–500), producing a per-sample score in `[0, 1]` aggregated as a mean composite. Evaluation budget per round is *N* × *K* backend calls, dominating wall-clock. Population is pre-enumerated — there's no parameter space to search, only a fixed set to compare.
 
-## Sample iteration order — Chernoff info against the seed prior
+## Sample iteration order — online adaptive picker
 
-Within each candidate, samples are evaluated in descending **Chernoff information against the seed prior** — `C(p_seed, p_pop)`, the Track-and-Stop (Garivier-Kaufmann 2016) optimal information measure for Bernoulli best-arm identification. Both rates are smoothed with a `Beta(1,1)` prior so always-miss-with-seed-hit samples (a candidate hitting where the seed always missed) still rank high; only true seed-vs-population agreement zeros out. The heatmap's hardest-first sort lives on the same artifact as a peer field (`sample_order`); PoBB consumes `pick_score.sample_order`. Seed = origin in R1, prior round winner R2+. Detail: [`../concepts/paired-sample-pobb.md`](../concepts/paired-sample-pobb.md#sample-selection-chernoff-info-not-hardness).
+Within each candidate, samples are selected **per step** by an online 1PL Item Response Theory picker (`promptpotter/application/intelligence/adaptive_picker.py`). The picker maintains a Gaussian-approximation posterior on the candidate's latent ability `θ_c` and re-picks the next sample after every measurement under one of two configurable objectives:
+
+- **`mfi`** (Maximum Fisher Information; Lord 1980 CAT) — argmax `p(1-p)` at the candidate's running `θ̂_c`. Picks the sample whose outcome is most uncertain under current beliefs; decision-agnostic.
+- **`track_and_stop`** (Garivier-Kaufmann 2016; **default**) — argmax `C(σ(μ̂_c - δ_s), σ(μ_s - δ_s))` where `μ_s` is the seed prior's fitted ability and `C` is Bernoulli Chernoff information. Picks the sample whose outcome maximally separates candidate from seed — directly minimizes expected queries to a keep/abort verdict.
+
+Configurable per dataset via `optimization.picker_objective` in `campaign.json`. The seed is origin in R1 and the prior round winner R2+; `μ_s` is fit once per round from the seed's measured outcomes. Detail and tradeoff: [`../concepts/paired-sample-pobb.md`](../concepts/paired-sample-pobb.md#sample-selection-online-adaptive-picker).
 
 ## Bayesian PoBB
 
-Individuals are evaluated sequentially on **Q** in pick-score-first order. The first runs to completion, establishing a reference. Each subsequent candidate is measured query by query; once `n_min` (default 4) is reached, after every query we recompute each candidate's **Posterior-of-Being-Best** probability and stop the current candidate when its P(best) drops below ε (default 0.05).
+Individuals are evaluated sequentially on **Q**, with the adaptive picker choosing each candidate's next sample per measurement. The first candidate runs to completion, establishing a reference. Each subsequent candidate is measured query by query; once `n_min` (default 4) is reached, after every query we recompute each candidate's **Posterior-of-Being-Best** probability and stop the current candidate when its P(best) drops below ε (default 0.05).
 
 A pure-arithmetic **dominance gate** fires before the Bayesian posterior: if `cand_hits + (budget − queries_scored) < seed_total_hits`, the candidate can't catch the seed prior even by hitting every remaining sample. Eliminate immediately. This is SPRT's deterministic corner (probability of catching up = 0) — stronger than the posterior gate, so it's checked first.
 

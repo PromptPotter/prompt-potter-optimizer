@@ -111,9 +111,29 @@ implementation site lands, or rename to a term already on the list.
   term — NEVER call this "query ranking."
 - **Rasch sort** — two-axis ordering of (sample-difficulty rank,
   candidate-ability rank). `application/intelligence/hard_sample_sorter.py`.
+- **Adaptive picker** — the live per-step sample selector
+  inside the PoBB loop. Maintains a Gaussian posterior on the
+  candidate's latent ability `θ_c` and re-picks every measurement
+  under the configured objective. `application/intelligence/adaptive_picker.py`.
+- **MFI** — Maximum Fisher Information objective for the
+  adaptive picker (Lord 1980 CAT). Picks argmax `p(1-p)` at
+  `p = σ(μ̂_c - δ_s)` — the sample whose outcome is most
+  uncertain under current beliefs. Decision-agnostic.
+- **Track-and-Stop (T&S)** — the decision-aligned objective for
+  the adaptive picker (Garivier-Kaufmann 2016). Picks argmax
+  Bernoulli Chernoff information between candidate's and seed's
+  predictive distributions on each sample. **Default**
+  (`optimization.picker_objective: "track_and_stop"`).
+- **picker_objective** — `campaign.json` field selecting the
+  adaptive picker's objective: `"mfi"` or `"track_and_stop"`.
+  Defaults to `"track_and_stop"`.
+- **Fisher info snapshot** — descriptive per-sample
+  `pick_score.per_sample` on the hard-samples artifact:
+  Fisher info at `θ=0`. Consumed by the webapp dataset table; the
+  live picker uses its own per-candidate posterior, not this snapshot.
 - **llm_ranking** — a backend node that orders ranked_items per
-  sample. Distinct from PoBB and Rasch. Currently broken on TermNorm
-  (see CLAUDE.md known issues).
+  sample. Distinct from PoBB, Rasch, and the adaptive picker.
+  Currently broken on TermNorm (see CLAUDE.md known issues).
 
 ## Escalation + healing
 

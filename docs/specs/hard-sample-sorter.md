@@ -44,23 +44,21 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact,
 )
 
-artifact = build_hard_samples_artifact(cycle.rounds, top_k_candidates=None, top_k_samples=None, seed_hits=seed_hits)
+artifact = build_hard_samples_artifact(cycle.rounds, top_k_candidates=None, top_k_samples=None)
 # artifact["candidate_order"]:       list[str]              (θ_c desc)
 # artifact["sample_order"]:          list[int]              (δ_s desc, hardest first — for the heatmap)
 # artifact["cells"]:                 list[{"c", "s", "hit"}] (measured only)
 # artifact["rasch"]:                 {"theta", "theta_se", "delta", "delta_se", ...}
-# artifact["pick_score"]["sample_order"]: list[int]         (Chernoff info desc — for PoBB picker)
-# artifact["pick_score"]["per_sample"]:   dict[str,float]   (Chernoff info per sample, ≥0)
+# artifact["pick_score"]["sample_order"]: list[int]         (Fisher info desc — descriptive snapshot)
+# artifact["pick_score"]["per_sample"]:   dict[str,float]   (Fisher info per sample, ≥0)
 ```
 
-The `pick_score` block is a peer of `sample_order`, not a replacement. Two consumers, two sorts:
+The `pick_score` block is a **descriptive snapshot** for the webapp dataset table and the FastAPI `/datasets/{name}/preview` endpoint. It carries 1PL Fisher information `p(1-p)` evaluated at `θ = 0` (the Rasch identifiability anchor / population-mean ability) — "how informative measuring this sample would be on a brand-new candidate before any of its outcomes land." High at samples whose δ is near 0 (the population-mean ability sees roughly 50/50), low at unanimous-easy and unanimous-hard tails symmetrically.
+
+The **live picker** (`promptpotter/application/intelligence/adaptive_picker.py`) does NOT consume this snapshot. It maintains a per-candidate posterior on `θ_c` and re-picks per measurement under the configured objective (`mfi` or `track_and_stop`). Two consumers, two sorts:
 
 - **Heatmap (`sample_order`, δ_s desc):** hardest first — operator sees the failure cluster aligned left.
-- **PoBB picker (`pick_score.sample_order`, Chernoff info desc):** seed-vs-population maximum-separation samples first — Track-and-Stop (Garivier-Kaufmann 2016) optimal information-per-sample, paired posteriors separate fast. Smoothed `Beta(1,1)` priors on both rates keep always-miss-with-seed-hit samples ranked high (a candidate hitting where the seed always missed is a huge signal); only true seed-vs-pop agreement zeros out.
-
-`seed_hits` is the seed prior's per-sample hit history (origin in R1, prior winner R2+). With no seed, the picker drops to `p·(1−p)` population variance.
-
-Hardest-first wins for display, Chernoff info wins for elimination. Detail and rationale: [`../concepts/paired-sample-pobb.md#sample-selection-chernoff-info-not-hardness`](../concepts/paired-sample-pobb.md#sample-selection-chernoff-info-not-hardness).
+- **Live picker (`adaptive_picker.next_sample_*`):** sample selected per step against the candidate's running θ̂_c posterior. See [`../concepts/paired-sample-pobb.md#sample-selection`](../concepts/paired-sample-pobb.md#sample-selection) for the objective contract.
 
 **Tri-state cell.** A cell is *measured & hit*, *measured & miss*, or *absent* (unmeasured). Heatmap renderers iterate `cells` for the measured pairs and treat any `(c ∈ candidate_order × s ∈ sample_order)` not present as the unmeasured tier.
 

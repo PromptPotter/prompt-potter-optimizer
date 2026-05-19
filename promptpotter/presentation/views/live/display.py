@@ -427,14 +427,16 @@ class LiveDisplay(DerivedView):
             )
 
     def on_sample_order_preview(self, preview: list[tuple[int, float]], n_priors: int) -> None:
-        """Print PoBB's next-3 picks for this candidate by Chernoff info
-        against the seed prior (Track-and-Stop information measure).
+        """Print the adaptive picker's expected next samples under the
+        prior posterior (1PL Rasch CAT, Fisher info objective).
 
         Fires after ``on_candidate_started`` and before any sample
-        scoring. Empty ``preview`` means the sorter had no observations
-        to fit (e.g. round-1 candidate-1 with no in-round priors and an
-        empty cycle); the line is suppressed in that case so the
-        operator isn't told "next: " over an empty list.
+        scoring. The values are Fisher info ``p(1-p)`` evaluated at the
+        prior's predicted hit probability — peaks at samples whose
+        outcome is most uncertain under prior beliefs. Live execution
+        re-picks per step; this preview is the "what's expected to be
+        informative" snapshot, not a commitment to the order. Empty
+        ``preview`` (cold start with no Rasch fit) suppresses the line.
         """
         if not preview:
             return

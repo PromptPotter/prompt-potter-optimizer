@@ -62,11 +62,14 @@ class DatasetItem(BaseModel):
     pick_score: float | None = Field(
         default=None,
         description=(
-            "Chernoff information vs the seed prior (Bernoulli, "
-            "Garivier-Kaufmann 2016). Drives PoBB's live sample-iteration "
-            "order — what dashboard.json::hard_sample_order ranks by. "
-            "None when the cross-cycle workspace scope is in use (no seed "
-            "concept across cycles) or when the sample has no measurement."
+            "1PL Fisher information at the population-anchor θ = 0 "
+            "(Lord 1980 MFI). Snapshot of how informative measuring "
+            "this sample would be on a brand-new candidate before any "
+            "of its outcomes land — peaks at samples whose outcome is "
+            "most uncertain under the population prior. The live "
+            "picker (``adaptive_picker``) re-evaluates this per step "
+            "against the candidate's running θ̂_c posterior. None "
+            "when the sample has no measurement yet."
         ),
     )
 

@@ -6,11 +6,11 @@ posterior probability of being the best falls below ε. The original
 formulation assumes every arm is observed on an i.i.d. sample of the same
 underlying distribution.
 
-PromptPotter's hard-sample sorter intentionally violates that assumption.
-The sorter reorders each candidate's evaluation so the most diagnostic
-(hardest) samples land first — that lets a clearly inferior candidate be
-abandoned within a handful of queries instead of burning the full sample
-budget. Hard-first ordering is the whole point of cheap loser elimination.
+PromptPotter's adaptive picker intentionally violates that assumption.
+The picker reorders each candidate's evaluation so the most diagnostic
+samples land first — that lets a clearly inferior candidate be abandoned
+within a handful of queries instead of burning the full sample budget.
+Online adaptive ordering is the whole point of cheap loser elimination.
 
 This document explains the failure mode the asymmetric ordering creates,
 the paired-sample mechanism that fixes it without giving up the sorter's
@@ -86,15 +86,18 @@ loop in `score_population`, right before each candidate's `score_search_point`
 call:
 
 ```python
-sample_order = build_hard_samples_artifact_from_observations(...)["sample_order"]
 samples_by_id = {str(s.id): s for s in dataset}
-await elim_check.backfill_priors(sample_order, samples_by_id)
+await elim_check.backfill_priors([s.id for s in dataset], samples_by_id)
 ```
 
-`backfill_priors` walks every prior in the pool, finds the sample IDs
-the prior hasn't been measured on yet that the candidate is about to see,
-and calls `backfill_fn(prior_sp, missing_samples)`. The backfill function
-is a thin closure over `score_search_point` so the new measurements:
+The candidate's budget under the adaptive picker is the full dataset
+(the picker chooses *which* sample to measure next, but the candidate
+runs until PoBB eliminates or the dataset is exhausted), so backfill
+covers the whole dataset rather than a static prefix. `backfill_priors`
+walks every prior in the pool, finds the sample IDs the prior hasn't
+been measured on yet, and calls `backfill_fn(prior_sp, missing_samples)`.
+The backfill function is a thin closure over `score_search_point` so
+the new measurements:
 
 * Hit the per-sample archive cache when those `(prior_sp, sample)`
   pairs already exist (cross-cycle, cross-fork — the MeasurementArchive
@@ -227,44 +230,62 @@ priors will surface as divergence via the candidate side).
 
 | File | Role |
 |---|---|
-| `promptpotter/application/optimization/pobb/elimination.py::PoBBCheck` | Sample-keyed priors, `backfill_priors`, paired `check()`, `snapshot_priors` |
-| `promptpotter/application/optimization/l1/score.py::score_population` | Builds the `backfill_fn` closure over `score_search_point`; injects into `PoBBCheck` |
-| `promptpotter/application/optimization/l1/score.py::score_one_candidate` | Calls `await elim_check.backfill_priors(sample_order, samples_by_id)` before each candidate evaluates |
+| `promptpotter/application/optimization/pobb/elimination.py::PoBBCheck` | Sample-keyed priors, `backfill_priors`, paired `check()`, `snapshot_priors`, `set_sample_universe` (budget for the dominance gate) |
+| `promptpotter/application/intelligence/adaptive_picker.py` | Online picker: `update_theta_posterior`, `fisher_info`, `next_sample_mfi`, `chernoff_info_pair`, `next_sample_track_and_stop` |
+| `promptpotter/application/optimization/l1/score.py::score_population` | Builds the `backfill_fn` closure + the `_next_sample(scored_outcomes)` closure parametric on `picker_objective`; injects both into PoBB / the query loop |
+| `promptpotter/application/optimization/l1/score.py::score_one_candidate` | Calls `await elim_check.backfill_priors([s.id for s in dataset], samples_by_id)` over the full dataset budget before each candidate evaluates |
+| `promptpotter/application/scoring/search_point_scorer.py::_run_query_loop` | Per-step call to `next_sample(scored_outcomes)` — no static iteration order |
 | `promptpotter/application/optimization/l1/population.py::pobb_decision_data` | Embeds `candidate_sample_ids` + `prior_histories` into the decision record |
 | `promptpotter/application/optimization/resume_and_fork/replayers.py::_pobb_replay_snapshot` | Reads paired snapshot from `data`; no cross-round resolver |
 
-## Sample-selection: Chernoff info, not hardness
+## Sample-selection: online adaptive picker
 
 Backfill makes the paired comparison statistically valid; the per-candidate
-**iteration order** is what makes it cheap. PoBB iterates samples in
-descending **Chernoff information against the seed prior** — the
-Track-and-Stop (Garivier & Kaufmann, 2016) information measure for
-optimal best-arm identification on Bernoulli arms:
-`C(p_seed, p_pop) = max_λ -log[ p_seed^λ p_pop^{1-λ} + (1-p_seed)^λ (1-p_pop)^{1-λ} ]`.
-Both rates use a smoothed `Beta(1,1)` posterior so always-miss + never-
-seen samples still carry signal. Seed = origin in R1, prior round winner
-R2+. The heatmap's hardest-first `sample_order` (the spec's `|δ_s|`
-sort) is kept on the same artifact under `sample_order`; the picker's
-order lives next to it as `pick_score.sample_order`. The two diverge by
-design.
+**iteration order** is what makes it cheap. The picker
+(`promptpotter/application/intelligence/adaptive_picker.py`) is a 1PL
+Item Response Theory online sequential selector — at each step it folds
+the candidate's measured `(δ_s, hit)` outcomes into a Gaussian Laplace-
+approximation posterior on `θ_c`, then picks the next sample by maximizing
+one of two information objectives:
 
-Why Chernoff info wins for elimination: the picker asks "how much does
-measuring this sample distinguish 'this candidate behaves like the seed
-prior' from 'this candidate behaves like the cross-candidate
-population'?" Samples where seed and population agree (always-hit-
-everywhere, always-miss-everywhere) yield ~0 info — no measurement can
-flip the comparison. Samples where they disagree — especially the
-always-miss-with-seed-hit tier (a candidate hitting where the seed
-always missed is a huge surprise) — carry maximum information per
-backend call. Dominated candidates fall out before the full sample
-budget is spent.
+- **`mfi` (Maximum Fisher Information; Lord 1980 CAT):** argmax
+  `p(1-p)` at `p = σ(μ̂_c - δ_s)`. Picks the sample whose outcome is
+  most uncertain under current beliefs — equivalently, whose δ sits
+  closest to the candidate's currently-estimated ability. Decision-
+  agnostic; pins `θ̂_c` fastest.
+- **`track_and_stop` (Garivier-Kaufmann 2016; default):** argmax
+  `C(σ(μ̂_c - δ_s), σ(μ_s - δ_s))` where `μ_s` is the seed prior's
+  fitted ability and `C` is the Bernoulli Chernoff information. Picks
+  the sample whose outcome maximally separates candidate from seed —
+  directly minimizes expected queries to a confident keep/abort
+  verdict. Decision-aligned.
 
-Why this beats the prior `p·(1−p)` formula: that formula was symmetric
-and treated always-miss-with-split-pop ≡ always-hit-with-split-pop ≡ 0,
-which is wrong — the always-miss-with-seed-hit case is where the seed
-beats most candidates and is exactly the kind of sample whose measurement
-locks in elimination. Chernoff info encodes the asymmetry; population
-variance does not.
+Both objectives share the Phase A infrastructure (per-candidate posterior,
+per-step re-pick, Bayesian update); only the per-sample score function
+changes. Configurable per dataset via
+`datasets/{name}/campaign.json::optimization.picker_objective`. Default
+is `track_and_stop` because PoBB *is* a keep/abort decision and that's
+what the operator's evaluation budget should buy down.
+
+The heatmap's hardest-first `sample_order` (the spec's `|δ_s|` sort)
+lives on the per-cycle artifact for display; the artifact's
+`pick_score.per_sample` is Fisher info at `θ=0` — a descriptive snapshot
+of "how informative is this sample on a brand-new candidate." The
+**live** picker uses its own per-candidate posterior, so the artifact's
+order and the candidate's actual measurement order can diverge — the
+artifact is what the operator sees in the webapp, the live order is what
+the candidate ran against on disk.
+
+Why this beats a static "hardest first" iteration: hardest-first treats
+the picker as a property of the *dataset* (Rasch δ alone). The adaptive
+picker treats it as a property of the *candidate-vs-seed comparison*,
+which is what PoBB actually tests. Within `track_and_stop`, samples
+where the seed and candidate are predicted to agree (both unanimous-
+HIT or both unanimous-MISS) carry zero info regardless of how hard they
+look on the δ axis; samples in the gap between `μ̂_c` and `μ_s` carry
+maximum info — and the picker re-evaluates that gap after every
+measurement, so the order is *responsive* to the candidate's running
+evidence rather than frozen at candidate-start.
 
 ## Elimination ladder: dominance before posterior
 
@@ -302,5 +323,7 @@ approximating it via a tunable multiplier.
 * `docs/operations/rewind-and-fork.md` — how decision replay drives
   divergence + fork behavior.
 * `docs/specs/hard-sample-sorter.md` — the artifact contract carrying
-  both the heatmap's `sample_order` and PoBB's
-  `pick_score.sample_order`.
+  the heatmap's `sample_order` (δ_s desc) and the descriptive
+  `pick_score.per_sample` Fisher-info snapshot.
+* `promptpotter/application/intelligence/adaptive_picker.py` — the
+  live online picker (Phase A MFI + Phase B Track-and-Stop).

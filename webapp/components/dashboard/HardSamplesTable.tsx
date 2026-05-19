@@ -151,9 +151,10 @@ interface PersistedState {
   folded: ColId[];
   wrapped: ColId[];
   // When true, the table sort follows ``dash.hard_sample_order`` (the
-  // Rasch δ_s ranking refreshed per-candidate by the optimizer) and
-  // header-click sorting is suppressed. Default ON — operator opted into
-  // the "real time mirror" framing.
+  // adaptive picker's expected per-candidate order — Fisher info under
+  // MFI or Chernoff info between candidate-prior and seed under
+  // Track-and-Stop) and header-click sorting is suppressed. Default ON
+  // — operator opted into the "real time mirror" framing.
   syncLive: boolean;
 }
 
@@ -241,10 +242,9 @@ function cellFor(
         style: missProbStyle(item.miss_prob),
       };
     case "pick_score":
-      // Chernoff info in nats — fit's typically in (0, ~0.7). Three
-      // decimals so equal-looking-but-actually-different values don't
-      // collapse visually. ``—`` when scope=workspace (no seed concept)
-      // or the sample is unmeasured.
+      // 1PL Fisher info at population-anchor θ=0 — bounded in (0, 0.25].
+      // Three decimals so equal-looking-but-actually-different values
+      // don't collapse visually. ``—`` when the sample is unmeasured.
       return {
         text: item.pick_score !== null ? item.pick_score.toFixed(3) : "—",
         raw: item.pick_score,

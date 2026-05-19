@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -407,12 +407,14 @@ class PoBBCheck:
         self._current_id: str = ""
         self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
         self._backfill_fn = backfill_fn
-        # Full pick-score-first sample order for the active candidate,
-        # set per candidate via ``set_sample_order``. ``check()`` uses
-        # ``len(_sample_order)`` as the candidate's intended sample budget
-        # for the deterministic dominance check (cand_max_hits =
-        # cand_hits + remaining); falls back to ``n_samples`` when unset.
-        self._sample_order: list[str] = []
+        # The candidate's sample budget — the set of sample IDs the
+        # candidate is scheduled to run on if PoBB does not stop it
+        # early. Set per candidate via ``set_sample_universe``; the
+        # online picker (Phase A) consumes the dataset as a set rather
+        # than an ordered list, so order is no longer part of the
+        # contract. ``check()``'s dominance gate reads ``len()`` for the
+        # budget and ``in`` for seed coverage.
+        self._sample_universe: frozenset[str] = frozenset()
 
     def set_current(
         self,
@@ -423,17 +425,18 @@ class PoBBCheck:
         self._current_id = candidate_id
         self._on_snapshot = on_snapshot
 
-    def set_sample_order(self, sample_order: Sequence[int | str] | None) -> None:
-        """Bind the candidate's pick-score-first sample order.
+    def set_sample_universe(self, sample_ids: Iterable[int | str] | None) -> None:
+        """Bind the candidate's sample budget (unordered set of ids).
 
         Called by ``score_population`` once per candidate so the
         dominance check inside ``check()`` knows the candidate's
-        intended sample budget (``len(_sample_order)``) and which
-        samples are still ahead. A missing order falls back to the
-        full dataset (``n_samples``) for the budget — the dominance
-        check still fires using ``n_samples`` as the cap.
+        intended budget (``len(_sample_universe)``) and which samples
+        the seed prior must cover for the gate to fire. Passing
+        ``None`` clears the universe — the dominance check then
+        short-circuits to ``None`` (no abort), matching the
+        no-explicit-budget unit-test path.
         """
-        self._sample_order = [str(sid) for sid in (sample_order or [])]
+        self._sample_universe = frozenset(str(sid) for sid in (sample_ids or []))
 
     def register_completed(
         self,
@@ -591,13 +594,15 @@ class PoBBCheck:
 
         # Separability floor — don't eliminate while the candidate's
         # hit-rate CI overlaps the leader's. At the picker's preferred
-        # samples (high seed-vs-population discrimination, p ≈ 0.5),
+        # samples (high information value at the candidate's running
+        # θ̂_c, or high candidate-vs-seed Chernoff info under T&S),
         # binomial noise alone produces 0/4 vs 2/4 outcomes for arms
-        # that are actually equivalent. The Chernoff-info picker is
-        # asymptotic (Garivier-Kaufmann 2016); at small n the posterior
-        # gate can fire on noise before the CI separates. The floor
-        # keeps the picker honest until the binomial actually splits
-        # the two arms. See ``project_pobb_separability_floor`` memory.
+        # that are actually equivalent. The information-theoretic
+        # adaptive picker is asymptotic (Lord 1980 / Garivier-Kaufmann
+        # 2016); at small n the posterior gate can fire on noise before
+        # the CI separates. The floor keeps the picker honest until the
+        # binomial actually splits the two arms. See
+        # ``project_pobb_separability_floor`` memory.
         if leader_id in paired_priors and wilson_overlap(
             scores, paired_priors[leader_id], alpha=0.05
         ):
@@ -647,12 +652,12 @@ class PoBBCheck:
             return None
         seed_id = self.prior_ids[0]
         seed_full = self.priors_by_sample.get(seed_id, {})
-        # Require an explicit sample order — without it we can't know
-        # the candidate's intended budget, and inferring from the seed's
-        # coverage would compare on samples the candidate isn't scored
-        # against. The score-population loop sets this per candidate;
-        # unit tests that don't would silently skip the gate.
-        sample_universe = self._sample_order
+        # Require an explicit sample universe — without it we can't
+        # know the candidate's intended budget, and inferring from the
+        # seed's coverage would compare on samples the candidate isn't
+        # scored against. The score-population loop sets this per
+        # candidate; unit tests that don't would silently skip the gate.
+        sample_universe = self._sample_universe
         if not sample_universe:
             return None
         if not all(sid in seed_full for sid in sample_universe):

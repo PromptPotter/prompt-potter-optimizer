@@ -215,15 +215,16 @@ class LiveDashboardView(DerivedView):
             # on ``sample_scored``. Lets the webapp dataset table pulse the
             # in-flight row in lockstep with the per-sample dashboard rewrites.
             "current_sample_id": None,
-            # Full sample_id list PoBB is iterating on for the current
-            # candidate — pick-score-first (Chernoff info against the
-            # seed prior, Track-and-Stop), refreshed per-candidate in
-            # ``score_population``. The webapp dataset table sorts on this
-            # when the operator's "sync with live sort" toggle is on.
-            # ``None`` until the first sorter fit lands (round 0 /
-            # pre-first-candidate fallback). Hardest-first ordering lives
-            # on the per-cycle hard-samples artifact under ``sample_order``
-            # for the heatmap.
+            # Adaptive picker's expected sample order at candidate-start
+            # under the active ``picker_objective`` (Fisher info under
+            # ``mfi``, Chernoff info between candidate-prior and seed
+            # under ``track_and_stop``). Refreshed per-candidate in
+            # ``score_population``. The webapp dataset table sorts on
+            # this when the operator's "sync with live sort" toggle is
+            # on. ``None`` until the first picker fit lands (round 0 /
+            # pre-first-candidate fallback). The hardest-first ordering
+            # (δ_s desc) lives on the per-cycle hard-samples artifact
+            # under ``sample_order`` for the heatmap.
             "hard_sample_order": None,
             "last_query_elapsed_s": 0.0,
             "wallclock_serialized_at": None,

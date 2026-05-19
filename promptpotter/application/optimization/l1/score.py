@@ -17,10 +17,16 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.application.intelligence.exploration import Observation
-from promptpotter.application.intelligence.hard_sample_sorter import (
-    build_hard_samples_artifact_from_observations,
+from promptpotter.application.intelligence.adaptive_picker import (
+    chernoff_info_pair,
+    expected_order_mfi,
+    expected_order_track_and_stop,
+    fisher_info,
+    next_sample_mfi,
+    next_sample_track_and_stop,
+    posterior_from_outcomes,
 )
+from promptpotter.application.intelligence.exploration import Observation, fit_rasch
 from promptpotter.application.optimization.l1.population import (
     INVALID_SCORES,
     build_score_report,
@@ -293,8 +299,7 @@ async def score_one_candidate(
     candidate_scores: list[CandidateScore],
     round_num: int,
     l1_diversity: float,
-    sample_order: list[int] | None = None,
-    refresh_sample_order: Callable[[set[int]], list[int]] | None = None,
+    next_sample: Callable[[dict[int, bool]], int | None] | None = None,
 ) -> CandidateRunResult:
     """Run one candidate through the three-exit-path lifecycle.
 
@@ -328,15 +333,14 @@ async def score_one_candidate(
     candidate_sp = osp_c.to_job_search_point(
         base_pipeline_params=merged_pp, schema=cycle.session.pipeline_schema
     )
-    # Backfill paired priors on the candidate's upcoming sample order BEFORE
-    # eval starts. This is what restores PoBB's iid premise: every prior in
-    # the pool gets measured on the same samples this candidate is about to
-    # see (cache-first via per-sample archive; fresh LLM call on miss). See
-    # docs/concepts/paired-sample-pobb.md for the full mechanism.
-    if sample_order:
-        samples_by_id = {str(s.id): s for s in dataset}
-        backfilled = await elim_check.backfill_priors(list(sample_order), samples_by_id)
-        callbacks.on_pobb_backfill(round_num, idx, n_total, backfilled)
+    # Backfill paired priors on the candidate's full sample budget BEFORE
+    # eval starts. This is what restores PoBB's iid premise: every prior
+    # in the pool gets measured on the same samples this candidate is
+    # about to see (cache-first via per-sample archive; fresh LLM call
+    # on miss). See docs/concepts/paired-sample-pobb.md.
+    samples_by_id = {str(s.id): s for s in dataset}
+    backfilled = await elim_check.backfill_priors([s.id for s in dataset], samples_by_id)
+    callbacks.on_pobb_backfill(round_num, idx, n_total, backfilled)
 
     results, scores, was_cached, signal = await score_search_point(
         candidate_sp,
@@ -350,8 +354,7 @@ async def score_one_candidate(
         n_total_candidates=n_total,
         axes=cycle.axes,
         l1_diversity=l1_diversity,
-        sample_order=sample_order,
-        refresh_sample_order=refresh_sample_order,
+        next_sample=next_sample,
     )
 
     # Path 2 — full-run cache replay.
@@ -548,12 +551,10 @@ async def score_population(
     #
     # Fix B — undermeasured filter: candidates with fewer than
     # n_samples // 2 measurements (i.e. ones the prior PoBB iteration
-    # aborted early) only contribute observations on the picker's
-    # discriminating samples. Including them biases ``pop_totals``
-    # on those samples and inflates Chernoff info for the next
-    # candidate's picker — exactly the C2.1 outlier symptom. The seed
-    # prior (registered separately into ``seed_hits``) is full, so
-    # dropping early-abort residue from ``sorter_obs`` is safe.
+    # aborted early) contribute observations only on the picker's
+    # discriminating samples. Including them biases the Rasch fit on
+    # those samples — the seed prior (registered separately) is full,
+    # so dropping early-abort residue from ``sorter_obs`` is safe.
     pop_min_obs = max(1, len(dataset) // 2)
 
     def _filtered_obs(
@@ -583,38 +584,57 @@ async def score_population(
         # mid-run abort residue), so no length filter needed there.
         base_sorter_obs = list(cycle.archive_observations) + base_sorter_obs
 
-    # Seed hit history (origin in R1, prior winner R2+) so the picker
-    # measures Chernoff info between the seed prior and the population,
-    # not just population variance.
-    seed_hits: dict[int, list[bool]] = {}
-    for sr in seed_results or []:
-        ssid = sr.get("sample_id")
-        if ssid is None or sr.get("error"):
-            continue
-        seed_hits.setdefault(int(ssid), []).append(bool(sr.get("hit")))
+    # Prior on candidate θ_c: broad N(0, 1) centred at the Rasch
+    # identifiability anchor (mean(θ) = 0). Observations dominate
+    # within ~3 measurements; the prior just keeps the cold-start
+    # posterior proper when the picker fires before any sample has
+    # been measured on this candidate.
+    PRIOR_MU = 0.0
+    PRIOR_VAR = 1.0
 
-    def _compute_sample_order(scored_ids: set[int]) -> list[int]:
-        """Re-rank remaining samples by Chernoff info against current evidence.
+    picker_objective = cycle.config.optimization.picker_objective
+    dataset_sample_ids = [int(s.id) for s in dataset]
 
-        Called once at candidate start (scored_ids empty), then every
-        ``SAMPLE_ORDER_REFRESH_EVERY`` samples inside the query loop so
-        the picker picks up evidence accumulating on this candidate.
-        Without re-rank, a hedge-collapse signature emerging on q3-4
-        still has to grind through every gt-class-matched sample in the
-        static initial order before PoBB can eliminate — Fix A.
+    def _delta_map_from_obs() -> dict[int, float]:
+        """Fit Rasch on current observations; return sample-id → δ_s.
+
+        Called once per candidate (before its query loop opens) so the
+        picker's δ-map reflects every measurement seen so far across
+        priors and in-progress in-round candidates. Empty observations
+        → empty map → picker falls back to sample-id ascending (cold
+        start), matching the pre-existing R0 candidate-1 behaviour.
         """
-        live_obs = _filtered_obs(all_candidate_results)
-        obs = base_sorter_obs + live_obs
+        obs = base_sorter_obs + _filtered_obs(all_candidate_results)
         if not obs:
-            return []
-        artifact = build_hard_samples_artifact_from_observations(
-            obs,
-            cycle_id=session.state.cycle_id,
-            top_k_candidates=None,
-            top_k_samples=None,
-            seed_hits=seed_hits or None,
-        )
-        return [sid for sid in artifact["pick_score"]["sample_order"] if sid not in scored_ids]
+            return {}
+        posterior = fit_rasch(obs)
+        return {int(sid): float(d) for sid, d in posterior.delta.items()}
+
+    def _seed_mu_from_results() -> float:
+        """Fold seed's per-sample outcomes into a θ_s posterior mean.
+
+        Used by the Phase B (Track-and-Stop) objective so the picker can
+        contrast each sample's predicted hit-rate between candidate and
+        seed. Returns ``PRIOR_MU`` when the seed has no measurements
+        (cold start) or when the picker objective is ``mfi`` (the value
+        is unused). Computed once per round at the entry to
+        ``score_population`` — the seed doesn't change between
+        candidates within a round.
+        """
+        if not seed_results:
+            return PRIOR_MU
+        delta_for_seed = _delta_map_from_obs()
+        if not delta_for_seed:
+            return PRIOR_MU
+        outcomes = [
+            (delta_for_seed.get(int(sr["sample_id"]), 0.0), bool(sr.get("hit")))
+            for sr in seed_results
+            if sr.get("sample_id") is not None and not sr.get("error")
+        ]
+        mu, _ = posterior_from_outcomes(PRIOR_MU, PRIOR_VAR, outcomes)
+        return mu
+
+    seed_mu = _seed_mu_from_results() if picker_objective == "track_and_stop" else PRIOR_MU
 
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
@@ -628,39 +648,72 @@ async def score_population(
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
 
-        sample_order: list[int] | None = None
-        live_in_progress_obs = _filtered_obs(all_candidate_results)
-        if base_sorter_obs or live_in_progress_obs:
-            sample_order = _compute_sample_order(scored_ids=set())
-            artifact_obs = base_sorter_obs + live_in_progress_obs
-            artifact = build_hard_samples_artifact_from_observations(
-                artifact_obs,
-                cycle_id=session.state.cycle_id,
-                top_k_candidates=None,
-                top_k_samples=None,
-                seed_hits=seed_hits or None,
+        # Online 1PL Rasch CAT picker. Refit δ on cumulative observations
+        # at candidate start; each per-sample call to ``next_sample``
+        # folds ``update_theta_posterior`` over the candidate's measured
+        # outcomes so far and picks argmax over the configured objective
+        # under the running θ̂_c posterior. Pure / stateless — callers
+        # don't persist (μ_c, σ²_c) across calls.
+        #
+        # Objective ``mfi``: argmax Fisher info p(1-p) at μ_c — Phase A,
+        # textbook CAT, decision-agnostic.
+        # Objective ``track_and_stop``: argmax Chernoff(p_c, p_s) where
+        # p_s is the seed's predicted hit-rate on the same sample —
+        # Phase B, decision-aligned (Garivier-Kaufmann 2016).
+        delta_map = _delta_map_from_obs()
+        objective = picker_objective
+
+        def _next_sample(
+            scored_outcomes: dict[int, bool],
+            _delta_map: dict[int, float] = delta_map,
+            _objective: str = objective,
+            _seed_mu: float = seed_mu,
+        ) -> int | None:
+            mu_c, _var_c = posterior_from_outcomes(
+                PRIOR_MU,
+                PRIOR_VAR,
+                ((_delta_map.get(sid, 0.0), hit) for sid, hit in scored_outcomes.items()),
             )
-            pick_per_sample = artifact["pick_score"]["per_sample"]
-            preview = [
-                (sid, float(pick_per_sample.get(str(sid), 0.0)))
-                for sid in sample_order[: min(3, len(sample_order))]
-            ]
+            remaining = set(dataset_sample_ids) - scored_outcomes.keys()
+            if _objective == "track_and_stop":
+                return next_sample_track_and_stop(mu_c, _seed_mu, _delta_map, remaining)
+            return next_sample_mfi(mu_c, _delta_map, remaining)
+
+        # Candidate-start preview: rank all dataset sample_ids under the
+        # active objective with the candidate's prior θ̂_c = PRIOR_MU.
+        # Surfaces on ``dashboard.json::hard_sample_order`` so the webapp
+        # table mirrors what the picker would pick if outcomes follow
+        # the prior. Live execution re-picks per step.
+        if picker_objective == "track_and_stop":
+            expected_order = expected_order_track_and_stop(
+                PRIOR_MU, seed_mu, delta_map, dataset_sample_ids
+            )
+            preview_scores = {
+                sid: float(chernoff_info_pair(PRIOR_MU, seed_mu, delta_map.get(sid, 0.0)))
+                for sid in expected_order[: min(3, len(expected_order))]
+            }
+        else:
+            expected_order = expected_order_mfi(PRIOR_MU, delta_map, dataset_sample_ids)
+            preview_scores = {
+                sid: float(fisher_info(PRIOR_MU, delta_map.get(sid, 0.0)))
+                for sid in expected_order[: min(3, len(expected_order))]
+            }
+
+        if delta_map:
+            preview = [(sid, preview_scores[sid]) for sid in preview_scores]
             callbacks.on_sample_order_preview(
                 round_num,
                 idx,
                 n,
                 preview,
                 n_priors=len(elim_check.priors_by_sample),
-                sample_order=sample_order,
+                sample_order=expected_order,
             )
-            # Hand the pick-score-first order to PoBBCheck so the
-            # dominance check inside ``check()`` knows the candidate's
-            # intended sample budget (== ``len(sample_order)``) and can
-            # bound the max-possible final-hit count against the seed
-            # prior's already-known total.
-            elim_check.set_sample_order(sample_order)
-        else:
-            elim_check.set_sample_order(None)
+        # Bind the candidate's sample budget so PoBB's dominance gate
+        # can compute ``cand_max_hits = cand_hits + remaining`` against
+        # the seed prior's total hits. Online picking means the candidate
+        # consumes the full dataset; the universe is unordered.
+        elim_check.set_sample_universe(dataset_sample_ids)
 
         cr_result = await score_one_candidate(
             idx=idx,
@@ -677,8 +730,7 @@ async def score_population(
             candidate_scores=candidate_scores,
             round_num=round_num,
             l1_diversity=l1_diversity,
-            sample_order=sample_order,
-            refresh_sample_order=_compute_sample_order if sample_order else None,
+            next_sample=_next_sample,
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
         if cr_result.runtime_failure is not None:

@@ -46,10 +46,11 @@ export interface DashboardSnapshot {
   // table pulses the row whose ``sample_id`` matches; ``null`` between
   // samples (no row pulses).
   current_sample_id?: number | null;
-  // Hardest-first sample_id list from the most recent Rasch fit
-  // (refreshed per-candidate). The dataset table sorts by this when the
-  // operator's "sync with live sort" tick is on. ``null`` before the
-  // first sorter fit lands.
+  // The adaptive picker's expected sample order under the active
+  // ``picker_objective`` (Fisher info / Chernoff info), refreshed per
+  // candidate at candidate-start. The dataset table sorts by this when
+  // the operator's "sync with live sort" tick is on. ``null`` before
+  // the first sorter fit lands.
   hard_sample_order?: number[] | null;
   [key: string]: unknown;
 }
