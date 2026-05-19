@@ -114,7 +114,9 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 
 ## Scientific framing
 
-PromptPotter is a **tree search over prompt programs**: an LLM proposes prompt variants, your evaluator scores them, and weak branches get pruned early.
+PromptPotter is a **tree search over prompt programs**: an LLM proposes prompt variants, your evaluator scores them, and weak branches get pruned early. Algorithmically, it is evolutionary search with [Bayesian best-arm-identification](docs/research/related-work.md#best-arm-identification--sequential-testing) pruning (PoBB) — the same *statistical-confidence-guided tree-search* family as MCTS, but deterministic evaluation in place of random rollouts. Comparison: [`docs/research/related-work.md`](docs/research/related-work.md#comparison-to-mcts).
+
+**Aspiration — towards AlphaZero-shaped MCTS.** Today L3 (the strategic replan layer) only refines the *plan* of the current trajectory. The forward arc is to give L3 the authority to **fork the search from any ancestor it judges promising**, propagate round outcomes as node statistics up the lineage tree, and pick the next ancestor via a UCB-style rule. With those three additions, PromptPotter becomes AlphaZero-shaped MCTS — categorically capable of *recovering from dead-end branches* that today the loop can only stall on. Backlog: [`docs/specs/roadmap.md`](docs/specs/roadmap.md#backlog-unscheduled).
 
 [![OpenEvolve: Towards Open Evolutionary Agents](https://img.youtube.com/vi/mWBT-szUutI/hqdefault.jpg)](https://www.youtube.com/watch?v=mWBT-szUutI)
 

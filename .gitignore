@@ -94,6 +94,9 @@ tools
 # Per-dataset HF/Excel cache — regenerable, dataset-name keyed
 datasets/*/cache.json
 
+# Recon-script raw data downloads (NaturalPlan GitHub JSON, etc.) — regenerable
+.cache/
+
 # Local campaign config (user-specific overrides)
 campaign_config.json
 

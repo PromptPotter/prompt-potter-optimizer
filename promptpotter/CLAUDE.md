@@ -88,6 +88,10 @@ The L3-layer may **terminate the loop** on the same two cases as the L2-layer (g
 
 L3-layer firing is **rarer still** than L2 — a fire signals the cycle's plan was wrong, not that one variant missed. Default: the L3-layer stays idle while the L2-layer carries the load.
 
+### Forward direction — L3 fork authority (aspirational, M13+)
+
+Today L3 replans **in place** — it rewrites `OptSearchPoint.plan` and the loop continues forward from the current round-winner. The forward arc is to give L3 the authority to **fork the search from an arbitrary ancestor in the lineage tree**, when L3 judges the current subtree exhausted and a deferred branch more promising. Combined with stat-backpropagation up the lineage (so ancestor nodes carry rolling descendant-success statistics) and a UCB-style ancestor-selection rule, this closes the three structural gaps between today's one-armed forward search and AlphaZero-shaped MCTS — see [`docs/research/related-work.md#comparison-to-mcts`](../docs/research/related-work.md#comparison-to-mcts) for the algorithmic-class comparison. The categorical capability unlocked is *recovery from dead-end branches*: a cycle that today simply terminates after L3 exhausts its replan moves could instead rewind to a promising deferred ancestor and re-expand from there. Not yet implemented; backlog entry in [`docs/specs/roadmap.md#backlog-unscheduled`](../docs/specs/roadmap.md#backlog-unscheduled).
+
 ## Signals come from measurement, not from the calendar
 
 Avoid hardcoded round thresholds inside the loops. `params_unlocked` derives from stall depth + mutation history, not `round ≥ 3`. `exploration_budget` widens with `stall_rounds`, not on a fixed schedule. Hardcoded stop conditions sit at the cycle boundary; everything inside the loops reasons from measurement.
