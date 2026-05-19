@@ -27,6 +27,7 @@ from typing import Any
 from promptpotter.application.optimization.dispatch.hub import (
     format_l1_critique_for_prompt,
 )
+from promptpotter.application.optimization.l1.score import round_winner_key
 from promptpotter.domain.opt_search_point import (
     build_candidate_flat,
     flatten_sp_summary,
@@ -428,21 +429,15 @@ def _sp_diff_from_dict(d: dict | None) -> SpDiffView:
 
 
 def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
-    """Round winner = max non-aborted ``ScoreEntry`` ranked by
-    ``(composite_fitness or accuracy, accuracy)``. Single source of truth for
-    the tiebreak rule shared between the live event ingress (``_l1_score_exit``)
-    and the disk-replay ingress (``from_disk_round``).
+    """Round winner = max non-aborted ``ScoreEntry`` ranked by ``round_winner_key``.
+
+    Shares the key with ``l1_score``'s round-time selection so the SCOREBOARD
+    ``*`` marker and the IMPROVED-line winner are always the same candidate.
     """
     non_aborted = [s for s in score_entries if not s.escalation_aborted]
     if not non_aborted:
         return None
-    return max(
-        non_aborted,
-        key=lambda s: (
-            s.composite_fitness if s.composite_fitness is not None else s.accuracy,
-            s.accuracy,
-        ),
-    )
+    return max(non_aborted, key=lambda s: round_winner_key(s.composite_fitness, s.accuracy))
 
 
 def score_entry_from_dict(s: dict) -> ScoreEntry:

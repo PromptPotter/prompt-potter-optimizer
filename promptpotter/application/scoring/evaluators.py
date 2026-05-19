@@ -58,9 +58,24 @@ __all__ = [
 
 
 def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float:
-    if not results:
+    """Mean per-sample score across **non-deprecated** samples.
+
+    Aligns with ``_compute_accuracy`` (metrics.py): deprecated samples
+    (``is_deprecated`` — fatal or infra classifications) are excluded from
+    both numerator and denominator. They are infrastructure failures, not
+    signal about prompt quality, and they are already penalized via the
+    ``runtime_failure_rate`` self-heal evaluator. Counting them in
+    accuracy's denominator would double-penalize and break the
+    ``accuracy == hits/total`` invariant downstream readers depend on.
+    """
+    # Lazy import to dodge the application/scoring → application/optimization
+    # circular (matches the pattern in _compute_accuracy at metrics.py).
+    from promptpotter.application.optimization.pobb.elimination import is_deprecated
+
+    valid = [r for r in results if not is_deprecated(r)]
+    if not valid:
         return 0.0
-    return sum(r.get("fitness", 0.0) for r in results) / len(results)
+    return sum(r.get("fitness", 0.0) for r in valid) / len(valid)
 
 
 def compute_error_rate(*, results: list[QueryMeasurement], **_: Any) -> float:
@@ -325,7 +340,7 @@ class Evaluator:
 _REGISTRY: list[Evaluator] = [
     Evaluator(
         name="accuracy",
-        description="Mean per-sample score across the round's result set.",
+        description="Mean per-sample score across non-deprecated samples.",
         scope="per_round",
         compute=compute_accuracy,
     ),

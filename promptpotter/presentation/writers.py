@@ -143,16 +143,20 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict | None:
     with graceful("hard_samples_workspace.json write failed"):
         write_json(cycle_dir / "hard_samples_workspace.json", workspace_artifact)
 
+    # Tenant snapshot is per-(backend, dataset) — cross-dataset pooling on
+    # a shared backend would corrupt Rasch + PoBB picker (sample_id collides).
+    dataset_tag = session.dataset_name or "unknown"
     tenant_path = (
         session.store.base_dir
         / "archive"
         / "measurements"
-        / f"hard_samples_workspace_{session.backend_id}.json"
+        / f"hard_samples_workspace_{session.backend_id}_{dataset_tag}.json"
     )
     with graceful("tenant hard_samples_workspace write failed"):
         archive_artifact = build_archive_hard_samples_artifact(
             session.store,
             session.backend_id,
+            dataset_name=session.dataset_name,
             top_k_candidates=None,
             top_k_samples=None,
         )

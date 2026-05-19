@@ -209,6 +209,7 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
         args.slice_spec,
         stores=session.store,
         backend_id=session.backend_id,
+        dataset_name=session.dataset_name,
     )
     variants = _parse_variants(args)
     if len(variants) > 1:
@@ -472,6 +473,7 @@ async def _run_panel_verb(
         args.slice_spec,
         stores=session.store,
         backend_id=session.backend_id,
+        dataset_name=session.dataset_name,
     )
     dataset = ctx.init_params["dataset_name"] or "unknown"
     sweep_id = __import__(

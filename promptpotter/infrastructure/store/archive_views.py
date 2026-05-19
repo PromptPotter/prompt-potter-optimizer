@@ -63,15 +63,30 @@ def measurements_for_sample(
     sample_id: int,
     *,
     run_ids: list[str] | None = None,
+    dataset_name: str | None = None,
+    include_unknown: bool = False,
 ) -> list[Measurement]:
-    """Every measurement of one training example, across all configs."""
-    return stores.archive.measurements_for_sample(backend_id, sample_id, run_ids=run_ids)
+    """Every measurement of one training example, across all configs.
+
+    ``dataset_name`` filters cross-cycle reads to one dataset's archive
+    slice — production sites pass ``session.dataset_name``.
+    """
+    return stores.archive.measurements_for_sample(
+        backend_id,
+        sample_id,
+        run_ids=run_ids,
+        dataset_name=dataset_name,
+        include_unknown=include_unknown,
+    )
 
 
 def measurement_series_for_samples(
     stores: Stores,
     backend_id: str,
     sample_ids: list[int],
+    *,
+    dataset_name: str | None = None,
+    include_unknown: bool = False,
 ) -> dict[int, list[dict[str, Any]]]:
     """Per-sample chronological measurement series, one archive walk for the whole set.
 
@@ -88,7 +103,9 @@ def measurement_series_for_samples(
     """
     wanted = set(sample_ids)
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in wanted}
-    for entry in stores.archive.list_all(backend_id):
+    for entry in stores.archive.list_all(
+        backend_id, dataset_name=dataset_name, include_unknown=include_unknown
+    ):
         run_id = entry["run_id"]
         detail = stores.archive.load_by_id(backend_id, run_id)
         if detail is None:
@@ -117,37 +134,68 @@ def measurements_for_config(
     predicate: dict[str, dict[str, Any]],
     *,
     run_ids: set[str] | list[str] | None = None,
+    dataset_name: str | None = None,
+    include_unknown: bool = False,
 ) -> list[Measurement]:
     """Every measurement under configs matching *predicate*, across all samples."""
-    return stores.archive.measurements_for_config(backend_id, predicate, run_ids=run_ids)
+    return stores.archive.measurements_for_config(
+        backend_id,
+        predicate,
+        run_ids=run_ids,
+        dataset_name=dataset_name,
+        include_unknown=include_unknown,
+    )
 
 
 def load_run(stores: Stores, backend_id: str, run_id: str) -> dict[str, Any] | None:
-    """Load one run's full detail file by ``run_id``; ``None`` if absent."""
+    """Load one run's full detail file by ``run_id``; ``None`` if absent.
+
+    Detail load is dataset-agnostic by design — the run_id encodes its
+    dataset via the archive index; callers that need the dataset stamp
+    read ``detail.get("dataset_name")`` themselves.
+    """
     return stores.archive.load_by_id(backend_id, run_id)
 
 
-def list_runs(stores: Stores, backend_id: str) -> list[dict[str, Any]]:
-    """All run-summary entries from the archive index."""
-    return stores.archive.list_all(backend_id)
+def list_runs(
+    stores: Stores,
+    backend_id: str,
+    *,
+    dataset_name: str | None = None,
+    include_unknown: bool = False,
+) -> list[dict[str, Any]]:
+    """All run-summary entries from the archive index, scoped to ``dataset_name``."""
+    return stores.archive.list_all(
+        backend_id, dataset_name=dataset_name, include_unknown=include_unknown
+    )
 
 
 def runs_since(
     stores: Stores,
     backend_id: str,
     seen_ids: set[str],
+    *,
+    dataset_name: str | None = None,
+    include_unknown: bool = False,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     """Yield ``(run_id, detail)`` for runs not in *seen_ids*; missing details skipped."""
-    return stores.archive.load_since(backend_id, seen_ids)
+    return stores.archive.load_since(
+        backend_id, seen_ids, dataset_name=dataset_name, include_unknown=include_unknown
+    )
 
 
 def find_by_prefix(
     stores: Stores,
     backend_id: str,
     node_configs: list[tuple[str, dict]],
+    *,
+    dataset_name: str | None = None,
+    include_unknown: bool = False,
 ) -> list[tuple[dict[str, Any], int]]:
     """Index entries sharing a node-config prefix; ``(entry, match_length)``, best first."""
-    return stores.archive.find_by_node_configs(backend_id, node_configs)
+    return stores.archive.find_by_node_configs(
+        backend_id, node_configs, dataset_name=dataset_name, include_unknown=include_unknown
+    )
 
 
 def reusable_results(
@@ -155,9 +203,22 @@ def reusable_results(
     backend_id: str,
     node_configs: list[tuple[str, dict]],
     is_fatal: Callable[[dict[str, Any]], bool] | None = None,
+    *,
+    dataset_name: str | None = None,
+    include_unknown: bool = False,
 ) -> dict[str, dict[str, Any]]:
-    """Per-sample cache reuse from prior runs sharing *node_configs* (full or prefix-trusted)."""
-    return stores.archive.load_reusable_results(backend_id, node_configs, is_fatal=is_fatal)
+    """Per-sample cache reuse from prior runs sharing *node_configs* (full or prefix-trusted).
+
+    ``dataset_name`` scopes cache reuse to one dataset's archive — see
+    :meth:`MeasurementArchive.load_reusable_results`.
+    """
+    return stores.archive.load_reusable_results(
+        backend_id,
+        node_configs,
+        is_fatal=is_fatal,
+        dataset_name=dataset_name,
+        include_unknown=include_unknown,
+    )
 
 
 def resolve_aliases(stores: Stores, backend_id: str, rp_hash: str) -> set[str]:
@@ -168,6 +229,9 @@ def resolve_aliases(stores: Stores, backend_id: str, rp_hash: str) -> set[str]:
 def aggregate_per_query(
     stores: Stores,
     backend_id: str,
+    *,
+    dataset_name: str | None = None,
+    include_unknown: bool = True,
 ) -> dict[str, Any]:
     """Roll up every archived measurement into per-query stats — the "your data accumulates" view.
 
@@ -177,15 +241,17 @@ def aggregate_per_query(
     n_unique_configs, mean_fitness, hit_rate, last_seen}``. Rows are
     sorted by ``n_measurements`` desc — most-reused queries first.
 
-    Archive is tenant-scoped (``backend_id`` is preserved on the signature
-    for facade consistency but ignored for path construction by the
-    underlying archive). Output therefore aggregates across every
-    campaign on the install.
+    Groups by query text (which is unique per dataset), so cross-dataset
+    pooling is structurally avoided here even though the default takes
+    every entry. Callers may scope to a single ``dataset_name`` for the
+    operator-facing accumulation view.
     """
     by_query: dict[str, dict[str, Any]] = {}
     seen_run_ids: set[str] = set()
     total_measurements = 0
-    for entry in stores.archive.list_all(backend_id):
+    for entry in stores.archive.list_all(
+        backend_id, dataset_name=dataset_name, include_unknown=include_unknown
+    ):
         run_id = entry["run_id"]
         if run_id in seen_run_ids:
             continue

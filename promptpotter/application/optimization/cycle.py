@@ -245,7 +245,11 @@ class Cycle:
         )
         from promptpotter.infrastructure.store import root_cycle_id as _root_cycle_id
 
-        archive_obs = build_archive_observations(session.store, session.backend_id)
+        archive_obs = build_archive_observations(
+            session.store,
+            session.backend_id,
+            dataset_name=session.dataset_name,
+        )
 
         # Inherit runtime_failures from sibling forks of this cycle's family
         # root. A fresh fork otherwise starts with an empty failure list and

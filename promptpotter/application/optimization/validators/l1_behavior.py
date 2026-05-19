@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import EVIDENCE_GROUNDING_FIELDS
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 
@@ -110,10 +110,7 @@ def _variant_text_blob(variant: dict[str, Any]) -> str:
     slot the schema split exposes: ``prompt_fields_override`` (the six
     PROMPT_STRING_FIELDS as a flat dict), ``task_context_override`` (the
     two splice strings as a flat dict), and ``reasoning`` (LLM-side
-    rationale). The legacy ``pipeline_params_override`` walk is kept for
-    backward compatibility with any historic round dump where prompt
-    fields landed under a node — modern variants emit them under
-    ``prompt_fields_override`` instead.
+    rationale).
     """
     parts = [
         str(variant.get("changes_description") or ""),
@@ -123,10 +120,6 @@ def _variant_text_blob(variant: dict[str, Any]) -> str:
         parts.append(str(value or ""))
     for value in (variant.get("task_context_override") or {}).values():
         parts.append(str(value or ""))
-    pp = variant.get("pipeline_params_override") or {}
-    for key, value in pp.items():
-        if key in PROMPT_STRING_FIELDS or key in TASK_CONTEXT_OVERRIDES:
-            parts.append(str(value or ""))
     return "\n".join(parts).lower()
 
 
@@ -297,33 +290,17 @@ def _check_evidence_grounding_present(round_dict: dict[str, Any], ctx: CheckCont
 
 
 def _check_not_only_param_variants(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
-    """≥1 variant per round must mutate a prompt-field axis.
-
-    A variant counts as touching a prompt-field axis when ANY of these
-    is true:
-      - ``prompt_fields_override`` is non-empty (canonical slot since the
-        schema split — keys are PROMPT_STRING_FIELDS members),
-      - ``pipeline_params_override`` carries a key that's a prompt-field
-        name (legacy / belt-and-braces — modern variants don't land here).
-    """
+    """≥1 variant per round must mutate a prompt-field axis (``prompt_fields_override``)."""
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("not_only_param_variants", True, "no variants emitted")
 
-    prompt_field_set = set(PROMPT_STRING_FIELDS)
     for v in variants:
         if v.get("prompt_fields_override"):
             return CheckResult(
                 "not_only_param_variants",
                 True,
-                "≥1 variant mutates a prompt-field axis (prompt_fields_override)",
-            )
-        pp = v.get("pipeline_params_override") or {}
-        if any(k in prompt_field_set for k in pp):
-            return CheckResult(
-                "not_only_param_variants",
-                True,
-                "≥1 variant mutates a prompt-field axis (legacy pipeline_params_override path)",
+                "≥1 variant mutates a prompt-field axis",
             )
     return CheckResult(
         "not_only_param_variants",
@@ -450,8 +427,7 @@ def _stale_prompt_field(ctx: CheckContext) -> str | None:
     mutated_fields: set[str] = set()
     for r in recent_two:
         for v in extract_l1_variants(r):
-            pp = v.get("pipeline_params_override") or {}
-            mutated_fields.update(k for k in pp if k in PROMPT_STRING_FIELDS)
+            mutated_fields.update((v.get("prompt_fields_override") or {}).keys())
     for field_name in PROMPT_STRING_FIELDS:
         if field_name not in mutated_fields:
             return field_name

@@ -158,6 +158,7 @@ async def close_round(
             scorer=session.scoring.scorer,
             scorer_id=session.scoring.scorer_id,
             scorer_formula=session.scoring.scorer_formula,
+            dataset_name=session.dataset_name,
         )
 
 

@@ -335,6 +335,7 @@ def _finalize_loop_state(
         scorer=session.scoring.scorer,
         scorer_id=session.scoring.scorer_id,
         scorer_formula=session.scoring.scorer_formula,
+        dataset_name=session.dataset_name,
     )
 
     if resolved_cycle_id:

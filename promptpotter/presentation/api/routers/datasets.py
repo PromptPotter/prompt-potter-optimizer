@@ -159,7 +159,12 @@ async def get_dataset_preview(
             )
         artifact = json.loads(path.read_text(encoding="utf-8"))
     else:
-        artifact = build_archive_hard_samples_artifact(store, backend_id, top_k_samples=None)
+        # Scope=archive is the per-dataset workspace view; cross-dataset
+        # pooling on sample_id would be meaningless. ``name`` is the
+        # dataset name from the URL path.
+        artifact = build_archive_hard_samples_artifact(
+            store, backend_id, dataset_name=name, top_k_samples=None
+        )
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
     n_obs_map: dict[int, int] = {
@@ -354,7 +359,9 @@ async def get_dataset_measurement_series(
             )
         artifact = json.loads(path.read_text(encoding="utf-8"))
     else:
-        artifact = build_archive_hard_samples_artifact(store, backend_id, top_k_samples=None)
+        artifact = build_archive_hard_samples_artifact(
+            store, backend_id, dataset_name=name, top_k_samples=None
+        )
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
 

@@ -327,6 +327,8 @@ class AxisIndex:
         scorer: Scorer | None = None,
         scorer_id: str = "none",
         scorer_formula: str | None = None,
+        *,
+        dataset_name: str | None,
     ) -> None:
         """Incrementally update both sides from the archive.
 
@@ -344,10 +346,16 @@ class AxisIndex:
 
         Both cursors are in-process only; new processes re-walk the
         full archive on first refresh.
+
+        ``dataset_name`` is required (keyword-only) — the AxisIndex is
+        a per-dataset derived view. Cross-dataset pollution on
+        ``sample_id`` corrupts the SampleIndex side; cross-dataset
+        pollution on axis values corrupts the axis-rankings ("AIME's
+        temperature effect" steering JustLogic's L1 mutation budget).
         """
         added = 0
         for run_id, detail in archive_views.runs_since(
-            store, backend_id, self.sample_index._seen_runs
+            store, backend_id, self.sample_index._seen_runs, dataset_name=dataset_name
         ):
             if scorer is not None:
                 rescore_results(detail.get("measurements") or [], scorer, scorer_id, scorer_formula)
@@ -361,7 +369,7 @@ class AxisIndex:
         # can invalidate exactly those impact-cache slots.
         touched_axes: set[str] = set()
         all_entries: list[dict[str, Any]] = []
-        for entry in archive_views.list_runs(store, backend_id):
+        for entry in archive_views.list_runs(store, backend_id, dataset_name=dataset_name):
             all_entries.append(entry)
             run_id = entry.get("run_id", "")
             if not run_id or run_id in self._axis_seen_runs:
@@ -453,8 +461,10 @@ class AxisIndex:
         scorer: Scorer | None = None,
         scorer_id: str = "none",
         scorer_formula: str | None = None,
+        *,
+        dataset_name: str | None,
     ) -> AxisIndex | None:
-        """Build a fresh ``AxisIndex`` and refresh once.
+        """Build a fresh ``AxisIndex`` and refresh once, scoped to ``dataset_name``.
 
         Returns ``None`` when ``store`` or ``backend_id`` is missing.
         Both digest sides are pure derivations over the archive; nothing
@@ -464,7 +474,12 @@ class AxisIndex:
             return None
         idx = cls()
         idx.refresh(
-            store, backend_id, scorer=scorer, scorer_id=scorer_id, scorer_formula=scorer_formula
+            store,
+            backend_id,
+            scorer=scorer,
+            scorer_id=scorer_id,
+            scorer_formula=scorer_formula,
+            dataset_name=dataset_name,
         )
         return idx
 

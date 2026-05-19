@@ -227,16 +227,21 @@ def _archive_hit_rates(
     stores: Any,
     backend_id: str,
     sample_ids: list[int],
+    *,
+    dataset_name: str | None,
 ) -> dict[int, tuple[float, int]]:
     """``{sample_id: (hit_rate, n_measurements)}`` from the cross-cycle
     archive (routed through ``archive_views`` facade). Missing samples
-    (never measured) are omitted."""
+    (never measured) are omitted. Scoped to ``dataset_name`` so an AIME
+    sample_id=14 hit rate doesn't bleed into a JustLogic slice decision."""
     from promptpotter.infrastructure.store import archive_views
 
     out: dict[int, tuple[float, int]] = {}
     for sid in sample_ids:
         try:
-            ms = archive_views.measurements_for_sample(stores, backend_id, sid)
+            ms = archive_views.measurements_for_sample(
+                stores, backend_id, sid, dataset_name=dataset_name
+            )
         except Exception:
             logger.debug("archive lookup failed for sample %d", sid, exc_info=True)
             continue
@@ -253,6 +258,7 @@ def slice_samples(
     *,
     stores: Any | None = None,
     backend_id: str | None = None,
+    dataset_name: str | None = None,
 ) -> tuple[list[Sample], str]:
     """Filter ``samples`` per ``slice_spec`` (one of ``SLICE_NAMES`` or
     ``samples=ID1,ID2,...``). Returns ``(filtered, resolved_name)``.
@@ -260,7 +266,8 @@ def slice_samples(
     ``easy``/``hard`` need archive measurements to classify by hit rate;
     when the archive is empty (fresh dataset, no prior cycle) the slice
     silently falls back to ``all`` so a first-run sweep still works.
-    Archive access routes through ``archive_views`` per §3.7.
+    Archive access routes through ``archive_views`` per §3.7, scoped to
+    ``dataset_name`` so cross-dataset hit rates don't drive the cut.
     """
     if slice_spec.startswith("samples="):
         wanted = {sid.strip() for sid in slice_spec[len("samples=") :].split(",") if sid.strip()}
@@ -280,7 +287,9 @@ def slice_samples(
         logger.info("slice %s requested without stores — falling back to all", name)
         return samples, "all"
 
-    rates = _archive_hit_rates(stores, backend_id, [s.id for s in samples])
+    rates = _archive_hit_rates(
+        stores, backend_id, [s.id for s in samples], dataset_name=dataset_name
+    )
     if not rates:
         logger.info("slice %s requested but archive is empty — falling back to all", name)
         return samples, "all"

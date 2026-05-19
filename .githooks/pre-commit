@@ -1,0 +1,22 @@
+#!/bin/sh
+# Block commit if staged Python files have format drift or lint errors.
+# Enabled per-clone by: git config core.hooksPath .githooks
+
+set -e
+
+staged_py=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
+[ -z "$staged_py" ] && exit 0
+
+if ! python -m ruff format --check $staged_py; then
+    echo ""
+    echo "ruff format would reformat staged files."
+    echo "Fix: python -m ruff format $staged_py && git add $staged_py"
+    exit 1
+fi
+
+if ! python -m ruff check $staged_py; then
+    echo ""
+    echo "ruff check found issues in staged files."
+    echo "Fix: python -m ruff check --fix $staged_py && git add $staged_py"
+    exit 1
+fi

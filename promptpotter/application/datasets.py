@@ -396,7 +396,10 @@ def load_justlogic(
 
     logger.info(
         "Loaded JustLogic %s: %d items (operator-defined cut, depths %s, %d/depth)",
-        split, len(samples), list(_JUSTLOGIC_DEPTHS), _JUSTLOGIC_TRAIN_PER_DEPTH,
+        split,
+        len(samples),
+        list(_JUSTLOGIC_DEPTHS),
+        _JUSTLOGIC_TRAIN_PER_DEPTH,
     )
     return samples
 
@@ -435,16 +438,24 @@ def build_dataset_run_data(
     scores: dict,
     results: list,
     *,
+    dataset_name: str | None,
     source: str = "",
     experiment_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
-    """Build a measurement-batch dict ready for ``Stores.archive.save()``."""
+    """Build a measurement-batch dict ready for ``Stores.archive.save()``.
+
+    ``dataset_name`` is required (keyword-only, no default) so every write
+    site declares which dataset's archive slice this measurement belongs
+    to. ``None`` is permitted only for forensic / admin writes outside the
+    optimization loop; production callers pass ``session.dataset_name``.
+    """
     rendered_prompt = search_point.render()
     sp_h = search_point.sp_hash(pipeline_schema)
     data: dict = {
         "run_id": run_id,
         "name": name,
+        "dataset_name": dataset_name,
         "content_hash": content_hash,
         "prompt_fields_id": sp_h,
         "rendered_prompt_hash": hashlib.sha256(

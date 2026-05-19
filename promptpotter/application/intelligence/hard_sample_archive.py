@@ -35,15 +35,25 @@ CANDIDATE_HASH_LEN = 12
 def build_archive_observations(
     stores: Stores,
     backend_id: str,
+    *,
+    dataset_name: str | None,
+    include_unknown: bool = False,
 ) -> list[Observation]:
     """Walk every measurement detail in the archive, project triples.
 
     Returns one ``Observation(candidate_id=content_hash[:12], sample_id, hit)``
     per measured row. Skips items without ``sample_id``, items flagged as
     errors, and entries lacking a ``content_hash``.
+
+    ``dataset_name`` scopes the walk to one dataset's archive slice
+    (required keyword, ``None`` permitted only for admin/forensic use).
+    Cross-dataset pollution on integer ``sample_id`` is the bug this
+    arg exists to prevent.
     """
     obs: list[Observation] = []
-    for entry in archive_views.list_runs(stores, backend_id):
+    for entry in archive_views.list_runs(
+        stores, backend_id, dataset_name=dataset_name, include_unknown=include_unknown
+    ):
         content_hash = (entry.get("content_hash") or "").strip()
         if not content_hash:
             continue
@@ -74,17 +84,25 @@ def build_archive_hard_samples_artifact(
     stores: Stores,
     backend_id: str,
     *,
+    dataset_name: str | None,
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
+    include_unknown: bool = False,
 ) -> dict:
-    """Tenant-wide hard-samples artifact, fit on every measurement in the archive.
+    """Per-dataset hard-samples artifact, fit on every archive measurement for that dataset.
 
     Same shape as :func:`hard_sample_sorter.build_hard_samples_artifact`.
-    ``cycle_id`` is always ``None`` since the artifact spans all cycles.
-    Pass ``top_k_*=None`` for the full matrix.
+    ``cycle_id`` is always ``None`` since the artifact spans all cycles
+    *for the requested dataset*. Pass ``top_k_*=None`` for the full
+    matrix.
     """
     return build_hard_samples_artifact_from_observations(
-        build_archive_observations(stores, backend_id),
+        build_archive_observations(
+            stores,
+            backend_id,
+            dataset_name=dataset_name,
+            include_unknown=include_unknown,
+        ),
         cycle_id=None,
         top_k_candidates=top_k_candidates,
         top_k_samples=top_k_samples,

@@ -317,6 +317,15 @@ async def _process_fresh_sample(
     return _SampleOutcome(escalation=esc) if esc else _SampleOutcome()
 
 
+SAMPLE_ORDER_REFRESH_EVERY = 5
+"""Default cadence for in-flight pick-score re-ranking — every N scored
+samples, ``_run_query_loop`` calls ``refresh_sample_order`` to recompute
+the priority of the remaining pending queue. Lower = more responsive to
+in-candidate evidence, higher = less recompute overhead. Five is a
+compromise: pick-score artifact build is O(observations + samples) and
+runs in microseconds; over 30 samples it adds ~6 recomputes."""
+
+
 async def _run_query_loop(
     search_point: JobSearchPoint,
     dataset: list[Sample],
@@ -335,6 +344,7 @@ async def _run_query_loop(
     axes: AxisIndex | None,
     persist_fresh: Callable[[list[QueryMeasurement]], None],
     sample_order: list[int] | None = None,
+    refresh_sample_order: Callable[[set[int]], list[int]] | None = None,
 ) -> QueryLoopResult:
     """Score dataset samples, reusing prior results where available.
 
@@ -343,6 +353,15 @@ async def _run_query_loop(
     diagnostic samples land first. Samples not present in ``sample_order``
     (e.g. fresh additions the sorter hasn't seen) are appended in their
     original order. Empty / None falls back to ``dataset`` as-is.
+
+    ``refresh_sample_order`` is the in-flight re-rank closure (Fix A) —
+    when supplied, the loop calls it every ``SAMPLE_ORDER_REFRESH_EVERY``
+    samples with the set of already-scored ``sample_id`` values, and the
+    callable returns a fresh priority order for the remaining pending
+    queue. This catches the case where early evidence on the current
+    candidate makes the static initial order obsolete (e.g. a hedge-
+    collapse signature emerging on q3-4 should re-rank the matching
+    gt-class queue down so PoBB can eliminate sooner).
     """
     assert session.scoring.scorer is not None, "session.scoring.scorer required for scoring"
     state = _LoopState(results=[])
@@ -369,18 +388,25 @@ async def _run_query_loop(
 
     # δ_s-ranked iteration when the sorter supplied an order. The dataset
     # itself is never mutated — content-hash identity stays the property
-    # of (search_point, full dataset), not the iteration order.
+    # of (search_point, full dataset), not the iteration order. The
+    # pending queue is mutated in-place by ``refresh_sample_order`` when
+    # provided (Fix A).
+    by_id: dict[int, Sample] = {s.id: s for s in dataset}
     if sample_order:
-        by_id = {s.id: s for s in dataset}
-        ranked = [by_id[sid] for sid in sample_order if sid in by_id]
-        ranked_ids = {s.id for s in ranked}
-        rest = [s for s in dataset if s.id not in ranked_ids]
-        ordered_dataset = ranked + rest
+        ranked_ids = [sid for sid in sample_order if sid in by_id]
+        ranked_set = set(ranked_ids)
+        rest_ids = [s.id for s in dataset if s.id not in ranked_set]
+        pending: list[int] = ranked_ids + rest_ids
     else:
-        ordered_dataset = dataset
+        pending = [s.id for s in dataset]
+
+    scored_ids: set[int] = set()
 
     try:
-        for i, sample in enumerate(ordered_dataset):
+        i = 0
+        while pending:
+            sid = pending.pop(0)
+            sample = by_id[sid]
             if session.stop_check and session.stop_check():
                 logger.debug("Graceful stop after query %d/%d.", len(state.results), len(dataset))
                 return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
@@ -407,14 +433,30 @@ async def _run_query_loop(
                     "Aborting scoring: %s on query %d. Marking remaining %d as errors.",
                     outcome.abort_reason,
                     i + 1,
-                    len(dataset) - i - 1,
+                    len(pending),
                 )
                 state.results.extend(
-                    _error_result(rq, outcome.abort_reason) for rq in ordered_dataset[i + 1 :]
+                    _error_result(by_id[rsid], outcome.abort_reason) for rsid in pending
                 )
                 return QueryLoopResult(
                     state.results, completed=False, stop_reason=outcome.abort_reason
                 )
+
+            scored_ids.add(sid)
+            i += 1
+
+            # Fix A — in-flight re-rank. Every refresh_every scored
+            # samples, ask the picker for a fresh order over the
+            # remaining pending queue. Samples missing from the new
+            # order keep their relative position at the tail (e.g. ones
+            # the picker filtered for any reason).
+            if refresh_sample_order is not None and pending and i % SAMPLE_ORDER_REFRESH_EVERY == 0:
+                new_order = refresh_sample_order(set(scored_ids))
+                pending_set = set(pending)
+                reordered = [s for s in new_order if s in pending_set]
+                reordered_set = set(reordered)
+                tail = [s for s in pending if s not in reordered_set]
+                pending = reordered + tail
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.warning(
             "Query loop force-interrupted at query %d/%d.", len(state.results), len(dataset)
@@ -439,6 +481,7 @@ async def score_search_point(
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
     sample_order: list[int] | None = None,
+    refresh_sample_order: Callable[[set[int]], list[int]] | None = None,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], bool, EscalationSignal | None]:
     """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe).
 
@@ -469,7 +512,13 @@ async def score_search_point(
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
         cached_sample_results = cast(
             "dict[str, QueryMeasurement]",
-            archive_views.reusable_results(store, backend_id, node_configs, is_fatal=is_deprecated),
+            archive_views.reusable_results(
+                store,
+                backend_id,
+                node_configs,
+                is_fatal=is_deprecated,
+                dataset_name=session.dataset_name,
+            ),
         )
 
     cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
@@ -523,6 +572,7 @@ async def score_search_point(
             search_point,
             scores,
             merged,
+            dataset_name=session.dataset_name,
             source=source,
             experiment_id=session.experiment_id,
             pipeline_schema=pipeline_schema,
@@ -561,6 +611,7 @@ async def score_search_point(
         axes=axes,
         persist_fresh=_persist_fresh,
         sample_order=sample_order,
+        refresh_sample_order=refresh_sample_order,
     )
     results = batch.results
     escalation_signal = batch.escalation_signal

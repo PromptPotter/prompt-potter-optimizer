@@ -224,7 +224,7 @@ def indexed_stores(tmp_path: Path):
 
 def test_axis_index_refresh_rebuilds_axis_values(indexed_stores: Any) -> None:
     idx = AxisIndex()
-    idx.refresh(indexed_stores, "any-backend")
+    idx.refresh(indexed_stores, "any-backend", dataset_name=None)
 
     # Axis side: model has two values (X, Y); temperature has one (0.0).
     assert set(idx._axis_values["llm_only.model"].keys()) == {"X", "Y"}
@@ -237,7 +237,7 @@ def test_axis_index_refresh_rebuilds_axis_values(indexed_stores: Any) -> None:
     snapshot = {
         a: {v: list(accs) for v, accs in vals.items()} for a, vals in idx._axis_values.items()
     }
-    idx.refresh(indexed_stores, "any-backend")
+    idx.refresh(indexed_stores, "any-backend", dataset_name=None)
     rebuilt = {
         a: {v: list(accs) for v, accs in vals.items()} for a, vals in idx._axis_values.items()
     }
@@ -247,7 +247,7 @@ def test_axis_index_refresh_rebuilds_axis_values(indexed_stores: Any) -> None:
 def test_axis_index_no_persistence(indexed_stores: Any, tmp_path: Path) -> None:
     """Neither digest side writes anything to ``archive/``."""
     idx = AxisIndex()
-    idx.refresh(indexed_stores, "any-backend")
+    idx.refresh(indexed_stores, "any-backend", dataset_name=None)
     library = indexed_stores.base_dir / "archive"
     assert not (library / "axes.json").exists()
     assert not (library / "search_memory.json").exists()
@@ -263,7 +263,7 @@ def test_config_index_run_ids_match_archive_full_scan(indexed_stores: Any) -> No
     subset, and no-match.
     """
     idx = AxisIndex()
-    idx.refresh(indexed_stores, "any-backend")
+    idx.refresh(indexed_stores, "any-backend", dataset_name=None)
 
     for predicate in (
         {"llm_only": {"model": "X"}},  # subset, matches run_a
@@ -360,7 +360,10 @@ def test_archive_observations_use_content_hash_prefix(
         ],
     )
     stores = SimpleNamespace(archive=aggregator_archive)
-    obs = build_archive_observations(stores, "bk")
+    # dataset_name=None bypasses the dataset filter (forensic mode) so the
+    # test's unstamped fixture entries are still visible. Per-dataset
+    # scoping is covered in tests/test_archive_dataset_scoping.py.
+    obs = build_archive_observations(stores, "bk", dataset_name=None)
     assert len(obs) == 2
     assert all(o.candidate_id == long_hash[:12] for o in obs)
     assert {o.sample_id for o in obs} == {1, 2}

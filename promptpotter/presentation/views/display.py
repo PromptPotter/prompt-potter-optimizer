@@ -244,8 +244,9 @@ def _scoreboard(
         ci_str = fmt_ci(*wilson_ci(s.get("hits", 0), s.get("total", 0)))
         # Per-row matched-pair origin: when present, compares this candidate's
         # accuracy against origin on the *same samples this candidate ran*
-        # (PoBB-locked rows). Falls back to the full-set origin for rows that
-        # ran every sample (matched == full) and for legacy rows missing the field.
+        # (PoBB-locked rows). Falls back to the full-set origin for rows the
+        # winner-selection loop never backfilled (escalation-aborted /
+        # fatal-degradation candidates not in ``scored``).
         row_origin = float(s.get("matched_origin_accuracy", origin_accuracy) or origin_accuracy)
         delta = acc - row_origin
         delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"

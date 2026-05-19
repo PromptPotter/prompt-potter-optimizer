@@ -33,6 +33,7 @@ The word `legacy` in a comment or docstring is a code smell — either the path 
 ```bash
 pip install -e ".[all,dev]"
 ruff check . && ruff format --check . && deptry . && mypy promptpotter/ && pytest -q   # CI runs same chain
+git config core.hooksPath .githooks                           # one-time per clone: enables .githooks/pre-commit (ruff format + check on staged .py)
 python -m promptpotter new <name>                            # fresh: mint session+cycle from datasets/<name>/, run from round 0
 python -m promptpotter resume                                # resume active; Ctrl+C: 1st saves, 2nd force-quits
 python -m promptpotter resume --from N                       # resume: rewind in place
@@ -45,6 +46,8 @@ python -m uvicorn promptpotter.main:app --port 8001          # read-only API + /
 Webapp preview at `http://localhost:8001/ui/` once uvicorn is running; reload after a fresh `new` (page reads `active_session.json` on load). `dashboard.json` only refreshes while `python -m promptpotter resume` is running in another terminal.
 
 `.env` with `GROQ_API_KEY` (or OPENAI/ANTHROPIC/OPENROUTER) required. Provider is per-campaign in `campaign.json::optimizer_llm.provider`.
+
+**Before any commit:** run `python -m ruff format promptpotter/ tests/ && python -m ruff check promptpotter/ tests/`. CI fails on format drift, not just lint errors — the `.githooks/pre-commit` hook enforces this once `git config core.hooksPath .githooks` has been set in the clone, but a fresh clone or session without it is still on the hook for it.
 
 ## Architecture
 

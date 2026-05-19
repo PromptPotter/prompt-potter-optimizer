@@ -11,15 +11,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.application.intelligence.exploration import (
-    Observation,
-    build_observations,
-)
+from promptpotter.application.intelligence.exploration import Observation
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
@@ -79,6 +77,22 @@ class CandidateOutcome(StrEnum):
     SCORED = "scored"
     LEADER_LOCKED = "leader_locked"
     ESCALATED = "escalated"
+
+
+def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
+    """Tiebreak key for round-winner selection: composite-first, accuracy-tiebreak.
+
+    Shared by ``l1_score`` (round-time selection over scored candidates) and
+    ``pick_round_winner`` (post-hoc selection over ``ScoreEntry``s for the
+    SCOREBOARD ``*`` marker). Centralised so the two surfaces cannot drift
+    apart — a single PR that changes this rule moves both readers together.
+
+    ``composite_fitness`` falls back to ``accuracy`` when ``None`` so the key
+    is well-defined for ``CandidateScore`` rows minted before backfill (path-1
+    validation-skip variants carry ``composite_fitness=0.0``, not ``None``,
+    but the fallback keeps the helper total over the type signature).
+    """
+    return (composite_fitness if composite_fitness is not None else accuracy, accuracy)
 
 
 @dataclass(frozen=True)
@@ -280,6 +294,7 @@ async def score_one_candidate(
     round_num: int,
     l1_diversity: float,
     sample_order: list[int] | None = None,
+    refresh_sample_order: Callable[[set[int]], list[int]] | None = None,
 ) -> CandidateRunResult:
     """Run one candidate through the three-exit-path lifecycle.
 
@@ -336,6 +351,7 @@ async def score_one_candidate(
         axes=cycle.axes,
         l1_diversity=l1_diversity,
         sample_order=sample_order,
+        refresh_sample_order=refresh_sample_order,
     )
 
     # Path 2 — full-run cache replay.
@@ -528,6 +544,78 @@ async def score_population(
         seed_id = f"R{cycle.rounds[-1].round}_winner" if cycle.rounds else "origin"
         elim_check.register_completed(seed_results, candidate_id=seed_id, sp=seed_sp)
 
+    # Hoisted picker plumbing — shared across the per-candidate loop.
+    #
+    # Fix B — undermeasured filter: candidates with fewer than
+    # n_samples // 2 measurements (i.e. ones the prior PoBB iteration
+    # aborted early) only contribute observations on the picker's
+    # discriminating samples. Including them biases ``pop_totals``
+    # on those samples and inflates Chernoff info for the next
+    # candidate's picker — exactly the C2.1 outlier symptom. The seed
+    # prior (registered separately into ``seed_hits``) is full, so
+    # dropping early-abort residue from ``sorter_obs`` is safe.
+    pop_min_obs = max(1, len(dataset) // 2)
+
+    def _filtered_obs(
+        results_by_cid: dict[str, list[QueryMeasurement]] | dict[str, list[dict]],
+    ) -> list[Observation]:
+        out: list[Observation] = []
+        for cid, results in results_by_cid.items():
+            valid = [r for r in results if r.get("sample_id") is not None and not r.get("error")]
+            if len(valid) < pop_min_obs:
+                continue
+            out.extend(
+                Observation(
+                    candidate_id=cid,
+                    sample_id=int(r["sample_id"]),
+                    hit=bool(r.get("hit")),
+                )
+                for r in valid
+            )
+        return out
+
+    prior_round_obs: list[Observation] = []
+    for rr in cycle.rounds:
+        prior_round_obs.extend(_filtered_obs(rr.all_candidate_results))
+    base_sorter_obs: list[Observation] = list(prior_round_obs)
+    if cycle.config.optimization.exploration.seed_evolve_from_archive:
+        # Archive observations come from completed scored runs (no
+        # mid-run abort residue), so no length filter needed there.
+        base_sorter_obs = list(cycle.archive_observations) + base_sorter_obs
+
+    # Seed hit history (origin in R1, prior winner R2+) so the picker
+    # measures Chernoff info between the seed prior and the population,
+    # not just population variance.
+    seed_hits: dict[int, list[bool]] = {}
+    for sr in seed_results or []:
+        ssid = sr.get("sample_id")
+        if ssid is None or sr.get("error"):
+            continue
+        seed_hits.setdefault(int(ssid), []).append(bool(sr.get("hit")))
+
+    def _compute_sample_order(scored_ids: set[int]) -> list[int]:
+        """Re-rank remaining samples by Chernoff info against current evidence.
+
+        Called once at candidate start (scored_ids empty), then every
+        ``SAMPLE_ORDER_REFRESH_EVERY`` samples inside the query loop so
+        the picker picks up evidence accumulating on this candidate.
+        Without re-rank, a hedge-collapse signature emerging on q3-4
+        still has to grind through every gt-class-matched sample in the
+        static initial order before PoBB can eliminate — Fix A.
+        """
+        live_obs = _filtered_obs(all_candidate_results)
+        obs = base_sorter_obs + live_obs
+        if not obs:
+            return []
+        artifact = build_hard_samples_artifact_from_observations(
+            obs,
+            cycle_id=session.state.cycle_id,
+            top_k_candidates=None,
+            top_k_samples=None,
+            seed_hits=seed_hits or None,
+        )
+        return [sid for sid in artifact["pick_score"]["sample_order"] if sid not in scored_ids]
+
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
         callbacks.on_candidate_started(
@@ -540,51 +628,18 @@ async def score_population(
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
 
-        # Sample order per candidate: fit Rasch on prior rounds plus the
-        # in-progress round's already-scored candidates, then iterate
-        # samples in descending Chernoff information against the seed
-        # prior (Track-and-Stop / Garivier-Kaufmann 2016) so paired
-        # posteriors separate fast and PoBB can eliminate dominated
-        # candidates without spending the full sample budget. The
-        # heatmap artifact's hardest-first ``sample_order`` stays as
-        # the display sort; PoBB consumes the ``pick_score.sample_order``
-        # peer field. Seed = origin in R1, prior round winner R2+.
-        sorter_obs = build_observations(cycle.rounds)
-        if cycle.config.optimization.exploration.seed_evolve_from_archive:
-            # Fold cross-cycle archive evidence into the per-candidate fit so
-            # round 1 lands diagnostic samples first instead of dataset order.
-            sorter_obs = list(cycle.archive_observations) + sorter_obs
-        for cid_seen, results_seen in all_candidate_results.items():
-            for r in results_seen:
-                sid = r.get("sample_id")
-                if sid is None or r.get("error"):
-                    continue
-                sorter_obs.append(
-                    Observation(
-                        candidate_id=cid_seen,
-                        sample_id=int(sid),
-                        hit=bool(r.get("hit")),
-                    )
-                )
         sample_order: list[int] | None = None
-        if sorter_obs:
-            # Build seed hit history (origin in R1, prior winner R2+) so
-            # the picker measures Chernoff info between the seed prior
-            # and the population, not just population variance.
-            seed_hits: dict[int, list[bool]] = {}
-            for sr in seed_results or []:
-                ssid = sr.get("sample_id")
-                if ssid is None or sr.get("error"):
-                    continue
-                seed_hits.setdefault(int(ssid), []).append(bool(sr.get("hit")))
+        live_in_progress_obs = _filtered_obs(all_candidate_results)
+        if base_sorter_obs or live_in_progress_obs:
+            sample_order = _compute_sample_order(scored_ids=set())
+            artifact_obs = base_sorter_obs + live_in_progress_obs
             artifact = build_hard_samples_artifact_from_observations(
-                sorter_obs,
+                artifact_obs,
                 cycle_id=session.state.cycle_id,
                 top_k_candidates=None,
                 top_k_samples=None,
                 seed_hits=seed_hits or None,
             )
-            sample_order = list(artifact["pick_score"]["sample_order"])
             pick_per_sample = artifact["pick_score"]["per_sample"]
             preview = [
                 (sid, float(pick_per_sample.get(str(sid), 0.0)))
@@ -623,6 +678,7 @@ async def score_population(
             round_num=round_num,
             l1_diversity=l1_diversity,
             sample_order=sample_order,
+            refresh_sample_order=_compute_sample_order if sample_order else None,
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
         if cr_result.runtime_failure is not None:
@@ -738,14 +794,16 @@ async def l1_score(
     best_matched_origin_acc = origin.accuracy
     best_matched_origin_hits = origin_base["hits"]
     best_matched_origin_composite = origin.composite_fitness
+    best_key = round_winner_key(origin.composite_fitness, origin.accuracy)
     winner_idx: int | None = None
-    # ``score_population`` already populated each ``CandidateScore`` with the
+    # ``score_population`` populated each ``CandidateScore`` with the
     # ``opt_sp=None`` composite (per-sample scoring path is target-layer; it
     # doesn't see ``OptSearchPoint``). That makes opt_sp-aware evaluators
     # (currently ``prompt_compactness``) collapse to their vacuous fallback,
-    # which inflates the composite shown on the SCOREBOARD relative to the
-    # round-summary recompute below. Index by candidate id so we can
-    # back-fill the opt_sp-aware composite + evaluators in one pass.
+    # inflating the per-candidate composite shown inline during scoring
+    # relative to the post-backfill value that lands on the SCOREBOARD.
+    # Index by candidate id so we can back-fill the opt_sp-aware composite +
+    # evaluators in one pass before selecting the winner.
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(candidate_scores)}
     for idx, ind in enumerate(scored):
         cand_results = all_candidate_results[ind.lineage.id]
@@ -778,7 +836,14 @@ async def l1_score(
                 matched_origin_hits=matched["hits"],
                 matched_origin_composite=matched["composite_fitness"],
             )
-        if s["accuracy"] > matched["accuracy"]:
+        # Winner = running max by (composite_fitness, accuracy). Same key as
+        # ``round_winner_key`` (used by the SCOREBOARD's ``pick_round_winner``)
+        # so the two surfaces report the same winner. The matched-origin gate
+        # is applied after selection via ``delta_ok`` below — it decides
+        # whether the round is ``improved``, not who won.
+        cand_key = round_winner_key(s["composite_fitness"], s["accuracy"])
+        if cand_key > best_key:
+            best_key = cand_key
             best_acc = s["accuracy"]
             best_comp = s["composite_fitness"]
             best_osp = ind
@@ -872,6 +937,7 @@ __all__ = [
     "SignalEffect",
     "decode_signal_effect",
     "l1_score",
+    "round_winner_key",
     "score_one_candidate",
     "score_population",
 ]

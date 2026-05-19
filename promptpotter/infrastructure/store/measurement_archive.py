@@ -68,6 +68,34 @@ def _matches_subset(
     return True
 
 
+def _entry_dataset(entry: dict[str, Any]) -> str | None:
+    """Extract the dataset_name from an archive entry; empty / missing → None."""
+    val = entry.get("dataset_name")
+    return val if isinstance(val, str) and val else None
+
+
+def _entry_matches_dataset(
+    entry: dict[str, Any],
+    dataset_name: str | None,
+    *,
+    include_unknown: bool,
+) -> bool:
+    """Filter rule for dataset-scoped reads.
+
+    - ``dataset_name=None`` returns every entry (no filter; forensic /
+      admin use only).
+    - ``dataset_name="X"`` matches entries stamped ``X``. Entries written
+      under v1 schema lack the field and only pass when
+      ``include_unknown=True``.
+    """
+    if dataset_name is None:
+        return True
+    ds = _entry_dataset(entry)
+    if ds == dataset_name:
+        return True
+    return ds is None and include_unknown
+
+
 class MeasurementArchive:
     """File I/O for the measurement archive — the database core.
 
@@ -117,6 +145,7 @@ class MeasurementArchive:
         summary = {
             "run_id": data["run_id"],
             "name": data.get("name", run_id),
+            "dataset_name": data.get("dataset_name"),
             "experiment_id": data.get("experiment_id", ""),
             "prompt_fields_id": data["prompt_fields_id"],
             "item_count": data["item_count"],
@@ -155,6 +184,7 @@ class MeasurementArchive:
                 entries.append(summary)
 
             index["total"] = len(entries)
+            index["schema_version"] = MEASUREMENTS_SCHEMA_VERSION
             write_json(index_path, index)
 
         return detail_path
@@ -167,26 +197,52 @@ class MeasurementArchive:
         """Load a run detail file directly by run_id (no index scan)."""
         return read_json_optional(self._runs_dir(backend_id) / f"{run_id}.json")
 
-    def list_all(self, backend_id: str) -> list[dict[str, Any]]:
-        """Return the index entries (summaries without full items)."""
+    def list_all(
+        self,
+        backend_id: str,
+        *,
+        dataset_name: str | None = None,
+        include_unknown: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return the index entries (summaries without full items).
+
+        ``dataset_name`` filters to one dataset's archive slice. ``None``
+        returns every entry — forensic / admin use only; production
+        callers pass a concrete dataset. v1 entries (written before the
+        schema bump to v2) lack the field and only appear when
+        ``include_unknown=True``.
+        """
         index = read_json_optional(self._index_path(backend_id)) or {
             "measurements": [],
             "total": 0,
             "schema_version": MEASUREMENTS_SCHEMA_VERSION,
         }
-        return index.get("measurements", [])
+        entries: list[dict[str, Any]] = index.get("measurements", [])
+        if dataset_name is None and include_unknown:
+            return entries
+        return [
+            e
+            for e in entries
+            if _entry_matches_dataset(e, dataset_name, include_unknown=include_unknown)
+        ]
 
     def load_since(
         self,
         backend_id: str,
         seen_ids: set[str],
+        *,
+        dataset_name: str | None = None,
+        include_unknown: bool = False,
     ) -> Iterator[tuple[str, dict[str, Any]]]:
         """Yield ``(run_id, detail)`` for runs whose ``run_id`` is not in ``seen_ids``.
 
         Skips runs whose detail file is missing. Encapsulates the index-scan +
         per-run load that derived views (e.g. AxisIndex) used to do by hand.
+        Filtered by ``dataset_name`` per :meth:`list_all`.
         """
-        for entry in self.list_all(backend_id):
+        for entry in self.list_all(
+            backend_id, dataset_name=dataset_name, include_unknown=include_unknown
+        ):
             run_id = entry["run_id"]
             if run_id in seen_ids:
                 continue
@@ -199,18 +255,24 @@ class MeasurementArchive:
         self,
         backend_id: str,
         node_configs: list[tuple[str, dict]],
+        *,
+        dataset_name: str | None = None,
+        include_unknown: bool = False,
     ) -> list[tuple[dict[str, Any], int]]:
         """Return index entries sharing a node-config prefix, best match first.
 
         Position-by-position prefix match with full dict equality. Returns
         ``(entry, match_length)`` tuples sorted by match_length desc,
-        then item_count desc.
+        then item_count desc. Filtered by ``dataset_name`` per
+        :meth:`list_all`.
         """
         if not node_configs:
             return []
 
         scored: list[tuple[dict[str, Any], int]] = []
-        for entry in self.list_all(backend_id):
+        for entry in self.list_all(
+            backend_id, dataset_name=dataset_name, include_unknown=include_unknown
+        ):
             stored = entry.get("node_configs")
             if not stored:
                 continue
@@ -236,12 +298,20 @@ class MeasurementArchive:
         sample_id: int,
         *,
         run_ids: list[str] | None = None,
+        dataset_name: str | None = None,
+        include_unknown: bool = False,
     ) -> list[Measurement]:
         """Every measurement of one training example, across all configs.
 
         When ``run_ids`` is provided (typically from
         ``Sample.run_ids``), skips the index scan and loads only those
         files. When ``None``, walks every batch in the archive.
+
+        ``dataset_name`` filters to one dataset's archive slice when the
+        index scan is taken; when ``run_ids`` is supplied, the caller is
+        responsible for ensuring those ids belong to the requested
+        dataset (typically true because ``Sample.run_ids`` is itself
+        populated from the dataset-scoped index path).
         """
         if run_ids is not None:
             sources: Iterator[tuple[str, dict[str, Any]]] = (
@@ -252,7 +322,9 @@ class MeasurementArchive:
         else:
             sources = (
                 (entry["run_id"], detail)
-                for entry in self.list_all(backend_id)
+                for entry in self.list_all(
+                    backend_id, dataset_name=dataset_name, include_unknown=include_unknown
+                )
                 if (detail := self.load_by_id(backend_id, entry["run_id"])) is not None
             )
 
@@ -269,6 +341,8 @@ class MeasurementArchive:
         predicate: dict[str, dict[str, Any]],
         *,
         run_ids: set[str] | list[str] | None = None,
+        dataset_name: str | None = None,
+        include_unknown: bool = False,
     ) -> list[Measurement]:
         """Every measurement under configs matching *predicate*, across all samples.
 
@@ -282,7 +356,9 @@ class MeasurementArchive:
         :class:`~promptpotter.application.intelligence.indexes.ConfigIndex`
         should always pass the hint — for an archive of N runs across K
         unique configs, this turns an O(N) scan into an O(K + matches)
-        walk that's primarily index lookups.
+        walk that's primarily index lookups. The hint must already be
+        dataset-scoped at the source (the per-dataset
+        :class:`ConfigIndex` honours this).
         """
         if not predicate:
             return []
@@ -298,7 +374,9 @@ class MeasurementArchive:
             return out
 
         out = []
-        for entry in self.list_all(backend_id):
+        for entry in self.list_all(
+            backend_id, dataset_name=dataset_name, include_unknown=include_unknown
+        ):
             stored = entry.get("node_configs")
             if not stored:
                 continue
@@ -317,14 +395,29 @@ class MeasurementArchive:
         backend_id: str,
         node_configs: list[tuple[str, dict]],
         is_fatal: Callable[[dict[str, Any]], bool] | None = None,
+        *,
+        dataset_name: str | None = None,
+        include_unknown: bool = False,
     ) -> dict[str, dict[str, Any]]:
-        """Build per-sample cache from prior runs sharing *node_configs* (exact: reuse all non-error; partial: prefix-trusted only). ``is_fatal`` ensures a saved valid retry isn't shadowed by an older deprecated archive."""
+        """Build per-sample cache from prior runs sharing *node_configs* (exact: reuse all non-error; partial: prefix-trusted only). ``is_fatal`` ensures a saved valid retry isn't shadowed by an older deprecated archive.
+
+        ``dataset_name`` scopes cache reuse to one dataset's archive. A
+        cached AIME hit on ``(node_config_prefix, sample_id=14)`` must
+        not satisfy a JustLogic lookup on the same key — different
+        problem, same integer. Production callers always pass the
+        current cycle's ``session.dataset_name``.
+        """
         if not node_configs:
             return {}
         chain_len = len(node_configs)
         cache: dict[str, dict[str, Any]] = {}
 
-        for entry, match_length in self.find_by_node_configs(backend_id, node_configs):
+        for entry, match_length in self.find_by_node_configs(
+            backend_id,
+            node_configs,
+            dataset_name=dataset_name,
+            include_unknown=include_unknown,
+        ):
             detail = self.load_by_id(backend_id, entry["run_id"])
             if not detail:
                 continue

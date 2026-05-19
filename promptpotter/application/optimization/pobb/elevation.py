@@ -139,18 +139,24 @@ def _load_arm_history(
     stores: Stores,
     backend_id: str,
     pipeline_schema: PipelineSchema,
+    *,
+    dataset_name: str | None,
 ) -> tuple[list[float], set[int]]:
     """Pull every archived ``(sample_id, score)`` for *jsp* across cycles.
 
-    Identity is exact-prefix node-config match (dataset-independent), so the
-    same JSP measured against differently-shaped scoring sets in two cycles
-    contributes both. Dedup by ``sample_id`` — same sample × same JSP is
-    deterministic, redundant duplicates are dropped on the first encounter.
+    Identity is exact-prefix node-config match plus ``dataset_name`` scope
+    — the same JSP measured against differently-shaped scoring sets in
+    two cycles of the same dataset contributes both, but a cross-dataset
+    sibling with identical node-configs is excluded (different sample
+    population, same integer ids). Dedup by ``sample_id`` — same sample
+    × same JSP × same dataset is deterministic.
     """
     chain = pipeline_schema.node_configs(jsp.pipeline_params or {})
     chain_len = len(chain)
     seen: dict[int, float] = {}
-    for entry, match_len in archive_views.find_by_prefix(stores, backend_id, chain):
+    for entry, match_len in archive_views.find_by_prefix(
+        stores, backend_id, chain, dataset_name=dataset_name
+    ):
         if match_len < chain_len:
             break
         detail = archive_views.load_run(stores, backend_id, entry["run_id"])
@@ -237,7 +243,9 @@ async def elevate_to_decisive(
     histories: dict[str, list[float]] = {}
     measured: dict[str, set[int]] = {}
     for name, jsp in arms.items():
-        h, sids = _load_arm_history(jsp, stores, backend_id, schema)
+        h, sids = _load_arm_history(
+            jsp, stores, backend_id, schema, dataset_name=session.dataset_name
+        )
         histories[name] = h
         measured[name] = sids
     topups = dict.fromkeys(arms, 0)
