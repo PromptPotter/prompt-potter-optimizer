@@ -1,0 +1,24 @@
+{
+  "campaign_config": {
+    "dataset_name": "justlogic",
+    "scoring": "exact_match(predicted, ground_truth)",
+    "sp_budget_ttest": 30,
+    "exclude_nodes": [],
+    "pipeline_overrides": {},
+    "optimization": {
+      "l1_patience": 3,
+      "max_rounds": 8,
+      "n_variants": 5,
+      "improvement_threshold": 0.02,
+      "degradation_threshold": 0.4,
+      "l2_patience": 2,
+      "l3_patience": 1,
+      "elimination_n_min": 4,
+      "pobb_epsilon": 0.05
+    },
+    "optimizer_llm": {
+      "model": "openai/gpt-oss-120b",
+      "provider": "groq"
+    }
+  }
+}

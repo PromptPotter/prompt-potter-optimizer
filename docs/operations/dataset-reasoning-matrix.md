@@ -8,6 +8,7 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 | `gsm8k` | `openai/gpt-oss-120b` | `medium` | absent | Grade-school math word problems. Medium reasoning is enough. |
 | `hotpotqa` | `openai/gpt-oss-120b` | `medium` | absent | Multi-hop QA. Medium reasoning. |
 | `bbeh` | `openai/gpt-oss-20b` *(prod: 120b — see below)* | `low` | absent | "Big-Bench Extra Hard" puzzles. `low` is intentional — see Groq ceiling note below. |
+| `justlogic` | `openai/gpt-oss-20b:nitro` (OpenRouter) | `low` | absent | JustLogic (Chen 2025), 3-class deductive reasoning, depths 6-7 only. Operator-defined cut: 200/depth train (400) + 500/depth held-out test (1,000). Synthetic generation — no contamination. Recon-measured origin **44%** on depth-6,7 slice 2026-05-19. L1 attack surface: hedge-break (model over-predicts `Uncertain` by ~30pp vs balanced gold). `:nitro` routing for ~0.3s/sample latency. |
 | `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. |
 
 `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.json` node config — provider ceiling applies. Enforced by `tests/test_dataset_pipeline_defaults.py`.

@@ -90,6 +90,12 @@ Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **W
 
 `datasets/{name}/`: `pipeline.json`, `campaign.json`, `task_description.md`, `prompts/{node}.json`, `dataset.md`. **Configs are the source of truth** — no parallel default ladders. Backend overlay (`nodes.{name}.config` in `pipeline.json`) is the sole route for backend tunable changes — model, provider, temperature, anything in `optimizer.param_keys`. Merge contract + the "never edit backend repo, even co-owned" rule: [`promptpotter/application/CLAUDE.md`](promptpotter/application/CLAUDE.md).
 
+**Dataset reference points.** Consult these any time a dataset question comes up — not only when wiring a new one. Treat them as the source of truth for cross-dataset judgment calls, projection biases, and the rationale behind every wire/reject decision.
+
+- *Adding a new dataset, finding its canonical split, framing the operator's cut decision* — [`docs/operations/adding-a-dataset.md`](docs/operations/adding-a-dataset.md). Research the canonical train/test split before writing code; never invent a split.
+- *Why dataset X is (or isn't) wired, measured recon origins on `gpt-oss-20b @ low`, the full trialed-and-rejected list with measurements, the selection-trail rounds, systemic findings on projection bias from older proxy models* — [`docs/operations/dataset-selection-rationale.md`](docs/operations/dataset-selection-rationale.md). When the operator asks "why didn't we use Y?" or "have we already trialed Z?", look here first.
+- *Per-dataset model defaults — which model + `reasoning_effort` + `max_tokens` each wired dataset ships with, the BBEH output-ceiling trap notes, the Groq daily-volume swap protocol* — [`docs/operations/dataset-reasoning-matrix.md`](docs/operations/dataset-reasoning-matrix.md).
+
 ## Conventions (non-derivable)
 
 Non-negotiables only — full style, code-shape, tests, CLI, git rules in [`docs/developer/conventions.md`](docs/developer/conventions.md).

@@ -1,0 +1,49 @@
+{
+  "name": "JustLogic",
+  "version": "v0.1",
+  "description": "JustLogic deductive-reasoning benchmark (Chen 2025), depths 6-7 only. 3-class TRUE/FALSE/Uncertain claim evaluation against premises. Routes through TermNorm /matches with the llm_only pipeline.",
+  "backend_name": "TermNorm",
+  "backend_type": "termnorm",
+  "available_models": ["openai/gpt-oss-20b"],
+  "nodes": {
+    "llm_only": {
+      "type": "generation",
+      "runtime": "backend",
+      "node_role": "ranker",
+      "description": "Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — provider ceiling applies. reasoning_effort=low is the conservative-floor origin; recon-measured at ~44% on the depth-6,7 stratum 2026-05-19.",
+      "config": {
+        "provider": "openrouter",
+        "model": "openai/gpt-oss-20b:nitro",
+        "temperature": 0.0,
+        "reasoning_effort": "low"
+      },
+      "prompt_meta": {
+        "family": "llm_only",
+        "template_variables": ["query"],
+        "description": "System prompt for JustLogic 3-class deductive reasoning"
+      },
+      "optimizer": {
+        "param_keys": ["temperature", "max_tokens", "model", "reasoning_effort", "persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
+        "param_allowed_values": {
+          "reasoning_effort": ["none", "default", "low", "medium", "high"]
+        },
+        "observation_name": "llm_only",
+        "observation_mappings": [
+          {
+            "pipeline_key": "final_ranking",
+            "output_field": "generated_text",
+            "is_llm": true
+          }
+        ],
+        "langfuse_type": "generation"
+      }
+    }
+  },
+  "pipelines": {
+    "default": ["llm_only"]
+  },
+  "llm_defaults": {
+    "provider": "openrouter",
+    "model": "openai/gpt-oss-20b:nitro"
+  }
+}

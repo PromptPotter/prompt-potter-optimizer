@@ -54,6 +54,7 @@ __all__ = [
     "load_dataset",
     "load_excel_ground_truth",
     "load_gsm8k",
+    "load_justlogic",
     "load_potter_traces",
     "sample_dataset",
     "samples_from_dicts",
@@ -318,10 +319,93 @@ def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[Sample]:
     return samples
 
 
+_JUSTLOGIC_DEPTHS: tuple[int, ...] = (6, 7)
+_JUSTLOGIC_TRAIN_PER_DEPTH: int = 200
+
+
+def load_justlogic(
+    split: str = "train",
+    sample_size: int = 0,
+    seed: int = 42,
+) -> list[Sample]:
+    """Load JustLogic (`michaelchenkj/JustLogic`) at reasoning depths 6-7.
+
+    Authors (Chen 2025, arXiv 2501.14851) ship one HF split (`train`,
+    4,900 rows, 700 per depth × 7 depths). The canonical test set is
+    deliberately withheld to prevent benchmark leakage — regenerate via
+    `create_split.py` (seed=0, 70/15/15 stratified per-depth) for a
+    leakage-free held-out, or request from authors. HF `train` IS the
+    public training fold per authors' intent.
+
+    Operator-blessed cut (this loader): filter to **depths 6 and 7
+    only** (1,400 rows total — the recon-measured in-band stratum at
+    ~44% origin on `gpt-oss-20b @ low`). Per included depth,
+    deterministic seed=42 shuffle → first 200 = ``train`` (400
+    total), rest = ``test`` (1,000 total). NOT canonical (authors'
+    test set is withheld); resulting numbers are non-leaderboard-
+    comparable. Documented in ``datasets/justlogic/dataset.md``.
+
+    Each row's query is formatted as
+    ``Premises:\\n{paragraph}\\n\\nClaim: {question}\\n\\nIs the claim
+    TRUE, FALSE, or Uncertain given the premises?``. Ground truth is
+    one of ``TRUE`` / ``FALSE`` / ``Uncertain`` — pair with the
+    existing ``exact_match`` scorer + the BBEH-style ``**X**`` answer
+    convention in ``prompts/default.json``.
+    """
+    if split not in ("train", "test"):
+        raise ValueError(f"load_justlogic split must be 'train' or 'test', got {split!r}")
+    try:
+        from datasets import load_dataset  # type: ignore[import-not-found,import-untyped]
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(
+            "The 'datasets' library is required for JustLogic. "
+            'Install the benchmarks extras: pip install -e ".[benchmarks]"'
+        ) from None
+    from collections import defaultdict
+
+    ds = load_dataset("michaelchenkj/JustLogic", split="train")
+    by_depth: dict[int, list] = defaultdict(list)
+    for row in ds:
+        if row["depth"] in _JUSTLOGIC_DEPTHS:
+            by_depth[row["depth"]].append(row)
+
+    samples: list[Sample] = []
+    for depth in sorted(by_depth):
+        rows = by_depth[depth]
+        indices = list(range(len(rows)))
+        random.Random(seed).shuffle(indices)
+        cut = _JUSTLOGIC_TRAIN_PER_DEPTH
+        picked = indices[:cut] if split == "train" else indices[cut:]
+        for src_idx in picked:
+            row = rows[src_idx]
+            query = (
+                f"Premises:\n{row['paragraph']}\n\n"
+                f"Claim: {row['question']}\n\n"
+                f"Is the claim TRUE, FALSE, or Uncertain given the premises?"
+            )
+            samples.append(
+                Sample(
+                    id=len(samples),
+                    query=query,
+                    ground_truth=str(row["label"]),
+                )
+            )
+
+    if sample_size > 0 and len(samples) > sample_size:
+        samples = random.Random(seed).sample(samples, sample_size)
+
+    logger.info(
+        "Loaded JustLogic %s: %d items (operator-defined cut, depths %s, %d/depth)",
+        split, len(samples), list(_JUSTLOGIC_DEPTHS), _JUSTLOGIC_TRAIN_PER_DEPTH,
+    )
+    return samples
+
+
 DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
     "gsm8k": load_gsm8k,
     "aime_2025": load_aime_2025,
     "bbeh": load_bbeh,
+    "justlogic": load_justlogic,
 }
 """Map dataset name → loader function. Register new datasets here.
 

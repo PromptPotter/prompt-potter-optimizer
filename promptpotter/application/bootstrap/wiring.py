@@ -146,12 +146,14 @@ def _load_dataset_into_session(
     session: Session, dataset_name: str, status: Callable[[str], None]
 ) -> None:
     """Populate session.samples + index_terms from DatasetStore or DATASET_LOADERS."""
+    from promptpotter.domain.sample import Sample
+
     ds = session.store.backends.load_dataset(dataset_name)
     if not (ds and ds.get("items")) and dataset_name in DATASET_LOADERS:
         status(f"Loading dataset '{dataset_name}' from registry ...")
         loader_items = DATASET_LOADERS[dataset_name]()
         session.store.backends.save_dataset(dataset_name, loader_items)
-        ds = {"items": loader_items}
+        ds = {"items": [s.model_dump() for s in loader_items]}
 
     if not (ds and ds.get("items")):
         status(f"Dataset '{dataset_name}' not available")
@@ -160,7 +162,7 @@ def _load_dataset_into_session(
             f"Add a loader to DATASET_LOADERS in dataset_builder.py."
         )
 
-    items = ds["items"]
+    items = [it.model_dump() if isinstance(it, Sample) else it for it in ds["items"]]
     valid = [item for item in items if item.get("query") and item.get("ground_truth")]
     session.samples = samples_from_dicts(valid)
     session.index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
