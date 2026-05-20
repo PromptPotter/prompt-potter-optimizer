@@ -3,9 +3,58 @@ import { useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { ensureChartRegistered } from "@/lib/chart-init";
 import { cssRgba, getCss } from "@/lib/theme";
-import type { ChartData, ChartOptions } from "chart.js";
+import type { ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
 
 ensureChartRegistered();
+
+// Per-bar sample count painted above each candidate's bar group. The metric
+// (accuracy / composite / what-if) is computed over `nSamples` samples — a
+// 0.6 over 5 samples is far noisier than a 0.6 over 20, and PoBB leader-lock
+// routinely stops a candidate on a partial set. The count makes that visible.
+declare module "chart.js" {
+  // Type param arity must match chart.js's own declaration to merge; unused here.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface PluginOptionsByType<TType extends ChartType> {
+    sampleCount?: { counts: (number | null)[] };
+  }
+}
+
+const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
+  id: "sampleCount",
+  afterDatasetsDraw(chart, _args, opts) {
+    const counts = opts?.counts;
+    const xScale = chart.scales.x;
+    if (!counts || !xScale) return;
+    const { ctx, chartArea } = chart;
+    ctx.save();
+    ctx.font = "10px Cascadia Mono, SF Mono, Menlo, Consolas, monospace";
+    ctx.fillStyle = getCss("--color-text-secondary");
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    counts.forEach((n, i) => {
+      if (n == null) return;
+      // Highest (smallest y) bar top across every series for this candidate.
+      let topY = Infinity;
+      chart.data.datasets.forEach((_ds, di) => {
+        const el = chart.getDatasetMeta(di).data[i] as { y?: number } | undefined;
+        if (el && typeof el.y === "number" && el.y < topY) topY = el.y;
+      });
+      if (!Number.isFinite(topY)) return;
+      const labelY = Math.max(topY - 4, chartArea.top + 10);
+      ctx.fillText(String(n), xScale.getPixelForValue(i), labelY);
+    });
+    ctx.restore();
+  },
+};
+
+// Stable identity — passing a fresh array each render churns the chart.
+const CHART_PLUGINS = [sampleCountPlugin];
+
+// Always lay out at least this many columns. A 1–2 candidate round would
+// otherwise stretch each bar across the whole frame; padding to a fixed
+// floor keeps bars a consistent narrow width and left-aligned, with the
+// surplus slots rendered as empty columns on the right.
+const MIN_SLOTS = 8;
 
 // Pre-projected bar slot. Origin, historical rounds, and the in-flight
 // current round all collapse to the same shape — FitnessPanel handles the
@@ -23,6 +72,8 @@ export interface BarSlot {
   composite: number | null;
   whatif: number | null;
   started: boolean;     // false = blank slot, true = scored or scoring
+  nSamples: number | null;   // samples the metric was computed over (null = unknown)
+  nExpected: number | null;  // full sample budget; set only when < nSamples is possible
   candidateId?: string;
   round?: number;
   isWinner?: boolean;
@@ -45,23 +96,35 @@ export function FitnessChart({
   selectedKey,
   onSelect,
 }: Props) {
-  const labels = useMemo(() => bars.map((b) => b.label), [bars]);
+  // Padded to MIN_SLOTS — surplus slots carry an empty label and render
+  // as blank columns; the real candidates fill from the left.
+  const labels = useMemo(() => {
+    const ls = bars.map((b) => b.label);
+    while (ls.length < MIN_SLOTS) ls.push("");
+    return ls;
+  }, [bars]);
 
   // Two parallel arrays per series: *Raw drives the tooltip; *Plot pushes
   // null → 0 only for bars whose scoring has begun (so `minBarLength`
   // paints a stub). Unstarted bars stay null so chart.js leaves the slot
   // blank — distinguishing "still computing" from "not yet started".
+  // Sized to the padded slot count; padding slots stay null (no bar).
   const { accRaw, compRaw, whatifRaw, accPlot, compPlot, whatifPlot } = useMemo(() => {
-    const aR = bars.map((b) => b.accuracy);
-    const cR = bars.map((b) => b.composite);
-    const wR = bars.map((b) => b.whatif);
+    const aR: (number | null)[] = [];
+    const cR: (number | null)[] = [];
+    const wR: (number | null)[] = [];
+    for (let i = 0; i < labels.length; i++) {
+      aR.push(bars[i]?.accuracy ?? null);
+      cR.push(bars[i]?.composite ?? null);
+      wR.push(bars[i]?.whatif ?? null);
+    }
     const coerce = (v: number | null, i: number): number | null =>
-      v == null ? (bars[i].started ? 0 : null) : v;
+      v == null ? (bars[i]?.started ? 0 : null) : v;
     return {
       accRaw: aR, compRaw: cR, whatifRaw: wR,
       accPlot: aR.map(coerce), compPlot: cR.map(coerce), whatifPlot: wR.map(coerce),
     };
-  }, [bars]);
+  }, [bars, labels]);
 
   // Per-bar border overlay — picks out the bar matching the shared
   // SelectionContext. Driven by --color-selection (set in globals.css)
@@ -172,15 +235,26 @@ export function FitnessChart({
       tooltip: {
         callbacks: {
           label: (ctx) => tooltipFor(String(ctx.dataset.label ?? ""), ctx.dataIndex),
+          footer: (items) => {
+            const idx = items[0]?.dataIndex;
+            if (idx == null) return "";
+            const n = bars[idx]?.nSamples;
+            if (n == null) return "";
+            const exp = bars[idx]?.nExpected;
+            return exp != null && exp !== n
+              ? `${n} of ${exp} samples scored`
+              : `${n} sample${n === 1 ? "" : "s"} scored`;
+          },
         },
       },
+      sampleCount: { counts: bars.map((b) => b.nSamples) },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [themeKey, accRaw, compRaw, whatifRaw, rotate, bars, selectedKey, onSelect]);
 
   return (
     <div className="fitness-chart-frame">
-      <Bar key={themeKey} data={data} options={options} />
+      <Bar key={themeKey} data={data} options={options} plugins={CHART_PLUGINS} />
     </div>
   );
 }

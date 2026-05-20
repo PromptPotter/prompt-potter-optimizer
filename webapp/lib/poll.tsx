@@ -40,6 +40,9 @@ export interface DashboardSnapshot {
     };
   };
   origin_accuracy?: number;
+  // Sample count behind the origin score — drives the C0 bar's over-bar
+  // label live, before round 1's file lands on disk.
+  origin_samples?: number;
   evaluators?: unknown[];
   scoring?: unknown;
   // Set on ``sample_started``, cleared on ``sample_scored``. The dataset

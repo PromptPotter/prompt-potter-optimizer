@@ -24,6 +24,8 @@ interface HistoricalCandidate {
   evaluators?: Record<string, number>;
   invalid?: boolean;
   is_winner?: boolean;
+  scored_samples?: number;
+  expected_samples?: number;
 }
 
 interface HistoricalRound {
@@ -283,6 +285,22 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
       );
       if (firstWithOrigin) originAccuracy = firstWithOrigin.origin_accuracy ?? null;
     }
+    // Origin scores the full set every time. Prefer the live dashboard's
+    // `origin_samples` (written at INIT:exit, before round 1's file lands so
+    // C0 carries a count during the very first round); fall back to a later
+    // candidate's `expected_samples` once history is on disk.
+    let originSamples: number | null = null;
+    const dashOriginSamples = (dash as { origin_samples?: number } | null)?.origin_samples;
+    if (typeof dashOriginSamples === "number" && dashOriginSamples > 0) {
+      originSamples = dashOriginSamples;
+    } else {
+      for (const h of history) {
+        for (const c of h.candidate_scores ?? []) {
+          if (typeof c.expected_samples === "number") { originSamples = c.expected_samples; break; }
+        }
+        if (originSamples != null) break;
+      }
+    }
     if (originAccuracy != null || history.length > 0 || inflightCandidates.length > 0) {
       out.push({
         key: "C0",
@@ -291,6 +309,8 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
         composite: null,
         whatif: null,
         started: originAccuracy != null,
+        nSamples: originSamples,
+        nExpected: null,
       });
     }
 
@@ -310,6 +330,8 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
           composite: comp,
           whatif: useComposite && comp != null ? comp : correctedFromEvaluators(ev, selected, rows),
           started: acc != null || comp != null || Object.keys(ev).length > 0,
+          nSamples: typeof c.scored_samples === "number" ? c.scored_samples : null,
+          nExpected: typeof c.expected_samples === "number" ? c.expected_samples : null,
           candidateId: c.candidate_id ?? `r${roundNum}_${i}`,
           round: roundNum,
           isWinner: !!c.is_winner,
@@ -343,6 +365,8 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
             typeof c.stats?.accuracy === "number" ||
             typeof c.stats?.composite_fitness === "number" ||
             Object.keys(ev).length > 0,
+          nSamples: c.samples?.length ?? null,
+          nExpected: null,
           candidateId: `r${currentRound}_${i}`,
           round: currentRound,
           isWinner: false,

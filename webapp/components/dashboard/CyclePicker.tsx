@@ -1,50 +1,26 @@
 "use client";
-import { useEffect, useState } from "react";
-import { fetchCycles, type CycleListEntry } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
+import type { CycleListEntry } from "@/lib/api";
 
-interface Props {
-  cycleId: string | null;
-  onChange: (id: string) => void;
-}
+// Inline campaign picker for the dashboard breadcrumb. The breadcrumb text
+// becomes a `<select>` styled to read as text — the operator clicks the
+// cycle id and gets a native dropdown grouped by dataset_name. Native
+// control = free keyboard nav + click-outside-to-close + a11y.
+//
+// Campaign list, active pointer, and the current selection all come from
+// the shared workspace context — no independent fetch, no manual refresh
+// button: the workspace poll keeps the list current.
+export function CyclePicker() {
+  const { cycleId, cycles, cyclesLoaded, cyclesError, activeCycleId, selectCycle } =
+    useWorkspace();
 
-// Inline picker. The breadcrumb text becomes a `<select>` styled to read
-// as text — the operator clicks the cycle id and gets a native dropdown
-// grouped by dataset_name. Native control = free keyboard nav + click-
-// outside-to-close + a11y. Refresh button next to it picks up new cycles
-// minted by the CLI mid-session.
-export function CyclePicker({ cycleId, onChange }: Props) {
-  const [cycles, setCycles] = useState<CycleListEntry[] | null>(null);
-  const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  // Bumped to trigger a refetch — used by the manual refresh button and the
-  // window-focus listener. Keeping the fetch inside the effect body (rather
-  // than a useCallback) avoids the eslint react-hooks/set-state-in-effect
-  // false positive that fires when an effect calls a memoized setState'd fn.
-  const [refreshTick, setRefreshTick] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetchCycles();
-        if (cancelled) return;
-        setCycles(r.cycles);
-        setActiveCycleId(r.active_cycle_id);
-        setErr(null);
-      } catch (e) {
-        if (!cancelled) setErr((e as Error).message);
-      }
-    })();
-    const onFocus = () => setRefreshTick((t) => t + 1);
-    window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [refreshTick]);
-
-  if (err) return <span className="cycle-picker-err">campaigns: {err}</span>;
-  if (!cycles || cycles.length === 0) {
+  if (cyclesError && cycles.length === 0) {
+    return <span className="cycle-picker-err">campaigns: {cyclesError}</span>;
+  }
+  if (!cyclesLoaded) {
+    return <span>{cycleId || "loading…"}</span>;
+  }
+  if (cycles.length === 0) {
     return <span>{cycleId || "no campaigns"}</span>;
   }
 
@@ -70,7 +46,7 @@ export function CyclePicker({ cycleId, onChange }: Props) {
     <span className="cycle-picker">
       <select
         value={cycleId ?? ""}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => selectCycle(e.target.value)}
         aria-label="Switch campaign"
       >
         {!selectedKnown && cycleId && (
@@ -89,15 +65,6 @@ export function CyclePicker({ cycleId, onChange }: Props) {
           </optgroup>
         ))}
       </select>
-      <button
-        type="button"
-        className="cycle-picker-refresh"
-        onClick={() => setRefreshTick((t) => t + 1)}
-        title="Refresh campaign list"
-        aria-label="Refresh campaign list"
-      >
-        ↻
-      </button>
     </span>
   );
 }

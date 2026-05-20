@@ -1,11 +1,11 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchCycles, type CycleListEntry, type SiblingKind } from "@/lib/api";
+import { type CycleListEntry, type SiblingKind } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
 import { shortFamilyTail } from "@/lib/ids";
 import { TERMS } from "@/lib/terms";
 
 interface Props {
-  cycleId: string | null;
   onSelectCycle: (id: string) => void;
   onNewCycle: () => void;
   collapsed: boolean;
@@ -123,12 +123,10 @@ function saveCollapsed(s: Set<string>) {
   }
 }
 
-export function Sidebar({ cycleId, onSelectCycle, onNewCycle, collapsed, onToggleCollapse }: Props) {
-  const [cycles, setCycles] = useState<CycleListEntry[] | null>(null);
-  const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
-  // Bumped manually and on `window` focus to pick up cycles the CLI minted
-  // in another terminal. No periodic poll — the list changes rarely.
-  const [tick, setTick] = useState(0);
+export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse }: Props) {
+  // Campaign list + active pointer + current selection all come from the
+  // shared workspace context (one poll for the whole app).
+  const { cycleId, cycles, cyclesLoaded, activeCycleId } = useWorkspace();
   // Family-collapse state — families with children expand by default
   // (operators want to see what's there), so we persist the families the
   // operator has explicitly collapsed instead of the ones they've expanded.
@@ -142,27 +140,7 @@ export function Sidebar({ cycleId, onSelectCycle, onNewCycle, collapsed, onToggl
     setCollapsedFamilies(loadCollapsed());
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetchCycles();
-        if (cancelled) return;
-        setCycles(r.cycles);
-        setActiveCycleId(r.active_cycle_id);
-      } catch {
-        // silent — sidebar degrades to nav-only when /cycles is unreachable
-      }
-    })();
-    const onFocus = () => setTick((t) => t + 1);
-    window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [tick]);
-
-  const families = useMemo(() => groupByFamily(cycles ?? []), [cycles]);
+  const families = useMemo(() => groupByFamily(cycles), [cycles]);
 
   // Auto-expand the family that contains the active/selected cycle. Map
   // either cycleId or activeCycleId to its family-root and force-expand —
@@ -263,23 +241,14 @@ export function Sidebar({ cycleId, onSelectCycle, onNewCycle, collapsed, onToggl
       <div className="cycle-library">
         <div className="cycle-library-head">
           <span>Campaigns</span>
-          <button
-            type="button"
-            className="cycle-library-refresh"
-            onClick={() => setTick((t) => t + 1)}
-            title="Refresh campaign list"
-            aria-label="Refresh campaign list"
-          >
-            ↻
-          </button>
         </div>
-        {cycles === null && <div className="cycle-library-note">loading…</div>}
-        {cycles !== null && families.length === 0 && (
+        {!cyclesLoaded && <div className="cycle-library-note">loading…</div>}
+        {cyclesLoaded && families.length === 0 && (
           <div className="cycle-library-note">
             None on disk yet — run <code>python -m promptpotter new &lt;dataset&gt;</code>.
           </div>
         )}
-        {cycles !== null && families.length > 0 && (
+        {cyclesLoaded && families.length > 0 && (
           <ul className="cycle-library-list">
             {families.map((fam) => {
               const isOpen = !collapsedFamilies.has(fam.root.cycle_id);

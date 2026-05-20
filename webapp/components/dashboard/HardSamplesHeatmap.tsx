@@ -71,6 +71,10 @@ function liveMeasurements(
   return out;
 }
 
+// Hard-samples heat-map. Collapsed: a compact resizable badge — one tile
+// per sample in live Rasch difficulty order, green = mostly hit, red =
+// mostly miss, dark = no measurements. Clicking the badge expands the full
+// HardSamplesTable; the bottom-edge grip (hover to reveal) resizes it.
 export function HardSamplesHeatmap({
   dash,
   dashRound,
@@ -114,6 +118,27 @@ export function HardSamplesHeatmap({
     }
     return out;
   }, [archivePerSample, dash, dashRound]);
+
+  // Tile order — mirror the optimizer's live difficulty sort. Follow
+  // ``dash.hard_sample_order`` (the adaptive picker's expected order) when
+  // it's a non-empty array; samples missing from it sink to the end by
+  // sample_id. Otherwise fall back to ``datasetItems`` order (the /preview
+  // API's static Rasch miss-prob sort).
+  const hardOrder = dash?.hard_sample_order;
+  const sortedItems = useMemo(() => {
+    if (Array.isArray(hardOrder) && hardOrder.length > 0) {
+      const rank = new Map<number, number>();
+      for (let i = 0; i < hardOrder.length; i++) rank.set(hardOrder[i], i);
+      const sink = hardOrder.length;
+      return [...datasetItems].sort((a, b) => {
+        const ra = rank.get(a.sample_id) ?? sink;
+        const rb = rank.get(b.sample_id) ?? sink;
+        if (ra !== rb) return ra - rb;
+        return a.sample_id - b.sample_id;
+      });
+    }
+    return datasetItems;
+  }, [datasetItems, hardOrder]);
 
   if (datasetItems.length === 0) return null;
 
@@ -161,10 +186,10 @@ export function HardSamplesHeatmap({
           onClick={() => setExpanded(true)}
           aria-expanded={false}
           aria-label={`Expand sample heat-map. ${summary}.`}
-          title={summary}
+          title={`${summary} — click to expand · drag the bottom edge to resize`}
         >
           <span className="hs-heat-mini" aria-hidden="true">
-            {datasetItems.map((it) => {
+            {sortedItems.map((it) => {
               const ms = perSample.get(it.sample_id);
               let cls: "hit" | "miss" | "none" = "none";
               if (ms && ms.length > 0) {

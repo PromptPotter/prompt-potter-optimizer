@@ -1,7 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import {
-  fetchActive,
   fetchActiveDatasetName,
   fetchCycleFile,
   fetchDatasetPipeline,
@@ -19,6 +18,7 @@ import {
   type DashboardSnapshot,
   type RoundFileDoc,
 } from "@/lib/poll";
+import { useWorkspace } from "@/lib/workspace";
 import { applyChartDefaults } from "@/lib/theme";
 import { Chart as ChartJS } from "chart.js";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -49,34 +49,22 @@ import { ComparePane } from "@/components/compare/ComparePane";
 import type { PipelineDoc, PipelineView } from "@/components/workflow/types";
 
 export function DashboardPane() {
-  const [cycleId, setCycleId] = useState<string | null>(null);
-  // Auto-follow the server's active cycle pointer until the operator picks
-  // one manually. URL ?cycle=… deep-link counts as a manual pick (set on
-  // mount in the initial-fetch effect below).
-  const [autoFollow, setAutoFollow] = useState(true);
+  // `cycleId` is owned by WorkspaceProvider (the single campaign-identity
+  // source of truth) — this only forwards it into the dashboard's
+  // per-cycle data stream.
+  const { cycleId } = useWorkspace();
   return (
     <CycleStreamProvider cycleId={cycleId}>
-      <DashboardPaneInner
-        cycleId={cycleId}
-        setCycleId={setCycleId}
-        autoFollow={autoFollow}
-        setAutoFollow={setAutoFollow}
-      />
+      <DashboardPaneInner />
     </CycleStreamProvider>
   );
 }
 
-function DashboardPaneInner({
-  cycleId,
-  setCycleId,
-  autoFollow,
-  setAutoFollow,
-}: {
-  cycleId: string | null;
-  setCycleId: (id: string | null) => void;
-  autoFollow: boolean;
-  setAutoFollow: (v: boolean) => void;
-}) {
+function DashboardPaneInner() {
+  // Campaign identity comes from the workspace context — no local cycle
+  // resolution, no independent /active poll.
+  const { cycleId, sessionId, activeError, following, selectCycle, followActive } =
+    useWorkspace();
   // Replit-style sub-tabs (Chat / Dashboard / Files) scoped to the
   // currently-selected cycle. The sidebar is persistent across all
   // three. Default = chat: that's where new cycles get conceived and
@@ -86,7 +74,6 @@ function DashboardPaneInner({
   // chat dodges that path. Revisit when we untangle the dashboard
   // first-render sequence.
   const [tab, setTab] = useState<Tab>("chat");
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<PipelineDoc | null>(null);
@@ -109,29 +96,12 @@ function DashboardPaneInner({
   const [archivePerSample, setArchivePerSample] = useState<Map<number, MeasurementDot[]>>(
     () => new Map(),
   );
-  // Hard-sample view scope — workspace = cross-cycle archive, campaign =
-  // this cycle only. Default workspace (matches the original always-archive
-  // behaviour); persisted in localStorage so the operator's choice survives
-  // reloads. Re-fetches the dataset preview when toggled.
-  const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("workspace");
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem("promptpotter.hardSamples.scope");
-      if (raw === "campaign" || raw === "workspace") setHardSamplesScope(raw);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-  const updateHardSamplesScope = useCallback((next: HardSamplesScope) => {
-    setHardSamplesScope(next);
-    try {
-      window.localStorage.setItem("promptpotter.hardSamples.scope", next);
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  // Hard-sample view scope — campaign = this cycle only (default), workspace
+  // = cross-cycle archive. Clicking the heat-map badge toggles it; the
+  // dataset preview re-fetches on change. Not persisted — always opens on
+  // campaign.
+  const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("campaign");
   const [themeKey, setThemeKey] = useState<string>("init");
-  const [activeError, setActiveError] = useState<string | null>(null);
   // Edit mode — off by default; gates Stop run + Fork-from-here. Never
   // persisted across reloads (no URL param, no localStorage) so the
   // operator never finds risky affordances quietly enabled.
@@ -174,83 +144,6 @@ function DashboardPaneInner({
   // success/age into "live"/"stale"/"offline" — reuse that signal instead
   // of inventing a second one.
   const isLive = dashState.status === "live";
-
-  // Initial cycle selection + auto-follow poll. Precedence on mount:
-  //   URL `?cycle=…` > /api/v1/active > null
-  // A URL deep-link pins the view (autoFollow flipped off on first tick);
-  // otherwise we track the server's active pointer every 3 s so a CLI-side
-  // mint / fork moves the main panel in lock-step with the sidebar's orange
-  // dot. The sidebar (CyclePicker) already follows active_cycle_id; this
-  // closes the last source-of-truth gap between it and the dashboard.
-  //
-  // Effect deps include `cycleId` + `autoFollow` so each manual pick / auto-
-  // follow swap rebuilds the interval with fresh closures. That's one extra
-  // fetch per rare cycle change — cheap.
-  //
-  // `sessionId` still comes from /active (the workspace pointer is
-  // CLI-owned and doesn't move when the operator browses a different cycle).
-  useEffect(() => {
-    let cancelled = false;
-    const urlCycle =
-      typeof window !== "undefined"
-        ? new URLSearchParams(window.location.search).get("cycle")
-        : null;
-    const tick = async () => {
-      try {
-        const a = await fetchActive();
-        if (cancelled) return;
-        setSessionId(a.session_id);
-        setActiveError(null);
-        if (cycleId === null) {
-          // Mount path: seed cycleId from /active (or the URL pin). A URL
-          // deep-link counts as a manual pick — drop out of auto-follow.
-          if (urlCycle) setAutoFollow(false);
-          setCycleId(urlCycle || a.cycle_id);
-        } else if (autoFollow && a.cycle_id && a.cycle_id !== cycleId) {
-          // Server-side active pointer moved (CLI mint / fork) while we
-          // were still auto-following — swing the view to follow it.
-          setCycleId(a.cycle_id);
-        }
-      } catch (e) {
-        if (cancelled) return;
-        if (cycleId === null && urlCycle) {
-          setAutoFollow(false);
-          setCycleId(urlCycle); // honour deep-link even when no active session
-        } else if (cycleId === null) {
-          setActiveError((e as Error).message);
-        }
-      }
-    };
-    void tick();
-    const handle = window.setInterval(() => void tick(), 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(handle);
-    };
-  }, [setCycleId, setAutoFollow, cycleId, autoFollow]);
-
-  // Keep ?cycle=… in the URL so reloads stick to the currently-viewed cycle.
-  // replaceState (not pushState) — switching cycles isn't a navigation event,
-  // we don't want a back-button entry per pick.
-  useEffect(() => {
-    if (typeof window === "undefined" || !cycleId) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("cycle") === cycleId) return;
-    params.set("cycle", cycleId);
-    window.history.replaceState(null, "", `?${params.toString()}`);
-  }, [cycleId]);
-
-  // Picker handoff. SelectionProvider auto-clears its slot on cycleId
-  // change (prev-prop pattern); no need to plumb that here. Picking a
-  // cycle manually pins the view — `autoFollow` flips off so subsequent
-  // CLI-side mints don't yank the operator off whatever they're inspecting.
-  const handleCycleChange = useCallback(
-    (next: string) => {
-      setAutoFollow(false);
-      setCycleId(next);
-    },
-    [setCycleId, setAutoFollow],
-  );
 
   // One-shot pipeline (topology) lookup
   useEffect(() => {
@@ -322,9 +215,8 @@ function DashboardPaneInner({
   }, [cycleId]);
 
   // Dataset preview — one fetch per cycle, threaded down through ChatPane to
-  // HardSamplesHeatmap → HardSamplesTable. Owning it here means a tab swap
-  // (New Job ↔ View Results) doesn't re-fetch, and the heat-map and table
-  // both read the same data instead of each running their own fetch chain.
+  // HardSamplesHeatmap. Owning it here means a tab swap (New Job ↔ View
+  // Results) doesn't re-fetch instead of running its own fetch chain.
   //
   // Bounded retry on transient failure: the active-cycle poll races
   // `python -m promptpotter new <ds>` — the dashboard sees the new cycleId
@@ -345,15 +237,24 @@ function DashboardPaneInner({
           return;
         }
         setDatasetName(name);
-        const [preview, seriesRes] = await Promise.all([
-          fetchDatasetPreview(name, 1000, ac.signal, hardSamplesScope, cycleId),
-          fetchMeasurementSeries(name, 1000, ac.signal, hardSamplesScope, cycleId).catch(
-            // Campaign scope before round 1 returns 404 (no
-            // hard_samples_campaign.json yet) — fall back to an empty map
-            // rather than dropping the whole preview alongside it.
-            () => null,
-          ),
-        ]);
+        // The sample roster is dataset-wide — fetch it at workspace scope
+        // so the heat-map always renders, even on a cycle with no
+        // hard_samples_campaign.json yet (campaign-scope /preview 404s).
+        const preview = await fetchDatasetPreview(name, 1000, ac.signal, "workspace", cycleId);
+        // Cell evidence follows the campaign ⇄ workspace toggle. Campaign
+        // scope is empty on a cycle with no rounds — fall back to the
+        // cross-cycle archive so the badge still shows hit/miss colours.
+        let seriesRes = await fetchMeasurementSeries(
+          name, 1000, ac.signal, hardSamplesScope, cycleId,
+        ).catch(() => null);
+        if (
+          (!seriesRes || seriesRes.items.length === 0) &&
+          hardSamplesScope !== "workspace"
+        ) {
+          seriesRes = await fetchMeasurementSeries(
+            name, 1000, ac.signal, "workspace", cycleId,
+          ).catch(() => null);
+        }
         if (cancelled) return;
         setDatasetItems(preview.items);
         setDatasetTrainCount(preview.train_count);
@@ -413,9 +314,8 @@ function DashboardPaneInner({
     <SelectionProvider cycleId={cycleId}>
     <div className={`shell${tab === "chat" ? " chat-mode sidebar-hidden" : sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <Sidebar
-        cycleId={cycleId}
         onSelectCycle={(id) => {
-          handleCycleChange(id);
+          selectCycle(id);
           setTab("dashboard");
         }}
         onNewCycle={() => setTab("chat")}
@@ -453,7 +353,7 @@ function DashboardPaneInner({
             datasetTestCount={datasetTestCount}
             archivePerSample={archivePerSample}
             hardSamplesScope={hardSamplesScope}
-            onHardSamplesScopeChange={updateHardSamplesScope}
+            onHardSamplesScopeChange={setHardSamplesScope}
             targetPipelineView={targetPipelineView}
             targetConnector={targetConnector}
           />
@@ -464,7 +364,17 @@ function DashboardPaneInner({
                 <div className="page-header">
                   <div className="breadcrumb">
                     Campaign »{" "}
-                    <CyclePicker cycleId={cycleId} onChange={handleCycleChange} />
+                    <CyclePicker />
+                    {!following && (
+                      <button
+                        type="button"
+                        className="follow-active-btn"
+                        onClick={followActive}
+                        title="Pinned to this campaign. Click to resume following the campaign the CLI is currently running."
+                      >
+                        ↪ Follow active
+                      </button>
+                    )}
                     {isLive && (
                       <span className="live-badge" title="Campaign is actively running — dashboard updated in the last 60s">
                         ● Live
@@ -489,7 +399,8 @@ function DashboardPaneInner({
                   cycleId={cycleId}
                   themeKey={themeKey}
                   rounds={dashState.rounds}
-                  onSelectCycle={handleCycleChange}
+                  onSelectCycle={selectCycle}
+                  isLive={isLive}
                 />
               </NarrowSpine>
               <NarrowSpine>
@@ -546,6 +457,7 @@ function NowRow({
   themeKey,
   rounds,
   onSelectCycle,
+  isLive,
 }: {
   dash: DashboardSnapshot | null;
   dashRound: number | null;
@@ -554,6 +466,7 @@ function NowRow({
   themeKey: string;
   rounds: RoundFileDoc[];
   onSelectCycle: (id: string) => void;
+  isLive: boolean;
 }) {
   const { node, setNode } = useSelection();
   return (
@@ -566,7 +479,7 @@ function NowRow({
       <div className="dash-row-verdict">
         <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
         <LineageTree dash={dash} cycleId={cycleId} onSelectCycle={onSelectCycle} />
-        <WorkflowCanvas pipeline={pipeline} dash={dash} />
+        <WorkflowCanvas pipeline={pipeline} dash={dash} isLive={isLive} />
       </div>
       {node && (
         <OptimizerNodeDetail

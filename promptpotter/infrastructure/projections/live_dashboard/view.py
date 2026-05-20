@@ -195,6 +195,7 @@ class LiveDashboardView(DerivedView):
             # was written. Backfill on load so the webapp's LineageTree
             # doesn't render "origin 0%" until the next INIT:exit fires.
             "origin_accuracy": r.get("origin_accuracy") or r.get("origin") or 0.0,
+            "origin_samples": r.get("origin_samples", 0),
             "best": r.get("best", 0.0),
             "current_acc": 0.0,
             "composite_fitness_formula": r.get("composite_fitness_formula"),
@@ -532,6 +533,9 @@ class LiveDashboardView(DerivedView):
             # nothing updated it). Keep both in sync at the single write
             # site so subscribers never see a drift between them.
             s["origin_accuracy"] = cycle.tracking.current_accuracy
+            # Sample count behind the origin score — the webapp prints it
+            # above the C0 bar before round 1's file exists on disk.
+            s["origin_samples"] = len(cycle.tracking.origin_per_sample_results)
             self.patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self.patience_max}"
             if view is not None:

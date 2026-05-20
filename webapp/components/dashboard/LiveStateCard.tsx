@@ -5,7 +5,9 @@ interface Props {
   dash: DashboardSnapshot | null;
 }
 
-// Fields surfaced elsewhere (header, payload block, dedicated cards, workflow toolbar).
+// Fields surfaced elsewhere (header, payload block, dedicated cards, workflow
+// toolbar) — or withheld from the UI entirely. `patience` is withheld pending
+// a redesign that gives it one dedicated location.
 const SHOWN_ELSEWHERE = new Set([
   "cycle_id", "wallclock_serialized_at",
   "best", "total_queries_scored", "last_query_elapsed_s",
@@ -13,10 +15,10 @@ const SHOWN_ELSEWHERE = new Set([
   "current_round",
   "current_query_payload",
   "state", "round", "candidate", "query",
+  "patience",
 ]);
 
 const KNOWN_ORDER = [
-  "patience",
   "origin", "current_acc", "n_variants", "sp_budget_ttest",
   "total_backend_calls", "error_count", "degraded_count", "backend_retry_count",
   "state_since", "stop_reason",

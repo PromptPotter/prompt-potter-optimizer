@@ -21,9 +21,12 @@ const EDGE_VARIANTS: Record<string, { color: ColorKey; dash: string; marker: str
 interface Props {
   pipeline: PipelineDoc | null;
   dash: DashboardSnapshot | null;
+  // Real liveness from the cycle stream (poll age), not `dash` truthiness —
+  // a frozen campaign still has a `dash` snapshot but is not live.
+  isLive: boolean;
 }
 
-export function WorkflowCanvas({ pipeline, dash }: Props) {
+export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
   const view = pipeline?.view;
   const activeId = phaseToNodeId(dash?.state);
   // Node selection rides the shared SelectionContext so the Now lane can
@@ -80,7 +83,9 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
     <div className="workflow-card">
       <div className="workflow-toolbar">
         <span style={{ flex: 1 }}>Optimizer</span>
-        <span style={{ color: dash ? colors.ok : colors.txt }}>● {dash ? "live" : "pending"}</span>
+        <span style={{ color: isLive ? colors.ok : colors.txt }}>
+          ● {isLive ? "live" : dash ? "idle" : "pending"}
+        </span>
         {(() => {
           const r = roundOf(dash);
           return r != null && r !== 0 ? (

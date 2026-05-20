@@ -1,6 +1,7 @@
 "use client";
 import { TERMS } from "@/lib/terms";
 import { roundOf, type DashboardSnapshot, type StatusKind } from "@/lib/poll";
+import { cycleStatusLabel } from "@/lib/cycle-status";
 import { StopButton } from "@/components/dashboard/StopButton";
 
 // Pinned status row. Visible on every tab (Chat / Dashboard / Files) so the
@@ -115,8 +116,15 @@ export function StatusBar({
 }: Props) {
   const tip = termKey ? TERMS[termKey] : "";
   const round = roundOf(dash);
-  const patience = (dash as { patience?: string } | null)?.patience;
-  const phase = (dash?.state as string | undefined) ?? null;
+  // One canonical status word — collapses dashboard `state`/`stop_reason`
+  // to the same vocabulary the cycle list (index.json `status`) uses, so a
+  // stopped+interrupted cycle reads "interrupted" here too, not "stopped".
+  const phase = dash?.state
+    ? cycleStatusLabel(
+        dash.state as string,
+        (dash as { stop_reason?: string } | null)?.stop_reason,
+      )
+    : null;
   const best = typeof dash?.best === "number" ? dash.best : null;
   const origin = typeof dash?.origin_accuracy === "number" ? dash.origin_accuracy : null;
   const delta = best != null && origin != null ? best - origin : null;
@@ -147,7 +155,6 @@ export function StatusBar({
       <span className="dash-strip-cell">
         <span className="dash-strip-label">round</span>
         <strong>{round != null ? `R${round}` : "—"}</strong>
-        {patience ? <span className="dash-strip-sub">· patience {patience}</span> : null}
         {phase ? <span className="dash-strip-sub">· {phase}</span> : null}
       </span>
       <span className="dash-strip-cell">
@@ -174,7 +181,7 @@ export function StatusBar({
         <span className="dash-strip-label">updated</span>
         <strong>{ageText(dash?.wallclock_serialized_at)}</strong>
       </span>
-      {cycleId ? <StopButton cycleId={cycleId} isLive={isLive} /> : null}
+      {cycleId && isLive ? <StopButton cycleId={cycleId} isLive={isLive} /> : null}
       <button
         type="button"
         className="dash-strip-jump"

@@ -127,11 +127,9 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .sidebar-cta:hover{background:var(--color-background-hover);border-color:var(--color-text-secondary)}
 /* Cycle library — chat-history-style list of every cycle on disk under
    the tenant. Active per CLI bullet-marked; currently-viewed highlighted.
-   Refresh on focus picks up cycles minted by a parallel CLI run. */
+   The list is kept current by the shared workspace poll. */
 .cycle-library{margin-top:14px;padding:0 8px;border-top:0.5px solid var(--color-border-tertiary);padding-top:10px;display:flex;flex-direction:column;min-height:0;flex:1}
-.cycle-library-head{display:flex;align-items:center;justify-content:space-between;padding:0 8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
-.cycle-library-refresh{background:transparent;border:0;color:var(--color-text-tertiary);cursor:pointer;font-size:14px;padding:0 4px;line-height:1}
-.cycle-library-refresh:hover{color:var(--color-text-primary)}
+.cycle-library-head{display:flex;align-items:center;padding:0 8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
 .cycle-library-note{padding:4px 8px;font-size:12px;color:var(--color-text-tertiary)}
 .cycle-library-note code{font-size:11px}
 .cycle-library-list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1}
@@ -181,6 +179,11 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 /* Live badge in the breadcrumb — passive indicator that the dashboard
    poll is seeing fresh writes. dashState.status === "live" drives it. */
 .live-badge{display:inline-flex;align-items:center;gap:3px;margin-left:8px;padding:1px 6px;border-radius:10px;background:var(--color-status-success,#16a34a);color:#fff;font-size:10px;font-weight:500;letter-spacing:0.03em}
+/* Breadcrumb affordance shown only while the view is pinned to a campaign
+   (workspace `following` is false) — one click resumes following the
+   CLI's active campaign. */
+.follow-active-btn{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;border-radius:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);font-family:inherit;font-size:11px;cursor:pointer;transition:color .15s,border-color .15s}
+.follow-active-btn:hover{color:var(--color-accent);border-color:var(--color-accent)}
 /* Modal — used by Fork and Stop confirmations. Backdrop covers the
    whole viewport; card sits centered. Action buttons render in given
    order (rightmost = primary by convention). */
@@ -236,12 +239,15 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
    container. Reuses .status-bar's color tokens (live/stale/offline) so the
    palette stays linked, but lays the row out as a flex strip with named
    cells instead of a single text run. */
-.dash-strip{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;flex-wrap:nowrap;
+/* flex-wrap:wrap — the strip is global chrome (rendered in <main>, outside
+   the `content` container), so the container-query relief below never
+   fires for it. Wrapping lets cells drop to a second line instead of
+   overlapping into each other on a mid-width viewport. */
+.dash-strip{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;
   padding:8px 14px;margin:0 0 14px;border-radius:0;border-left:0;border-right:0;
   background:var(--color-background-primary);
   border-top:0.5px solid var(--color-border-tertiary);
-  border-bottom:0.5px solid var(--color-border-tertiary);
-  overflow:hidden}
+  border-bottom:0.5px solid var(--color-border-tertiary)}
 .dash-strip.live{box-shadow:inset 3px 0 0 var(--color-success)}
 .dash-strip.stale{box-shadow:inset 3px 0 0 var(--color-warn)}
 .dash-strip.offline{box-shadow:inset 3px 0 0 var(--color-danger)}
@@ -375,8 +381,6 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .cycle-picker select{appearance:none;-webkit-appearance:none;background:var(--color-background-secondary,rgba(127,127,127,0.06));border:0;border-radius:4px;color:inherit;font:inherit;padding:3px 22px 3px 8px;margin:0;cursor:pointer;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:right 10px center,right 6px center;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
 .cycle-picker select:hover{color:var(--color-text-primary);background-color:var(--color-background-hover)}
 .cycle-picker select:focus{outline:none}
-.cycle-picker-refresh{background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:13px;padding:0 4px;line-height:1}
-.cycle-picker-refresh:hover{color:var(--color-text-primary)}
 .cycle-picker-err{color:var(--color-status-error,#c53030);font-size:13px}
 /* Lineage clickable nodes — hover/selected feedback so the operator
    sees which node feeds the ScoringInspector. */
@@ -836,95 +840,6 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .wf-hero-multi-node .node-label{font-size:10px;font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
 .wf-hero-multi-node .node-sub{font-size:9px;fill:var(--color-text-tertiary);font-family:var(--font-mono);pointer-events:none}
 .wf-hero-multi-tag{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--color-text-tertiary);text-align:center;padding-bottom:4px;font-family:var(--font-mono);opacity:.8}
-.hs-zone{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:24px;padding:0 8px}
-.hs-block{width:100%;max-width:1280px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:vertical;height:320px;min-height:200px;max-height:80vh}
-.hs-scroll{flex:1;min-height:0;overflow:auto}
-.hs-grid{display:grid;grid-auto-rows:min-content;background:var(--color-background-secondary)}
-.hs-header{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;padding:0 8px;height:30px;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border-tertiary);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600;user-select:none;overflow:hidden}
-.hs-header[data-align="right"]{justify-content:flex-end}
-.hs-header[data-align="center"]{justify-content:center}
-.hs-header.folded{padding:0 2px;justify-content:center}
-.hs-header.sorted{color:var(--color-accent)}
-.hs-header-label{background:transparent;border:0;cursor:pointer;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;padding:0;display:inline-flex;align-items:center;gap:4px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-.hs-header[data-align="right"] .hs-header-label{justify-content:flex-end}
-.hs-header[data-align="center"] .hs-header-label{justify-content:center}
-.hs-header-label:hover{color:var(--color-text-primary)}
-.hs-header.sorted .hs-header-label{color:var(--color-accent)}
-.hs-sort-mark{font-size:9px;opacity:.85}
-.hs-header-tools{display:flex;align-items:center;gap:1px;opacity:0;transition:opacity .12s;flex-shrink:0}
-.hs-header:hover .hs-header-tools{opacity:1}
-.hs-tool{background:transparent;border:0;font-size:11px;cursor:pointer;color:var(--color-text-tertiary);padding:2px 4px;border-radius:3px;line-height:1}
-.hs-tool:hover{background:rgba(var(--color-accent-rgb),0.10);color:var(--color-accent)}
-.hs-tool.on{color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.12)}
-.hs-resize{width:6px;align-self:stretch;margin-left:2px;cursor:col-resize;background:transparent;border-right:1px solid var(--color-border-tertiary);flex-shrink:0;touch-action:none}
-.hs-resize:hover{border-right-color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.10);border-right-width:2px}
-.hs-cell{padding:6px 10px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);border-bottom:1px solid var(--color-border-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;content-visibility:auto;contain-intrinsic-size:auto 26px;display:flex;align-items:center;min-width:0}
-.hs-cell[data-align="right"]{justify-content:flex-end;font-variant-numeric:tabular-nums}
-.hs-cell[data-align="center"]{justify-content:center}
-.hs-cell.wrapped{white-space:normal;overflow-wrap:anywhere;align-items:flex-start;padding:6px 10px}
-.hs-cell.folded{padding:0;color:transparent;cursor:pointer}
-.hs-cell.folded:hover{background:rgba(var(--color-accent-rgb),0.08)}
-.hs-cell.rank,.hs-header.rank{color:var(--color-text-tertiary);background:var(--color-background-primary)}
-.hs-cell.rank{font-variant-numeric:tabular-nums}
-.hs-cell.hs-cell-hit{color:var(--color-success);font-weight:600}
-.hs-cell.hs-cell-miss{color:var(--color-danger)}
-.hs-cell.hs-cell-cached{color:var(--color-text-tertiary)}
-.hs-cell.meas{padding:3px 6px;overflow:hidden}
-/* Roster grid: each row places its measurements on a shared ordinal axis
-   (one column per global ord) so vertically aligned cells represent the
-   same measurement across samples; empty cells leave blanks. Cells flex
-   into the column width — at most 8 px each (capped via inline
-   ``maxWidth``), down to MIN_CELL_PX vertical lines when the column is
-   too narrow for all cells at full size. Beyond that the strip
-   overflows and the sticky master scrollbar below scrolls every row in
-   sync; the native per-row scrollbar is hidden so only the master one
-   shows. ``gap`` is set inline (1 px with room, 0 px squeezed). */
-.hs-cell-meas-strip{display:grid;align-items:center;width:100%;min-width:0;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
-.hs-cell-meas-strip::-webkit-scrollbar{width:0;height:0;display:none}
-/* Single shared horizontal scrollbar for the Meas column. Stretches the
-   full natural strip width inside the wrap so the scrollbar's thumb
-   reflects how much of the heat-map is visible. */
-.hs-meas-master-scroll-wrap{position:sticky;bottom:0;z-index:3;background:var(--color-background-secondary);border-top:1px solid var(--color-border-tertiary)}
-.hs-meas-master-scroll{overflow-x:scroll;overflow-y:hidden;height:12px}
-.hs-meas-master-scroll-inner{height:1px}
-.hs-footer{padding:6px 10px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-primary);font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center;gap:12px}
-.hs-counts{font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap}
-.hs-reset{font-family:var(--font-mono);font-size:11px;background:transparent;border:1px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 8px;border-radius:4px;cursor:pointer}
-.hs-reset:hover{border-color:var(--color-accent);color:var(--color-accent)}
-/* Live-sort lock — when persisted.syncLive is on, header sort-cycle is
-   muted. Keep fold/wrap/resize affordances usable; only the label's
-   sort hint fades. */
-.hs-header.sort-locked .hs-header-label{color:var(--color-text-tertiary);cursor:default}
-.hs-header.sort-locked .hs-header-label:hover{color:var(--color-text-tertiary)}
-/* Auto-sort toggle — canonical checkbox on the left of the footer.
-   No chrome around the label; ``accent-color`` tints the native tick
-   to match the app palette so theme follows naturally. */
-.hs-sync-toggle{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);letter-spacing:.04em;cursor:pointer;user-select:none}
-.hs-sync-toggle input[type="checkbox"]{accent-color:var(--color-accent);margin:0;cursor:pointer}
-.hs-sync-toggle:hover{color:var(--color-text-primary)}
-/* Workspace / Campaign data-scope toggle — segmented control on the
-   footer's left side. Selecting Campaign hits the per-cycle
-   hard_samples_campaign.json; Workspace hits the cross-cycle archive. */
-.hs-scope-toggle{display:inline-flex;border:1px solid var(--color-border-tertiary);border-radius:4px;overflow:hidden;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em}
-.hs-scope-opt{background:transparent;border:0;color:var(--color-text-secondary);padding:3px 9px;cursor:pointer;border-right:1px solid var(--color-border-tertiary)}
-.hs-scope-opt:last-child{border-right:0}
-.hs-scope-opt:hover{color:var(--color-text-primary)}
-.hs-scope-opt.on{background:var(--color-accent);color:var(--color-background-primary)}
-/* Soft pulse for the row currently being scored. Marker is per-cell
-   (rows aren't wrapped in HardSamplesTable — every column is a direct
-   grid child), so the keyframe runs on each cell of the active row.
-   Background-only — text stays legible the whole cycle. */
-.hs-cell[data-running="true"]{animation:hs-soft-blink 1.4s ease-in-out infinite}
-@keyframes hs-soft-blink{0%,100%{background-color:transparent}50%{background-color:rgba(var(--color-accent-rgb),0.18)}}
-@media (prefers-reduced-motion:reduce){
-  .hs-cell[data-running="true"]{animation:none;background-color:rgba(var(--color-accent-rgb),0.12)}
-}
-.hs-popover-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px}
-.hs-popover{background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:10px;max-width:80vw;max-height:80vh;min-width:320px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
-.hs-popover-header{padding:10px 14px;border-bottom:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--color-text-secondary);letter-spacing:.04em}
-.hs-popover-header button{background:transparent;border:0;color:var(--color-text-tertiary);font-size:18px;cursor:pointer;padding:0 4px;line-height:1}
-.hs-popover-header button:hover{color:var(--color-accent)}
-.hs-popover-body{margin:0;padding:14px;overflow:auto;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);white-space:pre-wrap;word-break:break-word}
 .chat-grid{display:grid;grid-template-columns:minmax(0,600px) 360px;gap:24px;justify-content:center;flex:1;min-height:0;padding:0 20px}
 @media (max-width:980px){.chat-grid{grid-template-columns:1fr}}
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:620px;min-width:0}
@@ -1084,73 +999,108 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .family-tree-modal-body code{font-family:var(--font-mono,monospace);background:var(--color-background-hover);padding:1px 4px;border-radius:3px;font-size:12px}
 .family-tree-modal-error{font-size:12px;color:var(--color-status-error,#c53030);margin:0 0 12px}
 
-/* Hard-samples heat-map — full HardSamplesTable in both compact and
-   expanded states. Compact = small default height showing ~3 rows; the
-   .hs-block resize handle still works in both states. */
+/* Hard-samples heat-map. Collapsed: a compact resizable badge — one 4 px
+   tile per sample (matching the original badge) in live Rasch difficulty
+   order (green = mostly hit, red = mostly miss, dark = no measurements).
+   Standard layout ~10 tiles across × 3 down; drag the bottom-right corner
+   on either axis to resize — tiles keep their size, the grid reflows how
+   many show. The grip fades in on hover. Click to expand HardSamplesTable. */
 .hs-heat-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;margin-top:24px;padding:0 8px}
-.hs-heat-bar{display:flex;justify-content:flex-end;align-items:center;width:100%;max-width:1280px;font-size:12px;color:var(--color-text-secondary);font-family:var(--font-mono);gap:10px;padding:0 4px}
-.hs-heat-title{letter-spacing:.03em}
-.hs-heat-hit{color:var(--color-success);font-weight:600}
-.hs-heat-miss{color:var(--color-danger);font-weight:600}
-.hs-heat-toggle{background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:3px 10px;font-size:11px;cursor:pointer;font-family:inherit;letter-spacing:.04em}
-.hs-heat-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
+.hs-heat-mini-btn{position:relative;display:block;margin:0 auto;padding:3px;cursor:pointer;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;resize:both;width:57px;height:22px;min-width:30px;min-height:14px;max-width:90%;max-height:50vh;transition:border-color .12s,box-shadow .12s}
+.hs-heat-mini-btn:hover{border-color:var(--color-accent)}
+.hs-heat-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+/* Native resizer glyph hidden; a diagonal-line grip fades in on hover. */
+.hs-heat-mini-btn::-webkit-resizer{background:transparent}
+.hs-heat-mini-btn::after{content:"";position:absolute;right:1px;bottom:1px;width:5px;height:5px;background:repeating-linear-gradient(135deg,var(--color-accent) 0 1.5px,transparent 1.5px 3px);opacity:0;transition:opacity .12s;pointer-events:none}
+.hs-heat-mini-btn:hover::after{opacity:1}
+/* 4 px tiles; auto-fill so dragging the button on either axis reflows how
+   many tiles are visible without ever changing tile size. */
+.hs-heat-mini{display:grid;grid-template-columns:repeat(auto-fill,4px);grid-auto-rows:4px;gap:1px;align-content:start}
+.hs-heat-mini-cell{width:4px;height:4px;border-radius:1px;background:var(--color-background-tertiary)}
+.hs-heat-mini-cell.hit{background:var(--color-success)}
+.hs-heat-mini-cell.miss{background:var(--color-danger)}
+/* Expanded wrap — positions the Shrink FAB over the table's top-right corner. */
+.hs-expand-wrap{position:relative;width:100%;display:flex;justify-content:center}
+.hs-expand-wrap > .hs-zone{margin-top:0}
+.hs-heat-shrink-fab{position:absolute;top:5px;right:18px;z-index:5;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0.5px solid var(--color-border-tertiary);border-radius:4px;background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;transition:background .12s,color .12s,border-color .12s,box-shadow .12s}
+.hs-heat-shrink-fab:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
+.hs-heat-shrink-fab:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+/* --- Expanded view: full HardSamplesTable --- */
+.hs-zone{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:24px;padding:0 8px}
+.hs-block{width:100%;max-width:1280px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:vertical;height:320px;min-height:200px;max-height:80vh}
+.hs-scroll{flex:1;min-height:0;overflow:auto}
+.hs-grid{display:grid;grid-auto-rows:min-content;background:var(--color-background-secondary)}
+.hs-header{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;padding:0 8px;height:30px;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border-tertiary);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600;user-select:none;overflow:hidden}
+.hs-header[data-align="right"]{justify-content:flex-end}
+.hs-header[data-align="center"]{justify-content:center}
+.hs-header.folded{padding:0 2px;justify-content:center}
+.hs-header.sorted{color:var(--color-accent)}
+.hs-header-label{background:transparent;border:0;cursor:pointer;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;padding:0;display:inline-flex;align-items:center;gap:4px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.hs-header[data-align="right"] .hs-header-label{justify-content:flex-end}
+.hs-header[data-align="center"] .hs-header-label{justify-content:center}
+.hs-header-label:hover{color:var(--color-text-primary)}
+.hs-header.sorted .hs-header-label{color:var(--color-accent)}
+.hs-sort-mark{font-size:9px;opacity:.85}
+.hs-header-tools{display:flex;align-items:center;gap:1px;opacity:0;transition:opacity .12s;flex-shrink:0}
+.hs-header:hover .hs-header-tools{opacity:1}
+.hs-tool{background:transparent;border:0;font-size:11px;cursor:pointer;color:var(--color-text-tertiary);padding:2px 4px;border-radius:3px;line-height:1}
+.hs-tool:hover{background:rgba(var(--color-accent-rgb),0.10);color:var(--color-accent)}
+.hs-tool.on{color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.12)}
+.hs-resize{width:6px;align-self:stretch;margin-left:2px;cursor:col-resize;background:transparent;border-right:1px solid var(--color-border-tertiary);flex-shrink:0;touch-action:none}
+.hs-resize:hover{border-right-color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.10);border-right-width:2px}
+.hs-cell{padding:6px 10px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);border-bottom:1px solid var(--color-border-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;content-visibility:auto;contain-intrinsic-size:auto 26px;display:flex;align-items:center;min-width:0}
+.hs-cell[data-align="right"]{justify-content:flex-end;font-variant-numeric:tabular-nums}
+.hs-cell[data-align="center"]{justify-content:center}
+.hs-cell.wrapped{white-space:normal;overflow-wrap:anywhere;align-items:flex-start;padding:6px 10px}
+.hs-cell.folded{padding:0;color:transparent;cursor:pointer}
+.hs-cell.folded:hover{background:rgba(var(--color-accent-rgb),0.08)}
+.hs-cell.rank,.hs-header.rank{color:var(--color-text-tertiary);background:var(--color-background-primary)}
+.hs-cell.rank{font-variant-numeric:tabular-nums}
+.hs-cell.hs-cell-hit{color:var(--color-success);font-weight:600}
+.hs-cell.hs-cell-miss{color:var(--color-danger)}
+.hs-cell.hs-cell-cached{color:var(--color-text-tertiary)}
+.hs-cell.meas{padding:3px 6px;overflow:hidden}
+.hs-cell-meas-strip{display:grid;align-items:center;width:100%;min-width:0;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+.hs-cell-meas-strip::-webkit-scrollbar{width:0;height:0;display:none}
+.hs-meas-master-scroll-wrap{position:sticky;bottom:0;z-index:3;background:var(--color-background-secondary);border-top:1px solid var(--color-border-tertiary)}
+.hs-meas-master-scroll{overflow-x:scroll;overflow-y:hidden;height:12px}
+.hs-meas-master-scroll-inner{height:1px}
+.hs-footer{padding:6px 10px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-primary);font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.hs-counts{font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap}
+.hs-reset{font-family:var(--font-mono);font-size:11px;background:transparent;border:1px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 8px;border-radius:4px;cursor:pointer}
+.hs-reset:hover{border-color:var(--color-accent);color:var(--color-accent)}
+.hs-header.sort-locked .hs-header-label{color:var(--color-text-tertiary);cursor:default}
+.hs-header.sort-locked .hs-header-label:hover{color:var(--color-text-tertiary)}
+.hs-sync-toggle{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);letter-spacing:.04em;cursor:pointer;user-select:none}
+.hs-sync-toggle input[type="checkbox"]{accent-color:var(--color-accent);margin:0;cursor:pointer}
+.hs-sync-toggle:hover{color:var(--color-text-primary)}
+.hs-scope-toggle{display:inline-flex;border:1px solid var(--color-border-tertiary);border-radius:4px;overflow:hidden;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em}
+.hs-scope-opt{background:transparent;border:0;color:var(--color-text-secondary);padding:3px 9px;cursor:pointer;border-right:1px solid var(--color-border-tertiary)}
+.hs-scope-opt:last-child{border-right:0}
+.hs-scope-opt:hover{color:var(--color-text-primary)}
+.hs-scope-opt.on{background:var(--color-accent);color:var(--color-background-primary)}
+.hs-cell[data-running="true"]{animation:hs-soft-blink 1.4s ease-in-out infinite}
+@keyframes hs-soft-blink{0%,100%{background-color:transparent}50%{background-color:rgba(var(--color-accent-rgb),0.18)}}
+.hs-popover-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px}
+.hs-popover{background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:10px;max-width:80vw;max-height:80vh;min-width:320px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
+.hs-popover-header{padding:10px 14px;border-bottom:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--color-text-secondary);letter-spacing:.04em}
+.hs-popover-header button{background:transparent;border:0;color:var(--color-text-tertiary);font-size:18px;cursor:pointer;padding:0 4px;line-height:1}
+.hs-popover-header button:hover{color:var(--color-accent)}
+.hs-popover-body{margin:0;padding:14px;overflow:auto;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);white-space:pre-wrap;word-break:break-word}
 .hs-heat-empty{color:var(--color-text-tertiary);font-style:italic}
-.hs-heat-dot{display:inline-block;width:8px;height:8px;border-radius:1px;flex-shrink:0;transition:transform .1s;animation:hs-dot-pop .35s ease-out}
-.hs-heat-dot:hover{transform:scale(1.6);position:relative;z-index:1}
-.hs-heat-dot.hit{background:var(--color-success)}
-.hs-heat-dot.miss{background:var(--color-danger)}
-.hs-heat-dot.pending{background:transparent;border:1px dashed var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);animation:hs-dot-pending 1.2s ease-in-out infinite}
-/* Roster cells: one per global ord, aligned across rows. .empty stays
-   transparent so unmeasured columns read as blanks (the alignment is the
-   information, not a fill). Width comes from the grid template — no
-   fixed width, so cells squeeze to fit narrower columns and stretch to
-   the 8 px ceiling on wider ones. No arrival animation — at hundreds of
-   cells per row .hs-dot-pop reads as noise; the pending cell keeps its
-   throbber via the shared keyframe. */
 .hs-heat-cell{display:block;width:100%;height:8px;border-radius:1px;cursor:pointer;transition:transform .1s}
 .hs-heat-cell:hover{transform:scale(1.6);position:relative;z-index:1}
 .hs-heat-cell.hit{background:var(--color-success)}
 .hs-heat-cell.miss{background:var(--color-danger)}
 .hs-heat-cell.empty{background:transparent;cursor:pointer}
 .hs-heat-cell.pending{background:transparent;border:1px dashed var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);animation:hs-dot-pending 1.2s ease-in-out infinite}
-/* Click a cell → its ord lights up across every row. Inset ring keeps
-   the hit/miss colour visible underneath; empty cells in the selected
-   column tint with the accent so the column reads as a continuous
-   vertical band. Arrows pan the selection; Escape clears. */
 .hs-heat-cell.selected{box-shadow:0 0 0 1px var(--color-accent);z-index:2;position:relative}
 .hs-heat-cell.empty.selected{background:rgba(var(--color-accent-rgb),0.28)}
-@keyframes hs-dot-pop{0%{transform:scale(2.4);opacity:.2}60%{transform:scale(1.1);opacity:1}100%{transform:scale(1);opacity:1}}
 @keyframes hs-dot-pending{0%,100%{opacity:.45}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){
-  .hs-heat-dot{animation:none}
-  .hs-heat-dot.pending{animation:none;opacity:.7}
+  .hs-cell[data-running="true"]{animation:none;background-color:rgba(var(--color-accent-rgb),0.12)}
   .hs-heat-cell.pending{animation:none;opacity:.7}
 }
-/* Compact preset: ~3 rows visible (header + 3 × 26 px ≈ 100 px). User
-   drags the bottom edge to grow it. Larger preset (Grow button) drops
-   the compact class so .hs-block falls back to its 320 px default. */
-.hs-block.compact{height:96px;min-height:60px}
-/* Mini heat-map — collapsed dynamic-icon view. Three rows of 4 px cells
-   with a 1 px gap; the whole thing is wrapped in a button that expands
-   to the full table on click. No header bar, no chrome — it reads as a
-   little badge. */
-/* Expanded wrap: positions the Shrink FAB over the table's top-right
-   corner so the toggle lives inside the table chrome rather than adding
-   a banner above it. Override .hs-zone margin so .hs-block lines up
-   with the wrap's top edge — the FAB then anchors to that corner. */
-.hs-expand-wrap{position:relative;width:100%;display:flex;justify-content:center}
-.hs-expand-wrap > .hs-zone{margin-top:0}
-.hs-heat-shrink-fab{position:absolute;top:5px;right:18px;z-index:5;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0.5px solid var(--color-border-tertiary);border-radius:4px;background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;transition:background .12s,color .12s,border-color .12s,box-shadow .12s}
-.hs-heat-shrink-fab:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
-.hs-heat-shrink-fab:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-
-.hs-heat-mini-btn{display:inline-flex;background:transparent;border:0;padding:4px;margin:0 auto;cursor:pointer;border-radius:4px;transition:background .12s,box-shadow .12s;font-family:inherit}
-.hs-heat-mini-btn:hover{background:var(--color-background-secondary);box-shadow:0 0 0 1px var(--color-border-tertiary)}
-.hs-heat-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-.hs-heat-mini{display:grid;grid-template-rows:repeat(3,4px);grid-auto-flow:column;grid-auto-columns:4px;gap:1px}
-.hs-heat-mini-cell{width:4px;height:4px;border-radius:1px;background:var(--color-background-tertiary)}
-.hs-heat-mini-cell.hit{background:var(--color-success)}
-.hs-heat-mini-cell.miss{background:var(--color-danger)}
 
 /* Phase 4 — cadence signals readout + stuck-diagnosis verdict. */
 .signals-panel .signals-list{display:flex;flex-direction:column;gap:10px;margin-top:8px}

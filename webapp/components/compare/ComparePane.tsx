@@ -9,10 +9,10 @@ import { Line } from "react-chartjs-2";
 import type { ChartData, ChartOptions } from "chart.js";
 import {
   fetchCampaignDetail,
-  fetchCycles,
   type CampaignDetail,
   type CycleListEntry,
 } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
 
 interface Props {
   themeKey: string;
@@ -49,27 +49,14 @@ function trajectory(detail: CampaignDetail): { x: number; y: number }[] {
 }
 
 export function ComparePane({ themeKey }: Props) {
-  const [cycles, setCycles] = useState<CycleListEntry[] | null>(null);
+  // The campaign list comes from the shared workspace context — same list
+  // the sidebar and breadcrumb read, kept current by one poll.
+  const { cycles, cyclesError } = useWorkspace();
   const [leftId, setLeftId] = useState<string | null>(null);
   const [rightId, setRightId] = useState<string | null>(null);
   const [left, setLeft] = useState<LoadedCampaign | null>(null);
   const [right, setRight] = useState<LoadedCampaign | null>(null);
   const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetchCycles();
-        if (!cancelled) setCycles(r.cycles);
-      } catch (e) {
-        if (!cancelled) setErr((e as Error).message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Filter eligible right-side cycles to the same dataset as the left pick
   // (apples-to-apples). When no left pick yet, show all.
@@ -165,9 +152,11 @@ export function ComparePane({ themeKey }: Props) {
         />
       </div>
 
-      {err && <div className="compare-error">Load failed: {err}</div>}
+      {(err || cyclesError) && (
+        <div className="compare-error">Load failed: {err || cyclesError}</div>
+      )}
 
-      {(!left || !right) && !err && (
+      {(!left || !right) && !err && !cyclesError && (
         <div className="compare-empty">
           {!left
             ? "Pick a campaign for slot A."

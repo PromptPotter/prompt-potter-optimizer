@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { TERMS } from "@/lib/terms";
 import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
+import { cycleStatusLabel } from "@/lib/cycle-status";
 
 // Merged Hero + Progress card. Replaces the prior dash-hero double-card
 // (HeroSummary on the right of the breadcrumb + ProgressCard underneath).
@@ -103,7 +104,10 @@ export function TopStrip({ dash, dashRound }: Props) {
   const best = typeof dash?.best === "number" ? dash.best : null;
   const queries = dash?.total_queries_scored ?? null;
   const lastQuery = dash?.last_query_elapsed_s ?? null;
-  const phase = (dash?.state as string | undefined) ?? "—";
+  const phase = cycleStatusLabel(
+    dash?.state as string | undefined,
+    (dash as { stop_reason?: string } | null)?.stop_reason,
+  );
   const round = dashRound != null ? `R${dashRound}` : "—";
   const qm = parseProgress((dash as { query?: string } | null)?.query);
   const qPct = qm && qm.tot ? Math.min(100, Math.round((qm.cur / qm.tot) * 100)) : 0;
