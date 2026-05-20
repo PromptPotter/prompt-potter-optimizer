@@ -40,7 +40,7 @@ on every round. With distinct slots the LLM cannot conflate the buckets.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
@@ -106,7 +106,9 @@ class VariantEvidenceGrounding(BaseModel):
 
     field: str = Field(
         description="One of EVIDENCE_GROUNDING_FIELDS — panel entry cited.",
-        json_schema_extra={"enum": sorted(EVIDENCE_GROUNDING_FIELDS)},
+        # dict[str, Any]: json_schema_extra is freeform schema, not a strict
+        # JsonValue tree, and a bare list[str] literal trips list-invariance.
+        json_schema_extra=cast("dict[str, Any]", {"enum": sorted(EVIDENCE_GROUNDING_FIELDS)}),
     )
     citation: str
 

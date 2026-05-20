@@ -499,7 +499,8 @@ async def get_family_lineage(store: StoreDep, cycle_id: str) -> FamilyLineageRes
             continue
 
         immediate_parent = index.get("parent_cycle_id") or None
-        fork_block = index.get("fork") if isinstance(index.get("fork"), dict) else {}
+        _fork = index.get("fork")
+        fork_block: dict = _fork if isinstance(_fork, dict) else {}
         trigger = str(fork_block.get("trigger") or "")
 
         # Three sources for fork_from_round, tried in this order:

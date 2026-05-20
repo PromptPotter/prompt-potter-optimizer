@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -502,7 +502,7 @@ class PoBBCheck:
                 fresh[cid] = added
         return fresh
 
-    def snapshot_priors(self, sample_ids: list[int | str]) -> dict[str, dict[str, float]]:
+    def snapshot_priors(self, sample_ids: Sequence[int | str]) -> dict[str, dict[str, float]]:
         """Return the per-prior fitness map over ``sample_ids``; for decision archival.
 
         Only sample IDs the prior actually covers are emitted (the caller
