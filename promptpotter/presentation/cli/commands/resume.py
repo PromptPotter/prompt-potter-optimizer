@@ -184,6 +184,7 @@ async def _drive_optimization(
         diag=getattr(args, "diag", False),
         halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
         max_spend_usd=getattr(args, "max_spend_usd", None),
+        ignore_render_errors=getattr(args, "ignore_render_errors", False),
     )
     return cycle_result
 

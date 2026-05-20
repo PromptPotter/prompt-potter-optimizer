@@ -201,6 +201,7 @@ This is where the reader's mental model of a round usually starts: candidates we
 ### L2_CONTEXT / L3_PLAN-internal
 
 - ¹ **`l1_signal_catalogue`** ← sorted `L1_POSSIBLE` (`domain/l1_layout.py`) · menu L2_CONTEXT picks from when assembling L1_GENERATE's layout.
+- **`prompt_budget_status`** (DERIVED) ← computed off `bundle.opt_sp` + the registry · L2_CONTEXT template only. The prompt-budget unit's L2 self-heal surface: every per-injection `char_cap` + the live size of any overrun, split into **YOURS** (`task_context`🧩, `l1_supplemental_rules`🧩, `l1_situational_examples`🧩 — L2 trims these) and **OTHER LAYERS** (flagged, not L2's to edit). `MANDATORY`-tier so the allocator never sheds the block that tells L2 how to heal. Full spec: [`../specs/dispatch-prompt-budget.md`](../specs/dispatch-prompt-budget.md).
 
 ### Caller extras — L1_GENERATE template scalars (`l1/generate.py`)
 
@@ -211,7 +212,7 @@ Substituted directly by `compile_prompt`; not signals.
 ## Mechanics
 
 - **Fill** — L1_GENERATE slot bodies are plain text; `fill_l1` walks `opt_sp.l1_layout` (per-slot injection-name lists) and appends rendered injection text to each slot. L1_CRITIQUE / L2_CONTEXT / L3_PLAN bodies carry literal `{{name}}` markers; `fill_fixed` regex-extracts and resolves them. `validate_template()` (called from `load_optimizer_prompt`) errors at module load if any `{{slot}}` is not in the `INJECTIONS` registry.
-- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, validation_failures, runtime_failures, critique, axis_memory}` 🧩; the other injections (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `l2_guard_breaches`, `l3_guard_breaches`) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal.
+- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, validation_failures, runtime_failures, critique, axis_memory}` 🧩; the other injections (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `prompt_budget_status`, `l2_guard_breaches`, `l3_guard_breaches`) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal.
 - **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` with `nurse_target='l3'` — L3_PLAN replans rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state.
 
 ## Future — possible merge of L1_SCORE readouts

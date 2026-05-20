@@ -28,23 +28,37 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes import AxisIndex
 
 
-# Module-level format constants shared across renderers.
+# Module-level format constants shared across renderers. The dispatch-hub
+# budget allocator is the last resort — these per-injection caps are the
+# first line and stay tight.
 AXES_ENUM_PREVIEW = 4
-NEAR_MISS_RENDER_CAP = 3
+NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
 FAILURE_WARNING_PREVIEW = 1
-PIPELINE_PARAM_CATALOGUE_MODEL_CAP = 8
-# Caps for the trajectory-memory panels — bounded so a long campaign or
-# large dataset can't bloat L1's prompt. 3 samples each is enough to
-# signal a cluster without paying the per-sample cost (~110 chars each).
-ORIGIN_STRENGTHS_RENDER_CAP = 3
-INTRACTABLE_SAMPLES_RENDER_CAP = 4
+PIPELINE_PARAM_CATALOGUE_MODEL_CAP = 6
+# Cap for the trajectory-memory panel — bounded so a long campaign or large
+# dataset can't bloat L1's prompt. Two sample pointers are enough to signal a
+# cluster without paying the per-sample cost (~110 chars each).
+INTRACTABLE_SAMPLES_RENDER_CAP = 2
+# Per-value cap for the task_context renderer. L2 authors these strings as
+# 1-2 sentence framing fields; ``_r_task_context`` truncates past this and
+# warns — an LLM overrun is an LLM mistake, healed (truncated) not raised.
+TASK_CONTEXT_VALUE_CAP = 300
 # Runtime-failures stay on OptSearchPoint forever (trend visibility for the
 # state layer) but the ``runtime_failures`` signal only emits failures
 # first-seen in the last K rounds. Older entries collapse to a single
 # suppression line so the LLM still knows there's tail without paying the
 # token cost. Tightens prompts on long campaigns + small models.
-RUNTIME_FAILURE_RECENCY_WINDOW = 10
+RUNTIME_FAILURE_RECENCY_WINDOW = 6
+
+# Aggregate budget for one composed optimizer meta-prompt (static template
+# body + every injection). The dispatch hub sheds OPTIONAL- then CORE-tier
+# injections to hold this line; MANDATORY-tier injections are never shed.
+# ~2,500 tokens — above the worst-case all-MANDATORY floor with shed
+# headroom, so the PROMPT_BUDGET halt only fires on genuine bloat. The soft
+# OPTIMIZER_PROMPT_WARN_CHARS line (7,500) flags an oversized prompt well
+# before this hard ceiling. See docs/specs/dispatch-prompt-budget.md.
+OPTIMIZER_PROMPT_CHAR_BUDGET = 10_000
 
 # Prompt-injection fence — wraps signals whose body carries untrusted content
 # (sample queries, ground truths, model predictions echoed back, pipeline
@@ -75,20 +89,46 @@ class InjectionKind(enum.StrEnum):
     DIRECTIVE = "directive"
 
 
+class InjectionTier(enum.IntEnum):
+    """Drop priority for the dispatch-hub budget allocator.
+
+    When a composed optimizer prompt exceeds
+    :data:`OPTIMIZER_PROMPT_CHAR_BUDGET` the hub sheds whole injections
+    lowest-tier-first. ``IntEnum`` so the allocator sorts by tier directly.
+    """
+
+    OPTIONAL = 0  # cross-cycle nice-to-haves — shed first
+    CORE = 1  # this round's failure evidence — shed only after OPTIONAL
+    MANDATORY = 2  # parent prompt, contract, framing — never shed
+
+
 @dataclass(frozen=True)
 class _Injection:
     """One :data:`INJECTIONS` entry — kind tag + InjectionBundle-shaped renderer + doc.
 
     Renderers stay plain ``Callable[[InjectionBundle], str]`` — no Pydantic schema,
-    no freshness budget, no producer indirection. This wrapper exists to
-    carry the kind tag and a one-line description; everything else stays
-    as it is on main.
+    no freshness budget, no producer indirection. This wrapper carries the
+    kind tag, the budget :class:`InjectionTier`, the per-injection
+    ``char_cap``, and a one-line description.
+
+    Neither ``tier`` nor ``char_cap`` has a default: a new ``INJECTIONS``
+    entry that omits either is a ``TypeError`` at construction — a coding
+    mistake fails loud rather than silently landing uncapped or in a tier
+    the allocator might shed.
+
+    ``char_cap`` is the self-healing budget for one injection. LLM-authored
+    text (the parent prompt, L2/L3 framing, the critique) carries an
+    ``int`` cap — :meth:`DispatchHub.render` truncates + warns when the
+    authoring LLM overruns it. Derived / measurement injections are already
+    bounded by their ``*_RENDER_CAP`` row limits and pass ``None``.
     """
 
     name: str
     kind: InjectionKind
     render: Callable[[InjectionBundle], str]
     description: str
+    tier: InjectionTier
+    char_cap: int | None
 
 
 @dataclass(frozen=True)
@@ -170,6 +210,11 @@ class InjectionBundle:
     # pipeline-param catalogue advertises locked-axis options (model list).
     # Default True matches the production OptimizationConfig default.
     forbidden_axes_strict: bool = True
+    # Operator escape hatch (``resume --ignore-render-errors``). When True a
+    # renderer that raises is logged and rendered as "" instead of halting
+    # the loop with StopReason.RENDER_ERROR — see DispatchHub.render. Default
+    # False: a raising renderer is code drift and should stop for a fix.
+    ignore_render_errors: bool = False
 
 
 __all__ = [
@@ -177,13 +222,15 @@ __all__ = [
     "FAILURE_WARNING_PREVIEW",
     "INTRACTABLE_SAMPLES_RENDER_CAP",
     "NEAR_MISS_RENDER_CAP",
-    "ORIGIN_STRENGTHS_RENDER_CAP",
+    "OPTIMIZER_PROMPT_CHAR_BUDGET",
     "PIPELINE_PARAM_CATALOGUE_MODEL_CAP",
     "RUNTIME_FAILURE_RECENCY_WINDOW",
     "SAMPLE_RENDER_CAP",
+    "TASK_CONTEXT_VALUE_CAP",
     "CycleSlice",
     "InjectionBundle",
     "InjectionKind",
+    "InjectionTier",
     "RoundDigest",
     "fence_untrusted",
 ]

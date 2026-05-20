@@ -47,6 +47,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 )
 from promptpotter.application.optimization.dispatch.hub.facade import (
     DispatchHub,
+    InjectionRenderError,
     validate_template,
 )
 from promptpotter.application.optimization.dispatch.hub.injections import (
@@ -60,6 +61,7 @@ __all__ = [
     "DispatchHub",
     "InjectionBundle",
     "InjectionKind",
+    "InjectionRenderError",
     "RoundDigest",
     "build_bundle",
     "format_l1_critique_for_prompt",

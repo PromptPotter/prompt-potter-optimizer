@@ -1002,6 +1002,151 @@ def test_axis_memory_listed_in_l1_possible_and_default_layout():
 
 
 # ===========================================================================
+# Dispatch prompt-budget allocator — deterministic injection shedding
+# ===========================================================================
+#
+# docs/specs/dispatch-prompt-budget.md. The allocator holds every optimizer
+# meta-prompt under OPTIMIZER_PROMPT_CHAR_BUDGET by dropping whole injections
+# lowest-tier-first. The invariant that must never regress: MANDATORY-tier
+# injections (parent prompt, contract, framing) are never shed.
+
+
+def test_dispatch_budget_caps_injections_and_sheds_by_tier(monkeypatch):
+    """The prompt-budget self-healing unit, end to end: char_cap truncates an
+    LLM overrun; the allocator sheds OPTIONAL before CORE, never MANDATORY; an
+    unhealable prompt halts with StopReason.PROMPT_BUDGET; a raising renderer
+    halts with InjectionRenderError unless --ignore-render-errors downgrades it
+    to an empty render."""
+    import pytest
+
+    from promptpotter.application.optimization.dispatch.hub import (
+        DispatchHub,
+        InjectionBundle,
+        InjectionRenderError,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.dispatch.hub.bundle import (
+        OPTIMIZER_PROMPT_CHAR_BUDGET as BUDGET,
+    )
+    from promptpotter.application.optimization.dispatch.hub.bundle import (
+        InjectionKind,
+        InjectionTier,
+        _Injection,
+    )
+    from promptpotter.application.optimization.dispatch.hub.facade import _apply_budget
+    from promptpotter.application.optimization.dispatch.hub.injections import INJECTIONS
+    from promptpotter.domain.phases import StopLoop, StopReason
+
+    def _bundle(**kw):
+        return InjectionBundle(
+            opt_sp=kw.pop("opt_sp", OptSearchPoint()),
+            pipeline_schema=None,
+            cycle_slice=_empty_cycle_slice(),
+            digest=RoundDigest(diagnostics=None, critique=None),
+            axes=None,
+            **kw,
+        )
+
+    # Per-injection char cap: an LLM that overruns its budget is truncated +
+    # warned (self-healing). Read the live cap so the assertion tracks
+    # re-tuned cap constants instead of pinning a stale literal.
+    plan_cap = INJECTIONS["plan"].char_cap
+    assert plan_cap is not None
+    capped = DispatchHub.render("plan", _bundle(opt_sp=OptSearchPoint(plan="x" * 5000)))
+    assert len(capped) <= plan_cap + 1, "char_cap must truncate an overrun LLM injection"
+    assert capped.endswith("…")
+
+    unit = BUDGET // 4  # real injection names so INJECTIONS[name].tier resolves
+
+    # Shedding the lone OPTIONAL injection is enough — CORE + MANDATORY kept.
+    out = _apply_budget(
+        unit,
+        {
+            "rendered_prompt": "M" * unit,  # MANDATORY
+            "diagnostics": "C" * unit,  # CORE
+            "axis_memory": "O" * (2 * unit),  # OPTIONAL
+        },
+    )
+    assert out["rendered_prompt"] and out["diagnostics"], "OPTIONAL must shed first"
+    assert out["axis_memory"] == ""
+    assert unit + sum(len(v) for v in out.values()) <= BUDGET
+
+    # OPTIONAL alone insufficient → CORE sheds too; MANDATORY always survives.
+    out2 = _apply_budget(
+        unit,
+        {
+            "rendered_prompt": "M" * (2 * unit),  # MANDATORY
+            "diagnostics": "C" * (2 * unit),  # CORE
+            "axis_memory": "O" * unit,  # OPTIONAL
+        },
+    )
+    assert out2["rendered_prompt"], "MANDATORY survives even when CORE must shed"
+    assert out2["axis_memory"] == "" and out2["diagnostics"] == ""
+    assert unit + sum(len(v) for v in out2.values()) <= BUDGET
+
+    # Unhealable: MANDATORY content alone is over budget after every OPTIONAL
+    # and CORE injection is shed — the loop halts with PROMPT_BUDGET.
+    with pytest.raises(StopLoop) as halt:
+        _apply_budget(BUDGET, {"rendered_prompt": "M" * BUDGET})
+    assert halt.value.reason is StopReason.PROMPT_BUDGET
+
+    # A renderer that raises is code drift: DispatchHub.render re-raises it as
+    # InjectionRenderError so the loop can halt with RENDER_ERROR — unless the
+    # operator's --ignore-render-errors downgrades it to an empty render.
+    def _boom(_b):
+        raise AttributeError("renamed data-model field")
+
+    monkeypatch.setitem(
+        INJECTIONS,
+        "plan",
+        _Injection(
+            "plan", InjectionKind.TRACE, _boom, "", tier=InjectionTier.MANDATORY, char_cap=1200
+        ),
+    )
+    with pytest.raises(InjectionRenderError):
+        DispatchHub.render("plan", _bundle())
+    assert DispatchHub.render("plan", _bundle(ignore_render_errors=True)) == ""
+
+
+async def test_optimizer_call_deadline_retries_once_then_raises(monkeypatch):
+    """``_chat_under_deadline`` bounds an optimizer call with a total
+    wall-clock deadline the provider SDK's per-read timeout is not: a first
+    timeout is treated as transient and retried, a second raises TimeoutError
+    — which the round loop turns into StopReason.OPTIMIZER_TIMEOUT."""
+    import asyncio
+
+    import pytest
+
+    from promptpotter.application.optimization.dispatch import llm_call as llm_call_mod
+
+    monkeypatch.setattr(llm_call_mod, "OPTIMIZER_CALL_DEADLINE_S", 0.05)
+
+    class _Client:
+        """Hangs (asyncio.timeout cancels the sleep) for the first N calls."""
+
+        def __init__(self, hang_calls: int) -> None:
+            self.hang_calls = hang_calls
+            self.calls = 0
+
+        async def chat(self, **_kw):
+            self.calls += 1
+            if self.calls <= self.hang_calls:
+                await asyncio.sleep(10)  # cancelled by the deadline, not awaited
+            return "ok"
+
+    # One transient timeout → retried once → the second attempt succeeds.
+    recovers = _Client(hang_calls=1)
+    result = await llm_call_mod._chat_under_deadline(recovers, node_label="l1_generate")
+    assert result == "ok" and recovers.calls == 2
+
+    # Both attempts blow the deadline → TimeoutError propagates for the loop.
+    never = _Client(hang_calls=2)
+    with pytest.raises(TimeoutError):
+        await llm_call_mod._chat_under_deadline(never, node_label="l1_generate")
+    assert never.calls == 2
+
+
+# ===========================================================================
 # Escalation rules engine reproduces prior observe_round FSM
 # ===========================================================================
 #

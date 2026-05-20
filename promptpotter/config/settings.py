@@ -70,6 +70,27 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
 MEASUREMENTS_SCHEMA_VERSION = 2
 DEFAULT_CONNECTOR_TYPE = "default"
 
+# Optimizer-call reliability + size visibility.
+#
+# OPTIMIZER_CALL_DEADLINE_S — total wall-clock ceiling on one optimizer LLM
+# call. ``llm_call`` wraps each attempt in ``asyncio.timeout``. The provider
+# SDK's own timeout is a per-read-gap timeout, not a total one: a reasoning
+# model streaming a large output slowly never trips it and the call can hang
+# indefinitely. Healthy optimizer calls run 8-40s; 180s is a generous ceiling
+# that still bounds a runaway. One transient timeout is retried; a second
+# halts the loop with ``StopReason.OPTIMIZER_TIMEOUT``.
+OPTIMIZER_CALL_DEADLINE_S: float = 180.0
+
+# OPTIMIZER_PROMPT_WARN_CHARS — soft size line. A composed optimizer prompt
+# above this renders its CLI marker yellow with a ⚠ and logs at warn level.
+# Set just above the real l1_generate floor: the distilled static body is
+# ~3k, but the injected half (rendered_prompt + diagnostics + axis_memory +
+# critique + …) carries a mid-campaign round to ~7.9k. 8,000 keeps healthy
+# rounds quiet and flags only genuine bloat. Distinct from the dispatch-hub
+# allocator's hard ``OPTIMIZER_PROMPT_CHAR_BUDGET`` — this only warns, it
+# never sheds.
+OPTIMIZER_PROMPT_WARN_CHARS: int = 8_000
+
 
 class Settings(BaseSettings):
     """Application configuration settings."""
@@ -146,6 +167,8 @@ __all__ = [
     "LOCK_TIMEOUT",
     "MEASUREMENTS_SCHEMA_VERSION",
     "NO_RESULT",
+    "OPTIMIZER_CALL_DEADLINE_S",
+    "OPTIMIZER_PROMPT_WARN_CHARS",
     "PROMPT_STRING_FIELDS",
     "TASK_CONTEXT_OVERRIDES",
     "WELL_KNOWN_PARAM_TYPES",

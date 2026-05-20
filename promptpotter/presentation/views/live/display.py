@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
+from promptpotter.config.settings import OPTIMIZER_PROMPT_WARN_CHARS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import candidate_label
@@ -195,16 +196,22 @@ class LiveDisplay(DerivedView):
         input size upfront — a 12k-char l1_generate vs an 800-char l3_plan
         have very different latency expectations. Char count is shown
         verbatim (not converted to tokens) because the tokenizer isn't
-        on this path; total tokens land on the completion line.
+        on this path; total tokens land on the completion line. A prompt
+        over ``OPTIMIZER_PROMPT_WARN_CHARS`` flips the line from dim grey
+        to yellow with a ``⚠`` so an oversized meta-prompt is visible at
+        a glance — a cue to distil the node template or trim its caps.
         """
         self._pending_calls[record.call_id] = record.started_at_ms
         model = record.model or "(default)"
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
-        bits = [f"↻ optimizer call: {node_label} · {model}"]
+        oversize = record.prompt_chars > OPTIMIZER_PROMPT_WARN_CHARS
+        marker = "⚠ " if oversize else "↻ "
+        bits = [f"{marker}optimizer call: {node_label} · {model}"]
         if record.prompt_chars > 0:
             bits.append(f"{record.prompt_chars:,}c prompt")
-        self._write(f"  {DIM}{' · '.join(bits)}{RESET}")
+        color = YELLOW if oversize else DIM
+        self._write(f"  {color}{' · '.join(bits)}{RESET}")
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
         """Render an elapsed-time heartbeat while an LLM call is in flight.

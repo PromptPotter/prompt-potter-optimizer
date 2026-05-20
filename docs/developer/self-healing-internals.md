@@ -2,7 +2,7 @@
 
 Implementation of the four wounds. Concept overview: [`../concepts/self-healing.md`](../concepts/self-healing.md). This page is the wiring map.
 
-Failures attach to the **candidate that produced them** (direct fields on `OptSearchPoint`), never to the round, so a losing candidate's problem never disrupts the round winner. New mechanisms must land as one of the four wounds below — no sidecars, no silent drops.
+Failures attach to the **candidate that produced them** (direct fields on `OptSearchPoint`), never to the round, so a losing candidate's problem never disrupts the round winner. New mechanisms must land as one of the four wounds below — no sidecars, no silent drops. The one sanctioned non-wound healing class is the prompt-budget unit (see [Beyond the wounds](#beyond-the-wounds--the-prompt-budget-unit-tier-2)); it still rides the dispatch-hub registry, not a sidecar.
 
 ## The four wounds at a glance
 
@@ -17,6 +17,37 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 | **Renderer** | `_r_validation_failures` | `_r_runtime_failures` | `_r_runtime_failures` | `_r_l2_guard_breaches` |
 | **Nurse's writeback** | `cycle.opt_sp.task_context` | `task_context` / scheme + text overrides | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
 | **Score effect** | synthetic 0 (Path 1 in `score_population`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
+
+## Beyond the wounds — the prompt-budget unit (tier 2)
+
+The four wounds are the **vanilla** healing class: each is one
+producer→nurse channel — one detector, one failure record, one nurse
+layer, one prompt slot. Uniform by design.
+
+The **prompt-budget unit** (full spec:
+[`../specs/dispatch-prompt-budget.md`](../specs/dispatch-prompt-budget.md))
+is a different kind of mechanism — the project's most sophisticated
+healing unit. It guards one concern, the size of a composed optimizer
+meta-prompt, with **four healing modes stacked on one another**:
+
+1. **Truncate** — per-injection `char_cap`; an LLM-authored block over
+   its cap is cut + warned in `DispatchHub.render`.
+2. **Shed** — the aggregate allocator (`facade._apply_budget`) drops
+   whole low-tier injections when the composed prompt exceeds
+   `OPTIMIZER_PROMPT_CHAR_BUDGET`.
+3. **L2 self-heal** — the `prompt_budget_status` injection shows L2 every
+   cap + the live size of any overrun; L2 trims the blocks it authors.
+4. **Halt** — two distinct operator-recoverable stops: `RENDER_ERROR`
+   (an injection renderer *raised* — code drift) and `PROMPT_BUDGET`
+   (the prompt won't fit even after shedding everything).
+
+Why it is not a wound: it has no single producer→nurse pair. Modes 1–2
+are mechanical (no LLM), mode 3 is LLM-routed but only for blocks L2
+itself authored, mode 4 escalates to a human. It is the one place
+mechanical healing, LLM-routed healing, and a graceful halt meet on one
+concern — hence "tier 2". It still obeys the no-sidecar rule: every mode
+rides the `INJECTIONS` registry, `DispatchHub`, and the existing
+`StopLoop` / round-loop teardown.
 
 ## Wound 1 — L2 tends L1's `ValidationFailure`
 

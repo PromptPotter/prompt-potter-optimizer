@@ -81,6 +81,7 @@ def build_bundle(
         origin_per_sample=origin_per_sample,
         trajectory_misses=trajectory_misses,
         forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
+        ignore_render_errors=cycle.ignore_render_errors,
     )
 
 

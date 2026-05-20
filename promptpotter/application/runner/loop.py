@@ -16,6 +16,7 @@ from collections.abc import Callable
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle
+from promptpotter.application.optimization.dispatch.hub import InjectionRenderError
 from promptpotter.application.optimization.l1 import execute_round
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.runner.round import (
@@ -201,6 +202,33 @@ async def run_round_loop(
         )
         logger.warning("Optimization interrupted at round %d (%s).", round_num, cause)
         return StopReason.INTERRUPTED
+    except InjectionRenderError:
+        # An injection renderer raised — code drift (a renamed data-model
+        # field, usually), not an LLM mistake. Stash the traceback like a
+        # crash so the failing injection + cause land on
+        # index.json::final.crash_traceback, but return a distinct reason:
+        # the operator fixes a renderer (or reruns with
+        # --ignore-render-errors), they don't debug a generic crash.
+        session.state.crash_traceback = traceback.format_exc()
+        logger.exception(
+            "Optimization halted at round %d — an injection renderer failed. "
+            "Fix the renderer and resume, or `resume --ignore-render-errors`.",
+            round_num,
+        )
+        return StopReason.RENDER_ERROR
+    except TimeoutError:
+        # An optimizer LLM call blew its total wall-clock deadline twice
+        # (see llm_call._chat_under_deadline). Not a crash, not a renderer
+        # bug — the provider stalled mid-stream. Graceful, operator-
+        # recoverable halt: a plain `resume` re-fires the call from the
+        # same round. No traceback stashed — the cause is the deadline,
+        # already in the warn-level log.
+        logger.warning(
+            "Optimization halted at round %d — an optimizer LLM call exceeded "
+            "its deadline twice. Resume to retry.",
+            round_num,
+        )
+        return StopReason.OPTIMIZER_TIMEOUT
     except Exception:
         # Per application/CLAUDE.md ("escalation flows via return value, not
         # exception"), the loop must NOT re-raise — return a typed stop

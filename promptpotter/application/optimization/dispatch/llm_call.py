@@ -30,6 +30,10 @@ from pydantic import BaseModel
 from promptpotter.application.optimization.dispatch.schemas import (
     OPTIMIZER_RESPONSE_MODELS,
 )
+from promptpotter.config.settings import (
+    OPTIMIZER_CALL_DEADLINE_S,
+    OPTIMIZER_PROMPT_WARN_CHARS,
+)
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.run_records import (
@@ -166,6 +170,46 @@ async def _heartbeat(
         )
 
 
+async def _chat_under_deadline(
+    llm_client: LLMClientBase,
+    *,
+    node_label: str,
+    **chat_kwargs: Any,
+) -> LLMResponse:
+    """Run one optimizer chat call under a total wall-clock deadline.
+
+    The provider SDK's ``timeout`` is a per-read-gap timeout, not a total
+    one: a reasoning model streaming a large output slowly never trips it
+    and the call can hang indefinitely (a live ``l1_generate`` sat 315s+
+    with no response). :func:`asyncio.timeout` is the hard wall-clock
+    bound the SDK's timeout is not.
+
+    A first timeout is treated as transient (provider hiccup) and the call
+    is retried once; a second raises :class:`TimeoutError` to the caller.
+    :func:`run_round_loop` turns that into ``StopReason.OPTIMIZER_TIMEOUT``
+    — a graceful, operator-recoverable halt.
+    """
+    for attempt in range(2):
+        try:
+            async with asyncio.timeout(OPTIMIZER_CALL_DEADLINE_S):
+                return await llm_client.chat(**chat_kwargs)
+        except TimeoutError:
+            if attempt == 0:
+                logger.warning(
+                    "optimizer call %s exceeded the %.0fs deadline — retrying once",
+                    node_label,
+                    OPTIMIZER_CALL_DEADLINE_S,
+                )
+                continue
+            logger.error(
+                "optimizer call %s exceeded the %.0fs deadline twice — halting",
+                node_label,
+                OPTIMIZER_CALL_DEADLINE_S,
+            )
+            raise
+    raise AssertionError("unreachable — the loop returns or raises on every path")
+
+
 def _ledger_response_payload(response: LLMResponse) -> Any:
     """Materialize ``response.parsed`` into a JSON-safe shape for the ledger.
 
@@ -279,12 +323,17 @@ async def llm_call(
             )
         # Pre-call info line — surfaces what we're waiting on so the operator
         # can distinguish "in-flight LLM call" from "frozen process" without
-        # opening dashboard.json. Lands in terminal AND output.log.
-        logger.info(
-            "→ optimizer call: %s · %s · %d-char prompt",
+        # opening dashboard.json. Lands in terminal AND output.log. An
+        # oversized prompt logs at warn level so it stands out in output.log
+        # the same way the CLI marker turns yellow.
+        oversize = prompt_chars > OPTIMIZER_PROMPT_WARN_CHARS
+        log = logger.warning if oversize else logger.info
+        log(
+            "→ optimizer call: %s · %s · %d-char prompt%s",
             node or "llm_call",
             merged.get("model") or "(default)",
             prompt_chars,
+            f" (over the {OPTIMIZER_PROMPT_WARN_CHARS}-char warn line)" if oversize else "",
         )
         # Heartbeat task — appends LLMCallProgressRecord every
         # HEARTBEAT_INTERVAL_S so the CLI display + webapp dashboard
@@ -307,7 +356,9 @@ async def llm_call(
         try:
             for attempt in range(MAX_429_ATTEMPTS):
                 try:
-                    response = await llm_client.chat(
+                    response = await _chat_under_deadline(
+                        llm_client,
+                        node_label=node or "llm_call",
                         messages=messages,
                         model=merged.get("model"),
                         temperature=merged["temperature"],

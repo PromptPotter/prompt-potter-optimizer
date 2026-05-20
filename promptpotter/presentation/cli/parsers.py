@@ -165,6 +165,15 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
         "and re-run the divergent round under the current scorer.",
     )
     p_resume.add_argument(
+        "--ignore-render-errors",
+        dest="ignore_render_errors",
+        action="store_true",
+        help="If an injection renderer raises (code drift — usually a renamed "
+        "data-model field), log it and render that block empty instead of "
+        "halting with stop_reason=render_error. Escape hatch only: the "
+        "renderer is still broken and should be fixed.",
+    )
+    p_resume.add_argument(
         "--diag",
         dest="diag",
         action="store_true",

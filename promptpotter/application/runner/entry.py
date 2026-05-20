@@ -62,6 +62,7 @@ async def run_optimization(
     fork_payload: ForkPayload | None = None,
     halt_at_accuracy: float | None = None,
     max_spend_usd: float | None = None,
+    ignore_render_errors: bool = False,
 ) -> CycleResult:
     """Run optimization end-to-end. ``observers`` MUST be pre-built via
     ``build_run_observers`` so the ledger is bound before origin ticks.
@@ -125,6 +126,11 @@ async def run_optimization(
             session=session,
             started_at=started_at,
         )
+
+        # Operator escape hatch — `resume --ignore-render-errors`. Stamped on
+        # the cycle so every `build_bundle` copies it onto the InjectionBundle
+        # and `DispatchHub.render` downgrades a raising renderer to "".
+        cycle.ignore_render_errors = ignore_render_errors
 
         # Operator-issued forks (sweep, future rebase): stamp the payload's
         # L1-surface deltas onto the fresh OSP. Triggers without OSP deltas
@@ -267,27 +273,39 @@ def _finalize_run(
     stop_reason = cycle_result.stop_reason
     is_interrupted = stop_reason == StopReason.INTERRUPTED
     is_crashed = stop_reason == StopReason.CRASHED
+    is_render_error = stop_reason == StopReason.RENDER_ERROR
+    is_prompt_budget = stop_reason == StopReason.PROMPT_BUDGET
+    is_optimizer_timeout = stop_reason == StopReason.OPTIMIZER_TIMEOUT
+    # All five teardown reasons leave the active round partial. Render-error
+    # also stashes a traceback (the failing renderer) the same way a crash
+    # does; the prompt-budget and optimizer-timeout halts are graceful —
+    # their cause is in the log, no traceback needed.
+    halted_mid_round = (
+        is_interrupted or is_crashed or is_render_error or is_prompt_budget or is_optimizer_timeout
+    )
+    has_traceback = is_crashed or is_render_error
     emitter = observers.dashboard
     if session.state.cycle_id:
         status_map = {
             str(StopReason.INTERRUPTED): "interrupted",
             str(StopReason.CRASHED): "crashed",
             str(StopReason.DIVERGED): "diverged",
+            str(StopReason.RENDER_ERROR): "render_error",
+            str(StopReason.PROMPT_BUDGET): "prompt_budget",
+            str(StopReason.OPTIMIZER_TIMEOUT): "optimizer_timeout",
         }
         # The active round number when the loop tore down lives on the
         # callbacks (set by ``cb.set_round`` at each iteration). Surfacing
         # it on ``index.json::interrupted_round`` lets the operator see
         # which round is partial without diffing the on-disk tree — same
         # field works for crash, the traceback is the discriminator.
-        interrupted_round = (
-            int(observers.callbacks._current_round) if (is_interrupted or is_crashed) else None
-        )
+        interrupted_round = int(observers.callbacks._current_round) if halted_mid_round else None
         # The active exception is gone from sys.exc_info() by the time
         # ``_finalize_run`` runs — ``run_round_loop`` returned normally with
-        # StopReason.CRASHED. The except clause stashed the formatted
-        # traceback on session.state.crash_traceback before returning, so
-        # the disk copy matches what stderr received.
-        crash_traceback = session.state.crash_traceback if is_crashed else None
+        # the stop reason. The except clause stashed the formatted traceback
+        # on session.state.crash_traceback before returning (crash and
+        # render-error both do), so the disk copy matches what stderr saw.
+        crash_traceback = session.state.crash_traceback if has_traceback else None
         session.store.campaigns.mark_finished(
             session.backend_id,
             session.state.cycle_id,
@@ -308,7 +326,7 @@ def _finalize_run(
     # ``round:complete`` either way).
     if emitter is not None:
         emitter.mark_stopped(str(stop_reason or ""))
-    observers.audit._cycle_was_interrupted = is_interrupted or is_crashed
+    observers.audit._cycle_was_interrupted = halted_mid_round
     observers.drain_all()
 
     obs = session.state.obs

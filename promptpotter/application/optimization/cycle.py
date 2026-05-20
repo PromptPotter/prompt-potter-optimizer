@@ -177,6 +177,11 @@ class Cycle:
     # plus the per-candidate sorter / initial-scoring-set picker when the
     # respective `exploration.seed_*_from_archive` flags are on.
     archive_observations: list[Observation] = field(default_factory=list)
+    # Operator escape hatch (`resume --ignore-render-errors`), stamped by
+    # `run_optimization` after bootstrap. Copied onto every `InjectionBundle`
+    # so `DispatchHub.render` downgrades a raising renderer to an empty
+    # render instead of halting with StopReason.RENDER_ERROR.
+    ignore_render_errors: bool = False
 
     @classmethod
     def start(
