@@ -433,7 +433,7 @@ def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
 
 
 # ===========================================================================
-# Adaptive picker — 1PL Rasch CAT with Fisher-info objective (Phase A)
+# Adaptive picker — 1PL Rasch CAT with expected-information-gain objective
 # ===========================================================================
 
 
@@ -459,156 +459,80 @@ def test_update_theta_posterior_hits_raise_mean_misses_lower_it() -> None:
     assert var_hit < var0 and var_miss < var0, "any observation must shrink posterior variance"
 
 
-def test_fisher_info_peaks_at_delta_equals_theta() -> None:
-    """1PL Fisher info ``p(1-p)`` peaks at δ = μ_c and falls off symmetrically.
+def test_eig_rises_with_sample_uncertainty_and_recovers_mfi_limit() -> None:
+    """Expected information gain rewards uncertainty the plug-in Fisher
+    objective discarded — and collapses to it in the δ-known limit.
 
-    This is the "capable region" centred on the candidate's currently-
-    estimated ability — what the picker targets."""
-    from promptpotter.application.intelligence.adaptive_picker import fisher_info
+    (1) At an equal predicted hit-probability, a barely-measured sample
+    (large ``se_δ``) carries more EIG than a fully-pinned one (``se_δ → 0``):
+    measuring it sharpens the model. This is the 0/4/7 fix.
+    (2) With ``se_δ = 0`` the objective is monotone in ``w̄ = p̄(1−p̄)`` — the
+    Maximum-Fisher-Information ranking — so a mid-difficulty sample still
+    beats an extreme one."""
+    from promptpotter.application.intelligence.adaptive_picker import (
+        expected_information_gain,
+    )
 
-    peak = fisher_info(mu_c=0.5, delta_s=0.5)
-    assert peak == pytest.approx(0.25)
-    # Symmetric falloff around the peak.
-    left = fisher_info(mu_c=0.5, delta_s=-1.5)
-    right = fisher_info(mu_c=0.5, delta_s=2.5)
-    assert left == pytest.approx(right, abs=1e-9)
-    assert left < peak and right < peak
+    # (1) Same δ (hence same p̄) — only se_δ differs.
+    eig_uncertain = expected_information_gain(0.0, var_c=1.0, delta_s=0.0, se_delta_s=1.5)
+    eig_pinned = expected_information_gain(0.0, var_c=1.0, delta_s=0.0, se_delta_s=0.01)
+    assert eig_uncertain > eig_pinned, "a barely-measured sample is worth more, not less"
+
+    # (2) δ-known limit: mid-difficulty (w̄ peak) beats an extreme sample.
+    eig_mid = expected_information_gain(0.0, var_c=1.0, delta_s=0.0, se_delta_s=0.0)
+    eig_extreme = expected_information_gain(0.0, var_c=1.0, delta_s=3.0, se_delta_s=0.0)
+    assert eig_mid > eig_extreme, "se_δ → 0 recovers the Fisher-info ranking"
 
 
-def test_next_sample_mfi_adapts_to_outcomes() -> None:
+def test_next_sample_eig_adapts_to_outcomes() -> None:
     """The picker shifts toward harder samples after a HIT and easier
     samples after a MISS — the online adaptive contract.
 
-    Prior μ=0 on three samples at δ = {−1, 0, +1}:
-    - First pick: δ=0 (Fisher info peak at prior θ̂).
+    Prior μ=0 on three well-measured samples at δ = {−1, 0, +1}:
+    - First pick: δ=0 (EIG peak at the prior θ̂).
     - After HIT: μ moves positive → next argmax shifts to δ=+1.
     - After MISS: μ moves negative → next argmax shifts to δ=−1.
     """
     from promptpotter.application.intelligence.adaptive_picker import (
-        next_sample_mfi,
+        next_sample_eig,
         update_theta_posterior,
     )
 
     delta_map = {1: -1.0, 2: 0.0, 3: 1.0}
+    delta_se_map = {1: 0.1, 2: 0.1, 3: 0.1}  # well-measured → EIG ranks ≈ Fisher
 
-    first = next_sample_mfi(mu_c=0.0, delta_map=delta_map, remaining={1, 2, 3})
-    assert first == 2, "prior μ=0 → δ=0 (sample 2) is the Fisher info peak"
+    first = next_sample_eig(0.0, 1.0, delta_map, delta_se_map, remaining={1, 2, 3})
+    assert first == 2, "prior μ=0 → δ=0 (sample 2) is the EIG peak"
 
     # HIT on sample 2 → μ moves positive → next argmax should be sample 3 (δ=+1)
-    mu_after_hit, _ = update_theta_posterior(0.0, 1.0, delta_s=0.0, hit=True)
-    next_after_hit = next_sample_mfi(mu_c=mu_after_hit, delta_map=delta_map, remaining={1, 3})
+    mu_hit, var_hit = update_theta_posterior(0.0, 1.0, delta_s=0.0, hit=True)
+    next_after_hit = next_sample_eig(mu_hit, var_hit, delta_map, delta_se_map, remaining={1, 3})
     assert next_after_hit == 3, "after HIT, picker reaches for the harder sample"
 
     # MISS on sample 2 → μ moves negative → next argmax should be sample 1 (δ=-1)
-    mu_after_miss, _ = update_theta_posterior(0.0, 1.0, delta_s=0.0, hit=False)
-    next_after_miss = next_sample_mfi(mu_c=mu_after_miss, delta_map=delta_map, remaining={1, 3})
+    mu_miss, var_miss = update_theta_posterior(0.0, 1.0, delta_s=0.0, hit=False)
+    next_after_miss = next_sample_eig(mu_miss, var_miss, delta_map, delta_se_map, remaining={1, 3})
     assert next_after_miss == 1, "after MISS, picker reaches for the easier sample"
 
 
-# ===========================================================================
-# Adaptive picker — Track-and-Stop objective (Phase B)
-# ===========================================================================
-
-
-def test_chernoff_info_pair_peaks_in_the_decision_gap() -> None:
-    """Chernoff info between candidate-θ and seed-θ predictive Bernoullis peaks
-    where δ_s sits in the gap between μ_c and μ_s — the sample whose outcome
-    most pushes the keep/abort decision."""
+def test_decision_information_gain_peaks_at_candidate_ability() -> None:
+    """The decision objective scores a measurement by how much it moves the
+    keep/abort verdict ``θ_c > θ_s``. Since only the candidate is measured,
+    the most decision-informative sample sits near the candidate's own
+    ability — where its outcome is most uncertain and most shifts θ_c — not
+    out where the candidate always hits or always misses."""
     from promptpotter.application.intelligence.adaptive_picker import (
-        chernoff_info_pair,
+        decision_information_gain,
     )
 
-    # Candidate weaker than seed: μ_c=0, μ_s=2. Gap is δ ≈ 1.
-    in_gap = chernoff_info_pair(mu_c=0.0, mu_s=2.0, delta_s=1.0)
-    below_gap = chernoff_info_pair(mu_c=0.0, mu_s=2.0, delta_s=-1.0)
-    above_gap = chernoff_info_pair(mu_c=0.0, mu_s=2.0, delta_s=3.0)
-
-    assert in_gap > below_gap, "decision-gap sample beats below-gap easy sample"
-    assert in_gap > above_gap, "decision-gap sample beats above-gap hard sample"
-    # Equal-θ pair: zero info (no discrimination possible).
-    assert chernoff_info_pair(mu_c=1.0, mu_s=1.0, delta_s=0.5) == pytest.approx(0.0)
-
-
-def test_track_and_stop_picks_decision_gap_first() -> None:
-    """T&S picks the sample whose outcome maximally separates candidate from
-    seed. Loser candidate (μ_c < μ_s): picks the sample where the seed
-    confidently hits but the candidate is uncertain — that's where one
-    candidate-MISS reveals the gap fastest."""
-    from promptpotter.application.intelligence.adaptive_picker import (
-        next_sample_track_and_stop,
+    # Contestable verdict: candidate μ_c=0, seed μ_s=1. δ near μ_c vs flanks.
+    near = decision_information_gain(0.0, 1.0, mu_s=1.0, var_s=1.0, delta_s=0.0, se_delta_s=0.1)
+    far_easy = decision_information_gain(
+        0.0, 1.0, mu_s=1.0, var_s=1.0, delta_s=-4.0, se_delta_s=0.1
     )
-
-    # μ_c = 0 (broad), μ_s = 2. δ map: easy (-2), gap (1), hard (4).
-    delta_map = {1: -2.0, 2: 1.0, 3: 4.0}
-    pick = next_sample_track_and_stop(mu_c=0.0, mu_s=2.0, delta_map=delta_map, remaining={1, 2, 3})
-    assert pick == 2, "decision-gap sample (δ=1) wins over both flanks"
-
-
-def test_track_and_stop_accumulates_decision_evidence_faster_than_mfi() -> None:
-    """T&S accumulates log-likelihood-ratio evidence between hypotheses (θ_c, θ_s)
-    faster than MFI on the SAME measurement budget. MFI optimizes for θ_c-
-    variance reduction; T&S directly optimizes for the keep/abort decision, so
-    its samples drive the SPRT statistic away from zero per query.
-
-    Simulates 10 queries on each picker against a clear-loser candidate
-    (θ_c = -2) vs a winning seed (θ_s = +2), averaged across seeds. The
-    LLR ``Σ log p_c(y) - log p_s(y)`` reaches a larger absolute magnitude
-    under T&S — the picker is mechanically aligned with the decision."""
-    import math
-    import random
-
-    from promptpotter.application.intelligence.adaptive_picker import (
-        next_sample_mfi,
-        next_sample_track_and_stop,
-        posterior_from_outcomes,
-        predicted_hit_probability,
-    )
-
-    delta_map = {i: -3.0 + 6.0 * (i / 19.0) for i in range(20)}  # spread δ from -3 to +3
-    true_mu_c = -2.0
-    true_mu_s = 2.0
-
-    PRIOR_MU = 0.0
-    PRIOR_VAR = 1.0
-    BUDGET = 10
-
-    def llr_after_budget(objective: str, seed: int) -> float:
-        """SPRT log-likelihood-ratio between H_c (true loser) and H_s (true winner)
-        after ``BUDGET`` measurements selected by ``objective``. Larger
-        |LLR| means each measurement carried more decision evidence."""
-        rng = random.Random(seed)
-        scored: dict[int, bool] = {}
-        llr = 0.0
-        for _ in range(BUDGET):
-            mu_c, _ = posterior_from_outcomes(
-                PRIOR_MU,
-                PRIOR_VAR,
-                ((delta_map[s], h) for s, h in scored.items()),
-            )
-            remaining = set(delta_map) - scored.keys()
-            if objective == "track_and_stop":
-                pick = next_sample_track_and_stop(mu_c, true_mu_s, delta_map, remaining)
-            else:
-                pick = next_sample_mfi(mu_c, delta_map, remaining)
-            assert pick is not None
-            d = delta_map[pick]
-            p_true = predicted_hit_probability(true_mu_c, d)
-            hit = rng.random() < p_true
-            scored[pick] = hit
-            p_c = predicted_hit_probability(true_mu_c, d)
-            p_s = predicted_hit_probability(true_mu_s, d)
-            llr += math.log(p_c if hit else 1 - p_c) - math.log(p_s if hit else 1 - p_s)
-        return llr
-
-    seeds = list(range(16))
-    mfi_llr = sum(llr_after_budget("mfi", s) for s in seeds) / len(seeds)
-    ts_llr = sum(llr_after_budget("track_and_stop", s) for s in seeds) / len(seeds)
-    # Loser case → both LLRs are negative (evidence favours H_c being loser).
-    # T&S accumulates more negative LLR per query → stronger decision evidence.
-    assert ts_llr < mfi_llr, (
-        f"T&S must accumulate more decision evidence per query against MFI. "
-        f"Got T&S LLR={ts_llr:.2f}, MFI LLR={mfi_llr:.2f} (more negative = stronger)."
-    )
+    far_hard = decision_information_gain(0.0, 1.0, mu_s=1.0, var_s=1.0, delta_s=4.0, se_delta_s=0.1)
+    assert near > far_easy, "a sample at the candidate's ability beats a too-easy one"
+    assert near > far_hard, "a sample at the candidate's ability beats a too-hard one"
 
 
 # ===========================================================================
@@ -616,16 +540,17 @@ def test_track_and_stop_accumulates_decision_evidence_faster_than_mfi() -> None:
 # ===========================================================================
 
 
-def test_pick_score_artifact_carries_fisher_info_under_population_prior() -> None:
-    """Artifact ``pick_score.per_sample`` carries 1PL Fisher info at θ=0
-    (the Rasch identifiability anchor / population-mean ability). This
-    is the snapshot consumed by the webapp; the live picker recomputes
-    against the candidate's running θ̂_c posterior, so the artifact is
-    descriptive, not the live iteration order.
+def test_pick_score_artifact_carries_eig() -> None:
+    """Artifact ``pick_score.per_sample`` carries expected information gain at
+    the population-prior ability ``N(0, σ_θ²)``. Unlike the old Fisher
+    snapshot, EIG reads the sample-difficulty SE: a sample measured once is
+    *not* treated as settled.
 
-    Samples with δ near 0 (mid-difficulty for the population) score
-    high; both extreme-easy and extreme-hard samples tail the order
-    symmetrically because Fisher info is the variance of a Bernoulli."""
+    Construction: sample 1 measured by every candidate, all HIT (a settled,
+    easy sample); sample 2 measured by every candidate, split (settled, mid);
+    sample 3 measured exactly once. The barely-measured sample outranks the
+    settled all-HIT sample and is not last in the pick order — the 0/4/7
+    failure the redesign fixes."""
     from promptpotter.application.intelligence.exploration import Observation
     from promptpotter.application.intelligence.hard_sample_sorter import (
         ARTIFACT_SCHEMA_VERSION,
@@ -633,22 +558,22 @@ def test_pick_score_artifact_carries_fisher_info_under_population_prior() -> Non
     )
 
     obs = [
-        # Sample 1: all candidates HIT — easy → δ very negative → low Fisher
+        # Sample 1: every candidate HITs — settled easy → δ low, w̄ → 0.
         *[Observation(candidate_id=c, sample_id=1, hit=True) for c in "abcd"],
-        # Sample 2: split — mid difficulty → δ ≈ 0 → high Fisher
+        # Sample 2: split — settled mid difficulty → δ ≈ 0.
         Observation(candidate_id="a", sample_id=2, hit=True),
         Observation(candidate_id="b", sample_id=2, hit=False),
         Observation(candidate_id="c", sample_id=2, hit=True),
         Observation(candidate_id="d", sample_id=2, hit=False),
-        # Sample 3: all candidates MISS — hard → δ very positive → low Fisher
-        *[Observation(candidate_id=c, sample_id=3, hit=False) for c in "abcd"],
+        # Sample 3: measured exactly once → large se_δ → high EIG.
+        Observation(candidate_id="a", sample_id=3, hit=True),
     ]
     artifact = build_hard_samples_artifact_from_observations(obs)
     assert artifact["schema_version"] == ARTIFACT_SCHEMA_VERSION == 3
 
     per_sample = artifact["pick_score"]["per_sample"]
-    assert per_sample["2"] > per_sample["1"], "mid-difficulty leads easy"
-    assert per_sample["2"] > per_sample["3"], "mid-difficulty leads hard"
-    # Both extremes tail the order; sample 2 leads.
-    assert artifact["pick_score"]["sample_order"][0] == 2
-    assert artifact["pick_score"]["sample_order"][-1] in {1, 3}
+    # The barely-measured sample is worth measuring next — not the near-zero
+    # score the plug-in Fisher objective gave a settled all-HIT sample.
+    assert per_sample["3"] > per_sample["1"], "one-observation sample beats settled-easy"
+    # The settled all-HIT sample, not the barely-measured one, tails the order.
+    assert artifact["pick_score"]["sample_order"][-1] == 1

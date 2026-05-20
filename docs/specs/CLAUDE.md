@@ -36,6 +36,7 @@
 | Item | Status |
 |------|--------|
 | [Hard-Sample Sorter](hard-sample-sorter.md) | capability spec, unscheduled — `promptpotter/application/intelligence/{hard_sample_sorter,exploration}.py`, `docs/methods/exploration-exploitation.md` |
+| [Bayesian Sample Picker](bayesian-sample-picker.md) | shipped (Phases 1–3) — hierarchical IRT + Expected-Information-Gain objective; superseded plug-in MFI/Chernoff in `adaptive_picker.py` |
 | [State-Sync Cleanup](state-sync-cleanup.md) | pre-whitelabel foundation, 4 phases — `promptpotter/infrastructure/store/`, `promptpotter/infrastructure/projections/live_dashboard/`, `promptpotter/presentation/api/routers/active.py`, `webapp-react/` |
 | [Security audit](security-audit.md) | first hardening pass complete 2026-05-05 — `promptpotter/application/scoring/formula/`, `promptpotter/config/log_redaction.py`, `promptpotter/application/optimization/dispatch/hub/` |
 | M10 cleanup | archived → [`archive/m10-cleanup.md`](archive/m10-cleanup.md) + sub-audits |

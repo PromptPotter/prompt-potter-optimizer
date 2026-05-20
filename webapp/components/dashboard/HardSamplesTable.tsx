@@ -151,10 +151,10 @@ interface PersistedState {
   folded: ColId[];
   wrapped: ColId[];
   // When true, the table sort follows ``dash.hard_sample_order`` (the
-  // adaptive picker's expected per-candidate order — Fisher info under
-  // MFI or Chernoff info between candidate-prior and seed under
-  // Track-and-Stop) and header-click sorting is suppressed. Default ON
-  // — operator opted into the "real time mirror" framing.
+  // adaptive picker's expected per-candidate order — descending expected
+  // information gain) and header-click sorting is suppressed. The "Pick"
+  // column carries the live-sort marker. Default ON — operator opted
+  // into the "real time mirror" framing.
   syncLive: boolean;
 }
 
@@ -242,9 +242,10 @@ function cellFor(
         style: missProbStyle(item.miss_prob),
       };
     case "pick_score":
-      // 1PL Fisher info at population-anchor θ=0 — bounded in (0, 0.25].
-      // Three decimals so equal-looking-but-actually-different values
-      // don't collapse visually. ``—`` when the sample is unmeasured.
+      // Expected information gain at the population prior — higher means
+      // measuring this sample teaches the model more. Three decimals so
+      // equal-looking-but-actually-different values don't collapse
+      // visually. ``—`` when the sample is unmeasured.
       return {
         text: item.pick_score !== null ? item.pick_score.toFixed(3) : "—",
         raw: item.pick_score,
@@ -629,12 +630,24 @@ export function HardSamplesTable({
           >
             {columns.map((col) => {
               const folded = persisted.folded.includes(col.id);
-              const sorted = !liveSortActive && sortBy?.col === col.id ? sortBy.dir : null;
+              // Under live-sort the rows follow the picker's information-gain
+              // ranking — which is the "Pick" column descending; mark it so
+              // the operator can see what the order is. Otherwise the manual
+              // header-click sort owns the marker.
+              const sorted = liveSortActive
+                ? col.id === "pick_score"
+                  ? "desc"
+                  : null
+                : sortBy?.col === col.id
+                  ? sortBy.dir
+                  : null;
               const isRank = col.id === "rank";
               const headerTitle = folded
                 ? "Unfold column"
                 : liveSortActive
-                  ? "Synced to live Rasch sort — toggle off the sync chip to sort manually"
+                  ? col.id === "pick_score"
+                    ? "Live sort: descending expected information gain (the picker's order)"
+                    : "Synced to the picker's live information-gain ranking — toggle off Auto-sort to sort manually"
                   : isRank
                     ? RANK_HINT
                     : `Sort by ${col.label}`;

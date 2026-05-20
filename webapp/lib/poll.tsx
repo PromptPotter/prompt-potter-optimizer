@@ -50,10 +50,11 @@ export interface DashboardSnapshot {
   // samples (no row pulses).
   current_sample_id?: number | null;
   // The adaptive picker's expected sample order under the active
-  // ``picker_objective`` (Fisher info / Chernoff info), refreshed per
-  // candidate at candidate-start. The dataset table sorts by this when
-  // the operator's "sync with live sort" tick is on. ``null`` before
-  // the first sorter fit lands.
+  // ``picker_objective`` — descending expected information gain
+  // (``model``) or decision-verdict mutual information (``decision``),
+  // refreshed per candidate at candidate-start. The dataset table sorts
+  // by this when the operator's "sync with live sort" tick is on.
+  // ``null`` before the first sorter fit lands.
   hard_sample_order?: number[] | null;
   [key: string]: unknown;
 }

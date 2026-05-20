@@ -410,7 +410,7 @@ class PoBBCheck:
         # The candidate's sample budget — the set of sample IDs the
         # candidate is scheduled to run on if PoBB does not stop it
         # early. Set per candidate via ``set_sample_universe``; the
-        # online picker (Phase A) consumes the dataset as a set rather
+        # online picker consumes the dataset as a set rather
         # than an ordered list, so order is no longer part of the
         # contract. ``check()``'s dominance gate reads ``len()`` for the
         # budget and ``in`` for seed coverage.
@@ -594,13 +594,12 @@ class PoBBCheck:
 
         # Separability floor — don't eliminate while the candidate's
         # hit-rate CI overlaps the leader's. At the picker's preferred
-        # samples (high information value at the candidate's running
-        # θ̂_c, or high candidate-vs-seed Chernoff info under T&S),
-        # binomial noise alone produces 0/4 vs 2/4 outcomes for arms
-        # that are actually equivalent. The information-theoretic
-        # adaptive picker is asymptotic (Lord 1980 / Garivier-Kaufmann
-        # 2016); at small n the posterior gate can fire on noise before
-        # the CI separates. The floor keeps the picker honest until the
+        # samples (high expected information gain at the candidate's
+        # running θ̂_c posterior), binomial noise alone produces 0/4 vs
+        # 2/4 outcomes for arms that are actually equivalent. The
+        # information-theoretic adaptive picker is asymptotic; at small n
+        # the posterior gate can fire on noise before the CI separates.
+        # The floor keeps the picker honest until the
         # binomial actually splits the two arms. See
         # ``project_pobb_separability_floor`` memory.
         if leader_id in paired_priors and wilson_overlap(

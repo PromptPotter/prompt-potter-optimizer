@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from promptpotter.application.intelligence.adaptive_picker import fisher_info
+from promptpotter.application.intelligence.adaptive_picker import expected_information_gain
 from promptpotter.application.intelligence.exploration import build_observations, fit_rasch
 
 if TYPE_CHECKING:
@@ -58,25 +58,32 @@ def _sample_miss_rates(observations: list[Observation]) -> dict[int, float]:
     return {sid: misses.get(sid, 0) / n for sid, n in totals.items() if n > 0}
 
 
-def _fisher_information_under_prior(
+def _eig_under_prior(
     delta: dict[int, float],
+    delta_se: dict[int, float],
+    sigma_theta: float,
 ) -> dict[int, float]:
-    """Per-sample 1PL Fisher info at the population-anchor θ = 0.
+    """Per-sample expected information gain for a brand-new candidate.
 
-    The Rasch fit anchors ``mean(θ) = 0`` for identifiability, so θ = 0
-    is the population-mean ability — the natural prior on every new
-    candidate before any of its outcomes land. Fisher info there is
-    ``σ(-δ_s) · (1 - σ(-δ_s))`` = ``p · (1-p)`` with ``p = σ(-δ_s)``.
+    A brand-new candidate's ability prior is ``N(0, σ_θ²)`` — the estimated
+    population posterior at the Rasch identifiability anchor ``mean(θ) = 0``.
+    Expected information gain there is ``½·log(1 + w̄·(σ_θ² + se_δ_s²))``: it
+    rewards both mid-difficulty samples (large ``w̄``) AND barely-measured
+    samples (large ``se_δ_s``), so a sample seen once no longer reads as
+    settled.
 
-    This is the snapshot consumed by the webapp's per-sample
-    ``pick_score`` column and the dashboard ``hard_sample_order``
-    table. The live picker (Phase A Rasch CAT in ``adaptive_picker.py``)
-    re-evaluates Fisher info per step against the *candidate's* running
-    θ̂ posterior — so the artifact value is a "what's expected to be
-    informative on a brand-new candidate" snapshot, not the live
-    iteration order.
+    This is the snapshot consumed by the webapp's per-sample ``pick_score``
+    column and the dashboard ``hard_sample_order`` table. The live picker
+    (``adaptive_picker.py``) re-evaluates EIG per step against the
+    *candidate's* running θ̂ posterior — so the artifact value is a "what's
+    expected to be informative on a brand-new candidate" snapshot, not the
+    live iteration order.
     """
-    return {sid: fisher_info(0.0, d) for sid, d in delta.items()}
+    var_theta = sigma_theta * sigma_theta
+    return {
+        sid: expected_information_gain(0.0, var_theta, d, delta_se.get(sid, 0.0))
+        for sid, d in delta.items()
+    }
 
 
 def _resolve_candidate_order(
@@ -102,7 +109,7 @@ def _resolve_sample_order(
 
 
 def _resolve_pick_order(pick_score: dict[int, float]) -> list[int]:
-    """Sort sample IDs by descending Fisher info under the population prior.
+    """Sort sample IDs by descending expected information gain under the prior.
 
     Ties break by ascending sample id for determinism. The artifact
     snapshot is descriptive — the live picker (``adaptive_picker``)
@@ -195,7 +202,7 @@ def build_hard_samples_artifact_from_observations(
         posterior = fit_rasch(observations)
     hit_rates = _candidate_hit_rates(observations)
     miss_rates = _sample_miss_rates(observations)
-    pick_score_map = _fisher_information_under_prior(posterior.delta)
+    pick_score_map = _eig_under_prior(posterior.delta, posterior.delta_se, posterior.sigma_theta)
 
     full_candidate_order = _resolve_candidate_order(posterior, hit_rates)
     full_sample_order = _resolve_sample_order(posterior, miss_rates)
@@ -224,6 +231,12 @@ def build_hard_samples_artifact_from_observations(
     rasch_view = {
         "converged": bool(posterior.converged),
         "iterations": int(posterior.n_iterations),
+        # Empirical-Bayes hyperparameters — the estimated population spreads
+        # and mean difficulty. Operator-readable shrinkage strength; nothing
+        # downstream re-derives them.
+        "sigma_theta": float(posterior.sigma_theta),
+        "sigma_delta": float(posterior.sigma_delta),
+        "mu_delta": float(posterior.mu_delta),
         "theta": {cid: float(posterior.theta[cid]) for cid in candidate_order},
         "theta_se": {cid: float(posterior.theta_se.get(cid, 0.0)) for cid in candidate_order},
         # JSON object keys must be strings — consumers cast back to int.

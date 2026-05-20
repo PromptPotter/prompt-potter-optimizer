@@ -1,20 +1,23 @@
-"""Online adaptive sample picker — 1PL Rasch CAT with Fisher-info objective.
+"""Online adaptive sample picker — 1PL Rasch CAT with an information-gain objective.
 
-Maintains a Gaussian-approximation posterior on the candidate's latent
-ability ``θ_c`` (mean ``μ`` + variance ``σ²``) and re-picks the next
-sample after each observation. Objective: **Maximum Fisher Information**
-at the candidate's current ``θ̂_c`` — i.e., select the sample whose
-outcome is most uncertain under current beliefs, equivalently the sample
-whose ``δ_s`` sits closest to the candidate's estimated ability.
+After each observation the picker re-estimates the candidate's latent-ability
+posterior ``θ_c ~ N(μ_c, var_c)`` and re-picks the next sample. Two objectives
+share the module, selected by ``OptimizationConfig.picker_objective``:
 
-This is Phase A of the picker arc: textbook Computerized Adaptive
-Testing on the 1PL (Rasch) model (Owen 1975 sequential Bayes / Lord
-1980 MFI). Phase B will swap the per-sample objective for the Chernoff
-information between the candidate's and seed's predictive distributions
-(Track-and-Stop, Garivier-Kaufmann 2016) — decision-aligned variant
-that directly minimizes expected samples to a keep/abort verdict.
+* **model** (default) — Expected Information Gain: the entropy reduction of the
+  hierarchical IRT posterior from one Bernoulli measurement. It reads the
+  candidate-ability variance *and* the sample-difficulty SE that ``fit_rasch``
+  already returns, so a barely-measured sample (large ``se_δ``) ranks high —
+  measuring it sharpens the model. As ``se_δ → 0`` the objective collapses to
+  the textbook Maximum-Fisher-Information ranking (Lord 1980 CAT).
 
-Pure module: no I/O, no mutation of inputs.
+* **decision** — the mutual information between the next outcome and the
+  keep/abort verdict ``θ_c > θ_s`` against the seed. Decision-aligned; the
+  means-known limit recovers Bernoulli Chernoff information
+  (Garivier-Kaufmann 2016 Track-and-Stop).
+
+Both objectives are knob-free and computed over the posterior. Pure module:
+no I/O, no mutation of inputs.
 """
 
 from __future__ import annotations
@@ -23,17 +26,20 @@ import math
 from collections.abc import Iterable
 
 __all__ = [
-    "chernoff_bernoulli",
-    "chernoff_info_pair",
-    "expected_order_mfi",
-    "expected_order_track_and_stop",
-    "fisher_info",
-    "next_sample_mfi",
-    "next_sample_track_and_stop",
+    "decision_information_gain",
+    "expected_information_gain",
+    "expected_order_decision",
+    "expected_order_eig",
+    "next_sample_decision",
+    "next_sample_eig",
     "posterior_from_outcomes",
-    "predicted_hit_probability",
+    "predictive_hit_prob",
     "update_theta_posterior",
 ]
+
+# Probit scale for the logistic-Gaussian integral
+# ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))``.
+_PROBIT_SCALE = math.pi / 8.0
 
 
 def _sigmoid(x: float) -> float:
@@ -42,6 +48,18 @@ def _sigmoid(x: float) -> float:
         return 1.0 / (1.0 + math.exp(-x))
     ex = math.exp(x)
     return ex / (1.0 + ex)
+
+
+def _normal_cdf(x: float) -> float:
+    """Standard-normal CDF Φ(x) via the error function."""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _binary_entropy(p: float) -> float:
+    """Binary (Shannon) entropy in nats; 0 at ``p ∈ {0, 1}``."""
+    if p <= 0.0 or p >= 1.0:
+        return 0.0
+    return -p * math.log(p) - (1.0 - p) * math.log(1.0 - p)
 
 
 def update_theta_posterior(mu: float, var: float, delta_s: float, hit: bool) -> tuple[float, float]:
@@ -89,151 +107,180 @@ def posterior_from_outcomes(
     return mu, var
 
 
-def fisher_info(mu_c: float, delta_s: float) -> float:
-    """1PL Fisher information at the candidate's current ``θ̂_c``.
+# ---------------------------------------------------------------------------
+# Model objective — Expected Information Gain
+# ---------------------------------------------------------------------------
 
-    Returns ``p · (1 - p)`` where ``p = σ(μ_c - δ_s)``. Maximized at
-    ``δ_s == μ_c`` (peak 0.25) and falls off symmetrically — the
-    "capable region" centered on the candidate's currently-estimated
-    ability, not statically on ``p_pop = 0.5``.
+
+def predictive_hit_prob(mu_c: float, var_c: float, delta_s: float, se_delta_s: float) -> float:
+    """Posterior-predictive hit probability of candidate ``c`` on sample ``s``.
+
+    Marginalizes the 1PL likelihood ``σ(θ_c − δ_s)`` over the Gaussian
+    posteriors ``θ_c ~ N(μ_c, var_c)`` and ``δ_s ~ N(δ̂_s, se_δ_s²)`` with the
+    probit approximation ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))``.
     """
-    p = _sigmoid(mu_c - delta_s)
-    return p * (1.0 - p)
+    m = mu_c - delta_s
+    v = var_c + se_delta_s * se_delta_s
+    return _sigmoid(m / math.sqrt(1.0 + _PROBIT_SCALE * v))
 
 
-def predicted_hit_probability(mu_c: float, delta_s: float) -> float:
-    """Convenience accessor: ``σ(μ_c - δ_s)`` — the candidate's currently-
-    predicted hit probability on sample ``s``. Telemetry-only; the picker
-    consumes ``fisher_info`` directly."""
-    return _sigmoid(mu_c - delta_s)
+def expected_information_gain(
+    mu_c: float, var_c: float, delta_s: float, se_delta_s: float
+) -> float:
+    """Expected information gain of one measurement of candidate ``c`` on sample ``s``.
+
+    The entropy reduction of the joint ``(θ_c, δ_s)`` Gaussian posterior from a
+    single Bernoulli observation. A measurement informs only the difference
+    ``θ_c − δ_s`` (observed-info contribution ``w̄·[[1,−1],[−1,1]]``); the
+    priors break the rank-1 degeneracy and the joint-entropy reduction is
+    closed form::
+
+        EIG = ½ · log(1 + w̄ · (var_c + se_δ_s²))
+
+    with ``w̄ = p̄(1−p̄)`` the predictive Bernoulli variance. Large ``se_δ_s``
+    (a barely-measured sample) ⇒ large EIG; as ``se_δ_s → 0`` the objective is
+    monotone in ``w̄`` — the Maximum-Fisher-Information ranking, recovered
+    exactly as the δ-known limit.
+    """
+    v = var_c + se_delta_s * se_delta_s
+    p_bar = predictive_hit_prob(mu_c, var_c, delta_s, se_delta_s)
+    w_bar = p_bar * (1.0 - p_bar)
+    return 0.5 * math.log1p(w_bar * v)
 
 
-def next_sample_mfi(
+def next_sample_eig(
     mu_c: float,
+    var_c: float,
     delta_map: dict[int, float],
+    delta_se_map: dict[int, float],
     remaining: set[int],
 ) -> int | None:
-    """Pick the remaining sample maximizing Fisher info at ``μ_c``.
+    """Pick the remaining sample with the highest expected information gain.
 
-    Returns ``None`` when ``remaining`` is empty (loop-exit signal).
-    Ties break by ascending sample id (deterministic). Samples missing
-    from ``delta_map`` fall back to ``δ = 0`` (centred difficulty), which
-    yields the cold-start tie behaviour: everything sorts equal and
-    sample-id ascending decides.
+    Returns ``None`` when ``remaining`` is empty (loop-exit signal). Ties break
+    by ascending sample id (deterministic). A sample absent from the maps falls
+    back to a centred, fully-uncertain prior — it sorts high, gets measured,
+    and enters the next fit.
     """
     if not remaining:
         return None
     return max(
         remaining,
-        key=lambda sid: (fisher_info(mu_c, delta_map.get(sid, 0.0)), -sid),
+        key=lambda sid: (
+            expected_information_gain(
+                mu_c, var_c, delta_map.get(sid, 0.0), delta_se_map.get(sid, 1.0)
+            ),
+            -sid,
+        ),
     )
 
 
-def expected_order_mfi(
+def expected_order_eig(
     mu_c: float,
+    var_c: float,
     delta_map: dict[int, float],
+    delta_se_map: dict[int, float],
     sample_ids: Iterable[int],
 ) -> list[int]:
-    """Full ranking of ``sample_ids`` by descending Fisher info under ``μ_c``.
+    """Full ranking of ``sample_ids`` by descending expected information gain.
 
     Telemetry-only snapshot consumed by ``dashboard.json::hard_sample_order``
-    so the webapp's hard-samples table mirrors the picker's expected
-    sequence. Live execution still re-picks per step via
-    :func:`next_sample_mfi` once outcomes start arriving.
-    """
-    return sorted(
-        sample_ids,
-        key=lambda sid: (-fisher_info(mu_c, delta_map.get(sid, 0.0)), sid),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Phase B — Track-and-Stop objective (decision-aligned picker)
-# ---------------------------------------------------------------------------
-
-
-def chernoff_bernoulli(p: float, q: float) -> float:
-    """Chernoff information between two Bernoulli distributions.
-
-    ``C(p, q) = max_{λ∈[0,1]} -log[ p^λ q^{1-λ} + (1-p)^λ (1-q)^{1-λ} ]``.
-
-    Zero iff ``p == q``; positive otherwise. The exponent of the
-    asymptotic error rate in optimal binary hypothesis testing
-    (Garivier-Kaufmann 2016 Track-and-Stop). No closed form for λ*;
-    99-point grid is sub-1% precision and trivially cheap at the
-    per-sample fire rate.
-    """
-    if abs(p - q) < 1e-9:
-        return 0.0
-    p = min(max(p, 1e-9), 1.0 - 1e-9)
-    q = min(max(q, 1e-9), 1.0 - 1e-9)
-    best = 0.0
-    for i in range(1, 100):
-        lam = i / 100.0
-        mix = p**lam * q ** (1.0 - lam) + (1.0 - p) ** lam * (1.0 - q) ** (1.0 - lam)
-        val = -math.log(mix)
-        if val > best:
-            best = val
-    return best
-
-
-def chernoff_info_pair(mu_c: float, mu_s: float, delta_s: float) -> float:
-    """Chernoff info between candidate's and seed's predictive Bernoulli on sample s.
-
-    ``p_c = σ(μ_c - δ_s)``, ``p_s = σ(μ_s - δ_s)``. Returns
-    ``C(p_c, p_s)`` — the expected information one measurement on
-    sample ``s`` contributes toward the candidate-vs-seed decision.
-    Peaks where the two predicted hit probabilities differ most
-    (``δ_s`` sitting in the gap between ``μ_c`` and ``μ_s``); zero
-    where they agree (no discriminatory value).
-
-    Decision-aligned variant of the picker: directly minimizes the
-    expected number of measurements to a confident keep/abort
-    verdict, replacing Phase A's θ-estimation-variance objective.
-    """
-    p_c = _sigmoid(mu_c - delta_s)
-    p_s = _sigmoid(mu_s - delta_s)
-    return chernoff_bernoulli(p_c, p_s)
-
-
-def next_sample_track_and_stop(
-    mu_c: float,
-    mu_s: float,
-    delta_map: dict[int, float],
-    remaining: set[int],
-) -> int | None:
-    """Pick the remaining sample maximizing Chernoff info between candidate and seed.
-
-    Returns ``None`` when ``remaining`` is empty. Ties break by
-    ascending sample id (deterministic). Samples missing from
-    ``delta_map`` fall back to ``δ = 0`` — under cold-start
-    ``μ_c == μ_s == 0`` this gives zero pick-score everywhere, sid-asc
-    decides, matching MFI's cold-start behaviour.
-    """
-    if not remaining:
-        return None
-    return max(
-        remaining,
-        key=lambda sid: (chernoff_info_pair(mu_c, mu_s, delta_map.get(sid, 0.0)), -sid),
-    )
-
-
-def expected_order_track_and_stop(
-    mu_c: float,
-    mu_s: float,
-    delta_map: dict[int, float],
-    sample_ids: Iterable[int],
-) -> list[int]:
-    """Full ranking by descending Chernoff info between (μ_c, μ_s) on each δ_s.
-
-    Telemetry snapshot peer of :func:`expected_order_mfi` — surfaced
-    on ``dashboard.json::hard_sample_order`` when the picker objective
-    is ``track_and_stop``.
+    so the webapp's hard-samples table mirrors the picker's expected sequence
+    at the candidate's prior ability. Live execution re-picks per step via
+    :func:`next_sample_eig` once outcomes start arriving.
     """
     return sorted(
         sample_ids,
         key=lambda sid: (
-            -chernoff_info_pair(mu_c, mu_s, delta_map.get(sid, 0.0)),
+            -expected_information_gain(
+                mu_c, var_c, delta_map.get(sid, 0.0), delta_se_map.get(sid, 1.0)
+            ),
+            sid,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Decision objective — mutual information with the keep/abort verdict
+# ---------------------------------------------------------------------------
+
+
+def decision_information_gain(
+    mu_c: float,
+    var_c: float,
+    mu_s: float,
+    var_s: float,
+    delta_s: float,
+    se_delta_s: float,
+) -> float:
+    """Mutual information between one measurement of ``c`` on ``s`` and the verdict.
+
+    The verdict is the keep/abort decision ``θ_c > θ_s`` against the seed.
+    ``I(Y_s ; verdict) = H_b(P₀) − E_Y[H_b(P | Y)]`` where
+    ``P = Φ((μ_c − μ_s) / √(var_c + var_s))`` is the probability the candidate
+    beats the seed, the one-step Newton update folds a hit / miss into ``θ_c``,
+    and the outcome ``Y`` is weighted by the predictive hit probability.
+    Knob-free; the means-known limit recovers Bernoulli Chernoff information.
+    """
+    p0 = _normal_cdf((mu_c - mu_s) / math.sqrt(var_c + var_s))
+    mu_hit, var_hit = update_theta_posterior(mu_c, var_c, delta_s, True)
+    mu_miss, var_miss = update_theta_posterior(mu_c, var_c, delta_s, False)
+    p_hit = _normal_cdf((mu_hit - mu_s) / math.sqrt(var_hit + var_s))
+    p_miss = _normal_cdf((mu_miss - mu_s) / math.sqrt(var_miss + var_s))
+    p_bar = predictive_hit_prob(mu_c, var_c, delta_s, se_delta_s)
+    return _binary_entropy(p0) - (
+        p_bar * _binary_entropy(p_hit) + (1.0 - p_bar) * _binary_entropy(p_miss)
+    )
+
+
+def next_sample_decision(
+    mu_c: float,
+    var_c: float,
+    mu_s: float,
+    var_s: float,
+    delta_map: dict[int, float],
+    delta_se_map: dict[int, float],
+    remaining: set[int],
+) -> int | None:
+    """Pick the remaining sample maximizing decision information gain.
+
+    Returns ``None`` when ``remaining`` is empty. Ties break by ascending
+    sample id. Missing samples fall back to a centred, fully-uncertain prior.
+    """
+    if not remaining:
+        return None
+    return max(
+        remaining,
+        key=lambda sid: (
+            decision_information_gain(
+                mu_c, var_c, mu_s, var_s, delta_map.get(sid, 0.0), delta_se_map.get(sid, 1.0)
+            ),
+            -sid,
+        ),
+    )
+
+
+def expected_order_decision(
+    mu_c: float,
+    var_c: float,
+    mu_s: float,
+    var_s: float,
+    delta_map: dict[int, float],
+    delta_se_map: dict[int, float],
+    sample_ids: Iterable[int],
+) -> list[int]:
+    """Full ranking by descending decision information gain.
+
+    Telemetry snapshot peer of :func:`expected_order_eig` — surfaced on
+    ``dashboard.json::hard_sample_order`` when the picker objective is
+    ``decision``.
+    """
+    return sorted(
+        sample_ids,
+        key=lambda sid: (
+            -decision_information_gain(
+                mu_c, var_c, mu_s, var_s, delta_map.get(sid, 0.0), delta_se_map.get(sid, 1.0)
+            ),
             sid,
         ),
     )

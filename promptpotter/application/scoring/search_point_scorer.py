@@ -338,7 +338,7 @@ async def _run_query_loop(
 ) -> QueryLoopResult:
     """Score dataset samples, reusing prior results where available.
 
-    ``next_sample`` is the online adaptive picker (Phase A Rasch CAT).
+    ``next_sample`` is the online adaptive picker (1PL Rasch CAT).
     When supplied, the loop calls it before each iteration with the
     candidate's accumulated ``scored_outcomes`` (sample_id → hit) and
     receives the next sample id to measure. Returning ``None`` from

@@ -8,12 +8,12 @@ Each round evolves *N* individuals (default *N* = 5) via an LLM meta-prompt. Eac
 
 ## Sample iteration order — online adaptive picker
 
-Within each candidate, samples are selected **per step** by an online 1PL Item Response Theory picker (`promptpotter/application/intelligence/adaptive_picker.py`). The picker maintains a Gaussian-approximation posterior on the candidate's latent ability `θ_c` and re-picks the next sample after every measurement under one of two configurable objectives:
+Within each candidate, samples are selected **per step** by an online 1PL Item Response Theory picker (`promptpotter/application/intelligence/adaptive_picker.py`). The hierarchical Rasch posterior is fit once at the round boundary over the dataset-scoped archive; the picker maintains a Gaussian-approximation posterior on the candidate's latent ability `θ_c` and re-picks the next sample after every measurement under one of two configurable objectives:
 
-- **`mfi`** (Maximum Fisher Information; Lord 1980 CAT) — argmax `p(1-p)` at the candidate's running `θ̂_c`. Picks the sample whose outcome is most uncertain under current beliefs; decision-agnostic.
-- **`track_and_stop`** (Garivier-Kaufmann 2016; **default**) — argmax `C(σ(μ̂_c - δ_s), σ(μ_s - δ_s))` where `μ_s` is the seed prior's fitted ability and `C` is Bernoulli Chernoff information. Picks the sample whose outcome maximally separates candidate from seed — directly minimizes expected queries to a keep/abort verdict.
+- **`model`** (Expected Information Gain; **default**) — argmax `½·log(1 + w̄·(var_c + se_δ²))`, the entropy reduction of the hierarchical IRT posterior from one measurement. It reads the sample-difficulty SE, so a barely-measured sample ranks high; the `se_δ → 0` limit recovers Maximum Fisher Information. Decision-agnostic.
+- **`decision`** — argmax `I(Y_s ; verdict)`, the mutual information between the next outcome and the keep/abort verdict `θ_c > θ_s` against the seed. Picks the sample whose outcome most moves the decision; the means-known limit recovers Bernoulli Chernoff information.
 
-Configurable per dataset via `optimization.picker_objective` in `campaign.json`. The seed is origin in R1 and the prior round winner R2+; `μ_s` is fit once per round from the seed's measured outcomes. Detail and tradeoff: [`../concepts/paired-sample-pobb.md`](../concepts/paired-sample-pobb.md#sample-selection-online-adaptive-picker).
+Configurable per dataset via `optimization.picker_objective` in `campaign.json`. The seed is origin in R1 and the prior round winner R2+; the seed's `(μ_s, var_s)` is fit once per round from its measured outcomes. Detail and tradeoff: [`../concepts/paired-sample-pobb.md`](../concepts/paired-sample-pobb.md#sample-selection-online-adaptive-picker).
 
 ## Bayesian PoBB
 

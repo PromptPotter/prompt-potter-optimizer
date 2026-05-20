@@ -115,22 +115,24 @@ implementation site lands, or rename to a term already on the list.
   inside the PoBB loop. Maintains a Gaussian posterior on the
   candidate's latent ability `θ_c` and re-picks every measurement
   under the configured objective. `application/intelligence/adaptive_picker.py`.
-- **MFI** — Maximum Fisher Information objective for the
-  adaptive picker (Lord 1980 CAT). Picks argmax `p(1-p)` at
-  `p = σ(μ̂_c - δ_s)` — the sample whose outcome is most
-  uncertain under current beliefs. Decision-agnostic.
-- **Track-and-Stop (T&S)** — the decision-aligned objective for
-  the adaptive picker (Garivier-Kaufmann 2016). Picks argmax
-  Bernoulli Chernoff information between candidate's and seed's
-  predictive distributions on each sample. **Default**
-  (`optimization.picker_objective: "track_and_stop"`).
+- **EIG** — Expected Information Gain, the default adaptive-picker
+  objective. The entropy reduction of the hierarchical IRT
+  posterior from one measurement: `½·log(1 + w̄·(var_c + se_δ²))`.
+  Reads the sample-difficulty SE, so a barely-measured sample
+  ranks high; the `se_δ → 0` limit recovers Maximum Fisher
+  Information.
+- **Decision objective** — the decision-aligned adaptive-picker
+  objective: the mutual information between the next outcome and
+  the keep/abort verdict `θ_c > θ_s` against the seed. The
+  means-known limit recovers Bernoulli Chernoff information.
 - **picker_objective** — `campaign.json` field selecting the
-  adaptive picker's objective: `"mfi"` or `"track_and_stop"`.
-  Defaults to `"track_and_stop"`.
-- **Fisher info snapshot** — descriptive per-sample
-  `pick_score.per_sample` on the hard-samples artifact:
-  Fisher info at `θ=0`. Consumed by the webapp dataset table; the
-  live picker uses its own per-candidate posterior, not this snapshot.
+  adaptive picker's objective: `"model"` (EIG, default) or
+  `"decision"`.
+- **EIG snapshot** — descriptive per-sample
+  `pick_score.per_sample` on the hard-samples artifact: expected
+  information gain at the population-prior ability `N(0, σ_θ²)`.
+  Consumed by the webapp dataset table; the live picker uses its
+  own per-candidate posterior, not this snapshot.
 - **llm_ranking** — a backend node that orders ranked_items per
   sample. Distinct from PoBB, Rasch, and the adaptive picker.
   Currently broken on TermNorm (see CLAUDE.md known issues).

@@ -217,9 +217,9 @@ class LiveDashboardView(DerivedView):
             # in-flight row in lockstep with the per-sample dashboard rewrites.
             "current_sample_id": None,
             # Adaptive picker's expected sample order at candidate-start
-            # under the active ``picker_objective`` (Fisher info under
-            # ``mfi``, Chernoff info between candidate-prior and seed
-            # under ``track_and_stop``). Refreshed per-candidate in
+            # under the active ``picker_objective`` — expected information
+            # gain (``model``) or decision-verdict mutual information
+            # (``decision``). Refreshed per-candidate in
             # ``score_population``. The webapp dataset table sorts on
             # this when the operator's "sync with live sort" toggle is
             # on. ``None`` until the first picker fit lands (round 0 /

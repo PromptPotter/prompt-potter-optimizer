@@ -77,11 +77,11 @@ export interface DatasetItem {
   // Miss-probability for an average candidate, sigmoid(δ_s) from Rasch.
   // 0.5 prior for unmeasured samples. Drives the static-mode sort.
   miss_prob: number;
-  // 1PL Fisher information at the population-anchor θ=0 (descriptive
-  // snapshot). Indicates how informative measuring this sample would
-  // be on a brand-new candidate before any of its outcomes land. The
-  // live picker recomputes per step against the candidate's running
-  // θ̂_c posterior, so this is descriptive — not the iteration order.
+  // Expected information gain of measuring this sample on a brand-new
+  // candidate (ability prior N(0, σ_θ²)). Reads the Rasch δ_s standard
+  // error, so a barely-measured sample scores high. The live picker
+  // recomputes per step against the candidate's running θ̂_c posterior,
+  // so this is a descriptive snapshot — not the iteration order.
   // null when the sample has no measurement yet.
   pick_score: number | null;
 }

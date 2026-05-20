@@ -122,14 +122,6 @@ class ExplorationConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    seed_evolve_from_archive: bool = Field(
-        False,
-        description=(
-            "The per-round subset picker folds archive observations into its "
-            "Rasch fit alongside live `build_observations(rounds)`, so the "
-            "sample selection reflects cross-cycle evidence from round 1 onward."
-        ),
-    )
     seed_heatmap_from_archive: bool = Field(
         False,
         description=(
@@ -194,18 +186,17 @@ class OptimizationConfig(BaseModel):
 
     zero_signal_filter_enabled: bool = Field(False)
 
-    picker_objective: Literal["mfi", "track_and_stop"] = Field(
-        "track_and_stop",
+    picker_objective: Literal["model", "decision"] = Field(
+        "model",
         description=(
             "Per-step sample selector inside the PoBB loop. "
-            "``mfi`` = Phase A Maximum Fisher Information at the "
-            "candidate's running θ̂_c posterior (Lord 1980 CAT) — picks "
-            "the sample whose outcome is most uncertain under current "
-            "beliefs; decision-agnostic. ``track_and_stop`` (default) = "
-            "Phase B Chernoff information between the candidate's and "
-            "seed's predictive Bernoulli on each sample "
-            "(Garivier-Kaufmann 2016) — picks the sample whose outcome "
-            "most pushes the keep/abort verdict; decision-aligned."
+            "``model`` (default) = Expected Information Gain — picks the "
+            "sample whose measurement most reduces the entropy of the "
+            "hierarchical IRT posterior; reads the sample-difficulty SE so a "
+            "barely-measured sample ranks high; decision-agnostic. "
+            "``decision`` = mutual information between the next outcome and "
+            "the keep/abort verdict against the seed; decision-aligned, the "
+            "means-known limit of Chernoff information."
         ),
     )
 

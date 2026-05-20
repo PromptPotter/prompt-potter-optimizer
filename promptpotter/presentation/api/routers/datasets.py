@@ -62,14 +62,13 @@ class DatasetItem(BaseModel):
     pick_score: float | None = Field(
         default=None,
         description=(
-            "1PL Fisher information at the population-anchor θ = 0 "
-            "(Lord 1980 MFI). Snapshot of how informative measuring "
-            "this sample would be on a brand-new candidate before any "
-            "of its outcomes land — peaks at samples whose outcome is "
-            "most uncertain under the population prior. The live "
-            "picker (``adaptive_picker``) re-evaluates this per step "
-            "against the candidate's running θ̂_c posterior. None "
-            "when the sample has no measurement yet."
+            "Expected information gain of measuring this sample on a "
+            "brand-new candidate (ability prior N(0, sigma_theta^2)). Reads "
+            "the Rasch delta_s standard error, so a barely-measured sample "
+            "scores high — there is more to learn. The live picker "
+            "(``adaptive_picker``) re-evaluates it per step against the "
+            "candidate's running θ̂_c posterior. None when the sample has "
+            "no measurement yet."
         ),
     )
 
@@ -173,8 +172,9 @@ async def get_dataset_preview(
     n_obs_map: dict[int, int] = {
         int(k): int(v) for k, v in rasch.get("n_obs_per_sample", {}).items()
     }
-    # Pick-score (Chernoff info vs seed prior) is only populated for the
-    # per-cycle artifact — the cross-cycle archive has no seed concept.
+    # Pick-score is the expected information gain of measuring each sample
+    # on a brand-new candidate — populated for both the per-cycle and the
+    # cross-cycle archive artifact.
     pick_score_block = artifact.get("pick_score", {}).get("per_sample", {})
     pick_score_map: dict[int, float] = {int(k): float(v) for k, v in pick_score_block.items()}
     measured = {sid for sid in delta_map if sid in sample_lookup}

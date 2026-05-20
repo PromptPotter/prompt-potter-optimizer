@@ -389,23 +389,31 @@ def _synth_observations(
 
 
 def test_rasch_recovers_known_parameters() -> None:
-    # Wide spread + many obs/pair → MAP should recover both arrays within tolerance.
+    # Wide spread + many obs/pair → empirical-Bayes MAP recovers both the
+    # latent arrays and the population hyperparameters within tolerance.
     theta_true = {"strong": 1.5, "mid": 0.0, "weak": -1.5}
     delta_true = {1: -1.0, 2: 0.0, 3: 1.0, 4: 2.0}
-    obs = _synth_observations(theta_true, delta_true, n_per_pair=40, seed=42)
+    obs = _synth_observations(theta_true, delta_true, n_per_pair=80, seed=42)
 
-    posterior = fit_rasch(obs, theta_prior_sigma=10.0, delta_prior_sigma=10.0)
+    posterior = fit_rasch(obs)
 
     assert posterior.converged
     # Identifiability: both arrays anchored to mean(theta) == 0.
     assert abs(sum(posterior.theta.values()) / len(posterior.theta)) < 1e-6
-    # Recovery is within the noise floor for n=40 obs/pair (Bernoulli SE ~ 0.08).
+    # Recovery is within the noise floor at n=80 obs/pair.
     # Loosen to 0.5 logits — math correctness is what we're guarding, not precision.
     theta_offset = sum(theta_true.values()) / len(theta_true)
     for cid, t_true in theta_true.items():
         assert abs(posterior.theta[cid] - (t_true - theta_offset)) < 0.5
     for sid, d_true in delta_true.items():
         assert abs(posterior.delta[sid] - (d_true - theta_offset)) < 0.5
+
+    # Empirical Bayes estimates the priors instead of hardcoding them: the
+    # hyperparameters track the true population spread (θ std ≈ 1.22, δ std
+    # ≈ 1.12, mean δ ≈ 0.5), not the old fixed 1.5 / 2.0 sigmas.
+    assert abs(posterior.sigma_theta - 1.22) < 0.6
+    assert abs(posterior.sigma_delta - 1.12) < 0.6
+    assert abs(posterior.mu_delta - 0.5) < 0.4
 
 
 def test_rasch_handles_sparse_matrix() -> None:
@@ -426,7 +434,7 @@ def test_rasch_handles_sparse_matrix() -> None:
 
 
 def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() -> None:
-    bank = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(9)]
+    bank = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(6)]
 
     # Cold start (no observations) → deterministic bank-order prefix.
     assert select_round_subset(bank, [], 3) == bank[:3]
@@ -434,18 +442,21 @@ def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() ->
     assert select_round_subset(bank, [], 99) == bank
     assert select_round_subset(bank, [], 0) == []
 
-    # Warm: 4 candidates. Samples 0-3 hit by all (understood/easy), 5-8 missed
-    # by all (out of reach), sample 4 split 2-2 — the one contested,
-    # maximally-informative sample. A budget-3 subset must surface it over the
-    # understood prefix.
+    # Warm: samples 0-2 measured heavily and split ~50/50 (mid difficulty,
+    # tight δ); samples 3-5 measured exactly once (same mid difficulty band,
+    # but loose δ). The expected-information-gain objective surfaces the
+    # barely-measured samples — equal difficulty, but more to learn — over
+    # the well-pinned prefix, which the old Fisher objective could not tell
+    # apart.
     obs: list[Observation] = []
-    for ci, cid in enumerate(("a", "b", "c", "d")):
-        for sid in range(9):
-            hit = sid <= 3 or (sid == 4 and ci < 2)
-            obs.append(Observation(cid, sid, hit))
+    for sid in (0, 1, 2):
+        for cid in ("a", "b", "c"):
+            obs.extend(Observation(cid, sid, True) for _ in range(6))
+            obs.extend(Observation(cid, sid, False) for _ in range(6))
+    for sid in (3, 4, 5):
+        obs.append(Observation("a", sid, True))
     picked_ids = {s.id for s in select_round_subset(bank, obs, 3)}
-    assert len(picked_ids) == 3
-    assert 4 in picked_ids
+    assert picked_ids == {3, 4, 5}
 
 
 # ===========================================================================

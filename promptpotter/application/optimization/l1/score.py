@@ -18,15 +18,19 @@ from functools import partial
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.intelligence.adaptive_picker import (
-    chernoff_info_pair,
-    expected_order_mfi,
-    expected_order_track_and_stop,
-    fisher_info,
-    next_sample_mfi,
-    next_sample_track_and_stop,
+    decision_information_gain,
+    expected_information_gain,
+    expected_order_decision,
+    expected_order_eig,
+    next_sample_decision,
+    next_sample_eig,
     posterior_from_outcomes,
 )
-from promptpotter.application.intelligence.exploration import Observation, fit_rasch
+from promptpotter.application.intelligence.exploration import (
+    Observation,
+    RaschPosterior,
+    fit_rasch,
+)
 from promptpotter.application.optimization.l1.population import (
     INVALID_SCORES,
     build_score_report,
@@ -578,63 +582,59 @@ async def score_population(
     prior_round_obs: list[Observation] = []
     for rr in cycle.rounds:
         prior_round_obs.extend(_filtered_obs(rr.all_candidate_results))
-    base_sorter_obs: list[Observation] = list(prior_round_obs)
-    if cycle.config.optimization.exploration.seed_evolve_from_archive:
-        # Archive observations come from completed scored runs (no
-        # mid-run abort residue), so no length filter needed there.
-        base_sorter_obs = list(cycle.archive_observations) + base_sorter_obs
-
-    # Prior on candidate θ_c: broad N(0, 1) centred at the Rasch
-    # identifiability anchor (mean(θ) = 0). Observations dominate
-    # within ~3 measurements; the prior just keeps the cold-start
-    # posterior proper when the picker fires before any sample has
-    # been measured on this candidate.
-    PRIOR_MU = 0.0
-    PRIOR_VAR = 1.0
+    # Archive observations come from completed scored runs (no mid-run abort
+    # residue) and are dataset-scoped, so the picker's δ posterior carries
+    # every cross-cycle measurement, not just this cycle's rounds.
+    round_boundary_obs: list[Observation] = list(cycle.archive_observations) + prior_round_obs
 
     picker_objective = cycle.config.optimization.picker_objective
     dataset_sample_ids = [int(s.id) for s in dataset]
 
-    def _delta_map_from_obs() -> dict[int, float]:
-        """Fit Rasch on current observations; return sample-id → δ_s.
+    def _picker_maps(
+        posterior: RaschPosterior,
+    ) -> tuple[dict[int, float], dict[int, float]]:
+        """Complete (δ̂_s, se_δ_s) maps over every dataset sample.
 
-        Called once per candidate (before its query loop opens) so the
-        picker's δ-map reflects every measurement seen so far across
-        priors and in-progress in-round candidates. Empty observations
-        → empty map → picker falls back to sample-id ascending (cold
-        start), matching the pre-existing R0 candidate-1 behaviour.
+        Measured samples carry their fitted posterior; unmeasured ones the
+        estimated population prior (μ_δ, σ_δ) — so an as-yet-unseen sample
+        reads as maximally informative rather than as δ = 0 / se = 0.
         """
-        obs = base_sorter_obs + _filtered_obs(all_candidate_results)
-        if not obs:
-            return {}
-        posterior = fit_rasch(obs)
-        return {int(sid): float(d) for sid, d in posterior.delta.items()}
+        delta_map = {
+            sid: posterior.delta.get(sid, posterior.mu_delta) for sid in dataset_sample_ids
+        }
+        delta_se_map = {
+            sid: posterior.delta_se.get(sid, posterior.sigma_delta) for sid in dataset_sample_ids
+        }
+        return delta_map, delta_se_map
 
-    def _seed_mu_from_results() -> float:
-        """Fold seed's per-sample outcomes into a θ_s posterior mean.
+    # Fit the hierarchical Rasch posterior once at the round boundary over the
+    # dataset-scoped archive plus prior-round observations. δ_s is a property
+    # of samples, not candidates, so every candidate's picker reads this one
+    # cached posterior — no per-candidate refit. ``prior_var`` is the
+    # estimated population ability variance σ_θ²: a brand-new candidate's
+    # θ_c prior, drawn from N(0, σ_θ²).
+    picker_posterior = fit_rasch(round_boundary_obs)
+    delta_map, delta_se_map = _picker_maps(picker_posterior)
+    prior_var = picker_posterior.sigma_theta**2
 
-        Used by the Phase B (Track-and-Stop) objective so the picker can
-        contrast each sample's predicted hit-rate between candidate and
-        seed. Returns ``PRIOR_MU`` when the seed has no measurements
-        (cold start) or when the picker objective is ``mfi`` (the value
-        is unused). Computed once per round at the entry to
-        ``score_population`` — the seed doesn't change between
-        candidates within a round.
+    def _seed_posterior() -> tuple[float, float]:
+        """Fold the seed's per-sample outcomes into a θ_s posterior (μ_s, var_s).
+
+        Used by the ``decision`` picker objective so each sample's
+        information gain can be scored against the keep/abort verdict.
+        Returns the centred prior ``(0, σ_θ²)`` when the seed has no
+        measurements.
         """
         if not seed_results:
-            return PRIOR_MU
-        delta_for_seed = _delta_map_from_obs()
-        if not delta_for_seed:
-            return PRIOR_MU
+            return 0.0, prior_var
         outcomes = [
-            (delta_for_seed.get(int(sr["sample_id"]), 0.0), bool(sr.get("hit")))
+            (delta_map.get(int(sr["sample_id"]), 0.0), bool(sr.get("hit")))
             for sr in seed_results
             if sr.get("sample_id") is not None and not sr.get("error")
         ]
-        mu, _ = posterior_from_outcomes(PRIOR_MU, PRIOR_VAR, outcomes)
-        return mu
+        return posterior_from_outcomes(0.0, prior_var, outcomes)
 
-    seed_mu = _seed_mu_from_results() if picker_objective == "track_and_stop" else PRIOR_MU
+    seed_mu, seed_var = _seed_posterior() if picker_objective == "decision" else (0.0, 1.0)
 
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
@@ -648,58 +648,67 @@ async def score_population(
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
 
-        # Online 1PL Rasch CAT picker. Refit δ on cumulative observations
-        # at candidate start; each per-sample call to ``next_sample``
-        # folds ``update_theta_posterior`` over the candidate's measured
-        # outcomes so far and picks argmax over the configured objective
-        # under the running θ̂_c posterior. Pure / stateless — callers
-        # don't persist (μ_c, σ²_c) across calls.
+        # Online 1PL Rasch CAT picker. The δ posterior is the round-boundary
+        # fit above; each per-sample call to ``next_sample`` folds
+        # ``update_theta_posterior`` over the candidate's measured outcomes so
+        # far and picks argmax of the configured objective under the running
+        # θ̂_c posterior. Pure / stateless — callers don't persist
+        # (μ_c, var_c) across calls.
         #
-        # Objective ``mfi``: argmax Fisher info p(1-p) at μ_c — Phase A,
-        # textbook CAT, decision-agnostic.
-        # Objective ``track_and_stop``: argmax Chernoff(p_c, p_s) where
-        # p_s is the seed's predicted hit-rate on the same sample —
-        # Phase B, decision-aligned (Garivier-Kaufmann 2016).
-        delta_map = _delta_map_from_obs()
-        objective = picker_objective
-
+        # Objective ``model``: argmax expected information gain — the entropy
+        # reduction of the hierarchical IRT posterior; decision-agnostic.
+        # Objective ``decision``: argmax mutual information between the next
+        # outcome and the keep/abort verdict against the seed.
         def _next_sample(
             scored_outcomes: dict[int, bool],
             _delta_map: dict[int, float] = delta_map,
-            _objective: str = objective,
+            _delta_se_map: dict[int, float] = delta_se_map,
+            _prior_var: float = prior_var,
+            _objective: str = picker_objective,
             _seed_mu: float = seed_mu,
+            _seed_var: float = seed_var,
         ) -> int | None:
-            mu_c, _var_c = posterior_from_outcomes(
-                PRIOR_MU,
-                PRIOR_VAR,
+            mu_c, var_c = posterior_from_outcomes(
+                0.0,
+                _prior_var,
                 ((_delta_map.get(sid, 0.0), hit) for sid, hit in scored_outcomes.items()),
             )
             remaining = set(dataset_sample_ids) - scored_outcomes.keys()
-            if _objective == "track_and_stop":
-                return next_sample_track_and_stop(mu_c, _seed_mu, _delta_map, remaining)
-            return next_sample_mfi(mu_c, _delta_map, remaining)
+            if _objective == "decision":
+                return next_sample_decision(
+                    mu_c, var_c, _seed_mu, _seed_var, _delta_map, _delta_se_map, remaining
+                )
+            return next_sample_eig(mu_c, var_c, _delta_map, _delta_se_map, remaining)
 
         # Candidate-start preview: rank all dataset sample_ids under the
-        # active objective with the candidate's prior θ̂_c = PRIOR_MU.
+        # active objective at the candidate's prior θ̂_c = N(0, σ_θ²).
         # Surfaces on ``dashboard.json::hard_sample_order`` so the webapp
         # table mirrors what the picker would pick if outcomes follow
         # the prior. Live execution re-picks per step.
-        if picker_objective == "track_and_stop":
-            expected_order = expected_order_track_and_stop(
-                PRIOR_MU, seed_mu, delta_map, dataset_sample_ids
+        if picker_objective == "decision":
+            expected_order = expected_order_decision(
+                0.0, prior_var, seed_mu, seed_var, delta_map, delta_se_map, dataset_sample_ids
             )
             preview_scores = {
-                sid: float(chernoff_info_pair(PRIOR_MU, seed_mu, delta_map.get(sid, 0.0)))
+                sid: float(
+                    decision_information_gain(
+                        0.0, prior_var, seed_mu, seed_var, delta_map[sid], delta_se_map[sid]
+                    )
+                )
                 for sid in expected_order[: min(3, len(expected_order))]
             }
         else:
-            expected_order = expected_order_mfi(PRIOR_MU, delta_map, dataset_sample_ids)
+            expected_order = expected_order_eig(
+                0.0, prior_var, delta_map, delta_se_map, dataset_sample_ids
+            )
             preview_scores = {
-                sid: float(fisher_info(PRIOR_MU, delta_map.get(sid, 0.0)))
+                sid: float(
+                    expected_information_gain(0.0, prior_var, delta_map[sid], delta_se_map[sid])
+                )
                 for sid in expected_order[: min(3, len(expected_order))]
             }
 
-        if delta_map:
+        if picker_posterior.delta:
             preview = [(sid, preview_scores[sid]) for sid in preview_scores]
             callbacks.on_sample_order_preview(
                 round_num,

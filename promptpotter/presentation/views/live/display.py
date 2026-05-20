@@ -435,15 +435,15 @@ class LiveDisplay(DerivedView):
 
     def on_sample_order_preview(self, preview: list[tuple[int, float]], n_priors: int) -> None:
         """Print the adaptive picker's expected next samples under the
-        prior posterior (1PL Rasch CAT, Fisher info objective).
+        prior posterior (1PL Rasch CAT, expected-information-gain objective).
 
         Fires after ``on_candidate_started`` and before any sample
-        scoring. The values are Fisher info ``p(1-p)`` evaluated at the
-        prior's predicted hit probability — peaks at samples whose
-        outcome is most uncertain under prior beliefs. Live execution
-        re-picks per step; this preview is the "what's expected to be
-        informative" snapshot, not a commitment to the order. Empty
-        ``preview`` (cold start with no Rasch fit) suppresses the line.
+        scoring. The values are the expected information gain of measuring
+        each sample on a brand-new candidate — peaks where one measurement
+        most sharpens the model. Live execution re-picks per step; this
+        preview is the "what's expected to be informative" snapshot, not a
+        commitment to the order. Empty ``preview`` (cold start with no Rasch
+        fit) suppresses the line.
         """
         if not preview:
             return

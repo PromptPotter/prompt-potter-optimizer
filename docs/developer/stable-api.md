@@ -94,7 +94,6 @@ Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::C
 | `exploration.swap_out_delta_se` | 0.7 | Rasch SE threshold for the scoring-set swap-out. |
 | `exploration.swap_in_kg_threshold` | 0.01 | Rasch KG threshold for swap-in. |
 | `exploration.max_swaps_per_round` | 3 | Cap on scoring-set churn per round. |
-| `exploration.cold_start_prior_sigma` | 1.5 | Theta prior sigma when no observations yet. |
 
 **`optimizer_llm` knobs:** `provider` (`groq`/`openai`/`anthropic`/`openrouter`), `model` (provider-specific). Per-node temperature + max_tokens come from `datasets/_optimizer/pipeline.json`, not the campaign config.
 

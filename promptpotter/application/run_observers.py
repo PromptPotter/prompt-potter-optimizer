@@ -172,10 +172,10 @@ class RunCallbacks:
         n_priors: int,
         sample_order: list[int],
     ) -> None:
-        """Adaptive picker preview — top-3 expected next samples by Fisher
-        info under the prior posterior (1PL Rasch CAT, Lord 1980 MFI),
-        plus the full expected order so the webapp dataset table can
-        re-sort live to mirror what the picker would pick if outcomes
+        """Adaptive picker preview — top-3 expected next samples by
+        expected information gain under the prior posterior (1PL Rasch
+        CAT), plus the full expected order so the webapp dataset table
+        can re-sort live to mirror what the picker would pick if outcomes
         follow the prior.
 
         Fired at the start of each candidate before scoring begins.
@@ -183,10 +183,10 @@ class RunCallbacks:
         this snapshot is the "what the picker thinks before any outcome"
         view, useful for the operator's running mental model of which
         samples are in scope. ``sample_order`` is the full dataset
-        ranked by Fisher info under the prior; the artifact's
-        hardest-first ``sample_order`` (heatmap x-axis) is distinct —
-        that ranking is absolute difficulty, this one is "expected
-        information value at the candidate's prior ability."
+        ranked by expected information gain under the prior; the
+        artifact's hardest-first ``sample_order`` (heatmap x-axis) is
+        distinct — that ranking is absolute difficulty, this one is
+        "expected information value at the candidate's prior ability."
         """
         self._snapshot(
             "sample_order_preview",
