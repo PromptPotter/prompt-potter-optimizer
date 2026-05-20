@@ -152,10 +152,8 @@ def build_hard_samples_artifact(
 
     Thin wrapper over :func:`build_hard_samples_artifact_from_observations`
     that projects ``cycle.rounds`` into ``(candidate, sample, hit)`` triples
-    via :func:`build_observations` first. If ``posterior`` is supplied (e.g.
-    cached from the round-end ``evolve_scoring_set`` call), the redundant
-    refit is skipped — the heatmap and the scoring-set evolution share one
-    Rasch fit per round.
+    via :func:`build_observations` first. If a pre-fitted ``posterior`` is
+    supplied, the redundant Rasch refit is skipped.
 
     Pure function: no I/O.
     """

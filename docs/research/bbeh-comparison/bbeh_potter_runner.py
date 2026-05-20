@@ -66,15 +66,12 @@ def build_campaign_config(
         cfg["sp_budget_ttest"] = sp_budget_ttest
 
     # Rasch-validation run scaffolding (docs/specs/rasch-validation-plan.md):
-    # large l1_patience defers L2/L3 firing for the run window so swap
-    # evidence has time to accumulate; 0.7 SE threshold is a temporary push
-    # above the 0.5 default to make round-1→2 firing realistic at 5
-    # obs/sample (SE ~0.78 at p≈0.5).
+    # large l1_patience defers L2/L3 firing for the run window so the
+    # per-round CAT picker has time to accumulate δ evidence.
     cfg["optimization"] = {
         **cfg.get("optimization", {}),
         "max_rounds": 5,
         "l1_patience": 99,
-        "scoring_set": {"swap_out_delta_se": 0.7},
     }
 
     opt_overrides = {

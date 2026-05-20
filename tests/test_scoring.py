@@ -1,5 +1,5 @@
-"""Per-dataset scorer formulas, evaluator registry, composite_fitness render, scoring-set
-evolution, and interactive steering.
+"""Per-dataset scorer formulas, evaluator registry, composite_fitness render,
+round-subset selection, and interactive steering.
 
 Five named invariants:
   1. Dataset-specific scorers (AIME / GSM8K / exact_match) recover wrong-reveal
@@ -12,8 +12,8 @@ Five named invariants:
      ``inline_short_formula_values`` produce formula text + named evaluator pairs
      within their three-line frame budget, dropping evaluators not in formula.
   4. ``fit_rasch`` recovers known θ/δ on synthetic Bernoulli data and is sparse-safe;
-     ``evolve_scoring_set`` preserves the ``elimination_n_min`` floor, mutates only the
-     scoring slice, and is a no-op when disabled.
+     ``select_round_subset`` picks the budget-N most-informative samples from the bank
+     and falls back to the bank-order prefix at cold start.
   5. ``apply_steer_file`` hot-swaps ``session.scoring.round_scorer`` on a valid
      ``scoring_steer.json`` (archives the file) and leaves state untouched on
      a broken formula (file stays in place for the operator).
@@ -26,12 +26,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from promptpotter.application.config import ExplorationConfig
 from promptpotter.application.intelligence.exploration import (
     Observation,
-    evolve_scoring_set,
     fit_rasch,
-    knowledge_gradient,
+    select_round_subset,
 )
 from promptpotter.application.scoring.evaluators import (
     all_evaluators,
@@ -57,7 +55,6 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-from promptpotter.domain.results import RoundResult
 from promptpotter.domain.sample import Sample
 
 # ===========================================================================
@@ -428,61 +425,27 @@ def test_rasch_handles_sparse_matrix() -> None:
     assert all(se > 0 for se in posterior.delta_se.values())
 
 
-def test_kg_is_non_negative_and_zero_for_unknown_pair() -> None:
-    obs = _synth_observations({"a": 1.0, "b": -1.0}, {1: 0.0, 2: 0.5}, n_per_pair=10, seed=1)
-    posterior = fit_rasch(obs)
+def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() -> None:
+    bank = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(9)]
 
-    for cid in ("a", "b"):
-        for sid in (1, 2):
-            assert knowledge_gradient(posterior, cid, sid) >= 0.0
+    # Cold start (no observations) → deterministic bank-order prefix.
+    assert select_round_subset(bank, [], 3) == bank[:3]
+    # Budget at/above bank size → the whole bank; non-positive budget → empty.
+    assert select_round_subset(bank, [], 99) == bank
+    assert select_round_subset(bank, [], 0) == []
 
-    assert knowledge_gradient(posterior, "unknown", 1) == 0.0
-    assert knowledge_gradient(posterior, "a", 999) == 0.0
-
-
-def _make_round(round_idx: int, candidate_results: dict[str, list[dict]]) -> RoundResult:
-    return RoundResult(
-        round=round_idx,
-        label=f"R{round_idx}",
-        accuracy=0.5,
-        composite_fitness=0.5,
-        hits=0,
-        total=0,
-        improved=False,
-        prompt_fields={},
-        all_candidate_results=candidate_results,
-        candidates_scored=len(candidate_results),
-    )
-
-
-def test_evolve_scoring_set_respects_min_size() -> None:
-    # Tiny scoring set at the floor → swap-out must yield zero, returning current.
-    scoring_set = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(4)]
-    extra = [Sample(id=10 + i, query=f"q{10 + i}", ground_truth="g") for i in range(5)]
-    full = scoring_set + extra
-
-    # Many candidates measuring all scoring-set samples consistently → narrow δ SE
-    # → swap-out would be eligible, but the elimination_n_min==4 floor must block it.
-    candidate_results = {
-        f"c{ci}": [{"sample_id": s.id, "hit": True} for s in scoring_set] for ci in range(8)
-    }
-    rounds = [_make_round(0, candidate_results)]
-
-    cfg = ExplorationConfig(
-        swap_out_delta_se=10.0,  # extremely permissive — every scoring-set sample qualifies
-        swap_in_kg_threshold=0.0,
-        max_swaps_per_round=10,
-    )
-    out = evolve_scoring_set(
-        full_dataset=full,
-        current_scoring_set=scoring_set,
-        rounds=rounds,
-        config=cfg,
-        elimination_n_min=4,  # floor matches len(scoring_set)
-    )
-    assert len(out.new_scoring_set) >= 4
-    # No scoring-set sample dropped below the floor.
-    assert {s.id for s in out.new_scoring_set} >= {s.id for s in scoring_set} - {-1}
+    # Warm: 4 candidates. Samples 0-3 hit by all (understood/easy), 5-8 missed
+    # by all (out of reach), sample 4 split 2-2 — the one contested,
+    # maximally-informative sample. A budget-3 subset must surface it over the
+    # understood prefix.
+    obs: list[Observation] = []
+    for ci, cid in enumerate(("a", "b", "c", "d")):
+        for sid in range(9):
+            hit = sid <= 3 or (sid == 4 and ci < 2)
+            obs.append(Observation(cid, sid, hit))
+    picked_ids = {s.id for s in select_round_subset(bank, obs, 3)}
+    assert len(picked_ids) == 3
+    assert 4 in picked_ids
 
 
 # ===========================================================================

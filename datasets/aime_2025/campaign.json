@@ -21,7 +21,6 @@
       "elimination_n_min": 4,
       "pobb_epsilon": 0.20,
       "exploration": {
-        "seed_initial_scoring_set_from_archive": true,
         "seed_evolve_from_archive": true,
         "seed_heatmap_from_archive": true
       }

@@ -1,32 +1,38 @@
-"""Rasch + KG primitives + round-level scoring-set evolution.
+"""Rasch IRT primitives + per-round scoring-subset selection.
 
-Two related concerns share this module so the Rasch posterior and the
-sample-swap policy that consumes it stay co-located:
+Two related concerns share this module:
 
-1. **Rasch model + Knowledge Gradient** — fitting the IRT posterior
-   (``RaschPosterior`` / ``fit_rasch_irt``) and computing per-sample KG
-   used to rank exploration value. Pure-math primitives.
+1. **Rasch model** — fitting the IRT posterior (``fit_rasch`` /
+   ``RaschPosterior``) over ``(candidate, sample, hit)`` observations.
+   Pure-math primitives, ``mean(theta) == 0`` anchored for identifiability.
 
-2. **Round-level scoring-set evolution** (``evolve_scoring_set``) —
-   between rounds, swap understood samples (low δ_s SE) out of the active
-   scoring set in favor of high-KG samples. Exploration / exploitation
-   on which sample IDs are in play next round.
+2. **Per-round subset selection** (``select_round_subset``) — each round,
+   pick the ``sp_budget_ttest`` most-informative samples out of the full
+   bank via the CAT picker's Fisher-information objective at the leading
+   candidate's estimated ability. This is what decouples the bank (the
+   full train split) from the per-round eval budget.
 """
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
+from promptpotter.application.intelligence.adaptive_picker import expected_order_mfi
+
 if TYPE_CHECKING:
-    from promptpotter.application.config import ExplorationConfig
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
 
-logger = logging.getLogger(__name__)
+__all__ = [
+    "Observation",
+    "RaschPosterior",
+    "build_observations",
+    "fit_rasch",
+    "select_round_subset",
+]
 
 
 class Observation(NamedTuple):
@@ -54,14 +60,6 @@ class RaschPosterior:
     n_obs_per_sample: dict[int, int] = field(default_factory=dict)
     n_iterations: int = 0
     converged: bool = False
-
-
-def _sigmoid(x: float) -> float:
-    if x >= 0:
-        ex = np.exp(-x)
-        return float(1.0 / (1.0 + ex))
-    ex = np.exp(x)
-    return float(ex / (1.0 + ex))
 
 
 def fit_rasch(
@@ -166,123 +164,6 @@ def fit_rasch(
     )
 
 
-def knowledge_gradient(
-    posterior: RaschPosterior,
-    candidate_id: str,
-    sample_id: int,
-) -> float:
-    """One-step KG for measuring ``(candidate, sample)``.
-
-    Closed-form for Bernoulli observation under the Laplace approximation.
-    Returns the expected absolute shift in this candidate's ``theta``
-    estimate, weighted by the predicted outcome probability. Larger means
-    "this measurement would move our belief about candidate's ability
-    more, in expectation".
-
-    Returns 0 when the pair is already heavily measured (info dominates
-    the new observation) or when the candidate / sample is unknown.
-    """
-    t = posterior.theta.get(candidate_id)
-    d = posterior.delta.get(sample_id)
-    if t is None or d is None:
-        return 0.0
-
-    p = _sigmoid(t - d)
-    w = p * (1.0 - p)
-
-    # Posterior info on theta_c is approximately n_obs * mean_w + 1/sigma_prior^2;
-    # use the candidate's actual SE to back out the current info budget.
-    se = posterior.theta_se.get(candidate_id, 1.0)
-    info_current = 1.0 / max(se * se, 1e-9)
-    info_new = info_current + w  # one more observation contributes w to Fisher info
-
-    # Newton step delta for an observation outcome y ∈ {0, 1}:
-    # Δθ = (y - p) / info_new
-    delta_if_hit = (1.0 - p) / max(info_new, 1e-9)
-    delta_if_miss = (0.0 - p) / max(info_new, 1e-9)
-
-    # Expected absolute shift in posterior mean of theta_c.
-    # Already-measured pairs are naturally discounted by the 1/info_new factor.
-    expected_shift = p * abs(delta_if_hit) + (1.0 - p) * abs(delta_if_miss)
-    return float(expected_shift)
-
-
-def sample_kg_max(
-    posterior: RaschPosterior,
-    sample_id: int,
-    candidate_ids: list[str],
-) -> float:
-    """Per-sample KG = ``max_c KG(c, s)`` over a candidate set.
-
-    The "any high-value pair justifies measuring this sample" interpretation.
-    Used by the swap-in ranker.
-    """
-    if not candidate_ids:
-        return 0.0
-    return max(knowledge_gradient(posterior, cid, sample_id) for cid in candidate_ids)
-
-
-# ===========================================================================
-# Round-level scoring-set evolution via Rasch + KG
-# ===========================================================================
-
-__all__ = [
-    "EvolveResult",
-    "build_observations",
-    "evolve_scoring_set",
-    "seed_initial_scoring_set",
-]
-
-
-def seed_initial_scoring_set(
-    observations: list[Observation],
-    dataset: list[Sample],
-    n: int,
-) -> list[Sample] | None:
-    """Pick the ``n`` hardest samples in ``dataset`` by δ_s from a Rasch fit on ``observations``.
-
-    Returns ``None`` when ``observations`` is too shallow to yield a stable
-    fit (caller falls back to the dataset-order prefix). Pure: no I/O.
-    """
-    if n <= 0 or not dataset or not observations:
-        return None
-    posterior = fit_rasch(observations)
-    if not posterior.delta:
-        return None
-    by_id = {s.id: s for s in dataset}
-    ranked_ids = [sid for sid, _ in sorted(posterior.delta.items(), key=lambda kv: -kv[1])]
-    picked: list[Sample] = []
-    for sid in ranked_ids:
-        s = by_id.get(int(sid))
-        if s is None:
-            continue
-        picked.append(s)
-        if len(picked) >= n:
-            break
-    if not picked:
-        return None
-    if len(picked) < n:
-        seen = {s.id for s in picked}
-        for s in dataset:
-            if s.id in seen:
-                continue
-            picked.append(s)
-            if len(picked) >= n:
-                break
-    return picked
-
-
-@dataclass
-class EvolveResult:
-    """Outcome of one ``evolve_scoring_set()`` call."""
-
-    new_scoring_set: list[Sample]
-    swapped_out: list[Sample] = field(default_factory=list)
-    swapped_in: list[Sample] = field(default_factory=list)
-    rasch: RaschPosterior | None = None
-    reason: str = ""
-
-
 def build_observations(rounds: list[RoundResult]) -> list[Observation]:
     """Flatten ``cycle.rounds`` into the ``(candidate, sample, hit)`` triples Rasch needs.
 
@@ -305,143 +186,32 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
     return obs
 
 
-def _select_swap_outs(
-    posterior: RaschPosterior,
-    scoring_set_sample_ids: set[int],
-    config: ExplorationConfig,
-    min_scoring_set_size: int,
-    max_swaps: int,
-) -> list[int]:
-    """Samples in the scoring set whose δ_s SE is below the swap-out threshold.
+def select_round_subset(
+    bank: list[Sample],
+    observations: list[Observation],
+    budget: int,
+) -> list[Sample]:
+    """Pick the ``budget`` most-informative samples from ``bank`` for one round.
 
-    Sorted ascending by SE (most-understood first). Capped at
-    ``max_swaps`` and bounded by ``min_scoring_set_size`` floor.
+    Fits Rasch on ``observations``, estimates the leading candidate's
+    ability as ``max(theta)``, and ranks the bank by Fisher information at
+    that ability — the samples whose outcome is least certain for the best
+    prompt so far, i.e. the contested band where a mutation can still flip
+    a miss into a hit. Cold start (no observations, hence no δ estimates)
+    falls back to the bank-order prefix, byte-identical to the
+    pre-decoupling ``dataset[:budget]`` slice. Pure: no I/O.
     """
-    candidates = []
-    for sid in scoring_set_sample_ids:
-        se = posterior.delta_se.get(sid)
-        if se is None:
-            continue
-        if se <= config.swap_out_delta_se:
-            candidates.append((se, sid))
-    candidates.sort()  # smallest SE first
-    max_removable = max(0, len(scoring_set_sample_ids) - min_scoring_set_size)
-    take = min(len(candidates), max_swaps, max_removable)
-    return [sid for _, sid in candidates[:take]]
-
-
-def _select_swap_ins(
-    posterior: RaschPosterior,
-    scoring_set_sample_ids: set[int],
-    full_dataset: list[Sample],
-    surviving_candidates: list[str],
-    config: ExplorationConfig,
-    n_slots: int,
-) -> list[int]:
-    """Samples not in the scoring set, ranked by max-over-candidates KG.
-
-    Only considers samples already observed at least once (have a δ_s
-    estimate). Cold sampling — pulling never-measured samples in via KG —
-    is out of scope for v1 since their KG is undefined; future iterations
-    can add a uniform-exploration tier.
-    """
-    if n_slots <= 0 or not surviving_candidates:
+    if budget <= 0 or not bank:
         return []
-
-    scored: list[tuple[float, int]] = []
-    for s in full_dataset:
-        if s.id in scoring_set_sample_ids:
-            continue
-        if s.id not in posterior.delta:
-            continue
-        kg = sample_kg_max(posterior, s.id, surviving_candidates)
-        if kg < config.swap_in_kg_threshold:
-            continue
-        scored.append((kg, s.id))
-
-    scored.sort(reverse=True)
-    return [sid for _, sid in scored[:n_slots]]
-
-
-def evolve_scoring_set(
-    full_dataset: list[Sample],
-    current_scoring_set: list[Sample],
-    rounds: list[RoundResult],
-    config: ExplorationConfig,
-    *,
-    elimination_n_min: int,
-    surviving_candidates: list[str] | None = None,
-    extra_observations: list[Observation] = (),  # type: ignore[assignment]
-) -> EvolveResult:
-    """Decide the next round's scoring set. Pure — no I/O, no mutation of inputs.
-
-    When there are no completed rounds yet, or when the dataset has
-    nothing left to swap in, returns the current scoring set unchanged
-    with ``reason`` populated for telemetry.
-
-    ``extra_observations`` (default empty) is prepended to the live
-    observations before the Rasch fit — used to fold cross-cycle archive
-    evidence into the per-round swap decisions when
-    ``exploration.seed_evolve_from_archive`` is on.
-    """
-    if not rounds:
-        return EvolveResult(new_scoring_set=list(current_scoring_set), reason="no_rounds_yet")
-
-    observations = list(extra_observations) + build_observations(rounds)
+    if budget >= len(bank):
+        return list(bank)
     if not observations:
-        return EvolveResult(new_scoring_set=list(current_scoring_set), reason="no_observations")
-
-    posterior = fit_rasch(
-        observations,
-        theta_prior_sigma=config.cold_start_prior_sigma,
-    )
-
-    if surviving_candidates is None:
-        surviving_candidates = list(posterior.theta.keys())
-
-    min_size = elimination_n_min
-    scoring_set_ids = {s.id for s in current_scoring_set}
-
-    swap_out_ids = _select_swap_outs(
-        posterior, scoring_set_ids, config, min_size, config.max_swaps_per_round
-    )
-    swap_in_ids = _select_swap_ins(
-        posterior,
-        scoring_set_ids,
-        full_dataset,
-        surviving_candidates,
-        config,
-        n_slots=len(swap_out_ids),
-    )
-
-    # Pair-wise swap: only swap as many as we have viable replacements for.
-    k = min(len(swap_out_ids), len(swap_in_ids))
-    if k == 0:
-        return EvolveResult(
-            new_scoring_set=list(current_scoring_set),
-            rasch=posterior,
-            reason="no_viable_swap",
-        )
-    swap_out_ids = swap_out_ids[:k]
-    swap_in_ids = swap_in_ids[:k]
-
-    out_ids_set = set(swap_out_ids)
-    by_id = {s.id: s for s in full_dataset}
-    new_scoring_set = [s for s in current_scoring_set if s.id not in out_ids_set]
-    swapped_in_samples = [by_id[sid] for sid in swap_in_ids if sid in by_id]
-    new_scoring_set.extend(swapped_in_samples)
-    swapped_out_samples = [s for s in current_scoring_set if s.id in out_ids_set]
-
-    logger.info(
-        "ScoringSet: round-end swap of %d sample(s). out=%s in=%s",
-        k,
-        [s.id for s in swapped_out_samples],
-        [s.id for s in swapped_in_samples],
-    )
-    return EvolveResult(
-        new_scoring_set=new_scoring_set,
-        swapped_out=swapped_out_samples,
-        swapped_in=swapped_in_samples,
-        rasch=posterior,
-        reason="swapped",
-    )
+        return list(bank[:budget])
+    posterior = fit_rasch(observations)
+    if not posterior.delta:
+        return list(bank[:budget])
+    delta_map = {int(sid): float(d) for sid, d in posterior.delta.items()}
+    leader_theta = max(posterior.theta.values()) if posterior.theta else 0.0
+    by_id = {int(s.id): s for s in bank}
+    ranked = expected_order_mfi(leader_theta, delta_map, list(by_id))
+    return [by_id[sid] for sid in ranked[:budget]]

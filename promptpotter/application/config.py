@@ -116,43 +116,18 @@ def _diff_paths(
 
 class ExplorationConfig(BaseModel):
     """Round-level Rasch IRT — fits one posterior per round, used for both
-    scoring-set evolution (in-memory swap of understood ↔ high-info samples)
-    and the round-end hard-sample heatmap rendered into ``log.md``.
+    the per-round eval-subset picker (``select_round_subset``) and the
+    round-end hard-sample heatmap rendered into ``log.md``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    swap_out_delta_se: float = Field(
-        0.7,
-        description="Swap-out threshold: SE on delta_s below which a sample is 'understood' "
-        "(~95% CI half-width of ~1.4 logits). Sized so the swap fires round 1->2 on the "
-        "typical 20-sample / 5-candidate budget.",
-    )
-    swap_in_kg_threshold: float = Field(
-        0.01,
-        description="Swap-in threshold: minimum sample KG to be eligible.",
-    )
-    max_swaps_per_round: int = Field(3, description="Cap on scoring-set churn per round.")
-    cold_start_prior_sigma: float = Field(
-        1.5,
-        description="Sigma on the N(0, sigma²) theta prior when no observations yet.",
-    )
-
-    seed_initial_scoring_set_from_archive: bool = Field(
-        False,
-        description=(
-            "Round-0 scoring set is picked from archive δ_s (hardest first) "
-            "instead of `sample_dataset` dataset order. Falls back to dataset "
-            "order when the archive has fewer than `elimination_n_min` "
-            "observations for this backend."
-        ),
-    )
     seed_evolve_from_archive: bool = Field(
         False,
         description=(
-            "`evolve_scoring_set` folds archive observations into its per-round "
-            "Rasch fit alongside live `build_observations(rounds)`. Affects "
-            "swap-out and swap-in decisions from round 1 onward."
+            "The per-round subset picker folds archive observations into its "
+            "Rasch fit alongside live `build_observations(rounds)`, so the "
+            "sample selection reflects cross-cycle evidence from round 1 onward."
         ),
     )
     seed_heatmap_from_archive: bool = Field(
@@ -268,7 +243,13 @@ class CampaignConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dataset_name: str = Field("")
-    sp_budget_ttest: int = Field(20)
+    sp_budget_ttest: int = Field(
+        20,
+        description="Per-round eval budget — how many samples each candidate is "
+        "scored on per round. The full train split is the bank; each round the "
+        "CAT picker (`select_round_subset`) selects this many informative "
+        "samples from it. Not the dataset/pool size.",
+    )
     exclude_nodes: list[str] = Field(default_factory=list)
     pipeline_overrides: dict = Field(default_factory=dict)
     scoring: str | dict[str, str] | None = Field(None)
@@ -330,11 +311,11 @@ def _check_sp_budget_vs_dataset(config: CampaignConfig, dataset: list) -> Prefli
     if m > 0 and n > m:
         return PreflightWarning(
             code="sp_budget_exceeds_dataset",
-            title=f"sp_budget_ttest ({n}) exceeds dataset size ({m})",
+            title=f"per-round eval budget sp_budget_ttest ({n}) exceeds bank size ({m})",
             detail=(
-                f"Scoring will run on {m} samples (the full dataset). "
-                f"Lower sp_budget_ttest to {m} or grow the dataset to silence "
-                f"this warning."
+                f"The bank (full train split) has only {m} samples, so each round "
+                f"scores on all {m}. Lower sp_budget_ttest to {m} or below, or grow "
+                f"the dataset, to give the CAT picker a bank to select from."
             ),
         )
     return None

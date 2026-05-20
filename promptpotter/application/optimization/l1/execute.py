@@ -5,6 +5,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from promptpotter.application.intelligence.exploration import (
+    build_observations,
+    select_round_subset,
+)
 from promptpotter.application.optimization.dispatch.hub import format_l1_critique_for_prompt
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.l1.resume import generate_or_load_candidates
@@ -46,7 +50,7 @@ locker-in commits the round-winner)."""
 async def execute_round(
     cycle: Cycle,
     round_num: int,
-    scoring_set: list[Sample],
+    eval_pool: list[Sample],
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
     *,
@@ -69,6 +73,20 @@ async def execute_round(
     if obs:
         with graceful("RoundStart emit failed"):
             obs.emit(RoundStart(campaign_id=session.state.tracing_campaign_id, round_num=round_num))
+
+    # Per-round eval subset. On non-probe rounds the runner hands us the
+    # full bank (the train split); the CAT picker narrows it to
+    # ``sp_budget_ttest`` samples whose outcome is least certain for the
+    # leading prompt — the contested band. Origin re-score and every
+    # candidate share this one subset, so PoBB compares like-for-like.
+    # Probe rounds carry their own warned-query set and pass through as-is.
+    if cycle.probe_next_round:
+        scoring_set = eval_pool
+    else:
+        observations = build_observations(cycle.rounds)
+        if opt.exploration.seed_evolve_from_archive:
+            observations = [*cycle.archive_observations, *observations]
+        scoring_set = select_round_subset(eval_pool, observations, config.sp_budget_ttest)
 
     candidates, yield_stats = await generate_or_load_candidates(
         round_num, cycle, callbacks.on_phase, n_eval_queries=len(scoring_set), obs=obs

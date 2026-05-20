@@ -119,9 +119,20 @@ def parse_response_content(
         ``None`` if even repair fails).
       - ``response_model is not None``: parse via ``try_parse_json`` then
         ``response_model.model_validate(...)`` for type-level guarantee.
-        Raises ``ValueError`` on parse failure.
+        Raises ``ValueError`` on unparseable content and ``ValidationError``
+        on empty content (a structured call that came back empty is a
+        provider failure, not a valid ``None``).
     """
-    if not content:
+    if not content or not content.strip():
+        # Empty content. For a typed structured call this is a provider
+        # failure, not a valid ``None``: a reasoning model can spend its
+        # whole token budget on reasoning and emit empty ``content``.
+        # ``model_validate(None)`` raises a ``ValidationError`` that
+        # ``_one_attempt`` catches, so the repair retry — and then
+        # ``MetaPromptParseError`` — fires, instead of the empty leaking
+        # downstream as ``parsed=None`` → ``""`` past the schema guard.
+        if response_model is not None:
+            response_model.model_validate(None)
         return None
     if response_model is None and response_schema is None:
         return None
