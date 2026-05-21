@@ -3,11 +3,12 @@
 Session-family-bound: one ``dashboard.json`` per session, written into
 the session's root cycle dir and shared by that session's forks (a fork's
 family root is the session root). A campaign holds N independent live
-streams — one per session — never one shared stream. The active cycle id
-is **NOT** stored in this file — it lives in ``active_session.json`` alone
-(one writer, one source). Readers that need to know "what cycle does this
-data describe?" read the active pointer; this file describes whatever the
-active cycle's loop has produced so far.
+streams — one per session — never one shared stream. The file self-stamps
+its own ``(campaign_id, cycle_id, session_id)`` — the session-family it
+belongs to — so a webapp poll can drop any payload that doesn't match the
+unit it asked for. That stamp is self-identity, not the *active* pointer:
+``active_session.json`` stays the sole source of which cycle the operator
+is currently running (one writer, one source).
 
 The constructor takes :data:`SessionFamilyDir` so a per-cycle audit block
 cannot accidentally land here.
@@ -145,6 +146,9 @@ class LiveDashboardView(DerivedView):
         family_dir: SessionFamilyDir,
         session_dir: Path,
         *,
+        campaign_id: str,
+        cycle_id: str,
+        session_id: str,
         l1_patience: int,
         n_variants: int,
         sp_budget_ttest: int,
@@ -167,6 +171,14 @@ class LiveDashboardView(DerivedView):
         self.patience_max = l1_patience
         r = resume_from or {}
         self.state: dict[str, Any] = {
+            # Self-identity stamp — which session-family this dashboard.json
+            # describes. Always from the constructor args, never from
+            # ``resume_from`` or a phase event, so a stale prior file can't
+            # poison it. The webapp drops any polled payload whose stamp
+            # doesn't match the unit it asked for.
+            "campaign_id": campaign_id,
+            "cycle_id": cycle_id,
+            "session_id": session_id,
             "state": r.get("state", "init"),
             "state_since": datetime.now(UTC).isoformat(),
             "stop_reason": r.get("stop_reason"),
@@ -305,6 +317,12 @@ class LiveDashboardView(DerivedView):
         return cls(
             family_dir,
             session_dir,
+            # ``cycle_id`` stamps the session-family ROOT (not the raw cycle
+            # arg) — dashboard.json is per-family, shared by forks, so a fork
+            # view fetching this file must still match the stamp.
+            campaign_id=campaign_id,
+            cycle_id=session_root,
+            session_id=session_id,
             l1_patience=l1_patience,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
@@ -511,9 +529,8 @@ class LiveDashboardView(DerivedView):
             cycle = data["state"]
             loop_env = data["env"]
             config = data["config"]
-            # No cycle_id write — active-cycle identity lives in
-            # active_session.json; this projection only records what
-            # the active cycle's loop produced.
+            # The (campaign_id, cycle_id, session_id) identity stamp is set
+            # once at construction; no phase event mutates it.
             del loop_env
             s["origin"] = cycle.tracking.current_accuracy
             # ``origin`` and ``origin_accuracy`` are two names for the same

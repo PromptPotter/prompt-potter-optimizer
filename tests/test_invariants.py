@@ -161,6 +161,9 @@ def test_emitter_produces_all_artifacts(
     emitter = LiveDashboardView(
         SessionFamilyDir(cycle_dir),
         session_dir,
+        campaign_id=campaign_dir.name,
+        cycle_id=cycle_dir.name,
+        session_id=session_dir.name,
         l1_patience=3,
         n_variants=5,
         sp_budget_ttest=20,

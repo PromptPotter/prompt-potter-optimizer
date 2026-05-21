@@ -226,26 +226,19 @@ function DashboardPaneInner() {
 
   // Dataset preview — one fetch per cycle, threaded down through ChatPane to
   // HardSamplesHeatmap. Owning it here means a tab swap (New Job ↔ View
-  // Results) doesn't re-fetch instead of running its own fetch chain.
+  // Results) reuses the result instead of running its own fetch chain.
   //
-  // Bounded retry on transient failure: the active-cycle poll races
-  // `python -m promptpotter new <ds>` — the dashboard sees the new cycleId
-  // before `index.json` lands, fetchActiveDatasetName throws, and without a
-  // retry the heat-map icon stays hidden forever (HardSamplesHeatmap returns
-  // null on empty datasetItems). Retry on a 2 s timer until success or the
-  // cycle changes (cleanup clears the timer).
+  // No mint-race retry: `auto_mint_session` writes `index.json` and a
+  // stamped `dashboard.json` before it flips the active pointer, so by the
+  // time the webapp resolves the new unit both files already exist.
   useEffect(() => {
     if (!campaignId || !cycleId) return;
     let cancelled = false;
     const ac = new AbortController();
-    let retryHandle: number | null = null;
-    const attempt = async () => {
+    (async () => {
       try {
         const name = await fetchActiveDatasetName(campaignId, cycleId, ac.signal);
-        if (cancelled || !name) {
-          if (!cancelled && !name) scheduleRetry();
-          return;
-        }
+        if (cancelled || !name) return;
         setDatasetName(name);
         // The sample roster is dataset-wide — fetch it at dataset scope so
         // the heat-map always renders, even on a campaign with no
@@ -275,34 +268,26 @@ function DashboardPaneInner() {
         for (const s of seriesRes?.items ?? []) m.set(s.sample_id, s.measurements);
         setArchivePerSample(m);
       } catch {
-        // Transient failure (mint race, 404 before index.json lands). Retry
-        // until the cycle changes; cleanup cancels the pending timer.
-        if (!cancelled) scheduleRetry();
+        /* transient fetch failure — a cycle/scope change re-runs this */
       }
-    };
-    const scheduleRetry = () => {
-      if (cancelled || retryHandle != null) return;
-      retryHandle = window.setTimeout(() => {
-        retryHandle = null;
-        void attempt();
-      }, 2000);
-    };
-    void attempt();
+    })();
     return () => {
       cancelled = true;
       ac.abort();
-      if (retryHandle != null) window.clearTimeout(retryHandle);
     };
   }, [campaignId, cycleId, hardSamplesScope]);
 
-  // Cycle change ⇒ clear per-cycle derived state. Prev-prop pattern (React's
-  // documented "adjusting state when a prop changes" recipe) avoids the
-  // cascading render that `setState` in `useEffect` would cost. The
-  // CycleStreamProvider owns the round-file + dashboard reset; this only
-  // handles the dataset preview owned by this component.
-  const [prevCycleId, setPrevCycleId] = useState<string | null>(cycleId);
-  if (cycleId !== prevCycleId) {
-    setPrevCycleId(cycleId);
+  // Unit change ⇒ clear per-cycle derived state. The unit identity is the
+  // (campaign, cycle) PAIR — a cycle_id alone is ambiguous across
+  // campaigns, so a campaign-only switch must still clear. Prev-prop
+  // pattern (React's documented "adjusting state when a prop changes"
+  // recipe) avoids the cascading render a `setState` in `useEffect` costs.
+  // The CycleStreamProvider owns the round-file + dashboard reset; this
+  // only handles the dataset preview owned by this component.
+  const unitKey = campaignId && cycleId ? `${campaignId} ${cycleId}` : null;
+  const [prevUnitKey, setPrevUnitKey] = useState<string | null>(unitKey);
+  if (unitKey !== prevUnitKey) {
+    setPrevUnitKey(unitKey);
     setDatasetName(null);
     setDatasetItems([]);
     setDatasetTrainCount(0);

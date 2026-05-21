@@ -21,6 +21,13 @@ export type StatusKind = "live" | "stale" | "offline";
 export interface DashboardSnapshot {
   // Loose typing — dashboard.json is operator-facing JSON; we tolerate shape drift
   // and drill down at the use site.
+  // Self-identity stamp written by LiveDashboardView — the session-family
+  // this file describes. The poll guard (`tick`) drops any payload whose
+  // stamp doesn't match the unit it asked for, so a stale response can
+  // never render under the wrong header.
+  campaign_id?: string;
+  cycle_id?: string;
+  session_id?: string;
   state?: string;
   round?: number;
   query?: string;
@@ -167,6 +174,18 @@ export function roundOf(dash: DashboardSnapshot | null): number | null {
   return typeof r === "number" ? r : null;
 }
 
+// Frontend port of `root_cycle_id` in
+// promptpotter/infrastructure/store/paths.py — the session-family root is
+// the prefix before the FIRST sibling separator (`_fork_` / `_diag_` /
+// `_sweep_`). dashboard.json is per-session-family and self-stamps that
+// root, so the payload guard must compare the viewed cycle's root, not its
+// raw id (a fork view fetches its session root's dashboard.json).
+const SIBLING_SEP_RE = /_(?:fork|diag|sweep)_/;
+function rootCycleId(cycleId: string): string {
+  const m = SIBLING_SEP_RE.exec(cycleId);
+  return m ? cycleId.slice(0, m.index) : cycleId;
+}
+
 export function ageBucket(ageS: number | null): BucketResult {
   if (ageS == null) {
     return {
@@ -244,9 +263,10 @@ function useCycleStreamSource(
     cycleRef.current = cycleId;
     campaignRef.current = campaignId;
     lastRoundRef.current = null;
-    if (state.dash !== null || state.rounds.length > 0) {
-      setState((prev) => ({ ...prev, dash: null, rounds: [] }));
-    }
+    // Identity changed — hard-reset every cycle-scoped field so the prior
+    // unit's rounds, dash snapshot, and `● Live` badge can't linger for a
+    // frame while the first poll of the new unit is in flight.
+    setState({ ...INITIAL_STATE, statusText: "Switching to active campaign…" });
   }
 
   useEffect(() => {
@@ -315,6 +335,20 @@ function useCycleStreamSource(
         // the session-family root from the viewed cycle id.
         const dash = (await fetchDashboard(cmp, id, ctrl.signal)) as DashboardSnapshot;
         if (cancelled) return;
+        // Payload-identity guard: dashboard.json self-stamps the
+        // session-family it describes. Drop any payload that doesn't match
+        // the unit we polled for — a late response from the prior cycle, or
+        // a transient identity/payload disagreement during a `new` or a
+        // cycle switch. Stale data never reaches the UI; the next tick
+        // retries against the correct unit.
+        if (dash.campaign_id !== cmp || dash.cycle_id !== rootCycleId(id)) {
+          console.debug(
+            "[cycle-stream] dropped dashboard payload — stamp " +
+              `(${dash.campaign_id ?? "none"}, ${dash.cycle_id ?? "none"}) ` +
+              `!= unit (${cmp}, ${rootCycleId(id)})`,
+          );
+          return;
+        }
         const wall = Date.parse(dash.wallclock_serialized_at || "");
         const ageS = Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
         const bucket = ageBucket(ageS);

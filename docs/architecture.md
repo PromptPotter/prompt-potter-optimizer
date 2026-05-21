@@ -300,7 +300,10 @@ directories do not. `dashboard.json` is **per-session**: it lives in the
 session's root cycle dir (`cycles/{session_root}/dashboard.json`) and is
 shared by that session's forks (a fork's family root is its session
 root). A campaign therefore carries N independent live `dashboard.json`
-streams — one per session — never one shared stream. Each campaign is a
+streams — one per session — never one shared stream. Each `dashboard.json`
+self-stamps its own `(campaign_id, cycle_id, session_id)`; the webapp drops
+a polled payload whose stamp doesn't match the unit it asked for, so a
+freshly minted session never renders the prior one's data. Each campaign is a
 standalone dashboard: the operator understands a campaign from
 `campaign.json` + `log.md` plus the per-session `dashboard.json`
 streams, without descending into per-cycle round detail.

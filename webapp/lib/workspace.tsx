@@ -74,7 +74,7 @@ function urlPin(): UnitPin | null {
 }
 
 export function WorkspaceProvider({
-  intervalMs = 3000,
+  intervalMs = 2000,
   children,
 }: {
   intervalMs?: number;
@@ -146,12 +146,20 @@ export function WorkspaceProvider({
     };
     void tick();
     const handle = window.setInterval(() => void tick(), intervalMs);
-    const onFocus = () => void tick();
-    window.addEventListener("focus", onFocus);
+    // Re-resolve the active pointer the instant the operator returns to the
+    // tab — a `new` run in another terminal is reflected within a frame,
+    // not after a full poll interval.
+    const onWake = () => void tick();
+    window.addEventListener("focus", onWake);
+    const onVis = () => {
+      if (!document.hidden) onWake();
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       cancelled = true;
       window.clearInterval(handle);
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", onWake);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, [intervalMs]);
 

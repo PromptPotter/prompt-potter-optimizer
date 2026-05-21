@@ -274,6 +274,19 @@ def auto_mint_session(
     session.state.cycle_id = root_cycle
 
     save_active_pointer(session.store.tenant_id, session_id, campaign_id, root_cycle)
+
+    # Pre-seed dashboard.json so the webapp has a valid, identity-stamped
+    # file the instant ``new`` returns — closing the mint→loop-start window
+    # where a poll for the freshly minted cycle would 404. Built via the
+    # shared factory (the single dashboard.json writer); the view is
+    # constructed for its ``_persist`` side-effect and discarded — the
+    # optimization loop builds its own emitter.
+    from promptpotter.application.origin import build_campaign_emitter
+    from promptpotter.shared.errors import graceful
+
+    with graceful("Pre-seeding dashboard.json failed"):
+        build_campaign_emitter(session, campaign_config, origin_accuracy=origin_acc)
+
     logger.info(
         "Auto-minted session %s (#%d) in campaign %s — cycle %s%s",
         session_id,

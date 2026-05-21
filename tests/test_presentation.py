@@ -260,6 +260,9 @@ def test_live_dashboard_binds_to_session_family_dir(tmp_path: Path) -> None:
     proj = LiveDashboardView(
         SessionFamilyDir(family_dir),
         session_dir,
+        campaign_id="ds__abc123abc123",
+        cycle_id="cycle_abc123abc123",
+        session_id="s_test",
         l1_patience=3,
         n_variants=5,
         sp_budget_ttest=20,
