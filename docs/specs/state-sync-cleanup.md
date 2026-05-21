@@ -176,11 +176,19 @@ Post-migration, the following invariants are enforceable as tests:
 
 ## What this is NOT
 
-- Not a control plane. The webapp stays read-only. Mutating
-  endpoints (fork, stop) are out of scope here — they ship with
-  M12.
-- Not a daemon. The CLI remains the only thing that runs the loop;
-  the webapp polls a pure-read endpoint.
+- Not the control plane itself. This spec ships no mutating
+  endpoint and no job runner. The webapp single-operator control
+  plane — launch / stop / resume / fork, the in-process
+  `JobRegistry`, SSE reactivity — builds on this cleanup and ships
+  as the M10 mini-milestone
+  [`m10-operator-control-loop.md`](m10-operator-control-loop.md);
+  multi-tenant hardening follows in
+  [`m12-control-plane.md`](m12-control-plane.md).
+- Not the job runner. This spec leaves the CLI as the only loop
+  driver; the in-process `JobRegistry` that lets the webapp launch
+  runs is the M10 mini-milestone's Track B. Phases 1–3 here are its
+  prerequisite — the live endpoint (Phase 3) is what the
+  mini-milestone's SSE channels stream.
 - Not a schema migration. `index.json` and `state.json` keep their
   field sets; only identity (`campaign_id`) is dropped.
 

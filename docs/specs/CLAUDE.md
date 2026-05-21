@@ -12,7 +12,7 @@
 - [ ] **L2 self-diagnosis panels.** Option-set / axis-exhaustion / sample-delta / verbosity stats — L2 today reads winner only. → [`m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface`](m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface)
 - [x] **L1 evidence-grounding validator.** Shipped: `evidence_grounding` is a required L1-output field; `evidence_grounding_present` behavior check + `EvidenceGrounding` lineage carry. Healing rule (`l2_unjustified_mutations`) ships with Track 4. → [`m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface`](m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface)
 - [ ] **State-sync cleanup.** Five drifting state surfaces (`active_session.json`, `dashboard.json`, `index.json::campaign_id`, dir name, in-memory CLI) need to collapse into two clean ones before whitelabel. Pre-M12 foundation. → [`state-sync-cleanup.md`](state-sync-cleanup.md)
-- [ ] **Webapp control plane + multi-cycle.** Read-only ships (M11); control plane is M12. → [`m12-multi-connector.md`](m12-multi-connector.md)
+- [ ] **Webapp control plane.** Read-only ships (M11); the single-operator write surface (launch / stop / resume / fork, SSE, `Control-remote` I/O kind) is an M10 mini-milestone; the multi-user SaaS hardening (auth, multi-tenant, whitelabel) is M12. → [`m10-operator-control-loop.md`](m10-operator-control-loop.md) + [`m12-control-plane.md`](m12-control-plane.md)
 - [ ] **Chat-first multi-user web.** End-state product surface: one admin self-hosts; casual web users sign in; chat is the constant control surface; install-scoped shared measurements. Spec-only, no code. → [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md)
 - [partial] **L3 fork authority → AlphaZero-shaped MCTS.** **(1) selection ✓** — L3 emits observation-only `fork_proposal` (operator forks manually). **(2) backpropagation** — persist round outcomes as node-stats up the lineage. **(3) UCB-rule + auto-fork** — sample-efficient ancestor pick wired into `inherit_from`. All three close the structural gaps to AlphaZero-shaped MCTS; unlock recovery from dead-end branches. → [`roadmap.md#backlog-unscheduled`](roadmap.md#backlog-unscheduled), comparison [`../research/related-work.md#comparison-to-mcts`](../research/related-work.md#comparison-to-mcts)
 - [ ] **Publication benchmarks + ablation.** BBEH headline + ablation studies not yet published. → [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md)
@@ -26,10 +26,12 @@
 | Spec | Pre-reading |
 |------|-------------|
 | [![m12-multi-connector](https://img.shields.io/badge/m12--multi--connector-red?style=for-the-badge)](m12-multi-connector.md) | `promptpotter/infrastructure/backend.py`, `promptpotter/connectors/protocol.py`, `webapp/app/` |
+| [![m12-control-plane](https://img.shields.io/badge/m12--control--plane-red?style=for-the-badge)](m12-control-plane.md) | `promptpotter/application/bootstrap/session.py`, `promptpotter/infrastructure/store/stores.py`, [`security-audit.md`](security-audit.md) |
 | [![m13-chat-first-user-web](https://img.shields.io/badge/m13--chat--first--web-orange?style=for-the-badge)](m13-chat-first-user-web.md) | `webapp/app/page.tsx`, `promptpotter/presentation/cli/`, `archive/measurements/` |
 | [![m12-plus-backlog](https://img.shields.io/badge/m12--plus--backlog-black?style=for-the-badge)](m12-plus-backlog.md) | — |
 | [![m11-publication-benchmarks](https://img.shields.io/badge/m11--publication--benchmarks-red?style=for-the-badge)](m11-publication-benchmarks.md) — subs: [`m11-spend-tracking.md`](m11-spend-tracking.md) | `docs/research/benchmarks.md`, `datasets/{hotpotqa,gsm8k}/`, `promptpotter/application/datasets.py`, `webapp/app/` |
 | [![m10-prompt-iteration-framework](https://img.shields.io/badge/m10--prompt--iteration--framework-black?style=for-the-badge)](m10-prompt-iteration-framework.md) | `promptpotter/application/optimization/{optimizer_pipeline.json,pipeline.py}`, `promptpotter/application/runner/`, `tests/test_invariants.py` |
+| [![m10-operator-control-loop](https://img.shields.io/badge/m10--operator--control--loop-black?style=for-the-badge)](m10-operator-control-loop.md) | `promptpotter/application/runner/entry.py`, `promptpotter/presentation/api/routers/`, `webapp/lib/`, [`state-sync-cleanup.md`](state-sync-cleanup.md) |
 
 ## Reference (not on the TODO)
 

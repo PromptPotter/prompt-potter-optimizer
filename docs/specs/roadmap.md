@@ -37,7 +37,7 @@ The destination. Three deliverables, one milestone:
 
 1. **Multi-connector architecture.** Foundation shipped (`ed95509`): `Connector` shape + registry at `promptpotter/connectors/`, `BackendClient` connector-agnostic, TermNorm migrated. Outstanding: register a second connector to prove the boundary end-to-end, drive lookup from `pipeline.json::backend_type`, hoist the query parser per-connector, and land the workflow nodes deferred from M6 Wave 4.
 2. **Competitor comparison.** Publication picks up its head-to-head numbers — MIPROv2 reproduction if reviewers demand it, cited numbers otherwise. The BBEH backbone from M11 is the substrate; M12 is the pass that turns it into "vs. competitors" rather than "ours alone."
-3. **Webapp Phase 2.** Campaign launcher, live monitoring over WebSocket / SSE, API extensions for control. The M11 read-only views become a full operator surface.
+3. **Webapp Phase 2 — control plane.** The M11 read-only views become a full operator surface, then a multi-user SaaS. Split across two specs: [`m10-operator-control-loop.md`](m10-operator-control-loop.md) pulls the single-operator write surface (launch / stop / resume / fork, SSE reactivity, meta-prompt read panel) **forward to M10** as a mini-milestone; [`m12-control-plane.md`](m12-control-plane.md) adds auth, multi-tenant isolation, the hub, and whitelabel on top.
 
 **Why headline now:** the loop is functionally complete, the backbone is most of the way landed, and the next thing that meaningfully changes what PromptPotter *is* — not just how it's tuned — is connector generalization. M9, M10, and M11 are valuable because they make M12 cheaper, not because they're terminal goals.
 
@@ -45,7 +45,7 @@ The destination. Three deliverables, one milestone:
 
 **Exit gate:** Second backend connector runs through the same optimization workflow with parity tests. Competitor head-to-head published. Webapp can launch and monitor a campaign end-to-end.
 
-Full spec: [`m12-multi-connector.md`](m12-multi-connector.md)
+Full spec: [`m12-multi-connector.md`](m12-multi-connector.md) · control plane: [`m12-control-plane.md`](m12-control-plane.md)
 
 ---
 
@@ -134,6 +134,8 @@ Five tracks:
 **Entry criteria:** M9 exit gate passed.
 
 **Exit gate:** All five deliverables implemented; tests green; `rounds_to_95 ≤ 5` achieved on `llm_only` AND TermNorm for at least one cycle each under the same prompt revision; `behavior_pass_rate = 1.0` for both seeded checks across the qualifying cycles.
+
+**Mini-milestone — Operator Control Loop.** Landing alongside the framework tracks: the webapp single-operator write surface (launch / stop / resume / fork over HTTP, an in-process `JobRegistry`, SSE reactivity, a read-only meta-prompt panel), carved **forward from M12** so the tune-run-review loop is smooth before the M10 exit gate. Single tenant, no auth — multi-user hardening stays M12. Full spec: [`m10-operator-control-loop.md`](m10-operator-control-loop.md).
 
 Full spec: [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.md)
 

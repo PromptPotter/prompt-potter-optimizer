@@ -1,6 +1,6 @@
 # M12: Multi-Connector, Competitor Comparison, Webapp Phase 2
 
-**Status:** Track 1 (foundation) shipped in `ed95509`; Tracks 2 + 3 in flight; Tracks 4 + 5 + 3.5 specced.
+**Status:** Track 1 (foundation) shipped in `ed95509`; Tracks 2 + 4 + 5 in flight / specced. Webapp Phase 2 (ex-Track 3 / 3.5) extracted → [`m10-operator-control-loop.md`](m10-operator-control-loop.md) + [`m12-control-plane.md`](m12-control-plane.md).
 **Depends on:** M11 (Publication Benchmarks, Ablation Studies, Webapp Read-Only).
 
 ## Why
@@ -87,38 +87,24 @@ M11 filled PromptPotter's rows; competitor rows are still empty.
 
 **Deliverables.** Cited numbers (all competitors filled; labeled "cited" vs "ours") · MIPROv2 reproduction (optional, defensive — if reviewers object) on HotPotQA with same model + split as M11 Track 1 · cost/efficiency scatter (optimizer LLM calls vs accuracy gain) · final paper draft. Different models and hardware across papers weaken direct comparison; lock dataset + metric where possible.
 
-### Track 3 — Webapp Phase 2 (launcher + live monitoring)
+### Track 3 — Webapp Phase 2 (control plane) — *extracted*
 
-**API extensions.** `POST /api/v1/backends/{id}/campaigns` (start) · `POST /campaigns/{id}/control` (pause/resume/stop) · `GET /campaigns/{id}/state` (live polling) · WebSocket or SSE for real-time round progress.
+The webapp control plane outgrew a single track and is now two dedicated specs:
 
-**Open M11–M12 design question.** Two launcher shapes are both in play; M12 Wave 3 lands *one* that satisfies both. Neither is yet sufficient alone:
+- **[`m10-operator-control-loop.md`](m10-operator-control-loop.md)** — the
+  single-operator write surface, pulled **forward to M10** as a mini-milestone
+  so the meta-prompt tuning loop is smooth before the M10 exit gate: in-process
+  `JobRegistry`, the `Control-remote` I/O kind, launch / stop / resume / fork
+  over HTTP, SSE reactivity, the meta-prompt read panel.
+- **[`m12-control-plane.md`](m12-control-plane.md)** — the multi-user SaaS
+  hardening that rides on top: auth, multi-tenant isolation, the hub,
+  whitelabel, the chat-panel launcher.
 
-1. **Campaign configuration form** — dataset + pipeline + connector selection, `campaign.json` builder, scan variant editor. Every knob editable, no ambiguity, reproducible JSON. Strength: completeness, auditability — power users + reproducibility.
-2. **Chat panel** (operator-staged in M11's "New Job" tab) — conversation-shaped entry. Drop dataset → see preview → wand toggle on → quiet evolution starts. Wires to the `restructure` optimizer node (downstream of `l3_plan`) as user-facing surface. Strength: low-friction onboarding; matches "fix a broken LLM pipeline in half a day, then it just works." Yet to fulfill what the form covers.
-
-**Control surface — same dual-design tension.** Discrete pause/resume/stop buttons (explicit, model-the-state) vs wand "always-on background optimization" toggle (live mode vs offline campaign). `POST /control` endpoints stay; only the user-facing surface is open.
-
-**Other views.** Dataset preview on drop (pairs with both launcher shapes) · real-time progress dashboard (current round, candidates, live accuracy, L1/L2/L3 status, log tail; SSE/WebSocket replaces 2 s polling) · pipeline visualization is connector-driven (renders whatever the active connector's `pipeline.json` declares, re-renders on dataset/session switch).
-
-**Multi-tenant hook-up.** M12 activates the `TenantContext` seam shaped in M9: auth middleware populates it; `infrastructure/store/` enforces `{tenant_id}/...` path prefixes. Whitelabel becomes viable. Sidebar `Log out` lights up.
-
-**New Job status bar** (v1 shipped 2026-05-08 at `webapp/components/dashboard/ChatPane.tsx::chat-job-bar`). Thin bar above the chat panel: collapsed shows `dataset · Best · Round · Spend · Budget · Δ/$`; chevron expands inline into a four-section read-only panel. Interactive piece (live wand toggle, spend chips wired to control) lands with this track.
-
-### Track 3.5 — Orchestrator daemon (control plane structural shape)
-
-Track 3's launcher/control work describes REST endpoints — that's the half-step. The structural shape is an **orchestrator daemon**: `new` / `resume` runs as a long-lived process owning `Session` and `LoopState`; CLI / notebook / webapp become HTTP clients of the same orchestrator. **Adds a fourth I/O kind** beyond §0's three (Persistence / Display / Control-local) — call it **Control-remote**.
-
-Named explicitly so Track 3 doesn't accidentally ship a halfway-daemon (in-process-per-request orchestrator with no state coherence between requests). Decide: land as a sibling sub-spec `m12-orchestrator-daemon.md` or keep inline if the section stays small.
-
-**Must address:**
-
-- **The fourth I/O kind ("Control-remote") and what it can and can't do** — parallel to §0's three-kind invariant. **Allowed:** receive control commands, expose `Session`/`LoopState` snapshots, route campaign output. **Not allowed:** writing campaign artifacts directly (still through `CycleEventLog.append`); reading tracing data (still fan-out only).
-- **How `Session` becomes daemon-owned.** Either in-process-mutable (cheap; daemon owns lifetime) or projection-over-the-ledger (expensive; enables multi-process + trivial restart). Decide on whether multi-process state coherence is required.
-- **How CLI / notebook / webapp become clients.** Concrete: what does `python -m promptpotter resume` do when the daemon is running? Spawn one if none, or hard-fail with "start the daemon first"?
-- **State-authority decision.** If multi-process / restart-survival needed, pull §3.8's reconstructable-state invariant forward into a partial event-sourcing migration (Session-as-projection over ledger).
-- **Coupling with Tracks 1 + 4.** Daemon owns the connector instance (not per-request); L4 closure runs as a daemon-managed long-lived job.
-
-**Why M12 not later.** Multi-tenant work in Track 3 already touches every store boundary; adding daemon shape on top of in-process orchestration later means revisiting twice. Better to design Track 3 + 3.5 together so the launcher is daemon-shaped from the start.
+Track 3.5's orchestrator-daemon question is resolved there: the daemon is
+**in-process** — the long-lived API process hosts the `JobRegistry`; there is
+no separate process. `Control-remote` is defined as the fourth §0 I/O kind by
+the M10 mini-milestone's Track A (§0 amendment), which lands before any
+control code.
 
 ### Track 4 — L4 self-optimization closure
 
@@ -179,19 +165,22 @@ fitness = 0.7 * composite_fitness - 0.2 * (cost_usd_total / cost_budget) - 0.1 *
 ```
 Wave 1: ✅ Track 1 foundation — Connector + registry + TermNorm migration (ed95509)
 
-Wave 2: Track 1.5 (second connector) + Track 3 (API extensions)
-        — parallel; second connector exercises the boundary, API extensions unblock webapp
+Wave 2: Track 1.5 (second connector)
+        — exercises the connector boundary end-to-end
 
-Wave 3: Track 2 (cited competitor numbers + figures) + Track 3 (launcher + live monitoring)
-        — parallel; publication closes, webapp gains control
+Wave 3: Track 2 (cited competitor numbers + figures)
+        — publication closes
 
-Wave 4: Track 3 (multi-tenant + polish + deployment) + Track 2 (MIPROv2 reproduction if needed)
-        + Track 4 (L4 outer-loop run) + Track 5 P2 (per-candidate rollup)
+Wave 4: Track 2 (MIPROv2 reproduction if needed) + Track 4 (L4 outer-loop run)
+        + Track 5 P2 (per-candidate rollup)
         — ship; L4 closure runs against the new connector + M10 fixture
 
-Wave 5: Track 3.5 (orchestrator daemon) + Track 5 P3 (multi-objective formula)
-        — Track 3.5 reshapes control plane around daemon ownership of Session;
-          Track 5 P3 lands once the rollup data is stable
+Wave 5: Track 5 P3 (multi-objective formula)
+        — lands once the rollup data is stable
+
+Control plane: webapp launch / monitor / control sequences independently of
+        the connector + publication waves above — m10-operator-control-loop.md
+        (single-operator) then m12-control-plane.md (multi-user SaaS).
 ```
 
 ## Entry / exit
@@ -205,12 +194,10 @@ Wave 5: Track 3.5 (orchestrator daemon) + Track 5 P3 (multi-objective formula)
 - [ ] Bootstrap + API connector lookup driven by `pipeline.json::backend_type`.
 - [ ] Workflow nodes (M6 Wave 4) implemented.
 - [ ] Main results table complete with all competitors (cited or reproduced).
-- [ ] Webapp can launch, monitor, and control a campaign end-to-end.
-- [ ] `TenantContext` enforced at `infrastructure/store/` boundary; whitelabel viable.
+- [ ] Webapp control plane shipped — see [`m10-operator-control-loop.md`](m10-operator-control-loop.md) (single-operator) + [`m12-control-plane.md`](m12-control-plane.md) (multi-tenant + whitelabel) for their own exit gates.
 - [ ] Publication final draft complete.
 - [ ] L4 self-optimization closure: outer-loop campaign on `datasets/promptpotter/` ran end-to-end; findings doc at `docs/research/l4-self-optimization-results.md`.
 - [ ] Track 5 P2 (per-candidate cost/time rollup on `dashboard.json::current_round.candidates[].rollup`) + P3 (`compile_post_aggregate_fitness`) shipped; one operator-written cost-aware campaign on record.
-- [ ] Orchestrator daemon (Track 3.5): control-plane shape decided (in-process-mutable Session vs Session-as-projection); daemon spec landed (sub-spec or inline); CLI / notebook / webapp client behavior defined when daemon is running.
 
 ## Key existing code
 

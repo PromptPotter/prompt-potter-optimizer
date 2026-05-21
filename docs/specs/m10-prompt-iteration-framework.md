@@ -7,6 +7,8 @@
 
 This is the M10 charter for everything around tuning the four optimizer meta-prompts: the framework (Tracks 1–4), the unified fork primitive that sweep rides on (Track 5), the sweep toolkit verbs (Track 6), the L2 self-diagnosis surface (Track 7), and Imagination (Track 8 — the deferred bet).
 
+**Sibling mini-milestone:** [`m10-operator-control-loop.md`](m10-operator-control-loop.md) — the webapp single-operator control loop (launch / stop / resume / fork + SSE reactivity + meta-prompt read panel), carved forward from M12 to land alongside these tracks. It is a separate spec with its own `Control-remote` I/O kind and its own cost envelope; this spec's "no new I/O kind" envelope is unaffected.
+
 ## Why bother
 
 `l1_generate` is the principal bottleneck — the loop only descends gradient when L1 produces useful variants. L1 has known misbehaviors (ignores `context_object`, mutates LLM-call params before prompt fields saturate) plus open unknowns. Auto-tuning (L4) is too expensive in the small-N regime, so the framework's job is to give the operator + Claude the same quality of feedback an L4 would give itself — manually, fast, and per-cycle.
