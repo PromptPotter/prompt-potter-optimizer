@@ -1,8 +1,19 @@
-"""Cycle-id parsing + per-cycle directory builders.
+"""Campaign / cycle directory builders + cycle-id parsing.
 
 Module-level so callers that don't hold a ``CampaignStore`` (the emitter's
 classmethod constructor, the api-layer reader) can resolve the same paths
 without instantiating a store. Pure functions — no I/O, no parent walk.
+
+On-disk shape: ``campaigns/{campaign_id}/`` holds the campaign manifest
+(``campaign.json``), the campaign digest (``log.md``), and
+``cycles/{cycle_id}/`` — every cycle flat under one ``cycles/`` dir. A
+campaign is a **forest**: it holds N *session* roots (one per ``new`` on
+the same origin declaration) plus their fork descendants. Session roots
+are ``cycle_{hash}`` (session 1) and ``cycle_{hash}_s{N}`` (session N);
+the ``_s{N}`` suffix only disambiguates the dir — it is not a sibling
+separator. Per-session telemetry (``dashboard.json``) binds at each
+session-family root cycle dir. The cycle's sibling kind + sweep batch id
+live in ``cycles/{cycle_id}/index.json`` metadata, not the path.
 """
 
 from __future__ import annotations
@@ -22,21 +33,18 @@ DEFAULT_DATASETS_ROOT = _REPO_ROOT / "datasets"
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag|sweep)_")
 _SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag|sweep)_(?!.*_(fork|diag|sweep)_)")
 _SWEEP_BATCH_ID_RE = re.compile(r"_sweep_([^_]+)_")
+_SESSION_SUFFIX_RE = re.compile(r"_s(\d+)$")
 
 
 def root_cycle_id(cycle_id: str) -> str:
     """Family-root cycle id — the prefix before the FIRST sibling separator.
 
-    Three separators are recognized: ``_fork_`` (divergence forks, minted by
-    ``_mint_fork`` with ``ForkTrigger.SCORING_DIVERGENCE``), ``_diag_``
-    (diagnostic-BFS siblings, minted by ``_mint_fork`` with
-    ``ForkTrigger.OPERATOR_DIAG``), and ``_sweep_`` (sweep-batch forks,
-    minted by ``_mint_fork`` with ``ForkTrigger.OPERATOR_SWEEP`` from the
-    sweep batch dispatcher). All deterministic — no I/O, no parent walk.
+    Three separators are recognized: ``_fork_`` (divergence forks), ``_diag_``
+    (diagnostic-BFS siblings), and ``_sweep_`` (sweep-batch forks). All
+    deterministic — no I/O, no parent walk.
 
     Uses FIRST separator: a sweep-of-fork like ``cycle_X_fork_Y_sweep_b1_abc``
-    still roots at ``cycle_X``, since the whole family shares one telemetry
-    stream regardless of intermediate fork depth."""
+    still roots at ``cycle_X``."""
     m = _SIBLING_SEP_RE.search(cycle_id)
     return cycle_id[: m.start()] if m else cycle_id
 
@@ -45,9 +53,7 @@ def sibling_kind(cycle_id: str) -> Literal["root", "fork", "diag", "sweep"]:
     """Kind of THIS cycle (uses the LAST separator).
 
     For ``cycle_X_fork_Y_sweep_b1_abc`` the last separator is ``_sweep_``,
-    so the cycle is a sweep fork (its parent ``cycle_X_fork_Y`` was a fork
-    of the root). The dir layout follows the leaf kind: it lands under
-    ``sweeps/b1/forks/`` regardless of the intermediate fork."""
+    so the cycle is a sweep fork."""
     m = _SIBLING_LAST_SEP_RE.search(cycle_id)
     if m is None:
         return "root"
@@ -62,48 +68,62 @@ def _sweep_batch_id(cycle_id: str) -> str:
     return m.group(1)
 
 
-def root_dir_for(tenant_root: Path, cycle_id: str) -> Path:
-    """Family-root campaign dir — where telemetry binds (one continuous stream
-    across all forks of the family)."""
-    return tenant_root / "campaigns" / validate_path_component(root_cycle_id(cycle_id))
+def session_index(cycle_id: str) -> int:
+    """Session ordinal encoded in a session-root cycle id.
+
+    ``cycle_{hash}`` → 1 (the campaign's first session); ``cycle_{hash}_s3``
+    → 3. Defined for session roots only — the ``_s{N}`` suffix never appears
+    on a fork/diag/sweep cycle."""
+    m = _SESSION_SUFFIX_RE.search(cycle_id)
+    return int(m.group(1)) if m else 1
 
 
-def campaign_dir_for(tenant_root: Path, cycle_id: str) -> Path:
-    """Per-cycle dir (audit). Routes by sibling kind:
+def session_cycle_id(base_cycle_id: str, index: int) -> str:
+    """Root cycle id for the Nth session of a campaign.
 
-    - root → ``campaigns/{cycle_id}``
-    - fork (operator divergence) → ``campaigns/{root}/forks/{cycle_id}``
-    - diag (diagnostic-BFS) → ``campaigns/{root}/diag/{cycle_id}``
-    - sweep (sweep-batch fork) → ``campaigns/{root}/sweeps/{batch_id}/forks/{cycle_id}``
-    """
+    ``index <= 1`` keeps the bare ``cycle_{hash}`` (session 1); ``index >= 2``
+    appends ``_s{index}``. ``base_cycle_id`` is the bare origin root id from
+    :func:`cycle_config_identity`. The ``_s{N}`` suffix only disambiguates
+    the Nth re-run's root dir within one campaign's flat ``cycles/`` tree —
+    it is NOT a sibling separator, so :func:`root_cycle_id` /
+    :func:`sibling_kind` still treat ``cycle_X_s2`` as its own family root
+    and ``cycle_X_s2_fork_abc`` as a fork rooted at it."""
+    if index <= 1:
+        return base_cycle_id
+    return f"{base_cycle_id}_s{index}"
+
+
+def campaign_root_dir_for(tenant_root: Path, campaign_id: str) -> Path:
+    """Campaign dir — holds ``campaign.json``, ``log.md``, the campaign-scope
+    ``hard_samples.json``, and the ``cycles/`` subtree (the campaign's whole
+    forest). Per-session telemetry binds one level down, at each
+    session-family root cycle dir, not here."""
+    return tenant_root / "campaigns" / validate_path_component(campaign_id)
+
+
+def cycle_dir_for(tenant_root: Path, campaign_id: str, cycle_id: str) -> Path:
+    """Per-cycle dir — ``campaigns/{campaign_id}/cycles/{cycle_id}``.
+
+    Flat: root, fork, diag, and sweep cycles all land directly under
+    ``cycles/``. The sibling kind is recorded in the cycle's ``index.json``,
+    never encoded into the directory tree."""
+    validate_path_component(campaign_id)
     validate_path_component(cycle_id)
-    kind = sibling_kind(cycle_id)
-    if kind == "root":
-        return tenant_root / "campaigns" / cycle_id
-    root = root_cycle_id(cycle_id)
-    if kind == "fork":
-        return tenant_root / "campaigns" / root / "forks" / cycle_id
-    if kind == "diag":
-        return tenant_root / "campaigns" / root / "diag" / cycle_id
-    # sweep
-    batch_id = _sweep_batch_id(cycle_id)
-    return tenant_root / "campaigns" / root / "sweeps" / batch_id / "forks" / cycle_id
+    return tenant_root / "campaigns" / campaign_id / "cycles" / cycle_id
 
 
-def sweep_batch_dir_for(tenant_root: Path, root_cid: str, batch_id: str) -> Path:
-    """Sweep batch dir — holds the batch's ``index.json`` + ``forks/`` subtree."""
-    validate_path_component(root_cid)
+def sweep_batch_dir_for(tenant_root: Path, campaign_id: str, batch_id: str) -> Path:
+    """Sweep-batch dir — ``campaigns/{campaign_id}/sweeps/{batch_id}``.
+
+    Holds the batch ``index.json`` + ``summary.md`` (campaign-level
+    artifacts). The sweep-fork *cycles* themselves live flat under
+    ``cycles/``; only their ``index.json`` records the ``sweep_batch_id``."""
     validate_path_component(batch_id)
-    return tenant_root / "campaigns" / root_cid / "sweeps" / batch_id
+    return campaign_root_dir_for(tenant_root, campaign_id) / "sweeps" / batch_id
 
 
 def session_dir_for(tenant_root: Path, session_id: str) -> Path:
-    """Return ``{tenant_root}/sessions/{session_id}``.
-
-    Module-level so callers that don't hold a ``SessionStore`` (e.g. the
-    emitter's classmethod constructor, which only has a raw project root)
-    can resolve the same path without instantiating a store.
-    """
+    """Return ``{tenant_root}/sessions/{session_id}``."""
     validate_path_component(session_id)
     return tenant_root / "sessions" / session_id
 
@@ -112,10 +132,12 @@ __all__ = [
     "DEFAULT_DATASETS_ROOT",
     "DEFAULT_PROJECTS_ROOT",
     "DEFAULT_TENANT_ID",
-    "campaign_dir_for",
+    "campaign_root_dir_for",
+    "cycle_dir_for",
     "root_cycle_id",
-    "root_dir_for",
+    "session_cycle_id",
     "session_dir_for",
+    "session_index",
     "sibling_kind",
     "sweep_batch_dir_for",
 ]

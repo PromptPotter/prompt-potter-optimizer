@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any, ClassVar
 
-from promptpotter.infrastructure.store import campaign_dir_for
+from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.base import (
     append_jsonl,
     read_json_optional,
@@ -45,19 +45,18 @@ logger = logging.getLogger(__name__)
 class FileSink:
     """Append-only Langfuse-style file log per cycle."""
 
-    def __init__(self, store_base_dir: str | Path, backend_id: str) -> None:
+    def __init__(self, store_base_dir: str | Path, backend_id: str, campaign_id: str = "") -> None:
         self._tenant_root = Path(store_base_dir)
         self._backend_id = backend_id
+        self._campaign_id = campaign_id
         self._cycle_id: str | None = None
         self._campaign_traces: dict[str, str] = {}
         self._round_observation_ids: dict[tuple[str, int], tuple[str, str]] = {}
         self._node_observations: dict[tuple[str, int, str], tuple[str, str]] = {}
 
     def _scope_dir(self) -> Path:
-        if self._cycle_id:
-            # Route through campaign_dir_for so fork cycle_ids land in their
-            # nested fork dir, not at flat-layout campaigns/{cycle_id}/.
-            return campaign_dir_for(self._tenant_root, self._cycle_id)
+        if self._campaign_id and self._cycle_id:
+            return cycle_dir_for(self._tenant_root, self._campaign_id, self._cycle_id)
         # Orphan fallback for out-of-campaign file_only() emits — tucked
         # under archive/obs/ so it doesn't compete with operator views.
         return self._tenant_root / "archive" / "obs"

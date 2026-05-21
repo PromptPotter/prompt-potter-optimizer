@@ -84,7 +84,10 @@ def discover_compare_arms(
         family_root = root_cycle_id(active_cycle_id)
         summaries = session.store.campaigns.list_all(session.backend_id)
         cycle_ids = [
-            s["campaign_id"] for s in summaries if root_cycle_id(s["campaign_id"]) == family_root
+            s["cycle_id"]
+            for s in summaries
+            if s["campaign_id"] == session.campaign_id
+            and root_cycle_id(s["cycle_id"]) == family_root
         ]
         if not cycle_ids:
             return CompareArmsResult(
@@ -96,7 +99,7 @@ def discover_compare_arms(
 
     arms: dict[str, JobSearchPoint] = {}
     for cid in cycle_ids:
-        idx = session.store.campaigns.load(session.backend_id, cid)
+        idx = session.store.campaigns.load(session.campaign_id, cid)
         if idx is None:
             if discover_family:
                 logger.info("compare: skipping %s (not found)", cid)

@@ -1,12 +1,20 @@
 """Campaign registry + per-cycle live reads.
 
-The campaign registry (``/backends/{backend_id}/campaigns/...``) and the
-cycle live reads (``/campaigns/{cycle_id}/...``) ride one ``APIRouter``
-instance because main.py mounts it at ``/api/v1`` with a single prefix.
+A campaign is a **forest**: ``campaign_id`` identifies one optimization
+effort (a dataset + pipeline origin + context), and it holds N *sessions*
+(re-runs of the same declaration) plus their fork descendants — every
+cycle flat under ``campaigns/{campaign_id}/cycles/``. Every per-cycle path
+resolution carries both ids.
+
+``dashboard.json`` is session-scoped — one telemetry stream per session
+(the session root + its forks share it) — and resolves at the session's
+root cycle dir. The per-cycle dashboard route resolves
+``root_cycle_id(cycle_id)`` server-side.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -19,32 +27,46 @@ from pydantic import BaseModel, Field
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.store import Stores, campaign_dir_for, root_dir_for
+from promptpotter.infrastructure.store import (
+    Stores,
+    campaign_root_dir_for,
+    cycle_dir_for,
+    root_cycle_id,
+)
 from promptpotter.infrastructure.store.base import read_json_optional
-from promptpotter.infrastructure.store.paths import root_cycle_id, sibling_kind
+from promptpotter.infrastructure.store.paths import session_index, sibling_kind
 from promptpotter.presentation.api.deps import StoreDep, read_text_or_404
 
 logger = logging.getLogger(__name__)
 
 campaigns_router = APIRouter()
 
-# Family-root file-level artifacts (mirror of tests/test_invariants.py::ROOT_TELEMETRY_ARTIFACTS).
-_FAMILY_FILE_LEVEL_ARTIFACTS = ("dashboard.json",)
+# Campaign-level file artifacts that live at the campaign dir, not a cycle dir.
+# ``dashboard.json`` is NOT here — it is session-scoped and lives in the
+# session's root cycle dir under ``cycles/``.
+_CAMPAIGN_FILE_LEVEL_ARTIFACTS = ("campaign.json", "log.md", "hard_samples.json")
 _MAX_PREVIEW_BYTES = 2 * 1024 * 1024  # 2 MiB
 _MAX_FILE_ENTRIES = 5000
 
 _TEXT_SUFFIXES = {".txt", ".jsonl", ""}
 
 
+# ---------------------------------------------------------------------------
+# Campaign registry — real Campaign manifests, not cycles.
+# ---------------------------------------------------------------------------
+
+
 class CampaignSummary(BaseModel):
-    campaign_id: str = Field(description="Unique campaign identifier")
-    name: str = Field(description="Human-readable campaign name")
-    status: str = Field(description="Campaign status: active, completed, or stopped")
-    n_rounds: int = Field(description="Total number of completed round_data rounds")
-    best_accuracy: float = Field(description="Highest accuracy achieved across all rounds")
-    origin_accuracy: float = Field(description="Initial accuracy before optimization")
+    campaign_id: str = Field(description="Stable campaign id ({dataset}__{origin hash})")
+    dataset_name: str = Field(description="Dataset this campaign optimizes")
+    label: str = Field(default="", description="Operator-supplied campaign label")
+    status: str = Field(description="Status of the campaign's most-recent session")
     created_at: str = Field(description="ISO 8601 creation timestamp")
-    updated_at: str = Field(description="ISO 8601 last-update timestamp")
+    root_cycle_id: str = Field(description="The campaign's first session's root cycle id")
+    backend_id: str = Field(default="", description="Backend this campaign optimizes against")
+    session_count: int = Field(
+        default=1, description="Number of sessions (re-runs of the declaration) in the campaign"
+    )
 
 
 class CampaignListResponse(BaseModel):
@@ -52,83 +74,260 @@ class CampaignListResponse(BaseModel):
     total: int = Field(description="Total number of campaigns")
 
 
-class RoundSummary(BaseModel):
-    round_id: str = Field(description="Unique round_data identifier")
-    round: int = Field(description="Round number within the campaign")
-    label: str = Field(description="Human-readable label (e.g. 'round_3')")
-    prompt_fields_id: str = Field(description="OptSearchPoint ID for this round_data's prompt")
-    accuracy: float = Field(description="Accuracy achieved in this round_data")
-    hits: int = Field(description="Number of correct matches")
-    total: int = Field(description="Total number of evaluated samples")
-    improved: bool = Field(description="Whether this round_data improved over the previous best")
-    created_at: str = Field(description="ISO 8601 creation timestamp")
+class SessionSummary(BaseModel):
+    """One session in a campaign's forest — a root cycle + its forks."""
+
+    root_cycle_id: str = Field(description="The session's root cycle id (cycle_{hash}[_s{N}])")
+    session_index: int = Field(description="1-based session ordinal within the campaign")
+    status: str = Field(default="", description="Session root cycle status")
+    n_rounds: int = Field(default=0, description="Rounds completed on the session root cycle")
+    best_accuracy: float | None = Field(default=None, description="Best round accuracy")
+    created_at: str = Field(default="", description="ISO 8601 session creation timestamp")
+    updated_at: str = Field(default="", description="ISO 8601 last write")
 
 
 class CampaignDetailResponse(CampaignSummary):
-    backend_id: str = Field(description="Backend this campaign optimizes against")
-    config: dict[str, Any] = Field(description="Full campaign configuration used for this run")
-    best_round_id: str | None = Field(description="Trial ID of the best-performing round")
-    rounds: list[RoundSummary] = Field(description="Ordered list of round_data summaries")
-    langfuse_trace_id: str | None = Field(
-        default=None,
-        description="Langfuse trace ID if observability is enabled",
+    root_content_hash: str = Field(
+        default="", description="Content hash of the origin search point — the campaign identity"
+    )
+    config: dict[str, Any] = Field(description="Frozen CampaignConfig snapshot for this campaign")
+    sessions: list[SessionSummary] = Field(
+        description="Every session in the campaign's forest, ordered by session index"
     )
 
 
-@campaigns_router.get(
-    "/backends/{backend_id}/campaigns",
-    response_model=CampaignListResponse,
-)
+def _campaign_summary(campaign: Any, session_count: int) -> CampaignSummary:
+    return CampaignSummary(
+        campaign_id=campaign.campaign_id,
+        dataset_name=campaign.dataset_name,
+        label=campaign.label,
+        status=campaign.status,
+        created_at=campaign.created_at,
+        root_cycle_id=campaign.root_cycle_id,
+        backend_id=campaign.backend_id,
+        session_count=session_count,
+    )
+
+
+def _session_summaries(store: Stores, campaign_id: str) -> list[SessionSummary]:
+    """Build the campaign's session list from its root cycles' index.json."""
+    out: list[SessionSummary] = []
+    for e in store.campaigns.enumerate_cycles():
+        if e["campaign_id"] != campaign_id or not e["is_root"]:
+            continue
+        out.append(
+            SessionSummary(
+                root_cycle_id=e["cycle_id"],
+                session_index=session_index(e["cycle_id"]),
+                status=e["status"],
+                n_rounds=e["n_rounds"],
+                best_accuracy=e["best_accuracy"],
+                created_at=e["created_at"],
+                updated_at=e["updated_at"],
+            )
+        )
+    out.sort(key=lambda s: s.session_index)
+    return out
+
+
+@campaigns_router.get("/campaigns", response_model=CampaignListResponse)
 async def list_campaigns(
     store: StoreDep,
-    backend_id: str,
-):
-    """List all campaigns for a backend."""
-    campaigns = store.campaigns.list_all(backend_id)
+    dataset: str | None = Query(default=None, description="Filter to one dataset"),
+) -> CampaignListResponse:
+    """Every campaign on disk, newest first, optionally filtered by dataset."""
+    campaigns = store.campaigns.list_campaigns(dataset)
+    campaigns.sort(key=lambda c: c.created_at, reverse=True)
     return CampaignListResponse(
-        campaigns=[CampaignSummary(**c) for c in campaigns],
+        campaigns=[
+            _campaign_summary(c, len(store.campaigns.list_sessions(c.campaign_id)))
+            for c in campaigns
+        ],
         total=len(campaigns),
     )
 
 
-@campaigns_router.get(
-    "/backends/{backend_id}/campaigns/{campaign_id}",
-    response_model=CampaignDetailResponse,
-)
-async def get_campaign(
-    store: StoreDep,
-    backend_id: str,
-    campaign_id: str,
-):
-    """Get campaign detail with round_data summaries."""
-    data = store.campaigns.load(backend_id, campaign_id)
-    if data is None:
+@campaigns_router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
+async def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
+    """Campaign manifest detail + its session forest."""
+    campaign = store.campaigns.load_campaign(campaign_id)
+    if campaign is None:
         raise HTTPException(404, f"Campaign not found: {campaign_id}")
-    return CampaignDetailResponse(**data)
+    sessions = _session_summaries(store, campaign_id)
+    return CampaignDetailResponse(
+        campaign_id=campaign.campaign_id,
+        dataset_name=campaign.dataset_name,
+        label=campaign.label,
+        status=campaign.status,
+        created_at=campaign.created_at,
+        root_cycle_id=campaign.root_cycle_id,
+        backend_id=campaign.backend_id,
+        session_count=len(sessions) or 1,
+        root_content_hash=campaign.root_content_hash,
+        config=campaign.config,
+        sessions=sessions,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-cycle reads — index, rounds, dashboard, log, ledger.
+# All routes carry (campaign_id, cycle_id).
+# ---------------------------------------------------------------------------
+
+
+class CycleSummary(BaseModel):
+    campaign_id: str
+    cycle_id: str
+    sibling_kind: Literal["root", "fork", "diag", "sweep"]
+    is_root: bool
+    parent_cycle_id: str | None = None
+    status: str = ""
+    n_rounds: int = 0
+    best_accuracy: float | None = None
+    origin_accuracy: float | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class CampaignCyclesResponse(BaseModel):
+    campaign_id: str
+    cycles: list[CycleSummary] = Field(description="Every cycle in the campaign's lineage tree")
+
+
+class RoundSummary(BaseModel):
+    round: int = Field(description="Round number within the cycle")
+    label: str = Field(description="Human-readable label (winner's L1 description)")
+    accuracy: float | None = Field(default=None, description="Round-level accuracy (winner)")
+    improved: bool = Field(default=False, description="Whether this round improved over best")
+
+
+class CycleDetailResponse(CycleSummary):
+    backend_id: str = Field(default="", description="Backend this cycle optimizes against")
+    best_round_id: str | None = Field(default=None, description="Round id of the best round")
+    rounds: list[RoundSummary] = Field(description="Ordered round summaries")
+
+
+@campaigns_router.get("/campaigns/{campaign_id}/cycles", response_model=CampaignCyclesResponse)
+async def list_campaign_cycles(store: StoreDep, campaign_id: str) -> CampaignCyclesResponse:
+    """Every cycle in one campaign's lineage tree."""
+    if store.campaigns.load_campaign(campaign_id) is None:
+        raise HTTPException(404, f"Campaign not found: {campaign_id}")
+    cycles = [
+        CycleSummary(
+            campaign_id=e["campaign_id"],
+            cycle_id=e["cycle_id"],
+            sibling_kind=e["sibling_kind"],
+            is_root=e["is_root"],
+            parent_cycle_id=e["parent_cycle_id"],
+            status=e["status"],
+            n_rounds=e["n_rounds"],
+            best_accuracy=e["best_accuracy"],
+            created_at=e["created_at"],
+            updated_at=e["updated_at"],
+        )
+        for e in store.campaigns.enumerate_cycles()
+        if e["campaign_id"] == campaign_id
+    ]
+    return CampaignCyclesResponse(campaign_id=campaign_id, cycles=cycles)
+
+
+def _round_summaries(index: dict[str, Any]) -> list[RoundSummary]:
+    out: list[RoundSummary] = []
+    rounds_raw = index.get("rounds")
+    if not isinstance(rounds_raw, list):
+        return out
+    for r in rounds_raw:
+        if not isinstance(r, dict):
+            continue
+        rn = r.get("round")
+        if not isinstance(rn, int):
+            continue
+        out.append(
+            RoundSummary(
+                round=rn,
+                label=str(r.get("label") or ""),
+                accuracy=(
+                    float(r["accuracy"]) if isinstance(r.get("accuracy"), int | float) else None
+                ),
+                improved=bool(r.get("improved", False)),
+            )
+        )
+    return out
 
 
 @campaigns_router.get(
-    "/backends/{backend_id}/campaigns/{campaign_id}/rounds/{round_num}",
+    "/campaigns/{campaign_id}/cycles/{cycle_id}", response_model=CycleDetailResponse
+)
+async def get_cycle(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleDetailResponse:
+    """One cycle's ``index.json`` detail with round summaries."""
+    index = store.campaigns.load(campaign_id, cycle_id)
+    if index is None:
+        raise HTTPException(404, f"Cycle not found: {campaign_id}/{cycle_id}")
+    kind = sibling_kind(cycle_id)
+    return CycleDetailResponse(
+        campaign_id=campaign_id,
+        cycle_id=cycle_id,
+        sibling_kind=index.get("sibling_kind", kind),
+        is_root=kind == "root",
+        parent_cycle_id=index.get("parent_cycle_id"),
+        status=str(index.get("status") or ""),
+        n_rounds=int(index.get("n_rounds", 0)),
+        best_accuracy=(
+            float(index["best_accuracy"])
+            if isinstance(index.get("best_accuracy"), int | float)
+            else None
+        ),
+        origin_accuracy=(
+            float(index["origin_accuracy"])
+            if isinstance(index.get("origin_accuracy"), int | float)
+            else None
+        ),
+        created_at=str(index.get("created_at") or ""),
+        updated_at=str(index.get("updated_at") or ""),
+        backend_id=str(index.get("backend_id") or ""),
+        best_round_id=index.get("best_round_id"),
+        rounds=_round_summaries(index),
+    )
+
+
+@campaigns_router.get(
+    "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
     response_model=dict[str, Any],
 )
-async def get_trial(
-    store: StoreDep,
-    backend_id: str,
-    campaign_id: str,
-    round_num: int,
-):
-    """Get full round_data detail for a specific round."""
-    round_data = store.campaigns.load_round_file(backend_id, campaign_id, round_num)
+async def get_round(
+    store: StoreDep, campaign_id: str, cycle_id: str, round_num: int
+) -> dict[str, Any]:
+    """Full round detail for one round of one cycle."""
+    round_data = store.campaigns.load_round_file(campaign_id, cycle_id, round_num)
     if round_data is None:
-        raise HTTPException(404, f"Trial round {round_num} not found")
+        raise HTTPException(404, f"Round {round_num} not found")
     return round_data
 
 
 # ---------------------------------------------------------------------------
-# Per-cycle live reads — dashboard, log, ledger
-# Webapp-facing endpoints that pass through the on-disk artifacts the
-# operator workflows already use, plus filtered ledger views (decisions,
-# forks) derived from the typed CycleRecord stream.
+# Session-scoped telemetry — dashboard.json lives in the session's root
+# cycle dir. The route accepts any cycle of the session and resolves the
+# session-family root server-side.
+# ---------------------------------------------------------------------------
+
+
+@campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
+async def get_cycle_dashboard(store: StoreDep, campaign_id: str, cycle_id: str) -> dict[str, Any]:
+    """Live session telemetry — ``cycles/{session_root}/dashboard.json``.
+
+    ``dashboard.json`` is written once per session, into the session's
+    root cycle dir; the session root and its forks share it. Pass any
+    cycle of the session — the session-family root is resolved here.
+    """
+    session_root = root_cycle_id(cycle_id)
+    path = cycle_dir_for(store.base_dir, campaign_id, session_root) / "dashboard.json"
+    if not path.is_file():
+        raise HTTPException(404, f"dashboard.json not present for {campaign_id}/{session_root}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Per-cycle live reads — log, ledger, decisions, forks.
 # ---------------------------------------------------------------------------
 
 
@@ -136,9 +335,7 @@ class CycleRecordEnvelope(BaseModel):
     """One typed ledger record + its offset.
 
     ``record_type`` discriminates ResumeCheckpointRecord / PhaseRecord / SnapshotRecord;
-    ``payload`` carries the model's fields verbatim (Pydantic
-    model_dump). Consumers either route by record_type or filter on
-    ResumeCheckpointRecord.kind for gating events.
+    ``payload`` carries the model's fields verbatim (Pydantic model_dump).
     """
 
     offset: int = Field(description="Position in events.jsonl, monotonic per cycle")
@@ -181,15 +378,15 @@ class ForksResponse(BaseModel):
 
 
 class LogMdResponse(BaseModel):
-    cycle_id: str = Field(description="Cycle the markdown belongs to")
+    scope_id: str = Field(description="Campaign id or cycle id the markdown belongs to")
     markdown: str = Field(description="Verbatim log.md source")
 
 
-def _open_cycle_ledger_or_404(cycle_id: str, store: Stores) -> CycleEventLog:
+def _open_cycle_ledger_or_404(campaign_id: str, cycle_id: str, store: Stores) -> CycleEventLog:
     """Open the per-cycle ledger; 404 if the cycle dir doesn't exist."""
-    cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
+    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     if not cycle_dir.exists():
-        raise HTTPException(404, f"Cycle '{cycle_id}' not found")
+        raise HTTPException(404, f"Cycle '{campaign_id}/{cycle_id}' not found")
     return CycleEventLog.open(CycleDir(cycle_dir))
 
 
@@ -201,56 +398,55 @@ def _record_to_envelope(record: Any, offset: int) -> CycleRecordEnvelope:
     )
 
 
+@campaigns_router.get("/campaigns/{campaign_id}/log_md", response_model=LogMdResponse)
+async def get_campaign_log_md(store: StoreDep, campaign_id: str) -> LogMdResponse:
+    """Campaign digest — ``campaigns/{campaign_id}/log.md`` in a typed envelope."""
+    campaign_dir = campaign_root_dir_for(store.base_dir, campaign_id)
+    text = read_text_or_404(campaign_dir / "log.md", "log.md")
+    return LogMdResponse(scope_id=campaign_id, markdown=text)
+
+
 @campaigns_router.get(
-    "/campaigns/{cycle_id}/log_md",
+    "/campaigns/{campaign_id}/cycles/{cycle_id}/log_md",
     response_model=LogMdResponse,
 )
-async def get_cycle_log_md(store: StoreDep, cycle_id: str) -> LogMdResponse:
-    """Pre-rendered log.md (per-cycle audit) — markdown source in a typed envelope."""
-    cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
+async def get_cycle_log_md(store: StoreDep, campaign_id: str, cycle_id: str) -> LogMdResponse:
+    """Pre-rendered per-cycle ``log.md`` — markdown source in a typed envelope."""
+    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     text = read_text_or_404(cycle_dir / "log.md", "log.md")
-    return LogMdResponse(cycle_id=cycle_id, markdown=text)
+    return LogMdResponse(scope_id=cycle_id, markdown=text)
 
 
-@campaigns_router.get("/campaigns/{cycle_id}/hard_samples")
+@campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/hard_samples")
 async def get_cycle_hard_samples(
-    store: StoreDep,
-    cycle_id: str,
-    view: Literal["campaign", "workspace"] = Query(
-        "campaign",
-        description=(
-            "campaign = Rasch fit over this cycle's rounds only. "
-            "workspace = fit over this cycle + cross-cycle MeasurementArchive."
-        ),
-    ),
+    store: StoreDep, campaign_id: str, cycle_id: str
 ) -> dict[str, Any]:
-    """Thin pass-through of the per-cycle hard-sample artifact JSON.
+    """Cycle-scoped hard-sample artifact — ``cycles/{cycle_id}/hard_samples.json``.
 
-    Two on-disk files, both written at every round-end finalize and
-    parity-readable by Claude without uvicorn:
-    ``hard_samples_campaign.json`` and ``hard_samples_workspace.json``.
+    The Rasch fit over this cycle's rounds only. Campaign-scoped and
+    dataset-scoped heatmaps are served elsewhere (campaign dir artifact /
+    archive snapshot via the datasets router).
     """
-    cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
+    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     if not cycle_dir.exists():
-        raise HTTPException(404, f"Cycle '{cycle_id}' not found")
-    path = cycle_dir / f"hard_samples_{view}.json"
+        raise HTTPException(404, f"Cycle '{campaign_id}/{cycle_id}' not found")
+    path = cycle_dir / "hard_samples.json"
     if not path.is_file():
-        raise HTTPException(404, f"hard_samples_{view}.json not present (cycle has no rounds yet)")
-    import json as _json
-
-    return _json.loads(path.read_text(encoding="utf-8"))
+        raise HTTPException(404, "hard_samples.json not present (cycle has no rounds yet)")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @campaigns_router.get(
-    "/campaigns/{cycle_id}/ledger",
+    "/campaigns/{campaign_id}/cycles/{cycle_id}/ledger",
     response_model=LedgerSliceResponse,
 )
 async def get_cycle_ledger(
     store: StoreDep,
+    campaign_id: str,
     cycle_id: str,
     since: int = Query(0, ge=0, description="Skip records before this offset"),
     limit: int = Query(1000, ge=1, le=50_000, description="Max records to return"),
-):
+) -> LedgerSliceResponse:
     """Typed CycleRecord stream from the cycle's events.jsonl, since the given offset.
 
     Pass back ``next_offset`` as ``?since=`` for incremental polling —
@@ -258,7 +454,7 @@ async def get_cycle_ledger(
     per call so the operator can stream a long history without one-shot
     huge responses.
     """
-    ledger = _open_cycle_ledger_or_404(cycle_id, store)
+    ledger = _open_cycle_ledger_or_404(campaign_id, cycle_id, store)
     records: list[CycleRecordEnvelope] = []
     offset = since
     for rec in ledger.iter(since=since):
@@ -274,17 +470,19 @@ async def get_cycle_ledger(
 
 
 @campaigns_router.get(
-    "/campaigns/{cycle_id}/decisions",
+    "/campaigns/{campaign_id}/cycles/{cycle_id}/decisions",
     response_model=DecisionsResponse,
 )
-async def get_cycle_decisions(store: StoreDep, cycle_id: str):
+async def get_cycle_decisions(
+    store: StoreDep, campaign_id: str, cycle_id: str
+) -> DecisionsResponse:
     """All ResumeCheckpointRecord records from the cycle's ledger, in append order.
 
     Filtered view over ``GET /ledger`` for the common gating-event use
     case. Includes archival kinds (probe, fork_cut) — consumers filter
     by ``kind`` if they only want REPLAYED ones.
     """
-    ledger = _open_cycle_ledger_or_404(cycle_id, store)
+    ledger = _open_cycle_ledger_or_404(campaign_id, cycle_id, store)
     out: list[DecisionEnvelope] = []
     for offset, rec in enumerate(ledger.iter()):
         if isinstance(rec, ResumeCheckpointRecord):
@@ -303,10 +501,10 @@ async def get_cycle_decisions(store: StoreDep, cycle_id: str):
 
 
 @campaigns_router.get(
-    "/campaigns/{cycle_id}/forks",
+    "/campaigns/{campaign_id}/cycles/{cycle_id}/forks",
     response_model=ForksResponse,
 )
-async def get_cycle_forks(store: StoreDep, cycle_id: str):
+async def get_cycle_forks(store: StoreDep, campaign_id: str, cycle_id: str) -> ForksResponse:
     """Sibling forks minted from this cycle, derived from FORK_CUT records.
 
     Each fork's metadata comes from a single ``ResumeCheckpointRecord(kind=FORK_CUT)``
@@ -314,7 +512,7 @@ async def get_cycle_forks(store: StoreDep, cycle_id: str):
     ``inputs_ref.from_round`` is the cut point, ``data.forked_at`` is
     the wall-clock fork time.
     """
-    ledger = _open_cycle_ledger_or_404(cycle_id, store)
+    ledger = _open_cycle_ledger_or_404(campaign_id, cycle_id, store)
     forks: list[ForkRef] = []
     for rec in ledger.iter():
         if isinstance(rec, ResumeCheckpointRecord) and rec.kind is ResumeCheckpointKind.FORK_CUT:
@@ -329,14 +527,14 @@ async def get_cycle_forks(store: StoreDep, cycle_id: str):
 
 
 # ---------------------------------------------------------------------------
-# Family lineage — every cycle in a family + each cycle's rounds with
+# Campaign lineage — every cycle in a campaign + each cycle's rounds with
 # candidates + the parent-round where each fork was cut. One round-trip
 # from the webapp; per-cycle index.json reads are batched server-side.
 # Backs the cross-cycle search-point cladogram in the dashboard.
 # ---------------------------------------------------------------------------
 
 
-class FamilyLineageCandidate(BaseModel):
+class CampaignLineageCandidate(BaseModel):
     candidate_id: str = Field(description="Stable id assigned at L1-score time")
     label: str = Field(default="", description="Short L1-generated description")
     accuracy: float | None = Field(default=None, description="Per-candidate accuracy")
@@ -344,58 +542,54 @@ class FamilyLineageCandidate(BaseModel):
     is_winner: bool = Field(default=False, description="True for the round's elected winner")
 
 
-class FamilyLineageRound(BaseModel):
+class CampaignLineageRound(BaseModel):
     round: int = Field(description="Round number within the cycle (1-indexed)")
     label: str = Field(default="", description="Round label — winner's L1 description")
     accuracy: float | None = Field(default=None, description="Round-level accuracy (winner)")
-    candidates: list[FamilyLineageCandidate] = Field(
+    candidates: list[CampaignLineageCandidate] = Field(
         description="All candidates scored this round, sorted by rank"
     )
 
 
-class FamilyLineageCycle(BaseModel):
+class CampaignLineageCycle(BaseModel):
     cycle_id: str
     sibling_kind: Literal["root", "fork", "diag", "sweep"]
-    # Immediate parent, not family-root — read from index.json so sub-forks
-    # (forks of forks) attach to their actual parent in the visual tree.
+    # Immediate parent, read from index.json so sub-forks (forks of forks)
+    # attach to their actual parent in the visual tree.
     immediate_parent_cycle_id: str | None
     # Round of the immediate parent at which this cycle's first round was
-    # cut. None for roots; may be None for old forks whose ledger/index
-    # didn't record from_round.
+    # cut. None for roots; may be None for forks whose index didn't record it.
     fork_from_round: int | None
     # Candidate id at the parent's fork_from_round that this fork descends
     # from. Only set when index.json::fork carries from_candidate (operator
     # HITL forks); divergence/sweep forks attach at round-level only.
     fork_from_candidate_id: str | None
-    # Fork creation trigger — drives the round-numbering convention. The
-    # webapp uses this + ``round_column_offset`` to place rounds on the
-    # cladogram without having to know per-trigger semantics itself.
+    # Fork creation trigger — drives the round-numbering convention.
     trigger: str
-    # X-axis offset for this cycle's rounds in the family cladogram —
+    # X-axis offset for this cycle's rounds in the campaign cladogram —
     # add to each round's ``round`` number to get its absolute column.
-    # See ``_compute_round_column_offset`` for the per-trigger logic.
     round_column_offset: int
     status: str
     dataset_name: str
     best_accuracy: float | None
-    rounds: list[FamilyLineageRound]
+    rounds: list[CampaignLineageRound]
 
 
-class FamilyLineageResponse(BaseModel):
-    root_cycle_id: str
-    cycles: list[FamilyLineageCycle] = Field(
-        description="Every cycle in the family (root + forks + sweeps + diag). "
-        "BFS ordering by lineage depth; lay out in this order."
+class CampaignLineageResponse(BaseModel):
+    campaign_id: str
+    cycles: list[CampaignLineageCycle] = Field(
+        description="Every cycle in the campaign (root + forks + sweeps + diag). "
+        "Sorted by cycle id; lay out via immediate_parent_cycle_id."
     )
 
 
-def _extract_candidates(scoreboard: list[Any]) -> list[FamilyLineageCandidate]:
-    out: list[FamilyLineageCandidate] = []
+def _extract_candidates(scoreboard: list[Any]) -> list[CampaignLineageCandidate]:
+    out: list[CampaignLineageCandidate] = []
     for c in scoreboard:
         if not isinstance(c, dict):
             continue
         out.append(
-            FamilyLineageCandidate(
+            CampaignLineageCandidate(
                 candidate_id=str(c.get("candidate_id") or ""),
                 label=str(c.get("label") or ""),
                 accuracy=(
@@ -411,9 +605,9 @@ def _extract_candidates(scoreboard: list[Any]) -> list[FamilyLineageCandidate]:
 def _fork_from_round_from_ledger(parent_dir: Path, child_cycle_id: str) -> int | None:
     """Find the FORK_CUT record in *parent_dir* whose outcome is *child_cycle_id*.
 
-    Final fallback when neither index.json::forked_from_round nor
-    index.json::fork::from_round carries the value. Returns None if the
-    parent's ledger is missing or the record isn't there.
+    Final fallback when index.json::fork::from_round doesn't carry the
+    value. Returns None if the parent's ledger is missing or the record
+    isn't there.
     """
     if not (parent_dir / "events.jsonl").is_file():
         return None
@@ -434,12 +628,11 @@ def _fork_from_round_from_ledger(parent_dir: Path, child_cycle_id: str) -> int |
 
 
 def _filter_post_divergence_rounds(
-    rounds: list[FamilyLineageRound], trigger: str, fork_from_round: int | None
-) -> list[FamilyLineageRound]:
-    """For divergence / sweep / diag forks, drop rounds that are inherited
-    from the parent (round <= fork_from_round). Those rounds belong to
-    the parent's lane and would visually overlap if rendered in the
-    fork's lane.
+    rounds: list[CampaignLineageRound], trigger: str, fork_from_round: int | None
+) -> list[CampaignLineageRound]:
+    """For divergence / sweep / diag forks, drop rounds inherited from the
+    parent (round <= fork_from_round). Those rounds belong to the parent's
+    lane and would visually overlap if rendered in the fork's lane.
 
     Operator HITL forks restart numbering at 1 so all their rounds are
     post-divergence by definition — return as-is.
@@ -452,46 +645,40 @@ def _filter_post_divergence_rounds(
 
 
 @campaigns_router.get(
-    "/campaigns/{cycle_id}/family-lineage",
-    response_model=FamilyLineageResponse,
+    "/campaigns/{campaign_id}/lineage",
+    response_model=CampaignLineageResponse,
 )
-async def get_family_lineage(store: StoreDep, cycle_id: str) -> FamilyLineageResponse:
-    """Aggregated lineage for the whole family root-rooted at *cycle_id*.
+async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLineageResponse:
+    """Aggregated lineage for the whole campaign.
 
-    One pass over every cycle in the family — reads each index.json
+    One pass over every cycle in the campaign — reads each index.json
     (which already carries the per-round scoreboard) and supplements with
     a ledger scan for fork-cut rounds when the index doesn't have them.
+    The tree is built from each cycle's ``parent_cycle_id``.
     """
-    root_id = root_cycle_id(cycle_id)
-    # Discover every cycle in the family by walking the existing enumerate
-    # output and filtering on family-root id. Cheap — enumerate already
-    # touched every index.json once during the listing pass.
-    enum_entries = store.campaigns.enumerate_cycles()
-    family_ids = {
-        e["cycle_id"]
-        for e in enum_entries
-        if e["cycle_id"] == root_id or e["parent_cycle_id"] == root_id
-    }
-    family_ids.add(root_id)  # root always included, even if dir missing
+    if store.campaigns.load_campaign(campaign_id) is None:
+        raise HTTPException(404, f"Campaign not found: {campaign_id}")
+    enum_entries = [
+        e for e in store.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id
+    ]
 
-    out_cycles: list[FamilyLineageCycle] = []
-    for cid in sorted(family_ids):
-        cdir = campaign_dir_for(store.base_dir, cid)
+    out_cycles: list[CampaignLineageCycle] = []
+    for entry in sorted(enum_entries, key=lambda e: e["cycle_id"]):
+        cid = entry["cycle_id"]
+        cdir = cycle_dir_for(store.base_dir, campaign_id, cid)
         index = read_json_optional(cdir / "index.json")
         if not isinstance(index, dict):
-            # Defensive: include a stub so the renderer still sees the
-            # node (matches enumerate_cycles' tolerance).
             out_cycles.append(
-                FamilyLineageCycle(
+                CampaignLineageCycle(
                     cycle_id=cid,
                     sibling_kind=sibling_kind(cid),
-                    immediate_parent_cycle_id=(None if cid == root_id else root_id),
+                    immediate_parent_cycle_id=entry["parent_cycle_id"],
                     fork_from_round=None,
                     fork_from_candidate_id=None,
                     trigger="",
                     round_column_offset=0,
                     status="missing",
-                    dataset_name="",
+                    dataset_name=entry["dataset_name"],
                     best_accuracy=None,
                     rounds=[],
                 )
@@ -503,25 +690,17 @@ async def get_family_lineage(store: StoreDep, cycle_id: str) -> FamilyLineageRes
         fork_block: dict = _fork if isinstance(_fork, dict) else {}
         trigger = str(fork_block.get("trigger") or "")
 
-        # Three sources for fork_from_round, tried in this order:
-        #   1. index.json::forked_from_round (divergence + sweep + new
-        #      operator HITL writes all land here)
-        #   2. index.json::fork::from_round (older operator HITL only)
-        #   3. parent ledger's FORK_CUT record (last-resort scan)
-        # Whichever is set first wins; checking all three covers the
-        # operator's on-disk data without back-compat shims.
+        # Two sources for fork_from_round, tried in this order:
+        #   1. index.json::fork::from_round
+        #   2. parent ledger's FORK_CUT record (last-resort scan)
         from_round: int | None = None
-        top_fr = index.get("forked_from_round")
-        if isinstance(top_fr, int):
-            from_round = top_fr
-        else:
-            block_fr = fork_block.get("from_round")
-            if isinstance(block_fr, int):
-                from_round = block_fr
-            elif immediate_parent:
-                from_round = _fork_from_round_from_ledger(
-                    campaign_dir_for(store.base_dir, immediate_parent), cid
-                )
+        block_fr = fork_block.get("from_round")
+        if isinstance(block_fr, int):
+            from_round = block_fr
+        elif immediate_parent:
+            from_round = _fork_from_round_from_ledger(
+                cycle_dir_for(store.base_dir, campaign_id, immediate_parent), cid
+            )
 
         from_candidate = fork_block.get("from_candidate")
         from_candidate_str = (
@@ -529,7 +708,7 @@ async def get_family_lineage(store: StoreDep, cycle_id: str) -> FamilyLineageRes
         )
 
         rounds_raw = index.get("rounds")
-        rounds_out: list[FamilyLineageRound] = []
+        rounds_out: list[CampaignLineageRound] = []
         if isinstance(rounds_raw, list):
             for r in rounds_raw:
                 if not isinstance(r, dict):
@@ -538,7 +717,7 @@ async def get_family_lineage(store: StoreDep, cycle_id: str) -> FamilyLineageRes
                 if not isinstance(rn, int):
                     continue
                 rounds_out.append(
-                    FamilyLineageRound(
+                    CampaignLineageRound(
                         round=rn,
                         label=str(r.get("label") or ""),
                         accuracy=(
@@ -550,30 +729,23 @@ async def get_family_lineage(store: StoreDep, cycle_id: str) -> FamilyLineageRes
                     )
                 )
 
-        # Drop pre-divergence rounds for forks whose rounds[] inherits
-        # parent numbering — they'd visually duplicate parent's rounds in
-        # the fork's lane.
         rounds_out = _filter_post_divergence_rounds(rounds_out, trigger, from_round)
-
-        # Column offset per trigger — operator HITL restarts numbering at
-        # 1 so its rounds need to shift right by the cut point; every
-        # other trigger keeps parent numbering so offset stays 0.
         col_offset = from_round if trigger == "operator_hitl" and isinstance(from_round, int) else 0
 
         header_raw = index.get("header")
         header = header_raw if isinstance(header_raw, dict) else {}
 
         out_cycles.append(
-            FamilyLineageCycle(
+            CampaignLineageCycle(
                 cycle_id=cid,
-                sibling_kind=sibling_kind(cid),
+                sibling_kind=str(index.get("sibling_kind") or sibling_kind(cid)),  # type: ignore[arg-type]
                 immediate_parent_cycle_id=immediate_parent,
                 fork_from_round=from_round,
                 fork_from_candidate_id=from_candidate_str,
                 trigger=trigger,
                 round_column_offset=col_offset,
                 status=str(index.get("status") or ""),
-                dataset_name=str(header.get("dataset_name") or ""),
+                dataset_name=str(header.get("dataset_name") or entry["dataset_name"]),
                 best_accuracy=(
                     float(index["best_accuracy"])
                     if isinstance(index.get("best_accuracy"), int | float)
@@ -583,31 +755,32 @@ async def get_family_lineage(store: StoreDep, cycle_id: str) -> FamilyLineageRes
             )
         )
 
-    return FamilyLineageResponse(root_cycle_id=root_id, cycles=out_cycles)
+    return CampaignLineageResponse(campaign_id=campaign_id, cycles=out_cycles)
 
 
 # ---------------------------------------------------------------------------
 # File-tree reads — recursive listing + content for one file under the
-# cycle dir or the family-root telemetry artifacts.
+# cycle dir or the campaign-level artifacts.
 # ---------------------------------------------------------------------------
 
 
 class FileEntry(BaseModel):
     path: str = Field(description="Path relative to the scope root, forward slashes")
-    scope: Literal["cycle", "family"] = Field(description="Which root the path is under")
+    scope: Literal["cycle", "campaign"] = Field(description="Which root the path is under")
     size: int = Field(description="File size in bytes")
     mtime: str = Field(description="ISO 8601 UTC modification time")
 
 
 class FilesResponse(BaseModel):
+    campaign_id: str
     cycle_id: str
-    is_fork: bool = Field(description="True when cycle dir != family-root dir")
     entries: list[FileEntry]
 
 
 class FileContentResponse(BaseModel):
+    campaign_id: str
     cycle_id: str
-    scope: Literal["cycle", "family"]
+    scope: Literal["cycle", "campaign"]
     path: str
     size: int
     mtime: str
@@ -661,19 +834,17 @@ def _classify_suffix(suffix: str) -> Literal["json", "markdown", "log", "text"] 
 
 
 @campaigns_router.get(
-    "/campaigns/{cycle_id}/files",
+    "/campaigns/{campaign_id}/cycles/{cycle_id}/files",
     response_model=FilesResponse,
 )
-async def list_cycle_files(store: StoreDep, cycle_id: str) -> FilesResponse:
-    """Recursive file tree for the cycle dir + family-root telemetry artifacts."""
-    cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
-    root_dir = root_dir_for(store.base_dir, cycle_id)
+async def list_cycle_files(store: StoreDep, campaign_id: str, cycle_id: str) -> FilesResponse:
+    """Recursive file tree for the cycle dir + campaign-level artifacts."""
+    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+    campaign_dir = campaign_root_dir_for(store.base_dir, campaign_id)
     if not cycle_dir.exists():
-        raise HTTPException(404, f"Cycle '{cycle_id}' not found")
+        raise HTTPException(404, f"Cycle '{campaign_id}/{cycle_id}' not found")
 
-    is_fork = cycle_dir.resolve() != root_dir.resolve()
     entries: list[FileEntry] = []
-
     for f in _walk_files(cycle_dir):
         entries.append(
             FileEntry(
@@ -686,51 +857,39 @@ async def list_cycle_files(store: StoreDep, cycle_id: str) -> FilesResponse:
         if len(entries) > _MAX_FILE_ENTRIES:
             raise HTTPException(413, f"Too many entries in cycle dir (>{_MAX_FILE_ENTRIES})")
 
-    if is_fork:
-        for name in _FAMILY_FILE_LEVEL_ARTIFACTS:
-            f = root_dir / name
-            if f.is_file():
-                entries.append(
-                    FileEntry(
-                        path=name,
-                        scope="family",
-                        size=f.stat().st_size,
-                        mtime=_iso_mtime(f),
-                    )
+    for name in _CAMPAIGN_FILE_LEVEL_ARTIFACTS:
+        f = campaign_dir / name
+        if f.is_file():
+            entries.append(
+                FileEntry(
+                    path=name,
+                    scope="campaign",
+                    size=f.stat().st_size,
+                    mtime=_iso_mtime(f),
                 )
+            )
 
-    return FilesResponse(cycle_id=cycle_id, is_fork=is_fork, entries=entries)
+    return FilesResponse(campaign_id=campaign_id, cycle_id=cycle_id, entries=entries)
 
 
 @campaigns_router.get(
-    "/campaigns/{cycle_id}/file",
+    "/campaigns/{campaign_id}/cycles/{cycle_id}/file",
     response_model=FileContentResponse,
 )
 async def get_cycle_file(
     store: StoreDep,
+    campaign_id: str,
     cycle_id: str,
-    scope: Literal["cycle", "family"] = Query(..., description="cycle | family"),
+    scope: Literal["cycle", "campaign"] = Query(..., description="cycle | campaign"),
     path: str = Query(..., description="Relative path under the chosen scope root"),
 ) -> FileContentResponse:
-    """Read the contents of one file under the cycle or family-root scope."""
+    """Read the contents of one file under the cycle or campaign scope."""
     if scope == "cycle":
-        scope_root = campaign_dir_for(store.base_dir, cycle_id)
+        scope_root = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     else:
-        scope_root = root_dir_for(store.base_dir, cycle_id)
+        scope_root = campaign_root_dir_for(store.base_dir, campaign_id)
     if not scope_root.exists():
-        raise HTTPException(404, f"Cycle '{cycle_id}' not found")
-
-    # Family-rooted artifacts (currently just ``dashboard.json``) live only
-    # at the family root by design — ``LiveDashboardView`` is bound there
-    # and forks share that one stream. When a fork is asked for one of
-    # these via scope=cycle, auto-fall-back to the family root so the
-    # webapp doesn't 404 on every fork in the sidebar.
-    if scope == "cycle" and path in _FAMILY_FILE_LEVEL_ARTIFACTS:
-        cycle_path = scope_root / path
-        if not cycle_path.is_file():
-            family_root = root_dir_for(store.base_dir, cycle_id)
-            if family_root.exists() and family_root.resolve() != scope_root.resolve():
-                scope_root = family_root
+        raise HTTPException(404, f"Scope root not found: {campaign_id}/{cycle_id}")
 
     resolved = _resolve_safe_file(scope_root, path)
     size = resolved.stat().st_size
@@ -739,6 +898,7 @@ async def get_cycle_file(
 
     if size > _MAX_PREVIEW_BYTES:
         return FileContentResponse(
+            campaign_id=campaign_id,
             cycle_id=cycle_id,
             scope=scope,
             path=path,
@@ -748,34 +908,12 @@ async def get_cycle_file(
             content=None,
         )
 
-    if classification is None:
-        try:
-            text = resolved.read_text(encoding="utf-8")
-            return FileContentResponse(
-                cycle_id=cycle_id,
-                scope=scope,
-                path=path,
-                size=size,
-                mtime=mtime,
-                content_type="text",
-                content=text,
-            )
-        except UnicodeDecodeError:
-            return FileContentResponse(
-                cycle_id=cycle_id,
-                scope=scope,
-                path=path,
-                size=size,
-                mtime=mtime,
-                content_type="binary",
-                content=None,
-            )
-
-    if classification == "text":
+    if classification is None or classification == "text":
         try:
             text = resolved.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             return FileContentResponse(
+                campaign_id=campaign_id,
                 cycle_id=cycle_id,
                 scope=scope,
                 path=path,
@@ -785,6 +923,7 @@ async def get_cycle_file(
                 content=None,
             )
         return FileContentResponse(
+            campaign_id=campaign_id,
             cycle_id=cycle_id,
             scope=scope,
             path=path,
@@ -795,6 +934,7 @@ async def get_cycle_file(
         )
 
     return FileContentResponse(
+        campaign_id=campaign_id,
         cycle_id=cycle_id,
         scope=scope,
         path=path,
@@ -806,16 +946,19 @@ async def get_cycle_file(
 
 
 __all__ = [
+    "CampaignCyclesResponse",
     "CampaignDetailResponse",
+    "CampaignLineageCandidate",
+    "CampaignLineageCycle",
+    "CampaignLineageResponse",
+    "CampaignLineageRound",
     "CampaignListResponse",
     "CampaignSummary",
+    "CycleDetailResponse",
     "CycleRecordEnvelope",
+    "CycleSummary",
     "DecisionEnvelope",
     "DecisionsResponse",
-    "FamilyLineageCandidate",
-    "FamilyLineageCycle",
-    "FamilyLineageResponse",
-    "FamilyLineageRound",
     "FileContentResponse",
     "FileEntry",
     "FilesResponse",
@@ -824,5 +967,6 @@ __all__ = [
     "LedgerSliceResponse",
     "LogMdResponse",
     "RoundSummary",
+    "SessionSummary",
     "campaigns_router",
 ]

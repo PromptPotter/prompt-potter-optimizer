@@ -1,14 +1,13 @@
-"""``cmd_new`` — mint a fresh root campaign + run the loop from round 0.
+"""``cmd_new`` — start (or join) a campaign + run the loop from round 0.
 
-Always mints a fresh root cycle. If the dataset+pipeline content-hash
-collides with an existing root campaign dir, a ``_r2`` / ``_r3`` / ...
-discriminator is appended so the new run lands in its own directory tree
-(separate ``dashboard.json``, ``log.md``, ledger, archive subtree). The
-prior campaign is preserved untouched.
-
-That's the bug fix that drove the CLI redesign: under ``optimize --config``
-two runs with identical config used to land on top of each other ("Reusing
-cycle X (N prior rounds cached)"). Now they each get their own root.
+``new`` is **find-or-create**: ``campaign_id`` is ``{dataset}__{hash}``,
+derived from the origin declaration's content hash. A *new* declaration
+mints a fresh :class:`Campaign`; re-running ``new`` on an *unchanged*
+declaration resolves to the existing campaign and adds a **session** to
+it — a fresh ``session_id`` plus a ``cycle_{hash}_s{N}`` root cycle. The
+campaign dir (``campaigns/{campaign_id}/``) holds ``campaign.json`` +
+``log.md``; per-session telemetry (``dashboard.json``) and round detail
+live one level down under ``cycles/{cycle_id}/``.
 """
 
 from __future__ import annotations
@@ -23,6 +22,7 @@ from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     _mint_session_and_cycle,
     _prepare_cycle,
+    campaign_result_human,
     get_verbose,
     init_services_cli,
     log_startup_summary,
@@ -33,29 +33,8 @@ if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.run_observers import RunObservers
-    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger("promptpotter.presentation.cli")
-
-
-def _next_root_cycle_id(store: Stores, base_cycle_id: str) -> str:
-    """Find the next free root cycle id by appending ``_r2`` / ``_r3`` / ...
-
-    Content-hashed cycle ids are deterministic over (origin SP, dataset,
-    pipeline_params). When the operator runs ``new`` twice against the same
-    dataset, the hash collides — without the discriminator, the second run
-    would merge into the first's directory. The discriminator keeps the two
-    campaigns separate while still grouping by content (the hash prefix is
-    shared, the suffix orders re-runs).
-    """
-    if not store.campaigns.campaign_dir(base_cycle_id).exists():
-        return base_cycle_id
-    n = 2
-    while True:
-        candidate = f"{base_cycle_id}_r{n}"
-        if not store.campaigns.campaign_dir(candidate).exists():
-            return candidate
-        n += 1
 
 
 async def _maybe_decompose_task(
@@ -107,11 +86,12 @@ async def _maybe_decompose_task(
 
 
 async def _mint_fresh_session(args: argparse.Namespace) -> tuple[dict[str, Any], Session]:
-    """Mint a fresh session+cycle: services, datasets, pipeline, session record.
+    """Find-or-create the campaign + mint a session + root cycle.
 
-    Applies the root-discriminator: a content-hash collision against an
-    existing root campaign dir bumps the cycle_id to ``cycle_<hash>_r2`` /
-    ``_r3`` / ... so the new run lands in its own root.
+    ``campaign_id`` is derived from the origin declaration's content hash,
+    so a re-run on an unchanged declaration joins the existing campaign as
+    session N. ``auto_mint_session`` writes ``campaign.json`` (new campaign
+    only), the session's root cycle index, and the 4-key active pointer.
 
     No scoring calls here — the origin runs as phase 0 of the optimize
     loop on the ``sp_budget_ttest`` slice. The one LLM cost is the
@@ -164,9 +144,7 @@ async def _mint_fresh_session(args: argparse.Namespace) -> tuple[dict[str, Any],
     else:
         train_data = session.samples or []
 
-    pipeline_params, origin, base_cycle_id = _prepare_cycle(session, campaign_config, train_data)
-    cycle_id = _next_root_cycle_id(session.store, base_cycle_id)
-    discriminated = cycle_id != base_cycle_id
+    pipeline_params, origin, cycle_id = _prepare_cycle(session, campaign_config, train_data)
 
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     init_params = {
@@ -175,7 +153,7 @@ async def _mint_fresh_session(args: argparse.Namespace) -> tuple[dict[str, Any],
         "experiment_id": args.experiment_id,
         "dataset_name": dataset_name,
     }
-    session_id = _mint_session_and_cycle(
+    session_id, campaign_id, cycle_id = _mint_session_and_cycle(
         session,
         campaign_config,
         cycle_id=cycle_id,
@@ -194,19 +172,23 @@ async def _mint_fresh_session(args: argparse.Namespace) -> tuple[dict[str, Any],
         task_text=args.task_text,
     )
 
-    if discriminated:
+    from promptpotter.infrastructure.store import session_index
+
+    sess_n = session_index(cycle_id)
+    if sess_n == 1:
         logger.info(
-            "Fresh root minted: session=%s cycle=%s (discriminated from %s — "
-            "prior campaign preserved) dataset=%s (%d queries)",
+            "Fresh campaign minted: campaign=%s session=%s cycle=%s dataset=%s (%d queries)",
+            campaign_id,
             session_id,
             cycle_id,
-            base_cycle_id,
             dataset_name,
             len(train_data),
         )
     else:
         logger.info(
-            "Fresh root minted: session=%s cycle=%s dataset=%s (%d queries)",
+            "Joined campaign %s as session #%d: session=%s cycle=%s dataset=%s (%d queries)",
+            campaign_id,
+            sess_n,
             session_id,
             cycle_id,
             dataset_name,
@@ -215,6 +197,7 @@ async def _mint_fresh_session(args: argparse.Namespace) -> tuple[dict[str, Any],
 
     info = {
         "session_id": session_id,
+        "campaign_id": campaign_id,
         "cycle_id": cycle_id,
         "backend_id": backend_id,
         "dataset_count": len(train_data),
@@ -356,8 +339,8 @@ async def _run_loop(
     # Wire the webapp's "Stop run" channel: presence of .runtime/stop.flag
     # signals the loop to exit at the next stop_check point. See
     # docs/operations/human-in-the-loop.md.
-    stop_flag = session.store.campaigns.campaign_dir(ctx.cycle_id) / ".runtime" / "stop.flag"
-    session.stop_check = stop_flag.is_file
+    cycle_dir = session.store.campaigns.cycle_dir(ctx.campaign_id, ctx.cycle_id)
+    session.stop_check = (cycle_dir / ".runtime" / "stop.flag").is_file
 
     cycle_result = await _orch_run_optimization(
         train_data,
@@ -377,25 +360,26 @@ async def _run_loop(
 
     ctx.state["best_accuracy"] = cycle_result.best_accuracy
     ctx.save_phase("optimize")
-    campaign_dir = session.store.campaigns.campaign_dir(ctx.cycle_id)
+    campaign_dir = session.store.campaigns.campaign_root_dir(ctx.campaign_id)
     return CommandResult(
         data=cycle_result.model_dump(),
-        human=(
-            f"Campaign: {cycle_result.cycle_id}\n"
-            f"Dashboard: {campaign_dir / 'dashboard.json'}\n"
-            f"Digest: {campaign_dir / 'log.md'}"
+        human=campaign_result_human(
+            campaign_dir,
+            dataset_name=ctx.init_params.get("dataset_name") or "?",
+            cycle_id=cycle_result.cycle_id,
         ),
     )
 
 
 async def cmd_new(args: argparse.Namespace) -> CommandResult:
-    """Mint a fresh root campaign and run the loop from round 0.
+    """Start (or join) a campaign and run the loop from round 0.
 
-    Always creates a new root cycle dir. If the content hash collides
-    with an existing root, a ``_r2`` / ``_r3`` discriminator is appended
-    so the new run lands in its own tree. Live state is
-    ``campaigns/{cycle_id}/dashboard.json``; digest is ``log.md``; final
-    summary is ``index.json::final``. Stop with Ctrl+C.
+    Find-or-create on the origin declaration's content hash: a new
+    declaration mints a fresh campaign, a re-run of an unchanged one adds
+    a session to the existing campaign. Live state is
+    ``cycles/{cycle_id}/dashboard.json``; the campaign digest is
+    ``campaigns/{campaign_id}/log.md``; the final summary is
+    ``cycles/{cycle_id}/index.json::final``. Stop with Ctrl+C.
     """
     from promptpotter.shared.spend import refresh_rates
 
@@ -415,6 +399,7 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
 
     train_data = session.samples or []
     session.session_id = ctx.session_id
+    session.campaign_id = ctx.campaign_id
     session.state.cycle_id = ctx.cycle_id
 
     log_startup_summary(
@@ -425,7 +410,7 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
         ctx.init_params["dataset_name"],
     )
     logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
-    logger.info("Campaign: %s", session.store.campaigns.campaign_dir(ctx.cycle_id))
+    logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
 
     if (
         sweep_result := await _maybe_dispatch_sweep_batch(args, ctx, campaign_config, train_data)

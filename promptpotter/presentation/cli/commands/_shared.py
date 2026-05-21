@@ -72,6 +72,28 @@ def log_startup_summary(
     logger.info("%s · %s · backend %s · dataset %s", pipe, nodes, backend_url, ds)
 
 
+def campaign_result_human(campaign_dir: Any, *, dataset_name: str, cycle_id: str | None) -> str:
+    """Operator-facing summary block for a finished ``new`` / ``resume`` run.
+
+    Names the dataset, campaign, session, and cycle. ``campaign.json`` +
+    ``log.md`` live at the campaign dir; per-session ``dashboard.json``
+    and round detail live under ``cycles/{cycle_id}/``.
+    """
+    from promptpotter.infrastructure.store import root_cycle_id, session_index
+
+    session_n = session_index(root_cycle_id(cycle_id)) if cycle_id else 1
+    return (
+        f"Dataset:   {dataset_name}\n"
+        f"Campaign:  {campaign_dir.name}\n"
+        f"Session:   {session_n}\n"
+        f"Cycle:     {cycle_id or '?'}\n"
+        f"Directory: {campaign_dir}\n"
+        f"  campaign.json          — manifest\n"
+        f"  log.md                 — campaign digest\n"
+        f"  cycles/{cycle_id or '?'}/  — session telemetry (dashboard.json) + rounds"
+    )
+
+
 async def init_services_cli(
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = DEFAULT_BACKEND_ID,
@@ -125,11 +147,16 @@ def _mint_session_and_cycle(
     pipeline_params: dict,
     origin,
     dataset_count: int,
-) -> str:
-    """Mint session+cycle with the CLI's pipeline-snapshot extras."""
+) -> tuple[str, str, str]:
+    """Mint session + campaign + root cycle with the CLI's pipeline-snapshot extras.
+
+    Returns ``(session_id, campaign_id, cycle_id)``. ``auto_mint_session``
+    writes ``campaign.json``, the root cycle index, and the 4-key active
+    pointer; it also threads ``campaign_id`` onto *session*.
+    """
     from promptpotter.application.bootstrap.session import auto_mint_session
 
-    session_id, _ = auto_mint_session(
+    return auto_mint_session(
         session,
         campaign_config,
         cycle_id=cycle_id,
@@ -139,7 +166,6 @@ def _mint_session_and_cycle(
         pipeline_params=pipeline_params,
         active_steps=list(pipeline_params.get("steps", [])),
     )
-    return session_id
 
 
 def _build_divergence_hint() -> str:
@@ -165,7 +191,7 @@ def _build_divergence_hint() -> str:
         f"Checked decisions: {', '.join(replayed)}.\n"
         f"(Archival, not divergence-gated: {', '.join(archival)}.)\n\n"
         "Options:\n"
-        "  • `python -m promptpotter new <dataset>` — start a fresh root "
+        "  • `python -m promptpotter new <dataset>` — start a fresh "
         "campaign (most common: you wanted a new run, not a resume).\n"
         "  • `python -m promptpotter resume --fork-on-divergence` — branch "
         "a sibling cycle here under the current scorer.\n"
@@ -203,6 +229,7 @@ def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
 
 __all__ = [
     "CommandResult",
+    "campaign_result_human",
     "confirm_tty",
     "get_verbose",
     "init_services_cli",

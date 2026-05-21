@@ -98,13 +98,14 @@ class ObservabilityBridge:
         cls,
         store_base_dir: str | Path,
         backend_id: str,
+        campaign_id: str = "",
         *,
         langfuse: LangfuseLogger | None,
     ) -> ObservabilityBridge:
 
-        file_sink = FileSink(store_base_dir, backend_id)
+        file_sink = FileSink(store_base_dir, backend_id, campaign_id)
         lf_sink = (
-            LangfuseSink(store_base_dir, backend_id, langfuse)
+            LangfuseSink(store_base_dir, backend_id, campaign_id, langfuse)
             if (langfuse and langfuse.enabled)
             else None
         )
@@ -116,10 +117,11 @@ class ObservabilityBridge:
         cls,
         store_base_dir: str | Path,
         backend_id: str,
+        campaign_id: str = "",
     ) -> ObservabilityBridge:
 
         return cls(
-            file_sink=FileSink(store_base_dir, backend_id),
+            file_sink=FileSink(store_base_dir, backend_id, campaign_id),
             langfuse_sink=None,
             mlflow_sink=MLflowSink(store_base_dir, backend_id) if settings.MLFLOW_ENABLED else None,
         )
@@ -204,6 +206,7 @@ class ObservabilityBridge:
         origin_accuracy: float,
         dataset: list,
         tracing_campaign_id: str,
+        campaign_id: str,
         langfuse_session_id: str | None,
         langfuse: LangfuseLogger | None,
     ) -> ObservabilityBridge | None:
@@ -214,7 +217,7 @@ class ObservabilityBridge:
 
         bridge: ObservabilityBridge | None = None
         with graceful("Failed to create ObservabilityBridge"):
-            bridge = cls.from_settings(project_root, backend_id, langfuse=langfuse)
+            bridge = cls.from_settings(project_root, backend_id, campaign_id, langfuse=langfuse)
         if bridge is None:
             return None
 

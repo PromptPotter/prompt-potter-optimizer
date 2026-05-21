@@ -5,14 +5,13 @@ Two named invariants:
      on ``RoundCompleteView`` — the named correctness guarantee of the
      two-factories-onto-one-View unification. Holds for the improvement
      case AND the no-improvement case (delta=0, p_value=None).
-  2. Projection routing: ``LiveDashboardView`` accepts only a
-     ``RootCycleDir`` (sibling dirs under ``forks/`` / ``diag/`` /
-     ``sweeps/`` are rejected at ``__init__``); ``AuditTrailView``
-     accepts only a ``rounds_dir`` ending in ``.runtime/cache/rounds`` (or
-     a CycleDir via ``from_cycle_dir`` that derives the subpath); the
-     ``on_record`` ledger hook drives ``begin_round`` / ``flush`` on
-     PhaseRecord('round', enter|complete), persists the origin phase to
-     ``round_origin.json``, and ignores ResumeCheckpointRecord records.
+  2. Projection routing: ``LiveDashboardView`` binds to a ``SessionFamilyDir``
+     (one ``dashboard.json`` per session); ``AuditTrailView`` accepts only
+     a ``rounds_dir`` ending in ``.runtime/cache/rounds`` (or a CycleDir via
+     ``from_cycle_dir`` that derives the subpath); the ``on_record`` ledger
+     hook drives ``begin_round`` / ``flush`` on PhaseRecord('round',
+     enter|complete), persists the origin phase, and ignores
+     ResumeCheckpointRecord records.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from promptpotter.domain.cycle_paths import CycleDir, RootCycleDir
+from promptpotter.domain.cycle_paths import CycleDir, SessionFamilyDir
 from promptpotter.domain.phases import PhaseEvent
 from promptpotter.infrastructure.projections import (
     AuditTrailView,
@@ -251,38 +250,21 @@ def test_round_complete_view_no_improvement() -> None:
 # ===========================================================================
 
 
-@pytest.mark.parametrize("kind", ["forks", "diag", "sweeps"])
-def test_live_dashboard_rejects_sibling_path(tmp_path: Path, kind: str) -> None:
-    """A sibling dir (under ``forks/``, ``diag/``, or ``sweeps/``) cannot host the live dashboard."""
-    fork_dir = tmp_path / "campaigns" / "root_xyz" / kind / f"root_xyz_{kind}_abc"
-    fork_dir.mkdir(parents=True)
-    session_dir = tmp_path / "sessions" / "s_test"
-    session_dir.mkdir(parents=True)
-
-    with pytest.raises(ValueError, match="family root"):
-        LiveDashboardView(
-            RootCycleDir(fork_dir),  # newtype-cast at the wrong site
-            session_dir,
-            l1_patience=3,
-            n_variants=5,
-            sp_budget_ttest=20,
-        )
-
-
-def test_live_dashboard_accepts_root_path(tmp_path: Path) -> None:
-    """A family-root cycle dir is the only valid live-dashboard target."""
-    root_dir = tmp_path / "campaigns" / "root_xyz"
-    root_dir.mkdir(parents=True)
+def test_live_dashboard_binds_to_session_family_dir(tmp_path: Path) -> None:
+    """The live dashboard binds to the session-family root cycle dir — one
+    ``dashboard.json`` per session."""
+    family_dir = tmp_path / "campaigns" / "ds__abc123abc123" / "cycles" / "cycle_abc123abc123"
+    family_dir.mkdir(parents=True)
     session_dir = tmp_path / "sessions" / "s_test"
 
     proj = LiveDashboardView(
-        RootCycleDir(root_dir),
+        SessionFamilyDir(family_dir),
         session_dir,
         l1_patience=3,
         n_variants=5,
         sp_budget_ttest=20,
     )
-    assert proj.state_path == root_dir / "dashboard.json"
+    assert proj.state_path == family_dir / "dashboard.json"
 
 
 def test_live_dashboard_for_session_recovers_round_after_interrupt(
@@ -295,13 +277,15 @@ def test_live_dashboard_for_session_recovers_round_after_interrupt(
     forever on a cycle that has rounds 1–3 completed.
     """
     project_root = tmp_path / "default"
-    cycle_id = "cycle_abc123"
-    root_dir = project_root / "campaigns" / cycle_id
-    rounds_dir = root_dir / "rounds"
+    campaign_id = "ds__abc123abc123"
+    cycle_id = "cycle_abc123abc123"
+    cycle_dir = project_root / "campaigns" / campaign_id / "cycles" / cycle_id
+    rounds_dir = cycle_dir / "rounds"
     rounds_dir.mkdir(parents=True)
     for n in (1, 2, 3):
         (rounds_dir / f"round_{n:04d}.json").write_text("{}", encoding="utf-8")
-    (root_dir / "dashboard.json").write_text(
+    # dashboard.json is per-session — in the session's root cycle dir.
+    (cycle_dir / "dashboard.json").write_text(
         json.dumps({"state": "init", "round": 0, "best": 0.5}),
         encoding="utf-8",
     )
@@ -311,6 +295,7 @@ def test_live_dashboard_for_session_recovers_round_after_interrupt(
         cycle_id=cycle_id,
         project_root=str(project_root),
         session_id="s_test",
+        campaign_id=campaign_id,
         l1_patience=3,
         n_variants=5,
         sp_budget_ttest=20,
@@ -336,13 +321,19 @@ def test_audit_trail_from_cycle_dir_derives_subpath(tmp_path: Path) -> None:
 
 
 def test_audit_trail_fork_dir_lands_under_fork(tmp_path: Path) -> None:
-    """A fork's audit projection writes under the fork dir, never the parent root."""
-    root_dir = tmp_path / "campaigns" / "root_xyz"
-    fork_dir = root_dir / "forks" / "root_xyz_fork_abc"
+    """A fork's audit projection writes under its own cycle dir.
+
+    Forks live flat under ``campaigns/{campaign_id}/cycles/`` — the
+    fork's audit cache must land in the fork's own dir, never a sibling's.
+    """
+    cycles_dir = tmp_path / "campaigns" / "ds__20260101-000000" / "cycles"
+    root_dir = cycles_dir / "cycle_root_xyz"
+    fork_dir = cycles_dir / "cycle_root_xyz_fork_abc"
     fork_dir.mkdir(parents=True)
+    root_dir.mkdir(parents=True)
     proj = AuditTrailView.from_cycle_dir(CycleDir(fork_dir))
     assert proj.rounds_dir == fork_dir / ".runtime" / "cache" / "rounds"
-    assert root_dir not in proj.rounds_dir.parents or "forks" in proj.rounds_dir.parts
+    assert root_dir not in proj.rounds_dir.parents
 
 
 def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:

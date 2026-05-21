@@ -1,14 +1,16 @@
 """Structural invariants — artifact parity + hexagonal layer-import rules.
 
 Two named invariants:
-  1. ``LiveDashboardView`` lifecycle produces every per-cycle and
-     per-session artifact in ``CAMPAIGN_ARTIFACTS`` / ``SESSION_ARTIFACTS``.
-     Campaign artifacts split into ``ROOT_TELEMETRY_ARTIFACTS`` (shared
-     across forks) and ``PER_CYCLE_OPERATOR_ARTIFACTS`` (per-cycle frozen
-     records). Internals (``.runtime/``) live under that umbrella;
-     ``ledger.jsonl`` / ``streams/`` / ``.cache/`` MUST NOT exist next to
-     operator files. ``FileSink`` Langfuse shadow uses camelCase fields and
-     nests node spans under round spans via ``parentObservationId``.
+  1. ``LiveDashboardView`` lifecycle produces per-session telemetry in
+     ``SESSION_TELEMETRY_ARTIFACTS`` at the session's root cycle dir; the
+     campaign manifest (``CAMPAIGN_DIR_ARTIFACTS``) lands at the campaign
+     dir; the runner mirror produces per-cycle operator artifacts in
+     ``CYCLE_OPERATOR_ARTIFACTS`` at the cycle dir; ``SESSION_ARTIFACTS``
+     land in the session dir. Internals (``.runtime/``) hold the ledger
+     spine; ``ledger.jsonl`` / ``streams/`` / ``.cache/`` MUST NOT exist
+     next to operator files. ``FileSink`` Langfuse shadow uses camelCase
+     fields and nests node spans under round spans via
+     ``parentObservationId``.
   2. Hexagonal runtime imports: ``domain/`` is a sink (imports nothing),
      ``application/intelligence/`` MUST NOT import from
      ``application/optimization/``, and ``infrastructure/`` MUST NOT
@@ -33,107 +35,110 @@ import pytest
 # Artifact parity
 # ===========================================================================
 
-# Per-family-root artifacts (telemetry stream, shared across forks).
-ROOT_TELEMETRY_ARTIFACTS = {
+# Campaign-dir manifest, at campaigns/{campaign_id}/. A campaign is a
+# forest of N sessions; the manifest is its single identity record.
+CAMPAIGN_DIR_ARTIFACTS = {
+    "campaign.json",
+}
+
+# Per-session live telemetry — dashboard.json, written into the session's
+# root cycle dir (the session root and its forks share one stream).
+SESSION_TELEMETRY_ARTIFACTS = {
     "dashboard.json",
 }
 
-# Per-cycle operator-facing artifacts (frozen audit + drill-in dirs the
-# operator reads directly).
-PER_CYCLE_OPERATOR_ARTIFACTS = {
+# Per-cycle operator-facing artifacts (frozen audit the operator reads
+# directly), at campaigns/{campaign_id}/cycles/{cycle_id}/.
+CYCLE_OPERATOR_ARTIFACTS = {
     "index.json",
     "log.md",
     "review.md",
-    # Subdirs are conditional — only present when content was produced.
-    # The minimum-required set asserted by ``test_emitter_produces_all_artifacts``
-    # is the three top-level files.
 }
 
 # Per-cycle internal umbrella — opaque to operators. Holds the ledger spine,
-# pobb streams, the round/candidate caches, and rewind sweepup. Existence
-# of the umbrella dir is the contract; the contents are projection-owned.
+# pobb streams, the round/candidate caches, and rewind sweepup.
 PER_CYCLE_INTERNAL_UMBRELLA = ".runtime"
-
-# Sibling-group dirs that may appear at the family root, each holding
-# nested fork cycle dirs.
-SIBLING_GROUP_DIRS = {"forks", "diag", "sweeps"}
-
-# Combined campaign-tree contract — what an un-forked cycle dir must contain
-# at minimum (operator-facing files only; the internal umbrella is asserted
-# separately).
-CAMPAIGN_ARTIFACTS = ROOT_TELEMETRY_ARTIFACTS | PER_CYCLE_OPERATOR_ARTIFACTS
 
 # Per-session artifacts under ``sessions/{session_id}/``. ``session.json``
 # is owned by SessionStore. ``journal.md`` / ``notes.md`` are NOT in this
-# set — they're a notebook ↔ Claude exchange habit, not a contract; per
-# tests/CLAUDE.md "UX affordances. Journal/notes/HITL exchange surface.
-# It is a habit, not a contract." They appear lazily on first write.
+# set — they're a notebook ↔ Claude exchange habit, not a contract.
 SESSION_ARTIFACTS = {
     "session.json",
 }
 
 
 @pytest.fixture
-def session_and_campaign_dirs(tmp_path: Path) -> tuple[Path, Path]:
-    """Create a session dir + campaign dir + minimal session.json + index.json.
+def session_campaign_cycle_dirs(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Create session + campaign + cycle dirs with minimal manifests.
 
-    Layout: ``{tmp_path}/sessions/{session_id}/`` and
-    ``{tmp_path}/campaigns/{cycle_id}/``. ``tmp_path`` stands in for the
-    tenant root.
+    Layout: ``{tmp_path}/sessions/{session_id}/``,
+    ``{tmp_path}/campaigns/{campaign_id}/`` (manifest + telemetry), and
+    ``campaigns/{campaign_id}/cycles/{cycle_id}/`` (per-cycle audit).
     """
     session_id = "s_test1234"
+    campaign_id = "testds__20260101-000000"
     cycle_id = "cycle_test_abc"
     sdir = tmp_path / "sessions" / session_id
-    cdir = tmp_path / "campaigns" / cycle_id
+    campaign_dir = tmp_path / "campaigns" / campaign_id
+    cycle_dir = campaign_dir / "cycles" / cycle_id
     sdir.mkdir(parents=True)
-    cdir.mkdir(parents=True)
+    cycle_dir.mkdir(parents=True)
 
     (sdir / "session.json").write_text(
+        json.dumps({"session_id": session_id, "phase": "optimizing"})
+    )
+    (campaign_dir / "campaign.json").write_text(
         json.dumps(
             {
-                "session_id": session_id,
-                "phase": "optimizing",
+                "campaign_id": campaign_id,
+                "dataset_name": "testds",
+                "label": "",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "status": "active",
+                "root_cycle_id": cycle_id,
+                "root_content_hash": "",
+                "backend_id": "test_backend",
+                "config": {},
             }
         )
     )
-    (cdir / "index.json").write_text(
+    (cycle_dir / "index.json").write_text(
         json.dumps(
             {
-                "campaign_id": cycle_id,
                 "backend_id": "test_backend",
                 "parent_session_id": session_id,
+                "sibling_kind": "root",
                 "rounds": [],
                 "n_rounds": 0,
             }
         )
     )
-    return sdir, cdir
+    return sdir, campaign_dir, cycle_dir
 
 
 def test_artifact_sets_are_disjoint_and_well_formed() -> None:
-    """CAMPAIGN_ARTIFACTS and SESSION_ARTIFACTS must never overlap; each
-    fixed key must land in the expected set. The two campaign bands
-    (``ROOT_TELEMETRY_ARTIFACTS`` and ``PER_CYCLE_OPERATOR_ARTIFACTS``) must
-    also be disjoint — telemetry is not per-cycle, audit is not at root.
-    Sibling-group dirs are not artifacts — they hold nested cycles."""
-    assert CAMPAIGN_ARTIFACTS.isdisjoint(SESSION_ARTIFACTS)
-    assert ROOT_TELEMETRY_ARTIFACTS.isdisjoint(PER_CYCLE_OPERATOR_ARTIFACTS)
-    assert SIBLING_GROUP_DIRS.isdisjoint(CAMPAIGN_ARTIFACTS)
-    assert PER_CYCLE_INTERNAL_UMBRELLA not in CAMPAIGN_ARTIFACTS
+    """The artifact bands must never overlap; each fixed key lands in the
+    expected set."""
+    bands = CAMPAIGN_DIR_ARTIFACTS | SESSION_TELEMETRY_ARTIFACTS | CYCLE_OPERATOR_ARTIFACTS
+    assert bands.isdisjoint(SESSION_ARTIFACTS)
+    assert PER_CYCLE_INTERNAL_UMBRELLA not in bands
     assert {"session.json"} <= SESSION_ARTIFACTS
-    assert {"dashboard.json"} <= ROOT_TELEMETRY_ARTIFACTS
-    assert {"index.json", "log.md", "review.md"} <= PER_CYCLE_OPERATOR_ARTIFACTS
-    assert {"forks", "diag", "sweeps"} == SIBLING_GROUP_DIRS
+    assert {"campaign.json"} <= CAMPAIGN_DIR_ARTIFACTS
+    assert {"dashboard.json"} <= SESSION_TELEMETRY_ARTIFACTS
+    assert {"index.json", "log.md", "review.md"} <= CYCLE_OPERATOR_ARTIFACTS
 
 
-def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, Path]) -> None:
-    """Emitter lifecycle must produce all CAMPAIGN_ARTIFACTS in the campaign
-    dir and ensure all SESSION_ARTIFACTS in the session dir."""
+def test_emitter_produces_all_artifacts(
+    session_campaign_cycle_dirs: tuple[Path, Path, Path],
+) -> None:
+    """Emitter lifecycle produces per-session telemetry in the session's
+    root cycle dir; the runner mirror produces operator artifacts at the
+    cycle dir."""
     from types import SimpleNamespace
 
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle, TrackingState
-    from promptpotter.domain.cycle_paths import RootCycleDir
+    from promptpotter.domain.cycle_paths import SessionFamilyDir
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import CycleResult, RoundResult
     from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
@@ -143,7 +148,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         view_to_wire_dict,
     )
 
-    session_dir, campaign_dir = session_and_campaign_dirs
+    session_dir, campaign_dir, cycle_dir = session_campaign_cycle_dirs
     config = CampaignConfig(
         optimization={
             "max_rounds": 5,
@@ -152,8 +157,9 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
             "degradation_threshold": 0.4,
         }
     )
+    # The seeded cycle is the session root — telemetry binds to its dir.
     emitter = LiveDashboardView(
-        RootCycleDir(campaign_dir),
+        SessionFamilyDir(cycle_dir),
         session_dir,
         l1_patience=3,
         n_variants=5,
@@ -326,36 +332,87 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         finished_at="2026-04-19T00:01:00+00:00",
         cycle_id="cycle_test_001",
     ).model_dump(exclude={"rounds"})
-    index_path = campaign_dir / "index.json"
+    index_path = cycle_dir / "index.json"
     index_data = json.loads(index_path.read_text(encoding="utf-8")) | {"final": final}
     index_path.write_text(json.dumps(index_data), encoding="utf-8")
     trial_dump = round_result.model_dump()
-    (campaign_dir / "log.md").write_text(
+    (cycle_dir / "log.md").write_text(
         to_markdown(from_disk_log(index_data, [trial_dump])), encoding="utf-8"
     )
-    (campaign_dir / "review.md").write_text(
+    (cycle_dir / "review.md").write_text(
         render_review_md(index_data, [trial_dump], round_audits=[None]), encoding="utf-8"
     )
 
-    missing_campaign = [a for a in CAMPAIGN_ARTIFACTS if not (campaign_dir / a).exists()]
-    assert not missing_campaign, f"Campaign-tree parity violated — missing: {missing_campaign}"
+    missing_campaign = [a for a in CAMPAIGN_DIR_ARTIFACTS if not (campaign_dir / a).exists()]
+    assert not missing_campaign, f"Campaign-dir parity violated — missing: {missing_campaign}"
+    missing_telemetry = [a for a in SESSION_TELEMETRY_ARTIFACTS if not (cycle_dir / a).exists()]
+    assert not missing_telemetry, (
+        f"Session telemetry parity violated — missing: {missing_telemetry}"
+    )
+    missing_cycle = [a for a in CYCLE_OPERATOR_ARTIFACTS if not (cycle_dir / a).exists()]
+    assert not missing_cycle, f"Cycle-tree parity violated — missing: {missing_cycle}"
     missing_session = [a for a in SESSION_ARTIFACTS if not (session_dir / a).exists()]
     assert not missing_session, f"Session-tree parity violated — missing: {missing_session}"
 
-    # Internals: ``.runtime/`` umbrella with ``cache/rounds/`` is created
-    # by ``AuditTrailView.flush`` whenever a round records node
-    # I/O. The legacy top-level ``ledger.jsonl`` / ``streams/`` /
+    # Internals: the legacy top-level ``ledger.jsonl`` / ``streams/`` /
     # ``.cache/`` paths must NOT exist next to operator files.
-    assert not (campaign_dir / "ledger.jsonl").exists(), "ledger.jsonl moved under .runtime/"
-    assert not (campaign_dir / ".cache").exists(), ".cache/ replaced by .runtime/cache/"
-    assert not (campaign_dir / "streams").exists(), "streams/ moved under .runtime/"
+    assert not (cycle_dir / "ledger.jsonl").exists(), "ledger.jsonl moved under .runtime/"
+    assert not (cycle_dir / ".cache").exists(), ".cache/ replaced by .runtime/cache/"
+    assert not (cycle_dir / "streams").exists(), "streams/ moved under .runtime/"
 
 
-def test_campaign_records_parent_session(session_and_campaign_dirs: tuple[Path, Path]) -> None:
-    """Every campaign records its parent session id in index.json."""
-    _session_dir, campaign_dir = session_and_campaign_dirs
-    data = json.loads((campaign_dir / "index.json").read_text(encoding="utf-8"))
+def test_campaign_records_parent_session(
+    session_campaign_cycle_dirs: tuple[Path, Path, Path],
+) -> None:
+    """Every cycle records its parent session id in index.json."""
+    _session_dir, _campaign_dir, cycle_dir = session_campaign_cycle_dirs
+    data = json.loads((cycle_dir / "index.json").read_text(encoding="utf-8"))
     assert data["parent_session_id"], "index.json must carry parent_session_id"
+
+
+def test_session_cycle_id_grammar() -> None:
+    """The ``_s{N}`` session suffix disambiguates a campaign's N session
+    roots without colliding with the fork/diag/sweep separators.
+
+    A campaign is a forest of N sessions: session 1 is the bare
+    ``cycle_{hash}``, session N is ``cycle_{hash}_s{N}``. The suffix must
+    NOT read as a sibling separator — ``root_cycle_id`` / ``sibling_kind``
+    have to treat a ``_s{N}`` root as its own family root, and a fork of
+    it as a fork. ``campaign_id`` is stable across all N sessions.
+    """
+    from promptpotter.application.runner.identity import campaign_id_for
+    from promptpotter.infrastructure.store.campaign_store.store import _unit_kind
+    from promptpotter.infrastructure.store.paths import (
+        root_cycle_id,
+        session_cycle_id,
+        session_index,
+        sibling_kind,
+    )
+
+    base = "cycle_2451d3cf6ebc"
+    # session_cycle_id numbering: session 1 stays bare, N>=2 gets _s{N}.
+    assert session_cycle_id(base, 1) == base
+    assert session_cycle_id(base, 3) == "cycle_2451d3cf6ebc_s3"
+    assert session_index(base) == 1
+    assert session_index("cycle_2451d3cf6ebc_s3") == 3
+
+    # A _s{N} session root is its own family root, kind "root".
+    s2 = "cycle_2451d3cf6ebc_s2"
+    assert root_cycle_id(s2) == s2
+    assert sibling_kind(s2) == "root"
+    # A fork of a _s{N} session roots back at that session, kind "fork".
+    s2_fork = "cycle_2451d3cf6ebc_s2_fork_abc123"
+    assert root_cycle_id(s2_fork) == s2
+    assert sibling_kind(s2_fork) == "fork"
+
+    # campaign_id is {dataset}__{hash} — stable across a campaign's sessions.
+    assert campaign_id_for("justlogic", "2451d3cf6ebc") == "justlogic__2451d3cf6ebc"
+
+    # Diag + sweep both fold to the operator-facing "user_fork" kind; a
+    # root reads as "session".
+    assert _unit_kind("diag", None) == "user_fork"
+    assert _unit_kind("sweep", None) == "user_fork"
+    assert _unit_kind("root", None) == "session"
 
 
 def test_observers_built_via_shared_helper() -> None:
@@ -525,7 +582,8 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
 
     tenant_root = tmp_path / "default"
     tenant_root.mkdir()
-    sink = FileSink(str(tenant_root), backend_id="bk_test")
+    entity_campaign = "ds__20260101-000000"
+    sink = FileSink(str(tenant_root), backend_id="bk_test", campaign_id=entity_campaign)
 
     cycle_id = "cycle_wire_parity"
     campaign_id = "cmp_wire_parity"
@@ -580,13 +638,13 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
         )
     )
 
-    campaign_root = tenant_root / "campaigns" / cycle_id
+    cycle_root = tenant_root / "campaigns" / entity_campaign / "cycles" / cycle_id
 
-    trace_files = list((campaign_root / "langfuse" / "traces").glob("*.json"))
+    trace_files = list((cycle_root / "langfuse" / "traces").glob("*.json"))
     assert len(trace_files) == 1
     trace_id = json.loads(trace_files[0].read_text())["id"]
 
-    obs_dir = campaign_root / "langfuse" / "observations" / trace_id
+    obs_dir = cycle_root / "langfuse" / "observations" / trace_id
     observations = [json.loads(p.read_text()) for p in obs_dir.glob("*.json")]
     assert len(observations) == 2, "round + node observation expected (single obs per round)"
 
@@ -602,7 +660,7 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
     assert "parentObservationId" not in round_obs, "round span has no parent (trace-level)"
     assert node_obs["parentObservationId"] == round_obs["id"], "node must nest under round"
 
-    score_files = list((campaign_root / "langfuse" / "scores").glob("*.jsonl"))
+    score_files = list((cycle_root / "langfuse" / "scores").glob("*.jsonl"))
     assert score_files, "at least one score jsonl expected"
     scores = [json.loads(line) for p in score_files for line in p.read_text().splitlines() if line]
     assert scores, "at least one score entry expected"
@@ -935,13 +993,19 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
     from promptpotter.infrastructure.store import build_stores
 
     stores = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
-    fake_session = SimpleNamespace(store=stores)
+    fake_session = SimpleNamespace(store=stores, campaign_id="ds__20260101-000000")
 
     ledger = _open_cycle_ledger(fake_session, "cycle_x")  # type: ignore[arg-type]
     assert ledger is not None
-    assert ledger.path == stores.campaigns.campaign_dir("cycle_x") / ".runtime" / "ledger.jsonl"
+    assert (
+        ledger.path
+        == stores.campaigns.cycle_dir("ds__20260101-000000", "cycle_x")
+        / ".runtime"
+        / "ledger.jsonl"
+    )
 
-    assert _open_cycle_ledger(SimpleNamespace(store=None), "cycle_x") is None  # type: ignore[arg-type]
+    none_session = SimpleNamespace(store=None, campaign_id="")
+    assert _open_cycle_ledger(none_session, "cycle_x") is None  # type: ignore[arg-type]
 
 
 def test_runcallbacks_emits_records_to_ledger(tmp_path: Path) -> None:
@@ -1156,19 +1220,25 @@ def test_secret_redaction_filter_scrubs_settings_values_and_prefixes(
 
 
 def test_path_builders_reject_traversal(tmp_path: Path) -> None:
-    from promptpotter.infrastructure.store.paths import root_dir_for, sweep_batch_dir_for
+    from promptpotter.infrastructure.store.paths import (
+        campaign_root_dir_for,
+        cycle_dir_for,
+        sweep_batch_dir_for,
+    )
 
     with pytest.raises(ValueError):
-        root_dir_for(tmp_path, "../escape")
+        campaign_root_dir_for(tmp_path, "../escape")
 
     with pytest.raises(ValueError):
-        sweep_batch_dir_for(tmp_path, "ok_root", "../escape")
+        cycle_dir_for(tmp_path, "ok_campaign", "../escape")
 
     with pytest.raises(ValueError):
-        sweep_batch_dir_for(tmp_path, "../escape", "ok_batch")
+        sweep_batch_dir_for(tmp_path, "ok_campaign", "../escape")
 
-    out = root_dir_for(tmp_path, "cycle_abc_fork_def_xyz")
-    assert out == tmp_path / "campaigns" / "cycle_abc"
+    out = cycle_dir_for(tmp_path, "ds__20260101-000000", "cycle_abc_fork_def_xyz")
+    assert out == (
+        tmp_path / "campaigns" / "ds__20260101-000000" / "cycles" / "cycle_abc_fork_def_xyz"
+    )
 
 
 def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:

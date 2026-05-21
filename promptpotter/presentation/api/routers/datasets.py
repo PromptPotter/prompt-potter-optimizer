@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.infrastructure.store import campaign_dir_for
+from promptpotter.infrastructure.store import campaign_root_dir_for, cycle_dir_for
 from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
@@ -21,6 +21,66 @@ from promptpotter.presentation.api.deps import StoreDep
 _datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
 _DATASET_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+# Three named data scopes — same vocabulary as the heatmap artifacts and the
+# webapp toggle. ``cycle`` = one cycle's own Rasch fit; ``campaign`` = the
+# campaign's pooled fit; ``dataset`` = the cross-campaign archive snapshot.
+# A workspace-scope heatmap is meaningless (samples differ per dataset), so
+# the heatmap tier stops at ``dataset``.
+HeatmapScope = Literal["cycle", "campaign", "dataset"]
+
+
+def _resolve_scope_artifact(
+    store: Any,
+    *,
+    scope: HeatmapScope,
+    name: str,
+    backend_id: str,
+    campaign_id: str | None,
+    cycle_id: str | None,
+) -> dict[str, Any]:
+    """Resolve the hard-samples artifact for the requested data scope.
+
+    - ``cycle``: ``campaigns/{campaign_id}/cycles/{cycle_id}/hard_samples.json``
+      — needs both ids.
+    - ``campaign``: ``campaigns/{campaign_id}/hard_samples.json`` — campaign-
+      pooled fit over all the campaign's cycles.
+    - ``dataset``: the cross-campaign archive snapshot for ``name``.
+    """
+    from promptpotter.application.intelligence.hard_sample_archive import (
+        build_archive_hard_samples_artifact,
+    )
+
+    # A missing ``hard_samples.json`` is a normal empty state — a campaign /
+    # cycle that hasn't produced a heatmap yet (no rounds, or migrated from
+    # an older layout). Return an empty artifact so the heatmap renders a
+    # clean "no data" panel; a 404 here would surface as a console error and
+    # read as breakage. A genuinely-absent dir is still a real 404.
+    if scope == "cycle":
+        if not campaign_id or not cycle_id:
+            raise HTTPException(400, "scope=cycle requires campaign_id and cycle_id")
+        cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+        if not cycle_dir.exists():
+            raise HTTPException(404, f"Cycle '{campaign_id}/{cycle_id}' not found")
+        path = cycle_dir / "hard_samples.json"
+        if not path.is_file():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+    if scope == "campaign":
+        if not campaign_id:
+            raise HTTPException(400, "scope=campaign requires campaign_id")
+        campaign_dir = campaign_root_dir_for(store.base_dir, campaign_id)
+        if not campaign_dir.exists():
+            raise HTTPException(404, f"Campaign '{campaign_id}' not found")
+        path = campaign_dir / "hard_samples.json"
+        if not path.is_file():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+    # scope == "dataset" — cross-campaign archive snapshot. Cross-dataset
+    # pooling would be meaningless, so this is always per-dataset.
+    return build_archive_hard_samples_artifact(
+        store, backend_id, dataset_name=name, top_k_samples=None
+    )
 
 
 def _trim_unmeasured(
@@ -98,39 +158,42 @@ async def get_dataset_preview(
             "doesn't drown signal in 'no evidence yet' rows."
         ),
     ),
-    scope: Literal["workspace", "campaign"] = Query(
-        default="workspace",
+    scope: Literal["cycle", "campaign", "dataset"] = Query(
+        default="dataset",
         description=(
-            "workspace = cross-cycle Rasch over the whole MeasurementArchive. "
-            "campaign = single-cycle Rasch (requires cycle_id)."
+            "dataset = cross-campaign Rasch over the whole MeasurementArchive "
+            "for this dataset. campaign = the campaign's pooled fit (requires "
+            "campaign_id). cycle = one cycle's own fit (requires campaign_id "
+            "and cycle_id)."
         ),
+    ),
+    campaign_id: str | None = Query(
+        default=None,
+        description="Required when scope is campaign or cycle.",
     ),
     cycle_id: str | None = Query(
         default=None,
-        description="Required when scope=campaign; ignored when scope=workspace.",
+        description="Required when scope=cycle; ignored otherwise.",
     ),
 ) -> DatasetPreviewResponse:
     """Hard-sample leaderboard for ``{name}`` — every dataset row in Rasch
     difficulty order (hardest first), with unmeasured samples appended at the
     bottom in ``sample_id`` order.
 
-    Two scopes:
+    Three data scopes:
 
-    - ``workspace`` (default): cross-cycle Rasch fit over the whole
+    - ``dataset`` (default): cross-campaign Rasch fit over the whole
       ``MeasurementArchive`` for ``backend_id``.
-    - ``campaign``: per-cycle fit, read from
-      ``campaigns/{cycle_id}/hard_samples_campaign.json``. Reflects only the
-      cycle's own observations — useful for "what does THIS run look like?"
+    - ``campaign``: the campaign's pooled fit, from
+      ``campaigns/{campaign_id}/hard_samples.json``.
+    - ``cycle``: one cycle's own fit, from
+      ``campaigns/{campaign_id}/cycles/{cycle_id}/hard_samples.json``.
 
     ``train_count`` = samples with at least one measurement in the selected
     scope. ``test_count`` = samples in the dataset cache that have none.
     Both counts always reflect the FULL dataset — ``max_unmeasured`` only
     trims the rows returned in ``items``, not the totals.
     """
-    from promptpotter.application.intelligence.hard_sample_archive import (
-        build_archive_hard_samples_artifact,
-    )
-
     if not _DATASET_NAME_RE.match(name):
         raise HTTPException(400, "Invalid dataset name")
     datasets_root = DEFAULT_DATASETS_ROOT.resolve()
@@ -148,25 +211,14 @@ async def get_dataset_preview(
         sid = int(item["sample_id"] if "sample_id" in item else item["id"])
         sample_lookup[sid] = item
 
-    if scope == "campaign":
-        if not cycle_id:
-            raise HTTPException(400, "scope=campaign requires cycle_id")
-        cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
-        if not cycle_dir.exists():
-            raise HTTPException(404, f"Cycle '{cycle_id}' not found")
-        path = cycle_dir / "hard_samples_campaign.json"
-        if not path.is_file():
-            raise HTTPException(
-                404, "hard_samples_campaign.json not present (cycle has no rounds yet)"
-            )
-        artifact = json.loads(path.read_text(encoding="utf-8"))
-    else:
-        # Scope=archive is the per-dataset workspace view; cross-dataset
-        # pooling on sample_id would be meaningless. ``name`` is the
-        # dataset name from the URL path.
-        artifact = build_archive_hard_samples_artifact(
-            store, backend_id, dataset_name=name, top_k_samples=None
-        )
+    artifact = _resolve_scope_artifact(
+        store,
+        scope=scope,
+        name=name,
+        backend_id=backend_id,
+        campaign_id=campaign_id,
+        cycle_id=cycle_id,
+    )
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
     n_obs_map: dict[int, int] = {
@@ -216,9 +268,9 @@ class MeasurementDot(BaseModel):
     ord: str = Field(
         description=(
             "Stable composite ordinal — opaque string the client only uses "
-            "for lexicographic sort + uniqueness. Workspace scope encodes "
-            "created_at + run_id + index; campaign scope encodes round + "
-            "scoreboard idx."
+            "for lexicographic sort + uniqueness. Dataset scope encodes "
+            "created_at + run_id + index; cycle/campaign scope encodes "
+            "round + scoreboard idx."
         ),
     )
     hit: bool
@@ -232,20 +284,20 @@ class SampleSeries(BaseModel):
 
 class MeasurementSeriesResponse(BaseModel):
     name: str
-    scope: Literal["workspace", "campaign"]
+    scope: HeatmapScope
     items: list[SampleSeries]
 
 
-def _campaign_series(
-    store: Any, cycle_id: str, sample_ids: set[int]
+def _cycle_series(
+    store: Any, campaign_id: str, cycle_id: str, sample_ids: set[int]
 ) -> dict[int, list[dict[str, Any]]]:
-    """Walk ``rounds/round_*.json`` for *cycle_id*, returning per-sample series.
+    """Walk one cycle's ``rounds/round_*.json``, returning per-sample series.
 
     Ord = ``{round:04d}/{cand_idx:02d}`` so series sort chronologically by
     round then by scoreboard position within the round. Candidates not
     appearing in the round's scoreboard sink to slot 99.
     """
-    cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
+    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     rounds_dir = cycle_dir / "rounds"
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
     if not rounds_dir.is_dir():
@@ -291,6 +343,28 @@ def _campaign_series(
     return out
 
 
+def _campaign_series(
+    store: Any, campaign_id: str, sample_ids: set[int]
+) -> dict[int, list[dict[str, Any]]]:
+    """Pool every cycle's round-file series across one campaign.
+
+    Ord is prefixed with the cycle id so series from different cycles in
+    the campaign stay distinct under lexicographic sort.
+    """
+    out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
+    for entry in store.campaigns.enumerate_cycles():
+        if entry["campaign_id"] != campaign_id:
+            continue
+        cid = entry["cycle_id"]
+        per_cycle = _cycle_series(store, campaign_id, cid, sample_ids)
+        for sid, dots in per_cycle.items():
+            for d in dots:
+                out[sid].append({"ord": f"{cid}/{d['ord']}", "hit": d["hit"], "label": d["label"]})
+    for bucket in out.values():
+        bucket.sort(key=lambda m: m["ord"])
+    return out
+
+
 @_datasets_router.get(
     "/{name}/measurement-series",
     response_model=MeasurementSeriesResponse,
@@ -310,16 +384,21 @@ async def get_dataset_measurement_series(
             "to ``/preview`` so the two responses stay aligned by index."
         ),
     ),
-    scope: Literal["workspace", "campaign"] = Query(
-        default="workspace",
+    scope: Literal["cycle", "campaign", "dataset"] = Query(
+        default="dataset",
         description=(
-            "workspace = cross-cycle MeasurementArchive series per sample. "
-            "campaign = walk this cycle's round files."
+            "dataset = cross-campaign MeasurementArchive series per sample. "
+            "campaign = pool every cycle's round files in the campaign. "
+            "cycle = walk one cycle's round files."
         ),
+    ),
+    campaign_id: str | None = Query(
+        default=None,
+        description="Required when scope is campaign or cycle.",
     ),
     cycle_id: str | None = Query(
         default=None,
-        description="Required when scope=campaign; ignored when scope=workspace.",
+        description="Required when scope=cycle; ignored otherwise.",
     ),
 ) -> MeasurementSeriesResponse:
     """Per-sample chronological measurement series feeding the hard-sample
@@ -330,10 +409,6 @@ async def get_dataset_measurement_series(
     responses by ``sample_id`` without re-sorting. ``ord`` is opaque and
     only used for the roster's left-to-right alignment across rows.
     """
-    from promptpotter.application.intelligence.hard_sample_archive import (
-        build_archive_hard_samples_artifact,
-    )
-
     if not _DATASET_NAME_RE.match(name):
         raise HTTPException(400, "Invalid dataset name")
     datasets_root = DEFAULT_DATASETS_ROOT.resolve()
@@ -349,22 +424,14 @@ async def get_dataset_measurement_series(
         sid = int(item["sample_id"] if "sample_id" in item else item["id"])
         sample_lookup[sid] = item
 
-    if scope == "campaign":
-        if not cycle_id:
-            raise HTTPException(400, "scope=campaign requires cycle_id")
-        cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
-        if not cycle_dir.exists():
-            raise HTTPException(404, f"Cycle '{cycle_id}' not found")
-        path = cycle_dir / "hard_samples_campaign.json"
-        if not path.is_file():
-            raise HTTPException(
-                404, "hard_samples_campaign.json not present (cycle has no rounds yet)"
-            )
-        artifact = json.loads(path.read_text(encoding="utf-8"))
-    else:
-        artifact = build_archive_hard_samples_artifact(
-            store, backend_id, dataset_name=name, top_k_samples=None
-        )
+    artifact = _resolve_scope_artifact(
+        store,
+        scope=scope,
+        name=name,
+        backend_id=backend_id,
+        campaign_id=campaign_id,
+        cycle_id=cycle_id,
+    )
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
 
@@ -379,13 +446,16 @@ async def get_dataset_measurement_series(
     selected = trimmed_order[:limit]
     selected_set = set(selected)
 
-    if scope == "campaign":
-        assert cycle_id is not None  # checked above; appeases mypy
-        series = _campaign_series(store, cycle_id, selected_set)
+    if scope == "cycle":
+        assert campaign_id is not None and cycle_id is not None  # checked in resolver
+        series = _cycle_series(store, campaign_id, cycle_id, selected_set)
+    elif scope == "campaign":
+        assert campaign_id is not None  # checked in resolver
+        series = _campaign_series(store, campaign_id, selected_set)
     else:
         raw_series = measurement_series_for_samples(store, backend_id, selected)
-        # Workspace ord already carries timestamp + run_id + idx; label is a
-        # short "run abbrev" — first 8 chars of run_id is plenty for tooltips.
+        # Dataset-scope ord already carries timestamp + run_id + idx; label
+        # is a short "run abbrev" — first 8 chars of run_id for tooltips.
         series = {
             sid: [
                 {

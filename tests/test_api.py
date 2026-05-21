@@ -1,14 +1,13 @@
 """Read-only webapp API endpoints — first real consumer of the per-cycle ledger.
 
-Pins the contract for the 7 per-cycle live-read endpoints introduced in
-the Tier 3.2 cleanup. Each endpoint round-trips a typed envelope from a
-seeded fixture cycle so the ledger structure has at least one external
-consumer that fails loudly when the record schema drifts.
+Pins the contract for the per-cycle live-read endpoints. Each endpoint
+round-trips a typed envelope from a seeded fixture campaign+cycle so the
+ledger structure has at least one external consumer that fails loudly
+when the record schema drifts.
 
-Also covers the M11 webapp-preview surface: ``/active`` pointer, the
-``/campaigns/{cycle_id}/files`` recursive listing, the
-``/campaigns/{cycle_id}/file`` content read, and the static ``/ui``
-mount.
+A campaign is a forest of N sessions: routes carry both ``campaign_id``
+and ``cycle_id``; ``dashboard.json`` is per-session (in the session's
+root cycle dir).
 """
 
 from __future__ import annotations
@@ -27,26 +26,62 @@ from promptpotter.domain.run_records import (
     ResumeCheckpointRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.store import build_stores, campaign_dir_for, root_dir_for
+from promptpotter.infrastructure.store import (
+    build_stores,
+    campaign_root_dir_for,
+    cycle_dir_for,
+)
 from promptpotter.main import WEBAPP_DIR, app
+
+_CAMPAIGN_ID = "apitest__20260101-000000"
 
 
 @pytest.fixture
-def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
-    """Spin up a tenant with one cycle dir containing dashboard / log.md / ledger."""
+def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str, str]]:
+    """Spin up a tenant with one campaign + cycle (manifest, telemetry, ledger)."""
     projects_root = tmp_path / "projects"
     datasets_root = tmp_path / "datasets"
     cycle_id = "cycle_apitest_001"
 
     stores = build_stores(projects_root, datasets_root=datasets_root)
 
-    root_dir = root_dir_for(stores.base_dir, cycle_id)
-    cycle_dir = campaign_dir_for(stores.base_dir, cycle_id)
-    root_dir.mkdir(parents=True, exist_ok=True)
+    campaign_dir = campaign_root_dir_for(stores.base_dir, _CAMPAIGN_ID)
+    cycle_dir = cycle_dir_for(stores.base_dir, _CAMPAIGN_ID, cycle_id)
+    campaign_dir.mkdir(parents=True, exist_ok=True)
     cycle_dir.mkdir(parents=True, exist_ok=True)
 
-    (root_dir / "dashboard.json").write_text(
+    (campaign_dir / "campaign.json").write_text(
+        json.dumps(
+            {
+                "campaign_id": _CAMPAIGN_ID,
+                "dataset_name": "apitest",
+                "label": "",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "status": "active",
+                "root_cycle_id": cycle_id,
+                "root_content_hash": "",
+                "backend_id": "test_backend",
+                "config": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    # dashboard.json is per-session — it lives in the session's root cycle dir.
+    (cycle_dir / "dashboard.json").write_text(
         json.dumps({"phase": "l1_score", "round": 3, "best": 0.812}),
+        encoding="utf-8",
+    )
+    (cycle_dir / "index.json").write_text(
+        json.dumps(
+            {
+                "backend_id": "test_backend",
+                "parent_session_id": "s_abc",
+                "sibling_kind": "root",
+                "status": "active",
+                "rounds": [{"round": 0, "accuracy": 0.5, "label": "origin"}],
+                "n_rounds": 1,
+            }
+        ),
         encoding="utf-8",
     )
     (cycle_dir / "log.md").write_text(
@@ -85,23 +120,33 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
 
     app.dependency_overrides[build_stores] = _override_stores
     try:
-        yield TestClient(app), cycle_id
+        yield TestClient(app), _CAMPAIGN_ID, cycle_id
     finally:
         app.dependency_overrides.clear()
 
 
-def test_log_md_returns_markdown_envelope(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
-    resp = client.get(f"/api/v1/campaigns/{cycle_id}/log_md")
+def test_campaigns_list_returns_manifest(seeded_tenant: tuple[TestClient, str, str]) -> None:
+    client, campaign_id, _ = seeded_tenant
+    resp = client.get("/api/v1/campaigns")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["cycle_id"] == cycle_id
+    assert body["total"] == 1
+    assert body["campaigns"][0]["campaign_id"] == campaign_id
+    assert body["campaigns"][0]["dataset_name"] == "apitest"
+
+
+def test_log_md_returns_markdown_envelope(seeded_tenant: tuple[TestClient, str, str]) -> None:
+    client, campaign_id, cycle_id = seeded_tenant
+    resp = client.get(f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/log_md")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["scope_id"] == cycle_id
     assert "# Campaign log" in body["markdown"]
 
 
-def test_ledger_returns_typed_records(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
-    resp = client.get(f"/api/v1/campaigns/{cycle_id}/ledger")
+def test_ledger_returns_typed_records(seeded_tenant: tuple[TestClient, str, str]) -> None:
+    client, campaign_id, cycle_id = seeded_tenant
+    resp = client.get(f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/ledger")
     assert resp.status_code == 200
     body = resp.json()
     assert body["cycle_id"] == cycle_id
@@ -110,26 +155,30 @@ def test_ledger_returns_typed_records(seeded_tenant: tuple[TestClient, str]) -> 
     assert types == ["phase", "decision", "phase", "decision"]
 
 
-def test_ledger_since_offset_skips_earlier_records(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
-    resp = client.get(f"/api/v1/campaigns/{cycle_id}/ledger?since=2")
+def test_ledger_since_offset_skips_earlier_records(
+    seeded_tenant: tuple[TestClient, str, str],
+) -> None:
+    client, campaign_id, cycle_id = seeded_tenant
+    resp = client.get(f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/ledger?since=2")
     body = resp.json()
     assert [r["offset"] for r in body["records"]] == [2, 3]
     assert body["next_offset"] == 4
 
 
-def test_decisions_filters_to_decision_records(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
-    resp = client.get(f"/api/v1/campaigns/{cycle_id}/decisions")
+def test_decisions_filters_to_decision_records(
+    seeded_tenant: tuple[TestClient, str, str],
+) -> None:
+    client, campaign_id, cycle_id = seeded_tenant
+    resp = client.get(f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/decisions")
     assert resp.status_code == 200
     body = resp.json()
     kinds = [d["kind"] for d in body["decisions"]]
     assert kinds == ["round_winner", "fork_cut"]
 
 
-def test_forks_derives_from_fork_cut_records(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
-    resp = client.get(f"/api/v1/campaigns/{cycle_id}/forks")
+def test_forks_derives_from_fork_cut_records(seeded_tenant: tuple[TestClient, str, str]) -> None:
+    client, campaign_id, cycle_id = seeded_tenant
+    resp = client.get(f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/forks")
     assert resp.status_code == 200
     body = resp.json()
     assert body["parent_cycle_id"] == cycle_id
@@ -140,17 +189,27 @@ def test_forks_derives_from_fork_cut_records(seeded_tenant: tuple[TestClient, st
     assert fork["forked_at"] == "2026-04-30T12:00:00+00:00"
 
 
+def test_dashboard_resolves_at_session_family_root(
+    seeded_tenant: tuple[TestClient, str, str],
+) -> None:
+    """The dashboard route resolves the session-family root server-side."""
+    client, campaign_id, cycle_id = seeded_tenant
+    resp = client.get(f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
+    assert resp.status_code == 200
+    assert resp.json()["round"] == 3
+
+
 # ===========================================================================
-# M11 webapp preview — /active, /files, /file, /ui mount
+# Webapp preview — /active, /files, /file, /ui mount
 # ===========================================================================
 
 
 def test_active_returns_404_when_pointer_missing(
-    seeded_tenant: tuple[TestClient, str],
+    seeded_tenant: tuple[TestClient, str, str],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    client, _ = seeded_tenant
+    client, _, _ = seeded_tenant
     monkeypatch.setattr(
         "promptpotter.infrastructure.store._ACTIVE_SESSION_PATH",
         tmp_path / "missing_active.json",
@@ -160,14 +219,21 @@ def test_active_returns_404_when_pointer_missing(
 
 
 def test_active_returns_pointer_when_present(
-    seeded_tenant: tuple[TestClient, str],
+    seeded_tenant: tuple[TestClient, str, str],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    client, cycle_id = seeded_tenant
+    client, campaign_id, cycle_id = seeded_tenant
     pointer_path = tmp_path / "active.json"
     pointer_path.write_text(
-        json.dumps({"tenant_id": "default", "session_id": "s_abc", "cycle_id": cycle_id}),
+        json.dumps(
+            {
+                "tenant_id": "default",
+                "session_id": "s_abc",
+                "campaign_id": campaign_id,
+                "cycle_id": cycle_id,
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -177,26 +243,35 @@ def test_active_returns_pointer_when_present(
     resp = client.get("/api/v1/active")
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"tenant_id": "default", "session_id": "s_abc", "cycle_id": cycle_id}
+    assert body == {
+        "tenant_id": "default",
+        "session_id": "s_abc",
+        "campaign_id": campaign_id,
+        "cycle_id": cycle_id,
+    }
 
 
-def test_files_lists_cycle_artifacts(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
-    resp = client.get(f"/api/v1/campaigns/{cycle_id}/files")
+def test_files_lists_cycle_and_campaign_artifacts(
+    seeded_tenant: tuple[TestClient, str, str],
+) -> None:
+    client, campaign_id, cycle_id = seeded_tenant
+    resp = client.get(f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/files")
     assert resp.status_code == 200
     body = resp.json()
+    assert body["campaign_id"] == campaign_id
     assert body["cycle_id"] == cycle_id
-    assert body["is_fork"] is False  # root cycle, not a fork
-    paths = {e["path"] for e in body["entries"]}
-    assert {"dashboard.json", "log.md", "rounds/round_0000.json"} <= paths
-    # All entries on a non-fork cycle must be scope=cycle.
-    assert all(e["scope"] == "cycle" for e in body["entries"])
+    cycle_paths = {e["path"] for e in body["entries"] if e["scope"] == "cycle"}
+    campaign_paths = {e["path"] for e in body["entries"] if e["scope"] == "campaign"}
+    # dashboard.json is per-session — it sits in the (root) cycle dir, not
+    # the campaign dir.
+    assert {"index.json", "log.md", "rounds/round_0000.json", "dashboard.json"} <= cycle_paths
+    assert {"campaign.json"} <= campaign_paths
 
 
-def test_file_returns_json_content(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
+def test_file_returns_json_content(seeded_tenant: tuple[TestClient, str, str]) -> None:
+    client, campaign_id, cycle_id = seeded_tenant
     resp = client.get(
-        f"/api/v1/campaigns/{cycle_id}/file",
+        f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/file",
         params={"scope": "cycle", "path": "dashboard.json"},
     )
     assert resp.status_code == 200
@@ -205,34 +280,34 @@ def test_file_returns_json_content(seeded_tenant: tuple[TestClient, str]) -> Non
     assert json.loads(body["content"])["round"] == 3
 
 
-def test_file_rejects_path_traversal(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
+def test_file_rejects_path_traversal(seeded_tenant: tuple[TestClient, str, str]) -> None:
+    client, campaign_id, cycle_id = seeded_tenant
     for bad in ("../etc/passwd", "/abs/path", "rounds\\..\\x"):
         resp = client.get(
-            f"/api/v1/campaigns/{cycle_id}/file",
+            f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/file",
             params={"scope": "cycle", "path": bad},
         )
         assert resp.status_code == 400, f"expected 400 for {bad!r}, got {resp.status_code}"
 
 
-def test_file_404_on_missing(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
+def test_file_404_on_missing(seeded_tenant: tuple[TestClient, str, str]) -> None:
+    client, campaign_id, cycle_id = seeded_tenant
     resp = client.get(
-        f"/api/v1/campaigns/{cycle_id}/file",
+        f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/file",
         params={"scope": "cycle", "path": "no_such.json"},
     )
     assert resp.status_code == 404
 
 
 def test_file_oversize_returns_null_content(
-    seeded_tenant: tuple[TestClient, str],
+    seeded_tenant: tuple[TestClient, str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client, cycle_id = seeded_tenant
+    client, campaign_id, cycle_id = seeded_tenant
     # Force the size threshold below dashboard.json's actual size.
     monkeypatch.setattr("promptpotter.presentation.api.routers.campaigns._MAX_PREVIEW_BYTES", 1)
     resp = client.get(
-        f"/api/v1/campaigns/{cycle_id}/file",
+        f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/file",
         params={"scope": "cycle", "path": "dashboard.json"},
     )
     assert resp.status_code == 200

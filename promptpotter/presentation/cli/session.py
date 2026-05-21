@@ -27,6 +27,7 @@ class SessionCtx:
     state: dict
     backend_id: str
     session_id: str
+    campaign_id: str
     cycle_id: str
 
     @property
@@ -39,9 +40,30 @@ class SessionCtx:
 
     @property
     def campaign_config(self) -> CampaignConfig:
-        from promptpotter.application.config import load_campaign_config
+        """Campaign config for the run.
 
-        return load_campaign_config(self.state["campaign_config"])
+        Sourced from the live ``datasets/{name}/campaign.json`` (so config
+        edits are picked up + drift-detected), with the campaign's own
+        frozen ``campaign.json::config`` snapshot as the fallback. The
+        session-state copy is never consulted — it can carry fields from a
+        since-renamed config schema.
+        """
+        from promptpotter.application.config import (
+            load_campaign_config as validate_campaign_config,
+        )
+        from promptpotter.infrastructure.store.paths import DEFAULT_DATASETS_ROOT
+
+        dataset_name = self.init_params.get("dataset_name") or ""
+        raw: dict = {}
+        if dataset_name:
+            ds_path = DEFAULT_DATASETS_ROOT / dataset_name / "campaign.json"
+            if ds_path.is_file():
+                raw = load_campaign_config(str(ds_path))
+        if not raw and self.campaign_id:
+            campaign = self.store.campaigns.load_campaign(self.campaign_id)
+            if campaign is not None:
+                raw = campaign.config
+        return validate_campaign_config(raw)
 
     @property
     def task_context(self) -> dict | None:
@@ -71,7 +93,7 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
             "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint()
         )
     store = build_stores(tenant_id=getattr(args, "tenant", "default"))
-    _tid, pointer_sid, pointer_cid = read_active_pointer()
+    _tid, pointer_sid, pointer_cid, pointer_cyid = read_active_pointer()
     session_id = getattr(args, "session", None) or pointer_sid
     if not session_id:
         raise SystemExit("ERROR: No active session_id in pointer.")
@@ -80,9 +102,10 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
     if not state:
         raise SystemExit(f"ERROR: Session '{session_id}' not found.")
 
-    cycle_id = getattr(args, "cycle", None) or pointer_cid or ""
+    campaign_id = pointer_cid or ""
+    cycle_id = getattr(args, "cycle", None) or pointer_cyid or ""
     backend_id = state.get("init_params", {}).get("backend_id", "") or ""
-    return SessionCtx(store, state, backend_id, session_id, cycle_id)
+    return SessionCtx(store, state, backend_id, session_id, campaign_id, cycle_id)
 
 
 def load_campaign_config(config_path: str | None) -> dict:

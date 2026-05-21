@@ -5,10 +5,10 @@ is the operator-facing surface.
 
 Two write verbs:
 
-* ``new [DATASET]`` mints a fresh root campaign. Always. If the content hash
-  collides with an existing root, a ``_r2`` / ``_r3`` discriminator suffix
-  is appended so the new run lands in its own directory tree with its own
-  dashboard. The prior campaign is preserved untouched.
+* ``new [DATASET]`` mints a fresh campaign — ``campaign_id`` is
+  ``{dataset}__{YYYYMMDD-HHMMSS}``, collision-free by construction, so
+  every invocation lands in its own ``campaigns/{campaign_id}/`` directory
+  with its own dashboard.
 * ``resume`` continues the active campaign (rewinds with ``--from``, forks
   on divergence with ``--fork-on-divergence``, etc.).
 """
@@ -441,17 +441,17 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m promptpotter",
         description="PromptPotter optimization CLI. Bare invocation runs "
         "`resume` (continue the active session). `new [DATASET]` mints a "
-        "fresh root campaign. Reads happen by opening the artifact tree "
-        "(sessions/{id}/, campaigns/{cycle_id}/) directly.",
+        "fresh campaign. Reads happen by opening the artifact tree "
+        "(sessions/{id}/, campaigns/{campaign_id}/) directly.",
     )
     _add_global_args(parser)
     sub = parser.add_subparsers(dest="command", required=False)
 
     p_new = sub.add_parser(
         "new",
-        help="Mint a fresh root campaign on the named dataset. Always creates a "
-        "new root cycle dir — if the content hash collides with an existing "
-        "root, a `_r2` / `_r3` discriminator is appended.",
+        help="Mint a fresh campaign on the named dataset. Every invocation "
+        "mints a brand-new campaign (campaign_id is timestamp-derived — "
+        "collision-free, no discriminator).",
     )
     _add_new_args(p_new)
 

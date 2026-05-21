@@ -2,7 +2,7 @@
 
 The per-command bodies live in ``commands/``:
 
-* ``commands/new.py`` — ``cmd_new`` (mint a fresh root campaign)
+* ``commands/new.py`` — ``cmd_new`` (mint a fresh campaign)
 * ``commands/resume.py`` — ``cmd_resume`` (continue active campaign)
 * ``commands/sweep.py`` — ``cmd_sweep`` (sweep toolkit verbs)
 * ``commands/compare.py`` — ``cmd_compare`` (PoBB cross-cycle comparison)
@@ -11,12 +11,12 @@ The per-command bodies live in ``commands/``:
   ``init_services_cli``, ``log_startup_summary``, the shared
   cycle-preparation helpers, and the divergence hint text.
 
-Two write verbs: ``new [DATASET]`` mints a fresh root campaign (always);
+Two write verbs: ``new [DATASET]`` mints a fresh campaign (always);
 ``resume`` continues the active session. Reads happen by opening the
-on-disk artifact tree (``sessions/{id}/``, ``campaigns/{cycle_id}/``) —
+on-disk artifact tree (``sessions/{id}/``, ``campaigns/{campaign_id}/``) —
 ``dashboard.json`` for live state, ``log.md`` for the digest,
-``index.json`` for the final summary including ``stop_reason``. Stop
-with Ctrl+C — there is no mid-run pause/resume.
+``cycles/{cycle_id}/index.json`` for the final summary including
+``stop_reason``. Stop with Ctrl+C — there is no mid-run pause/resume.
 
 ``session.py`` carries ``SessionCtx``/``load_session``/``load_campaign_config``.
 """

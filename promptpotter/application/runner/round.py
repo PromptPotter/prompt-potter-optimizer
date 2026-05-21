@@ -102,7 +102,7 @@ def persist_round(
     if session.state.cycle_id:
         with graceful("Round checkpoint failed"):
             session.store.campaigns.save_round_file(
-                session.backend_id,
+                session.campaign_id,
                 session.state.cycle_id,
                 trial_dict,
             )

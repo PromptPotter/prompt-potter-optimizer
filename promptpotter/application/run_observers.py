@@ -346,7 +346,9 @@ def build_run_observers(
     if session.state.cycle_id is None or session.store is None:
         raise RuntimeError("build_run_observers: session must have cycle_id and store")
 
-    cycle_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
+    cycle_dir = CycleDir(
+        session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
+    )
     audit = AuditTrailView.from_cycle_dir(cycle_dir)
     audit.rehydrate_sticky()
     session.state.audit_projection = audit
@@ -369,7 +371,9 @@ def build_run_observers(
             new_cycle_id=session.state.cycle_id,
             from_round=resumed_from_round or 0,
         )
-        parent_dir = CycleDir(session.store.campaigns.campaign_dir(fork.parent_cycle_id))
+        parent_dir = CycleDir(
+            session.store.campaigns.cycle_dir(session.campaign_id, fork.parent_cycle_id)
+        )
         fresh_parent = CycleEventLog.open(parent_dir)
         ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
 

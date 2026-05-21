@@ -51,6 +51,7 @@ def build_campaign_emitter(
         session.state.cycle_id,
         project_root=session.project_root,
         session_id=session.session_id,
+        campaign_id=session.campaign_id,
         l1_patience=opt.l1_patience,
         n_variants=opt.n_variants,
         sp_budget_ttest=campaign_config.sp_budget_ttest,

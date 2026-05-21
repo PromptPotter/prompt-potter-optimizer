@@ -668,12 +668,19 @@ def load_potter_traces(
         List of rows conforming to the dataset-row contract.  Empty list if
         no transitions are recoverable.
     """
-    campaigns = store.campaigns.load_many(backend_id, cycle_ids)
     rows: list[dict] = []
-    for campaign in campaigns:
-        cycle_id = campaign["campaign_id"]
+    for entry in store.campaigns.enumerate_cycles():
+        cycle_id = entry["cycle_id"]
+        if cycle_ids is not None and cycle_id not in cycle_ids:
+            continue
+        if backend_id and entry.get("backend_id") and entry["backend_id"] != backend_id:
+            continue
+        campaign_id = entry["campaign_id"]
+        index = store.campaigns.load(campaign_id, cycle_id)
+        if index is None:
+            continue
         round_summaries = sorted(
-            campaign.get("rounds", []),
+            index.get("rounds", []),
             key=lambda t: int(t.get("round", 0)),
         )
         if len(round_summaries) < 2:
@@ -682,7 +689,7 @@ def load_potter_traces(
         rounds: list[dict[str, Any]] = []
         for summary in round_summaries:
             detail = store.campaigns.load_round_file(
-                backend_id,
+                campaign_id,
                 cycle_id,
                 int(summary.get("round", 0)),
             )

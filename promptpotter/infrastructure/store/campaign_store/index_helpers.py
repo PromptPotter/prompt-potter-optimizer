@@ -2,7 +2,10 @@
 
 Used by :class:`CampaignStore` when projecting a round_data detail into
 the index's ``rounds[]`` shape and when minting a clean-slate sibling
-fork that inherits parent metadata.
+cycle that inherits parent metadata.
+
+The cycle ``index.json`` carries no ``config`` snapshot — the frozen
+``CampaignConfig`` lives once in the campaign manifest (``campaign.json``).
 """
 
 from __future__ import annotations
@@ -28,29 +31,28 @@ def round_summary(round_data: dict[str, Any]) -> dict[str, Any]:
 
 def fresh_sibling_index_blob(
     parent_index: dict[str, Any],
-    new_cycle_id: str,
     parent_cycle_id: str,
-    fork_kind: str,
+    sibling_kind: str,
     forked_at: str,
     **extras: Any,
 ) -> dict[str, Any]:
-    """Clean-slate sibling index inheriting type/config/backend from the parent.
+    """Clean-slate sibling index inheriting type/backend from the parent.
 
-    No ``campaign_id`` field — directory name (``new_cycle_id``) is the
-    authoritative identity. See ``CampaignStore.load`` for the read-side
-    injection.
+    ``sibling_kind`` is one of ``fork`` / ``diag`` / ``sweep`` — recorded
+    in ``index.json`` so directory layout stays flat. No ``campaign_id``
+    field (the campaign owns identity); no ``config`` (the manifest owns
+    the snapshot).
     """
-    del new_cycle_id  # accepted for symmetry; identity lives in the dir name
     return {
         "type": parent_index.get("type", "optimization_loop"),
-        "config": parent_index.get("config", {}),
         "connector_type": parent_index.get("connector_type", ""),
         "backend_id": parent_index.get("backend_id", ""),
+        "header": parent_index.get("header", {}),
         "parent_cycle_id": parent_cycle_id,
         "parent_session_id": parent_index.get("parent_session_id", ""),
+        "sibling_kind": sibling_kind,
         "forked_from_round": 0,
         "forked_at": forked_at,
-        "fork_kind": fork_kind,
         "rounds": [],
         "n_rounds": 0,
         "best_accuracy": 0.0,

@@ -105,6 +105,9 @@ class Session:
 
     # -- Identity --------------------------------------------------------
     session_id: str = ""
+    # The campaign this session is working — stable across forks within
+    # the campaign (only ``state.cycle_id`` flips when a fork is minted).
+    campaign_id: str = ""
 
     # -- Per-cycle bundles ----------------------------------------------
     state: CycleState = field(default_factory=CycleState)
@@ -168,12 +171,47 @@ def auto_mint_session(
     experiment_id: str | None = None,
     pipeline_params: dict | None = None,
     active_steps: list[str] | None = None,
-    create_campaign_dir: bool = True,
-) -> tuple[str, str]:
-    """Mint session_id, write session state, claim active pointer; mutates session in place."""
+    label: str = "",
+) -> tuple[str, str, str]:
+    """Find-or-create the campaign, mint a session into it, claim the pointer.
+
+    The ``campaign_id`` is *derived* from the origin declaration's content
+    hash — carried in *cycle_id* (``cycle_{hash}``) — so a re-run of ``new``
+    on an unchanged declaration resolves to the existing campaign:
+
+    * **campaign exists** — mint a fresh session: a new ``session_id`` and a
+      session-root cycle ``cycle_{hash}_s{N}`` (N = next free index).
+      ``campaign.json``'s frozen snapshot is not rewritten; its status flips
+      back to ``active``.
+    * **new campaign** — write ``campaign.json`` (the declaration snapshot)
+      and create the first session at the bare ``cycle_{hash}``.
+
+    Mutates *session* in place (``session_id``, ``campaign_id``,
+    ``state.cycle_id``) and claims the 4-key active pointer. Returns
+    ``(session_id, campaign_id, session_root_cycle_id)`` — the cycle id is
+    the ``_s{N}``-suffixed form when the campaign already had sessions.
+    """
+    from datetime import UTC, datetime
+
+    from promptpotter.application.runner.identity import campaign_id_for
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.infrastructure.store import session_cycle_id
+
     cycle_hash = cycle_id.removeprefix("cycle_")
     validate_path_component(cycle_hash)
     session_id = mint_session_id()
+    now = datetime.now(UTC)
+    dataset_name = session.dataset_name or campaign_config.dataset_name or ""
+    campaign_id = campaign_id_for(dataset_name, cycle_hash)
+
+    campaigns = session.store.campaigns
+    existing_campaign = campaigns.load_campaign(campaign_id)
+    if existing_campaign is None:
+        next_index = 1
+        root_cycle = cycle_id
+    else:
+        next_index = campaigns.next_session_index(campaign_id)
+        root_cycle = session_cycle_id(cycle_id, next_index)
 
     state = new_session_state(
         init_params={
@@ -193,22 +231,48 @@ def auto_mint_session(
     sessions = session.store.sessions
     sessions.create(session_id, state)
 
-    if create_campaign_dir:
-        session.store.campaigns.create(
-            session.backend_id,
-            cycle_id,
-            {
-                "parent_session_id": session_id,
-                "header": _build_index_header(session, dataset_size),
-            },
+    if existing_campaign is None:
+        campaigns.create_campaign(
+            Campaign(
+                campaign_id=campaign_id,
+                dataset_name=dataset_name,
+                label=label,
+                created_at=now.isoformat(),
+                status="active",
+                root_cycle_id=root_cycle,
+                root_content_hash=cycle_hash,
+                backend_id=session.backend_id,
+                config=campaign_config.model_dump(mode="json"),
+            )
         )
+    else:
+        # A fresh `new` on this declaration reactivates the campaign — its
+        # status reflects its most-recent session.
+        campaigns.update_campaign(campaign_id, {"status": "active", "finished_at": ""})
+
+    campaigns.create(
+        campaign_id,
+        root_cycle,
+        {
+            "parent_session_id": session_id,
+            "header": _build_index_header(session, dataset_size),
+        },
+    )
 
     session.session_id = session_id
-    session.state.cycle_id = cycle_id
+    session.campaign_id = campaign_id
+    session.state.cycle_id = root_cycle
 
-    save_active_pointer(session.store.tenant_id, session_id, cycle_id)
-    logger.info("Auto-minted session %s + cycle %s", session_id, cycle_id)
-    return session_id, cycle_id
+    save_active_pointer(session.store.tenant_id, session_id, campaign_id, root_cycle)
+    logger.info(
+        "Auto-minted session %s (#%d) in campaign %s — cycle %s%s",
+        session_id,
+        next_index,
+        campaign_id,
+        root_cycle,
+        "" if existing_campaign is None else " (existing campaign)",
+    )
+    return session_id, campaign_id, root_cycle
 
 
 def _open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
@@ -218,7 +282,7 @@ def _open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
 
     if session.store is None:
         return None
-    cycle_dir = CycleDir(session.store.campaigns.campaign_dir(cycle_id))
+    cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.campaign_id, cycle_id))
     return CycleEventLog.open(cycle_dir)
 
 

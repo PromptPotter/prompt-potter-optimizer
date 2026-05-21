@@ -1,15 +1,16 @@
 """``LiveDashboardView`` — operator-facing ``dashboard.json`` writer.
 
-Family-root-bound: one ``dashboard.json`` per cycle family, shared
-across all forks. The active cycle id is **NOT** stored in this file —
-it lives in ``active_session.json`` alone (one writer, one source).
-Readers that need to know "what cycle does this data describe?" read
-the active pointer; this file describes whatever the active cycle's
-loop has produced so far.
+Session-family-bound: one ``dashboard.json`` per session, written into
+the session's root cycle dir and shared by that session's forks (a fork's
+family root is the session root). A campaign holds N independent live
+streams — one per session — never one shared stream. The active cycle id
+is **NOT** stored in this file — it lives in ``active_session.json`` alone
+(one writer, one source). Readers that need to know "what cycle does this
+data describe?" read the active pointer; this file describes whatever the
+active cycle's loop has produced so far.
 
-The constructor takes :data:`RootCycleDir` so a per-cycle audit block
-cannot accidentally land here. A runtime assertion in ``__init__``
-rejects any path that contains a ``forks/`` segment.
+The constructor takes :data:`SessionFamilyDir` so a per-cycle audit block
+cannot accidentally land here.
 
 Single ingress: the projection consumes only via ``on_record`` from the
 per-cycle ``CycleEventLog``. The runner emits typed ``PhaseRecord`` /
@@ -27,7 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.cycle_paths import RootCycleDir
+from promptpotter.domain.cycle_paths import SessionFamilyDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import (
@@ -50,8 +51,8 @@ from promptpotter.infrastructure.projections.live_state import (
     top_n_p_best,
 )
 from promptpotter.infrastructure.store import (
-    campaign_dir_for,
-    root_dir_for,
+    cycle_dir_for,
+    root_cycle_id,
     session_dir_for,
 )
 from promptpotter.shared.errors import is_degraded
@@ -140,37 +141,26 @@ class LiveDashboardView(DerivedView):
 
     def __init__(
         self,
-        root_dir: RootCycleDir,
+        family_dir: SessionFamilyDir,
         session_dir: Path,
         *,
         l1_patience: int,
         n_variants: int,
         sp_budget_ttest: int,
         resume_from: dict[str, Any] | None = None,
-        cycle_id: str | None = None,
         recorder: AuditTrailView | None = None,
     ) -> None:
-        # Telemetry binds to the family root (the cycle with no parent_cycle_id).
-        # Forks share one continuous dashboard.json; per-fork audit
+        # Telemetry binds to the session-family root cycle dir — one
+        # dashboard.json per session, shared by that session's forks. A
+        # campaign holds N such streams (one per session). Per-cycle audit
         # (index.json, log.md, rounds/, .runtime/) stays in each cycle's
-        # own dir, written through dynamic ``session.state.cycle_id`` paths.
-        #
-        # ``cycle_id`` is accepted for symmetry with the prior contract but
-        # is no longer persisted into the file. Active-cycle identity comes
+        # own dir under ``cycles/``, written through dynamic
+        # ``session.state.cycle_id`` paths. Active-cycle identity comes
         # from ``active_session.json`` (one writer, one source); the file's
         # data describes whatever the active cycle's loop has produced.
-        # Branch-tree rendering uses ``walk_cycle_lineage`` at API read
-        # time, not a stale field embedded here.
-        del cycle_id  # accepted for back-compat call sites; identity lives elsewhere
-        root_path = Path(root_dir)
-        sibling_kinds = {"forks", "diag", "sweeps"}
-        if sibling_kinds & set(root_path.parts):
-            raise ValueError(
-                f"LiveDashboardView root_dir must be a family root, not a sibling dir; "
-                f"got {root_path}"
-            )
-        self.root_dir = root_path
-        self.state_path = root_path / "dashboard.json"
+        family_path = Path(family_dir)
+        self.family_dir = family_path
+        self.state_path = family_path / "dashboard.json"
         self.session_dir = session_dir
         self._recorder = recorder
         self.patience_max = l1_patience
@@ -260,6 +250,7 @@ class LiveDashboardView(DerivedView):
         *,
         project_root: str,
         session_id: str,
+        campaign_id: str,
         l1_patience: int,
         n_variants: int,
         sp_budget_ttest: int,
@@ -271,18 +262,20 @@ class LiveDashboardView(DerivedView):
         On ``--from N`` rewind, the ``best`` counter past the surviving rounds
         is clamped to avoid a phantom value.
 
-        Telemetry binds to the family root (derived from ``cycle_id`` —
-        the prefix before any ``_fork_`` segment). Forks of the same family
-        share that root's dashboard.json."""
-        if not (project_root and session_id and cycle_id):
+        Telemetry binds to the session-family root cycle dir — the session
+        root + its forks share one ``dashboard.json``."""
+        if not (project_root and session_id and campaign_id and cycle_id):
             return None
 
         tenant_root = Path(project_root)
-        root_dir = RootCycleDir(root_dir_for(tenant_root, cycle_id))
+        # The session-family root: a fork's family root is its session
+        # root, so a fork and its session share one dashboard.json.
+        session_root = root_cycle_id(cycle_id)
+        family_dir = SessionFamilyDir(cycle_dir_for(tenant_root, campaign_id, session_root))
         session_dir = session_dir_for(tenant_root, session_id)
 
         resume_from: dict[str, Any] | None = None
-        prior_state = Path(root_dir) / "dashboard.json"
+        prior_state = Path(family_dir) / "dashboard.json"
         if prior_state.exists():
             try:
                 resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
@@ -291,19 +284,16 @@ class LiveDashboardView(DerivedView):
                 resume_from = None
 
         # ``best`` is the rolling-max composite for the active cycle. The prior
-        # ``dashboard.json`` may hold a number from an earlier campaign run
-        # against the same family root (cycle_id is content-hashed, so a
-        # re-init of the same campaign lands here). Don't surface that number
-        # in the UI until the active cycle has produced an on-disk round to
-        # back it; otherwise every percentage chip shows a value the loop will
-        # never confirm. Self-heal the stale ``round`` pointer in the same
-        # pass — both signals depend on ``disk_round``.
+        # ``dashboard.json`` may hold a number from an earlier run of the same
+        # session (resume re-instantiates this projection against the same
+        # session-family dir). Don't surface that number in the UI until the
+        # active cycle has produced an on-disk round to back it; otherwise
+        # every percentage chip shows a value the loop will never confirm.
+        # Self-heal the stale ``round`` pointer in the same pass — both
+        # signals depend on ``disk_round``.
         if resume_from is not None:
-            # ``campaign_dir_for`` resolves to the active fork's own dir
-            # (forks route under ``forks/{cycle_id}``); ``root_dir_for``
-            # would point at the family root, whose ``rounds/`` is the
-            # parent's checkpoints, not this fork's.
-            active_cycle_dir = campaign_dir_for(tenant_root, cycle_id)
+            # The active cycle's own ``rounds/`` — under ``cycles/{cycle_id}``.
+            active_cycle_dir = cycle_dir_for(tenant_root, campaign_id, cycle_id)
             disk_round = _max_round_on_disk(active_cycle_dir / "rounds")
             if disk_round > int(resume_from.get("round") or 0):
                 resume_from["round"] = disk_round
@@ -313,13 +303,12 @@ class LiveDashboardView(DerivedView):
                 resume_from["best"] = 0.0
 
         return cls(
-            root_dir,
+            family_dir,
             session_dir,
             l1_patience=l1_patience,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
             resume_from=resume_from,
-            cycle_id=cycle_id,
             recorder=recorder,
         )
 

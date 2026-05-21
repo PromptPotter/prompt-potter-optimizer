@@ -45,7 +45,7 @@ async def run_sweep_generation_only(
     if session.state.cycle_id:
         with graceful("Sweep generation-only round_data write failed"):
             session.store.campaigns.save_round_file(
-                session.backend_id,
+                session.campaign_id,
                 session.state.cycle_id,
                 {
                     "round_id": f"round_{round_num}",

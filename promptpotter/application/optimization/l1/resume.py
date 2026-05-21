@@ -67,7 +67,7 @@ async def generate_or_load_candidates(
 
     if session.state.cycle_id:
         persisted_raw = session.store.campaigns.load_round_candidates(
-            session.backend_id,
+            session.campaign_id,
             session.state.cycle_id,
             round_num,
         )
@@ -133,7 +133,7 @@ async def generate_or_load_candidates(
 
     if session.state.cycle_id:
         session.store.campaigns.save_round_candidates(
-            session.backend_id,
+            session.campaign_id,
             session.state.cycle_id,
             round_num,
             [cp.model_dump() for cp in candidates],

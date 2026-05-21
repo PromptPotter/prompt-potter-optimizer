@@ -46,42 +46,37 @@ def _rf_dedup_key(rf_dict: dict) -> tuple:
 
 def gather_sibling_runtime_failures(
     stores: Stores,
+    campaign_id: str,
     root_cycle_id: str,
     backend_id: str,
     exclude_cycle_id: str | None = None,
 ) -> list[RuntimeFailure]:
-    """Aggregate runtime_failures from finished sibling forks of `root_cycle_id`.
+    """Aggregate runtime_failures from finished sibling cycles of `root_cycle_id`.
 
-    Walks `campaigns/{root}/forks/` (and `diag/`, `sweeps/`); for each
-    sibling with a finished `index.json::stop_reason`, reads the last
-    round_NNNN.json's terminal `opt_search_point.wounds.runtime_failures`.
+    Walks the campaign's flat `cycles/` dir; for each cycle that shares the
+    same family root and has a finished `index.json::stop_reason`, reads the
+    last round_NNNN.json's terminal `opt_search_point.wounds.runtime_failures`.
     Returns a deduped list of `RuntimeFailure` objects.
 
     `exclude_cycle_id` skips one specific sibling (used at fork-mint time
     to avoid inheriting from oneself when the new fork is already on disk).
 
-    Best-effort: malformed JSON, missing files, or sibling cycles from
-    pre-WoundChannels refactors are skipped silently. Logs at DEBUG.
+    Best-effort: malformed JSON or missing files are skipped silently.
     """
+    from promptpotter.infrastructure.store import root_cycle_id as _root_of
+
     out: list[RuntimeFailure] = []
     seen_keys: set[tuple] = set()
 
-    try:
-        root_dir = stores.campaigns.campaign_dir(root_cycle_id)
-    except Exception:
-        return out
-    if not root_dir.exists():
+    cycles_dir = stores.campaigns.campaign_root_dir(campaign_id) / "cycles"
+    if not cycles_dir.exists():
         return out
 
-    sibling_dirs: list[Any] = []
-    for sub in ("forks", "diag", "sweeps"):
-        parent = root_dir / sub
-        if parent.is_dir():
-            sibling_dirs.extend(sorted(parent.iterdir()))
+    sibling_dirs: list[Any] = [
+        d for d in sorted(cycles_dir.iterdir()) if d.is_dir() and _root_of(d.name) == root_cycle_id
+    ]
 
     for sibling in sibling_dirs:
-        if not sibling.is_dir():
-            continue
         if exclude_cycle_id and sibling.name == exclude_cycle_id:
             continue
         idx_path = sibling / "index.json"

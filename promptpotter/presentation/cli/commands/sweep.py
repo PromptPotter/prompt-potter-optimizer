@@ -100,6 +100,7 @@ async def _setup_sweep_cycle(
         args, ctx, session, campaign_config, train_data, pivot_prompt=False
     )
     session.session_id = ctx.session_id
+    session.campaign_id = ctx.campaign_id
     session.state.cycle_id = ctx.cycle_id
 
     log_startup_summary(
@@ -316,6 +317,7 @@ async def _fork_and_bind(
     )
     new_cycle_id = _mint_fork(
         store.campaigns,
+        parent_ctx.campaign_id,
         tenant_id,
         parent_ctx.session_id,
         parent_ctx.cycle_id,
@@ -331,6 +333,7 @@ async def _fork_and_bind(
         on_status=lambda msg: logger.info(msg) if get_verbose() else None,
     )
     fork_session.session_id = fork_ctx.session_id
+    fork_session.campaign_id = fork_ctx.campaign_id
     fork_session.state.cycle_id = fork_ctx.cycle_id
     configure_and_apply_pipeline(
         fork_session,
@@ -543,11 +546,17 @@ async def _run_panel_verb(
 
     if multi:
         # _mint_fork retargeted the active pointer per iteration; put it
-        # back so subsequent operator commands hit the parent cycle.
-        # dashboard.json no longer carries cycle_id (active identity
-        # lives only in active_session.json), so the pointer restore
-        # is sufficient — no sidecar dashboard rewrite needed.
-        save_active_pointer(getattr(args, "tenant", "default"), ctx.session_id, parent_cycle_id)
+        # back so subsequent operator commands hit the parent cycle. The
+        # sweep forks stay in the parent's campaign, so the restore keeps
+        # the same campaign_id. dashboard.json no longer carries cycle_id
+        # (active identity lives only in active_session.json), so the
+        # pointer restore is sufficient — no sidecar dashboard rewrite.
+        save_active_pointer(
+            getattr(args, "tenant", "default"),
+            ctx.session_id,
+            ctx.campaign_id,
+            parent_cycle_id,
+        )
 
     human_lines = [f"Sweep {verb}: {len(results)} variant(s); sweep_id={sweep_id}"]
     for r in results:

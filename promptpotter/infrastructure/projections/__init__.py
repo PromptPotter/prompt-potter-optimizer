@@ -3,15 +3,15 @@
 Each module here owns one view over the ledger's record stream:
 
 * :mod:`live_dashboard` — the operator-facing ``dashboard.json`` writer,
-  family-root-bound (one file per cycle family, shared across forks).
-  Constructor takes ``RootCycleDir`` so an audit block cannot
-  accidentally land here.
+  session-family-bound (one file per session, written into the session
+  root cycle dir and shared by that session's forks). Constructor takes
+  ``SessionFamilyDir`` so an audit block cannot accidentally land here.
 * :mod:`audit_trail` — the per-round node I/O recorder that flushes to
-  ``campaigns/{cycle_id}/.runtime/cache/rounds/round_NNNN.json``. Per-cycle
-  scope; constructor takes ``CycleDir`` so a fork's recorder cannot
-  accidentally write to the parent's tree.
-* :mod:`pobb_stream` — appends per-sample P(best) updates to
-  ``campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl``.
+  ``campaigns/{campaign_id}/cycles/{cycle_id}/.runtime/cache/rounds/round_NNNN.json``.
+  Per-cycle scope; constructor takes ``CycleDir`` so a fork's recorder
+  cannot accidentally write to a sibling's tree.
+* :mod:`pobb_stream` — appends per-sample P(best) updates to the cycle's
+  ``.runtime/streams/round_NNNN_p_best.jsonl``.
 """
 
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailView

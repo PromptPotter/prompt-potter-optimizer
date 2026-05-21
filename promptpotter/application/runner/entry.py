@@ -256,6 +256,7 @@ async def run_optimization(
     if forked_in_this_run and cycle_result.n_rounds == 0:
         cleanup_stub_fork_if_empty(
             campaign_store=session.store.campaigns,
+            campaign_id=session.campaign_id,
             tenant_id=session.store.tenant_id,
             session_id=session.session_id or "",
             cycle_id=session.state.cycle_id,
@@ -306,10 +307,11 @@ def _finalize_run(
         # on session.state.crash_traceback before returning (crash and
         # render-error both do), so the disk copy matches what stderr saw.
         crash_traceback = session.state.crash_traceback if has_traceback else None
+        cycle_status = status_map.get(stop_reason, "completed")
         session.store.campaigns.mark_finished(
-            session.backend_id,
+            session.campaign_id,
             session.state.cycle_id,
-            status=status_map.get(stop_reason, "completed"),
+            status=cycle_status,
             stop_reason=stop_reason,
             best_accuracy=cycle_result.best_accuracy,
             best_round=cycle_result.best_round,
@@ -318,6 +320,12 @@ def _finalize_run(
             interrupted_round=interrupted_round,
             crash_traceback=crash_traceback,
         )
+        if session.campaign_id:
+            session.store.campaigns.mark_campaign_finished(
+                session.campaign_id,
+                status=cycle_status,
+                finished_at=cycle_result.finished_at,
+            )
     # Drain projections AFTER mark_stopped so dashboard.json's stopped-state
     # is in place before the audit cache settles. ``_cycle_was_interrupted``
     # threads ``"interrupted": true`` into any partial round_NNNN.json the

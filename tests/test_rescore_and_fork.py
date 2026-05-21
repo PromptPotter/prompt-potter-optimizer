@@ -23,6 +23,9 @@ from promptpotter.domain.run_records import (
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import build_stores, walk_cycle_lineage
 
+# Every cycle lives inside a campaign; the tests pin one.
+_CAMPAIGN = "testds__20260101-000000"
+
 
 def test_rescore_results_accumulates_and_projects_active() -> None:
     """Two scorers accumulate side-by-side; top-level score/hit follow the latest call."""
@@ -103,22 +106,24 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
 
 def _seed_cycle(projects_root: Path, tenant: str, cycle_id: str, n_rounds: int) -> list[dict]:
     """Lay down a minimal cycle dir on disk; return the round_data-index list."""
-    base = projects_root / tenant / "campaigns" / cycle_id
+    base = projects_root / tenant / "campaigns" / _CAMPAIGN / "cycles" / cycle_id
     (base / "rounds").mkdir(parents=True)
-    (base / "candidates").mkdir(parents=True)
+    (base / ".runtime" / "cache" / "candidates").mkdir(parents=True)
     rounds_index = []
     for r in range(n_rounds):
         t = {"round_id": f"round_{r}", "round": r, "accuracy": 0.5 + 0.1 * r, "label": f"r{r}"}
         (base / "rounds" / f"round_{r:04d}.json").write_text(json.dumps(t), encoding="utf-8")
-        (base / "candidates" / f"round_{r:04d}.json").write_text("[]", encoding="utf-8")
+        (base / ".runtime" / "cache" / "candidates" / f"round_{r:04d}.json").write_text(
+            "[]", encoding="utf-8"
+        )
         rounds_index.append(t)
     (base / "index.json").write_text(
         json.dumps(
             {
-                "campaign_id": cycle_id,
                 "rounds": rounds_index,
                 "n_rounds": n_rounds,
                 "best_round_id": f"round_{n_rounds - 1}",
+                "sibling_kind": "root",
                 "status": "in_progress",
             }
         ),
@@ -162,9 +167,10 @@ def test_mint_fork_scoring_divergence_inherits_and_appends_fork_cut(
     ptr = _patch_pointer(monkeypatch, tmp_path)
 
     stores = build_stores(tmp_path, tenant_id=tenant)
-    parent_dir = stores.campaigns.campaign_dir(parent)
+    parent_dir = stores.campaigns.cycle_dir(_CAMPAIGN, parent)
     new_cycle = _mint_fork(
         stores.campaigns,
+        _CAMPAIGN,
         tenant,
         "s_test",
         parent,
@@ -173,17 +179,19 @@ def test_mint_fork_scoring_divergence_inherits_and_appends_fork_cut(
         surviving_rounds=rounds[:2],
     )
 
-    new_dir = stores.campaigns.campaign_dir(new_cycle)
-    assert new_dir.parent.name == "forks"
+    new_dir = stores.campaigns.cycle_dir(_CAMPAIGN, new_cycle)
+    assert new_dir.parent.name == "cycles"
     assert (new_dir / "rounds" / "round_0001.json").exists()
     assert not (new_dir / "rounds" / "round_0002.json").exists()
 
     index = json.loads((new_dir / "index.json").read_text(encoding="utf-8"))
     assert index["parent_cycle_id"] == parent
     assert index["forked_from_round"] == 2
+    assert index["sibling_kind"] == "fork"
     assert index["fork"] == {"trigger": "scoring_divergence"}
 
     assert json.loads(ptr.read_text(encoding="utf-8"))["cycle_id"] == new_cycle
+    assert json.loads(ptr.read_text(encoding="utf-8"))["campaign_id"] == _CAMPAIGN
 
     cut = list(CycleEventLog.open(CycleDir(parent_dir)).iter())[-1]
     assert isinstance(cut, ResumeCheckpointRecord)
@@ -206,16 +214,17 @@ def test_mint_fork_operator_diag_counted_id_clean_slate(tmp_path: Path, monkeypa
     _patch_pointer(monkeypatch, tmp_path)
     stores = build_stores(tmp_path, tenant_id=tenant)
 
-    sib1 = _mint_fork(stores.campaigns, tenant, "s_test", parent, 0, _diag_payload())
-    sib2 = _mint_fork(stores.campaigns, tenant, "s_test", parent, 0, _diag_payload())
+    sib1 = _mint_fork(stores.campaigns, _CAMPAIGN, tenant, "s_test", parent, 0, _diag_payload())
+    sib2 = _mint_fork(stores.campaigns, _CAMPAIGN, tenant, "s_test", parent, 0, _diag_payload())
 
     assert sib1 == f"{parent}_diag_001"
     assert sib2 == f"{parent}_diag_002"
 
-    sib1_dir = stores.campaigns.campaign_dir(sib1)
-    assert sib1_dir.parent.name == "diag"
+    sib1_dir = stores.campaigns.cycle_dir(_CAMPAIGN, sib1)
+    assert sib1_dir.parent.name == "cycles"
     sib1_index = json.loads((sib1_dir / "index.json").read_text(encoding="utf-8"))
     assert sib1_index["rounds"] == []
+    assert sib1_index["sibling_kind"] == "diag"
     assert sib1_index["fork"] == {"trigger": "operator_diag"}
 
 
@@ -224,15 +233,13 @@ def test_mint_fork_operator_sweep_no_inherit_and_dedup_fields(tmp_path: Path, mo
     tenant = "default"
     parent = "cyclesweepparent"
     _seed_cycle(tmp_path, tenant, parent, n_rounds=1)
-    cands = tmp_path / tenant / "campaigns" / parent / ".runtime" / "cache" / "candidates"
-    cands.mkdir(parents=True)
-    (cands / "round_0000.json").write_text("[]", encoding="utf-8")
     _patch_pointer(monkeypatch, tmp_path)
     stores = build_stores(tmp_path, tenant_id=tenant)
-    parent_dir = stores.campaigns.campaign_dir(parent)
+    parent_dir = stores.campaigns.cycle_dir(_CAMPAIGN, parent)
 
     new_cycle = _mint_fork(
         stores.campaigns,
+        _CAMPAIGN,
         tenant,
         "s_test",
         parent,
@@ -242,12 +249,13 @@ def test_mint_fork_operator_sweep_no_inherit_and_dedup_fields(tmp_path: Path, mo
         sweep_source_file="01_persona.json",
     )
 
-    new_dir = stores.campaigns.campaign_dir(new_cycle)
-    assert new_dir.parent.parent.parent.name == "sweeps"
+    new_dir = stores.campaigns.cycle_dir(_CAMPAIGN, new_cycle)
+    assert new_dir.parent.name == "cycles"
     assert not (new_dir / ".runtime" / "cache" / "candidates" / "round_0000.json").exists()
 
     index = json.loads((new_dir / "index.json").read_text(encoding="utf-8"))
     assert index["sweep_batch_id"] == "b1abc"
+    assert index["sibling_kind"] == "sweep"
     assert index["fork"] == {"trigger": "operator_sweep"}
 
     # source_file + sweep_batch_id stay at data top level so
@@ -270,6 +278,7 @@ def test_walk_cycle_lineage_walks_parent_chain(tmp_path: Path, monkeypatch) -> N
 
     fork = _mint_fork(
         stores.campaigns,
+        _CAMPAIGN,
         tenant,
         "s_test",
         parent,
@@ -279,6 +288,7 @@ def test_walk_cycle_lineage_walks_parent_chain(tmp_path: Path, monkeypatch) -> N
     )
     sweep = _mint_fork(
         stores.campaigns,
+        _CAMPAIGN,
         tenant,
         "s_test",
         fork,
@@ -289,9 +299,9 @@ def test_walk_cycle_lineage_walks_parent_chain(tmp_path: Path, monkeypatch) -> N
     )
 
     tenant_root = tmp_path / tenant
-    assert walk_cycle_lineage(tenant_root, parent) == [parent]
-    assert walk_cycle_lineage(tenant_root, fork) == [parent, fork]
-    assert walk_cycle_lineage(tenant_root, sweep) == [parent, fork, sweep]
+    assert walk_cycle_lineage(tenant_root, _CAMPAIGN, parent) == [parent]
+    assert walk_cycle_lineage(tenant_root, _CAMPAIGN, fork) == [parent, fork]
+    assert walk_cycle_lineage(tenant_root, _CAMPAIGN, sweep) == [parent, fork, sweep]
 
 
 def _prior(query: str, predicted: str = "p", gt: str = "g") -> dict:
@@ -372,25 +382,15 @@ def _make_round_data(round_num: int, accuracy: float) -> dict:
     }
 
 
-def _seed_rewind_cycle(store, backend_id: str, cycle_id: str, rounds: int) -> None:
-    store.create(
-        backend_id,
-        cycle_id,
-        {"type": "optimization_loop", "config": {}, "origin_accuracy": 0.0},
-    )
+def _seed_rewind_cycle(store, campaign_id: str, cycle_id: str, rounds: int) -> None:
+    store.create(campaign_id, cycle_id, {"type": "optimization_loop", "origin_accuracy": 0.0})
     for r in range(rounds):
-        store.save_round_file(backend_id, cycle_id, _make_round_data(r, 0.1 * (r + 1)))
+        store.save_round_file(campaign_id, cycle_id, _make_round_data(r, 0.1 * (r + 1)))
         # Simulate round-level candidate checkpoints for the same round.
-        store.save_round_candidates(
-            backend_id,
-            cycle_id,
-            r,
-            [{"round": r, "id": f"cand_{r}"}],
-        )
+        store.save_round_candidates(campaign_id, cycle_id, r, [{"round": r, "id": f"cand_{r}"}])
     # Mint a minimal ledger so the ledger-aware ``rewind_to_round`` admissibility
-    # check sees each seeded round as completed. Origin (round 0) closes via
-    # ``(phase=origin, event=exit)``; normal rounds via ``(phase=round, event=complete)``.
-    cycle_dir = store.campaign_dir(cycle_id)
+    # check sees each seeded round as completed.
+    cycle_dir = store.cycle_dir(campaign_id, cycle_id)
     runtime_dir = cycle_dir / ".runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     ledger_path = runtime_dir / "ledger.jsonl"
@@ -414,11 +414,11 @@ class TestRewindToRound:
         from promptpotter.infrastructure.store import CampaignStore
 
         store = CampaignStore(tmp_path)
-        _seed_rewind_cycle(store, "bid", "cycle_a", rounds=5)
+        _seed_rewind_cycle(store, _CAMPAIGN, "cycle_a", rounds=5)
 
-        store.rewind_to_round("bid", "cycle_a", after_round=2)
+        store.rewind_to_round(_CAMPAIGN, "cycle_a", after_round=2)
 
-        cycle_dir = store.campaign_dir("cycle_a")
+        cycle_dir = store.cycle_dir(_CAMPAIGN, "cycle_a")
         rounds_dir = cycle_dir / "rounds"
         candidates_dir = cycle_dir / ".runtime" / "cache" / "candidates"
         assert (rounds_dir / "round_0000.json").exists()
@@ -443,17 +443,17 @@ class TestRewindToRound:
         from promptpotter.infrastructure.store import CampaignStore
 
         store = CampaignStore(tmp_path)
-        _seed_rewind_cycle(store, "bid", "cycle_a", rounds=5)
+        _seed_rewind_cycle(store, _CAMPAIGN, "cycle_a", rounds=5)
 
         # Seed a best-accuracy that lives in an archived round_data so the
         # rebuild has to recompute it.
-        store.save_round_file("bid", "cycle_a", _make_round_data(4, 0.99))
-        before = json.loads((store._entity_path("bid", "cycle_a")).read_text(encoding="utf-8"))
+        store.save_round_file(_CAMPAIGN, "cycle_a", _make_round_data(4, 0.99))
+        before = json.loads(store._index_path(_CAMPAIGN, "cycle_a").read_text(encoding="utf-8"))
         assert before["best_accuracy"] == _pytest.approx(0.99)
 
-        store.rewind_to_round("bid", "cycle_a", after_round=2)
+        store.rewind_to_round(_CAMPAIGN, "cycle_a", after_round=2)
 
-        after = json.loads((store._entity_path("bid", "cycle_a")).read_text(encoding="utf-8"))
+        after = json.loads(store._index_path(_CAMPAIGN, "cycle_a").read_text(encoding="utf-8"))
         assert after["n_rounds"] == 3
         rounds_in_index = sorted(t["round"] for t in after["rounds"])
         assert rounds_in_index == [0, 1, 2]
@@ -467,14 +467,11 @@ class TestRewindToRound:
         from promptpotter.infrastructure.store import CampaignStore
 
         store = CampaignStore(tmp_path)
-        _seed_rewind_cycle(store, "bid", "cycle_a", rounds=3)
+        _seed_rewind_cycle(store, _CAMPAIGN, "cycle_a", rounds=3)
 
         # ``rewind_to_round`` consults the ledger first for admissibility.
-        # Asking for a round the ledger never closed surfaces a truthful
-        # "ledger only has completed rounds 0..N" rather than the cache-name
-        # error of the prior contract.
         with _pytest.raises(LookupError, match=r"ledger only has completed rounds 0\.\.2"):
-            store.rewind_to_round("bid", "cycle_a", after_round=99)
+            store.rewind_to_round(_CAMPAIGN, "cycle_a", after_round=99)
 
     def test_resume_from_missing_cycle_raises(self, tmp_path):
         import pytest as _pytest
@@ -485,4 +482,4 @@ class TestRewindToRound:
         # A nonexistent cycle has no ledger on disk — the ledger pre-check
         # raises before the public ``rounds/`` tree is consulted.
         with _pytest.raises(LookupError, match="no ledger on disk"):
-            store.rewind_to_round("bid", "cycle_nonexistent", after_round=0)
+            store.rewind_to_round(_CAMPAIGN, "cycle_nonexistent", after_round=0)

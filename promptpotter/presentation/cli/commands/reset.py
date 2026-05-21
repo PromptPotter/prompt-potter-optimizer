@@ -125,7 +125,7 @@ def _remove(path: Path) -> None:
 
 def _active_pointer_in_scope(tenant_dirs: list[Path]) -> bool:
     """True iff the global active-session pointer points at a tenant we're resetting."""
-    tenant_id, _, _ = read_active_pointer()
+    tenant_id, _, _, _ = read_active_pointer()
     if not tenant_id:
         return False
     return any(td.name == tenant_id for td in tenant_dirs)

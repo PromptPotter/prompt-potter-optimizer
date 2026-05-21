@@ -103,8 +103,15 @@ def render_completion(
     *,
     best_round: dict,
     pipeline_schema: PipelineSchema | None = None,
+    dataset_name: str | None = None,
+    campaign_id: str | None = None,
 ) -> str:
-    """Render the closing summary box (interrupted vs complete) + pipeline overrides."""
+    """Render the closing summary box (interrupted vs complete) + pipeline overrides.
+
+    ``dataset_name`` / ``campaign_id`` name the campaign the way the CLI's
+    ``new`` / ``resume`` stdout does — the same campaign dir holds the
+    standalone-dashboard artifacts.
+    """
     interrupted = result.stop_reason == "interrupted"
     title = (
         f"{YELLOW}{BOLD}INTERRUPTED{RESET} — stopped by user"
@@ -119,6 +126,10 @@ def render_completion(
     ]
     if interrupted:
         fields.append("Resume: re-run this cell -- rounds auto-restore")
+    if dataset_name:
+        fields.append(f"Dataset      {dataset_name}")
+    if campaign_id:
+        fields.append(f"Campaign     {campaign_id}")
     if result.cycle_id:
         fields.append(f"Cycle ID     {result.cycle_id}")
     if result.session_id:
@@ -262,7 +273,15 @@ async def run_optimization_notebook(
         return result
 
     best = max((r.model_dump() for r in result.rounds), key=lambda r: r["accuracy"])
-    print(render_completion(result, best_round=best, pipeline_schema=session.pipeline_schema))
+    print(
+        render_completion(
+            result,
+            best_round=best,
+            pipeline_schema=session.pipeline_schema,
+            dataset_name=session.dataset_name,
+            campaign_id=session.campaign_id or None,
+        )
+    )
     _try_display_html(render_completion_html(result))
 
     if result.stop_reason == "interrupted":

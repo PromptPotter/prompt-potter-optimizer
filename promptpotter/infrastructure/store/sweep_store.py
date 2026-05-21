@@ -1,8 +1,8 @@
-"""Per-batch sweep artifacts under ``campaigns/{root}/sweeps/{batch_id}/``.
+"""Per-batch sweep artifacts under ``campaigns/{campaign_id}/sweeps/{batch_id}/``.
 
 Sweeps are batch-level, not cycle-level: one ``index.json`` + ``summary.md``
-spans many forked cycles. Keyed by ``(family_root, batch_id)`` rather than
-``(backend_id, entity_id)`` — not an ``EntityStore``.
+spans many sweep-fork cycles (which live flat under the campaign's
+``cycles/``). Keyed by ``(campaign_id, batch_id)`` — not an ``EntityStore``.
 """
 
 from __future__ import annotations
@@ -26,15 +26,15 @@ class SweepStore:
     """File I/O for sweep-batch artifacts (``index.json`` + ``summary.md``)."""
 
     def __init__(self, base_dir: Path) -> None:
-        # base_dir is tenant root; sweeps nest under campaigns/{root}/sweeps/{batch_id}/.
+        # base_dir is tenant root; sweeps nest under campaigns/{campaign_id}/sweeps/{batch_id}/.
         self._base_dir = base_dir
 
-    def batch_dir(self, family_root: str, batch_id: str) -> Path:
-        return sweep_batch_dir_for(self._base_dir, family_root, batch_id)
+    def batch_dir(self, campaign_id: str, batch_id: str) -> Path:
+        return sweep_batch_dir_for(self._base_dir, campaign_id, batch_id)
 
     def init_batch(
         self,
-        family_root: str,
+        campaign_id: str,
         batch_id: str,
         *,
         parent_cycle_id: str,
@@ -42,13 +42,13 @@ class SweepStore:
         payloads: list[dict[str, str]],
     ) -> Path:
         """Write the running batch index. ``payloads`` is the per-source dispatch list."""
-        path = self.batch_dir(family_root, batch_id) / "index.json"
+        path = self.batch_dir(campaign_id, batch_id) / "index.json"
         write_json(
             path,
             {
                 "batch_id": batch_id,
                 "parent_cycle_id": parent_cycle_id,
-                "family_root": family_root,
+                "campaign_id": campaign_id,
                 "started_at": started_at,
                 "status": "running",
                 "payloads": payloads,
@@ -58,7 +58,7 @@ class SweepStore:
 
     def finalize_batch(
         self,
-        family_root: str,
+        campaign_id: str,
         batch_id: str,
         *,
         completed_at: str,
@@ -66,7 +66,7 @@ class SweepStore:
         cycle_by_source: dict[str, str],
     ) -> Path:
         """Read the running index, mark complete, fill per-payload status+cycle, write back."""
-        path = self.batch_dir(family_root, batch_id) / "index.json"
+        path = self.batch_dir(campaign_id, batch_id) / "index.json"
         index = read_json(path)
         index["status"] = "completed"
         index["completed_at"] = completed_at
@@ -84,18 +84,18 @@ class SweepStore:
 
     def write_summary_md(
         self,
-        family_root: str,
+        campaign_id: str,
         batch_id: str,
         content: str,
     ) -> Path:
         """Write the pre-rendered batch summary markdown."""
-        path = self.batch_dir(family_root, batch_id) / "summary.md"
+        path = self.batch_dir(campaign_id, batch_id) / "summary.md"
         write_text(path, content)
         return path
 
-    def load_batch(self, family_root: str, batch_id: str) -> dict[str, Any] | None:
+    def load_batch(self, campaign_id: str, batch_id: str) -> dict[str, Any] | None:
         """Read the batch index; ``None`` if it doesn't exist."""
-        return read_json_optional(self.batch_dir(family_root, batch_id) / "index.json")
+        return read_json_optional(self.batch_dir(campaign_id, batch_id) / "index.json")
 
 
 __all__ = ["SweepStore"]

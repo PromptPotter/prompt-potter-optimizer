@@ -7,12 +7,11 @@ either:
 
 * halts with :class:`ResumeDivergenceError` when ``fork_on_divergence``
   is False, or
-* mints a sibling via :func:`_mint_fork` with
-  ``ForkTrigger.SCORING_DIVERGENCE``, retargets the active pointer,
+* mints a sibling cycle (inside the same campaign) via :func:`_mint_fork`
+  with ``ForkTrigger.SCORING_DIVERGENCE``, retargets the active pointer,
   and returns the new cycle's id and resume offset.
 
-Behaviour-equivalent to the prior cycle.py implementation. The
-escalation FSM is rebuilt via ``EscalationState.from_ledger`` because
+The escalation FSM is rebuilt via ``EscalationState.from_ledger`` because
 the ledger is the SoT for layer-stall counters across resume.
 """
 
@@ -44,7 +43,7 @@ __all__ = ["resume_with_divergence_check"]
 
 def resume_with_divergence_check(
     campaign_store: CampaignStore,
-    backend_id: str,
+    campaign_id: str,
     cycle_id: str,
     resumed_from_round: int,
     session: Session,
@@ -56,16 +55,16 @@ def resume_with_divergence_check(
     """Rescore prior rounds under the active scorer; halt or fork on divergence.
 
     Short-circuits when the diff between the active ``cycle.config`` and the
-    cycle's frozen snapshot (``index.json::config``) classifies as
-    :attr:`DiffScope.POLICY_ONLY`: the parent's data trace is fully valid,
-    past decisions stay as the audit record of the policy in effect at the
-    time, and the new policy governs unevaluated rounds. No fork, no
-    divergence walk. See :meth:`CampaignConfig.classify_diff_against`.
+    campaign's frozen snapshot (``campaign.json::config``) classifies as
+    :attr:`DiffScope.NONE` or :attr:`DiffScope.POLICY_ONLY`: the parent's
+    data trace is fully valid, past decisions stay as the audit record, and
+    the active policy governs unevaluated rounds. No fork, no divergence
+    walk. See :meth:`CampaignConfig.classify_diff_against`.
     """
     sc = session.scoring
     scorer = sc.scorer
     assert scorer is not None, "session.scoring.scorer required for divergence replay"
-    prior = campaign_store.load_rounds_range(backend_id, cycle_id, 0, resumed_from_round - 1)
+    prior = campaign_store.load_rounds_range(campaign_id, cycle_id, 0, resumed_from_round - 1)
 
     def _rescore(items: Any) -> list:
         out = list(items or [])
@@ -80,19 +79,21 @@ def resume_with_divergence_check(
     origin_results_rescored = _rescore(cycle.tracking.current_results)
 
     if not skip_divergence_check:
-        frozen = (campaign_store.load(backend_id, cycle_id) or {}).get("config") or {}
+        campaign = campaign_store.load_campaign(campaign_id)
+        frozen = campaign.config if campaign is not None else {}
         scope, diffed = cycle.config.classify_diff_against(frozen)
-        if scope is DiffScope.POLICY_ONLY:
-            logger.info(
-                "Resume: policy-only config diff (%s); skipping divergence check, "
-                "continuing on cycle %s in-place",
-                ", ".join(diffed),
-                cycle_id,
-            )
-            # Refresh the snapshot so future resumes diff against current state.
-            campaign_store.update(
-                backend_id, cycle_id, {"config": cycle.config.model_dump(mode="json")}
-            )
+        if scope in (DiffScope.NONE, DiffScope.POLICY_ONLY):
+            if scope is DiffScope.POLICY_ONLY:
+                logger.info(
+                    "Resume: policy-only config diff (%s); continuing on cycle %s in-place",
+                    ", ".join(diffed),
+                    cycle_id,
+                )
+                # Refresh the campaign snapshot so future resumes diff
+                # against current state.
+                campaign_store.update_campaign(
+                    campaign_id, {"config": cycle.config.model_dump(mode="json")}
+                )
             cycle.replay_priors(prior)
             cycle.escalation = EscalationState.from_ledger(session.state.ledger)
             return None
@@ -113,6 +114,7 @@ def resume_with_divergence_check(
                 survivors = list(prior[:i])
                 new_cycle_id = _mint_fork(
                     campaign_store,
+                    campaign_id,
                     session.store.tenant_id,
                     session.session_id,
                     cycle_id,
@@ -123,15 +125,6 @@ def resume_with_divergence_check(
                         issued_by="system",
                     ),
                     surviving_rounds=survivors,
-                )
-                # The fork inherits the parent's stale ``config`` snapshot
-                # via ``save_divergence_fork``; refresh it to the active
-                # config so subsequent resumes on the fork diff against the
-                # baseline that minted them.
-                campaign_store.update(
-                    backend_id,
-                    new_cycle_id,
-                    {"config": cycle.config.model_dump(mode="json")},
                 )
                 cycle.replay_priors(survivors)
                 cycle.escalation = EscalationState.from_ledger(session.state.ledger)

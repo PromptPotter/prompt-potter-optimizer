@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from promptpotter.infrastructure.store import campaign_dir_for
+from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
 from promptpotter.infrastructure.tracing.events import (
     CampaignEnd,
@@ -37,10 +37,12 @@ class LangfuseSink:
         self,
         store_base_dir: str | Path,
         backend_id: str,
+        campaign_id: str,
         langfuse: LangfuseLogger,
     ) -> None:
         self._base = Path(store_base_dir)
         self._backend_id = backend_id
+        self._campaign_id = campaign_id
         self._lf = langfuse
 
         self._trace_ids: dict[str, str] = {}
@@ -56,8 +58,8 @@ class LangfuseSink:
         self._state_path: Path | None = None
 
     def _session_state_path(self, session_id: str) -> Path:
-        # session_id == cycle_id here; state is per-campaign.
-        return campaign_dir_for(self._base, session_id) / "langfuse" / "state.json"
+        # session_id == cycle_id here; langfuse state lives in the cycle dir.
+        return cycle_dir_for(self._base, self._campaign_id, session_id) / "langfuse" / "state.json"
 
     def _bind_session(self, session_id: str) -> None:
         if self._state_session_id == session_id:

@@ -1,4 +1,20 @@
-"""Per-cycle optimization artifacts under ``campaigns/``."""
+"""Campaign + cycle artifacts under ``campaigns/{campaign_id}/``.
+
+A campaign is a **forest**: it holds N *session* roots (one per ``new`` on
+the same origin declaration) plus their fork descendants, all flat under
+``cycles/``. :meth:`list_sessions` enumerates the forest roots.
+
+Two surfaces:
+
+* **Campaign-level** — ``campaign.json`` manifest CRUD
+  (:meth:`create_campaign` / :meth:`load_campaign` / :meth:`update_campaign`
+  / :meth:`list_campaigns`). The campaign owns the frozen ``CampaignConfig``
+  snapshot and the forest's identity (``campaign_id = {dataset}__{hash}``).
+* **Cycle-level** — per-cycle ``index.json`` + round/candidate files under
+  ``campaigns/{campaign_id}/cycles/{cycle_id}/``. Every cycle method takes a
+  leading ``campaign_id`` because a cycle id is unique only within its
+  campaign — the path spine is ``(campaign_id, cycle_id)``.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
+from promptpotter.domain.campaign import Campaign
 from promptpotter.infrastructure.store.base import (
     EntityStore,
     read_json,
@@ -29,8 +46,10 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_max_round_complete,
 )
 from promptpotter.infrastructure.store.paths import (
-    campaign_dir_for,
+    campaign_root_dir_for,
+    cycle_dir_for,
     root_cycle_id,
+    session_index,
     sibling_kind,
 )
 
@@ -40,17 +59,9 @@ logger = logging.getLogger(__name__)
 def _rmtree_robust(path: Path) -> None:
     """``shutil.rmtree`` that survives Windows-isms.
 
-    Three failure modes handled:
-    - Long paths (>260 chars) → prefix with ``\\\\?\\`` to bypass
-      ``MAX_PATH``. Without this, ``os.rmdir`` of a non-empty-looking
-      dir under a deep cycle tree (langfuse/datasets/ground_truth) hits
-      ``WinError 145`` even though shutil deleted the contents.
-    - Read-only files → chmod write, retry.
-    - Transient handles (AV / indexer) → small backoff, retry a few
-      times.
-
-    Linux/macOS take the same code path; the prefix is a no-op (paths
-    on those systems have no MAX_PATH equivalent).
+    Three failure modes handled: long paths (>260 chars) via the ``\\\\?\\``
+    prefix, read-only files (chmod + retry), and transient handles
+    (backoff + retry). Linux/macOS take the same path; the prefix is a no-op.
     """
     target_str = str(path.resolve())
     if os.name == "nt" and not target_str.startswith("\\\\?\\"):
@@ -77,8 +88,32 @@ def _rmtree_robust(path: Path) -> None:
             time.sleep(0.1 * (attempt + 1))
 
 
+def _unit_kind(sibling_kind: str, fork_trigger: str | None) -> str:
+    """Operator-facing unit kind — the time-horizon taxonomy for the sidebar.
+
+    Folds the on-disk ``(sibling_kind, fork trigger)`` into four kinds that
+    align with how an operator remembers their work over time:
+
+    - ``session`` — the root run; ``resume`` (incl. Ctrl+C → resume)
+      extends it, never branches.
+    - ``divergent_resume`` — a ``resume --fork-on-divergence`` branch.
+    - ``user_fork`` — any operator-initiated branch: a HITL fork, a
+      diagnostic-BFS sibling, or a sweep-batch fork.
+    - ``l3_fork`` — reserved for L3 auto-forking. No on-disk trigger emits
+      it yet (L3 fork-proposals are observation-only today), so it never
+      appears until that ships.
+    """
+    if sibling_kind == "root":
+        return "session"
+    if fork_trigger == "scoring_divergence":
+        return "divergent_resume"
+    if fork_trigger and fork_trigger.startswith("l3"):
+        return "l3_fork"
+    return "user_fork"
+
+
 class CampaignStore(EntityStore):
-    """File I/O for the per-cycle campaign tree."""
+    """File I/O for the ``campaigns/{campaign_id}/`` tree."""
 
     def __init__(self, base_dir: Path):
         # base_dir is tenant root; campaigns nest directly under it
@@ -86,107 +121,161 @@ class CampaignStore(EntityStore):
 
     # -- path helpers ---------------------------------------------------------
 
-    def _entity_dir(self, _backend_id: str) -> Path:
-        """Parent dir for root campaign trees. Tenant-global."""
-        return self._base_dir / "campaigns"
+    def campaign_root_dir(self, campaign_id: str) -> Path:
+        """Campaign dir — ``campaign.json`` / ``log.md`` / ``cycles/`` (the forest)."""
+        return campaign_root_dir_for(self._base_dir, campaign_id)
 
-    def _campaign_dir(self, _backend_id: str, cycle_id: str) -> Path:
-        """Per-cycle dir. Backend-agnostic; pass ``""`` to read parent indexes."""
-        return campaign_dir_for(self._base_dir, cycle_id)
+    def cycle_dir(self, campaign_id: str, cycle_id: str) -> Path:
+        """Per-cycle dir — ``campaigns/{campaign_id}/cycles/{cycle_id}``."""
+        return cycle_dir_for(self._base_dir, campaign_id, cycle_id)
 
-    def campaign_dir(self, cycle_id: str) -> Path:
-        """Public wrapper for ``_campaign_dir`` — used by orchestration to derive
-        the per-cycle path without leaking the leading underscore."""
-        return self._campaign_dir("", cycle_id)
+    def _manifest_path(self, campaign_id: str) -> Path:
+        return self.campaign_root_dir(campaign_id) / "campaign.json"
 
-    def _rounds_dir(self, backend_id: str, cycle_id: str) -> Path:
-        return self._campaign_dir(backend_id, cycle_id) / "rounds"
+    def _index_path(self, campaign_id: str, cycle_id: str) -> Path:
+        return self.cycle_dir(campaign_id, cycle_id) / "index.json"
 
-    def _candidates_dir(self, backend_id: str, cycle_id: str) -> Path:
-        return self._campaign_dir(backend_id, cycle_id) / ".runtime" / "cache" / "candidates"
+    def _rounds_dir(self, campaign_id: str, cycle_id: str) -> Path:
+        return self.cycle_dir(campaign_id, cycle_id) / "rounds"
 
-    def _entity_path(self, backend_id: str, entity_id: str) -> Path:
-        """Campaign metadata (index.json) lives INSIDE the per-cycle dir."""
-        return self._campaign_dir(backend_id, entity_id) / "index.json"
+    def _candidates_dir(self, campaign_id: str, cycle_id: str) -> Path:
+        return self.cycle_dir(campaign_id, cycle_id) / ".runtime" / "cache" / "candidates"
 
-    # -- Campaign CRUD --------------------------------------------------------
+    # -- Campaign manifest CRUD ----------------------------------------------
 
-    def load(self, backend_id: str, entity_id: str) -> dict[str, Any] | None:
-        """Load index.json with cycle_id derived from the directory name.
+    def create_campaign(self, campaign: Campaign) -> Path:
+        """Write the ``campaign.json`` manifest. The single config-snapshot writer."""
+        path = self._manifest_path(campaign.campaign_id)
+        write_json(path, campaign.model_dump(mode="json"))
+        return path
 
-        ``campaign_id`` is injected from ``entity_id`` (the dir name)
-        rather than read from the JSON blob. This makes the
-        directory-name authoritative: a manual ``mv`` of a cycle dir
-        cannot cause a downstream caller to see a stale embedded id.
-        New index.json writes (see ``create``) omit the field entirely;
-        the migration in ``scripts/migrate_state_sync_v1.py`` strips
-        it from existing files. The injection here is the read-side
-        bridge that keeps callers (datasets.py, review.py, writers.py)
-        working without per-caller changes.
-        """
-        data = read_json_optional(self._entity_path(backend_id, entity_id))
+    def load_campaign(self, campaign_id: str) -> Campaign | None:
+        """Load the ``campaign.json`` manifest; ``None`` when absent."""
+        data = read_json_optional(self._manifest_path(campaign_id))
         if data is None:
             return None
-        data["campaign_id"] = entity_id
+        return Campaign.model_validate(data)
+
+    def update_campaign(self, campaign_id: str, updates: dict[str, Any]) -> None:
+        """Merge *updates* into ``campaign.json`` and write back."""
+        path = self._manifest_path(campaign_id)
+        data = read_json(path)
+        data.update(updates)
+        write_json(path, data)
+
+    def list_campaign_ids(self) -> list[str]:
+        """Every campaign id on disk (dir with a ``campaign.json``), sorted."""
+        campaigns_dir = self._base_dir / "campaigns"
+        if not campaigns_dir.exists():
+            return []
+        return sorted(
+            p.name
+            for p in campaigns_dir.iterdir()
+            if p.is_dir() and (p / "campaign.json").is_file()
+        )
+
+    def list_campaigns(self, dataset_name: str | None = None) -> list[Campaign]:
+        """Every campaign manifest, optionally filtered to one dataset."""
+        out: list[Campaign] = []
+        for cid in self.list_campaign_ids():
+            campaign = self.load_campaign(cid)
+            if campaign is None:
+                continue
+            if dataset_name and campaign.dataset_name != dataset_name:
+                continue
+            out.append(campaign)
+        return out
+
+    def mark_campaign_finished(self, campaign_id: str, *, status: str, finished_at: str) -> None:
+        """Stamp the terminal ``status`` + ``finished_at`` onto ``campaign.json``.
+
+        ``status`` reflects the campaign's most-recent session — a fresh
+        ``new`` reactivates the campaign (see ``auto_mint_session``)."""
+        if self.load_campaign(campaign_id) is None:
+            return
+        self.update_campaign(campaign_id, {"status": status, "finished_at": finished_at})
+
+    def list_sessions(self, campaign_id: str) -> list[str]:
+        """Every session-root cycle id in the campaign's forest, ordered by
+        session index.
+
+        A session root is a cycle that is its own family root — no
+        ``_fork_``/``_diag_``/``_sweep_`` separator. The bare ``cycle_{hash}``
+        is session 1; ``cycle_{hash}_s{N}`` is the Nth ``new`` re-run of the
+        same origin declaration.
+        """
+        cycles_dir = self.campaign_root_dir(campaign_id) / "cycles"
+        if not cycles_dir.exists():
+            return []
+        roots = [
+            p.name
+            for p in cycles_dir.iterdir()
+            if p.is_dir() and (p / "index.json").is_file() and root_cycle_id(p.name) == p.name
+        ]
+        return sorted(roots, key=session_index)
+
+    def next_session_index(self, campaign_id: str) -> int:
+        """Index for the next session minted into this campaign (1 if empty)."""
+        sessions = self.list_sessions(campaign_id)
+        if not sessions:
+            return 1
+        return max(session_index(s) for s in sessions) + 1
+
+    # -- Cycle index CRUD -----------------------------------------------------
+
+    def load(self, campaign_id: str, cycle_id: str) -> dict[str, Any] | None:
+        """Load a cycle's ``index.json``; ``cycle_id`` is injected from the dir name."""
+        data = read_json_optional(self._index_path(campaign_id, cycle_id))
+        if data is None:
+            return None
+        data["cycle_id"] = cycle_id
         return data
 
     def create(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         metadata: dict[str, Any],
     ) -> Path:
-        """Create/augment a campaign's ``index.json`` with metadata.
+        """Create/augment a cycle's ``index.json``.
 
-        When the file doesn't exist yet, writes a fresh blob with defaults.
-        When it does, merges the new keys over existing values without
-        clobbering round_data/best/origin accumulators — defaults only fill
-        gaps. ``parent_session_id`` flows through ``metadata``.
+        Fresh write fills defaults; replay merges new keys without
+        clobbering ``rounds``/``best_*`` accumulators.
         """
-        path = self._entity_path(backend_id, cycle_id)
+        path = self._index_path(campaign_id, cycle_id)
         existing = read_json_optional(path) or {}
-        # Strip any stale embedded campaign_id from prior writes — the
-        # dir name is authoritative now (see ``load``). Idempotent.
-        existing.pop("campaign_id", None)
+        existing.pop("cycle_id", None)
         now = datetime.now(UTC).isoformat()
         defaults: dict[str, Any] = {
             "created_at": existing.get("created_at", now),
             "updated_at": now,
             "status": "active",
+            "type": "optimization_loop",
             "connector_type": metadata.get("connector_type", DEFAULT_CONNECTOR_TYPE),
-            "backend_id": backend_id,
             "parent_session_id": existing.get("parent_session_id", ""),
+            "parent_cycle_id": None,
+            "sibling_kind": sibling_kind(cycle_id),
             "n_rounds": 0,
             "best_accuracy": 0.0,
             "best_round_id": None,
             "origin_accuracy": 0.0,
             "rounds": [],
         }
-        # Merge order: defaults for missing keys → existing accumulators →
-        # explicit metadata overrides. Accumulators ("rounds" / "n_rounds"
-        # / "best_*") are preserved on replay via ``existing``.
         data = {**defaults, **existing, **metadata}
         data["updated_at"] = now
-        data["backend_id"] = backend_id
         write_json(path, data)
         return path
 
     def update(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         updates: dict[str, Any],
         *,
         remove: Sequence[str] = (),
     ) -> None:
-        """Merge *updates* into the campaign file and write back (+ timestamp).
-
-        ``remove`` is the set of top-level keys to drop from the stored
-        record before merging. Used by ``mark_finished`` to clear stale
-        crash bookkeeping (``interrupted_round`` / ``crash_traceback``)
-        when a previously interrupted cycle later completes cleanly.
-        """
-        path = self._entity_path(backend_id, cycle_id)
+        """Merge *updates* into the cycle ``index.json`` and write back (+ timestamp)."""
+        path = self._index_path(campaign_id, cycle_id)
         data = read_json(path)
         for key in remove:
             data.pop(key, None)
@@ -196,29 +285,19 @@ class CampaignStore(EntityStore):
 
     def rewind_to_round(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         after_round: int,
     ) -> None:
         """Archive round_data/candidate files for rounds > ``after_round``.
 
-        Moves ``rounds/round_{M:04d}.json`` and
-        ``.runtime/cache/candidates/round_{M:04d}.json`` for M > after_round
-        into ``.runtime/archived/resumed_at_<ts>/{rounds,candidates}/``,
-        then rebuilds the cycle's round_data index to reflect only surviving
-        rounds (rounds 0..after_round).
-
-        Admissibility consults the ledger first: ``--from N`` is valid iff
-        the ledger has a ``PhaseRecord(round, complete, round=N)``. The
-        public ``rounds/`` tree IS expected to be present for every round
-        in ``[0..max_complete]`` because ``save_round_file`` fires inside
-        the same ``_persist_round`` call that emits ``round:complete``.
-        Mismatch (ledger has it, public tree doesn't) is surfaced as a
-        separate, sharper error.
+        Moves ``rounds/round_{M:04d}.json`` and the matching candidate files
+        for M > after_round into ``.runtime/archived/resumed_at_<ts>/``, then
+        rebuilds the cycle's round index. Admissibility consults the ledger.
         """
-        cycle_dir = self._campaign_dir(backend_id, cycle_id)
-        rounds_dir = self._rounds_dir(backend_id, cycle_id)
-        candidates_dir = self._candidates_dir(backend_id, cycle_id)
+        cycle_dir = self.cycle_dir(campaign_id, cycle_id)
+        rounds_dir = self._rounds_dir(campaign_id, cycle_id)
+        candidates_dir = self._candidates_dir(campaign_id, cycle_id)
 
         ledger_path = cycle_dir / ".runtime" / "ledger.jsonl"
         if not ledger_path.exists():
@@ -229,12 +308,6 @@ class CampaignStore(EntityStore):
                 f"--from {after_round}: ledger only has completed rounds 0..{max_complete}"
             )
 
-        # Origin (round 0) closes via ``(phase=origin, event=exit)`` and writes
-        # only the audit cache (``.runtime/cache/rounds/round_0000.json``);
-        # ``save_round_file`` runs only inside ``_persist_round`` for round≥1.
-        # So ``--from 0`` on an origin-only cycle is legitimate even when
-        # the public ``rounds/`` tree doesn't exist yet — there's nothing
-        # to archive in that case.
         if after_round >= 1:
             if not rounds_dir.exists():
                 raise LookupError(
@@ -287,18 +360,17 @@ class CampaignStore(EntityStore):
                 archive_root,
             )
 
-        self._rebuild_round_index(backend_id, cycle_id, survivors)
+        self._rebuild_round_index(campaign_id, cycle_id, survivors)
 
     def _rebuild_round_index(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         survivors: list[Path],
     ) -> None:
-        """Recompute ``rounds`` / ``n_rounds`` / ``best_accuracy`` / ``best_round_id``
-        from the round_data detail files that remain after a rewind."""
-        campaign_path = self._entity_path(backend_id, cycle_id)
-        data = read_json(campaign_path)
+        """Recompute ``rounds`` / ``n_rounds`` / ``best_*`` from surviving detail files."""
+        index_path = self._index_path(campaign_id, cycle_id)
+        data = read_json(index_path)
 
         rebuilt = [round_summary(read_json(p)) for p in sorted(survivors)]
         best = max(rebuilt, key=lambda s: s["accuracy"], default=None)
@@ -308,11 +380,11 @@ class CampaignStore(EntityStore):
         data["best_accuracy"] = best["accuracy"] if best else 0.0
         data["best_round_id"] = best["round_id"] if best else None
         data["updated_at"] = datetime.now(UTC).isoformat()
-        write_json(campaign_path, data)
+        write_json(index_path, data)
 
     def mark_finished(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         *,
         status: str,
@@ -324,20 +396,7 @@ class CampaignStore(EntityStore):
         interrupted_round: int | None = None,
         crash_traceback: str | None = None,
     ) -> None:
-        """Write the terminal status/stop_reason + outcome summary to disk.
-
-        ``interrupted_round`` names which round was active when the loop
-        tore down (Ctrl+C, programmatic cancellation, or uncaught
-        exception). Persisted on ``status in {"interrupted", "crashed"}``
-        so the webapp / CLI can show "partial round N" without re-deriving
-        from the ledger.
-
-        ``crash_traceback`` is the formatted traceback from the uncaught
-        exception that ended the run with ``StopReason.CRASHED``. Stamped
-        onto ``index.json::final.crash_traceback`` so the cause survives
-        past terminal scrollback — the operator can read it after the
-        fact.
-        """
+        """Write the terminal status/stop_reason + outcome summary to the cycle index."""
         from promptpotter.shared.errors import graceful
 
         updates: dict[str, Any] = {
@@ -355,74 +414,46 @@ class CampaignStore(EntityStore):
             if crash_traceback:
                 updates["crash_traceback"] = crash_traceback
         else:
-            # Clean completion clears any stale crash bookkeeping written by
-            # a prior interrupted / crashed run of the same cycle.
             remove_keys = ["interrupted_round", "crash_traceback"]
-        with graceful("Campaign completion update failed"):
-            self.update(backend_id, cycle_id, updates, remove=remove_keys)
+        with graceful("Cycle completion update failed"):
+            self.update(campaign_id, cycle_id, updates, remove=remove_keys)
 
     def load_many(
         self,
-        backend_id: str,
-        cycle_ids: list[str] | None = None,
+        campaign_id: str,
+        cycle_ids: list[str],
     ) -> list[dict[str, Any]]:
-        """Load full campaign records for *cycle_ids*, or all campaigns when None.
-
-        Skips campaigns whose detail file is missing.
-        """
-        if cycle_ids is None:
-            cycle_ids = [s["campaign_id"] for s in self.list_all(backend_id)]
-        return [c for cid in cycle_ids if (c := self.load(backend_id, cid)) is not None]
+        """Load full cycle records for *cycle_ids* within one campaign."""
+        return [c for cid in cycle_ids if (c := self.load(campaign_id, cid)) is not None]
 
     def _index_files(self) -> list[Path]:
-        """Every ``index.json`` under this tenant's campaigns tree.
-
-        Walks root cycles (``campaigns/{cycle_id}/``) plus all three sibling
-        kinds: ``forks/``, ``diag/``, and ``sweeps/*/forks/``. Shared between
-        ``list_all`` (backend-filtered summary) and ``enumerate_cycles``
-        (webapp picker)."""
-        campaigns_dir = self._entity_dir("")
+        """Every cycle ``index.json`` under this tenant — ``campaigns/*/cycles/*/index.json``."""
+        campaigns_dir = self._base_dir / "campaigns"
         if not campaigns_dir.exists():
             return []
-        out: list[Path] = []
-        for root_dir in sorted(campaigns_dir.iterdir()):
-            if not root_dir.is_dir():
-                continue
-            if (idx := root_dir / "index.json").is_file():
-                out.append(idx)
-            for kind_dir in ("forks", "diag"):
-                parent = root_dir / kind_dir
-                if parent.is_dir():
-                    for fork_dir in sorted(parent.iterdir()):
-                        if (idx := fork_dir / "index.json").is_file():
-                            out.append(idx)
-            sweeps_dir = root_dir / "sweeps"
-            if sweeps_dir.is_dir():
-                for batch_dir in sorted(sweeps_dir.iterdir()):
-                    batch_forks = batch_dir / "forks"
-                    if batch_forks.is_dir():
-                        for fork_dir in sorted(batch_forks.iterdir()):
-                            if (idx := fork_dir / "index.json").is_file():
-                                out.append(idx)
-        return out
+        return sorted(campaigns_dir.glob("*/cycles/*/index.json"))
+
+    @staticmethod
+    def _ids_from_index_path(index_path: Path) -> tuple[str, str]:
+        """``(campaign_id, cycle_id)`` for a ``campaigns/{c}/cycles/{cy}/index.json`` path."""
+        cycle_id = index_path.parent.name
+        campaign_id = index_path.parent.parent.parent.name
+        return campaign_id, cycle_id
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
-        """Return summary for every campaign stored under this tenant.
-
-        Walks top-level root cycles (``campaigns/{cycle_id}/``) and all three
-        sibling kinds: ``forks/``, ``diag/``, and ``sweeps/*/forks/``.
-        Optionally filters by ``backend_id`` (matched against
-        ``index.json::backend_id``). Pass ``""`` to list all campaigns
-        regardless of backend.
-        """
+        """Summary row for every cycle on disk, optionally filtered by backend."""
         results = []
         for index_path in self._index_files():
             data = read_json(index_path)
-            if backend_id and data.get("backend_id") and data["backend_id"] != backend_id:
+            header = data.get("header") if isinstance(data.get("header"), dict) else {}
+            row_backend = data.get("backend_id") or header.get("backend_id", "")
+            if backend_id and row_backend and row_backend != backend_id:
                 continue
+            campaign_id, cycle_id = self._ids_from_index_path(index_path)
             results.append(
                 {
-                    "campaign_id": index_path.parent.name,
+                    "campaign_id": campaign_id,
+                    "cycle_id": cycle_id,
                     "name": data.get("name", ""),
                     "status": data["status"],
                     "n_rounds": data["n_rounds"],
@@ -436,38 +467,31 @@ class CampaignStore(EntityStore):
         return results
 
     def enumerate_cycles(self) -> list[dict[str, Any]]:
-        """Every cycle on disk under this tenant, with the richer shape the
-        webapp picker needs.
+        """Every cycle on disk, with the richer shape the webapp picker needs.
 
-        Walks the same tree as ``list_all`` (roots + forks + diag + sweeps)
-        but returns one entry per cycle carrying ``sibling_kind`` + dataset
-        header info, and is backend-agnostic (no filter). Tolerant of corrupt
-        or partially-written ``index.json``: a cycle dir with an unreadable
-        index contributes a stub entry with ``status="unreadable"`` and
-        defaulted numeric fields, so the operator can still see it in the
-        picker. The enumeration never raises.
+        Tolerant of corrupt ``index.json``: a cycle with an unreadable index
+        contributes a stub entry with ``status="unreadable"``.
         """
         results: list[dict[str, Any]] = []
         for index_path in self._index_files():
-            cycle_id = index_path.parent.name
+            campaign_id, cycle_id = self._ids_from_index_path(index_path)
             try:
                 data = read_json_optional(index_path)
-            except Exception:  # corrupt JSON, encoding error, etc.
+            except Exception:
                 data = None
+            kind = sibling_kind(cycle_id)
             if not isinstance(data, dict):
-                # stub entry for unreadable indexes — directory name is the cycle_id by construction
-                stub_kind = sibling_kind(cycle_id)
                 results.append(
                     {
+                        "campaign_id": campaign_id,
                         "cycle_id": cycle_id,
                         "parent_session_id": "",
-                        "parent_cycle_id": (
-                            None if stub_kind == "root" else root_cycle_id(cycle_id)
-                        ),
+                        "parent_cycle_id": (None if kind == "root" else root_cycle_id(cycle_id)),
                         "dataset_name": "",
                         "backend_id": "",
-                        "sibling_kind": stub_kind,
-                        "is_root": stub_kind == "root",
+                        "sibling_kind": kind,
+                        "unit_kind": _unit_kind(kind, None),
+                        "is_root": kind == "root",
                         "status": "unreadable",
                         "best_accuracy": None,
                         "n_rounds": 0,
@@ -478,15 +502,20 @@ class CampaignStore(EntityStore):
                 continue
             header_raw = data.get("header")
             header: dict[str, Any] = header_raw if isinstance(header_raw, dict) else {}
-            kind = sibling_kind(cycle_id)
+            sk = data.get("sibling_kind", kind)
+            fork_raw = data.get("fork")
+            fork_trigger = fork_raw.get("trigger") if isinstance(fork_raw, dict) else None
             results.append(
                 {
+                    "campaign_id": campaign_id,
                     "cycle_id": cycle_id,
                     "parent_session_id": data.get("parent_session_id", ""),
-                    "parent_cycle_id": None if kind == "root" else root_cycle_id(cycle_id),
+                    "parent_cycle_id": data.get("parent_cycle_id")
+                    or (None if kind == "root" else root_cycle_id(cycle_id)),
                     "dataset_name": header.get("dataset_name", ""),
                     "backend_id": data.get("backend_id") or header.get("backend_id", ""),
-                    "sibling_kind": kind,
+                    "sibling_kind": sk,
+                    "unit_kind": _unit_kind(sk, fork_trigger),
                     "is_root": kind == "root",
                     "status": data.get("status", ""),
                     "best_accuracy": data.get("best_accuracy"),
@@ -495,40 +524,21 @@ class CampaignStore(EntityStore):
                     "updated_at": data.get("updated_at", ""),
                 }
             )
-        # Sweep + fork + diag cycles don't carry a ``header.dataset_name`` of
-        # their own (sweep forks have no header block at all). Without
-        # backfill the webapp picker dumps them all under an "(unknown)"
-        # optgroup. The root's dataset_name is the authoritative value for
-        # the whole family — copy it across.
-        root_dataset: dict[str, str] = {
-            e["cycle_id"]: e["dataset_name"] for e in results if e["is_root"] and e["dataset_name"]
-        }
+        # Backfill dataset_name onto siblings from their campaign manifest.
         for e in results:
-            if not e["dataset_name"] and e["parent_cycle_id"]:
-                inherited = root_dataset.get(e["parent_cycle_id"], "")
-                if inherited:
-                    e["dataset_name"] = inherited
+            if not e["dataset_name"]:
+                campaign = self.load_campaign(e["campaign_id"])
+                if campaign is not None:
+                    e["dataset_name"] = campaign.dataset_name
         return results
 
-    def try_delete_stub_cycle(self, cycle_id: str) -> tuple[bool, str]:
+    def try_delete_stub_cycle(self, campaign_id: str, cycle_id: str) -> tuple[bool, str]:
         """Delete a stub cycle dir; return ``(deleted, reason)``.
 
-        Guards (all must hold for a delete to fire):
-
-        - dir exists on disk
-        - ``n_rounds == 0`` — the cycle's own work is empty
-          (``rounds[]`` may carry inherited parent rounds; ``n_rounds``
-          counts only the cycle's own rounds)
-        - cycle is not a family root (roots own family telemetry shared
-          across the tree)
-        - no descendants under ``forks/``, ``sweeps/``, ``diag/``
-
-        Active-pointer check is the caller's job — this method doesn't
-        read ``active_session.json``. The orchestration cleanup path
-        retargets the pointer to the parent BEFORE calling here; the
-        API endpoint refuses the request earlier when active matches.
+        Guards: dir exists, ``n_rounds == 0``, cycle is not a family root,
+        and no other cycle in the campaign names it as ``parent_cycle_id``.
         """
-        cycle_dir = self.campaign_dir(cycle_id)
+        cycle_dir = self.cycle_dir(campaign_id, cycle_id)
         index_path = cycle_dir / "index.json"
         if not index_path.is_file():
             return False, "not on disk"
@@ -541,10 +551,13 @@ class CampaignStore(EntityStore):
         n_rounds = index.get("n_rounds", 0)
         if not isinstance(n_rounds, int) or n_rounds != 0:
             return False, f"n_rounds={n_rounds} — cycle ran real work"
-        for sub in ("forks", "sweeps", "diag"):
-            sub_dir = cycle_dir / sub
-            if sub_dir.is_dir() and any(sub_dir.iterdir()):
-                return False, f"has descendants under {sub}/"
+        for other in self._index_files():
+            other_campaign, other_cycle = self._ids_from_index_path(other)
+            if other_campaign != campaign_id or other_cycle == cycle_id:
+                continue
+            other_data = read_json_optional(other)
+            if isinstance(other_data, dict) and other_data.get("parent_cycle_id") == cycle_id:
+                return False, f"has descendant {other_cycle}"
         _rmtree_robust(cycle_dir)
         return True, ""
 
@@ -552,6 +565,7 @@ class CampaignStore(EntityStore):
 
     def save_divergence_fork(
         self,
+        campaign_id: str,
         parent_cycle_id: str,
         new_cycle_id: str,
         *,
@@ -559,13 +573,8 @@ class CampaignStore(EntityStore):
         forked_at: str,
         forked_from_round: int,
     ) -> Path:
-        """Divergence-fork ``index.json`` inheriting parent state.
-
-        Recomputes ``best_*`` from ``surviving_rounds`` so the fork's index
-        reflects only the rounds < ``forked_from_round`` it inherited.
-        """
-        parent_path = self._campaign_dir("", parent_cycle_id) / "index.json"
-        parent_index = read_json_optional(parent_path) or {}
+        """Divergence-fork ``index.json`` inheriting parent state (same campaign)."""
+        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         best_acc = max(
             (float(t.get("accuracy", 0.0)) for t in surviving_rounds),
             default=0.0,
@@ -581,6 +590,7 @@ class CampaignStore(EntityStore):
         index = {
             **parent_index,
             "parent_cycle_id": parent_cycle_id,
+            "sibling_kind": "fork",
             "forked_from_round": forked_from_round,
             "forked_at": forked_at,
             "rounds": list(surviving_rounds),
@@ -590,32 +600,29 @@ class CampaignStore(EntityStore):
             "status": "resumed",
             "updated_at": forked_at,
         }
-        # parent_index may carry a stale embedded campaign_id from a
-        # pre-migration on-disk file; strip it so we don't perpetuate.
-        index.pop("campaign_id", None)
-        path = self._campaign_dir("", new_cycle_id) / "index.json"
+        index.pop("cycle_id", None)
+        path = self._index_path(campaign_id, new_cycle_id)
         write_json(path, index)
         return path
 
     def save_diag_fork(
         self,
+        campaign_id: str,
         parent_cycle_id: str,
         new_cycle_id: str,
         *,
         forked_at: str,
     ) -> Path:
         """Clean-slate diag-sibling ``index.json``."""
-        parent_path = self._campaign_dir("", parent_cycle_id) / "index.json"
-        parent_index = read_json_optional(parent_path) or {}
-        blob = fresh_sibling_index_blob(
-            parent_index, new_cycle_id, parent_cycle_id, "diag_sibling", forked_at
-        )
-        path = self._campaign_dir("", new_cycle_id) / "index.json"
+        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
+        blob = fresh_sibling_index_blob(parent_index, parent_cycle_id, "diag", forked_at)
+        path = self._index_path(campaign_id, new_cycle_id)
         write_json(path, blob)
         return path
 
     def save_sweep_fork(
         self,
+        campaign_id: str,
         parent_cycle_id: str,
         new_cycle_id: str,
         *,
@@ -623,41 +630,36 @@ class CampaignStore(EntityStore):
         forked_at: str,
     ) -> Path:
         """Clean-slate sweep-fork ``index.json`` carrying ``sweep_batch_id``."""
-        parent_path = self._campaign_dir("", parent_cycle_id) / "index.json"
-        parent_index = read_json_optional(parent_path) or {}
+        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         blob = fresh_sibling_index_blob(
             parent_index,
-            new_cycle_id,
             parent_cycle_id,
-            "sweep_fork",
+            "sweep",
             forked_at,
             sweep_batch_id=sweep_batch_id,
         )
-        path = self._campaign_dir("", new_cycle_id) / "index.json"
+        path = self._index_path(campaign_id, new_cycle_id)
         write_json(path, blob)
         return path
 
     def copy_parent_rounds_and_candidates(
         self,
+        campaign_id: str,
         parent_cycle_id: str,
         new_cycle_id: str,
         *,
         before_round: int,
     ) -> int:
-        """Copy parent's ``rounds/`` + ``candidates/`` files for rounds < ``before_round``.
-
-        Returns total files copied. Caller owns deciding when to invoke;
-        used by divergence forks for deterministic-replay inheritance.
-        """
+        """Copy parent's ``rounds/`` + ``candidates/`` files for rounds < ``before_round``."""
         copy_specs: tuple[tuple[Path, Path, str], ...] = (
             (
-                self._rounds_dir("", parent_cycle_id),
-                self._rounds_dir("", new_cycle_id),
+                self._rounds_dir(campaign_id, parent_cycle_id),
+                self._rounds_dir(campaign_id, new_cycle_id),
                 "round_",
             ),
             (
-                self._candidates_dir("", parent_cycle_id),
-                self._candidates_dir("", new_cycle_id),
+                self._candidates_dir(campaign_id, parent_cycle_id),
+                self._candidates_dir(campaign_id, new_cycle_id),
                 "round_",
             ),
         )
@@ -676,24 +678,24 @@ class CampaignStore(EntityStore):
                     n_copied += 1
         return n_copied
 
-    # -- Trial CRUD -----------------------------------------------------------
+    # -- Round CRUD -----------------------------------------------------------
 
     def save_round_file(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         round_data: dict[str, Any],
     ) -> Path:
-        """Persist a round_data detail file and update the campaign index."""
+        """Persist a round_data detail file and update the cycle index."""
         round_id = round_data["round_id"]
         validate_path_component(round_id)
         round_num = round_data.get("round", 0)
 
-        detail_path = self._rounds_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json"
+        detail_path = self._rounds_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json"
         write_json(detail_path, round_data)
 
-        campaign_path = self._entity_path(backend_id, cycle_id)
-        data = read_json(campaign_path)
+        index_path = self._index_path(campaign_id, cycle_id)
+        data = read_json(index_path)
 
         data["rounds"] = [t for t in data["rounds"] if t.get("round") != round_num]
         data["rounds"].append(round_summary(round_data))
@@ -704,88 +706,76 @@ class CampaignStore(EntityStore):
             data["best_round_id"] = round_id
 
         data["updated_at"] = datetime.now(UTC).isoformat()
-        write_json(campaign_path, data)
+        write_json(index_path, data)
 
         return detail_path
 
     def load_round_file(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         round_num: int,
     ) -> dict[str, Any] | None:
-        """Load a round_data detail by round number.  Returns None if not found."""
+        """Load a round_data detail by round number. ``None`` if not found."""
         return read_json_optional(
-            self._rounds_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json",
+            self._rounds_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json",
         )
 
     def load_rounds_range(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         start: int,
         end: int,
     ) -> list[dict[str, Any]]:
-        """Load rounds for rounds ``start..end`` inclusive, in round order.
-
-        Missing rounds are skipped silently (``None`` from
-        :meth:`load_round_file`). Used by the resume-divergence walker in
-        :mod:`promptpotter.application.optimization.cycle` to re-derive
-        each recorded decision under the current scorer.
-        """
+        """Load rounds ``start..end`` inclusive, in round order. Missing rounds skipped."""
         out: list[dict[str, Any]] = []
         for r in range(start, end + 1):
-            round_data = self.load_round_file(backend_id, cycle_id, r)
+            round_data = self.load_round_file(campaign_id, cycle_id, r)
             if round_data is not None:
                 out.append(round_data)
         return out
 
-    def complete(self, backend_id: str, cycle_id: str) -> None:
-        """Mark a campaign as completed."""
-        self.update(backend_id, cycle_id, {"status": "completed"})
-        logger.info("Campaign %s completed", cycle_id)
+    def complete(self, campaign_id: str, cycle_id: str) -> None:
+        """Mark a cycle as completed."""
+        self.update(campaign_id, cycle_id, {"status": "completed"})
+        logger.info("Cycle %s completed", cycle_id)
 
     def save_round_candidates(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         round_num: int,
         candidates: list[dict[str, Any]],
     ) -> None:
         """Persist generated candidates before scoring (mid-round checkpoint)."""
-        path = self._candidates_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json"
+        path = self._candidates_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json"
         write_json(path, candidates)
-        logger.debug(
-            "Saved %d candidates for round %d → %s",
-            len(candidates),
-            round_num,
-            path.name,
-        )
+        logger.debug("Saved %d candidates for round %d → %s", len(candidates), round_num, path.name)
 
     def load_round_candidates(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         round_num: int,
     ) -> list[dict[str, Any]] | None:
-        """Load persisted candidates for a round.  Returns None if not on disk."""
+        """Load persisted candidates for a round. ``None`` if not on disk."""
         return read_json_optional(
-            self._candidates_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json",
+            self._candidates_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json",
         )
 
     def delete_round_candidates(
         self,
-        backend_id: str,
+        campaign_id: str,
         cycle_id: str,
         round_num: int,
     ) -> None:
         """Delete persisted candidates for a round (forces fresh generation)."""
-        path = self._candidates_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json"
+        path = self._candidates_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json"
         if path.exists():
             path.unlink()
             logger.debug(
-                "Deleted cached candidates for round %d (escalation invalidation)",
-                round_num,
+                "Deleted cached candidates for round %d (escalation invalidation)", round_num
             )
 
 

@@ -1,13 +1,16 @@
-"""Operator-facing markdown writers — log.md / review.md / archive/*.md.
+"""Operator-facing markdown writers — log.md / review.md / hard_samples.json.
 
 Called from runner orchestration milestones, NOT from RunCallbacks (which
 must stay display-only per CLAUDE.md).
 
+Two log.md tiers: ``cycles/{cycle_id}/log.md`` (per-cycle detail) and
+``campaigns/{campaign_id}/log.md`` (the campaign digest — every cycle of
+the lineage + a campaign-scoped heatmap, the folder-UI headline).
+
 Owns the disk-side view reconstruction (``from_disk_round`` /
-``from_disk_log``): persisted ``trial_NNNN.json`` + ``index.json`` rebuild
+``from_disk_log``): persisted ``round_NNNN.json`` + ``index.json`` rebuild
 into the same ``RoundCompleteView`` / ``LogMdView`` shapes the live ingress
-emits, so ``to_markdown`` has one schema to render against. Shared
-score-entry helpers come from ``views.view_ingress``.
+emits, so ``to_markdown`` has one schema to render against.
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ from promptpotter.application.optimization.dispatch.hub import (
 )
 from promptpotter.application.review import render_review_md
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
-from promptpotter.infrastructure.store import root_cycle_id
 from promptpotter.infrastructure.store.base import write_json
 from promptpotter.presentation.views.render import to_markdown
 from promptpotter.presentation.views.view_ingress import (
@@ -50,6 +52,7 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.infrastructure.store import CampaignStore
 
 __all__ = [
     "from_disk_log",
@@ -64,9 +67,7 @@ def _filter_artifact_to_live_candidates(artifact: dict, live_cids: set[str]) -> 
     """Restrict candidate_order + cells to ``live_cids`` (Y-axis hygiene).
 
     The Rasch fit stays joint (archive observations still contribute to
-    ``δ_s``); only the displayed candidate axis is filtered. ``rasch.theta``
-    and friends are trimmed in lock-step so the rendered artifact is
-    internally consistent.
+    ``δ_s``); only the displayed candidate axis is filtered.
     """
     filtered_order = [cid for cid in artifact["candidate_order"] if cid in live_cids]
     filtered_cells = [c for c in artifact["cells"] if c["c"] in live_cids]
@@ -90,44 +91,43 @@ def _filter_artifact_to_live_candidates(artifact: dict, live_cids: set[str]) -> 
 
 
 def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict | None:
-    """Build campaign-only + workspace hard-sample artifacts; persist all three JSON variants.
+    """Build + persist the hard-sample heatmap artifacts at each data scope.
 
-    Three files are always written, regardless of any ``seed_*_from_archive``
-    flag — display variants are part of the operator-AI parity surface and
-    must be available unconditionally:
+    Three files, named by data scope:
 
-    - ``campaigns/{cycle_id}/hard_samples_campaign.json`` — fit over
+    - ``cycles/{cycle_id}/hard_samples.json`` — **cycle** scope: fit over
       ``cycle.rounds`` only.
-    - ``campaigns/{cycle_id}/hard_samples_workspace.json`` — fit over
-      ``cycle.rounds + cycle.archive_observations``. Y-axis filtered to
-      this cycle's candidate IDs unless
-      ``exploration.heatmap_show_archive_candidates`` is on.
-    - ``archive/measurements/hard_samples_workspace_{backend_id}.json`` —
-      tenant-wide archive snapshot for this backend.
+    - ``campaigns/{campaign_id}/hard_samples.json`` — **campaign** scope:
+      the cycle's rounds folded with the campaign's archive observations.
+    - ``archive/measurements/hard_samples_{backend}_{dataset}.json`` —
+      **dataset** scope: the archive snapshot for this backend + dataset.
 
-    Returns the artifact selected for inline log.md rendering: the workspace
-    one when ``exploration.seed_heatmap_from_archive`` is on, otherwise the
-    campaign one. Returns ``None`` when no observations exist yet (empty
-    cycle on round 0 with no archive).
+    Returns the artifact selected for inline log.md rendering: the
+    campaign-scope one when ``exploration.seed_heatmap_from_archive`` is on,
+    otherwise the cycle-scope one. ``None`` when no observations exist yet.
     """
     if not session.state.cycle_id or session.store is None:
         return None
 
-    cycle_dir = session.store.campaigns.campaign_dir(session.state.cycle_id)
+    store = session.store.campaigns
+    campaign_id = session.campaign_id
+    cycle_id = session.state.cycle_id
+    cycle_dir = store.cycle_dir(campaign_id, cycle_id)
+    campaign_dir = store.campaign_root_dir(campaign_id)
 
-    campaign_artifact = build_hard_samples_artifact(
+    cycle_artifact = build_hard_samples_artifact(
         cycle.rounds,
-        cycle_id=session.state.cycle_id,
+        cycle_id=cycle_id,
         top_k_candidates=None,
         top_k_samples=None,
         posterior=cycle.last_rasch_posterior,
     )
 
     live_obs = build_observations(cycle.rounds)
-    workspace_obs = list(cycle.archive_observations) + live_obs
-    workspace_artifact = build_hard_samples_artifact_from_observations(
-        workspace_obs,
-        cycle_id=session.state.cycle_id,
+    campaign_obs = list(cycle.archive_observations) + live_obs
+    campaign_artifact = build_hard_samples_artifact_from_observations(
+        campaign_obs,
+        cycle_id=cycle_id,
         top_k_candidates=None,
         top_k_samples=None,
     )
@@ -136,23 +136,23 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict | None:
     if not exp_cfg.heatmap_show_archive_candidates:
         live_cids = {cid for rr in cycle.rounds for cid in rr.all_candidate_results}
         if live_cids:
-            workspace_artifact = _filter_artifact_to_live_candidates(workspace_artifact, live_cids)
+            campaign_artifact = _filter_artifact_to_live_candidates(campaign_artifact, live_cids)
 
-    with graceful("hard_samples_campaign.json write failed"):
-        write_json(cycle_dir / "hard_samples_campaign.json", campaign_artifact)
-    with graceful("hard_samples_workspace.json write failed"):
-        write_json(cycle_dir / "hard_samples_workspace.json", workspace_artifact)
+    with graceful("cycle hard_samples.json write failed"):
+        write_json(cycle_dir / "hard_samples.json", cycle_artifact)
+    with graceful("campaign hard_samples.json write failed"):
+        write_json(campaign_dir / "hard_samples.json", campaign_artifact)
 
-    # Tenant snapshot is per-(backend, dataset) — cross-dataset pooling on
-    # a shared backend would corrupt Rasch + PoBB picker (sample_id collides).
+    # Dataset-scope snapshot is per-(backend, dataset) — cross-dataset
+    # pooling would corrupt Rasch + PoBB picker (sample_id collides).
     dataset_tag = session.dataset_name or "unknown"
     tenant_path = (
         session.store.base_dir
         / "archive"
         / "measurements"
-        / f"hard_samples_workspace_{session.backend_id}_{dataset_tag}.json"
+        / f"hard_samples_{session.backend_id}_{dataset_tag}.json"
     )
-    with graceful("tenant hard_samples_workspace write failed"):
+    with graceful("dataset hard_samples snapshot write failed"):
         archive_artifact = build_archive_hard_samples_artifact(
             session.store,
             session.backend_id,
@@ -162,7 +162,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict | None:
         )
         write_json(tenant_path, archive_artifact)
 
-    return workspace_artifact if exp_cfg.seed_heatmap_from_archive else campaign_artifact
+    return campaign_artifact if exp_cfg.seed_heatmap_from_archive else cycle_artifact
 
 
 def from_disk_round(
@@ -172,7 +172,7 @@ def from_disk_round(
     composite_fitness_formula_short: str | None = None,
     origin_composite_fitness: float | None = None,
 ) -> RoundCompleteView:
-    """Reconstruct a ``RoundCompleteView`` from a persisted ``trial_NNNN.json``."""
+    """Reconstruct a ``RoundCompleteView`` from a persisted ``round_NNNN.json``."""
     score_entries = [score_entry_from_dict(s) for s in round_data.get("candidate_scores") or []]
 
     winner = pick_round_winner(score_entries)
@@ -180,9 +180,6 @@ def from_disk_round(
 
     winner_acc = float(round_data.get("accuracy", 0.0))
     origin_acc = float(round_data.get("origin_accuracy", 0.0))
-    # Disk-replay rebuild: pull the matched-pair stats persisted by
-    # ``Cycle.absorb_round`` so the rendered verdict reads the same delta the
-    # live run computed. Fall back to full-set origin for older trial JSONs.
     matched_origin_acc = float(round_data.get("matched_origin_accuracy", origin_acc))
     matched_origin_hits = int(round_data.get("matched_origin_hits", 0))
     matched_origin_composite = round_data.get("matched_origin_composite")
@@ -215,15 +212,7 @@ def from_disk_round(
 def _load_p_best_trajectory(
     streams_dir: Path | None, round_num: int
 ) -> tuple[dict[str, list[float]], dict[str, int]]:
-    """Load per-sample P(best) snapshots from the JSONL stream for a single round.
-
-    Returns ``(trajectory, stopped_at)`` — trajectory is candidate_id →
-    list of P(best) values across queries; stopped_at is candidate_id →
-    last-query-idx-before-the-current-candidate-stopped, populated when a
-    candidate's value drops to / below ``ε`` (best-effort: the stream
-    doesn't carry ε, so we infer "stopped" as the query at which the
-    current candidate's snapshot disappears).
-    """
+    """Load per-sample P(best) snapshots from the JSONL stream for a single round."""
     if streams_dir is None or not streams_dir.is_dir():
         return {}, {}
     path = streams_dir / f"round_{round_num:04d}_p_best.jsonl"
@@ -257,16 +246,16 @@ def from_disk_log(
     streams_dir: Path | None = None,
     fork_indices: list[dict[str, Any]] | None = None,
 ) -> LogMdView:
-    """Build the ``log.md`` view from ``index.json`` + a list of round_data dicts.
+    """Build a ``log.md`` view from ``index.json`` + a list of round_data dicts.
 
-    ``fork_indices`` is the list of fork ``index.json`` blobs (one per fork
-    of the family); rendered as the ``## Forks`` section on the family-root
-    log.md. Forks themselves pass ``None`` and get an empty tuple.
+    ``fork_indices`` is the list of sibling-cycle ``index.json`` blobs;
+    rendered as the ``## Cycles`` section on the campaign digest. The
+    per-cycle log.md passes ``None``.
     """
     final = index.get("final") or {}
     gen_only = sum(1 for t in rounds if str(t.get("status") or "") == "generation_only")
     status = DigestStatusView(
-        campaign_id=str(index.get("campaign_id") or ""),
+        campaign_id=str(index.get("cycle_id") or ""),
         parent_session_id=index.get("parent_session_id"),
         status=str(index.get("status", "active")),
         stop_reason=str(final.get("stop_reason") or index.get("stop_reason") or "(running)"),
@@ -326,9 +315,6 @@ def from_disk_log(
     fork_views: tuple[ForkSummaryView, ...] = ()
     family_best: tuple[float, str] | None = None
     if fork_indices:
-        # Drop uninitialized forks (created but never ran a round) — their
-        # all-zeros row is noise. Sort survivors by best desc so the top
-        # contender surfaces first.
         live = [fi for fi in fork_indices if int(fi.get("n_rounds") or 0) > 0]
         fork_views = tuple(
             sorted(
@@ -337,10 +323,8 @@ def from_disk_log(
                 reverse=True,
             )
         )
-        # Family-best across the root + all forks. Cycle id of the holder
-        # disambiguates which sibling carries the headline.
         candidates: list[tuple[float, str]] = [
-            (float(index.get("best_accuracy", 0.0)), str(index.get("campaign_id") or ""))
+            (float(index.get("best_accuracy", 0.0)), str(index.get("cycle_id") or ""))
         ]
         for fv in fork_views:
             candidates.append((fv.best_accuracy, fv.cycle_id))
@@ -361,8 +345,8 @@ def from_disk_log(
 def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
     final = fork_index.get("final") or {}
     return ForkSummaryView(
-        cycle_id=str(fork_index.get("campaign_id") or ""),
-        mode=str(final.get("mode") or fork_index.get("fork_kind") or ""),
+        cycle_id=str(fork_index.get("cycle_id") or ""),
+        mode=str(final.get("mode") or fork_index.get("sibling_kind") or ""),
         status=str(fork_index.get("status", "active")),
         best_accuracy=float(fork_index.get("best_accuracy", 0.0)),
         origin_accuracy=float(fork_index.get("origin_accuracy", 0.0)),
@@ -373,73 +357,93 @@ def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
 
 
 def write_log_md(session: Session, *, hard_samples_artifact: dict | None = None) -> None:
-    """Render log.md for the active cycle; on a fork, also refresh the family root's."""
+    """Render the per-cycle log.md and refresh the campaign digest."""
     if not session.state.cycle_id or session.store is None:
         return
     with graceful("log.md render failed"):
         store = session.store.campaigns
+        campaign_id = session.campaign_id
         cycle_id = session.state.cycle_id
-        _render_log_md_for(store, session.backend_id, cycle_id, hard_samples_artifact)
-        root_id = root_cycle_id(cycle_id)
-        if root_id != cycle_id:
-            # Fork finished — refresh the family root's log.md so its Forks
-            # section picks up this fork's latest best/origin/stop_reason.
-            _render_log_md_for(store, session.backend_id, root_id, None)
+        _render_cycle_log_md(store, campaign_id, cycle_id, hard_samples_artifact)
+        _render_campaign_log_md(store, campaign_id)
 
 
-def _render_log_md_for(
-    store: Any,
-    backend_id: str,
+def _render_cycle_log_md(
+    store: CampaignStore,
+    campaign_id: str,
     cycle_id: str,
     hard_samples_artifact: dict | None,
 ) -> None:
-    index = store.load(backend_id, cycle_id)
+    """Per-cycle ``cycles/{cycle_id}/log.md`` — this cycle's rounds only."""
+    index = store.load(campaign_id, cycle_id)
     if not index:
         return
     n_rounds = int(index.get("n_rounds", 0) or 0)
-    rounds = store.load_rounds_range(backend_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
-    cycle_dir = store.campaign_dir(cycle_id)
+    rounds = store.load_rounds_range(campaign_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
+    cycle_dir = store.cycle_dir(campaign_id, cycle_id)
     streams_dir = cycle_dir / ".runtime" / "streams"
-    fork_indices = _load_fork_indices(cycle_dir)
     content = to_markdown(
         from_disk_log(
             index,
             rounds,
             hard_samples_artifact=hard_samples_artifact,
             streams_dir=streams_dir,
-            fork_indices=fork_indices,
+            fork_indices=None,
         )
     )
     (cycle_dir / "log.md").write_text(content, encoding="utf-8")
 
 
-def _load_fork_indices(cycle_dir: Path) -> list[dict] | None:
-    """Sibling index.json under forks/, diag/, sweeps/*/forks/. None when no siblings."""
-    sibling_dirs: list[Path] = []
-    for sibling_kind in ("forks", "diag"):
-        parent = cycle_dir / sibling_kind
-        if parent.is_dir():
-            sibling_dirs.extend(sorted(parent.iterdir()))
-    sweeps_dir = cycle_dir / "sweeps"
-    if sweeps_dir.is_dir():
-        for batch_dir in sorted(sweeps_dir.iterdir()):
-            batch_forks = batch_dir / "forks"
-            if batch_forks.is_dir():
-                sibling_dirs.extend(sorted(batch_forks.iterdir()))
-    if not sibling_dirs:
+def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
+    """Campaign digest ``campaigns/{campaign_id}/log.md`` — the folder-UI headline.
+
+    Anchored on the root cycle, with every other cycle of the lineage
+    folded into the ``## Cycles`` section.
+    """
+    campaign = store.load_campaign(campaign_id)
+    if campaign is None:
+        return
+    root_id = campaign.root_cycle_id
+    index = store.load(campaign_id, root_id)
+    if not index:
+        return
+    n_rounds = int(index.get("n_rounds", 0) or 0)
+    rounds = store.load_rounds_range(campaign_id, root_id, 0, n_rounds - 1) if n_rounds else []
+    cycle_dir = store.cycle_dir(campaign_id, root_id)
+    streams_dir = cycle_dir / ".runtime" / "streams"
+    fork_indices = _load_sibling_indices(store, campaign_id, exclude=root_id)
+    content = to_markdown(
+        from_disk_log(
+            index,
+            rounds,
+            streams_dir=streams_dir,
+            fork_indices=fork_indices,
+        )
+    )
+    (store.campaign_root_dir(campaign_id) / "log.md").write_text(content, encoding="utf-8")
+
+
+def _load_sibling_indices(
+    store: CampaignStore, campaign_id: str, *, exclude: str
+) -> list[dict] | None:
+    """Every cycle ``index.json`` in the campaign except ``exclude``. ``None`` when empty."""
+    cycles_dir = store.campaign_root_dir(campaign_id) / "cycles"
+    if not cycles_dir.is_dir():
         return None
     out: list[dict] = []
-    for fork_dir in sibling_dirs:
-        if not fork_dir.is_dir():
+    for cycle_dir in sorted(cycles_dir.iterdir()):
+        if not cycle_dir.is_dir() or cycle_dir.name == exclude:
             continue
-        idx = fork_dir / "index.json"
+        idx = cycle_dir / "index.json"
         if not idx.is_file():
             continue
         try:
-            out.append(json.loads(idx.read_text(encoding="utf-8")))
+            blob = json.loads(idx.read_text(encoding="utf-8"))
+            blob["cycle_id"] = cycle_dir.name
+            out.append(blob)
         except (OSError, json.JSONDecodeError):
             continue
-    return out
+    return out or None
 
 
 def write_review_md(session: Session, cycle: Cycle) -> None:
@@ -448,16 +452,14 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
         return
     with graceful("review.md render failed"):
         store = session.store.campaigns
-        index = store.load(session.backend_id, session.state.cycle_id)
+        campaign_id = session.campaign_id
+        cycle_id = session.state.cycle_id
+        index = store.load(campaign_id, cycle_id)
         if not index:
             return
         n_rounds = int(index.get("n_rounds", 0) or 0)
-        rounds = (
-            store.load_rounds_range(session.backend_id, session.state.cycle_id, 0, n_rounds - 1)
-            if n_rounds
-            else []
-        )
-        cycle_dir = store.campaign_dir(session.state.cycle_id)
+        rounds = store.load_rounds_range(campaign_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
+        cycle_dir = store.cycle_dir(campaign_id, cycle_id)
         round_audits = load_round_audits(cycle_dir, rounds)
         td = cycle.opt_sp.task_context
         context_object = [

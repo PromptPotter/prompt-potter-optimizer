@@ -6,7 +6,7 @@ audit trail, measurement archive, langfuse mirror) subscribe to the spine and
 rebuild their views deterministically — they never write to disk on their
 own initiative.
 
-Path-newtype guards (``RootCycleDir`` / ``CycleDir``) live in
+Path-newtype guards (``SessionFamilyDir`` / ``CycleDir``) live in
 :mod:`promptpotter.domain.cycle_paths` so both this module and the
 projection writers in :mod:`promptpotter.infrastructure.projections` can
 import them without crossing hexagonal layers.

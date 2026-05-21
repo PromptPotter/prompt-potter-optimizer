@@ -154,7 +154,7 @@ async def run_round_loop(
                     raise StopLoop(StopReason.ABORT)
                 if session.state.cycle_id:
                     session.store.campaigns.delete_round_candidates(
-                        session.backend_id,
+                        session.campaign_id,
                         session.state.cycle_id,
                         round_num + 1,
                     )

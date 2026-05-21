@@ -28,6 +28,7 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
     ctx = load_session(args)
     session = await init_services_cli(**ctx.init_params)
     session.session_id = ctx.session_id
+    session.campaign_id = ctx.campaign_id
     session.state.cycle_id = ctx.cycle_id
 
     campaign_config = ctx.campaign_config

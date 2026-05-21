@@ -42,35 +42,25 @@ logger = logging.getLogger(__name__)
 
 
 def bootstrap_cycle(
-    config: CampaignConfig,
     session: Session,
     origin_jsp: JobSearchPoint,
     origin_accuracy: float,
     dataset: list,
     cycle_id_override: str | None,
     *,
-    parent_session_id: str = "",
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
-    """Resume an existing cycle or create one — step 3 of the bootstrap
-    chain. Returns (cycle_id, resumed_from_round).
+    """Resolve the cycle to run — step 3 of the bootstrap chain.
+    Returns ``(cycle_id, resumed_from_round)``.
 
-    **Preconditions:**
-    - :func:`init_services` already ran (session has ``store``,
-      ``backend_id``, ``pipeline_schema``, ``samples``).
-    - :func:`populate_session_scoring` already ran (session has ``scoring``
-      block populated — needed because the cycle may immediately re-score).
-
-    **Postconditions:**
-    - On hit: cycle exists in ``store.campaigns``; ``resumed_from_round`` =
-      ``len(rounds) + 1``. The stored ``config`` snapshot stays untouched
-      here — ``resume_with_divergence_check`` owns refresh decisions based
-      on :meth:`CampaignConfig.classify_diff_against`.
-    - On miss: cycle freshly created at round 0; ``resumed_from_round = 1``.
+    The campaign + root-cycle ``index.json`` are minted up-front by
+    :func:`auto_mint_session`; this step opens the cycle, optionally
+    rewinds it, and reports the next L1 round. The frozen ``CampaignConfig``
+    snapshot lives in ``campaign.json`` — ``resume_with_divergence_check``
+    owns drift handling.
 
     ``resumed_from_round`` is the next L1 round_num to execute. Origin is
-    round 0 (always already scored by the time this returns); the first L1
-    round is round 1.
+    round 0; the first L1 round is round 1.
     """
     from promptpotter.application.runner import cycle_config_identity
 
@@ -78,26 +68,17 @@ def bootstrap_cycle(
         return None, 1
     try:
         store = session.store.campaigns
+        campaign_id = session.campaign_id
         resolved = cycle_id_override or cycle_config_identity(origin_jsp, dataset)
         if resume_from_round_override is not None:
-            store.rewind_to_round(session.backend_id, resolved, resume_from_round_override)
-        existing = store.load(session.backend_id, resolved)
+            store.rewind_to_round(campaign_id, resolved, resume_from_round_override)
+        existing = store.load(campaign_id, resolved)
         if existing is not None:
             # Diag forks inherit parent's origin_accuracy but re-measure
             # against their own JSP — refresh top-level field if drift.
             if existing.get("origin_accuracy") != origin_accuracy:
-                store.update(session.backend_id, resolved, {"origin_accuracy": origin_accuracy})
+                store.update(campaign_id, resolved, {"origin_accuracy": origin_accuracy})
             return resolved, len(existing.get("rounds", [])) + 1
-        store.create(
-            session.backend_id,
-            resolved,
-            {
-                "type": "optimization_loop",
-                "config": config.model_dump(mode="json"),
-                "origin_accuracy": origin_accuracy,
-                "parent_session_id": parent_session_id,
-            },
-        )
         return resolved, 1
     except (OSError, json.JSONDecodeError, KeyError):
         logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
@@ -219,13 +200,11 @@ def _build_cycle_and_bootstrap(
         base_pipeline_params=base_pp, schema=session.pipeline_schema
     )
     resolved_cycle_id, resumed_from_round = bootstrap_cycle(
-        config,
         session,
         origin_jsp,
         origin.origin_acc,
         dataset,
         cycle_id,
-        parent_session_id=session.session_id,
         resume_from_round_override=resume_from_round_override,
     )
     return cycle, origin_osp, resolved_cycle_id, resumed_from_round
@@ -256,6 +235,7 @@ def _start_observability_and_scoring(
         origin_accuracy=origin.origin_acc,
         dataset=dataset,
         tracing_campaign_id=tracing_campaign_id,
+        campaign_id=session.campaign_id,
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
         langfuse=session.langfuse,
     )
@@ -292,7 +272,7 @@ def _apply_resume_fork(
     if resumed_from_round > 1 and resolved_cycle_id:
         fork_result = resume_with_divergence_check(
             session.store.campaigns,
-            session.backend_id,
+            session.campaign_id,
             resolved_cycle_id,
             resumed_from_round,
             session,

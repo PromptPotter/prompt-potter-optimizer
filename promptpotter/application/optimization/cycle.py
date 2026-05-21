@@ -268,6 +268,7 @@ class Cycle:
                 root_id = _root_cycle_id(session.state.cycle_id)
                 inherited_failures = gather_sibling_runtime_failures(
                     session.store,
+                    session.campaign_id,
                     root_id,
                     session.backend_id,
                     exclude_cycle_id=session.state.cycle_id,

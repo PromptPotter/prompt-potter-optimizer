@@ -71,7 +71,9 @@ def load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, OperatorSweepFile]]
     ]
 
 
-def existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, str]:
+def existing_fork_source_files(
+    store: Any, campaign_id: str, parent_cycle_id: str
+) -> dict[str, str]:
     """Read the batch parent's ledger; return ``{source_file: fork_cycle_id}`` for prior FORK_CUTs.
 
     Lets the batch dispatcher skip payloads that already minted a fork
@@ -91,8 +93,8 @@ def existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, st
     from promptpotter.infrastructure.ledger import CycleEventLog
 
     out: dict[str, str] = {}
-    parent_dir = store.campaigns.campaign_dir(parent_cycle_id)
-    if not (parent_dir / "ledger.jsonl").exists():
+    parent_dir = store.campaigns.cycle_dir(campaign_id, parent_cycle_id)
+    if not (parent_dir / ".runtime" / "ledger.jsonl").exists():
         return out
     ledger = CycleEventLog.open(CycleDir(parent_dir))
     for record in ledger.iter():
@@ -102,7 +104,7 @@ def existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, st
         ):
             src = record.data.get("source_file")
             outcome = record.outcome
-            if src and outcome and store.campaigns.campaign_dir(str(outcome)).exists():
+            if src and outcome and store.campaigns.cycle_dir(campaign_id, str(outcome)).exists():
                 out[str(src)] = str(outcome)
     return out
 
@@ -141,7 +143,8 @@ async def run_sweep_batch(
     tenant_id = getattr(args, "tenant", "default")
     store = build_stores(tenant_id=tenant_id)
     parent_cycle_id = root_ctx.cycle_id
-    existing = existing_fork_source_files(store, parent_cycle_id)
+    campaign_id = root_ctx.campaign_id
+    existing = existing_fork_source_files(store, campaign_id, parent_cycle_id)
 
     started_at = datetime.now(UTC).isoformat()
     # Format: utc-ts + 4 random hex chars (no underscores — sweep_batch_id is
@@ -158,7 +161,7 @@ async def run_sweep_batch(
         for p, _ in sweep_payloads
     ]
     store.sweeps.init_batch(
-        family_root,
+        campaign_id,
         batch_id,
         parent_cycle_id=parent_cycle_id,
         started_at=started_at,
@@ -189,6 +192,7 @@ async def run_sweep_batch(
         # interrupts before _orch_run_optimization commits round 1.
         new_cycle_id = _mint_fork(
             store.campaigns,
+            campaign_id,
             tenant_id,
             root_ctx.session_id,
             parent_cycle_id,
@@ -208,6 +212,7 @@ async def run_sweep_batch(
                 on_status=(lambda msg: logger.info(msg) if verbose else None),
             )
             fork_session.session_id = fork_ctx.session_id
+            fork_session.campaign_id = fork_ctx.campaign_id
             fork_session.state.cycle_id = fork_ctx.cycle_id
             # init_services builds the pipeline_schema but leaves
             # session.pipeline_params empty until configure_and_apply_pipeline
@@ -247,6 +252,7 @@ async def run_sweep_batch(
             if n_rounds == 0:
                 cleanup_stub_fork_if_empty(
                     campaign_store=store.campaigns,
+                    campaign_id=campaign_id,
                     tenant_id=tenant_id,
                     session_id=root_ctx.session_id,
                     cycle_id=new_cycle_id,
@@ -311,7 +317,7 @@ async def run_sweep_batch(
             path.name,
         )
 
-    save_active_pointer(tenant_id, root_ctx.session_id, parent_cycle_id)
+    save_active_pointer(tenant_id, root_ctx.session_id, campaign_id, parent_cycle_id)
     # dashboard.json no longer carries cycle_id (active identity lives
     # only in active_session.json), so the pointer restore is the
     # entire sync — no sidecar dashboard rewrite needed.
@@ -321,14 +327,14 @@ async def run_sweep_batch(
         p.name: cid for (p, _), cid in zip(sweep_payloads, new_cycle_ids, strict=False)
     }
     store.sweeps.finalize_batch(
-        family_root,
+        campaign_id,
         batch_id,
         completed_at=completed_at,
         status_by_source=status_by_source,
         cycle_by_source=cycle_by_source,
     )
 
-    final_index = store.sweeps.load_batch(family_root, batch_id) or {}
+    final_index = store.sweeps.load_batch(campaign_id, batch_id) or {}
     payload_rows = tuple(
         SweepPayloadRow(
             source_file=entry["source_file"],
@@ -347,7 +353,7 @@ async def run_sweep_batch(
         n_payloads=len(sweep_payloads),
         payloads=payload_rows,
     )
-    store.sweeps.write_summary_md(family_root, batch_id, render_sweep_summary(summary_view))
+    store.sweeps.write_summary_md(campaign_id, batch_id, render_sweep_summary(summary_view))
 
     logger.info(
         "Sweep batch %s complete: %d forks under %s; active pointer restored",

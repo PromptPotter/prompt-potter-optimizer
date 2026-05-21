@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 def _apply_tenant_guard(tenant_id: str, take_over: bool, status: Callable[[str], None]) -> None:
     """Refuse tenant drift unless take_over=True; on take-over, clear the pointer."""
-    active_tid, active_sid, _ = read_active_pointer()
+    active_tid, active_sid, _, _ = read_active_pointer()
     if not (active_tid and active_tid != tenant_id):
         return
     if not take_over:
