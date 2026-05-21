@@ -75,7 +75,7 @@ Frozen dataclass returned by `compute_l1_stats(rounds, *, origin_composite, beha
 
 Parent composite: `origin_composite` for round 1, `trials[r-1].composite` thereafter.
 
-**Round-1 verdict** thresholds (calibrate after first 3 cycles): `yield_rate ≥ 0.20` → healthy · `< 0.20` → degraded · L1 schema failure / parse-fail-rate ≥ 50% / behavior checks all ✗ → broken.
+**Round-1 verdict** is conformance-anchored — it keys off behaviour-check conformance alone. `yield_rate` and `top_lift_mean` are confounded by dataset headroom (a capacity-bound dataset cannot register a gain) so they ride `L1Stats` as diagnostics, never as verdict inputs: zero conformance ✗ → `healthy` · exactly one ✗ → `degraded` · ≥ 2 ✗ (or a persistent `forbidden_axes_honored` violation) → `broken`. A healed `forbidden_axes_honored` ✗ does not count. Accuracy validity is checked periodically via `conformance_lift_corr` (Spearman of conformance against accuracy lift) on a movable dataset, not per cycle.
 
 ### Track 4 — Cross-cycle / cross-branch leaderboard
 

@@ -196,38 +196,42 @@ def _add_sweep_slice_args(p: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_sweep_l1_prompt_args(p: argparse.ArgumentParser, *, allow_multi: bool = True) -> None:
-    """Shared L1-prompt selector + label.
+def _add_sweep_prompt_args(p: argparse.ArgumentParser, *, allow_multi: bool = True) -> None:
+    """Shared optimizer-meta-prompt selectors + labels for ``l1_generate``
+    and ``l2_context``. One node per sweep — ``_parse_variants`` rejects
+    passing both, so a 2-round sweep's conformance reading attributes
+    cleanly to the prompt under test.
 
     ``allow_multi=True`` lets round1/round2 take a comma-list of variants;
     each variant runs in its own fork. ``time-to`` keeps singular semantics
     (only one halt-on-accuracy run makes sense per invocation).
     """
-    if allow_multi:
+    for node, flag in (("l1", "l1_generate"), ("l2", "l2_context")):
+        if allow_multi:
+            p.add_argument(
+                f"--{node}-prompts",
+                dest=f"{node}_prompts",
+                default=None,
+                help="Comma-separated paths to PromptTemplate JSON files to A/B "
+                "in one invocation. Each variant runs in its own OPERATOR_SWEEP "
+                "fork; results share a sweep_id. Omit to use the currently "
+                f"loaded {flag} template.",
+            )
+        else:
+            p.add_argument(
+                f"--{node}-prompt",
+                dest=f"{node}_prompt",
+                default=None,
+                help=f"Path to a PromptTemplate JSON to swap in for {flag}. "
+                "Omit to use the currently loaded template.",
+            )
         p.add_argument(
-            "--l1-prompts",
-            dest="l1_prompts",
+            f"--{node}-prompt-label",
+            dest=f"{node}_prompt_label",
             default=None,
-            help="Comma-separated paths to PromptTemplate JSON files to A/B "
-            "in one invocation. Each variant runs in its own OPERATOR_SWEEP "
-            "fork; results share a sweep_id. Omit to use the currently "
-            "loaded l1_generate template.",
+            help=f"Operator label for the {flag} meta-prompt revision "
+            f"(e.g. '{node}_v3'). Recorded on the result.",
         )
-    else:
-        p.add_argument(
-            "--l1-prompt",
-            dest="l1_prompt",
-            default=None,
-            help="Path to a PromptTemplate JSON to swap in for l1_generate. "
-            "Omit to use the currently loaded template.",
-        )
-    p.add_argument(
-        "--l1-prompt-label",
-        dest="l1_prompt_label",
-        default=None,
-        help="Operator label for the L1 meta-prompt revision (e.g. 'l1_v3'). "
-        "Recorded on the result; the hash is always derived from the loaded prompt.",
-    )
 
 
 def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
@@ -262,7 +266,7 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
         default=None,
         help="Halt when cumulative cycle spend (USD, optimizer + backend) ≥ this value.",
     )
-    _add_sweep_l1_prompt_args(p_time_to, allow_multi=False)
+    _add_sweep_prompt_args(p_time_to, allow_multi=False)
     _add_sweep_slice_args(p_time_to)
     p_time_to.add_argument(
         "--refresh-rates",
@@ -284,7 +288,7 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
         default=6,
         help="Number of candidates to generate (overrides campaign.json::optimization.n_variants).",
     )
-    _add_sweep_l1_prompt_args(p_round1)
+    _add_sweep_prompt_args(p_round1)
     _add_sweep_slice_args(p_round1)
     p_round1.add_argument(
         "--refresh-rates",
@@ -321,7 +325,7 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
         default=3,
         help="With --from-sweep: number of top-K variants to re-run (default 3).",
     )
-    _add_sweep_l1_prompt_args(p_round2)
+    _add_sweep_prompt_args(p_round2)
     _add_sweep_slice_args(p_round2)
     p_round2.add_argument(
         "--refresh-rates",

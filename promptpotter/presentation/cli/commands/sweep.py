@@ -46,40 +46,69 @@ def _sweep_early_exit_reason(stop_reason: str) -> str:
 
 @dataclass
 class _Variant:
-    """One L1-meta-prompt variant in a panel iteration."""
+    """One optimizer-meta-prompt variant in a panel iteration."""
 
     path: Path | None  # None ⇒ use whatever is currently loaded
     label: str | None  # operator-supplied or file stem
+    node: str = "l1_generate"  # optimizer node this variant overrides
 
 
 def _parse_variants(args: argparse.Namespace) -> list[_Variant]:
-    """Resolve ``--l1-prompts`` (plural, round1/round2) or ``--l1-prompt``
-    (singular, time-to). When neither is given returns a single
-    ``_Variant(path=None)`` so the verb runs against the currently
-    loaded L1 in one iteration."""
-    label_override = getattr(args, "l1_prompt_label", None)
-    raw = getattr(args, "l1_prompts", None) or getattr(args, "l1_prompt", None)
-    # NB: argparse declares only ONE of --l1-prompts / --l1-prompt per subparser
-    # (see _add_sweep_l1_prompt_args), so the unused attribute is never set on
-    # `args`. getattr-with-default is the correct contract here, not a shim.
+    """Resolve the optimizer-meta-prompt variants for this sweep.
+
+    Reads ``--l1-prompt(s)`` or ``--l2-prompt(s)`` — one optimizer node
+    per invocation, so a 2-round sweep attributes its conformance reading
+    cleanly to the prompt being A/B-tested. When neither is given returns
+    a single ``_Variant(path=None)`` so the verb runs against the
+    currently loaded ``l1_generate`` in one iteration.
+    """
+    l1_raw = getattr(args, "l1_prompts", None) or getattr(args, "l1_prompt", None)
+    l2_raw = getattr(args, "l2_prompts", None) or getattr(args, "l2_prompt", None)
+    # argparse declares only the singular OR plural flag per subparser
+    # (see _add_sweep_prompt_args), so getattr-with-default is the contract.
+    if l1_raw and l2_raw:
+        raise SystemExit(
+            "sweep: pass --l1-prompt(s) OR --l2-prompt(s), not both — one "
+            "optimizer node per sweep keeps the conformance reading attributable"
+        )
+    if l2_raw:
+        node, raw = "l2_context", l2_raw
+        label_override = getattr(args, "l2_prompt_label", None)
+    else:
+        node, raw = "l1_generate", l1_raw
+        label_override = getattr(args, "l1_prompt_label", None)
     if not raw:
-        return [_Variant(path=None, label=label_override)]
+        return [_Variant(path=None, label=label_override, node=node)]
     paths = [Path(p.strip()) for p in str(raw).split(",") if p.strip()]
     missing = [str(p) for p in paths if not p.exists()]
     if missing:
-        raise SystemExit(f"L1 prompt file(s) not found: {', '.join(missing)}")
+        raise SystemExit(f"{node} prompt file(s) not found: {', '.join(missing)}")
     return [
-        _Variant(path=p, label=label_override if len(paths) == 1 else None or p.stem) for p in paths
+        _Variant(
+            path=p,
+            label=(label_override if len(paths) == 1 else None) or p.stem,
+            node=node,
+        )
+        for p in paths
     ]
 
 
-def _resolve_l1_template(variant: _Variant) -> Any:
-    """Load PromptTemplate from variant's path (or None for current loader)."""
+def _resolve_template(variant: _Variant) -> Any:
+    """Load the PromptTemplate from the variant's path (None ⇒ current loader)."""
     if variant.path is None:
         return None
-    from promptpotter.application.sweep import load_l1_prompt_from_path
+    from promptpotter.application.sweep import load_prompt_template_from_path
 
-    return load_l1_prompt_from_path(variant.path)
+    return load_prompt_template_from_path(variant.path)
+
+
+def _variant_id_fields(variant: _Variant) -> dict[str, Any]:
+    """The label + path result fields for whichever optimizer node this
+    variant overrides; the other node's fields stay unset (``None``)."""
+    path = str(variant.path) if variant.path else None
+    if variant.node == "l2_context":
+        return {"l2_meta_prompt_label": variant.label, "l2_prompt_path": path}
+    return {"l1_meta_prompt_label": variant.label, "l1_prompt_path": path}
 
 
 async def _setup_sweep_cycle(
@@ -124,9 +153,9 @@ async def _run_sweep_optimize(
     max_spend_usd: float | None = None,
 ) -> tuple[Any, Any]:
     """Drive ``run_optimization`` for any sweep verb — honors
-    ``halt_at_accuracy`` / ``max_spend_usd`` and the active L1 override
-    (managed by the caller via :func:`l1_generate_override`). Returns
-    ``(cycle_result, observers)``."""
+    ``halt_at_accuracy`` / ``max_spend_usd`` and the active optimizer-prompt
+    override (managed by the caller via :func:`optimizer_prompt_override`).
+    Returns ``(cycle_result, observers)``."""
     from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
@@ -181,8 +210,8 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
     """
     from promptpotter.application.sweep import (
         build_sweep_result,
-        current_l1_meta_prompt_hash,
-        l1_generate_override,
+        current_optimizer_prompt_hash,
+        optimizer_prompt_override,
         slice_samples,
         write_sweep_result,
     )
@@ -216,7 +245,7 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
     if len(variants) > 1:
         raise SystemExit("sweep time-to: only one L1 variant per invocation")
     variant = variants[0]
-    l1_template = _resolve_l1_template(variant)
+    template = _resolve_template(variant)
 
     logger.info(
         "Sweep time-to %d%%: max_rounds=%d max_spend=%s slice=%s l1=%s",
@@ -228,7 +257,7 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
     )
 
     try:
-        with l1_generate_override(l1_template):
+        with optimizer_prompt_override(variant.node, template):
             cycle_result, observers = await _run_sweep_optimize(
                 args,
                 ctx,
@@ -252,9 +281,8 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
     result = build_sweep_result(
         verb="time-to",
         dataset=ctx.init_params["dataset_name"] or "unknown",
-        l1_meta_prompt_hash=current_l1_meta_prompt_hash(),
-        l1_meta_prompt_label=variant.label,
-        l1_prompt_path=str(variant.path) if variant.path else None,
+        l1_meta_prompt_hash=current_optimizer_prompt_hash(),
+        **_variant_id_fields(variant),
         cycle_id=cycle_result.cycle_id,
         slice_name=resolved_slice,
         rounds_to_target=cycle_result.n_rounds if target_hit else None,
@@ -353,10 +381,10 @@ async def _run_one_panel_variant(
 ) -> tuple[Any, Any]:
     """Run one optimize cycle with ``variant``'s L1 template applied.
     Returns ``(cycle_result, observers)``."""
-    from promptpotter.application.sweep import l1_generate_override
+    from promptpotter.application.sweep import optimizer_prompt_override
 
-    template = _resolve_l1_template(variant)
-    with l1_generate_override(template):
+    template = _resolve_template(variant)
+    with optimizer_prompt_override(variant.node, template):
         return await _run_sweep_optimize(args, ctx, campaign_config, session, train_data)
 
 
@@ -375,7 +403,7 @@ def _variant_to_result(
     """Compose one sweep-result dict from a finished panel run."""
     from promptpotter.application.sweep import (
         build_sweep_result,
-        current_l1_meta_prompt_hash,
+        current_optimizer_prompt_hash,
     )
 
     rounds = list(cycle_result.rounds or [])
@@ -392,9 +420,8 @@ def _variant_to_result(
         return build_sweep_result(
             verb=verb,
             dataset=dataset,
-            l1_meta_prompt_hash=current_l1_meta_prompt_hash(),
-            l1_meta_prompt_label=variant.label,
-            l1_prompt_path=str(variant.path) if variant.path else None,
+            l1_meta_prompt_hash=current_optimizer_prompt_hash(),
+            **_variant_id_fields(variant),
             cycle_id=cycle_result.cycle_id,
             sweep_id=sweep_id,
             slice_name=resolved_slice,
@@ -423,9 +450,8 @@ def _variant_to_result(
     return build_sweep_result(
         verb=verb,
         dataset=dataset,
-        l1_meta_prompt_hash=current_l1_meta_prompt_hash(),
-        l1_meta_prompt_label=variant.label,
-        l1_prompt_path=str(variant.path) if variant.path else None,
+        l1_meta_prompt_hash=current_optimizer_prompt_hash(),
+        **_variant_id_fields(variant),
         cycle_id=cycle_result.cycle_id,
         sweep_id=sweep_id,
         slice_name=resolved_slice,
@@ -460,9 +486,13 @@ async def _run_panel_verb(
 
     panel_size = int(args.panel_size)
     campaign_config = load_session(args).campaign_config
-    sweep_opt = campaign_config.optimization.model_copy(
-        update={"max_rounds": n_rounds, "n_variants": panel_size}
-    )
+    opt_update: dict[str, Any] = {"max_rounds": n_rounds, "n_variants": panel_size}
+    if any(v.node == "l2_context" for v in variants):
+        # An l2_context sweep must exercise l2 to measure it. l2 fires on L1
+        # stall — force l1_patience=0 so L1 stalls after round 1 and l2 fires
+        # (and is conformance-scored) in round 2 of the cheap 2-round loop.
+        opt_update["l1_patience"] = 0
+    sweep_opt = campaign_config.optimization.model_copy(update=opt_update)
     campaign_config = campaign_config.model_copy(update={"optimization": sweep_opt})
 
     train_data, ctx, session = await _setup_sweep_cycle(args, campaign_config)

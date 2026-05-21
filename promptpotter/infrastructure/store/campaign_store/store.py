@@ -395,18 +395,38 @@ class CampaignStore(EntityStore):
         finished_at: str,
         interrupted_round: int | None = None,
         crash_traceback: str | None = None,
+        final: dict[str, Any] | None = None,
     ) -> None:
-        """Write the terminal status/stop_reason + outcome summary to the cycle index."""
+        """Write the terminal status/stop_reason + outcome summary to the cycle index.
+
+        ``final`` is the terminal-summary namespace (``index.json::final``):
+        the frozen verdict the ``potter-l1-meta-campaign`` skill, ``review.md``
+        and the leaderboard read after a cycle ends. The caller assembles it
+        (it needs the optimizer prompt hashes, an application-layer fact);
+        this method only persists it.
+        """
         from promptpotter.shared.errors import graceful
+
+        # Round count is monotonic. A degenerate finalize — a resume that
+        # diverged or crashed during init, before a Cycle was built — carries
+        # n_rounds=0 / best_accuracy=0.0; it must not regress a cycle that
+        # already completed real rounds. On no-advance, only status /
+        # stop_reason / finished_at reflect this run; the outcome summary and
+        # the frozen `final` block are kept from disk.
+        existing = read_json_optional(self._index_path(campaign_id, cycle_id)) or {}
+        no_advance = n_rounds < int(existing.get("n_rounds") or 0)
 
         updates: dict[str, Any] = {
             "status": status,
             "stop_reason": stop_reason,
-            "best_accuracy": best_accuracy,
-            "best_round": best_round,
-            "n_rounds": n_rounds,
             "finished_at": finished_at,
         }
+        if not no_advance:
+            updates["best_accuracy"] = best_accuracy
+            updates["best_round"] = best_round
+            updates["n_rounds"] = n_rounds
+            if final is not None:
+                updates["final"] = final
         remove_keys: list[str] = []
         if status in {"interrupted", "crashed"}:
             if interrupted_round is not None:

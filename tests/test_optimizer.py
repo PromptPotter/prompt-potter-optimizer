@@ -1471,3 +1471,45 @@ def test_merge_into_cumulative_preserves_prior_on_untouched_samples():
     assert all(by_sid[i]["hit"] is True for i in range(10))
     # Empty incoming → cumulative unchanged.
     assert _merge_into_cumulative(prior, []) == prior
+
+
+def test_l2_behavior_checks_score_conformant_vs_stub_fires():
+    """L2 conformance contract: a well-formed ``l2_context`` fire passes
+    every behaviour check; a stub fire (terse rationale, no axis, verbatim
+    task_context) fails them. The score is dataset-independent — it reads
+    only the meta-prompt's output shape — which is what makes it the anchor
+    for iterating ``l2_context`` across datasets. A round where L2 did not
+    fire yields no results, so an absent fire never scores as a failure."""
+    from promptpotter.application.optimization.validators.l1_behavior import CheckContext
+    from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
+
+    def _round(response: dict) -> dict:
+        return {"nodes": {"l2_context": {"output": {"response": response}}}}
+
+    ctx = CheckContext(
+        round_num=3,
+        opt_search_point={"task_context": {"key_challenges": "the prior framing"}},
+    )
+
+    conformant = run_all_l2_checks(
+        _round(
+            {
+                "rationale": "Axis instruction stalled 3 rounds; sample #14 regressed — refocus.",
+                "axis_targeted": "instruction",
+                "task_context": {"key_challenges": "a genuinely new framing of negation depth"},
+            }
+        ),
+        ctx,
+    )
+    assert len(conformant) == 4
+    assert all(c.passed for c in conformant)
+
+    stub = run_all_l2_checks(
+        _round({"rationale": "ok", "axis_targeted": "", "task_context": {}}),
+        ctx,
+    )
+    failed = {c.check_id for c in stub if not c.passed}
+    assert {"l2_rationale_substantive", "l2_evidence_anchored"} <= failed
+
+    # A round where L2 did not fire — no l2_context node — yields nothing.
+    assert run_all_l2_checks({"nodes": {"l1_generate": {}}}, ctx) == []

@@ -49,13 +49,30 @@ Pass `--audit-dir` pointing at the parent's runtime cache when the cycle is a fo
 
 Read L1Stats from `{cycle_dir}/review.md` header (Track 3 fields): `behavior_pass_rate`, `yield_rate`, `top_lift_mean`, `stagnation_max`, `l2_fires`, and the origin-regression flag (round 0 best accuracy vs parent origin).
 
-Compute `round_1_verdict`:
+Compute `round_1_verdict` — **conformance-anchored**. The verdict keys off
+behaviour-check conformance alone. `yield_rate`, `top_lift_mean`, and
+origin-regression are confounded by dataset headroom — a capacity-bound
+dataset (e.g. aime_2025 at its 60 % ceiling) cannot register a gain no
+matter how good the meta-prompt — so read them as diagnostics on the
+`review` entry, never as verdict inputs. Accuracy validity is the *periodic*
+`conformance_lift_corr` gate (Phase 6) run on a movable dataset, not a
+per-cycle signal.
+
+The conformant check set depends on `prompt_id`:
+
+- **`l1_generate`** — read `round_1_verdict` straight from the `review.md`
+  header; Python computes it from the four L1 behaviour checks.
+- **`l2_context`** — Python's `round_1_verdict` covers L1 only. Derive the
+  L2 verdict from `l2_behavior_pass_rate` over the `l2_fires` rounds (a
+  2-round conformance sweep fires L2 exactly once, so the rate is exact):
+  `1.0` → healthy, `0.75` → degraded, `≤ 0.50` → broken. `l2_fires == 0`
+  means the sweep never fired L2 — a defect; re-run with `l1_patience=0`.
 
 | Verdict | Rule |
 |---|---|
-| `healthy` | `behavior_pass_rate == 1.0` AND `yield_rate ≥ 0.20` AND `top_lift_mean > 0` |
-| `degraded` | exactly one ✗ behavior check OR `yield_rate < 0.20` OR `top_lift_mean ≤ 0` (and not broken) |
-| `broken` | ≥ 2 ✗ behavior checks OR origin regression on round 0 |
+| `healthy` | zero ✗ conformance checks (a healed `forbidden_axes_honored` ✗ doesn't count) |
+| `degraded` | exactly one ✗ conformance check |
+| `broken` | ≥ 2 ✗ conformance checks OR a persistent `forbidden_axes_honored` violation (l1 only) |
 
 Append one `review` entry per cycle to `log.jsonl` (schema below). Then act on the verdict:
 
@@ -73,14 +90,24 @@ The skill reads `forbidden_axis_attempts` + `forbidden_axis_healed` from the L1S
 - **Healed** (`forbidden_axis_attempts > 0 AND forbidden_axis_healed == true`): not an issue. The chain worked as designed. Cycle flows through Screen/Promote normally. Record on the `review` event but do NOT halt. The behavior-check row shows ✗ with the trailer `→ healed by validator + L2 (N attempts across cycle)`.
 - **Persistent** (`forbidden_axis_attempts > 0 AND forbidden_axis_healed == false`): the heal chain didn't converge — top-issue, halt, propose. The fix is **never** "re-add an enumerated clause to L1's prompt." That option is closed by design (`docs/concepts/self-healing.md` Wound 1).
 
-**Top-issue rank** (first match wins):
+**Top-issue rank** (first match wins). The verdict is conformance-pure, so a
+non-healthy cycle always carries ≥ 1 conformance ✗ — the top issue is always
+a failed conformance check.
+
+*`l1_generate` campaign:*
 
 1. **Persistent** `forbidden_axes_honored` — heal chain failed.
 2. Failed seeded behavior check (`context_object_honored`, `param_scope_discipline`, `not_only_param_variants`, `parse_success`)
 3. Failed scaffolding check (any other ✗ in the behavior table, excluding healed `forbidden_axes_honored`)
-4. Low yield (`yield_rate < 0.20`)
-5. Flat lift (`top_lift_mean ≤ 0`)
-6. L2-source-of-lineage in round 1 (`l2_fires > 0` AND the round-1 winner's `lineage.source == l2_context`)
+
+*`l2_context` campaign:* the failed L2 check, in registry order —
+`l2_rationale_substantive`, `l2_evidence_anchored`,
+`l2_task_context_not_verbatim`, `l2_targets_l1_surface`.
+
+`yield_rate` and `top_lift_mean` are diagnostics on the `review` entry that
+feed `conformance_lift_corr`; they are never a top issue. `l1_critique`
+iteration is deferred (M10 spec) — this campaign edits `l1_generate` or
+`l2_context` only.
 
 **Proposed-edit mapping** (target prompt file ⇐ top issue; one change at a time):
 
@@ -91,9 +118,10 @@ The skill reads `forbidden_axis_attempts` + `forbidden_axis_healed` from the L1S
 | Failed `param_scope_discipline` | `l1_generate/1` | Bound param mutations until `param_unlock_round`. |
 | Failed `not_only_param_variants` | `l1_generate/1` | Require ≥1 prompt-field mutation per round. |
 | Failed `parse_success` | `l1_generate/1` | Tighten JSON-schema reminder + example. |
-| Low yield | `l1_generate/1` | Broaden L1 creativity (loosen mutation bounds, raise diversity ask). |
-| Flat lift | `l1_critique/1` | Sharpen critique signal — the bottleneck is feedback, not generation. |
-| Early L2 fires | `l1_critique/1` | Same root cause — critique didn't carry enough signal for L1. |
+| Failed `l2_rationale_substantive` | `l2_context/1` | Require a substantive diagnostic rationale, not a stub. |
+| Failed `l2_evidence_anchored` | `l2_context/1` | Require the refinement to name a targeted axis or cite a specific sample / number. |
+| Failed `l2_task_context_not_verbatim` | `l2_context/1` | Forbid no-op `task_context` merges — require a real field delta per fire. |
+| Failed `l2_targets_l1_surface` | `l2_context/1` | Require each fire to change something L1 reads (`task_context`, `l1_layout`, `l1_overrides`, a supplemental rule). |
 
 A **persistent** `forbidden_axes_honored` is a hard halt for both sweep and full cycles — the heal chain failing means L2 isn't absorbing the validator signal, and the cycle's variants are wasting slots that the validator catches but L1 keeps re-proposing. A **healed** `forbidden_axes_honored` is a normal observation, not a halt; the chain did its job.
 
@@ -170,8 +198,17 @@ Accept ⇒ append `promote_accept`; set `state.json::parent_hash = active_hash`,
    | 0.4 – 0.6 | `rung_2` + require one full-cycle confirmation per promotion |
    | < 0.4 | `rung_3` (R1 + R2 minimum) — surface loudly; this is a framework-level event |
 
-3. **Persist.** Overwrite `state.json` with new `phase`, `pending_*`, `proxy_lift_corr`, `n_paired`, `screen_floor`, `mode`, `paused`, `pause_reason`, `updated_at`.
-4. **One-paragraph status.** Print: `active_hash[:8]`, mode, last verdict, last `round_1_verdict` per pending cycle, what's pending (cycles + datasets), any proposed-edit path awaiting operator action, next operator action, the exact CLI command if one is recommended.
+3. **Recompute `conformance_lift_corr`.** This validates the anchor itself — does behaviour conformance predict accuracy lift? From `log.jsonl`, take every `promote_*` on the **movable** dataset (the one with accuracy headroom — never the conformance proving ground, which has none) and pair its conformance reading (`behavior_pass_rate` for an `l1_generate` campaign, `l2_behavior_pass_rate` for `l2_context`, read off the matching `review` entry) against its accuracy lift (`final_accuracy − parent_final_accuracy`). Spearman-rank the pairs. Skip if `n_conformance_paired < 4`.
+4. **Apply the conformance threshold table.** This governs whether a healthy sweep verdict can promote on its own:
+
+   | `conformance_lift_corr` (n ≥ 4) | effect |
+   |---|---|
+   | ≥ 0.6 | conformance trusted standalone — a `healthy` sweep verdict promotes without a confirmation cycle |
+   | < 0.6 | pair every promotion with one full-cycle confirmation on the movable dataset |
+   | n < 4 | not enough pairs yet — stay cautious (pair with confirmation) |
+
+5. **Persist.** Overwrite `state.json` with new `phase`, `pending_*`, `proxy_lift_corr`, `n_paired`, `conformance_lift_corr`, `n_conformance_paired`, `screen_floor`, `mode`, `paused`, `pause_reason`, `updated_at`.
+6. **One-paragraph status.** Print: `active_hash[:8]`, mode, last verdict, last `round_1_verdict` per pending cycle, `proxy_lift_corr` + `conformance_lift_corr` (with `n`), what's pending (cycles + datasets), any proposed-edit path awaiting operator action, next operator action, the exact CLI command if one is recommended.
 
 ## State + log schemas
 
@@ -189,6 +226,8 @@ Accept ⇒ append `promote_accept`; set `state.json::parent_hash = active_hash`,
   "screen_floor": "rung_2",
   "proxy_lift_corr": 0.71,
   "n_paired": 6,
+  "conformance_lift_corr": 0.64,
+  "n_conformance_paired": 5,
   "paused": false,
   "pause_reason": null,
   "pending_screen": [{"cycle_id": "…", "candidate": "01_step_by_step_verify", "prompt_hash": "…", "dataset": "termnorm"}],

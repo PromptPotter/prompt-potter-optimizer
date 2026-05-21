@@ -34,11 +34,11 @@ __all__ = [
     "SWEEP_RESULT_FIELDS",
     "build_sweep_result",
     "compute_panel_stats",
-    "current_l1_meta_prompt_hash",
+    "current_optimizer_prompt_hash",
     "find_sweep_results",
-    "l1_generate_override",
-    "load_l1_prompt_from_path",
+    "load_prompt_template_from_path",
     "mint_sweep_id",
+    "optimizer_prompt_override",
     "rank_sweep_results",
     "slice_samples",
     "sweep_archive_dir",
@@ -55,6 +55,8 @@ SWEEP_RESULT_FIELDS: tuple[str, ...] = (
     "l1_meta_prompt_hash",
     "l1_meta_prompt_label",
     "l1_prompt_path",
+    "l2_meta_prompt_label",
+    "l2_prompt_path",
     "cycle_id",
     "dataset",
     "slice",
@@ -159,13 +161,12 @@ def write_sweep_result(
     return out_path
 
 
-def current_l1_meta_prompt_hash() -> str:
-    """The L1-generate meta-prompt hash for the current optimizer pipeline
+def current_optimizer_prompt_hash(node: str = "l1_generate") -> str:
+    """The meta-prompt hash for optimizer ``node`` in the current pipeline
     snapshot. Same value that lands on ``index.json::final.prompt_hashes.
-    l1_generate``; used as the directory key so every sweep result groups
-    under the L1 revision that produced it."""
-    hashes = compute_optimizer_prompt_hashes()
-    return hashes.get("l1_generate", "unknown")
+    {node}``. The ``l1_generate`` hash is the sweep-archive directory key,
+    so every sweep result groups under the L1 revision that produced it."""
+    return compute_optimizer_prompt_hashes().get(node, "unknown")
 
 
 # ---------------------------------------------------------------------------
@@ -173,25 +174,28 @@ def current_l1_meta_prompt_hash() -> str:
 # ---------------------------------------------------------------------------
 
 
-def load_l1_prompt_from_path(path: Path) -> PromptTemplate:
+def load_prompt_template_from_path(path: Path) -> PromptTemplate:
     """Load a ``PromptTemplate`` from a JSON file on disk.
 
-    Accepts the same 8-field shape stored at ``datasets/{name}/prompts/{node}.json``
-    and at ``optimizer_pipeline.json::resolved_prompts['l1_generate/1']``.
+    Accepts the 8-field shape stored at ``datasets/{name}/prompts/{node}.json``
+    and at ``optimizer_pipeline.json::resolved_prompts['{node}/1']`` — used
+    to swap in an ``l1_generate`` or ``l2_context`` variant for a sweep.
     """
     body = json.loads(path.read_text(encoding="utf-8"))
     return PromptTemplate(**body)
 
 
 @contextlib.contextmanager
-def l1_generate_override(template: PromptTemplate | None) -> Iterator[None]:
-    """Temporarily redirect ``load_optimizer_prompt('l1_generate')`` to
-    ``template``. Pass ``None`` to leave the loader untouched (no-op).
+def optimizer_prompt_override(node_name: str, template: PromptTemplate | None) -> Iterator[None]:
+    """Temporarily redirect ``load_optimizer_prompt(node_name)`` to
+    ``template``. Pass ``template=None`` to leave the loader untouched
+    (no-op).
 
-    Used by ``round1``/``round2`` to A/B candidate L1 meta-prompts in one
-    invocation. Restores the cached loader on exit; the LRU cache is
-    cleared so subsequent loads see the canonical registry again. Only
-    `l1_generate` is overridden; other optimizer prompts pass through.
+    Used by ``round1``/``round2`` to A/B a candidate optimizer meta-prompt
+    in one invocation — ``node_name`` is ``l1_generate`` or ``l2_context``.
+    Restores the cached loader on exit; the LRU cache is cleared so
+    subsequent loads see the canonical registry again. Only ``node_name``
+    is overridden; the other optimizer prompts pass through.
     """
     if template is None:
         yield
@@ -200,7 +204,7 @@ def l1_generate_override(template: PromptTemplate | None) -> Iterator[None]:
     original = _llm_call._load_local
 
     def _overridden(name: str) -> PromptTemplate:
-        if name == "l1_generate":
+        if name == node_name:
             return template
         return original(name)
 

@@ -13,6 +13,7 @@ import asyncio
 import logging
 import traceback
 from datetime import UTC, datetime
+from typing import Any
 
 from promptpotter.application.bootstrap import init_optimization_loop
 from promptpotter.application.bootstrap.session import Session
@@ -242,7 +243,7 @@ async def run_optimization(
             session_id=session.session_id or None,
             resumed_from_round=session.state.resumed_from_round,
         )
-    _finalize_run(session, observers, cycle_result)
+    _finalize_run(session, observers, cycle_result, sweep=sweep)
 
     # Stub-fork cleanup. If this run forked during init (divergence
     # detection on resume) and the fork never completed a round, the
@@ -269,6 +270,8 @@ def _finalize_run(
     session: Session,
     observers: RunObservers,
     cycle_result: CycleResult,
+    *,
+    sweep: bool = False,
 ) -> None:
     """Mark cycle finished, fold summary into index.json::final, render log.md, drain projections."""
     stop_reason = cycle_result.stop_reason
@@ -308,6 +311,25 @@ def _finalize_run(
         # render-error both do), so the disk copy matches what stderr saw.
         crash_traceback = session.state.crash_traceback if has_traceback else None
         cycle_status = status_map.get(stop_reason, "completed")
+        # index.json::final — the terminal-summary namespace the
+        # potter-l1-meta-campaign skill gates on (final.stop_reason), and that
+        # review.md + the variant leaderboard read for the frozen verdict.
+        # Assembled here because prompt_hashes is an application-layer fact;
+        # the store only persists the dict.
+        from promptpotter.application.optimization.dispatch.llm_call import (
+            compute_optimizer_prompt_hashes,
+        )
+
+        rounds = cycle_result.rounds
+        rounds_to_95 = next((r.round for r in rounds if r.accuracy >= 0.95), None)
+        final_block: dict[str, Any] = {
+            "stop_reason": stop_reason,
+            "final_accuracy": cycle_result.best_accuracy,
+            "rounds_to_95": rounds_to_95,
+            "prompt_hashes": compute_optimizer_prompt_hashes(),
+            "origin_composite_fitness": (rounds[0].matched_origin_composite if rounds else 0.0),
+            "mode": "sweep" if sweep else "full",
+        }
         session.store.campaigns.mark_finished(
             session.campaign_id,
             session.state.cycle_id,
@@ -319,6 +341,7 @@ def _finalize_run(
             finished_at=cycle_result.finished_at,
             interrupted_round=interrupted_round,
             crash_traceback=crash_traceback,
+            final=final_block,
         )
         if session.campaign_id:
             session.store.campaigns.mark_campaign_finished(

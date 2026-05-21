@@ -24,8 +24,7 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 __all__ = ["L1Stats", "compute_l1_stats", "compute_round_1_verdict"]
 
 
-# Round-1 verdict thresholds.
-HEALTHY_YIELD_RATE = 0.20
+# Headline-accuracy threshold for ``rounds_to_95``.
 HEADLINE_ACC = 0.95
 
 
@@ -37,6 +36,12 @@ class L1Stats:
     behavior_pass_rate: float
     stagnation_max: int
     l2_fires: int
+    # Conformance of the ``l2_context`` meta-prompt — passing l2-check cells
+    # / total over the rounds where L2 fired. Dataset-independent: it scores
+    # the meta-prompt's contract, not task accuracy. 1.0 (vacuous) when
+    # ``l2_fires == 0`` — read alongside ``l2_fires`` to tell "perfect" from
+    # "never measured".
+    l2_behavior_pass_rate: float
     round_1_verdict: str  # "healthy" | "degraded" | "broken" | "unknown"
     # Wound 1 / forbidden-axes heal trail. The validator (`forbidden_axes_strict`)
     # rejects model/provider mutations pre-population; this counts attempts so
@@ -51,6 +56,7 @@ def compute_l1_stats(
     *,
     origin_composite_fitness: float,
     behavior_results: list[list[CheckResult]],
+    l2_behavior_results: list[list[CheckResult]] | None = None,
     audits: list[dict[str, Any] | None] | None = None,
 ) -> L1Stats:
     """Aggregate per-round round_data dicts + behaviour check results into L1Stats.
@@ -68,16 +74,14 @@ def compute_l1_stats(
     top_lift_mean = sum(top_lifts) / len(top_lifts) if top_lifts else 0.0
     stagnation_max = _max_stagnation_streak(top_lifts)
     behavior_pass_rate = _behavior_pass_rate(behavior_results)
+    l2_behavior_pass_rate = _behavior_pass_rate(l2_behavior_results or [])
     l2_fires = sum(1 for r in rounds if _round_source(r) == "l2_context")
     per_round_forbidden = _forbidden_axis_attempts_per_round(audits or [])
     forbidden_axis_attempts = sum(per_round_forbidden)
     forbidden_axis_healed = _forbidden_axis_healed(per_round_forbidden)
     round_1_verdict = compute_round_1_verdict(
         rounds,
-        origin_composite_fitness=origin_composite_fitness,
         round_1_behavior=behavior_results[0] if behavior_results else [],
-        round_1_top_lift=top_lifts[0] if top_lifts else 0.0,
-        round_1_yield_rate=_round_yield_rate(rounds[0]) if rounds else 0.0,
         forbidden_axis_healed=forbidden_axis_healed,
         forbidden_axis_attempts=forbidden_axis_attempts,
     )
@@ -88,6 +92,7 @@ def compute_l1_stats(
         behavior_pass_rate=behavior_pass_rate,
         stagnation_max=stagnation_max,
         l2_fires=l2_fires,
+        l2_behavior_pass_rate=l2_behavior_pass_rate,
         round_1_verdict=round_1_verdict,
         forbidden_axis_attempts=forbidden_axis_attempts,
         forbidden_axis_healed=forbidden_axis_healed,
@@ -97,23 +102,25 @@ def compute_l1_stats(
 def compute_round_1_verdict(
     rounds: list[dict[str, Any]],
     *,
-    origin_composite_fitness: float,
     round_1_behavior: list[CheckResult],
-    round_1_top_lift: float,
-    round_1_yield_rate: float,
     forbidden_axis_healed: bool = True,
     forbidden_axis_attempts: int = 0,
 ) -> str:
-    """Spec § Track 5 rule table.
+    """Conformance-anchored round-1 verdict.
 
-    - ``healthy`` — all behaviour checks ✓ OR every ✗ is the
-      ``forbidden_axes_honored`` row with the heal chain converged
-      (``forbidden_axis_healed=True``); yield ≥ HEALTHY_YIELD_RATE; lift > 0.
-    - ``degraded`` — exactly one check ✗ (and not absorbed by the heal), OR
-      yield < HEALTHY_YIELD_RATE, OR lift ≤ 0.
-    - ``broken`` — ≥ 2 checks ✗ (after discounting a healed forbidden-axes ✗),
-      OR origin regression at round 1, OR a persistent forbidden-axes
-      violation (attempts > 0 AND heal did not converge).
+    The classification keys off behaviour-check conformance **only**. Yield,
+    lift, and origin-regression are confounded by dataset headroom — a
+    capacity-bound dataset cannot register a gain — so they ride ``L1Stats``
+    as diagnostics but never gate the verdict. Accuracy validity is checked
+    periodically (``conformance_lift_corr`` on a movable dataset), not per
+    cycle.
+
+    - ``healthy`` — zero conformance ✗ (a healed ``forbidden_axes_honored``
+      ✗ doesn't count: the validator caught it, no spend was wasted).
+    - ``degraded`` — exactly one conformance ✗ (not absorbed by the heal).
+    - ``broken`` — ≥ 2 conformance ✗ (after discounting a healed
+      forbidden-axes ✗), OR a persistent forbidden-axes violation
+      (attempts > 0 AND heal did not converge).
     - ``unknown`` — no round 1 yet.
     """
     if not rounds:
@@ -129,18 +136,11 @@ def compute_round_1_verdict(
     if forbidden_failed_r1 and forbidden_axis_healed:
         failed_for_verdict -= 1
 
-    round_1_composite_fitness = float(rounds[0].get("composite_fitness") or 0.0)
-    origin_regression = round_1_composite_fitness < origin_composite_fitness
     persistent_forbidden = forbidden_axis_attempts > 0 and not forbidden_axis_healed
 
-    if failed_for_verdict >= 2 or origin_regression or persistent_forbidden:
+    if failed_for_verdict >= 2 or persistent_forbidden:
         return "broken"
-    healthy = (
-        failed_for_verdict == 0
-        and round_1_yield_rate >= HEALTHY_YIELD_RATE
-        and round_1_top_lift > 0.0
-    )
-    if healthy:
+    if failed_for_verdict == 0:
         return "healthy"
     return "degraded"
 

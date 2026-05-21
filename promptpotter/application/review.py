@@ -35,6 +35,7 @@ from promptpotter.application.optimization.validators.l1_behavior import (
     extract_l1_variants,
     run_all_checks,
 )
+from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
 
 __all__ = ["render_review_md"]
 
@@ -53,13 +54,16 @@ def render_review_md(
         audits.extend([None] * (len(rounds) - len(audits)))
     ctx_items = [c for c in (context_object or []) if isinstance(c, str) and c.strip()]
 
-    behavior_per_round = _compute_behavior_per_round(rounds, audits, ctx_items, param_unlock_round)
+    behavior_per_round, l2_behavior_per_round = _compute_behavior_per_round(
+        rounds, audits, ctx_items, param_unlock_round
+    )
     final = index.get("final") or {}
     origin_composite_fitness = float(final.get("origin_composite_fitness") or 0.0)
     stats = compute_l1_stats(
         list(rounds),
         origin_composite_fitness=origin_composite_fitness,
         behavior_results=behavior_per_round,
+        l2_behavior_results=l2_behavior_per_round,
         audits=audits,
     )
 
@@ -124,13 +128,21 @@ def _compute_behavior_per_round(
     audits: list[dict[str, Any] | None],
     context_object: list[str],
     param_unlock_round: int,
-) -> list[list[CheckResult]]:
-    out: list[list[CheckResult]] = []
+) -> tuple[list[list[CheckResult]], list[list[CheckResult]]]:
+    """Per-round L1 and L2 behaviour-check results, same length as ``rounds``.
+
+    One context-build loop feeds both registries. The L2 list is ``[]``
+    for any round where L2 did not fire — ``run_all_l2_checks`` returns
+    empty so an absent fire never counts as a conformance failure.
+    """
+    l1_out: list[list[CheckResult]] = []
+    l2_out: list[list[CheckResult]] = []
     prior_audits: list[dict[str, Any]] = []
     for i, round_data in enumerate(rounds):
         audit = audits[i] if i < len(audits) else None
         if audit is None:
-            out.append([])
+            l1_out.append([])
+            l2_out.append([])
             continue
         round_num = int(round_data.get("round") or i)
         peaked_raw = round_data.get("axis_memory_peaked") or []
@@ -143,9 +155,10 @@ def _compute_behavior_per_round(
             param_unlock_round=param_unlock_round,
             peaked_axes=peaked_axes,
         )
-        out.append(run_all_checks(audit, ctx))
+        l1_out.append(run_all_checks(audit, ctx))
+        l2_out.append(run_all_l2_checks(audit, ctx))
         prior_audits.append(audit)
-    return out
+    return l1_out, l2_out
 
 
 # --- rendering helpers ----------------------------------------------------
@@ -178,6 +191,9 @@ def _render_stats_block(
     calls_per_round: list[int],
 ) -> list[str]:
     rounds_to_95 = "—" if stats.rounds_to_95 is None else str(stats.rounds_to_95)
+    # L2 conformance is undefined when L2 never fired — render "n/a" rather
+    # than the vacuous 1.0 so the skill can tell "perfect" from "unmeasured".
+    l2_conf = "n/a" if stats.l2_fires == 0 else f"{stats.l2_behavior_pass_rate:.2f}"
     lines = [
         "## L1Stats",
         "",
@@ -185,6 +201,7 @@ def _render_stats_block(
         f"- yield_rate: {stats.yield_rate:.2f}",
         f"- top_lift_mean: {stats.top_lift_mean:+.4f}",
         f"- behavior_pass_rate: {stats.behavior_pass_rate:.2f}",
+        f"- l2_behavior_pass_rate: {l2_conf}",
         f"- stagnation_max: {stats.stagnation_max}",
         f"- l2_fires: {stats.l2_fires}",
     ]
