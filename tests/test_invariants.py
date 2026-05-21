@@ -380,7 +380,7 @@ def test_session_cycle_id_grammar() -> None:
     have to treat a ``_s{N}`` root as its own family root, and a fork of
     it as a fork. ``campaign_id`` is stable across all N sessions.
     """
-    from promptpotter.application.runner.identity import campaign_id_for
+    from promptpotter.application.runner.identity import campaign_id_for, declaration_hash
     from promptpotter.infrastructure.store.campaign_store.store import _unit_kind
     from promptpotter.infrastructure.store.paths import (
         root_cycle_id,
@@ -405,8 +405,18 @@ def test_session_cycle_id_grammar() -> None:
     assert root_cycle_id(s2_fork) == s2
     assert sibling_kind(s2_fork) == "fork"
 
-    # campaign_id is {dataset}__{hash} — stable across a campaign's sessions.
+    # campaign_id is {dataset}__{declaration_hash}.
     assert campaign_id_for("justlogic", "2451d3cf6ebc") == "justlogic__2451d3cf6ebc"
+
+    # declaration_hash folds the target hash + the optimizer-prompt hash —
+    # the campaign's identity. Pure, deterministic, 12-hex, and sensitive
+    # to BOTH halves (and their order).
+    d1 = declaration_hash("aaaa", "bbbb")
+    assert d1 == declaration_hash("aaaa", "bbbb")  # deterministic
+    assert d1 != declaration_hash("bbbb", "aaaa")  # order matters
+    assert d1 != declaration_hash("aaaa", "cccc")  # optimizer half matters
+    assert d1 != declaration_hash("dddd", "bbbb")  # target half matters
+    assert len(d1) == 12 and all(c in "0123456789abcdef" for c in d1)
 
     # Diag + sweep both fold to the operator-facing "user_fork" kind; a
     # root reads as "session".

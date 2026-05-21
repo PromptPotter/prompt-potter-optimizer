@@ -175,34 +175,44 @@ def auto_mint_session(
 ) -> tuple[str, str, str]:
     """Find-or-create the campaign, mint a session into it, claim the pointer.
 
-    The ``campaign_id`` is *derived* from the origin declaration's content
-    hash — carried in *cycle_id* (``cycle_{hash}``) — so a re-run of ``new``
-    on an unchanged declaration resolves to the existing campaign:
+    The ``campaign_id`` is the **declaration hash** — the target content
+    hash (carried in *cycle_id* = ``cycle_{target_hash}``) folded with the
+    optimizer meta-prompt hash. A re-run of ``new`` on an unchanged
+    declaration (same target AND same optimizer prompts) resolves to the
+    existing campaign:
 
     * **campaign exists** — mint a fresh session: a new ``session_id`` and a
-      session-root cycle ``cycle_{hash}_s{N}`` (N = next free index).
+      session-root cycle ``cycle_{target_hash}_s{N}`` (N = next free index).
       ``campaign.json``'s frozen snapshot is not rewritten; its status flips
       back to ``active``.
     * **new campaign** — write ``campaign.json`` (the declaration snapshot)
-      and create the first session at the bare ``cycle_{hash}``.
+      and create the first session at the bare ``cycle_{target_hash}``.
+
+    The root/session cycle ids stay *target*-based; only ``campaign_id``
+    carries the optimizer half — so editing an optimizer meta-prompt mints
+    a distinct campaign while two campaigns on one target still share their
+    root cycle id (unique only within a campaign).
 
     Mutates *session* in place (``session_id``, ``campaign_id``,
     ``state.cycle_id``) and claims the 4-key active pointer. Returns
-    ``(session_id, campaign_id, session_root_cycle_id)`` — the cycle id is
-    the ``_s{N}``-suffixed form when the campaign already had sessions.
+    ``(session_id, campaign_id, session_root_cycle_id)``.
     """
     from datetime import UTC, datetime
 
-    from promptpotter.application.runner.identity import campaign_id_for
+    from promptpotter.application.optimization.dispatch.llm_call import (
+        combined_optimizer_prompt_hash,
+    )
+    from promptpotter.application.runner.identity import campaign_id_for, declaration_hash
     from promptpotter.domain.campaign import Campaign
     from promptpotter.infrastructure.store import session_cycle_id
 
-    cycle_hash = cycle_id.removeprefix("cycle_")
-    validate_path_component(cycle_hash)
+    target_hash = cycle_id.removeprefix("cycle_")
+    validate_path_component(target_hash)
     session_id = mint_session_id()
     now = datetime.now(UTC)
     dataset_name = session.dataset_name or campaign_config.dataset_name or ""
-    campaign_id = campaign_id_for(dataset_name, cycle_hash)
+    optimizer_hash = combined_optimizer_prompt_hash()
+    campaign_id = campaign_id_for(dataset_name, declaration_hash(target_hash, optimizer_hash))
 
     campaigns = session.store.campaigns
     existing_campaign = campaigns.load_campaign(campaign_id)
@@ -240,7 +250,8 @@ def auto_mint_session(
                 created_at=now.isoformat(),
                 status="active",
                 root_cycle_id=root_cycle,
-                root_content_hash=cycle_hash,
+                root_content_hash=target_hash,
+                optimizer_prompt_hash=optimizer_hash,
                 backend_id=session.backend_id,
                 config=campaign_config.model_dump(mode="json"),
             )

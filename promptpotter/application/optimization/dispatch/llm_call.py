@@ -60,6 +60,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "combined_optimizer_prompt_hash",
     "compute_optimizer_prompt_hashes",
     "get_optimizer_schema",
     "list_optimizer_prompts",
@@ -657,3 +658,19 @@ def compute_optimizer_prompt_hashes() -> dict[str, str]:
         tpl = load_optimizer_prompt(name)
         out[name] = hashlib.sha256(tpl.model_dump_json().encode("utf-8")).hexdigest()[:16]
     return out
+
+
+def combined_optimizer_prompt_hash() -> str:
+    """One 12-hex hash over the whole optimizer meta-prompt set.
+
+    Folds the per-prompt hashes from :func:`compute_optimizer_prompt_hashes`
+    into a single deterministic digest. This is the *optimizer* half of a
+    campaign's identity: ``campaign_id = {dataset}__{declaration_hash}``,
+    where ``declaration_hash`` combines this with the target content hash
+    (see :func:`promptpotter.application.runner.identity.declaration_hash`).
+    Editing any optimizer meta-prompt shifts this hash, so the next ``new``
+    mints a distinct campaign.
+    """
+    per_prompt = compute_optimizer_prompt_hashes()
+    blob = json.dumps(per_prompt, sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]

@@ -147,6 +147,8 @@ Execute the ablation studies that feed the paper (L1-only vs L1+L2 vs full, scan
 
 The Routed Dispatch arc shipped `SignalsPanel` (rolling list of recent escalation-rule firings) and `StuckDiagnosis` (per-layer verdict from the latest `signal_inputs` snapshot) — read from `dashboard.json::recent_rules` + `dashboard.json::current_signals`. These are the precondition for M12 streaming (live signal stream via SSE/WebSocket).
 
+**Considered, not scheduled — multi-seed / multi-dataset campaigns + cross-campaign workspace data leverage.** A campaign spanning multiple `(dataset, origin)` pairs, with the workspace as a queryable datastore over every campaign + dataset. The Campaign-as-forest rework shipped the multi-session structure that carries this; the `seeds[]` model, `--seed` CLI, and cross-campaign query are not built, and `Campaign.dataset_name` stays singular until this is decided. M11 candidate — flag, not commitment.
+
 **Entry criteria:** M10 exit gate passed (optimizer prompts configured).
 
 **Exit gate:** BBEH results with statistical rigor (3 seeds, CIs) including head-to-head vs CAPO/GEPA/MIPROv2/BootstrapFewShot at identical model + split. HotPotQA saturation assessed (benchmarked if non-saturated). Ablation results complete. Webapp read-only views live. First publication figures generated.

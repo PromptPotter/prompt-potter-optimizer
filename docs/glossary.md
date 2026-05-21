@@ -66,13 +66,14 @@ The persisted world is a four-entity containment hierarchy
 - **Dataset** — the optimization target plus its config.
   `datasets/{name}/`.
 - **Campaign** — one declared optimization effort: a dataset, a
-  pipeline origin, and context text. A first-class entity and a
-  **forest** — it holds N sessions. Directory
-  `campaigns/{campaign_id}/` + `campaign.json` manifest.
-  `campaign_id = {dataset}__{origin_content_hash}` — the 12-hex content
-  hash of the origin declaration; **stable**, so re-running `new` on an
-  unchanged declaration find-or-creates the same campaign.
-  `domain/campaign.py`.
+  pipeline origin, context text, and the optimizer meta-prompts it runs
+  under. A first-class entity and a **forest** — it holds N sessions.
+  Directory `campaigns/{campaign_id}/` + `campaign.json` manifest.
+  `campaign_id = {dataset}__{declaration_hash}` — the 12-hex
+  **declaration hash** folds the target content hash with the optimizer
+  meta-prompt hash; **stable**, so re-running `new` on an unchanged
+  declaration find-or-creates the same campaign, while editing an
+  optimizer meta-prompt mints a distinct one. `domain/campaign.py`.
 - **Session** — one run of `new` on a campaign's declaration. A campaign
   holds N sessions; re-running `new` on the same declaration adds one,
   `resume` extends the active one. Identity is the `session_id`

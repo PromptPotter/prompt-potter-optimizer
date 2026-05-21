@@ -74,8 +74,17 @@ def _prepare_cycle_for_resume(
       ``new`` run. Sweep callers pass ``pivot_prompt=False`` — pivoting
       would silently turn a sweep into a new-campaign run. Non-TTY ⇒
       structured error so scripts get a deterministic exit-code path.
+
+    A second, independent check covers **optimizer-prompt drift**: the
+    campaign id folds in the optimizer meta-prompt hash, so editing
+    ``datasets/_optimizer/`` since mint time halts the resume with a
+    pointer to ``new`` (which mints a distinct campaign for the new
+    optimizer set). Empty stored hash means backfill, like the target hash.
     """
     from promptpotter.application.config import DiffScope
+    from promptpotter.application.optimization.dispatch.llm_call import (
+        combined_optimizer_prompt_hash,
+    )
 
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
     pipeline_params, _origin, expected_cycle_id = _prepare_cycle(
@@ -151,6 +160,37 @@ def _prepare_cycle_for_resume(
                     "sibling cycle, or revert the config edits and retry `resume`."
                 )
             raise _PivotToFreshError(dataset_name)
+
+    # Optimizer-prompt drift — the campaign's identity folds in the optimizer
+    # meta-prompts (datasets/_optimizer/). Editing them is data-affecting:
+    # cached rounds ran the old prompts, unevaluated rounds would run the new
+    # ones. `new` is the fix — it auto-mints a distinct campaign for the new
+    # optimizer set.
+    current_optimizer_hash = combined_optimizer_prompt_hash()
+    if campaign.optimizer_prompt_hash == "":
+        session.store.campaigns.update_campaign(
+            ctx.campaign_id, {"optimizer_prompt_hash": current_optimizer_hash}
+        )
+        logger.info(
+            "Resume: backfilled optimizer_prompt_hash=%s on campaign %s",
+            current_optimizer_hash,
+            ctx.campaign_id,
+        )
+    elif campaign.optimizer_prompt_hash != current_optimizer_hash:
+        dataset_name = ctx.init_params.get("dataset_name") or "<dataset>"
+        raise SystemExit(
+            f"ERROR: the optimizer meta-prompts changed since campaign "
+            f"{ctx.campaign_id} was minted.\n"
+            f"  stored optimizer hash:  {campaign.optimizer_prompt_hash}\n"
+            f"  current optimizer hash: {current_optimizer_hash}\n"
+            f"\n"
+            f"The optimizer meta-prompts (datasets/_optimizer/) are part of a "
+            f"campaign's identity — resuming would mix old-prompt rounds with "
+            f"new-prompt rounds.\n"
+            f"  - `python -m promptpotter new {dataset_name}` mints a distinct "
+            f"campaign for the new optimizer prompts (recommended).\n"
+            f"  - Revert datasets/_optimizer/ to resume this campaign in place."
+        )
 
     if resume_from_round is not None:
         if not ctx.cycle_id:

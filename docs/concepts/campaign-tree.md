@@ -3,16 +3,20 @@
 ## Campaign, Session, and Unit
 
 A **Campaign** is **one declared optimization effort** — a **dataset**, a
-**pipeline origin**, and the **context text**. It is a **forest**: a campaign
-holds N **sessions**. It owns the directory `campaigns/{campaign_id}/`, a
-`campaign.json` manifest, and a campaign-wide `log.md` + `hard_samples.json`.
+**pipeline origin**, the **context text**, and the **optimizer meta-prompts**
+it runs under. It is a **forest**: a campaign holds N **sessions**. It owns the
+directory `campaigns/{campaign_id}/`, a `campaign.json` manifest, and a
+campaign-wide `log.md` + `hard_samples.json`.
 
-`campaign_id = {dataset}__{origin_content_hash}` — the `origin_content_hash` is
-the 12-hex content hash of the origin declaration (the same hash that is the
-root cycle id). The id is **stable**: re-running `python -m promptpotter new
-<dataset>` on an unchanged declaration resolves to the **same** campaign
-(find-or-create), never a fresh one. Multiple campaigns may share a dataset —
-each distinct `(dataset, origin)` declaration is its own campaign.
+`campaign_id = {dataset}__{declaration_hash}` — the `declaration_hash` is the
+12-hex hash of the *complete* declaration: it folds the **target** content
+hash (`root_content_hash`, the same hash that is the root cycle id) with the
+**optimizer** meta-prompt hash (`optimizer_prompt_hash`, over
+`datasets/_optimizer/`). The id is **stable**: re-running `python -m
+promptpotter new <dataset>` on an unchanged declaration resolves to the
+**same** campaign (find-or-create), never a fresh one — while editing a target
+field OR an optimizer meta-prompt mints a distinct campaign. Multiple campaigns
+may share a dataset — each distinct declaration is its own campaign.
 
 A **Session** is **one run of `new`** on a campaign's declaration. The first
 `new` mints the campaign and its first session; each subsequent `new` on the
@@ -76,7 +80,7 @@ from the parent's history up to the cut. That's it.
 
 ```
 campaigns/
-  justlogic__a1b2c3d4e5f6/            # one Campaign — {dataset}__{origin_content_hash}
+  justlogic__a1b2c3d4e5f6/            # one Campaign — {dataset}__{declaration_hash}
     campaign.json                     # manifest: dataset, config, root_cycle_id, …
     log.md                            # campaign digest (every session + its forks + rounds)
     cycles/

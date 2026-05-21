@@ -168,14 +168,18 @@ world is a strict containment hierarchy:
 - **Dataset** — the optimization target plus its config
   (`datasets/{name}/`).
 - **Campaign** — one declared optimization effort: a dataset, a
-  pipeline origin, and context text. A **first-class entity** and a
-  **forest** — it holds N **sessions**. `campaign_id =
-  {dataset}__{origin_content_hash}`, where `origin_content_hash` is the
-  origin declaration's 12-hex content hash (the same hash that is the
-  root cycle id). The id is **stable**: re-running `new <dataset>` on an
-  unchanged declaration resolves to the **same** campaign
-  (find-or-create), not a fresh one. The dataset is embedded so
-  "campaigns for dataset X" is a prefix scan.
+  pipeline origin, context text, **and the optimizer meta-prompts it
+  runs under**. A **first-class entity** and a **forest** — it holds N
+  **sessions**. `campaign_id = {dataset}__{declaration_hash}`, where
+  `declaration_hash` is the 12-hex hash of the *complete* declaration:
+  it folds the **target** content hash (`root_content_hash` — the same
+  hash that is the root cycle id) with the **optimizer** meta-prompt
+  hash (`optimizer_prompt_hash` — `datasets/_optimizer/`). The id is
+  **stable**: re-running `new <dataset>` on an unchanged declaration
+  resolves to the **same** campaign (find-or-create), not a fresh one;
+  editing a target field OR an optimizer meta-prompt mints a distinct
+  campaign. The dataset is embedded so "campaigns for dataset X" is a
+  prefix scan.
 - **Session** — one run of `new` on a campaign's declaration. A campaign
   holds N sessions; re-running `new` on the same declaration **adds** a
   session to the existing campaign. `resume` extends the *active*
@@ -190,9 +194,10 @@ world is a strict containment hierarchy:
   | sweep. The operator-facing name is **Unit** — one continuous-parameter
   run; `resume` extends the current unit, each fork branches a new one
   (the webapp + docs say "unit", the on-disk / API id stays `cycle_id`).
-  Identity stays `cycle_{content_hash[:12]}` (+ the `_s{N}` session-root
-  suffix, `_fork_`/`_diag_`/`_sweep_` for branches). The content hash
-  keeps two jobs: archive cache-reuse keying and drift detection.
+  Identity stays `cycle_{target_hash[:12]}` (+ the `_s{N}` session-root
+  suffix, `_fork_`/`_diag_`/`_sweep_` for branches) — the *target*
+  content hash, distinct from the campaign's declaration hash. It keeps
+  two jobs: archive cache-reuse keying and target-drift detection.
   `cycle_id` is campaign-scoped — all path resolution is
   `(campaign_id, cycle_id)`.
 
@@ -413,9 +418,11 @@ the PR description.
   `campaign.json` manifest, the `campaigns/{campaign_id}/` directory
   with `log.md` + `hard_samples.json` at its root and
   `cycles/{cycle_id}/` flat below (every session root plus every
-  fork). `campaign_id = {dataset}__{origin_content_hash}` is stable —
-  re-running `new` on an unchanged declaration find-or-creates the same
-  campaign and adds a session. `dashboard.json` is per-session, at
+  fork). `campaign_id = {dataset}__{declaration_hash}` (the declaration
+  hash folds the target hash + the optimizer meta-prompt hash) is
+  stable — re-running `new` on an unchanged declaration find-or-creates
+  the same campaign and adds a session; editing an optimizer meta-prompt
+  mints a distinct campaign. `dashboard.json` is per-session, at
   `cycles/{session_root}/dashboard.json` — one live stream per session,
   never one per campaign. The four-entity hierarchy (Workspace /
   Dataset / Campaign / Cycle, with Session a unit of a Campaign) and

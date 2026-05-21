@@ -23,6 +23,7 @@ from promptpotter.application.runner.identity import (
     campaign_id_for,
     content_hash_of,
     cycle_config_identity,
+    declaration_hash,
 )
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     "campaign_id_for",
     "content_hash_of",
     "cycle_config_identity",
+    "declaration_hash",
     "run_optimization",
 ]
