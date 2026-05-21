@@ -6,7 +6,7 @@
     "exclude_nodes": [],
     "pipeline_overrides": {},
     "optimization": {
-      "l1_patience": 2,
+      "l1_patience": 0,
       "max_rounds": 5,
       "n_variants": 3,
       "improvement_threshold": 0.02,

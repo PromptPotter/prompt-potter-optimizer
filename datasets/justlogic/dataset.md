@@ -96,13 +96,14 @@ this directly.
   model+effort as the recon, `:nitro` for the fastest routing
   (per the AIME experience: 3-10s tail on most providers, dominant
   speed on `:nitro`).
-- `reasoning_effort: low` — conservative floor. `medium` is L1-
-  reachable when sibling-yield supports; `high` is on the table but
-  has the output-budget exhaustion trap on 20b (see
-  `dataset-selection-rationale.md` BBEH/high row).
+- `reasoning_effort: low` — locked. Pinned to `low` for this campaign
+  via `param_allowed_values`; `medium`/`high` are invalid — a proposal
+  is rejected and self-healed, never executed. The hedge bias is a
+  prompt problem, not a reasoning-headroom problem: at `high`, 20b
+  burns 70-80s/sample and still hedges.
 - Optimization target: prompt template (hedge-breaking discipline,
-  three-class commitment, premise-checking scaffolding),
-  `reasoning_effort`, `temperature`.
+  three-class commitment, premise-checking scaffolding) and
+  `temperature`.
 - Per-depth analysis: after a round, read per-depth accuracy from
   the per-sample scoring projection. Depth-6 vs depth-7 lift gap
   is itself a signal — if d=6 lifts and d=7 stalls, the optimizer

@@ -62,9 +62,15 @@ a real reasoning failure, not a label-skew artifact.
 
 - The target model (`llm_only.model`) is pinned to
   `openai/gpt-oss-20b:nitro` (see `datasets/justlogic/pipeline.json::available_models`).
-  Provider pinned to `openrouter`. L1 must not propose `model` /
-  `provider` mutations (operator-locked axes per `PARAM_FORBIDDEN_KEYS`).
-- L1 may freely mutate: `reasoning_effort`, `temperature`, `max_tokens`,
-  and any prompt field (`persona`, `task_intent`, `problem_description`,
-  `instruction`, `thinking_style`, `answer_format`). The hedge-breaking
-  prompt mutation is the highest-EV target.
+  Provider pinned to `openrouter`. L1 must not propose `model`,
+  `provider`, or `reasoning_effort` mutations. `model` and `provider`
+  are operator-locked axes (`PARAM_FORBIDDEN_KEYS`); `reasoning_effort`
+  is pinned to `low` for this campaign
+  (`pipeline.json::nodes.llm_only.optimizer.param_allowed_values`) — a
+  `medium`/`high` proposal is rejected as invalid and self-healed.
+- L1 may freely mutate: `temperature`, `max_tokens`, and any prompt
+  field (`persona`, `task_intent`, `problem_description`,
+  `instruction`, `thinking_style`, `answer_format`). The hedge bias
+  toward `Uncertain` must be broken by prompt engineering, not by
+  buying reasoning compute — the hedge-breaking prompt mutation is the
+  highest-EV target.
