@@ -79,7 +79,6 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "improvement_significance"): "policy",
     ("optimization", "zero_signal_filter_enabled"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
-    ("optimization", "picker_objective"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
     # OptimizerLLMConfig — changing the optimizer LLM provider or model would
     # produce different L1/L2/L3 candidates for future rounds; treat as
@@ -141,6 +140,19 @@ class ExplorationConfig(BaseModel):
             "is off."
         ),
     )
+    explore_weight: float = Field(
+        0.05,
+        description=(
+            "Blend weight of the sample picker's explore term. The picker has "
+            "one objective: decision-information-gain (exploit) plus this "
+            "weight times model-information-gain (explore — the pull toward "
+            "poorly-characterized / never-solved samples). Both terms are in "
+            "nats, so this is dimensionless. Kept low so the picker stays "
+            "decision-dominated — it re-measures the informative samples it "
+            "already knows about and only sporadically pulls in a fresh one, "
+            "rather than chasing whole blocks of never-measured samples."
+        ),
+    )
 
 
 class OptimizationConfig(BaseModel):
@@ -185,20 +197,6 @@ class OptimizationConfig(BaseModel):
     )
 
     zero_signal_filter_enabled: bool = Field(False)
-
-    picker_objective: Literal["model", "decision"] = Field(
-        "model",
-        description=(
-            "Per-step sample selector inside the PoBB loop. "
-            "``model`` (default) = Expected Information Gain — picks the "
-            "sample whose measurement most reduces the entropy of the "
-            "hierarchical IRT posterior; reads the sample-difficulty SE so a "
-            "barely-measured sample ranks high; decision-agnostic. "
-            "``decision`` = mutual information between the next outcome and "
-            "the keep/abort verdict against the seed; decision-aligned, the "
-            "means-known limit of Chernoff information."
-        ),
-    )
 
     forbidden_axes_strict: bool = Field(
         True,

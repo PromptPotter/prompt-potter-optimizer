@@ -1,7 +1,14 @@
 # Spec: Bayesian Sample Picker — Hierarchical IRT + Expected Information Gain
 
-**Status:** Shipped (Phases 1–3). Superseded the plug-in MFI / Track-and-Stop
-objective in `adaptive_picker.py`.
+**Status:** Shipped (Phases 1–3), then partly superseded. The hierarchical
+empirical-Bayes Rasch fit stands. The two-objective `picker_objective`
+(`"model"` EIG / `"decision"`) this spec introduced was superseded 2026-05-21
+by a single blended objective — `decision_information_gain + explore_weight ·
+model_information_gain`, no mode switch — after the EIG mode's `se_δ` term was
+found to dominate the heatmap sort and starve PoBB early-abort. Current
+contract: `adaptive_picker.py`, [`../concepts/paired-sample-pobb.md`](../concepts/paired-sample-pobb.md#sample-selection),
+[`../methods/candidate-elimination.md`](../methods/candidate-elimination.md).
+The Phase notes below are retained as the shipped-at-the-time record.
 
 ---
 

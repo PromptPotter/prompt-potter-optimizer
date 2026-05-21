@@ -86,7 +86,12 @@ async def execute_round(
         # Archive observations are dataset-scoped and abort-residue-free, so
         # the round-subset Rasch fit always carries cross-cycle evidence.
         observations = [*cycle.archive_observations, *build_observations(cycle.rounds)]
-        scoring_set = select_round_subset(eval_pool, observations, config.sp_budget_ttest)
+        scoring_set = select_round_subset(
+            eval_pool,
+            observations,
+            config.sp_budget_ttest,
+            config.optimization.exploration.explore_weight,
+        )
 
     candidates, yield_stats = await generate_or_load_candidates(
         round_num, cycle, callbacks.on_phase, n_eval_queries=len(scoring_set), obs=obs

@@ -8,9 +8,9 @@ Two related concerns share this module:
 
 2. **Per-round subset selection** (``select_round_subset``) — each round,
    pick the ``sp_budget_ttest`` most-informative samples out of the full
-   bank via the CAT picker's expected-information-gain objective at the
-   leading candidate's estimated ability. This is what decouples the bank
-   (the full train split) from the per-round eval budget.
+   bank via the CAT picker's blended objective: a fresh mutation scored
+   against the leading candidate. This is what decouples the bank (the
+   full train split) from the per-round eval budget.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
-from promptpotter.application.intelligence.adaptive_picker import expected_order_eig
+from promptpotter.application.intelligence.adaptive_picker import expected_order
 
 if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
@@ -295,16 +295,22 @@ def select_round_subset(
     bank: list[Sample],
     observations: list[Observation],
     budget: int,
+    explore_weight: float,
 ) -> list[Sample]:
     """Pick the ``budget`` most-informative samples from ``bank`` for one round.
 
-    Fits Rasch on ``observations``, estimates the leading candidate's
-    ability + variance, and ranks the bank by expected information gain at
-    that posterior — the samples whose measurement most sharpens the model
-    for the best prompt so far, i.e. the contested band where a mutation can
-    still flip a miss into a hit. Cold start (no observations, hence no δ
-    estimates) falls back to the bank-order prefix, byte-identical to the
-    pre-decoupling ``dataset[:budget]`` slice. Pure: no I/O.
+    Fits Rasch on ``observations``, then ranks the bank by the CAT picker's
+    blended objective for a fresh mutation of the leading candidate. The
+    mutation's ability prior is ``N(θ_leader, σ_θ²)`` — a mutation is a small
+    edit of its parent, so it starts at the parent's ability, not the
+    population-mean anchor ``0``. Centred there, the decision term peaks on
+    the contested band — measured samples whose difficulty sits at the
+    leader's ability, where a mutation can still flip the verdict — with a
+    small ``explore_weight`` pull toward poorly-characterized samples. A
+    centred-at-0 prior would instead make the decision term flat and let the
+    explore term sweep up fresh unmeasured blocks. Cold start (no
+    observations, hence no δ estimates) falls back to the bank-order prefix,
+    byte-identical to the pre-decoupling ``dataset[:budget]`` slice. Pure: no I/O.
     """
     if budget <= 0 or not bank:
         return []
@@ -327,5 +333,14 @@ def select_round_subset(
         leader_var = posterior.theta_se.get(leader_id, posterior.sigma_theta) ** 2
     else:
         leader_theta, leader_var = 0.0, posterior.sigma_theta**2
-    ranked = expected_order_eig(leader_theta, leader_var, delta_map, delta_se_map, list(by_id))
+    ranked = expected_order(
+        leader_theta,
+        posterior.sigma_theta**2,
+        leader_theta,
+        leader_var,
+        delta_map,
+        delta_se_map,
+        list(by_id),
+        explore_weight,
+    )
     return [by_id[sid] for sid in ranked[:budget]]

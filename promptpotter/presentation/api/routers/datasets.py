@@ -47,6 +47,7 @@ def _resolve_scope_artifact(
       pooled fit over all the campaign's cycles.
     - ``dataset``: the cross-campaign archive snapshot for ``name``.
     """
+    from promptpotter.application.config import ExplorationConfig
     from promptpotter.application.intelligence.hard_sample_archive import (
         build_archive_hard_samples_artifact,
     )
@@ -77,9 +78,15 @@ def _resolve_scope_artifact(
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
     # scope == "dataset" — cross-campaign archive snapshot. Cross-dataset
-    # pooling would be meaningless, so this is always per-dataset.
+    # pooling would be meaningless, so this is always per-dataset. The
+    # cross-campaign view has no single campaign config, so the picker's
+    # explore weight reads the declared ExplorationConfig default.
     return build_archive_hard_samples_artifact(
-        store, backend_id, dataset_name=name, top_k_samples=None
+        store,
+        backend_id,
+        dataset_name=name,
+        explore_weight=ExplorationConfig().explore_weight,
+        top_k_samples=None,
     )
 
 
@@ -122,13 +129,12 @@ class DatasetItem(BaseModel):
     pick_score: float | None = Field(
         default=None,
         description=(
-            "Expected information gain of measuring this sample on a "
-            "brand-new candidate (ability prior N(0, sigma_theta^2)). Reads "
-            "the Rasch delta_s standard error, so a barely-measured sample "
-            "scores high — there is more to learn. The live picker "
-            "(``adaptive_picker``) re-evaluates it per step against the "
-            "candidate's running θ̂_c posterior. None when the sample has "
-            "no measurement yet."
+            "The sample picker's blended objective for measuring this sample "
+            "on a brand-new candidate (ability prior N(0, sigma_theta^2)) "
+            "against the best fitted candidate: decision-information-gain "
+            "plus a small explore term. The live picker (``adaptive_picker``) "
+            "re-evaluates it per step against the candidate's running θ̂_c "
+            "posterior. None when the sample has no measurement yet."
         ),
     )
 
@@ -224,7 +230,7 @@ async def get_dataset_preview(
     n_obs_map: dict[int, int] = {
         int(k): int(v) for k, v in rasch.get("n_obs_per_sample", {}).items()
     }
-    # Pick-score is the expected information gain of measuring each sample
+    # Pick-score is the picker's blended objective for measuring each sample
     # on a brand-new candidate — populated for both the per-cycle and the
     # cross-cycle archive artifact.
     pick_score_block = artifact.get("pick_score", {}).get("per_sample", {})

@@ -161,25 +161,30 @@ The persisted world is a four-entity containment hierarchy
 - **Adaptive picker** — the live per-step sample selector
   inside the PoBB loop. Maintains a Gaussian posterior on the
   candidate's latent ability `θ_c` and re-picks every measurement
-  under the configured objective. `application/intelligence/adaptive_picker.py`.
-- **EIG** — Expected Information Gain, the default adaptive-picker
-  objective. The entropy reduction of the hierarchical IRT
-  posterior from one measurement: `½·log(1 + w̄·(var_c + se_δ²))`.
-  Reads the sample-difficulty SE, so a barely-measured sample
-  ranks high; the `se_δ → 0` limit recovers Maximum Fisher
-  Information.
-- **Decision objective** — the decision-aligned adaptive-picker
-  objective: the mutual information between the next outcome and
+  by the blended pick-value objective.
+  `application/intelligence/adaptive_picker.py`.
+- **pick-value** — the adaptive picker's single one-step-greedy
+  objective: `decision_information_gain + explore_weight ·
+  model_information_gain`, both terms in nats. Drives the
+  per-step pick and the `pick_score` snapshot.
+- **Decision information gain** — the exploit (dominant) term of
+  pick-value: the mutual information between the next outcome and
   the keep/abort verdict `θ_c > θ_s` against the seed. The
   means-known limit recovers Bernoulli Chernoff information.
-- **picker_objective** — `campaign.json` field selecting the
-  adaptive picker's objective: `"model"` (EIG, default) or
-  `"decision"`.
-- **EIG snapshot** — descriptive per-sample
-  `pick_score.per_sample` on the hard-samples artifact: expected
-  information gain at the population-prior ability `N(0, σ_θ²)`.
-  Consumed by the webapp dataset table; the live picker uses its
-  own per-candidate posterior, not this snapshot.
+- **Model information gain** — the explore term of pick-value: the
+  expected reduction in a sample's difficulty uncertainty,
+  `½·log(1 + w̄·se_δ²)`. Zero when `se_δ → 0`, so it never fights
+  the decision term where the model is already sharp.
+- **explore_weight** — `ExplorationConfig` knob (default 0.15):
+  the small, dimensionless weight on pick-value's explore term.
+  Kept well below 1 so the picker stays decision-dominated.
+- **pick_score snapshot** — descriptive per-sample
+  `pick_score.per_sample` on the hard-samples artifact: the
+  blended pick-value for a fresh mutation of the seed, ability
+  prior `N(θ_seed, σ_θ²)` (centred on the parent, not the
+  population-mean anchor 0). Consumed by the webapp dataset table;
+  the live picker uses its own per-candidate posterior, not this
+  snapshot.
 - **llm_ranking** — a backend node that orders ranked_items per
   sample. Distinct from PoBB, Rasch, and the adaptive picker.
   Currently broken on TermNorm (see CLAUDE.md known issues).

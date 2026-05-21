@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from promptpotter.application.intelligence.adaptive_picker import expected_information_gain
+from promptpotter.application.intelligence.adaptive_picker import pick_value
 from promptpotter.application.intelligence.exploration import build_observations, fit_rasch
 
 if TYPE_CHECKING:
@@ -58,30 +58,38 @@ def _sample_miss_rates(observations: list[Observation]) -> dict[int, float]:
     return {sid: misses.get(sid, 0) / n for sid, n in totals.items() if n > 0}
 
 
-def _eig_under_prior(
+def _pick_score_under_prior(
     delta: dict[int, float],
     delta_se: dict[int, float],
     sigma_theta: float,
+    seed_mu: float,
+    seed_var: float,
+    explore_weight: float,
 ) -> dict[int, float]:
-    """Per-sample expected information gain for a brand-new candidate.
+    """Per-sample blended pick-value for a brand-new candidate vs the seed.
 
-    A brand-new candidate's ability prior is ``N(0, σ_θ²)`` — the estimated
-    population posterior at the Rasch identifiability anchor ``mean(θ) = 0``.
-    Expected information gain there is ``½·log(1 + w̄·(σ_θ² + se_δ_s²))``: it
-    rewards both mid-difficulty samples (large ``w̄``) AND barely-measured
-    samples (large ``se_δ_s``), so a sample seen once no longer reads as
-    settled.
+    A brand-new candidate is a fresh mutation of the seed — the best fitted
+    candidate — so its ability prior is ``N(θ_seed, σ_θ²)``: a mutation is a
+    small edit of its parent and starts at the parent's ability, not the
+    population-mean anchor ``0``. Centred there, the decision term peaks on
+    the contested band (δ near the seed's ability); centred at 0 it would
+    fall flat and the explore term would rank unmeasured samples on top.
+    Each sample's pick-value is the picker's one objective:
+    decision-information-gain against the seed plus ``explore_weight`` times
+    the model-information-gain explore term.
 
     This is the snapshot consumed by the webapp's per-sample ``pick_score``
     column and the dashboard ``hard_sample_order`` table. The live picker
-    (``adaptive_picker.py``) re-evaluates EIG per step against the
-    *candidate's* running θ̂ posterior — so the artifact value is a "what's
-    expected to be informative on a brand-new candidate" snapshot, not the
-    live iteration order.
+    (``adaptive_picker.py``) re-evaluates per step against the *candidate's*
+    running θ̂ posterior — so the artifact value is a "what's expected to be
+    informative on a brand-new candidate" snapshot, not the live iteration
+    order.
     """
     var_theta = sigma_theta * sigma_theta
     return {
-        sid: expected_information_gain(0.0, var_theta, d, delta_se.get(sid, 0.0))
+        sid: pick_value(
+            seed_mu, var_theta, seed_mu, seed_var, d, delta_se.get(sid, 0.0), explore_weight
+        )
         for sid, d in delta.items()
     }
 
@@ -109,7 +117,7 @@ def _resolve_sample_order(
 
 
 def _resolve_pick_order(pick_score: dict[int, float]) -> list[int]:
-    """Sort sample IDs by descending expected information gain under the prior.
+    """Sort sample IDs by descending blended pick-value under the prior.
 
     Ties break by ascending sample id for determinism. The artifact
     snapshot is descriptive — the live picker (``adaptive_picker``)
@@ -150,6 +158,7 @@ def empty_artifact(
 def build_hard_samples_artifact(
     rounds: list[RoundResult],
     *,
+    explore_weight: float,
     cycle_id: str | None = None,
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
@@ -166,6 +175,7 @@ def build_hard_samples_artifact(
     """
     return build_hard_samples_artifact_from_observations(
         build_observations(rounds),
+        explore_weight=explore_weight,
         cycle_id=cycle_id,
         top_k_candidates=top_k_candidates,
         top_k_samples=top_k_samples,
@@ -176,6 +186,7 @@ def build_hard_samples_artifact(
 def build_hard_samples_artifact_from_observations(
     observations: list[Observation],
     *,
+    explore_weight: float,
     cycle_id: str | None = None,
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
@@ -202,7 +213,23 @@ def build_hard_samples_artifact_from_observations(
         posterior = fit_rasch(observations)
     hit_rates = _candidate_hit_rates(observations)
     miss_rates = _sample_miss_rates(observations)
-    pick_score_map = _eig_under_prior(posterior.delta, posterior.delta_se, posterior.sigma_theta)
+    # The picker's blended objective scores a brand-new candidate against the
+    # seed — the best fitted candidate. Cold start (no candidates) uses the
+    # centred population prior.
+    if posterior.theta:
+        best_cid = max(posterior.theta, key=lambda cid: posterior.theta[cid])
+        seed_mu = posterior.theta[best_cid]
+        seed_var = posterior.theta_se.get(best_cid, posterior.sigma_theta) ** 2
+    else:
+        seed_mu, seed_var = 0.0, posterior.sigma_theta**2
+    pick_score_map = _pick_score_under_prior(
+        posterior.delta,
+        posterior.delta_se,
+        posterior.sigma_theta,
+        seed_mu,
+        seed_var,
+        explore_weight,
+    )
 
     full_candidate_order = _resolve_candidate_order(posterior, hit_rates)
     full_sample_order = _resolve_sample_order(posterior, miss_rates)

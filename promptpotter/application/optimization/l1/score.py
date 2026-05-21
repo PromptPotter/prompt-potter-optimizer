@@ -18,12 +18,9 @@ from functools import partial
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.intelligence.adaptive_picker import (
-    decision_information_gain,
-    expected_information_gain,
-    expected_order_decision,
-    expected_order_eig,
-    next_sample_decision,
-    next_sample_eig,
+    expected_order,
+    next_sample,
+    pick_value,
     posterior_from_outcomes,
 )
 from promptpotter.application.intelligence.exploration import (
@@ -589,7 +586,7 @@ async def score_population(
     # every cross-cycle measurement, not just this cycle's rounds.
     round_boundary_obs: list[Observation] = list(cycle.archive_observations) + prior_round_obs
 
-    picker_objective = cycle.config.optimization.picker_objective
+    explore_weight = cycle.config.optimization.exploration.explore_weight
     dataset_sample_ids = [int(s.id) for s in dataset]
 
     def _picker_maps(
@@ -609,34 +606,51 @@ async def score_population(
         }
         return delta_map, delta_se_map
 
-    # Fit the hierarchical Rasch posterior once at the round boundary over the
-    # dataset-scoped archive plus prior-round observations. δ_s is a property
-    # of samples, not candidates, so every candidate's picker reads this one
-    # cached posterior — no per-candidate refit. ``prior_var`` is the
-    # estimated population ability variance σ_θ²: a brand-new candidate's
-    # θ_c prior, drawn from N(0, σ_θ²).
-    picker_posterior = fit_rasch(round_boundary_obs)
-    delta_map, delta_se_map = _picker_maps(picker_posterior)
-    prior_var = picker_posterior.sigma_theta**2
-
-    def _seed_posterior() -> tuple[float, float]:
+    def _seed_posterior(
+        d_map: dict[int, float], d_se_map: dict[int, float], p_var: float
+    ) -> tuple[float, float]:
         """Fold the seed's per-sample outcomes into a θ_s posterior (μ_s, var_s).
 
-        Used by the ``decision`` picker objective so each sample's
-        information gain can be scored against the keep/abort verdict.
+        The picker's decision term scores each sample's information gain
+        against the keep/abort verdict ``θ_c > θ_s`` — this is that seed.
         Returns the centred prior ``(0, σ_θ²)`` when the seed has no
         measurements.
         """
         if not seed_results:
-            return 0.0, prior_var
+            return 0.0, p_var
         outcomes = [
-            (delta_map.get(int(sr["sample_id"]), 0.0), bool(sr.get("hit")))
+            (
+                d_map.get(int(sr["sample_id"]), 0.0),
+                d_se_map.get(int(sr["sample_id"]), 1.0),
+                bool(sr.get("hit")),
+            )
             for sr in seed_results
             if sr.get("sample_id") is not None and not sr.get("error")
         ]
-        return posterior_from_outcomes(0.0, prior_var, outcomes)
+        return posterior_from_outcomes(0.0, p_var, outcomes)
 
-    seed_mu, seed_var = _seed_posterior() if picker_objective == "decision" else (0.0, 1.0)
+    # Live picker observations. The Rasch δ leaderboard is re-fit on EVERY
+    # measurement over the archive + prior rounds + this round's completed
+    # candidates (``round_live_obs``) + the in-flight candidate's outcomes,
+    # so the picker and the webapp hard-samples table track every score in
+    # real time instead of freezing at the round boundary.
+    round_live_obs: list[Observation] = []
+
+    def _fit_picker(
+        extra_obs: list[Observation],
+    ) -> tuple[dict[int, float], dict[int, float], float, float, float]:
+        """Re-fit the Rasch picker over every observation gathered so far.
+
+        Returns ``(delta_map, delta_se_map, prior_var, seed_mu, seed_var)``.
+        ``extra_obs`` is the in-flight candidate's outcomes — not yet folded
+        into ``round_live_obs``. ``fit_rasch`` is pure numpy over a
+        dataset-scoped observation set, cheap enough to run per measurement.
+        """
+        posterior = fit_rasch(round_boundary_obs + round_live_obs + extra_obs)
+        d_map, d_se_map = _picker_maps(posterior)
+        p_var = posterior.sigma_theta**2
+        s_mu, s_var = _seed_posterior(d_map, d_se_map, p_var)
+        return d_map, d_se_map, p_var, s_mu, s_var
 
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
@@ -650,76 +664,66 @@ async def score_population(
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
 
-        # Online 1PL Rasch CAT picker. The δ posterior is the round-boundary
-        # fit above; each per-sample call to ``next_sample`` folds
-        # ``update_theta_posterior`` over the candidate's measured outcomes so
-        # far and picks argmax of the configured objective under the running
-        # θ̂_c posterior. Pure / stateless — callers don't persist
-        # (μ_c, var_c) across calls.
-        #
-        # Objective ``model``: argmax expected information gain — the entropy
-        # reduction of the hierarchical IRT posterior; decision-agnostic.
-        # Objective ``decision``: argmax mutual information between the next
-        # outcome and the keep/abort verdict against the seed.
+        # Online 1PL Rasch CAT picker — re-fits the δ leaderboard on every
+        # measurement (``_fit_picker``), folds the candidate's outcomes into
+        # a running θ̂_c posterior, and picks argmax of the blended objective
+        # (decision-information-gain against the seed + the small explore
+        # term). Re-emits ``hard_sample_order`` each call so the webapp
+        # hard-samples table reorders on every score. Callers don't persist
+        # (μ_c, var_c) across calls — the fold is from scratch each step.
         def _next_sample(
             scored_outcomes: dict[int, bool],
-            _delta_map: dict[int, float] = delta_map,
-            _delta_se_map: dict[int, float] = delta_se_map,
-            _prior_var: float = prior_var,
-            _objective: str = picker_objective,
-            _seed_mu: float = seed_mu,
-            _seed_var: float = seed_var,
+            _cid: str = osp_c.lineage.id,
+            _idx: int = idx,
         ) -> int | None:
+            extra = [
+                Observation(candidate_id=_cid, sample_id=sid, hit=hit)
+                for sid, hit in scored_outcomes.items()
+            ]
+            d_map, d_se_map, p_var, s_mu, s_var = _fit_picker(extra)
+            # A fresh mutation is a small edit of its parent — its ability
+            # prior is the seed's ability θ_s, not the population-mean anchor
+            # 0. Fold the candidate's outcomes from there so the decision
+            # term has real signal from the first pick: a centred-at-0 prior
+            # makes decision-IG flat and lets the explore term walk fresh
+            # unmeasured blocks in sample-id order.
             mu_c, var_c = posterior_from_outcomes(
-                0.0,
-                _prior_var,
-                ((_delta_map.get(sid, 0.0), hit) for sid, hit in scored_outcomes.items()),
+                s_mu,
+                p_var,
+                (
+                    (d_map.get(sid, 0.0), d_se_map.get(sid, 1.0), hit)
+                    for sid, hit in scored_outcomes.items()
+                ),
             )
-            remaining = set(dataset_sample_ids) - scored_outcomes.keys()
-            if _objective == "decision":
-                return next_sample_decision(
-                    mu_c, var_c, _seed_mu, _seed_var, _delta_map, _delta_se_map, remaining
-                )
-            return next_sample_eig(mu_c, var_c, _delta_map, _delta_se_map, remaining)
-
-        # Candidate-start preview: rank all dataset sample_ids under the
-        # active objective at the candidate's prior θ̂_c = N(0, σ_θ²).
-        # Surfaces on ``dashboard.json::hard_sample_order`` so the webapp
-        # table mirrors what the picker would pick if outcomes follow
-        # the prior. Live execution re-picks per step.
-        if picker_objective == "decision":
-            expected_order = expected_order_decision(
-                0.0, prior_var, seed_mu, seed_var, delta_map, delta_se_map, dataset_sample_ids
+            # Re-emit the live leaderboard at the candidate's *current*
+            # posterior so the webapp hard-samples table reorders on every
+            # score and the console preview matches the pick actually made.
+            order = expected_order(
+                mu_c, var_c, s_mu, s_var, d_map, d_se_map, dataset_sample_ids, explore_weight
             )
-            preview_scores = {
-                sid: float(
-                    decision_information_gain(
-                        0.0, prior_var, seed_mu, seed_var, delta_map[sid], delta_se_map[sid]
-                    )
+            preview = [
+                (
+                    sid,
+                    float(
+                        pick_value(
+                            mu_c, var_c, s_mu, s_var, d_map[sid], d_se_map[sid], explore_weight
+                        )
+                    ),
                 )
-                for sid in expected_order[: min(3, len(expected_order))]
-            }
-        else:
-            expected_order = expected_order_eig(
-                0.0, prior_var, delta_map, delta_se_map, dataset_sample_ids
-            )
-            preview_scores = {
-                sid: float(
-                    expected_information_gain(0.0, prior_var, delta_map[sid], delta_se_map[sid])
-                )
-                for sid in expected_order[: min(3, len(expected_order))]
-            }
-
-        if picker_posterior.delta:
-            preview = [(sid, preview_scores[sid]) for sid in preview_scores]
+                for sid in order
+                if sid not in scored_outcomes
+            ][:3]
             callbacks.on_sample_order_preview(
                 round_num,
-                idx,
+                _idx,
                 n,
                 preview,
                 n_priors=len(elim_check.priors_by_sample),
-                sample_order=expected_order,
+                sample_order=order,
             )
+            remaining = set(dataset_sample_ids) - scored_outcomes.keys()
+            return next_sample(mu_c, var_c, s_mu, s_var, d_map, d_se_map, remaining, explore_weight)
+
         # Bind the candidate's sample budget so PoBB's dominance gate
         # can compute ``cand_max_hits = cand_hits + remaining`` against
         # the seed prior's total hits. Online picking means the candidate
@@ -744,6 +748,9 @@ async def score_population(
             next_sample=_next_sample,
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
+        # Fold this candidate's outcomes into the live picker observations so
+        # the next candidate's picker — and the leaderboard — see them.
+        round_live_obs.extend(_filtered_obs({osp_c.lineage.id: cr_result.results}))
         if cr_result.runtime_failure is not None:
             osp_c.wounds.runtime_failures = [
                 *osp_c.wounds.runtime_failures,

@@ -49,16 +49,16 @@ artifact = build_hard_samples_artifact(cycle.rounds, top_k_candidates=None, top_
 # artifact["sample_order"]:          list[int]              (δ_s desc, hardest first — for the heatmap)
 # artifact["cells"]:                 list[{"c", "s", "hit"}] (measured only)
 # artifact["rasch"]:                 {"theta", "theta_se", "delta", "delta_se", ...}
-# artifact["pick_score"]["sample_order"]: list[int]         (EIG desc — descriptive snapshot)
-# artifact["pick_score"]["per_sample"]:   dict[str,float]   (expected information gain per sample, ≥0)
+# artifact["pick_score"]["sample_order"]: list[int]         (pick-value desc — descriptive snapshot)
+# artifact["pick_score"]["per_sample"]:   dict[str,float]   (blended pick-value per sample)
 ```
 
-The `pick_score` block is a **descriptive snapshot** for the webapp dataset table and the FastAPI `/datasets/{name}/preview` endpoint. It carries the **expected information gain** of measuring each sample on a brand-new candidate (ability prior `N(0, σ_θ²)`): `½·log(1 + w̄·(σ_θ² + se_δ²))`. Because it reads the Rasch δ_s standard error, a barely-measured sample scores high — there is more to learn — instead of being mistaken for settled.
+The `pick_score` block is a **descriptive snapshot** for the webapp dataset table and the FastAPI `/datasets/{name}/preview` endpoint. It carries the picker's blended **pick-value** of measuring each sample on a brand-new candidate — a fresh mutation of the seed, ability prior `N(θ_seed, σ_θ²)` (centred on the parent, not the population-mean anchor 0) — scored against the best fitted candidate as the seed: `decision_information_gain + explore_weight · model_information_gain`.
 
-The **live picker** (`promptpotter/application/intelligence/adaptive_picker.py`) does NOT consume this snapshot. It maintains a per-candidate posterior on `θ_c` and re-picks per measurement under the configured objective (`model` or `decision`). Two consumers, two sorts:
+The **live picker** (`promptpotter/application/intelligence/adaptive_picker.py`) does NOT consume this snapshot. It maintains a per-candidate posterior on `θ_c` and re-picks per measurement by the same blended objective against its own running posterior. Two consumers, two sorts:
 
 - **Heatmap (`sample_order`, δ_s desc):** hardest first — operator sees the failure cluster aligned left.
-- **Live picker (`adaptive_picker.next_sample_*`):** sample selected per step against the candidate's running θ̂_c posterior. See [`../concepts/paired-sample-pobb.md#sample-selection`](../concepts/paired-sample-pobb.md#sample-selection) for the objective contract.
+- **Live picker (`adaptive_picker.next_sample`):** sample selected per step against the candidate's running θ̂_c posterior. See [`../concepts/paired-sample-pobb.md#sample-selection`](../concepts/paired-sample-pobb.md#sample-selection) for the objective contract.
 
 **Tri-state cell.** A cell is *measured & hit*, *measured & miss*, or *absent* (unmeasured). Heatmap renderers iterate `cells` for the measured pairs and treat any `(c ∈ candidate_order × s ∈ sample_order)` not present as the unmeasured tier.
 

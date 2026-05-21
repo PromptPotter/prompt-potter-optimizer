@@ -115,8 +115,11 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict | None:
     cycle_dir = store.cycle_dir(campaign_id, cycle_id)
     campaign_dir = store.campaign_root_dir(campaign_id)
 
+    explore_weight = cycle.config.optimization.exploration.explore_weight
+
     cycle_artifact = build_hard_samples_artifact(
         cycle.rounds,
+        explore_weight=explore_weight,
         cycle_id=cycle_id,
         top_k_candidates=None,
         top_k_samples=None,
@@ -127,6 +130,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict | None:
     campaign_obs = list(cycle.archive_observations) + live_obs
     campaign_artifact = build_hard_samples_artifact_from_observations(
         campaign_obs,
+        explore_weight=explore_weight,
         cycle_id=cycle_id,
         top_k_candidates=None,
         top_k_samples=None,
@@ -157,6 +161,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict | None:
             session.store,
             session.backend_id,
             dataset_name=session.dataset_name,
+            explore_weight=explore_weight,
             top_k_candidates=None,
             top_k_samples=None,
         )
