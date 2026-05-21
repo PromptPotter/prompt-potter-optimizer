@@ -11,6 +11,9 @@ import { HardSamplesTable } from "./HardSamplesTable";
 
 interface Props {
   dash: DashboardSnapshot | null;
+  // Freshness gate — forwarded to HardSamplesTable so the row-scoring blink
+  // stops when the optimizer process dies.
+  isLive: boolean;
   dashRound: number | null;
   datasetName: string | null;
   datasetItems: DatasetItem[];
@@ -77,6 +80,7 @@ function liveMeasurements(
 // HardSamplesTable; the bottom-edge grip (hover to reveal) resizes it.
 export function HardSamplesHeatmap({
   dash,
+  isLive,
   dashRound,
   datasetName,
   datasetItems,
@@ -170,6 +174,7 @@ export function HardSamplesHeatmap({
           </button>
           <HardSamplesTable
             dash={dash}
+            isLive={isLive}
             perSample={perSample}
             datasetName={datasetName}
             datasetItems={datasetItems}

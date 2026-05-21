@@ -129,7 +129,10 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
               if (!pos) return null;
               const data = currentNodes[n.id];
               const hasData = !!data;
-              const isActive = activeId === n.id;
+              // Gated on `isLive` so a frozen canvas (process killed,
+              // freshness lapsed) stops pulsing the last phase's node —
+              // `dash.state` stays at the last phase but no node is "active".
+              const isActive = isLive && activeId === n.id;
               const isSelected = selected === n.id;
               const isIo = n.kind === "io";
               const dotCls = [

@@ -40,6 +40,11 @@ export interface MeasurementDot {
 
 interface Props {
   dash: DashboardSnapshot | null;
+  // `status === "live"` — gates the row-scoring blink. When the optimizer
+  // process dies, `current_sample_id` is stranded in dashboard.json; without
+  // this gate the matched row would pulse forever. `isLive` goes false once
+  // the freshness signal lapses, so the blink stops on its own.
+  isLive: boolean;
   // Per-sample chronological measurement dots. When supplied, the table
   // shows a "measurements" column with one dot per measurement; when
   // omitted, the column is hidden.
@@ -151,8 +156,8 @@ interface PersistedState {
   folded: ColId[];
   wrapped: ColId[];
   // When true, the table sort follows ``dash.hard_sample_order`` (the
-  // adaptive picker's expected per-candidate order — descending expected
-  // information gain) and header-click sorting is suppressed. The "Pick"
+  // adaptive picker's expected per-candidate order — descending blended
+  // pick-value) and header-click sorting is suppressed. The "Pick"
   // column carries the live-sort marker. Default ON — operator opted
   // into the "real time mirror" framing.
   syncLive: boolean;
@@ -242,10 +247,10 @@ function cellFor(
         style: missProbStyle(item.miss_prob),
       };
     case "pick_score":
-      // Expected information gain at the population prior — higher means
-      // measuring this sample teaches the model more. Three decimals so
-      // equal-looking-but-actually-different values don't collapse
-      // visually. ``—`` when the sample is unmeasured.
+      // The picker's blended objective at the population prior — higher
+      // means measuring this sample is more decision-informative. Three
+      // decimals so equal-looking-but-actually-different values don't
+      // collapse visually. ``—`` when the sample is unmeasured.
       return {
         text: item.pick_score !== null ? item.pick_score.toFixed(3) : "—",
         raw: item.pick_score,
@@ -333,6 +338,7 @@ const RANK_HINT = "Position in current sort order — click to clear sort";
 
 export function HardSamplesTable({
   dash,
+  isLive,
   perSample,
   compact,
   datasetName,
@@ -630,10 +636,10 @@ export function HardSamplesTable({
           >
             {columns.map((col) => {
               const folded = persisted.folded.includes(col.id);
-              // Under live-sort the rows follow the picker's information-gain
-              // ranking — which is the "Pick" column descending; mark it so
-              // the operator can see what the order is. Otherwise the manual
-              // header-click sort owns the marker.
+              // Under live-sort the rows follow the picker's blended
+              // pick-value ranking — which is the "Pick" column descending;
+              // mark it so the operator can see what the order is. Otherwise
+              // the manual header-click sort owns the marker.
               const sorted = liveSortActive
                 ? col.id === "pick_score"
                   ? "desc"
@@ -646,8 +652,8 @@ export function HardSamplesTable({
                 ? "Unfold column"
                 : liveSortActive
                   ? col.id === "pick_score"
-                    ? "Live sort: descending expected information gain (the picker's order)"
-                    : "Synced to the picker's live information-gain ranking — toggle off Auto-sort to sort manually"
+                    ? "Live sort: descending blended pick-value (the picker's order)"
+                    : "Synced to the picker's live pick-value ranking — toggle off Auto-sort to sort manually"
                   : isRank
                     ? RANK_HINT
                     : `Sort by ${col.label}`;
@@ -714,8 +720,12 @@ export function HardSamplesTable({
               // soft-blink keyframe (globals.css) animates the whole row,
               // not just one cell. Independent of the sort-sync toggle —
               // operators sorting manually still want to see "this is the
-              // row the loop is on right now".
+              // row the loop is on right now". Gated on `isLive` + the
+              // scoring phase so a stranded `current_sample_id` (process
+              // killed mid-sample, or a non-scoring phase) never blinks.
               const isRunning =
+                isLive &&
+                dash?.state === "scoring" &&
                 typeof dash?.current_sample_id === "number" &&
                 item.sample_id === dash.current_sample_id;
               return columns.map((col) => {

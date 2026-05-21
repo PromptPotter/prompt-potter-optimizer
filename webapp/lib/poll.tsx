@@ -125,6 +125,15 @@ export interface CycleStreamState {
   error: string | null;
   // Sorted ascending by `round`. Empty until the first listing fetch lands.
   rounds: RoundFileDoc[];
+  // `status === "live"` — the optimizer wrote dashboard.json within the
+  // freshness window. The single gate for every transient indicator (blinking
+  // rows, pulsing nodes, "rolling" badges): when the producer dies the
+  // freshness signal goes stale and `isLive` flips false, so all motion stops
+  // without any per-component timeout logic.
+  isLive: boolean;
+  // `dash.state` lifted to the top level so transient indicators can gate on
+  // the phase (e.g. only blink a sample row when `phase === "scoring"`).
+  phase: string | null;
 }
 
 const INITIAL_STATE: CycleStreamState = {
@@ -136,6 +145,8 @@ const INITIAL_STATE: CycleStreamState = {
   termKey: "status_offline",
   error: null,
   rounds: [],
+  isLive: false,
+  phase: null,
 };
 
 // Status banner age buckets — same thresholds as vanilla setStatus call sites.
@@ -317,6 +328,8 @@ function useCycleStreamSource(
           ageS,
           termKey: bucket.termKey,
           error: null,
+          isLive: bucket.status === "live",
+          phase: typeof dash.state === "string" ? dash.state : null,
         }));
         if (liveRound != null && liveRound !== lastRoundRef.current) {
           lastRoundRef.current = liveRound;
@@ -332,6 +345,7 @@ function useCycleStreamSource(
           statusHint: "Resume the active campaign: `python -m promptpotter resume`",
           termKey: "status_offline",
           error: (e as Error).message,
+          isLive: false,
         }));
       }
     };

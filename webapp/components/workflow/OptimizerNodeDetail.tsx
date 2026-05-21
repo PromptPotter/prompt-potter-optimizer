@@ -26,6 +26,9 @@ interface Props {
   id: string;
   pipeline: PipelineDoc | null;
   dash: DashboardSnapshot | null;
+  // Freshness gate — a frozen cycle keeps `dash.state` at its last phase;
+  // without this the detail panel would claim the node is "live" forever.
+  isLive: boolean;
   rounds: RoundFileDoc[];
   onClose: () => void;
 }
@@ -108,7 +111,7 @@ function Chip({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function OptimizerNodeDetail({ id, pipeline, dash, rounds, onClose }: Props) {
+export function OptimizerNodeDetail({ id, pipeline, dash, isLive, rounds, onClose }: Props) {
   const view = pipeline?.view;
   const meta = view?.nodes.find((n) => n.id === id);
   const label = meta?.label ?? id;
@@ -139,7 +142,7 @@ export function OptimizerNodeDetail({ id, pipeline, dash, rounds, onClose }: Pro
     : "";
 
   const livePhaseNode = phaseToNodeId(dash?.state ?? null);
-  const isLiveNow = livePhaseNode === id;
+  const isLiveNow = isLive && livePhaseNode === id;
   const lastFiredRound = options[0]?.round ?? null;
   const statusLine = isLiveNow
     ? `live · round ${roundOf(dash) ?? "—"}`

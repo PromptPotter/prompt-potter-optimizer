@@ -147,11 +147,11 @@ function DashboardPaneInner() {
   // `useCycleStream().rounds`, so the dashboard makes one set of round-
   // file network calls per round change instead of one per panel.
   const dashRound = roundOf(dash);
-  // Liveness — used by mid-run guards (three-way fork modal, Live badge,
-  // Stop button visibility). The stream already classifies the poll's
-  // success/age into "live"/"stale"/"offline" — reuse that signal instead
-  // of inventing a second one.
-  const isLive = dashState.status === "live";
+  // Liveness — the single gate for mid-run guards (fork modal, Live badge,
+  // Stop button) and every transient indicator (blinking rows, pulsing
+  // nodes). The stream centralizes the poll's success/age classification;
+  // read it from there rather than re-deriving a second signal.
+  const isLive = dashState.isLive;
 
   // One-shot pipeline (topology) lookup
   useEffect(() => {
@@ -357,6 +357,7 @@ function DashboardPaneInner() {
             sessionId={sessionId}
             datasetTitle={datasetTitle}
             dash={dash}
+            isLive={isLive}
             dashRound={dashRound}
             cycleStartedAt={cycleStartedAt}
             themeKey={themeKey}
@@ -511,6 +512,7 @@ function NowRow({
           id={node}
           pipeline={pipeline}
           dash={dash}
+          isLive={isLive}
           rounds={rounds}
           onClose={() => setNode(null)}
         />

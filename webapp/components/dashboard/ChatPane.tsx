@@ -14,6 +14,8 @@ interface Props {
   sessionId: string | null;
   datasetTitle: string | null;
   dash: DashboardSnapshot | null;
+  // Freshness gate — forwarded to the hard-samples heatmap.
+  isLive: boolean;
   dashRound: number | null;
   cycleStartedAt: string | null;
   themeKey: string;
@@ -56,6 +58,7 @@ export function ChatPane({
   sessionId,
   datasetTitle,
   dash,
+  isLive,
   dashRound,
   cycleStartedAt,
   themeKey,
@@ -233,6 +236,7 @@ export function ChatPane({
         {samplesOpen && (
           <HardSamplesHeatmap
             dash={dash}
+            isLive={isLive}
             dashRound={dashRound}
             datasetName={datasetName}
             datasetItems={datasetItems}

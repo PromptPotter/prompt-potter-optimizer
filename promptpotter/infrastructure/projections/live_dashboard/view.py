@@ -32,6 +32,7 @@ from promptpotter.domain.cycle_paths import SessionFamilyDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import (
+    LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
     PhaseRecord,
@@ -206,16 +207,15 @@ class LiveDashboardView(DerivedView):
             # on ``sample_scored``. Lets the webapp dataset table pulse the
             # in-flight row in lockstep with the per-sample dashboard rewrites.
             "current_sample_id": None,
-            # Adaptive picker's expected sample order at candidate-start
-            # under the active ``picker_objective`` — expected information
-            # gain (``model``) or decision-verdict mutual information
-            # (``decision``). Refreshed per-candidate in
-            # ``score_population``. The webapp dataset table sorts on
-            # this when the operator's "sync with live sort" toggle is
-            # on. ``None`` until the first picker fit lands (round 0 /
-            # pre-first-candidate fallback). The hardest-first ordering
-            # (δ_s desc) lives on the per-cycle hard-samples artifact
-            # under ``sample_order`` for the heatmap.
+            # Adaptive picker's expected sample order at candidate-start —
+            # descending blended pick-value (decision-information-gain
+            # against the seed plus the small explore term). Refreshed
+            # per-candidate in ``score_population``. The webapp dataset
+            # table sorts on this when the operator's "sync with live
+            # sort" toggle is on. ``None`` until the first picker fit
+            # lands (round 0 / pre-first-candidate fallback). The
+            # hardest-first ordering (δ_s desc) lives on the per-cycle
+            # hard-samples artifact under ``sample_order`` for the heatmap.
             "hard_sample_order": None,
             "last_query_elapsed_s": 0.0,
             "wallclock_serialized_at": None,
@@ -614,6 +614,20 @@ class LiveDashboardView(DerivedView):
         ):
             self.state["in_flight"] = None
             self._persist()
+
+    def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
+        """Re-persist on each in-flight heartbeat to keep the freshness signal live.
+
+        A long optimizer LLM phase (l1_generate, l1_critique, …) fires no
+        ``PhaseRecord``/``SnapshotRecord`` for 30-90 s, so ``dashboard.json`` is
+        not rewritten and ``wallclock_serialized_at`` ages — the webapp would
+        false-positive "stale" on a healthy process. The heartbeat record
+        (every ``HEARTBEAT_INTERVAL_S``) is the liveness proof; this hook turns
+        it into a dashboard rewrite. No ``state`` mutation — a heartbeat means
+        "still alive in the current phase", only the timestamp moves.
+        """
+        del record
+        self._persist()
 
     def _update_current_acc(self, scores: dict) -> None:
         self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)
