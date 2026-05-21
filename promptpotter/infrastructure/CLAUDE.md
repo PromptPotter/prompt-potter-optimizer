@@ -17,10 +17,16 @@ campaign event stream.
 
 | Projection | Scope | Writes |
 |---|---|---|
-| `LiveDashboardView` | root cycle only | `dashboard.json`, `output.log` |
+| `LiveDashboardView` | session-family root cycle | `dashboard.json`, `output.log` |
 | `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` |
 | `LiveStateProjection` | per cycle | derived live state snapshot |
 | `PoBBStreamView` | per cycle | PoBB elimination event stream |
+
+`LiveDashboardView` writes into the **session-family root cycle dir**
+(`cycles/{session_root}/dashboard.json`) — a session's forks share their
+session root's stream. A campaign therefore carries N live `dashboard.json`
+streams, one per session, never one shared at the campaign root. The write
+target is the `SessionFamilyDir` newtype (`domain/cycle_paths.py`).
 
 `DerivedView.on_record` (`projections/base.py`) owns the
 `isinstance(record, …)` dispatch; subclasses override hooks. There's no
@@ -53,10 +59,11 @@ admissibility checks.
 builder. Composite over focused leaf stores (`BackendStore`,
 `CampaignStore` (`store/campaign_store/`), `DatasetRunStore`, `PlanStore`,
 `SessionStore`). Shared
-I/O + `EntityStore` in `store/base.py`. Path helpers + `CycleDir` /
-`RootCycleDir` newtypes in `store/paths.py` — projections and stores
-accept these newtypes, not raw `str`/`Path`. `archive/` is
-cross-cycle/session/tenant; `MeasurementArchive` is the DB core.
+I/O + `EntityStore` in `store/base.py`. Path helpers in `store/paths.py`;
+the `CycleDir` / `SessionFamilyDir` write-target newtypes in
+`domain/cycle_paths.py` — projections and stores accept these newtypes,
+not raw `str`/`Path`. `archive/` is cross-cycle/session/tenant;
+`MeasurementArchive` is the DB core.
 
 ## LLM client
 

@@ -54,19 +54,65 @@ implementation site lands, or rename to a term already on the list.
 - **ConfigIndex** — per-pipeline-config rollup for de-duplication and
   effect-size estimation. `application/intelligence/indexes/config.py`.
 
-## Hierarchy — sessions / cycles / forks / siblings
+## Hierarchy — workspace / dataset / campaign / session / unit
 
-- **Session** — operator workspace + per-cycle bundles (state, scoring,
-  observability). `application/bootstrap/session.py`.
-- **Cycle** — round-loop state container. One cycle per content-hashed
-  origin JSP. `application/optimization/cycle.py`.
+The persisted world is a four-entity containment hierarchy
+(outermost → innermost). The Session is a unit of a campaign;
+`active_session.json` is the operator's pointer/lens to the active one.
+
+- **Workspace** — the tenant-level container and queryable datastore:
+  every dataset, every campaign, the shared `archive/`. On disk
+  `projects/{tenant}/`.
+- **Dataset** — the optimization target plus its config.
+  `datasets/{name}/`.
+- **Campaign** — one declared optimization effort: a dataset, a
+  pipeline origin, and context text. A first-class entity and a
+  **forest** — it holds N sessions. Directory
+  `campaigns/{campaign_id}/` + `campaign.json` manifest.
+  `campaign_id = {dataset}__{origin_content_hash}` — the 12-hex content
+  hash of the origin declaration; **stable**, so re-running `new` on an
+  unchanged declaration find-or-creates the same campaign.
+  `domain/campaign.py`.
+- **Session** — one run of `new` on a campaign's declaration. A campaign
+  holds N sessions; re-running `new` on the same declaration adds one,
+  `resume` extends the active one. Identity is the `session_id`
+  (`s_xxxx`). Each session is a tree: a root cycle plus its fork
+  descendants. Session root cycle id is `cycle_{hash}` for session 1,
+  `cycle_{hash}_s{N}` for session N — the `_s{N}` suffix disambiguates
+  the directory, not a sibling separator.
+  `application/bootstrap/session.py`.
+- **Unit** — one continuous-parameter run inside a session. A session
+  starts with one unit; `resume` extends the current unit; each fork
+  (human / L3 / divergence) branches a new unit. The operator-facing
+  name for a **Cycle** — the webapp + docs say "unit", the on-disk / API
+  identifier stays `cycle_id`.
+- **Cycle** — the round-loop state container; the internal name for a
+  Unit. `cycle_{content_hash[:12]}` from the origin JSP content hash
+  (+ `_s{N}` for session-root cycles, `_fork_`/`_diag_`/`_sweep_` for
+  branches). `cycle_id` is campaign-scoped — path resolution is
+  `(campaign_id, cycle_id)`. `application/optimization/cycle.py`.
+- **unit_kind** — operator-facing label on the webapp sidebar, computed
+  server-side from `(sibling_kind, fork_trigger)`: `session` (a session
+  root run; `resume` extends it), `divergent_resume` (a `resume
+  --fork-on-divergence` branch), `user_fork` (any operator-initiated
+  branch — HITL fork, diagnostic, sweep, folded into one kind),
+  `l3_fork` (reserved for L3 auto-forking; not emitted yet).
+- **Data scope** — `campaign | dataset | workspace`: the three named
+  scopes the Workspace datastore is queried at — one campaign's
+  cycles (across every session), every campaign for one dataset, or
+  everything. Used identically by the archive query API, heatmap
+  artifacts, the `scope` API param, and the webapp toggle.
 - **Fork** — a sibling cycle minted from a parent at a specific ledger
-  offset via `CycleEventLog.inherit_from`. Three kinds:
-  `forks/` (divergence + operator-chosen), `diag/` (diagnostic),
-  `sweeps/<batch>/forks/` (sweep-toolkit A/B candidates).
-- **Sibling kind** — `root | fork | diag | sweep`. Derived from the
-  directory path under `campaigns/`. See
-  `infrastructure/store/paths.py::sibling_kind`.
+  offset via `CycleEventLog.inherit_from`, inside the **same
+  session**. Three kinds: divergence (operator-chosen), diagnostic,
+  and sweep (sweep-toolkit A/B candidates) — all flat under the
+  campaign's `cycles/`.
+- **Sibling kind** — `root | fork | diag | sweep`. Recorded in the
+  cycle's `index.json` metadata, not derived from a directory path.
+  See `infrastructure/store/paths.py::sibling_kind`.
+- **SessionFamilyDir** — the domain newtype for the dashboard's write
+  target: a session's root cycle dir, where `dashboard.json` lives and
+  is shared by that session's forks. `domain/cycle_paths.py`.
 
 ## Round-level vocabulary
 

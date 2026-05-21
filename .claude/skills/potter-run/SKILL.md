@@ -10,12 +10,12 @@ Optional dataset name (e.g. `bbeh`, `aime_2025`, `gsm8k`, `lca-termnorm`). If om
 
 ## CLI Reference
 
-Two write verbs: `new` and `resume`. Reads happen by opening `campaigns/<cycle_id>/{dashboard.json,log.md,index.json}` directly. Stop with Ctrl+C (first finishes in-flight, second force-quits) — there is no mid-run pause/resume.
+Two write verbs: `new` and `resume`. Reads happen by opening the campaign dir directly: `campaigns/<campaign_id>/{campaign.json,dashboard.json,log.md}` for the campaign, `campaigns/<campaign_id>/cycles/<cycle_id>/{index.json,log.md,rounds/}` for per-cycle detail. Stop with Ctrl+C (first finishes in-flight, second force-quits) — there is no mid-run pause/resume.
 
 | Verb | Behavior |
 |------|----------|
-| **`new <name>`** | Mint a fresh session+cycle from `datasets/<name>/`, decompose `task_description.md` on first sight, run from round 0. Every invocation mints a fresh root cycle; on content-hash collision with an existing root, the `cycle_id` gets a `_r2` / `_r3` discriminator suffix so the new run lands in its own directory tree (separate dashboard, log, archive subtree). The prior campaign is preserved. |
-| **`resume`** | Pick up the active session. Rewind in place with `--from <round>`. |
+| **`new <name>`** | Mint a fresh Campaign + root cycle from `datasets/<name>/`, decompose `task_description.md` on first sight, run from round 0. Every invocation produces a distinct `campaign_id` (`{dataset}__{YYYYMMDD-HHMMSS}` — sortable, collision-free) with its own directory, dashboard, and log. The prior campaign is preserved. |
+| **`resume`** | Pick up the active session — reads `{campaign_id, cycle_id}` from the pointer and continues that cycle. Rewind in place with `--from <round>`. |
 
 The fresh-mint prep flags (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--task-file`, `--task-text`) live on `new`.
 
@@ -24,7 +24,7 @@ The fresh-mint prep flags (`--backend-url`, `--backend-id`, `--config`, `--datas
 ## Rules (apply throughout)
 
 - **Dataset overrides.** Check `reference/{dataset}-notes.md` first — if present it supersedes this flow.
-- **Resume is the default.** `.promptpotter/active_session.json` = `{tenant_id, cycle_id}`. `resume` reads the pointer and continues the active session. `new <name>` overwrites the pointer (mints a fresh session+cycle). `init_services()` raises `ActiveSessionMismatchError` on drift unless `take_over=True`.
+- **Resume is the default.** `.promptpotter/active_session.json` = `{tenant_id, session_id, campaign_id, cycle_id}`. The happy path is bare `python -m promptpotter resume` — it reads the 4-key pointer and continues the active campaign's cycle, no flags needed. `new <name>` overwrites the pointer (mints a fresh Campaign + root cycle). `init_services()` raises `ActiveSessionMismatchError` on drift unless `take_over=True`.
 - **`new` is pure prep + run.** No backend scoring during the prep step; origin runs as phase 0 of the `new` body. There is no `--skip-origin` flag.
 - **Timeouts: 30s default, 60s hard max.** Never exceed 60s without asking. Never `run_in_background` CLI commands. If auto-backgrounded, `tasklist | findstr python` → `taskkill //F //PID <pid>` before retrying.
 - **Stop when bounded retries exhaust.** `BackendClient.run_query()` auto-retries 429 (RFC 7231 Retry-After) and 5xx/transport errors with countdown backoff (5 attempts max). If a campaign still propagates 5xx after retries, halt and tell the user "Backend returning persistent 5xx — likely Groq upstream rate-limiting or outage. Check and restart." Don't loop on top of the client's loop.
@@ -42,7 +42,7 @@ Persistent configs decide behavior — the skill does not carry a parallel defau
 - `datasets/{name}/campaign.json` — hyperparameters (max_rounds, n_variants, sp_budget_ttest, patiences)
 - `datasets/{name}/pipeline.json` — pipeline + model + caps
 - BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows `campaign.json`; notebook wins
-- Active session: `.promptpotter/active_session.json` → `campaigns/{cycle_id}/index.json` + `dashboard.json`
+- Active session: `.promptpotter/active_session.json` → `campaigns/{campaign_id}/dashboard.json` + `cycles/{cycle_id}/index.json`
 
 Per-dataset reasoning defaults (model + `reasoning_effort` + `max_tokens`) live in [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md). **Groq daily-volume swap:** `openai/gpt-oss-120b` is the canonical model; during dev the operator may flip the `pipeline.json` `model` field to `openai/gpt-oss-20b` when 120b daily volume is exhausted. Treat the field as a live operator knob, not a fixed default. `max_tokens` is never set numerically in node configs — provider ceiling applies; operators override per-cycle via `campaign.json::pipeline_overrides`.
 
@@ -114,7 +114,7 @@ CRITIQUE: {2-4 key lines — what failed, what to try next}
 NEXT:     {continue L1 / escalate to L2 / etc.}
 ```
 
-**Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{root_cycle_id}/dashboard.json` (active cycle id in `.promptpotter/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/ui/> — polls `dashboard.json` every 2 s; reload the page after a fresh `new <name>` mint. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-sample HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `resume` to continue.
+**Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{campaign_id}/dashboard.json` (active campaign + cycle ids in `.promptpotter/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/ui/> — polls `dashboard.json` every 2 s; reload the page after a fresh `new <name>` mint. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-sample HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `resume` to continue.
 
 **Incremental persistence.** Every query lands in `archive/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 
@@ -122,7 +122,7 @@ Escalation model: `reference/optimization-layers.md`, `docs/concepts/the-loop.md
 
 ## Phase 5: Results
 
-Open `campaigns/<cycle_id>/log.md` (rendered digest with status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner) and `index.json::final` (structured: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `origin_accuracy`, `stop_reason`). `index.json::final.stop_reason` → recovery path in `reference/troubleshooting.md`.
+Open `campaigns/<campaign_id>/log.md` (campaign digest — status, every cycle + its rounds, campaign-scoped heatmap, final winner) and `cycles/<cycle_id>/index.json::final` (structured: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `origin_accuracy`, `stop_reason`). `index.json::final.stop_reason` → recovery path in `reference/troubleshooting.md`.
 
 ---
 

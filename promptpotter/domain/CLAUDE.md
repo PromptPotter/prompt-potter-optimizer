@@ -28,7 +28,10 @@ back-compat shims. The word `legacy` is **never** sanctioned.
 
 ## Other surfaces
 
-- `cycle_paths.py` — `CycleDir`, `RootCycleDir` newtypes (used by stores +
+- `campaign.py` — `Campaign` frozen manifest (`campaign.json`); the
+  first-class optimization-effort entity, single owner of the frozen
+  `CampaignConfig` snapshot.
+- `cycle_paths.py` — `CycleDir`, `SessionFamilyDir` newtypes (used by stores +
   projections; passed through, never reconstructed from `str`).
 - `pipeline_parsing.py` — pure dict → `PipelineSchema` parser.
 - `validators.py`, `phases.py`, `escalation_signals.py`, `round_diagnostics.py`,

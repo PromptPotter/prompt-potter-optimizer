@@ -159,6 +159,69 @@ One `validate_template()` at module load that catches typos.
 **Adding a new piece of info to a prompt is one new injection
 renderer, period.** No sidecar paths, no out-of-band state mounting.
 
+**Four entities (outermost → innermost).** PromptPotter's persisted
+world is a strict containment hierarchy:
+
+- **Workspace** — the tenant-level container and **queryable
+  datastore**: every dataset, every campaign, and the shared
+  `archive/` measurement store. On disk it is `projects/{tenant}/`.
+- **Dataset** — the optimization target plus its config
+  (`datasets/{name}/`).
+- **Campaign** — one declared optimization effort: a dataset, a
+  pipeline origin, and context text. A **first-class entity** and a
+  **forest** — it holds N **sessions**. `campaign_id =
+  {dataset}__{origin_content_hash}`, where `origin_content_hash` is the
+  origin declaration's 12-hex content hash (the same hash that is the
+  root cycle id). The id is **stable**: re-running `new <dataset>` on an
+  unchanged declaration resolves to the **same** campaign
+  (find-or-create), not a fresh one. The dataset is embedded so
+  "campaigns for dataset X" is a prefix scan.
+- **Session** — one run of `new` on a campaign's declaration. A campaign
+  holds N sessions; re-running `new` on the same declaration **adds** a
+  session to the existing campaign. `resume` extends the *active*
+  session — it does not add one. A session's identity is its
+  `session_id` (`s_xxxx`). Each session is a tree: a root cycle plus its
+  fork descendants. The session root cycle id is `cycle_{hash}` for
+  session 1 and `cycle_{hash}_s{N}` for session N — the `_s{N}` suffix
+  only disambiguates the directory, it is **not** a sibling separator
+  (`root_cycle_id` / `sibling_kind` treat `cycle_X_s2` as its own family
+  root, `cycle_X_s2_fork_abc` as a fork rooted at it).
+- **Cycle** — one node in a session's lineage tree: root | fork | diag
+  | sweep. The operator-facing name is **Unit** — one continuous-parameter
+  run; `resume` extends the current unit, each fork branches a new one
+  (the webapp + docs say "unit", the on-disk / API id stays `cycle_id`).
+  Identity stays `cycle_{content_hash[:12]}` (+ the `_s{N}` session-root
+  suffix, `_fork_`/`_diag_`/`_sweep_` for branches). The content hash
+  keeps two jobs: archive cache-reuse keying and drift detection.
+  `cycle_id` is campaign-scoped — all path resolution is
+  `(campaign_id, cycle_id)`.
+
+The **Session** is a unit of a campaign (its identity is the
+`session_id`). `active_session.json` is the operator's *pointer/lens*
+into the Workspace — which tenant, session, campaign, and cycle are
+live. `new` resolves (find-or-create) the Campaign for the declaration
+and mints a fresh Session + its root cycle inside it. `resume` follows
+the pointer into the active session. `fork` mints a new cycle **inside
+the same session**.
+
+**`unit_kind` taxonomy.** An operator-facing label, computed
+server-side from `(sibling_kind, fork_trigger)`, used by the webapp
+sidebar: `session` (a session root run — `resume` extends it),
+`divergent_resume` (a `resume --fork-on-divergence` branch),
+`user_fork` (any operator-initiated branch — HITL fork, diagnostic,
+sweep — these three fold into one kind), `l3_fork` (reserved for L3
+auto-forking; not emitted yet).
+
+**Three data scopes — campaign / dataset / workspace.** The
+Workspace datastore is queryable at three named, consistently-used
+scopes: **campaign** (one campaign's own cycles — the campaign dir),
+**dataset** (every campaign for one dataset — `archive/` filtered by
+`dataset_name`), **workspace** (everything, all datasets — the whole
+`archive/`). The same three names are used by the archive query API,
+the heatmap artifacts, the `scope` API param, and the webapp toggle,
+so the operator always distinguishes "this campaign" vs "this
+dataset" vs "everything" identically.
+
 **State + persistence.** Three entry points (CLI, notebook, webapp)
 share **one** orchestration layer and **one** set of data types — no
 per-entry-point copies. **Three I/O kinds** the orchestrator reads or
@@ -207,16 +270,37 @@ replay-on-every-read; see m10-cleanup "Rejected approaches" for why
 we don't go further.
 
 **Everything material lives on disk, in human-readable form.** The
-project file tree IS the operator's primary interface — `dashboard.json`,
-`index.json`, `log.md`, per-round caches, the ledger itself. The
-webapp polls the same files; the CLI emits transient logs but every
-fact also lands on disk. This is **so an AI assistant working
+project file tree IS the operator's primary interface — `campaign.json`,
+`dashboard.json`, `index.json`, `log.md`, per-round caches, the ledger
+itself. The webapp polls the same files; the CLI emits transient logs
+but every fact also lands on disk. This is **so an AI assistant working
 alongside the operator can read project state directly from the file
 tree** — no copy-paste from CLI output, no asking the operator to
 re-run with different verbosity. If a fact matters, it's a file
 someone (or something) can open. Constraint, not feature: forbids the
 lazy alternative (stdout-only logging, in-memory-only cross-round
 state) without adding complexity.
+
+The on-disk layout makes the four-entity model literal. Under each
+tenant, `campaigns/{campaign_id}/` is the Campaign directory:
+`campaign.json` (manifest — `dataset_name, label, created_at, status,
+root_cycle_id, root_content_hash, backend_id, config`), `log.md`
+(campaign digest — covers every session, its forks, and its rounds),
+`hard_samples.json` (campaign-scope heatmap), and `cycles/{cycle_id}/`
+holding **every** cycle — all N session roots and every fork, diag, and
+sweep — **all flat** — sibling kind and sweep batch id are `index.json`
+metadata, not directory nesting. A flat `cycles/` store keyed by
+`parent_cycle_id` scales as the fork tree grows; nested fork-of-fork
+directories do not. `dashboard.json` is **per-session**: it lives in the
+session's root cycle dir (`cycles/{session_root}/dashboard.json`) and is
+shared by that session's forks (a fork's family root is its session
+root). A campaign therefore carries N independent live `dashboard.json`
+streams — one per session — never one shared stream. Each campaign is a
+standalone dashboard: the operator understands a campaign from
+`campaign.json` + `log.md` plus the per-session `dashboard.json`
+streams, without descending into per-cycle round detail.
+`archive/` stays a peer of `campaigns/` — dataset-scoped,
+cross-campaign by design (see "Measurement archive" below).
 
 **Entry-point scope rules.** The primary notebook
 (`notebooks/optimization_campaign.ipynb`) is a thin UI shell — every
@@ -263,8 +347,13 @@ load-bearing for the loop.
 ledger, a cross-cycle persistence layer lives at
 `archive/measurements/{run_id}.json` — content-addressed by
 `JobSearchPoint.content_hash`, indexed by `archive/measurements.json`.
-Each row is `(sample × config → outcome)`. **Cross-cycle,
-cross-session, cross-tenant.** The on-disk format is human-readable
+Each row is `(sample × config → outcome)`, stamped with
+`dataset_name` and `campaign_id` so the store answers all three data
+scopes from one query path: **campaign** (`campaign_id=…`),
+**dataset** (`dataset_name=…`), **workspace** (no filter). The
+archive is the Workspace datastore — a peer of `campaigns/`, never
+siloed into a campaign dir. **Cross-cycle, cross-session,
+cross-tenant.** The on-disk format is human-readable
 (operator can `cat` a row); programmatic reads go through two
 retrieval views (`measurements_for_sample()`,
 `measurements_for_config(predicate)`) — both behind the m10-cleanup
@@ -320,6 +409,19 @@ the PR description.
   (`Decision`/`ResumeCheckpointKind`) and the post-cleanup symbols
   (`ResumeCheckpoint*`) appear in §0's vocabulary table; mechanism
   stays through the rename.
+- **Campaign as a first-class entity, holding N sessions** —
+  `campaign.json` manifest, the `campaigns/{campaign_id}/` directory
+  with `log.md` + `hard_samples.json` at its root and
+  `cycles/{cycle_id}/` flat below (every session root plus every
+  fork). `campaign_id = {dataset}__{origin_content_hash}` is stable —
+  re-running `new` on an unchanged declaration find-or-creates the same
+  campaign and adds a session. `dashboard.json` is per-session, at
+  `cycles/{session_root}/dashboard.json` — one live stream per session,
+  never one per campaign. The four-entity hierarchy (Workspace /
+  Dataset / Campaign / Cycle, with Session a unit of a Campaign) and
+  the three data scopes (campaign / dataset / workspace) are §0
+  invariants — a cleanup PR cannot collapse Campaign back into a single
+  session-family or back into the root cycle.
 - **Per-cycle `CycleEventLog` + `DerivedView` dispatch** — the
   persistence backbone. No second ingress, ever.
 - **Hard-sample sorter (Rasch)**
