@@ -14,7 +14,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { fetchCycleFile, fetchFiles } from "./api";
+import { fetchCycleFile, fetchDashboard, fetchFiles } from "./api";
 
 export type StatusKind = "live" | "stale" | "offline";
 
@@ -184,7 +184,7 @@ export function ageBucket(ageS: number | null): BucketResult {
   return {
     status: "stale",
     statusText: `Snapshot · last write ${(ageS / 60).toFixed(0)}m ago`,
-    statusHint: "No live optimizer — viewing a frozen cycle",
+    statusHint: "No live optimizer — viewing a frozen unit",
     termKey: "status_snapshot",
   };
 }
@@ -202,8 +202,11 @@ export function useCycleStream(): CycleStreamState {
 // Internal hook backing the provider. Polls dashboard.json every
 // `intervalMs`; on each round change refreshes the round-files cache. Both
 // reset on cycleId change via the prev-prop pattern so the prior cycle's
-// snapshots can't linger during the new fetch.
+// snapshots can't linger during the new fetch. `campaignId` is needed
+// because a `cycle_id` is unique only within its campaign — every
+// per-cycle fetch carries both.
 function useCycleStreamSource(
+  campaignId: string | null,
   cycleId: string | null,
   intervalMs: number,
 ): CycleStreamState {
@@ -211,14 +214,24 @@ function useCycleStreamSource(
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cycleRef = useRef<string | null>(null);
+  const campaignRef = useRef<string | null>(null);
   // Highest round number seen on the live dashboard; bumping it triggers a
   // single rounds-listing refresh. Distinct from the most recent round file
   // we hold — that's encoded in `state.rounds`.
   const lastRoundRef = useRef<number | null>(null);
   const roundsFetchingRef = useRef(false);
 
-  if (cycleRef.current !== cycleId) {
+  // Change-detect on the COMPOSITE unit identity (campaign + cycle). A
+  // cycle_id is unique only within its campaign — switching to another
+  // campaign whose root unit shares this cycle_id must still reset the
+  // stream, or the prior campaign's dashboard lingers forever.
+  const unitKeyRef = useRef<string | null>(null);
+  const unitKey =
+    campaignId && cycleId ? `${campaignId} ${cycleId}` : null;
+  if (unitKeyRef.current !== unitKey) {
+    unitKeyRef.current = unitKey;
     cycleRef.current = cycleId;
+    campaignRef.current = campaignId;
     lastRoundRef.current = null;
     if (state.dash !== null || state.rounds.length > 0) {
       setState((prev) => ({ ...prev, dash: null, rounds: [] }));
@@ -226,7 +239,7 @@ function useCycleStreamSource(
   }
 
   useEffect(() => {
-    if (!cycleId) {
+    if (!cycleId || !campaignId) {
       setState({
         ...INITIAL_STATE,
         statusText: "No active campaign",
@@ -245,10 +258,11 @@ function useCycleStreamSource(
     // race-free with this shape.
     const refreshRounds = async () => {
       const id = cycleRef.current;
-      if (!id || id !== cycleId || roundsFetchingRef.current) return;
+      const cmp = campaignRef.current;
+      if (!id || !cmp || id !== cycleId || roundsFetchingRef.current) return;
       roundsFetchingRef.current = true;
       try {
-        const listing = await fetchFiles(id);
+        const listing = await fetchFiles(cmp, id);
         if (cancelled || cycleRef.current !== id) return;
         const roundFiles = listing.entries
           .filter(
@@ -258,8 +272,8 @@ function useCycleStreamSource(
         const fetched = await Promise.all(
           roundFiles.map(async (f) => {
             try {
-              const r = await fetchCycleFile(id, "cycle", f.path);
-              return JSON.parse(r.content) as RoundFileDoc;
+              const r = await fetchCycleFile(cmp, id, "cycle", f.path);
+              return r.content ? (JSON.parse(r.content) as RoundFileDoc) : null;
             } catch {
               return null;
             }
@@ -282,10 +296,13 @@ function useCycleStreamSource(
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       const id = cycleRef.current;
-      if (!id) return;
+      const cmp = campaignRef.current;
+      if (!id || !cmp) return;
       try {
-        const r = await fetchCycleFile(id, "cycle", "dashboard.json", ctrl.signal);
-        const dash = JSON.parse(r.content) as DashboardSnapshot;
+        // dashboard.json is per-session — it lives in the session's root
+        // cycle dir, shared by that session's forks. The server resolves
+        // the session-family root from the viewed cycle id.
+        const dash = (await fetchDashboard(cmp, id, ctrl.signal)) as DashboardSnapshot;
         if (cancelled) return;
         const wall = Date.parse(dash.wallclock_serialized_at || "");
         const ageS = Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
@@ -349,21 +366,23 @@ function useCycleStreamSource(
       document.removeEventListener("visibilitychange", onVis);
       stop();
     };
-  }, [cycleId, intervalMs]);
+  }, [campaignId, cycleId, intervalMs]);
 
   return state;
 }
 
 export function CycleStreamProvider({
+  campaignId,
   cycleId,
   intervalMs = 2000,
   children,
 }: {
+  campaignId: string | null;
   cycleId: string | null;
   intervalMs?: number;
   children: ReactNode;
 }) {
-  const state = useCycleStreamSource(cycleId, intervalMs);
+  const state = useCycleStreamSource(campaignId, cycleId, intervalMs);
   return (
     <CycleStreamContext.Provider value={state}>{children}</CycleStreamContext.Provider>
   );

@@ -119,19 +119,29 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .nav-item.disabled svg{opacity:.4 !important}
 .sidebar-footer{margin-top:auto;padding:12px 16px;border-top:0.5px solid var(--color-border-tertiary)}
 .sidebar-footer-item{font-size:13px;color:var(--color-text-tertiary);padding:5px 0}
-/* Primary sidebar CTA — "+ New cycle". Matches the Replit-style
+/* Primary sidebar CTA — "+ New campaign". Matches the Replit-style
    "Create something new" pattern: full-width, prominent, sits between
-   the brand and the cycle library. */
+   the brand and the campaign library. */
 .sidebar-primary{padding:8px 12px 6px;display:flex;flex-direction:column;gap:6px}
 .sidebar-cta{display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 12px;background:var(--color-background-tint,rgba(255,255,255,0.04));color:var(--color-text-primary);border:0.5px solid var(--color-border);border-radius:8px;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;width:100%}
 .sidebar-cta:hover{background:var(--color-background-hover);border-color:var(--color-text-secondary)}
-/* Cycle library — chat-history-style list of every cycle on disk under
-   the tenant. Active per CLI bullet-marked; currently-viewed highlighted.
-   The list is kept current by the shared workspace poll. */
+/* Campaign library — chat-history-style list of every campaign on disk
+   under the tenant, each expanding to its unit-tree. Active per CLI
+   bullet-marked; currently-viewed highlighted. The list is kept current
+   by the shared workspace poll. */
 .cycle-library{margin-top:14px;padding:0 8px;border-top:0.5px solid var(--color-border-tertiary);padding-top:10px;display:flex;flex-direction:column;min-height:0;flex:1}
 .cycle-library-head{display:flex;align-items:center;padding:0 8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
 .cycle-library-note{padding:4px 8px;font-size:12px;color:var(--color-text-tertiary)}
 .cycle-library-note code{font-size:11px}
+/* Dataset filter chip-bar — narrows the flat campaign list to one dataset.
+   Shown only when 2+ datasets have campaigns on disk. */
+.cycle-library-filter{display:flex;flex-wrap:wrap;gap:4px;padding:0 8px 8px}
+.cycle-library-filter-chip{padding:1px 8px;background:transparent;border:1px solid var(--color-border);border-radius:10px;cursor:pointer;font-family:inherit;font-size:11px;color:var(--color-text-tertiary);line-height:1.5}
+.cycle-library-filter-chip:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+.cycle-library-filter-chip.active{background:var(--color-background-tint-active);border-color:var(--color-accent);color:var(--color-accent);font-weight:500}
+/* Dim origin-hash tail next to an unlabelled campaign name — disambiguates
+   two campaigns on the same dataset without stealing focus from the name. */
+.cycle-library-hash{margin-left:6px;font-size:10px;color:var(--color-text-tertiary);font-variant-numeric:tabular-nums}
 .cycle-library-list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1}
 .cycle-library-item{display:flex;align-items:flex-start;gap:6px;padding:6px 8px;background:transparent;border:0;border-radius:6px;cursor:pointer;width:100%;text-align:left;font-family:inherit;color:var(--color-text-secondary);font-size:13px}
 .cycle-library-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
@@ -142,6 +152,10 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .cycle-library-meta{font-size:11px;color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cycle-library-live{color:var(--color-status-success,#16a34a);margin-left:4px;font-size:8px;vertical-align:middle}
 .cycle-library-missing{color:var(--color-text-tertiary);margin-left:4px;font-size:10px;vertical-align:middle}
+/* Unit-kind badge on a non-root unit row (fork / diag / sweep). Small,
+   uppercase, low-contrast — a qualifier, not a focal point. The root unit
+   gets no badge. */
+.cycle-library-kind{display:inline-block;margin-left:6px;padding:0 4px;border-radius:3px;background:var(--color-background-secondary,rgba(127,127,127,0.18));border:0.5px solid var(--color-border);color:var(--color-text-tertiary);font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;vertical-align:middle}
 /* Tiny clickable chips alongside the % on a family row — one per child
    kind (forks/sweeps/diag). Sits OUTSIDE the row's <button> so we don't
    nest interactive elements; flex on the family wrapper keeps it on the
@@ -964,6 +978,12 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .family-cladogram{margin:8px 0 12px;padding:0 4px 8px;border-bottom:0.5px solid var(--color-border-tertiary)}
 .family-cladogram-head{display:flex;align-items:center;justify-content:space-between;padding:0 2px 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
 .family-cladogram-scroll{max-height:none;overflow:auto}
+/* A campaign is a forest — one cladogram per session. Each forest is its
+   own <svg>; the session sub-header appears only for multi-session
+   campaigns (a single-session campaign needs no per-session label). */
+.family-cladogram-forest{margin-top:6px}
+.family-cladogram-forest:first-of-type{margin-top:0}
+.family-cladogram-session-head{padding:2px 2px 1px;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
 .family-cladogram-svg{display:block;font-family:var(--font-mono,inherit)}
 .family-cladogram-branch{stroke:var(--color-text-tertiary);stroke-width:1;opacity:0.55}
 .family-cladogram-branch.fork{stroke:var(--color-text-secondary);stroke-width:1;opacity:0.8;stroke-dasharray:2 2}

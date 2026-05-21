@@ -1,108 +1,186 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { type CycleListEntry, type SiblingKind } from "@/lib/api";
+import {
+  fetchCampaigns,
+  type Campaign,
+  type CycleListEntry,
+  type UnitKind,
+} from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
-import { shortFamilyTail } from "@/lib/ids";
+import { rootCycleId, shortFamilyTail } from "@/lib/ids";
 import { TERMS } from "@/lib/terms";
 
 interface Props {
-  onSelectCycle: (id: string) => void;
+  // A unit is the pair (campaignId, cycleId) — cycle_id alone is ambiguous
+  // across campaigns, so selection always carries both.
+  onSelectCycle: (campaignId: string, cycleId: string) => void;
   onNewCycle: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
 
-// One family = the root cycle + every sibling that derives from it
-// (forks, sweeps, diag). Disk already nests this way under
-// campaigns/{root}/{forks,sweeps,diag}/...; the flat /cycles response just
-// hadn't been re-grouped on the client. `parent_cycle_id` (new on the API)
-// is the join key.
-interface Family {
+// The sidebar is a forest. A **campaign** is a declared optimization effort
+// (a dataset + pipeline origin + context); its id is `{dataset}__{hash}`,
+// stable across re-runs. A campaign holds N **sessions** — one per `python
+// -m promptpotter new` on that declaration; a session's identity is its
+// root cycle (`cycle_{hash}` for session 1, `cycle_{hash}_s{N}` for the
+// Nth). Each session is itself a tree: a root + its forks / diag / sweeps.
+//
+// So the nesting is: campaign → session → fork-tree. Campaigns render in
+// one flat, recency-sorted list (a dataset-filter chip-bar at the top
+// narrows it). The single-session campaign — by far the common case —
+// collapses: the campaign row IS that session and opens it directly. The
+// session tier appears only when a campaign has 2+ sessions.
+
+// One session in a campaign's forest: its root cycle + every fork / diag /
+// sweep that descends from it.
+interface SessionGroup {
   root: CycleListEntry;
-  forks: CycleListEntry[];
-  sweeps: CycleListEntry[];
-  diag: CycleListEntry[];
-  // Most-recent updated_at across the whole family — sorts families so the
-  // one being actively worked on stays at the top regardless of how old the
-  // root's index.json is.
+  branches: CycleListEntry[];
+  // Most-recent updated_at across the session's units.
   updatedAt: string;
 }
 
-const SIBLING_GROUPS: { kind: SiblingKind; label: string; pluralBadge: string }[] = [
-  // diag is rare in practice; ordering keeps the common kinds first.
-  { kind: "fork", label: "Forks", pluralBadge: "⑂" },
-  { kind: "sweep", label: "Sweeps", pluralBadge: "~" },
-  { kind: "diag", label: "Diag", pluralBadge: "Δ" },
-];
+// One campaign's row in the tree: the manifest + its N sessions.
+interface CampaignGroup {
+  campaign: Campaign;
+  sessions: SessionGroup[];
+  // Most-recent updated_at across every session — sorts campaigns so the
+  // one being actively worked on stays at the top.
+  updatedAt: string;
+}
 
-function groupByFamily(cycles: CycleListEntry[]): Family[] {
-  // Stub roots: a sibling whose root id never appears as its own entry
-  // (e.g. the operator deleted the root dir but kept the forks). Without
-  // synthesising a placeholder root we'd silently drop those siblings from
-  // the sidebar entirely.
-  const roots = new Map<string, CycleListEntry>();
-  for (const c of cycles) {
-    if (c.is_root) roots.set(c.cycle_id, c);
+// Operator-facing badge for a non-session unit. The session root carries
+// no badge — it's the trunk, not a branch.
+const UNIT_KIND_LABEL: Record<Exclude<UnitKind, "session">, string> = {
+  divergent_resume: "divergent resume",
+  user_fork: "user fork",
+  l3_fork: "L3 fork",
+};
+
+// One node in a session's fork-tree: a unit plus the units forked off it.
+interface UnitNode {
+  unit: CycleListEntry;
+  children: UnitNode[];
+}
+
+const byUpdatedDesc = (a: CycleListEntry, b: CycleListEntry) =>
+  a.updated_at < b.updated_at ? 1 : -1;
+
+// Session ordinal from a root cycle id — `cycle_{hash}` → 1,
+// `cycle_{hash}_s3` → 3. Mirrors `session_index()` in paths.py.
+function sessionIndexOf(rootId: string): number {
+  const m = rootId.match(/_s(\d+)$/);
+  return m ? Number(m[1]) : 1;
+}
+
+// Build a session's fork-tree from `parent_cycle_id`. The root is the
+// trunk; every branch nests under its parent. A branch whose parent isn't
+// in the session attaches to the root so it can never vanish.
+function buildUnitTree(root: CycleListEntry, branches: CycleListEntry[]): UnitNode {
+  const rootId = root.cycle_id;
+  const childrenOf = new Map<string, CycleListEntry[]>();
+  for (const u of branches) {
+    const parent =
+      u.parent_cycle_id &&
+      (u.parent_cycle_id === rootId ||
+        branches.some((x) => x.cycle_id === u.parent_cycle_id))
+        ? u.parent_cycle_id
+        : rootId;
+    const arr = childrenOf.get(parent) ?? [];
+    arr.push(u);
+    childrenOf.set(parent, arr);
   }
-  for (const c of cycles) {
-    if (!c.is_root && c.parent_cycle_id && !roots.has(c.parent_cycle_id)) {
-      roots.set(c.parent_cycle_id, {
-        cycle_id: c.parent_cycle_id,
-        parent_session_id: "",
-        parent_cycle_id: null,
-        dataset_name: c.dataset_name,
-        backend_id: c.backend_id,
-        sibling_kind: "root",
-        is_root: true,
-        status: "missing",
-        best_accuracy: null,
-        n_rounds: 0,
-        created_at: "",
-        updated_at: c.updated_at,
-      });
+  const visit = (unit: CycleListEntry): UnitNode => ({
+    unit,
+    children: (childrenOf.get(unit.cycle_id) ?? [])
+      .slice()
+      .sort(byUpdatedDesc)
+      .map(visit),
+  });
+  return visit(root);
+}
+
+// Build the flat campaign list. Campaigns are the real manifests from
+// `GET /campaigns`; cycles come from `/cycles`, partitioned per campaign
+// into sessions by their family root (`rootCycleId`). A cycle whose
+// campaign isn't in the campaign list is dropped — the registry is the
+// source of truth for what's a campaign.
+function groupCampaigns(
+  campaigns: Campaign[],
+  cycles: CycleListEntry[],
+): CampaignGroup[] {
+  const cyclesByCampaign = new Map<string, CycleListEntry[]>();
+  for (const cyc of cycles) {
+    const arr = cyclesByCampaign.get(cyc.campaign_id) ?? [];
+    arr.push(cyc);
+    cyclesByCampaign.set(cyc.campaign_id, arr);
+  }
+
+  const groups: CampaignGroup[] = [];
+  for (const campaign of campaigns) {
+    const own = cyclesByCampaign.get(campaign.campaign_id) ?? [];
+    // Partition the campaign's cycles into sessions by family root.
+    const bySession = new Map<
+      string,
+      { root: CycleListEntry | null; branches: CycleListEntry[] }
+    >();
+    for (const cyc of own) {
+      const sr = rootCycleId(cyc.cycle_id);
+      let s = bySession.get(sr);
+      if (!s) {
+        s = { root: null, branches: [] };
+        bySession.set(sr, s);
+      }
+      if (cyc.cycle_id === sr) s.root = cyc;
+      else s.branches.push(cyc);
     }
+    const sessions: SessionGroup[] = [];
+    for (const s of bySession.values()) {
+      // A session with no root cycle dir on disk can't be navigated —
+      // skip it rather than render a headless branch list.
+      if (!s.root) continue;
+      s.branches.sort(byUpdatedDesc);
+      const updatedAt = [s.root, ...s.branches].reduce(
+        (m, c) => (c.updated_at > m ? c.updated_at : m),
+        s.root.updated_at,
+      );
+      sessions.push({ root: s.root, branches: s.branches, updatedAt });
+    }
+    sessions.sort(
+      (a, b) => sessionIndexOf(a.root.cycle_id) - sessionIndexOf(b.root.cycle_id),
+    );
+    const updatedAt = sessions.reduce(
+      (m, s) => (s.updatedAt > m ? s.updatedAt : m),
+      campaign.created_at,
+    );
+    groups.push({ campaign, sessions, updatedAt });
   }
-  const families = new Map<string, Family>();
-  for (const root of roots.values()) {
-    families.set(root.cycle_id, {
-      root,
-      forks: [],
-      sweeps: [],
-      diag: [],
-      updatedAt: root.updated_at,
-    });
-  }
-  for (const c of cycles) {
-    if (c.is_root) continue;
-    const parentId = c.parent_cycle_id;
-    if (!parentId) continue;
-    const fam = families.get(parentId);
-    if (!fam) continue;
-    if (c.sibling_kind === "fork") fam.forks.push(c);
-    else if (c.sibling_kind === "sweep") fam.sweeps.push(c);
-    else if (c.sibling_kind === "diag") fam.diag.push(c);
-    if (c.updated_at > fam.updatedAt) fam.updatedAt = c.updated_at;
-  }
-  for (const fam of families.values()) {
-    const byUpdated = (a: CycleListEntry, b: CycleListEntry) =>
-      a.updated_at < b.updated_at ? 1 : -1;
-    fam.forks.sort(byUpdated);
-    fam.sweeps.sort(byUpdated);
-    fam.diag.sort(byUpdated);
-  }
-  return [...families.values()].sort((a, b) =>
-    a.updatedAt < b.updatedAt ? 1 : -1,
-  );
+  groups.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  return groups;
 }
 
 function fmtAcc(v: number | null): string {
   return v == null ? "—" : `${(v * 100).toFixed(0)}%`;
 }
 
-// We store the COLLAPSED set, not the expanded one — families default to
-// expanded when they have children, so empty storage = "show everything."
-// Only families the operator has explicitly collapsed get persisted.
-const COLLAPSED_STORAGE_KEY = "promptpotter.sidebar.collapsedFamilies";
+// Short origin-hash tail of a campaign id (`{dataset}__{hash}` → the
+// hash) — disambiguates two campaigns on the same dataset.
+function originHash(campaignId: string): string {
+  const sep = campaignId.indexOf("__");
+  return sep >= 0 ? campaignId.slice(sep + 2) : campaignId;
+}
+
+// Campaign row name — the operator label when present, else the dataset
+// name (the campaign IS "the {dataset} experiment").
+function campaignName(c: Campaign): string {
+  return c.label || c.dataset_name || c.campaign_id;
+}
+
+// We store the COLLAPSED set, not the expanded one — campaigns + sessions
+// default to expanded, so empty storage = "show everything." Keys are
+// prefixed (`cmp:` / `sess:`) so campaign and session ids never collide.
+const COLLAPSED_STORAGE_KEY = "promptpotter.sidebar.collapsedNodes";
 
 function loadCollapsed(): Set<string> {
   try {
@@ -123,84 +201,108 @@ function saveCollapsed(s: Set<string>) {
   }
 }
 
+const sessKey = (campaignId: string, rootId: string) =>
+  `sess:${campaignId}::${rootId}`;
+
 export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse }: Props) {
-  // Campaign list + active pointer + current selection all come from the
-  // shared workspace context (one poll for the whole app).
-  const { cycleId, cycles, cyclesLoaded, activeCycleId } = useWorkspace();
-  // Family-collapse state — families with children expand by default
-  // (operators want to see what's there), so we persist the families the
-  // operator has explicitly collapsed instead of the ones they've expanded.
-  // Empty set on first visit ⇒ everything is visible. Named
-  // `collapsedFamilies` to avoid colliding with the `collapsed` prop that
-  // tracks the whole sidebar's collapse state.
-  const [collapsedFamilies, setCollapsedFamilies] = useState<Set<string>>(() => new Set());
+  // Cycle list + active pointer + current selection come from the shared
+  // workspace context (one poll for the whole app). Campaigns are a
+  // separate small read polled here — the campaign registry isn't on the
+  // hot per-cycle path the workspace context owns.
+  const { cycleId, campaignId, cycles, cyclesLoaded, activeCycleId, activeCampaignId } =
+    useWorkspace();
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaignsLoaded, setCampaignsLoaded] = useState(false);
+  // Campaign/session collapse state — nodes expand by default, so we
+  // persist the ones the operator explicitly collapsed.
+  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => new Set());
+  // Dataset filter — null = all datasets. Not persisted; resets per visit.
+  const [datasetFilter, setDatasetFilter] = useState<string | null>(null);
 
   // Hydrate stored collapsed set after mount (localStorage is browser-only).
   useEffect(() => {
-    setCollapsedFamilies(loadCollapsed());
+    setCollapsedNodes(loadCollapsed());
   }, []);
 
-  const families = useMemo(() => groupByFamily(cycles), [cycles]);
-
-  // Auto-expand the family that contains the active/selected cycle. Map
-  // either cycleId or activeCycleId to its family-root and force-expand —
-  // operators expect "where am I?" to be visible without a click. We never
-  // auto-collapse; explicit collapse beats helpfulness here.
-  const focusRoot = useMemo(() => {
-    const id = cycleId ?? activeCycleId;
-    if (!id) return null;
-    const direct = families.find((f) => f.root.cycle_id === id);
-    if (direct) return direct.root.cycle_id;
-    const child = families.find((f) =>
-      [...f.forks, ...f.sweeps, ...f.diag].some((c) => c.cycle_id === id),
-    );
-    return child?.root.cycle_id ?? null;
-  }, [families, cycleId, activeCycleId]);
-
-  // The family containing the active/selected cycle is force-expanded —
-  // if the operator collapsed it earlier we still uncollapse it here, so
-  // "where am I?" is always visible without a chevron click.
+  // Poll the campaign registry alongside the workspace poll cadence.
   useEffect(() => {
-    if (!focusRoot) return;
-    setCollapsedFamilies((prev) => {
-      if (!prev.has(focusRoot)) return prev;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetchCampaigns();
+        if (!cancelled) setCampaigns(res.campaigns);
+      } catch {
+        /* sidebar still renders from the last good list */
+      } finally {
+        if (!cancelled) setCampaignsLoaded(true);
+      }
+    };
+    void tick();
+    const handle = window.setInterval(() => void tick(), 3000);
+    const onFocus = () => void tick();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
+  const allGroups = useMemo(
+    () => groupCampaigns(campaigns, cycles),
+    [campaigns, cycles],
+  );
+
+  // Distinct dataset names, for the filter chip-bar.
+  const datasetNames = useMemo(() => {
+    const s = new Set<string>();
+    for (const g of allGroups) s.add(g.campaign.dataset_name || "(unknown)");
+    return [...s].sort();
+  }, [allGroups]);
+
+  const groups = useMemo(
+    () =>
+      datasetFilter == null
+        ? allGroups
+        : allGroups.filter(
+            (g) => (g.campaign.dataset_name || "(unknown)") === datasetFilter,
+          ),
+    [allGroups, datasetFilter],
+  );
+
+  // Auto-expand the campaign + session containing the viewed/active cycle
+  // — "where am I?" should be visible without a click. We never
+  // auto-collapse; explicit collapse beats helpfulness.
+  const focusKeys = useMemo(() => {
+    const cmpId = campaignId ?? activeCampaignId;
+    const cyId = cycleId ?? activeCycleId;
+    if (!cmpId || !cyId) return null;
+    return { cmp: `cmp:${cmpId}`, sess: sessKey(cmpId, rootCycleId(cyId)) };
+  }, [campaignId, activeCampaignId, cycleId, activeCycleId]);
+
+  useEffect(() => {
+    if (!focusKeys) return;
+    setCollapsedNodes((prev) => {
+      if (!prev.has(focusKeys.cmp) && !prev.has(focusKeys.sess)) return prev;
       const next = new Set(prev);
-      next.delete(focusRoot);
+      next.delete(focusKeys.cmp);
+      next.delete(focusKeys.sess);
       saveCollapsed(next);
       return next;
     });
-  }, [focusRoot]);
+  }, [focusKeys]);
 
-  const toggleFamily = useCallback((rootId: string) => {
-    setCollapsedFamilies((prev) => {
+  const toggleNode = useCallback((key: string) => {
+    setCollapsedNodes((prev) => {
       const next = new Set(prev);
-      if (next.has(rootId)) next.delete(rootId);
-      else next.add(rootId);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       saveCollapsed(next);
       return next;
     });
   }, []);
 
-  // Family rows that have no children behave like a normal leaf cycle:
-  // clicking selects the root. Family rows that DO have children also
-  // expand on a label click when collapsed — that way the operator can
-  // never end up with a row they can't drill into. Re-clicking does not
-  // collapse (that's what the chevron is for).
-  const selectFamily = useCallback(
-    (fam: Family) => {
-      onSelectCycle(fam.root.cycle_id);
-      const hasChildren = fam.forks.length + fam.sweeps.length + fam.diag.length > 0;
-      if (!hasChildren) return;
-      setCollapsedFamilies((prev) => {
-        if (!prev.has(fam.root.cycle_id)) return prev;
-        const next = new Set(prev);
-        next.delete(fam.root.cycle_id);
-        saveCollapsed(next);
-        return next;
-      });
-    },
-    [onSelectCycle],
-  );
+  const loaded = cyclesLoaded && campaignsLoaded;
 
   return (
     <nav className="sidebar" aria-label="Primary">
@@ -242,58 +344,35 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
         <div className="cycle-library-head">
           <span>Campaigns</span>
         </div>
-        {!cyclesLoaded && <div className="cycle-library-note">loading…</div>}
-        {cyclesLoaded && families.length === 0 && (
+        {datasetNames.length > 1 && (
+          <DatasetFilterBar
+            datasets={datasetNames}
+            selected={datasetFilter}
+            onSelect={setDatasetFilter}
+          />
+        )}
+        {!loaded && <div className="cycle-library-note">loading…</div>}
+        {loaded && groups.length === 0 && (
           <div className="cycle-library-note">
             None on disk yet — run <code>python -m promptpotter new &lt;dataset&gt;</code>.
           </div>
         )}
-        {cyclesLoaded && families.length > 0 && (
+        {loaded && groups.length > 0 && (
           <ul className="cycle-library-list">
-            {families.map((fam) => {
-              const isOpen = !collapsedFamilies.has(fam.root.cycle_id);
-              const totalChildren = fam.forks.length + fam.sweeps.length + fam.diag.length;
-              return (
-                <li key={fam.root.cycle_id}>
-                  <FamilyRow
-                    family={fam}
-                    isOpen={isOpen}
-                    selected={fam.root.cycle_id === cycleId}
-                    active={fam.root.cycle_id === activeCycleId}
-                    onToggle={() => toggleFamily(fam.root.cycle_id)}
-                    onSelect={() => selectFamily(fam)}
-                  />
-                  {isOpen && totalChildren > 0 && (
-                    <ul className="cycle-library-children">
-                      {SIBLING_GROUPS.map(({ kind, label }) => {
-                        const items =
-                          kind === "fork" ? fam.forks : kind === "sweep" ? fam.sweeps : fam.diag;
-                        if (items.length === 0) return null;
-                        return (
-                          <li key={kind} className="cycle-library-group">
-                            <div className="cycle-library-grouphead">
-                              {label} · {items.length}
-                            </div>
-                            <ul>
-                              {items.map((c) => (
-                                <li key={c.cycle_id}>
-                                  <ChildRow
-                                    cycle={c}
-                                    selected={c.cycle_id === cycleId}
-                                    active={c.cycle_id === activeCycleId}
-                                    onSelect={() => onSelectCycle(c.cycle_id)}
-                                  />
-                                </li>
-                              ))}
-                            </ul>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
+            {groups.map((cg) => (
+              <li key={cg.campaign.campaign_id}>
+                <CampaignNode
+                  group={cg}
+                  collapsedNodes={collapsedNodes}
+                  toggleNode={toggleNode}
+                  campaignId={campaignId}
+                  cycleId={cycleId}
+                  activeCampaignId={activeCampaignId}
+                  activeCycleId={activeCycleId}
+                  onSelectCycle={onSelectCycle}
+                />
+              </li>
+            ))}
           </ul>
         )}
       </div>
@@ -305,128 +384,369 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
   );
 }
 
-function FamilyRow({
-  family,
-  isOpen,
+// Dataset filter chip-bar — narrows the flat campaign list to one dataset.
+function DatasetFilterBar({
+  datasets,
   selected,
-  active,
-  onToggle,
   onSelect,
 }: {
-  family: Family;
-  isOpen: boolean;
-  selected: boolean;
-  active: boolean;
-  onToggle: () => void;
-  onSelect: () => void;
+  datasets: string[];
+  selected: string | null;
+  onSelect: (d: string | null) => void;
 }) {
-  const { root, forks, sweeps, diag } = family;
-  // Status badge — running/optimizing is fresher info than index.json best
-  // and the operator wants it visible at the family-row level.
-  const live = root.status === "running" || root.status === "optimizing";
-  // Tiny clickable chips for each child kind. Each chip is one square with
-  // a glyph + count; clicking a chip = toggle the family (same as the
-  // chevron). Glyph: ⑂ = fork, ~ = sweep, Δ = diag. The tooltip carries
-  // the plain-English meaning so the glyph isn't load-bearing.
-  const chips: { kind: string; glyph: string; count: number; title: string }[] = [
-    { kind: "fork", glyph: "⑂", count: forks.length, title: `${forks.length} fork${forks.length === 1 ? "" : "s"}` },
-    { kind: "sweep", glyph: "~", count: sweeps.length, title: `${sweeps.length} sweep${sweeps.length === 1 ? "" : "s"}` },
-    { kind: "diag", glyph: "Δ", count: diag.length, title: `${diag.length} diag` },
-  ].filter((c) => c.count > 0);
   return (
-    <div className={`cycle-library-family${selected ? " selected" : ""}`}>
+    <div className="cycle-library-filter" role="group" aria-label="Filter by dataset">
       <button
         type="button"
-        className="cycle-library-twist"
-        onClick={onToggle}
-        aria-label={isOpen ? "Collapse family" : "Expand family"}
-        aria-expanded={isOpen}
-        // Disabled when there's nothing to expand — keeps the chevron column
-        // aligned across rows but doesn't fire a no-op toggle.
-        disabled={forks.length + sweeps.length + diag.length === 0}
-        tabIndex={-1}
+        className={`cycle-library-filter-chip${selected == null ? " active" : ""}`}
+        onClick={() => onSelect(null)}
       >
-        {forks.length + sweeps.length + diag.length === 0 ? "" : isOpen ? "▼" : "▶"}
+        All
       </button>
-      <button
-        type="button"
-        className="cycle-library-item"
-        onClick={onSelect}
-        aria-current={selected ? "true" : undefined}
-        title={root.cycle_id}
-      >
-        <span className="cycle-library-mark">{active ? "●" : ""}</span>
-        <span className="cycle-library-row">
-          <span className="cycle-library-name">
-            {root.dataset_name || root.cycle_id}
-            {live && <span className="cycle-library-live" title="Campaign status is running">●</span>}
-            {root.status === "missing" && (
-              <span className="cycle-library-missing" title="Root dir not on disk; only sibling artifacts present">
-                ⚠
-              </span>
-            )}
-          </span>
-          <span className="cycle-library-meta">{fmtAcc(root.best_accuracy)}</span>
-        </span>
-      </button>
-      {/* Chips sit OUTSIDE the .cycle-library-item button — nested buttons are
-          invalid HTML and React warns. The chips' own onClick handles
-          family-toggle; they never bubble into the row-select handler. */}
-      {chips.length > 0 && (
-        <span className="cycle-library-chips" aria-hidden={false}>
-          {chips.map((chip) => (
-            <button
-              key={chip.kind}
-              type="button"
-              className="cycle-library-chip"
-              onClick={onToggle}
-              title={chip.title}
-              aria-label={chip.title}
-              tabIndex={-1}
-            >
-              <span className="cycle-library-chip-glyph" aria-hidden="true">{chip.glyph}</span>
-              <span className="cycle-library-chip-count">{chip.count}</span>
-            </button>
-          ))}
-        </span>
-      )}
+      {datasets.map((d) => (
+        <button
+          key={d}
+          type="button"
+          className={`cycle-library-filter-chip${selected === d ? " active" : ""}`}
+          onClick={() => onSelect(selected === d ? null : d)}
+          title={d}
+        >
+          {d}
+        </button>
+      ))}
     </div>
   );
 }
 
-function ChildRow({
-  cycle,
+// One campaign in the flat list. A single-session campaign collapses: the
+// campaign row IS that session and opens it directly (its twist, if any,
+// expands the session's fork-tree). A multi-session campaign expands into
+// a session row per session.
+function CampaignNode({
+  group,
+  collapsedNodes,
+  toggleNode,
+  campaignId,
+  cycleId,
+  activeCampaignId,
+  activeCycleId,
+  onSelectCycle,
+}: {
+  group: CampaignGroup;
+  collapsedNodes: Set<string>;
+  toggleNode: (key: string) => void;
+  campaignId: string | null;
+  cycleId: string | null;
+  activeCampaignId: string | null;
+  activeCycleId: string | null;
+  onSelectCycle: (campaignId: string, cycleId: string) => void;
+}) {
+  const cid = group.campaign.campaign_id;
+  const cmpKey = `cmp:${cid}`;
+  const cmpOpen = !collapsedNodes.has(cmpKey);
+  const single = group.sessions.length === 1;
+
+  // Single-session campaign — the campaign row IS the session.
+  if (single) {
+    const session = group.sessions[0];
+    return (
+      <SessionSubtree
+        campaign={group.campaign}
+        session={session}
+        isCampaignRow
+        open={cmpOpen}
+        onToggle={() => toggleNode(cmpKey)}
+        campaignId={campaignId}
+        cycleId={cycleId}
+        activeCampaignId={activeCampaignId}
+        activeCycleId={activeCycleId}
+        onSelectCycle={onSelectCycle}
+      />
+    );
+  }
+
+  // Multi-session campaign — a grouping row that expands to session rows.
+  const containsViewed = cid === campaignId;
+  const containsActive = cid === activeCampaignId;
+  const best = group.sessions.reduce<number | null>((m, s) => {
+    const a = s.root.best_accuracy;
+    return a != null && (m == null || a > m) ? a : m;
+  }, null);
+  return (
+    <>
+      <div className={`cycle-library-family${containsViewed ? " selected" : ""}`}>
+        <button
+          type="button"
+          className="cycle-library-twist"
+          onClick={() => toggleNode(cmpKey)}
+          aria-label={cmpOpen ? "Collapse sessions" : "Expand sessions"}
+          aria-expanded={cmpOpen}
+          tabIndex={-1}
+        >
+          {cmpOpen ? "▼" : "▶"}
+        </button>
+        <button
+          type="button"
+          className="cycle-library-item"
+          onClick={() => toggleNode(cmpKey)}
+          title={cid}
+        >
+          <span className="cycle-library-mark">{containsActive ? "●" : ""}</span>
+          <span className="cycle-library-row">
+            <span className="cycle-library-name">
+              {campaignName(group.campaign)}
+              {!group.campaign.label && (
+                <span className="cycle-library-hash" title={cid}>
+                  #{originHash(cid).slice(0, 6)}
+                </span>
+              )}
+            </span>
+            <span className="cycle-library-meta">
+              {group.sessions.length} sessions · {fmtAcc(best)}
+            </span>
+          </span>
+        </button>
+      </div>
+      {cmpOpen && (
+        <ul className="cycle-library-children">
+          {group.sessions.map((session) => {
+            const sKey = sessKey(cid, session.root.cycle_id);
+            return (
+              <li key={session.root.cycle_id}>
+                <SessionSubtree
+                  campaign={group.campaign}
+                  session={session}
+                  isCampaignRow={false}
+                  open={!collapsedNodes.has(sKey)}
+                  onToggle={() => toggleNode(sKey)}
+                  campaignId={campaignId}
+                  cycleId={cycleId}
+                  activeCampaignId={activeCampaignId}
+                  activeCycleId={activeCycleId}
+                  onSelectCycle={onSelectCycle}
+                />
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </>
+  );
+}
+
+// One session row + (when expanded) its fork-tree. Rendered either AS the
+// campaign row (single-session campaign) or as a child session row
+// (multi-session campaign) — `isCampaignRow` only changes the label.
+function SessionSubtree({
+  campaign,
+  session,
+  isCampaignRow,
+  open,
+  onToggle,
+  campaignId,
+  cycleId,
+  activeCampaignId,
+  activeCycleId,
+  onSelectCycle,
+}: {
+  campaign: Campaign;
+  session: SessionGroup;
+  isCampaignRow: boolean;
+  open: boolean;
+  onToggle: () => void;
+  campaignId: string | null;
+  cycleId: string | null;
+  activeCampaignId: string | null;
+  activeCycleId: string | null;
+  onSelectCycle: (campaignId: string, cycleId: string) => void;
+}) {
+  const cid = campaign.campaign_id;
+  const root = session.root;
+  const hasBranches = session.branches.length > 0;
+  const selected = cid === campaignId && root.cycle_id === cycleId;
+  const active = cid === activeCampaignId && root.cycle_id === activeCycleId;
+  const status = root.status;
+  const live = status === "running" || status === "optimizing";
+
+  // Branch-kind chips (only on the row that owns the fork-tree twist).
+  const counts = { fork: 0, sweep: 0, diag: 0 };
+  for (const b of session.branches) {
+    if (b.sibling_kind in counts) counts[b.sibling_kind as keyof typeof counts] += 1;
+  }
+  const chips = [
+    { kind: "fork", glyph: "⑂", count: counts.fork },
+    { kind: "sweep", glyph: "~", count: counts.sweep },
+    { kind: "diag", glyph: "Δ", count: counts.diag },
+  ].filter((c) => c.count > 0);
+
+  const label = isCampaignRow
+    ? campaignName(campaign)
+    : `session ${sessionIndexOf(root.cycle_id)}`;
+
+  return (
+    <>
+      <div className={`cycle-library-family${selected ? " selected" : ""}`}>
+        <button
+          type="button"
+          className="cycle-library-twist"
+          onClick={onToggle}
+          aria-label={open ? "Collapse" : "Expand"}
+          aria-expanded={open}
+          disabled={!hasBranches}
+          tabIndex={-1}
+        >
+          {!hasBranches ? "" : open ? "▼" : "▶"}
+        </button>
+        <button
+          type="button"
+          className="cycle-library-item"
+          onClick={() => onSelectCycle(cid, root.cycle_id)}
+          aria-current={selected ? "true" : undefined}
+          title={isCampaignRow ? cid : root.cycle_id}
+        >
+          <span className="cycle-library-mark">{active ? "●" : ""}</span>
+          <span className="cycle-library-row">
+            <span className="cycle-library-name">
+              {label}
+              {isCampaignRow && !campaign.label && (
+                <span className="cycle-library-hash" title={cid}>
+                  #{originHash(cid).slice(0, 6)}
+                </span>
+              )}
+              {live && (
+                <span className="cycle-library-live" title="Status is running">
+                  ●
+                </span>
+              )}
+            </span>
+            <span className="cycle-library-meta">{fmtAcc(root.best_accuracy)}</span>
+          </span>
+        </button>
+        {chips.length > 0 && (
+          <span className="cycle-library-chips">
+            {chips.map((chip) => (
+              <button
+                key={chip.kind}
+                type="button"
+                className="cycle-library-chip"
+                onClick={onToggle}
+                title={`${chip.count} ${chip.kind}${chip.count === 1 ? "" : "s"}`}
+                aria-label={`${chip.count} ${chip.kind}`}
+                tabIndex={-1}
+              >
+                <span className="cycle-library-chip-glyph" aria-hidden="true">
+                  {chip.glyph}
+                </span>
+                <span className="cycle-library-chip-count">{chip.count}</span>
+              </button>
+            ))}
+          </span>
+        )}
+      </div>
+      {open && hasBranches && (
+        <ul className="cycle-library-children">
+          <UnitBranchRows
+            nodes={buildUnitTree(root, session.branches).children}
+            campaignId={campaignId}
+            cycleId={cycleId}
+            activeCampaignId={activeCampaignId}
+            activeCycleId={activeCycleId}
+            onSelectCycle={onSelectCycle}
+          />
+        </ul>
+      )}
+    </>
+  );
+}
+
+// The fork-tree's branch rows — every fork / diag / sweep, nested under
+// its parent. The session root is NOT re-rendered here (the session row
+// above is the root).
+function UnitBranchRows({
+  nodes,
+  campaignId,
+  cycleId,
+  activeCampaignId,
+  activeCycleId,
+  onSelectCycle,
+}: {
+  nodes: UnitNode[];
+  campaignId: string | null;
+  cycleId: string | null;
+  activeCampaignId: string | null;
+  activeCycleId: string | null;
+  onSelectCycle: (campaignId: string, cycleId: string) => void;
+}) {
+  return (
+    <>
+      {nodes.map((node) => {
+        const u = node.unit;
+        return (
+          <li key={u.cycle_id}>
+            <UnitRow
+              unit={u}
+              selected={u.campaign_id === campaignId && u.cycle_id === cycleId}
+              active={
+                u.campaign_id === activeCampaignId && u.cycle_id === activeCycleId
+              }
+              onSelect={() => onSelectCycle(u.campaign_id, u.cycle_id)}
+            />
+            {node.children.length > 0 && (
+              <ul className="cycle-library-children">
+                <UnitBranchRows
+                  nodes={node.children}
+                  campaignId={campaignId}
+                  cycleId={cycleId}
+                  activeCampaignId={activeCampaignId}
+                  activeCycleId={activeCycleId}
+                  onSelectCycle={onSelectCycle}
+                />
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </>
+  );
+}
+
+// One branch row inside a session's fork-tree — a fork / diag / sweep,
+// carrying its kind badge and the disambiguating id tail.
+function UnitRow({
+  unit,
   selected,
   active,
   onSelect,
 }: {
-  cycle: CycleListEntry;
+  unit: CycleListEntry;
   selected: boolean;
   active: boolean;
   onSelect: () => void;
 }) {
-  const live = cycle.status === "running" || cycle.status === "optimizing";
-  // Child rows show the disambiguating suffix only — the family-root prefix
-  // is already in the parent row's title and would just eat horizontal
-  // space here. Falls back to full id when the parse fails (defensive only).
-  const shortLabel = shortFamilyTail(cycle.cycle_id);
+  const live = unit.status === "running" || unit.status === "optimizing";
+  const kindLabel =
+    unit.unit_kind === "session" ? null : UNIT_KIND_LABEL[unit.unit_kind];
   return (
     <button
       type="button"
       className={`cycle-library-item cycle-library-child${selected ? " selected" : ""}`}
       onClick={onSelect}
       aria-current={selected ? "true" : undefined}
-      title={cycle.cycle_id}
+      title={unit.cycle_id}
     >
       <span className="cycle-library-mark">{active ? "●" : ""}</span>
       <span className="cycle-library-row">
         <span className="cycle-library-name">
-          {shortLabel}
-          {live && <span className="cycle-library-live" title="Campaign status is running">●</span>}
+          {shortFamilyTail(unit.cycle_id)}
+          {kindLabel != null && (
+            <span className="cycle-library-kind" title={`This unit is a ${kindLabel}`}>
+              {kindLabel}
+            </span>
+          )}
+          {live && <span className="cycle-library-live" title="Unit status is running">●</span>}
         </span>
-        <span className="cycle-library-meta">{fmtAcc(cycle.best_accuracy)}</span>
+        <span className="cycle-library-meta">{fmtAcc(unit.best_accuracy)}</span>
       </span>
     </button>
   );
 }
-

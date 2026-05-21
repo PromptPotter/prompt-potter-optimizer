@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PromptPotter — Live Cycle",
+  title: "PromptPotter — Live Unit",
   description: "PromptPotter operator dashboard",
 };
 

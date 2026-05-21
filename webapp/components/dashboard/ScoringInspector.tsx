@@ -6,6 +6,7 @@ import { Modal, type ModalAction } from "@/components/shell/Modal";
 import type { SelectedCandidate } from "./SelectionContext";
 
 interface Props {
+  campaignId: string | null;
   cycleId: string | null;
   selected: SelectedCandidate | null;
   isLive: boolean;
@@ -30,6 +31,7 @@ interface RoundDoc {
 }
 
 export function ScoringInspector({
+  campaignId,
   cycleId,
   selected,
   isLive,
@@ -52,7 +54,7 @@ export function ScoringInspector({
   const data = entry;
 
   const runFork = async (alsoStop: boolean) => {
-    if (!cycleId) return;
+    if (!campaignId || !cycleId) return;
     setConfirming(false);
     setForkPending(true);
     setForkErr(null);
@@ -61,9 +63,14 @@ export function ScoringInspector({
         // Mid-run "Stop & fork" composes the two routes — stop the parent
         // first so the operator's next `resume` picks up the fork
         // cleanly instead of racing the still-running loop.
-        await postStopCycle(cycleId);
+        await postStopCycle(campaignId, cycleId);
       }
-      const r = await postCreateFork(cycleId, selected.round, selected.candidate_id);
+      const r = await postCreateFork(
+        campaignId,
+        cycleId,
+        selected.round,
+        selected.candidate_id,
+      );
       setForkResult({ id: r.fork_cycle_id, cli: r.cli_command });
     } catch (e) {
       setForkErr((e as Error).message);
@@ -161,7 +168,7 @@ export function ScoringInspector({
       )}
       <Modal
         open={confirming}
-        title={isLive ? "Fork from a running cycle?" : "Fork from this point?"}
+        title={isLive ? "Fork from a running unit?" : "Fork from this point?"}
         message={forkMessage}
         actions={forkActions}
         onClose={() => setConfirming(false)}

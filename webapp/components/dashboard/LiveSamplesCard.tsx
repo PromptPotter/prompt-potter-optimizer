@@ -90,7 +90,7 @@ function EmptyState({ status, dashRound }: { status: StatusKind; dashRound: numb
   }
   return (
     <div className="samples-empty">
-      This cycle hasn&apos;t run yet. Start it with{" "}
+      This unit hasn&apos;t run yet. Start it with{" "}
       <code>python -m promptpotter resume</code>.
     </div>
   );

@@ -49,22 +49,30 @@ import { ComparePane } from "@/components/compare/ComparePane";
 import type { PipelineDoc, PipelineView } from "@/components/workflow/types";
 
 export function DashboardPane() {
-  // `cycleId` is owned by WorkspaceProvider (the single campaign-identity
-  // source of truth) — this only forwards it into the dashboard's
-  // per-cycle data stream.
-  const { cycleId } = useWorkspace();
+  // `campaignId` + `cycleId` are owned by WorkspaceProvider (the single
+  // workspace-identity source of truth) — this only forwards them into the
+  // dashboard's per-cycle data stream.
+  const { campaignId, cycleId } = useWorkspace();
   return (
-    <CycleStreamProvider cycleId={cycleId}>
+    <CycleStreamProvider campaignId={campaignId} cycleId={cycleId}>
       <DashboardPaneInner />
     </CycleStreamProvider>
   );
 }
 
 function DashboardPaneInner() {
-  // Campaign identity comes from the workspace context — no local cycle
-  // resolution, no independent /active poll.
-  const { cycleId, sessionId, activeError, following, selectCycle, followActive } =
-    useWorkspace();
+  // Workspace identity comes from the shared context — no local cycle
+  // resolution, no independent /active poll. A `cycle_id` is unique only
+  // within its campaign, so `campaignId` rides alongside `cycleId`.
+  const {
+    campaignId,
+    cycleId,
+    sessionId,
+    activeError,
+    following,
+    selectCycle,
+    followActive,
+  } = useWorkspace();
   // Replit-style sub-tabs (Chat / Dashboard / Files) scoped to the
   // currently-selected cycle. The sidebar is persistent across all
   // three. Default = chat: that's where new cycles get conceived and
@@ -96,10 +104,10 @@ function DashboardPaneInner() {
   const [archivePerSample, setArchivePerSample] = useState<Map<number, MeasurementDot[]>>(
     () => new Map(),
   );
-  // Hard-sample view scope — campaign = this cycle only (default), workspace
-  // = cross-cycle archive. Clicking the heat-map badge toggles it; the
-  // dataset preview re-fetches on change. Not persisted — always opens on
-  // campaign.
+  // Hard-sample view scope — campaign = every cycle in this campaign
+  // (default), dataset = every campaign on this dataset (cross-campaign
+  // archive). Clicking the heat-map badge toggles it; the dataset preview
+  // re-fetches on change. Not persisted — always opens on campaign.
   const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("campaign");
   const [themeKey, setThemeKey] = useState<string>("init");
   // Edit mode — off by default; gates Stop run + Fork-from-here. Never
@@ -195,14 +203,16 @@ function DashboardPaneInner() {
 
   // Cycle title (dataset name) from index.json
   useEffect(() => {
-    if (!cycleId) return;
+    if (!campaignId || !cycleId) return;
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetchCycleFile(cycleId, "cycle", "index.json");
-        const idx = JSON.parse(r.content);
+        const r = await fetchCycleFile(campaignId, cycleId, "cycle", "index.json");
+        const idx = r.content ? JSON.parse(r.content) : {};
         if (!cancelled) {
-          setDatasetTitle(idx.dataset_name || idx.cycle_id || cycleId);
+          setDatasetTitle(
+            idx.header?.dataset_name || idx.dataset_name || idx.cycle_id || cycleId,
+          );
           setCycleStartedAt(typeof idx.created_at === "string" ? idx.created_at : null);
         }
       } catch {
@@ -212,7 +222,7 @@ function DashboardPaneInner() {
     return () => {
       cancelled = true;
     };
-  }, [cycleId]);
+  }, [campaignId, cycleId]);
 
   // Dataset preview — one fetch per cycle, threaded down through ChatPane to
   // HardSamplesHeatmap. Owning it here means a tab swap (New Job ↔ View
@@ -225,34 +235,36 @@ function DashboardPaneInner() {
   // null on empty datasetItems). Retry on a 2 s timer until success or the
   // cycle changes (cleanup clears the timer).
   useEffect(() => {
-    if (!cycleId) return;
+    if (!campaignId || !cycleId) return;
     let cancelled = false;
     const ac = new AbortController();
     let retryHandle: number | null = null;
     const attempt = async () => {
       try {
-        const name = await fetchActiveDatasetName(cycleId, ac.signal);
+        const name = await fetchActiveDatasetName(campaignId, cycleId, ac.signal);
         if (cancelled || !name) {
           if (!cancelled && !name) scheduleRetry();
           return;
         }
         setDatasetName(name);
-        // The sample roster is dataset-wide — fetch it at workspace scope
-        // so the heat-map always renders, even on a cycle with no
-        // hard_samples_campaign.json yet (campaign-scope /preview 404s).
-        const preview = await fetchDatasetPreview(name, 1000, ac.signal, "workspace", cycleId);
-        // Cell evidence follows the campaign ⇄ workspace toggle. Campaign
-        // scope is empty on a cycle with no rounds — fall back to the
-        // cross-cycle archive so the badge still shows hit/miss colours.
+        // The sample roster is dataset-wide — fetch it at dataset scope so
+        // the heat-map always renders, even on a campaign with no
+        // hard_samples.json yet (campaign-scope /preview 404s).
+        const preview = await fetchDatasetPreview(
+          name, 1000, ac.signal, "dataset", campaignId, cycleId,
+        );
+        // Cell evidence follows the campaign ⇄ dataset toggle. Campaign
+        // scope is empty before the campaign's first round — fall back to
+        // the cross-campaign archive so the badge still shows hit/miss.
         let seriesRes = await fetchMeasurementSeries(
-          name, 1000, ac.signal, hardSamplesScope, cycleId,
+          name, 1000, ac.signal, hardSamplesScope, campaignId, cycleId,
         ).catch(() => null);
         if (
           (!seriesRes || seriesRes.items.length === 0) &&
-          hardSamplesScope !== "workspace"
+          hardSamplesScope !== "dataset"
         ) {
           seriesRes = await fetchMeasurementSeries(
-            name, 1000, ac.signal, "workspace", cycleId,
+            name, 1000, ac.signal, "dataset", campaignId, cycleId,
           ).catch(() => null);
         }
         if (cancelled) return;
@@ -281,7 +293,7 @@ function DashboardPaneInner() {
       ac.abort();
       if (retryHandle != null) window.clearTimeout(retryHandle);
     };
-  }, [cycleId, hardSamplesScope]);
+  }, [campaignId, cycleId, hardSamplesScope]);
 
   // Cycle change ⇒ clear per-cycle derived state. Prev-prop pattern (React's
   // documented "adjusting state when a prop changes" recipe) avoids the
@@ -314,8 +326,8 @@ function DashboardPaneInner() {
     <SelectionProvider cycleId={cycleId}>
     <div className={`shell${tab === "chat" ? " chat-mode sidebar-hidden" : sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <Sidebar
-        onSelectCycle={(id) => {
-          selectCycle(id);
+        onSelectCycle={(cmp, cyc) => {
+          selectCycle(cmp, cyc);
           setTab("dashboard");
         }}
         onNewCycle={() => setTab("chat")}
@@ -333,6 +345,7 @@ function DashboardPaneInner() {
               : dashState.statusHint
           }
           termKey={dashState.termKey}
+          campaignId={campaignId}
           cycleId={cycleId}
           dash={dash}
           isLive={isLive}
@@ -396,6 +409,7 @@ function DashboardPaneInner() {
                   dash={dash}
                   dashRound={dashRound}
                   pipeline={pipeline}
+                  campaignId={campaignId}
                   cycleId={cycleId}
                   themeKey={themeKey}
                   rounds={dashState.rounds}
@@ -422,7 +436,11 @@ function DashboardPaneInner() {
             </Lane>
             <Lane id="why" title="Why" subtitle="Drill into a candidate" defaultOpen={false}>
               <WideSpine>
-                <SharedInspector cycleId={cycleId} isLive={isLive} />
+                <SharedInspector
+                  campaignId={campaignId}
+                  cycleId={cycleId}
+                  isLive={isLive}
+                />
               </WideSpine>
               <NarrowSpine>
                 <RawJsonCard dash={dash} />
@@ -430,13 +448,13 @@ function DashboardPaneInner() {
             </Lane>
           </div>
         ) : tab === "files" ? (
-          <FilesPane cycleId={cycleId} />
+          <FilesPane campaignId={campaignId} cycleId={cycleId} />
         ) : tab === "compare" ? (
           <ComparePane themeKey={themeKey} />
         ) : (
           <LeveragePanel />
         )}
-        <ConsolePane cycleId={cycleId} />
+        <ConsolePane campaignId={campaignId} cycleId={cycleId} />
       </main>
     </div>
     </SelectionProvider>
@@ -453,6 +471,7 @@ function NowRow({
   dash,
   dashRound,
   pipeline,
+  campaignId,
   cycleId,
   themeKey,
   rounds,
@@ -462,10 +481,11 @@ function NowRow({
   dash: DashboardSnapshot | null;
   dashRound: number | null;
   pipeline: PipelineDoc | null;
+  campaignId: string | null;
   cycleId: string | null;
   themeKey: string;
   rounds: RoundFileDoc[];
-  onSelectCycle: (id: string) => void;
+  onSelectCycle: (campaignId: string, cycleId: string) => void;
   isLive: boolean;
 }) {
   const { node, setNode } = useSelection();
@@ -478,7 +498,12 @@ function NowRow({
           is the only thing that decides placement. */}
       <div className="dash-row-verdict">
         <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
-        <LineageTree dash={dash} cycleId={cycleId} onSelectCycle={onSelectCycle} />
+        <LineageTree
+          dash={dash}
+          campaignId={campaignId}
+          cycleId={cycleId}
+          onSelectCycle={onSelectCycle}
+        />
         <WorkflowCanvas pipeline={pipeline} dash={dash} isLive={isLive} />
       </div>
       {node && (

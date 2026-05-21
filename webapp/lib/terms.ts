@@ -6,7 +6,7 @@ export const TERMS: Record<string, string> = {
   // Status banner — thresholds match ageBucket() in lib/poll.ts
   status_live:        "Optimizer wrote dashboard.json in the last 30 seconds — running.",
   status_idle:        "Last write 30s–5m ago. Round between phases or paused.",
-  status_snapshot:    "Last write >5m ago. No live optimizer — viewing a frozen campaign.",
+  status_snapshot:    "Last write >5m ago. No live optimizer — viewing a frozen unit.",
   status_offline:     "No active session, or dashboard.json unreachable. Run `python -m promptpotter new <dataset>` or `resume`.",
   status_nowall:      "Dashboard has no wallclock yet — optimizer probably has not started.",
 

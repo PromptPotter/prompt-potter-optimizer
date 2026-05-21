@@ -12,12 +12,12 @@ interface FileLeaf {
   path: string;
   scope: string;
   size?: number;
-  mtime?: number;
+  mtime?: string;
 }
 
 interface ScopedTree {
   cycle: DirNode;
-  family: DirNode;
+  campaign: DirNode;
 }
 
 function makeNode(): DirNode {
@@ -25,9 +25,9 @@ function makeNode(): DirNode {
 }
 
 function buildTree(entries: FileEntry[]): ScopedTree {
-  const tree: ScopedTree = { cycle: makeNode(), family: makeNode() };
+  const tree: ScopedTree = { cycle: makeNode(), campaign: makeNode() };
   for (const e of entries) {
-    const scope = e.scope === "family" ? "family" : "cycle";
+    const scope = e.scope === "campaign" ? "campaign" : "cycle";
     const parts = e.path.split("/");
     let cur = tree[scope];
     for (let i = 0; i < parts.length - 1; i += 1) {
@@ -46,21 +46,22 @@ function buildTree(entries: FileEntry[]): ScopedTree {
 }
 
 interface Props {
+  campaignId: string | null;
   cycleId: string | null;
   selected: { scope: string; path: string } | null;
   onSelect: (scope: string, path: string) => void;
 }
 
-export function FileTree({ cycleId, selected, onSelect }: Props) {
+export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!cycleId) return;
+    if (!campaignId || !cycleId) return;
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetchFiles(cycleId);
+        const r = await fetchFiles(campaignId, cycleId);
         if (!cancelled) setEntries(r.entries);
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
@@ -69,7 +70,7 @@ export function FileTree({ cycleId, selected, onSelect }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [cycleId]);
+  }, [campaignId, cycleId]);
 
   const tree = useMemo(() => (entries ? buildTree(entries) : null), [entries]);
 
@@ -85,8 +86,8 @@ export function FileTree({ cycleId, selected, onSelect }: Props) {
 
   return (
     <div>
-      <ScopeBlock label="cycle (root)" node={tree.cycle} scope="cycle" selected={selected} onSelect={onSelect} />
-      <ScopeBlock label="family (telemetry)" node={tree.family} scope="family" selected={selected} onSelect={onSelect} />
+      <ScopeBlock label="unit (root)" node={tree.cycle} scope="cycle" selected={selected} onSelect={onSelect} />
+      <ScopeBlock label="campaign (telemetry)" node={tree.campaign} scope="campaign" selected={selected} onSelect={onSelect} />
     </div>
   );
 }

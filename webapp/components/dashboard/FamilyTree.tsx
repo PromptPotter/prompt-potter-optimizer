@@ -1,24 +1,30 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  fetchFamilyLineage,
+  fetchCampaignLineage,
   postCleanupEmpty,
-  type FamilyLineageCycle,
-  type FamilyLineageResponse,
+  type CampaignLineageCycle,
+  type CampaignLineageResponse,
   type SiblingKind,
 } from "@/lib/api";
 import { rootCycleId, shortFamilyTail } from "@/lib/ids";
 
 interface Props {
+  // The campaign whose lineage to render. A campaign is a FOREST: it holds
+  // N session roots, each with its own fork tree. One fetch returns every
+  // cycle; we render one cladogram per session.
+  campaignId: string | null;
+  // The cycle currently in view — drives the selected-lane highlight.
   cycleId: string | null;
-  onSelectCycle: (id: string) => void;
+  // A unit is the pair (campaignId, cycleId); this tree is scoped to one
+  // campaign, so it passes its own campaignId alongside each cycle_id.
+  onSelectCycle: (campaignId: string, cycleId: string) => void;
 }
 
-// Cladogram dimensions. Each round across the whole family is one
+// Cladogram dimensions. Each round across a session's family is one
 // column; each cycle gets its own horizontal lane. Forks branch off
 // their parent's lane at the parent-round where the fork was cut and
-// then run their own rounds to the right. There's no built-in cap on
-// depth — chains extend as far right as the data needs.
+// then run their own rounds to the right.
 const COL_W = 110;          // width per round-column
 const LANE_H = 26;          // height per cycle-lane
 const STUB = 14;            // horizontal stub before each round node
@@ -35,25 +41,38 @@ const KIND_GLYPH: Record<SiblingKind, string> = {
   diag: "Δ",
 };
 
+// Session ordinal from a root cycle id — `cycle_{hash}` → 1,
+// `cycle_{hash}_s3` → 3. Mirrors `session_index()` in paths.py.
+function sessionIndexOf(rootId: string): number {
+  const m = rootId.match(/_s(\d+)$/);
+  return m ? Number(m[1]) : 1;
+}
+
 // Build immediate-parent map + per-parent child list (sorted by recency
 // of fork) so the BFS lays out forks under their parent in a stable order.
 interface CycleNode {
-  cycle: FamilyLineageCycle;
+  cycle: CampaignLineageCycle;
   children: CycleNode[];
 }
 
 function buildTree(
   rootId: string,
-  cycles: FamilyLineageCycle[],
+  cycles: CampaignLineageCycle[],
 ): CycleNode | null {
-  const byId = new Map<string, FamilyLineageCycle>();
-  for (const c of cycles) byId.set(c.cycle_id, c);
+  // A campaign is a forest of N session roots — restrict to THIS session's
+  // own cycles so an orphan never attaches across session boundaries.
+  const own = cycles.filter((c) => rootCycleId(c.cycle_id) === rootId);
+  const byId = new Map<string, CampaignLineageCycle>();
+  for (const c of own) byId.set(c.cycle_id, c);
   const root = byId.get(rootId);
   if (!root) return null;
-  const childrenOf = new Map<string, FamilyLineageCycle[]>();
-  for (const c of cycles) {
+  const childrenOf = new Map<string, CampaignLineageCycle[]>();
+  for (const c of own) {
     if (c.cycle_id === rootId) continue;
-    const pid = c.immediate_parent_cycle_id ?? rootId;
+    const pid =
+      c.immediate_parent_cycle_id && byId.has(c.immediate_parent_cycle_id)
+        ? c.immediate_parent_cycle_id
+        : rootId;
     const arr = childrenOf.get(pid) ?? [];
     arr.push(c);
     childrenOf.set(pid, arr);
@@ -69,7 +88,7 @@ function buildTree(
       return a.cycle_id.localeCompare(b.cycle_id);
     });
   }
-  const visit = (cycle: FamilyLineageCycle): CycleNode => ({
+  const visit = (cycle: CampaignLineageCycle): CycleNode => ({
     cycle,
     children: (childrenOf.get(cycle.cycle_id) ?? []).map(visit),
   });
@@ -81,7 +100,7 @@ function buildTree(
 // the server-computed `round_column_offset` for its rounds' x-positions,
 // so the client doesn't need to know HITL-vs-divergence semantics.
 interface LaneLayout {
-  cycle: FamilyLineageCycle;
+  cycle: CampaignLineageCycle;
   lane: number;
   // Parent's lane info — needed when the fork's nominal attachment
   // round isn't present in the parent's rounds[] (e.g. fork_from_round
@@ -217,10 +236,7 @@ function placeNodes(layouts: Map<string, LaneLayout>): {
   //   parent ran less    → parent's last round node
   //   parent has no rounds yet → parent's lane left edge
   // Child stub never goes LEFT of its anchor: we clamp childX to at least
-  // (anchorX + COL_W) so the stem always slants RIGHTWARD. Earlier code
-  // let empty-rounds divergence forks stub at col 1 even when the anchor
-  // was at col 4 — that drew a backward stem then a tiny right stub, the
-  // V-shape "reflection" the operator spotted.
+  // (anchorX + COL_W) so the stem always slants RIGHTWARD.
   for (const l of layouts.values()) {
     if (!l.parentCycleId) continue;
     const parentLayout = layouts.get(l.parentCycleId);
@@ -230,9 +246,6 @@ function placeNodes(layouts: Map<string, LaneLayout>): {
     let anchorX: number;
     let anchorY: number;
     if (fr === 0) {
-      // Cut at origin — anchor at the parent's lane left edge so sweep
-      // and divergence-at-origin forks fan from one shared point on the
-      // left, not from the parent's most recent (rightward) round.
       anchorX = LEFT_PAD;
       anchorY = parentLaneY;
     } else {
@@ -281,35 +294,34 @@ function fmtAcc(v: number | null | undefined): string {
   return `${(v * 100).toFixed(0)}%`;
 }
 
-export function FamilyTree({ cycleId, onSelectCycle }: Props) {
-  const [data, setData] = useState<FamilyLineageResponse | null>(null);
-  // Refetch when the operator switches cycles ACROSS families. Within a
-  // family, the lineage data is the same — skip the re-fetch.
-  const familyRoot = useMemo(
-    () => (cycleId ? rootCycleId(cycleId) : null),
-    [cycleId],
-  );
+export function FamilyTree({ campaignId, cycleId, onSelectCycle }: Props) {
+  const [data, setData] = useState<CampaignLineageResponse | null>(null);
   const [tick, setTick] = useState(0);
-  // Single batch-cleanup modal — replaces the per-row × delete. The
-  // operator clicks the header "Clean up N stubs" button; we open the
-  // modal, on confirm fire the server's batch endpoint, then refetch
-  // the lineage so deleted lanes vanish without a full page reload.
-  // Empty-row stubs accumulate because the fork-creation paths
-  // (divergence / sweep / operator HITL) all mint the cycle dir BEFORE
-  // the first round runs — an interrupt between dir-mint and
-  // first-round-run leaves a stub forever. The real fix is lazy-mint
-  // in the fork-creation paths; this cleanup is the interim sweep.
+  // The campaign's session roots — one cladogram per session. A campaign
+  // is a forest: every `sibling_kind === "root"` cycle is a session.
+  const rootCycleIds = useMemo(() => {
+    const roots = (data?.cycles ?? [])
+      .filter((c) => c.sibling_kind === "root")
+      .map((c) => c.cycle_id);
+    roots.sort((a, b) => sessionIndexOf(a) - sessionIndexOf(b));
+    return roots;
+  }, [data]);
+
+  // Single batch-cleanup modal — campaign-wide. Empty-row stubs accumulate
+  // because the fork-creation paths mint the cycle dir BEFORE the first
+  // round runs; an interrupt between dir-mint and first-round leaves a
+  // stub forever.
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [lastCleanupCount, setLastCleanupCount] = useState<number | null>(null);
 
   const confirmCleanup = useCallback(async () => {
-    if (!familyRoot) return;
+    if (!campaignId || rootCycleIds.length === 0) return;
     setCleaning(true);
     setCleanupError(null);
     try {
-      const r = await postCleanupEmpty(familyRoot);
+      const r = await postCleanupEmpty(campaignId, rootCycleIds[0]);
       setLastCleanupCount(r.deleted_cycle_ids.length);
       setCleanupOpen(false);
       setTick((t) => t + 1);
@@ -318,15 +330,15 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
     } finally {
       setCleaning(false);
     }
-  }, [familyRoot]);
+  }, [campaignId, rootCycleIds]);
 
   useEffect(() => {
-    if (!familyRoot) return;
+    if (!campaignId) return;
     let cancelled = false;
     const ac = new AbortController();
     (async () => {
       try {
-        const r = await fetchFamilyLineage(familyRoot, ac.signal);
+        const r = await fetchCampaignLineage(campaignId, ac.signal);
         if (!cancelled) setData(r);
       } catch {
         // Silent — sidebar covers navigation. Empty render below.
@@ -339,47 +351,45 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
       ac.abort();
       window.removeEventListener("focus", onFocus);
     };
-  }, [familyRoot, tick]);
+  }, [campaignId, tick]);
 
-  const computed = useMemo(() => {
-    if (!data || !familyRoot) return null;
-    const tree = buildTree(familyRoot, data.cycles);
-    if (!tree) return null;
-    if (tree.children.length === 0) return null;
-    const { laneByCycle, totalLanes, maxCol } = layout(tree);
-    const { nodes, segs } = placeNodes(laneByCycle);
-    const height = TOP_PAD + totalLanes * LANE_H + 8;
-    const width = LEFT_PAD + (maxCol + 1) * COL_W + RIGHT_PAD;
-    return { nodes, segs, height, width, laneByCycle };
-  }, [data, familyRoot]);
+  // Campaign-wide stub count — every empty non-root cycle, across every
+  // session. Same definition the server-side cleanup guard uses.
+  const stubCount = useMemo(
+    () =>
+      (data?.cycles ?? []).filter(
+        (c) => c.rounds.length === 0 && c.sibling_kind !== "root",
+      ).length,
+    [data],
+  );
 
-  if (!computed) return null;
-  const { nodes, segs, height, width, laneByCycle } = computed;
-  const totalDesc = laneByCycle.size - 1;
-  // Count of stub lanes (n_rounds === 0, not the root) — drives the
-  // "Clean up" button in the header. Reuses the same definition the
-  // server-side guard uses, so the header count matches what cleanup
-  // will actually delete.
-  const stubCount = [...laneByCycle.values()].filter(
-    (l) => l.cycle.rounds.length === 0 && l.cycle.sibling_kind !== "root",
-  ).length;
-  // Round-number header — one label per column across the whole family,
-  // so the operator can read which generation each dot belongs to even
-  // when chains run 10+ rounds deep. Built from the deepest column
-  // anyone reaches (data-driven, no hardcoded cap).
-  const headerCols: number[] = [];
-  for (let c = 1; (LEFT_PAD + c * COL_W) <= width - RIGHT_PAD + COL_W / 2; c += 1) {
-    headerCols.push(c);
-  }
+  // Per-session cladograms — only sessions that actually branched render a
+  // tree (a lone root with no forks has nothing to draw).
+  const forests = useMemo(() => {
+    if (!data) return [];
+    return rootCycleIds
+      .map((rootId) => {
+        const tree = buildTree(rootId, data.cycles);
+        if (!tree || tree.children.length === 0) return null;
+        return { rootId, tree };
+      })
+      .filter((f): f is { rootId: string; tree: CycleNode } => f !== null);
+  }, [data, rootCycleIds]);
+
+  if (!campaignId || forests.length === 0) return null;
+  const totalDesc = forests.reduce(
+    (n, f) => n + countDescendants(f.tree),
+    0,
+  );
+  const multiSession = rootCycleIds.length > 1;
 
   return (
-    <section className="family-cladogram" aria-label="Family lineage tree">
+    <section className="family-cladogram" aria-label="Campaign lineage tree">
       <div className="family-cladogram-head">
-        <span>Family lineage</span>
+        <span>Campaign lineage</span>
         <span className="family-cladogram-head-meta">
           <span className="badge">
-            {totalDesc} {totalDesc === 1 ? "descendant" : "descendants"} ·{" "}
-            {nodes.length} round{nodes.length === 1 ? "" : "s"}
+            {totalDesc} {totalDesc === 1 ? "descendant" : "descendants"}
           </span>
           {stubCount > 0 && (
             <button
@@ -389,7 +399,7 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
                 setCleanupError(null);
                 setCleanupOpen(true);
               }}
-              title="Delete every empty-stub fork in this family from disk"
+              title="Delete every empty-stub fork in this campaign from disk"
             >
               Clean up {stubCount} stub{stubCount === 1 ? "" : "s"}
             </button>
@@ -401,6 +411,72 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
           )}
         </span>
       </div>
+      {forests.map((f) => (
+        <Forest
+          key={f.rootId}
+          tree={f.tree}
+          campaignId={campaignId}
+          cycleId={cycleId}
+          onSelectCycle={onSelectCycle}
+          sessionLabel={
+            multiSession ? `Session ${sessionIndexOf(f.rootId)}` : null
+          }
+        />
+      ))}
+      {cleanupOpen && (
+        <CleanupConfirmModal
+          stubCount={stubCount}
+          cleaning={cleaning}
+          error={cleanupError}
+          onCancel={() => {
+            setCleanupOpen(false);
+            setCleanupError(null);
+          }}
+          onConfirm={confirmCleanup}
+        />
+      )}
+    </section>
+  );
+}
+
+function countDescendants(tree: CycleNode): number {
+  let n = 0;
+  for (const c of tree.children) n += 1 + countDescendants(c);
+  return n;
+}
+
+// One session's cladogram — its own <svg> so cross-session lane math
+// never has to be reconciled. The session header appears only when the
+// campaign has more than one session.
+function Forest({
+  tree,
+  campaignId,
+  cycleId,
+  onSelectCycle,
+  sessionLabel,
+}: {
+  tree: CycleNode;
+  campaignId: string;
+  cycleId: string | null;
+  onSelectCycle: (campaignId: string, cycleId: string) => void;
+  sessionLabel: string | null;
+}) {
+  const { laneByCycle, totalLanes, maxCol } = layout(tree);
+  const { nodes, segs } = placeNodes(laneByCycle);
+  const height = TOP_PAD + totalLanes * LANE_H + 8;
+  const width = LEFT_PAD + (maxCol + 1) * COL_W + RIGHT_PAD;
+
+  // Round-number header — one label per column across the whole family.
+  const headerCols: number[] = [];
+  for (let c = 1; LEFT_PAD + c * COL_W <= width - RIGHT_PAD + COL_W / 2; c += 1) {
+    headerCols.push(c);
+  }
+
+  return (
+    <div className="family-cladogram-forest">
+      {sessionLabel && (
+        <div className="family-cladogram-session-head">{sessionLabel}</div>
+      )}
       <div className="family-cladogram-scroll">
         <svg
           width={width}
@@ -408,14 +484,9 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
           viewBox={`0 0 ${width} ${height}`}
           xmlns="http://www.w3.org/2000/svg"
           className="family-cladogram-svg"
-          aria-label="Family lineage cladogram"
+          aria-label="Session lineage cladogram"
           shapeRendering="crispEdges"
         >
-          {/* Column-number header row — R1, R2, R3, ... across the
-              top so the cladogram reads as a real timeline. Faint
-              vertical gridline under each label so the operator can
-              trace any dot back up to its round number even when the
-              chain runs 10+ deep. No depth cap. */}
           {headerCols.map((c) => {
             const x = LEFT_PAD + c * COL_W;
             return (
@@ -471,7 +542,7 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
             />
           ))}
 
-          {/* Round-node markers + selected lane highlight (per cycle). */}
+          {/* Selected-lane highlight. */}
           {[...laneByCycle.values()].map((l) => {
             const selected = l.cycle.cycle_id === cycleId;
             if (!selected) return null;
@@ -495,17 +566,15 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
               if (!n.isLastInLane) return null;
               if (!layoutEntry) return null;
               const cyc = layoutEntry.cycle;
-              const label =
-                cyc.sibling_kind === "root"
-                  ? cyc.dataset_name || cyc.cycle_id
-                  : shortFamilyTail(cyc.cycle_id);
-              return label;
+              return cyc.sibling_kind === "root"
+                ? cyc.dataset_name || cyc.cycle_id
+                : shortFamilyTail(cyc.cycle_id);
             })();
             return (
               <g
                 key={`n-${n.cycleId}-${n.round}`}
                 className={`family-cladogram-node${cycleSelected ? " selected" : ""}`}
-                onClick={() => onSelectCycle(n.cycleId)}
+                onClick={() => onSelectCycle(campaignId, n.cycleId)}
                 style={{ cursor: "pointer" }}
               >
                 <circle
@@ -522,9 +591,6 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
                 >
                   R{n.round} {fmtAcc(n.accuracy)}
                 </text>
-                {/* Rightmost node in each lane carries the cycle's short
-                    identity label so the operator can name the branch
-                    they're looking at without hovering. */}
                 {rowLabelText && (
                   <text
                     x={n.x + 8}
@@ -537,8 +603,6 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
                     <tspan dx="4">{rowLabelText}</tspan>
                   </text>
                 )}
-                {/* Big hit-rect so the row catches clicks anywhere across
-                    its visual extent, not just on the small circle. */}
                 <rect
                   x={n.x - COL_W / 2}
                   y={n.y - LANE_H / 2 + 2}
@@ -555,10 +619,7 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
           })}
 
           {/* Per-lane interactive overlay — every lane (including
-              empty-rounds stubs) gets a click target spanning its full
-              width with a tooltip describing the cycle. Stub deletion
-              is a single batch action via the header button; this
-              overlay is read-only navigation + info. */}
+              empty-rounds stubs) gets a full-width click target. */}
           {[...laneByCycle.values()].map((l) => {
             const y = TOP_PAD + l.lane * LANE_H;
             const cyc = l.cycle;
@@ -571,7 +632,7 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
                 width={width}
                 height={LANE_H - 4}
                 className="family-cladogram-lane-hit"
-                onClick={() => onSelectCycle(cyc.cycle_id)}
+                onClick={() => onSelectCycle(campaignId, cyc.cycle_id)}
                 style={{ cursor: "pointer" }}
               >
                 <title>
@@ -590,32 +651,17 @@ export function FamilyTree({ cycleId, onSelectCycle }: Props) {
           })}
         </svg>
       </div>
-      {cleanupOpen && (
-        <CleanupConfirmModal
-          familyRootId={familyRoot ?? ""}
-          stubCount={stubCount}
-          cleaning={cleaning}
-          error={cleanupError}
-          onCancel={() => {
-            setCleanupOpen(false);
-            setCleanupError(null);
-          }}
-          onConfirm={confirmCleanup}
-        />
-      )}
-    </section>
+    </div>
   );
 }
 
 function CleanupConfirmModal({
-  familyRootId,
   stubCount,
   cleaning,
   error,
   onCancel,
   onConfirm,
 }: {
-  familyRootId: string;
   stubCount: number;
   cleaning: boolean;
   error: string | null;
@@ -635,11 +681,10 @@ function CleanupConfirmModal({
           Clean up {stubCount} empty stub{stubCount === 1 ? "" : "s"}?
         </h2>
         <p className="family-tree-modal-body">
-          Removes every fork / sweep dir in family{" "}
-          <code>{shortFamilyTail(familyRootId) || familyRootId}</code>{" "}
-          that has <code>n_rounds = 0</code> and no descendants. Cycles
-          that ran real work, the active cycle, the family root, and
-          cycles with children are skipped.
+          Removes every fork / sweep / diag dir in this campaign that has{" "}
+          <code>n_rounds = 0</code> and no descendants. Units that ran real
+          work, the active unit, session roots, and units with children are
+          skipped.
         </p>
         {error && <p className="family-tree-modal-error">{error}</p>}
         <div className="modal-actions">

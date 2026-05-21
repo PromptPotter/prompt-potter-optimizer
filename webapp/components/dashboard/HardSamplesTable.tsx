@@ -51,9 +51,9 @@ interface Props {
   datasetItems: DatasetItem[];
   datasetTrainCount: number;
   datasetTestCount: number;
-  // Data scope toggle. Workspace = cross-cycle archive Rasch (default,
-  // matches /datasets/{name}/preview's old behaviour). Campaign = this
-  // cycle only, read from campaigns/{cycle_id}/hard_samples_campaign.json.
+  // Data scope toggle. Campaign = the campaign's pooled Rasch fit over
+  // every cycle in it (campaigns/{campaign_id}/hard_samples.json). Dataset
+  // = the cross-campaign archive Rasch over every campaign on this dataset.
   // Owner (DashboardPane) refetches the preview when scope changes.
   scope?: HardSamplesScope;
   onScopeChange?: (s: HardSamplesScope) => void;
@@ -833,9 +833,9 @@ export function HardSamplesTable({
               role="radiogroup"
               aria-label="Hard-sample data scope"
               title={
-                scope === "workspace"
-                  ? "Showing cross-cycle archive evidence. Toggle to this cycle's evidence only."
-                  : "Showing this cycle's evidence only. Toggle to cross-cycle archive."
+                scope === "campaign"
+                  ? "Showing this campaign's pooled evidence. Toggle to every campaign on this dataset."
+                  : "Showing every campaign on this dataset (cross-campaign archive). Toggle to this campaign only."
               }
             >
               <button
@@ -845,16 +845,16 @@ export function HardSamplesTable({
                 className={`hs-scope-opt${scope === "campaign" ? " on" : ""}`}
                 onClick={() => onScopeChange("campaign")}
               >
-                Campaign
+                This campaign
               </button>
               <button
                 type="button"
                 role="radio"
-                aria-checked={scope === "workspace"}
-                className={`hs-scope-opt${scope === "workspace" ? " on" : ""}`}
-                onClick={() => onScopeChange("workspace")}
+                aria-checked={scope === "dataset"}
+                className={`hs-scope-opt${scope === "dataset" ? " on" : ""}`}
+                onClick={() => onScopeChange("dataset")}
               >
-                Workspace
+                All campaigns (dataset)
               </button>
             </div>
           ) : null}

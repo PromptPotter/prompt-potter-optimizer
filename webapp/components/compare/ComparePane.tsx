@@ -35,6 +35,32 @@ function fmtDelta(a: number | null, b: number | null): string {
   return `${d > 0 ? "+" : ""}${d.toFixed(1)}pp`;
 }
 
+// A unit is the pair (campaign_id, cycle_id) — a cycle_id alone is
+// ambiguous across the re-run campaigns of one dataset. The pickers key,
+// value, and store the composite; `findUnit` splits it back.
+const SEP = "::";
+
+function unitKey(campaignId: string, cycleId: string): string {
+  return `${campaignId}${SEP}${cycleId}`;
+}
+
+function findUnit(
+  cycles: CycleListEntry[] | null,
+  key: string | null,
+): CycleListEntry | null {
+  if (!cycles || !key) return null;
+  const i = key.indexOf(SEP);
+  if (i < 0) return null;
+  const cmp = key.slice(0, i);
+  const cyc = key.slice(i + SEP.length);
+  return cycles.find((c) => c.campaign_id === cmp && c.cycle_id === cyc) ?? null;
+}
+
+function campaignTail(campaignId: string): string {
+  const i = campaignId.indexOf("__");
+  return i >= 0 ? campaignId.slice(i + 2) : campaignId;
+}
+
 function trajectory(detail: CampaignDetail): { x: number; y: number }[] {
   const out: { x: number; y: number }[] = [];
   if (typeof detail.origin_accuracy === "number") {
@@ -60,12 +86,17 @@ export function ComparePane({ themeKey }: Props) {
 
   // Filter eligible right-side cycles to the same dataset as the left pick
   // (apples-to-apples). When no left pick yet, show all.
-  const leftEntry = cycles?.find((c) => c.cycle_id === leftId) ?? null;
+  const leftEntry = findUnit(cycles, leftId);
   const rightEligible = useMemo(() => {
     if (!cycles) return [];
     if (!leftEntry) return cycles;
     return cycles.filter(
-      (c) => c.dataset_name === leftEntry.dataset_name && c.cycle_id !== leftEntry.cycle_id,
+      (c) =>
+        c.dataset_name === leftEntry.dataset_name &&
+        !(
+          c.campaign_id === leftEntry.campaign_id &&
+          c.cycle_id === leftEntry.cycle_id
+        ),
     );
   }, [cycles, leftEntry]);
 
@@ -75,12 +106,12 @@ export function ComparePane({ themeKey }: Props) {
       setLeft(null);
       return;
     }
-    const c = cycles.find((x) => x.cycle_id === leftId);
+    const c = findUnit(cycles, leftId);
     if (!c) return;
     let cancelled = false;
     (async () => {
       try {
-        const d = await fetchCampaignDetail(c.cycle_id);
+        const d = await fetchCampaignDetail(c.campaign_id, c.cycle_id);
         if (!cancelled) setLeft({ cycle: c, detail: d });
       } catch (e) {
         if (!cancelled) setErr((e as Error).message);
@@ -96,12 +127,12 @@ export function ComparePane({ themeKey }: Props) {
       setRight(null);
       return;
     }
-    const c = cycles.find((x) => x.cycle_id === rightId);
+    const c = findUnit(cycles, rightId);
     if (!c) return;
     let cancelled = false;
     (async () => {
       try {
-        const d = await fetchCampaignDetail(c.cycle_id);
+        const d = await fetchCampaignDetail(c.campaign_id, c.cycle_id);
         if (!cancelled) setRight({ cycle: c, detail: d });
       } catch (e) {
         if (!cancelled) setErr((e as Error).message);
@@ -116,7 +147,7 @@ export function ComparePane({ themeKey }: Props) {
   // an apples-to-oranges comparison showing).
   useEffect(() => {
     if (rightId && leftEntry) {
-      const r = cycles?.find((c) => c.cycle_id === rightId);
+      const r = findUnit(cycles, rightId);
       if (r && r.dataset_name !== leftEntry.dataset_name) {
         setRightId(null);
       }
@@ -126,9 +157,9 @@ export function ComparePane({ themeKey }: Props) {
   return (
     <div className="compare-pane">
       <header className="compare-header">
-        <h2>Compare campaigns</h2>
+        <h2>Compare units</h2>
         <p className="compare-subtitle">
-          Pick two campaigns on the same project to see how their trajectories
+          Pick two units on the same project to see how their trajectories
           differ. Static read of <code>index.json</code> on disk — no live
           polling.
         </p>
@@ -159,8 +190,8 @@ export function ComparePane({ themeKey }: Props) {
       {(!left || !right) && !err && !cyclesError && (
         <div className="compare-empty">
           {!left
-            ? "Pick a campaign for slot A."
-            : "Pick a campaign for slot B (same project as A)."}
+            ? "Pick a unit for slot A."
+            : "Pick a unit for slot B (same project as A)."}
         </div>
       )}
 
@@ -229,20 +260,24 @@ function ComparePicker({ label, cycles, selected, onChange, disabled }: PickerPr
         value={selected ?? ""}
         onChange={(e) => onChange(e.target.value || null)}
         disabled={disabled || !cycles || cycles.length === 0}
-        aria-label={`Compare campaign slot ${label}`}
+        aria-label={`Compare unit slot ${label}`}
       >
-        <option value="">— pick a campaign —</option>
+        <option value="">— pick a unit —</option>
         {groups.map(([proj, list]) => (
           <optgroup key={proj} label={proj}>
-            {list.map((c) => (
-              <option key={c.cycle_id} value={c.cycle_id}>
-                {c.cycle_id.length > 26
-                  ? `${c.cycle_id.slice(0, 18)}…${c.cycle_id.slice(-4)}`
-                  : c.cycle_id}
-                {" · "}
-                best {c.best_accuracy == null ? "—" : `${(c.best_accuracy * 100).toFixed(0)}%`}
-              </option>
-            ))}
+            {list.map((c) => {
+              const k = unitKey(c.campaign_id, c.cycle_id);
+              return (
+                <option key={k} value={k}>
+                  {campaignTail(c.campaign_id)} · {c.sibling_kind}
+                  {" · "}
+                  best{" "}
+                  {c.best_accuracy == null
+                    ? "—"
+                    : `${(c.best_accuracy * 100).toFixed(0)}%`}
+                </option>
+              );
+            })}
           </optgroup>
         ))}
       </select>

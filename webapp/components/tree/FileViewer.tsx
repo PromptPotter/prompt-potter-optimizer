@@ -5,6 +5,7 @@ import { fetchCycleFile } from "@/lib/api";
 import { RoundFileView, type RoundDoc } from "./RoundFileView";
 
 interface Props {
+  campaignId: string | null;
   cycleId: string | null;
   selected: { scope: string; path: string } | null;
 }
@@ -35,11 +36,11 @@ function isRoundFile(selected: { scope: string; path: string } | null): boolean 
   return !!selected && selected.scope === "cycle" && ROUND_FILE_RE.test(selected.path);
 }
 
-export function FileViewer({ cycleId, selected }: Props) {
+export function FileViewer({ campaignId, cycleId, selected }: Props) {
   const [state, setState] = useState<ViewerState>(EMPTY);
 
   useEffect(() => {
-    if (!cycleId || !selected) {
+    if (!campaignId || !cycleId || !selected) {
       setState(EMPTY);
       return;
     }
@@ -47,9 +48,7 @@ export function FileViewer({ cycleId, selected }: Props) {
     setState({ meta: "loading file…", body: "", contentType: "", isMarkdown: false, roundDoc: null, rawJson: "", error: null });
     (async () => {
       try {
-        const r = (await fetchCycleFile(cycleId, selected.scope, selected.path)) as {
-          path: string; scope: string; content: string | null; size?: number; content_type?: string;
-        };
+        const r = await fetchCycleFile(campaignId, cycleId, selected.scope, selected.path);
         if (cancelled) return;
         const ct = r.content_type ?? "";
         const meta = `${r.size ?? "?"} B • ${ct || "text"}`;
@@ -98,7 +97,7 @@ export function FileViewer({ cycleId, selected }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [cycleId, selected]);
+  }, [campaignId, cycleId, selected]);
 
   const headerPath = selected ? `${selected.scope}: ${selected.path}` : "(no file selected)";
   return (

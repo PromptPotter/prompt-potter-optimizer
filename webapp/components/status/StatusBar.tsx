@@ -16,6 +16,7 @@ interface Props {
   statusText: string;
   statusHint?: string;
   termKey?: string;
+  campaignId: string | null;
   cycleId: string | null;
   dash: DashboardSnapshot | null;
   isLive: boolean;
@@ -109,6 +110,7 @@ export function StatusBar({
   statusText,
   statusHint,
   termKey,
+  campaignId,
   cycleId,
   dash,
   isLive,
@@ -149,7 +151,7 @@ export function StatusBar({
         ·
       </span>
       <span className="dash-strip-cell" title={cycleId ?? ""}>
-        <span className="dash-strip-label">campaign</span>
+        <span className="dash-strip-label">unit</span>
         <code>{shortCycleId(cycleId)}</code>
       </span>
       <span className="dash-strip-cell">
@@ -181,7 +183,9 @@ export function StatusBar({
         <span className="dash-strip-label">updated</span>
         <strong>{ageText(dash?.wallclock_serialized_at)}</strong>
       </span>
-      {cycleId && isLive ? <StopButton cycleId={cycleId} isLive={isLive} /> : null}
+      {campaignId && cycleId && isLive ? (
+        <StopButton campaignId={campaignId} cycleId={cycleId} isLive={isLive} />
+      ) : null}
       <button
         type="button"
         className="dash-strip-jump"

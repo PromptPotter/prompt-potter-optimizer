@@ -195,7 +195,7 @@ export function ChatPane({
           <div className="chat-job-dropdown" role="region" aria-label="Job status and configuration">
             <div className="job-section">
               <div className="section-title">Identity</div>
-              <div className="row"><span className="lbl">Campaign</span><span className="val">{fmt(cycleId)}</span></div>
+              <div className="row"><span className="lbl">Unit</span><span className="val">{fmt(cycleId)}</span></div>
               <div className="row"><span className="lbl">Session</span><span className="val">{fmt(sessionId)}</span></div>
               <div className="row"><span className="lbl">Project</span><span className="val">{fmt(datasetTitle)}</span></div>
               <div className="row"><span className="lbl">Updated</span><span className="val">{fmt(dash?.wallclock_serialized_at)}</span></div>

@@ -26,15 +26,18 @@ interface RoundView {
 
 interface Props {
   dash: DashboardSnapshot | null;
+  // The campaign the viewed cycle belongs to — needed for the campaign
+  // lineage fetch (FamilyTree) and any per-cycle resolution.
+  campaignId: string | null;
   // The cycle currently in view. Used to recognise inherited forks: when
   // cycleId differs from rootCycleId(cycleId), the cycle is a sibling
   // (fork/diag/sweep) and its empty rounds[] doesn't mean "fresh" — it
   // means "no NEW rounds yet on top of inherited parent history."
   cycleId: string | null;
-  // Re-select the parent cycle when the operator clicks the inheritance
-  // hint. Routed back to DashboardPane's handleCycleChange so the rest of
-  // the panels (sidebar selection, URL pin, breadcrumb) follow along.
-  onSelectCycle?: (id: string) => void;
+  // Re-select the parent unit when the operator clicks the inheritance
+  // hint. A unit is the pair (campaignId, cycleId) — lineage is
+  // campaign-scoped, so the parent shares this view's campaignId.
+  onSelectCycle?: (campaignId: string, cycleId: string) => void;
 }
 
 // Minimal cladogram layout. Each round occupies a fixed column. Parent
@@ -62,7 +65,7 @@ function fmtPct(v: number | undefined | null): string {
   return `${(v * 100).toFixed(0)}%`;
 }
 
-export function LineageTree({ dash, cycleId, onSelectCycle }: Props) {
+export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props) {
   const { selected, setSelected } = useSelection();
   const { rounds: docs } = useCycleStream();
   // Same merge logic FitnessPanel uses: historical rounds from disk +
@@ -198,16 +201,20 @@ export function LineageTree({ dash, cycleId, onSelectCycle }: Props) {
             cladogram (root + descendants) is still informative — operator
             can scan + click siblings. Self-hides when the family has no
             descendants. */}
-        <FamilyTree cycleId={cycleId} onSelectCycle={onSelectCycle ?? (() => {})} />
+        <FamilyTree
+          campaignId={campaignId}
+          cycleId={cycleId}
+          onSelectCycle={onSelectCycle ?? (() => {})}
+        />
         <div className="lineage-empty">
           {isInheritedSibling && parentId ? (
             <>
               inherited from{" "}
-              {onSelectCycle ? (
+              {onSelectCycle && campaignId ? (
                 <button
                   type="button"
                   className="lineage-inherit-link"
-                  onClick={() => onSelectCycle(parentId)}
+                  onClick={() => onSelectCycle(campaignId, parentId)}
                   title={`Switch to ${parentId}`}
                 >
                   {shortFamilyTail(parentId) || parentId}
@@ -234,10 +241,14 @@ export function LineageTree({ dash, cycleId, onSelectCycle }: Props) {
         <span>Lineage</span>
         <span className="badge">{branches.children.length} candidates · {rounds.length} round{rounds.length === 1 ? "" : "s"}</span>
       </div>
-      {/* Family cladogram sits above the candidate cladogram — same
+      {/* Campaign cladogram sits above the candidate cladogram — same
           visual language, different scale (cross-cycle vs within-cycle).
-          Self-hides for single-cycle families so it stays out of the way. */}
-      <FamilyTree cycleId={cycleId} onSelectCycle={onSelectCycle ?? (() => {})} />
+          Self-hides for single-cycle campaigns so it stays out of the way. */}
+      <FamilyTree
+        campaignId={campaignId}
+        cycleId={cycleId}
+        onSelectCycle={onSelectCycle ?? (() => {})}
+      />
       <div className="lineage-scroll">
         <svg
           width={totalW}

@@ -17,9 +17,9 @@ interface Props {
   datasetTrainCount: number;
   datasetTestCount: number;
   // Per-sample archive measurement series, fetched server-side from
-  // /datasets/{name}/measurement-series. Scope toggle (workspace vs
-  // campaign) is owned by DashboardPane and re-fetches this map; the
-  // heat-map merges live mid-round samples on top.
+  // /datasets/{name}/measurement-series. Scope toggle (this campaign vs
+  // all campaigns on the dataset) is owned by DashboardPane and re-fetches
+  // this map; the heat-map merges live mid-round samples on top.
   archivePerSample: Map<number, ArchiveDot[]>;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;

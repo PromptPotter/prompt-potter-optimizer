@@ -52,10 +52,11 @@ function writeOpen(next: boolean): void {
 }
 
 interface Props {
+  campaignId: string | null;
   cycleId: string | null;
 }
 
-export function ConsolePane({ cycleId }: Props) {
+export function ConsolePane({ campaignId, cycleId }: Props) {
   const open = useSyncExternalStore(
     subscribe,
     () => readOpen(),
@@ -77,12 +78,18 @@ export function ConsolePane({ cycleId }: Props) {
         <span className="console-title">Console</span>
         <span className="console-subtitle">output.log — live tail</span>
       </button>
-      {open ? <ConsoleBody cycleId={cycleId} /> : null}
+      {open ? <ConsoleBody campaignId={campaignId} cycleId={cycleId} /> : null}
     </section>
   );
 }
 
-function ConsoleBody({ cycleId }: { cycleId: string | null }) {
+function ConsoleBody({
+  campaignId,
+  cycleId,
+}: {
+  campaignId: string | null;
+  cycleId: string | null;
+}) {
   const [lines, setLines] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -102,7 +109,7 @@ function ConsoleBody({ cycleId }: { cycleId: string | null }) {
   }
 
   useEffect(() => {
-    if (!cycleId) return;
+    if (!campaignId || !cycleId) return;
     let cancelled = false;
     // Fresh cycle ⇒ re-grab stick-to-bottom; the operator hasn't yet scrolled
     // the new cycle's tail.
@@ -110,12 +117,12 @@ function ConsoleBody({ cycleId }: { cycleId: string | null }) {
 
     const tick = async () => {
       try {
-        const r = await fetchCycleFile(cycleId, "cycle", "output.log");
+        const r = await fetchCycleFile(campaignId, cycleId, "cycle", "output.log");
         if (cancelled) return;
         // Split, trim trailing empty (the log ends with a newline), keep
         // the last MAX_LINES so the DOM doesn't grow unbounded for long
         // cycles. The full file is still on disk for the operator to open.
-        const split = r.content.split("\n");
+        const split = (r.content ?? "").split("\n");
         if (split.length > 0 && split[split.length - 1] === "") split.pop();
         const tail = split.length > MAX_LINES ? split.slice(split.length - MAX_LINES) : split;
         setLines(tail);
@@ -132,7 +139,7 @@ function ConsoleBody({ cycleId }: { cycleId: string | null }) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [cycleId]);
+  }, [campaignId, cycleId]);
 
   const onScroll = useCallback(() => {
     const el = containerRef.current;
@@ -152,7 +159,7 @@ function ConsoleBody({ cycleId }: { cycleId: string | null }) {
   if (!cycleId) {
     return (
       <div id="console-body" className="console-body console-empty">
-        Select a cycle to tail its output.log.
+        Select a unit to tail its output.log.
       </div>
     );
   }

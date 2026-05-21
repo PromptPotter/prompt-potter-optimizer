@@ -3,6 +3,7 @@ import { ScoringInspector } from "./ScoringInspector";
 import { useSelection } from "./SelectionContext";
 
 interface Props {
+  campaignId: string | null;
   cycleId: string | null;
   isLive: boolean;
 }
@@ -10,7 +11,7 @@ interface Props {
 // Inspector slot for candidate selection (LineageTree + FitnessPanel clicks
 // write to `selected`). Workflow node selection lives in `node` and is
 // rendered by OptimizerNodeDetail in the Now lane, not here.
-export function SharedInspector({ cycleId, isLive }: Props) {
+export function SharedInspector({ campaignId, cycleId, isLive }: Props) {
   const { selected, setSelected } = useSelection();
 
   if (!selected) {
@@ -24,6 +25,7 @@ export function SharedInspector({ cycleId, isLive }: Props) {
   return (
     <div className="shared-inspector">
       <ScoringInspector
+        campaignId={campaignId}
         cycleId={cycleId}
         selected={selected}
         isLive={isLive}

@@ -1,24 +1,37 @@
 // Thin wrappers over the FastAPI surface (read-only).
+//
+// A campaign is a forest: `campaign_id` identifies one optimization effort
+// (a dataset + pipeline origin + context), and it holds N *sessions*
+// (re-runs of the same declaration) plus their fork descendants — every
+// cycle flat under `campaigns/{campaign_id}/cycles/`. A `cycle_id` is
+// unique only within its campaign, so every per-cycle fetch carries both
+// ids. `dashboard.json` is per-session — see `fetchDashboard`.
 
 const API = "/api/v1";
 
 export interface ActiveSession {
-  cycle_id: string;
+  tenant_id: string;
   session_id: string;
-  tenant_id?: string;
+  campaign_id: string;
+  cycle_id: string;
 }
 
 export interface FileEntry {
   scope: string;
   path: string;
   size?: number;
-  mtime?: number;
+  mtime?: string;
 }
 
 export interface FileResponse {
+  campaign_id: string;
+  cycle_id: string;
   path: string;
   scope: string;
-  content: string;
+  content: string | null;
+  content_type?: string;
+  size?: number;
+  mtime?: string;
 }
 
 // All reads are live (poll-driven). Pair with the server-side
@@ -50,22 +63,40 @@ export function fetchDatasetPipeline(name: string, signal?: AbortSignal): Promis
   return jget(`${API}/datasets/${encodeURIComponent(name)}/pipeline`, signal);
 }
 
+// Per-cycle file content. Files live either under the cycle dir
+// (`scope=cycle`) or at the campaign dir (`scope=campaign` — campaign.json,
+// log.md, hard_samples.json). `dashboard.json` is NOT a campaign artifact —
+// it is per-session; fetch it via `fetchDashboard`.
 export function fetchCycleFile(
+  campaignId: string,
   cycleId: string,
   scope: string,
   path: string,
   signal?: AbortSignal,
 ): Promise<FileResponse> {
-  const url = `${API}/campaigns/${cycleId}/file?scope=${scope}&path=${encodeURIComponent(path)}`;
+  const url =
+    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
+    `/cycles/${encodeURIComponent(cycleId)}/file` +
+    `?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`;
   return jget<FileResponse>(url, signal);
 }
 
 export interface FilesListing {
+  campaign_id: string;
+  cycle_id: string;
   entries: FileEntry[];
 }
 
-export function fetchFiles(cycleId: string, signal?: AbortSignal): Promise<FilesListing> {
-  return jget<FilesListing>(`${API}/campaigns/${cycleId}/files`, signal);
+export function fetchFiles(
+  campaignId: string,
+  cycleId: string,
+  signal?: AbortSignal,
+): Promise<FilesListing> {
+  return jget<FilesListing>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
+      `/cycles/${encodeURIComponent(cycleId)}/files`,
+    signal,
+  );
 }
 
 export interface DatasetItem {
@@ -94,17 +125,26 @@ export interface DatasetPreview {
   items: DatasetItem[];
 }
 
-export type HardSamplesScope = "workspace" | "campaign";
+// Three named data scopes — same vocabulary as the heatmap artifacts and
+// the API's `scope` query param. `cycle` = one cycle's own Rasch fit;
+// `campaign` = the campaign's pooled fit; `dataset` = the cross-campaign
+// archive snapshot. A workspace-scope heatmap is meaningless (samples
+// differ per dataset), so the heatmap tier stops at `dataset`.
+export type HardSamplesScope = "cycle" | "campaign" | "dataset";
 
 export function fetchDatasetPreview(
   name: string,
   limit = 25,
   signal?: AbortSignal,
-  scope: HardSamplesScope = "workspace",
+  scope: HardSamplesScope = "dataset",
+  campaignId?: string,
   cycleId?: string,
 ): Promise<DatasetPreview> {
   const params = new URLSearchParams({ limit: String(limit), scope });
-  if (scope === "campaign" && cycleId) params.set("cycle_id", cycleId);
+  if ((scope === "campaign" || scope === "cycle") && campaignId) {
+    params.set("campaign_id", campaignId);
+  }
+  if (scope === "cycle" && cycleId) params.set("cycle_id", cycleId);
   return jget<DatasetPreview>(
     `${API}/datasets/${encodeURIComponent(name)}/preview?${params.toString()}`,
     signal,
@@ -132,38 +172,106 @@ export function fetchMeasurementSeries(
   name: string,
   limit = 1000,
   signal?: AbortSignal,
-  scope: HardSamplesScope = "workspace",
+  scope: HardSamplesScope = "dataset",
+  campaignId?: string,
   cycleId?: string,
 ): Promise<MeasurementSeriesResponse> {
   const params = new URLSearchParams({ limit: String(limit), scope });
-  if (scope === "campaign" && cycleId) params.set("cycle_id", cycleId);
+  if ((scope === "campaign" || scope === "cycle") && campaignId) {
+    params.set("campaign_id", campaignId);
+  }
+  if (scope === "cycle" && cycleId) params.set("cycle_id", cycleId);
   return jget<MeasurementSeriesResponse>(
     `${API}/datasets/${encodeURIComponent(name)}/measurement-series?${params.toString()}`,
     signal,
   );
 }
 
+// Live session telemetry. `dashboard.json` is per-session — it lives in
+// the session's root cycle dir and is shared by that session's forks. The
+// server resolves the session-family root from any cycle of the session,
+// so pass the cycle currently in view. Returns the raw dashboard dict
+// (cast to `DashboardSnapshot` at the use site in poll.tsx).
+export function fetchDashboard(
+  campaignId: string,
+  cycleId: string,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  return jget<Record<string, unknown>>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
+      `/cycles/${encodeURIComponent(cycleId)}/dashboard`,
+    signal,
+  );
+}
+
 export async function fetchActiveDatasetName(
+  campaignId: string,
   cycleId: string,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const file = await fetchCycleFile(cycleId, "family", "index.json", signal);
-  const parsed = JSON.parse(file.content) as { header?: { dataset_name?: string } };
-  return parsed.header?.dataset_name ?? null;
+  const file = await fetchCycleFile(campaignId, cycleId, "cycle", "index.json", signal);
+  if (!file.content) return null;
+  const parsed = JSON.parse(file.content) as {
+    dataset_name?: string;
+    header?: { dataset_name?: string };
+  };
+  return parsed.header?.dataset_name ?? parsed.dataset_name ?? null;
 }
 
 export type SiblingKind = "root" | "fork" | "diag" | "sweep";
 
+// Operator-facing unit kind — the time-horizon taxonomy the sidebar
+// badges by, derived server-side from (sibling_kind, fork trigger).
+// `session` = the root run (resume extends it); `divergent_resume` = a
+// fork-on-divergence branch; `user_fork` = any operator-initiated branch
+// (HITL fork, diagnostic, sweep); `l3_fork` = reserved for L3
+// auto-forking (not emitted yet).
+export type UnitKind =
+  | "session"
+  | "divergent_resume"
+  | "user_fork"
+  | "l3_fork";
+
+// One campaign — a declared optimization effort (dataset + pipeline origin
+// + context). `campaign_id` is `{dataset}__{origin hash}` — stable, so a
+// re-run of `new` on an unchanged declaration joins the same campaign as a
+// new session. `session_count` is how many sessions the campaign holds.
+export interface Campaign {
+  campaign_id: string;
+  dataset_name: string;
+  label: string;
+  status: string;
+  created_at: string;
+  root_cycle_id: string;
+  backend_id: string;
+  session_count: number;
+}
+
+export interface CampaignListResponse {
+  campaigns: Campaign[];
+  total: number;
+}
+
+export function fetchCampaigns(
+  dataset?: string,
+  signal?: AbortSignal,
+): Promise<CampaignListResponse> {
+  const qs = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
+  return jget<CampaignListResponse>(`${API}/campaigns${qs}`, signal);
+}
+
 export interface CycleListEntry {
+  campaign_id: string;
   cycle_id: string;
   parent_session_id: string;
-  // Family-root id for siblings (forks/sweeps/diag); null for roots. The
-  // sidebar uses this to nest sibling rows under their root entry instead
-  // of scattering them as 60+ top-level rows.
+  // Immediate parent cycle id for siblings (forks/sweeps/diag); null for
+  // roots. The sidebar uses this to nest sibling rows under their parent
+  // within the campaign.
   parent_cycle_id: string | null;
   dataset_name: string;
   backend_id: string;
   sibling_kind: SiblingKind;
+  unit_kind: UnitKind;
   is_root: boolean;
   status: string;
   best_accuracy: number | null;
@@ -174,6 +282,7 @@ export interface CycleListEntry {
 
 export interface CyclesResponse {
   tenant_id: string;
+  active_campaign_id: string | null;
   active_cycle_id: string | null;
   cycles: CycleListEntry[];
 }
@@ -182,12 +291,12 @@ export function fetchCycles(signal?: AbortSignal): Promise<CyclesResponse> {
   return jget<CyclesResponse>(`${API}/cycles`, signal);
 }
 
-// Family lineage — the cross-cycle search-point graph rooted at the
-// family root. One request returns every cycle in the family + each
-// cycle's per-round candidates + the parent-round each fork was cut at.
-// Mirrors the server's FamilyLineageResponse pydantic models verbatim.
+// Campaign lineage — every cycle in one campaign + each cycle's per-round
+// candidates + the parent-round each fork was cut at. One request returns
+// the whole lineage tree. Mirrors the server's CampaignLineageResponse
+// pydantic models verbatim.
 
-export interface FamilyLineageCandidate {
+export interface CampaignLineageCandidate {
   candidate_id: string;
   label: string;
   accuracy: number | null;
@@ -195,14 +304,14 @@ export interface FamilyLineageCandidate {
   is_winner: boolean;
 }
 
-export interface FamilyLineageRound {
+export interface CampaignLineageRound {
   round: number;
   label: string;
   accuracy: number | null;
-  candidates: FamilyLineageCandidate[];
+  candidates: CampaignLineageCandidate[];
 }
 
-export interface FamilyLineageCycle {
+export interface CampaignLineageCycle {
   cycle_id: string;
   sibling_kind: SiblingKind;
   immediate_parent_cycle_id: string | null;
@@ -211,72 +320,84 @@ export interface FamilyLineageCycle {
   // Fork creation trigger — drives the round-numbering convention.
   trigger: string;
   // Add this to each round's `round` number to get its absolute column
-  // in the family cladogram. The server computes per-trigger so the
+  // in the campaign cladogram. The server computes per-trigger so the
   // client doesn't need to know HITL-vs-divergence semantics itself.
   round_column_offset: number;
   status: string;
   dataset_name: string;
   best_accuracy: number | null;
-  rounds: FamilyLineageRound[];
+  rounds: CampaignLineageRound[];
 }
 
-export interface FamilyLineageResponse {
-  root_cycle_id: string;
-  cycles: FamilyLineageCycle[];
+export interface CampaignLineageResponse {
+  campaign_id: string;
+  cycles: CampaignLineageCycle[];
 }
 
-export function fetchFamilyLineage(
-  cycleId: string,
+export function fetchCampaignLineage(
+  campaignId: string,
   signal?: AbortSignal,
-): Promise<FamilyLineageResponse> {
-  return jget<FamilyLineageResponse>(
-    `${API}/campaigns/${encodeURIComponent(cycleId)}/family-lineage`,
+): Promise<CampaignLineageResponse> {
+  return jget<CampaignLineageResponse>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}/lineage`,
     signal,
   );
 }
 
 // Sanctioned mutating endpoints — see promptpotter/presentation/CLAUDE.md
-// for the charter. Both ride existing I/O kinds (Persistence's
+// for the charter. All ride existing I/O kinds (Persistence's
 // `inherit_from` and Control-local's `stop_check` flag-poll); they do not
 // introduce a new I/O kind.
 
 export interface CreateForkResponse {
+  campaign_id: string;
   fork_cycle_id: string;
   cli_command: string;
   active_pointer_retargeted: boolean;
 }
 
 export async function postCreateFork(
+  campaignId: string,
   cycleId: string,
   round: number,
   candidateId: string,
 ): Promise<CreateForkResponse> {
-  const r = await fetch(`${API}/cycles/${encodeURIComponent(cycleId)}/forks`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ round, candidate_id: candidateId }),
-    cache: "no-store",
-  });
+  const r = await fetch(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
+      `/cycles/${encodeURIComponent(cycleId)}/forks`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ round, candidate_id: candidateId }),
+      cache: "no-store",
+    },
+  );
   if (!r.ok) throw new Error(`${r.status} POST /forks`);
   return (await r.json()) as CreateForkResponse;
 }
 
 export interface StopCycleResponse {
+  campaign_id: string;
   cycle_id: string;
   flag_written: boolean;
 }
 
 export interface DeleteCycleResponse {
+  campaign_id: string;
   cycle_id: string;
   deleted: boolean;
   reason: string;
 }
 
-export async function deleteCycle(cycleId: string): Promise<DeleteCycleResponse> {
-  const r = await fetch(`${API}/cycles/${encodeURIComponent(cycleId)}`, {
-    method: "DELETE",
-    cache: "no-store",
-  });
+export async function deleteCycle(
+  campaignId: string,
+  cycleId: string,
+): Promise<DeleteCycleResponse> {
+  const r = await fetch(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
+      `/cycles/${encodeURIComponent(cycleId)}`,
+    { method: "DELETE", cache: "no-store" },
+  );
   if (!r.ok) {
     let msg = `${r.status} DELETE /cycles`;
     try {
@@ -291,16 +412,19 @@ export async function deleteCycle(cycleId: string): Promise<DeleteCycleResponse>
 }
 
 export interface CleanupEmptyResponse {
-  family_root_cycle_id: string;
+  campaign_id: string;
+  root_cycle_id: string;
   deleted_cycle_ids: string[];
   skipped: { cycle_id: string; reason: string }[];
 }
 
 export async function postCleanupEmpty(
+  campaignId: string,
   cycleId: string,
 ): Promise<CleanupEmptyResponse> {
   const r = await fetch(
-    `${API}/campaigns/${encodeURIComponent(cycleId)}/cleanup-empty`,
+    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
+      `/cycles/${encodeURIComponent(cycleId)}/cleanup-empty`,
     { method: "POST", cache: "no-store" },
   );
   if (!r.ok) {
@@ -316,12 +440,19 @@ export async function postCleanupEmpty(
   return (await r.json()) as CleanupEmptyResponse;
 }
 
-export async function postStopCycle(cycleId: string): Promise<StopCycleResponse> {
-  const r = await fetch(`${API}/cycles/${encodeURIComponent(cycleId)}/stop`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    cache: "no-store",
-  });
+export async function postStopCycle(
+  campaignId: string,
+  cycleId: string,
+): Promise<StopCycleResponse> {
+  const r = await fetch(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
+      `/cycles/${encodeURIComponent(cycleId)}/stop`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+    },
+  );
   if (!r.ok) throw new Error(`${r.status} POST /stop`);
   return (await r.json()) as StopCycleResponse;
 }
@@ -353,10 +484,10 @@ export function fetchLeverage(
   return jget<LeverageResponse>(`${API}/measurements/leverage?limit=${limit}`, signal);
 }
 
-// Campaign detail — feeds the M13 compare-campaigns view. Reads
-// index.json via the generic cycle-file endpoint (the backend-scoped
-// detail route's response schema doesn't always match the on-disk
-// shape; reading the raw file dodges that mismatch).
+// Cycle detail — feeds the compare-campaigns view. Reads index.json via the
+// generic cycle-file endpoint (the typed detail route's response schema
+// doesn't always match the on-disk shape; reading the raw file dodges that
+// mismatch).
 
 export interface CampaignRoundSummary {
   round: number;
@@ -383,9 +514,11 @@ export interface CampaignDetail {
 }
 
 export async function fetchCampaignDetail(
+  campaignId: string,
   cycleId: string,
   signal?: AbortSignal,
 ): Promise<CampaignDetail> {
-  const file = await fetchCycleFile(cycleId, "cycle", "index.json", signal);
+  const file = await fetchCycleFile(campaignId, cycleId, "cycle", "index.json", signal);
+  if (!file.content) throw new Error("index.json is empty");
   return JSON.parse(file.content) as CampaignDetail;
 }

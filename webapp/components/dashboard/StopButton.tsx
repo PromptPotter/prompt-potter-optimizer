@@ -4,6 +4,7 @@ import { postStopCycle } from "@/lib/api";
 import { Modal } from "@/components/shell/Modal";
 
 interface Props {
+  campaignId: string;
   cycleId: string;
   isLive: boolean;
 }
@@ -14,7 +15,7 @@ interface Props {
 // shifts when `isLive` is false (frozen cycle): operator sees the flag is
 // being written for a cycle that isn't running, so the action is more
 // "leave a flag for the next run" than "halt now."
-export function StopButton({ cycleId, isLive }: Props) {
+export function StopButton({ campaignId, cycleId, isLive }: Props) {
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -25,7 +26,7 @@ export function StopButton({ cycleId, isLive }: Props) {
     setPending(true);
     setErr(null);
     try {
-      await postStopCycle(cycleId);
+      await postStopCycle(campaignId, cycleId);
       setDone(true);
     } catch (e) {
       setErr((e as Error).message);
@@ -48,11 +49,11 @@ export function StopButton({ cycleId, isLive }: Props) {
       {err && <span className="stop-err">stop: {err}</span>}
       <Modal
         open={confirming}
-        title={isLive ? "Stop this campaign?" : "Write stop.flag for this campaign?"}
+        title={isLive ? "Stop this unit?" : "Write stop.flag for this unit?"}
         message={
           isLive
             ? `${cycleId} is currently running. Writing .runtime/stop.flag — the optimizer exits at the next round boundary. Round-in-progress measurements are preserved.`
-            : `${cycleId} is not currently running. Writing the stop.flag now will cause the next \`resume\` invocation against this campaign to halt immediately.`
+            : `${cycleId} is not currently running. Writing the stop.flag now will cause the next \`resume\` invocation against this unit to halt immediately.`
         }
         actions={[
           { label: "Cancel", onClick: () => setConfirming(false) },
