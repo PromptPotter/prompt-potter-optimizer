@@ -13,6 +13,7 @@ import-time check fails if any ``REPLAYED`` kind has no replayer here.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -34,6 +35,8 @@ __all__ = [
     "Replayer",
     "replay_decisions",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 class Divergence(NamedTuple):
@@ -76,7 +79,14 @@ def replay_decisions(
         try:
             current = fn(ctx, rec.get("inputs_ref") or {}, rec.get("data") or {})
         except Exception:
-            # Replayer failure shouldn't poison resume — treat as non-divergence.
+            # Replayer failure shouldn't poison resume — treat as non-divergence,
+            # but surface it: a silently-skipped replayer hides real scorer drift.
+            logger.warning(
+                "replayer for decision kind %r crashed during resume divergence "
+                "check; treating as non-divergence",
+                kind,
+                exc_info=True,
+            )
             continue
         recorded = rec.get("outcome")
         if current != recorded:

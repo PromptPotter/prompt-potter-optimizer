@@ -48,6 +48,7 @@ from promptpotter.application.scoring.metrics import (
     matched_origin_stats,
 )
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
@@ -199,7 +200,7 @@ def decode_signal_effect(
         leader_id = str(cr.get("leader_id", ""))
         elim_ctx = {
             "p_best": float(cr.get("p_best", 0.0)),
-            "epsilon": float(cr.get("epsilon", 0.05)),
+            "epsilon": float(cr.get("epsilon", POBB_DEFAULT_EPSILON)),
             "leader_id": leader_id,
             "queries_scored": int(cr.get("queries_scored", len(results))),
             "total_queries": int(cr.get("total_samples", len(dataset))),

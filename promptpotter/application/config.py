@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from promptpotter.config.settings import POBB_DEFAULT_EPSILON
+
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.infrastructure.llm import LLMClientBase
@@ -182,7 +184,7 @@ class OptimizationConfig(BaseModel):
         "the Normal-CLT posterior to be meaningful).",
     )
     pobb_epsilon: float = Field(
-        0.05,
+        POBB_DEFAULT_EPSILON,
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Default 5%; smaller → fewer stops.",
     )

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.store import archive_views, root_cycle_id
 from promptpotter.shared.statistics import posterior_best_probabilities
@@ -215,7 +216,7 @@ async def elevate_to_decisive(
     session: Session,
     dataset: list[Sample],
     *,
-    epsilon: float = 0.05,
+    epsilon: float = POBB_DEFAULT_EPSILON,
     max_topups: int = 16,
     n_min_per_arm: int = 4,
     rng: np.random.Generator | None = None,

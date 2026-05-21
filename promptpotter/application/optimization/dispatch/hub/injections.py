@@ -36,15 +36,9 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 )
 from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.l1_layout import L1_MANDATORY, L1_POSSIBLE
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, PARAM_SCOPE_KEYS
 
 logger = logging.getLogger(__name__)
-
-# Param-axis names recognised by the continuous_envelope auto-trigger.
-# When L1_CRITIQUE.suggested_axes names one of these, render the envelope rule.
-_NUMERIC_PARAM_AXES: frozenset[str] = frozenset(
-    {"temperature", "max_tokens", "top_p", "reasoning_effort"}
-)
 
 # LaTeX corruption markers — match 'oxed{' NOT preceded by '\b' (legitimate
 # `\boxed{` is preceded by '\b' so the lookbehind skips it) OR 'athematical'
@@ -848,7 +842,7 @@ def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
     if b.opt_sp.wounds.runtime_failures:
         triggers.append("runtime_failure")
     sa = (b.digest.critique or {}).get("suggested_axes") or []
-    if any(a in _NUMERIC_PARAM_AXES for a in sa):
+    if any(a in PARAM_SCOPE_KEYS for a in sa):
         triggers.append("continuous_envelope")
     key_challenges = b.opt_sp.task_context.key_challenges or ""
     if "targeting L1 axis" in key_challenges:

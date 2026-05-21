@@ -5,6 +5,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,29 @@ def ensure_parent_dir(path: Path) -> None:
     os.makedirs(_long_path(path.parent), exist_ok=True)
 
 
+def _atomic_replace(tmp: str, path: Path) -> None:
+    """Atomically swap temp file *tmp* onto *path*, long-path safe.
+
+    Both args are routed through :func:`_long_path` so destinations past
+    Windows ``MAX_PATH=260`` succeed. On Windows, ``os.replace()`` can also
+    fail with ``PermissionError`` (WinError 5) when the destination is
+    briefly held by another process — OneDrive sync, antivirus, a stale
+    reader. Retry twice with 100 ms back-off; POSIX never hits the retry
+    branch.
+    """
+    last_exc: OSError | None = None
+    for attempt in range(3):
+        try:
+            os.replace(_long_path(tmp), _long_path(path))
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            if attempt < 2:
+                time.sleep(0.1)
+    if last_exc is not None:
+        raise last_exc
+
+
 def write_json(
     path: Path,
     data: Any,
@@ -54,38 +78,19 @@ def write_json(
 ) -> None:
     """Write *data* as pretty-printed JSON atomically.
 
-    Writes to a temp file in the same directory, then uses ``os.replace()``
-    to atomically swap it into place. This prevents partial/corrupt files
-    if the process crashes mid-write. Both args of ``os.replace`` are
-    routed through :func:`_long_path` so destinations past Windows
-    ``MAX_PATH=260`` succeed.
-
-    On Windows, ``os.replace()`` can also fail with ``PermissionError``
-    (WinError 5) when the destination is briefly held by another process —
-    OneDrive sync, antivirus, a stale reader. Retry once with 100 ms
-    back-off; POSIX never hits the retry branch.
+    Writes to a temp file in the same directory, then uses
+    :func:`_atomic_replace` to swap it into place — a crash mid-write can
+    never leave a partial/corrupt file.
 
     ``default`` is forwarded to ``json.dump`` for non-native types (e.g.
     pass ``str`` to coerce enums / datetimes to their ``str`` form).
     """
-    import time
-
     ensure_parent_dir(path)
     fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, default=default)
-        last_exc: OSError | None = None
-        for attempt in range(3):
-            try:
-                os.replace(_long_path(tmp), _long_path(path))
-                return
-            except PermissionError as exc:
-                last_exc = exc
-                if attempt < 2:
-                    time.sleep(0.1)
-        if last_exc is not None:
-            raise last_exc
+        _atomic_replace(tmp, path)
     except Exception:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
@@ -93,10 +98,21 @@ def write_json(
 
 
 def write_text(path: Path, content: str) -> None:
-    """Write *content* to *path*, creating parent directories if needed."""
+    """Write *content* to *path* atomically, creating parent dirs if needed.
+
+    Same temp-file + :func:`_atomic_replace` swap as :func:`write_json`,
+    so a crash mid-write can never leave a truncated file.
+    """
     ensure_parent_dir(path)
-    with open(_long_path(path), "w", encoding="utf-8") as f:
-        f.write(content)
+    fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        _atomic_replace(tmp, path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 def read_json(path: Path) -> Any:

@@ -12,7 +12,9 @@ import math
 import re
 from collections.abc import Callable
 
-_GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
+GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
+"""Matches the GSM8K answer-field format ``#### N``. Shared with the
+dataset loader, which normalises raw ground truth to the same shape."""
 _NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
 _BOXED_RE = re.compile(r"\\boxed\{([^{}]+)\}")
 _BOLD_RE = re.compile(r"\*\*([^*]+?)\*\*")
@@ -30,7 +32,7 @@ def _extract_bold(text: str) -> str:
 
 def _extract_gsm8k_number(text: str) -> float | None:
     """Extract GSM8K answer: ``#### N`` first, else the last number."""
-    m = _GSM8K_ANSWER_RE.search(text)
+    m = GSM8K_ANSWER_RE.search(text)
     if m:
         return float(m.group(1).replace(",", ""))
     matches = _NUMBER_RE.findall(text)
@@ -161,4 +163,9 @@ def extract_display_answer(predicted: str, formula: str | None) -> str:
     return text
 
 
-__all__ = ["DISPLAY_EXTRACTORS", "SCORING_FUNCTIONS", "extract_display_answer"]
+__all__ = [
+    "DISPLAY_EXTRACTORS",
+    "GSM8K_ANSWER_RE",
+    "SCORING_FUNCTIONS",
+    "extract_display_answer",
+]

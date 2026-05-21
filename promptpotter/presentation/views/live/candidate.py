@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.presentation.views.display import (
     CYAN,
     DIM,
@@ -176,7 +177,7 @@ def individual_summary_from_dict(
         prior_s = "" if n_priors == 1 else "s"
         leader_label = elim.get("leader_label") or (elim.get("leader_id", "?") or "?")[:8]
         p_best_pct = float(elim.get("p_best", 0.0))
-        eps_pct = float(elim.get("epsilon", 0.05))
+        eps_pct = float(elim.get("epsilon", POBB_DEFAULT_EPSILON))
         detail_lines.append(
             f"{YELLOW}✂ eliminated q{eq}/{eqt}{RESET}  "
             f"p_best={p_best_pct:.1%} < eps={eps_pct:.0%}  "

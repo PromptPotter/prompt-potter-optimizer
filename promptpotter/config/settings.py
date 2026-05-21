@@ -91,6 +91,13 @@ OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 # never sheds.
 OPTIMIZER_PROMPT_WARN_CHARS: int = 8_000
 
+# PoBB elimination — default posterior-of-being-best threshold ε. A
+# candidate stops when its P(best) drops below ε. The runtime value is
+# ``CampaignConfig.pobb_epsilon``; this is the single default every entry
+# point (the config Field, PoBBConfig, elevate_to_decisive, the CLI)
+# references so the number can't drift.
+POBB_DEFAULT_EPSILON: float = 0.05
+
 
 class Settings(BaseSettings):
     """Application configuration settings."""
@@ -169,6 +176,7 @@ __all__ = [
     "NO_RESULT",
     "OPTIMIZER_CALL_DEADLINE_S",
     "OPTIMIZER_PROMPT_WARN_CHARS",
+    "POBB_DEFAULT_EPSILON",
     "PROMPT_STRING_FIELDS",
     "TASK_CONTEXT_OVERRIDES",
     "WELL_KNOWN_PARAM_TYPES",

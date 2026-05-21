@@ -21,6 +21,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
+    POBB_DEFAULT_EPSILON,
 )
 
 
@@ -418,7 +419,12 @@ def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
         help="Auto-discover every cycle in the active family with a final winner. "
         "Implied when no positional cycle_ids are given.",
     )
-    p_cmp.add_argument("--epsilon", type=float, default=0.05, help="PoBB threshold (default 0.05)")
+    p_cmp.add_argument(
+        "--epsilon",
+        type=float,
+        default=POBB_DEFAULT_EPSILON,
+        help="PoBB threshold (default 0.05)",
+    )
     p_cmp.add_argument(
         "--max-topups",
         type=int,

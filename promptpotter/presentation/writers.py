@@ -32,7 +32,7 @@ from promptpotter.application.optimization.dispatch.hub import (
 )
 from promptpotter.application.review import render_review_md
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
-from promptpotter.infrastructure.store.base import write_json
+from promptpotter.infrastructure.store.base import write_json, write_text
 from promptpotter.presentation.views.render import to_markdown
 from promptpotter.presentation.views.view_ingress import (
     pick_round_winner,
@@ -396,7 +396,7 @@ def _render_cycle_log_md(
             fork_indices=None,
         )
     )
-    (cycle_dir / "log.md").write_text(content, encoding="utf-8")
+    write_text(cycle_dir / "log.md", content)
 
 
 def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
@@ -425,7 +425,7 @@ def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
             fork_indices=fork_indices,
         )
     )
-    (store.campaign_root_dir(campaign_id) / "log.md").write_text(content, encoding="utf-8")
+    write_text(store.campaign_root_dir(campaign_id) / "log.md", content)
 
 
 def _load_sibling_indices(
@@ -478,4 +478,4 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
             round_audits=round_audits,
             context_object=context_object,
         )
-        (cycle_dir / "review.md").write_text(content, encoding="utf-8")
+        write_text(cycle_dir / "review.md", content)

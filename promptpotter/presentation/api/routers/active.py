@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import read_active_pointer, save_active_pointer
+from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.paths import root_cycle_id
 from promptpotter.presentation.api.deps import StoreDep
 
@@ -196,7 +197,7 @@ async def create_fork(
             "forked_at": ts,
         },
     }
-    (fork_dir / "index.json").write_text(json.dumps(fork_index, indent=2), encoding="utf-8")
+    write_json(fork_dir / "index.json", fork_index)
 
     parent_log = CycleEventLog.open(CycleDir(parent_dir))
     fork_log = CycleEventLog.open(CycleDir(fork_dir))

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.backend_store import BackendStore
-from promptpotter.infrastructure.store.base import validate_path_component
+from promptpotter.infrastructure.store.base import validate_path_component, write_json
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.paths import (
@@ -46,17 +46,14 @@ def save_active_pointer(tenant_id: str, session_id: str, campaign_id: str, cycle
     validate_path_component(session_id)
     validate_path_component(campaign_id)
     validate_path_component(cycle_id)
-    _ACTIVE_SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _ACTIVE_SESSION_PATH.write_text(
-        json.dumps(
-            {
-                "tenant_id": tenant_id,
-                "session_id": session_id,
-                "campaign_id": campaign_id,
-                "cycle_id": cycle_id,
-            }
-        ),
-        encoding="utf-8",
+    write_json(
+        _ACTIVE_SESSION_PATH,
+        {
+            "tenant_id": tenant_id,
+            "session_id": session_id,
+            "campaign_id": campaign_id,
+            "cycle_id": cycle_id,
+        },
     )
 
 

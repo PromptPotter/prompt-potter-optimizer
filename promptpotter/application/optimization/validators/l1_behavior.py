@@ -20,11 +20,10 @@ from typing import Any
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import EVIDENCE_GROUNDING_FIELDS
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, PARAM_SCOPE_KEYS
 
 __all__ = [
     "CHECK_REGISTRY",
-    "PARAM_SCOPE_KEYS",
     "CheckContext",
     "CheckResult",
     "extract_l1_variants",
@@ -48,14 +47,6 @@ def extract_l1_variants(container: dict[str, Any] | None) -> list[dict[str, Any]
     if isinstance(response, dict):
         return [v for v in (response.get("variants") or []) if isinstance(v, dict)]
     return []
-
-
-# Per-node LLM-call params that are NOT prompt fields. A round that touches
-# these too early or while prompt fields are still being explored is
-# violating the param-scope-discipline rule.
-PARAM_SCOPE_KEYS: frozenset[str] = frozenset(
-    {"temperature", "max_tokens", "reasoning_effort", "top_p"}
-)
 
 
 @dataclass(frozen=True)

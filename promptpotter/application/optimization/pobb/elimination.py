@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.pobb.seeding import pobb_rng
 from promptpotter.application.scoring.metrics import count_degraded_samples
+from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
@@ -359,7 +360,7 @@ class PoBBConfig:
     """Bundled PoBB tuning knobs — passed through l1_score → score_population → PoBBCheck."""
 
     n_min: int = 6
-    epsilon: float = 0.05
+    epsilon: float = POBB_DEFAULT_EPSILON
     lock_in: float = 0.95
     lock_in_n_min: int = 8
 

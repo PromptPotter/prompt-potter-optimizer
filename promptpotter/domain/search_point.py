@@ -30,6 +30,19 @@ them as candidate axes.
 """
 
 
+PARAM_SCOPE_KEYS: frozenset[str] = frozenset(
+    {"temperature", "max_tokens", "reasoning_effort", "top_p"}
+)
+"""Per-node LLM-call params that are NOT prompt fields — the non-prompt
+tunable axes.
+
+Two consumers: the L1 param-scope-discipline check (a round touching
+these before prompt fields are explored violates the rule), and the
+dispatch-hub ``continuous_envelope`` auto-trigger (renders the ±50%
+envelope rule when ``L1_CRITIQUE.suggested_axes`` names one of these).
+"""
+
+
 class SearchPoint(BaseModel):
     """A point in any pipeline's search space.
 
@@ -209,4 +222,10 @@ class TaskDecomposition:
         return any(getattr(self, f.name) for f in fields(self))
 
 
-__all__ = ["PARAM_FORBIDDEN_KEYS", "JobSearchPoint", "SearchPoint", "TaskDecomposition"]
+__all__ = [
+    "PARAM_FORBIDDEN_KEYS",
+    "PARAM_SCOPE_KEYS",
+    "JobSearchPoint",
+    "SearchPoint",
+    "TaskDecomposition",
+]

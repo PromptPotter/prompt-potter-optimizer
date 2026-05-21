@@ -26,7 +26,6 @@ import hashlib
 import json
 import logging
 import random
-import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from itertools import pairwise
@@ -216,9 +215,6 @@ def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
     return dataset[:sample_size]
 
 
-_GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
-
-
 def load_gsm8k(
     split: str = "train",
     sample_size: int = 0,
@@ -236,10 +232,14 @@ def load_gsm8k(
             'Install the benchmarks extras: pip install -e ".[benchmarks]"'
         ) from None
 
+    # Function-scoped: the matchers module pulls in the scoring package,
+    # which imports this module — a top-level import would be circular.
+    from promptpotter.application.scoring.formula.matchers import GSM8K_ANSWER_RE
+
     ds = load_dataset("openai/gsm8k", "main", split=split)
     samples: list[Sample] = []
     for i, row in enumerate(ds):
-        m = _GSM8K_ANSWER_RE.search(row["answer"])
+        m = GSM8K_ANSWER_RE.search(row["answer"])
         gt = f"#### {m.group(1)}" if m else row["answer"].strip()
         samples.append(Sample(id=i, query=row["question"], ground_truth=gt))
 

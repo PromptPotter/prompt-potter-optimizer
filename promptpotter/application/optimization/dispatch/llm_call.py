@@ -15,7 +15,6 @@ model is configured for the node.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import functools
 import hashlib
 import json
@@ -396,8 +395,19 @@ async def llm_call(
             # and keep appending progress records against a closed call.
             if heartbeat_task is not None:
                 heartbeat_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
+                try:
                     await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    # The cancel above is expected; anything else means the
+                    # heartbeat hit a real fault (e.g. a failed ledger append)
+                    # that would otherwise vanish on this teardown path.
+                    logger.warning(
+                        "heartbeat task for %s raised on teardown",
+                        node or "llm_call",
+                        exc_info=True,
+                    )
 
         duration_s = round(time.monotonic() - _t0, 2)
 
