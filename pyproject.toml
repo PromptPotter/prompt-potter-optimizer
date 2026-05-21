@@ -122,6 +122,9 @@ follow_untyped_imports = false
 [tool.ruff]
 target-version = "py313"
 line-length = 100
+# Colab research notebooks — external-comparison artifacts, not project code.
+# Mirrors the deptry extend_exclude below.
+extend-exclude = ["docs/research/bbeh-comparison"]
 
 [tool.ruff.lint]
 select = [

@@ -39,11 +39,6 @@ class MetaPromptParseError(RuntimeError):
         self.error = error
         self.attempts = attempts
 
-    def short_summary(self, max_chars: int = 500) -> str:
-        """Compact error string for prompt-injection / log lines."""
-        s = str(self.error)
-        return s if len(s) <= max_chars else s[: max_chars - 1] + "…"
-
 
 def try_parse_json(content: str, provider: str) -> Any | None:
     """Parse JSON from response content; return None on failure.

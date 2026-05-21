@@ -32,7 +32,6 @@ DEFAULT_DATASETS_ROOT = _REPO_ROOT / "datasets"
 
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag|sweep)_")
 _SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag|sweep)_(?!.*_(fork|diag|sweep)_)")
-_SWEEP_BATCH_ID_RE = re.compile(r"_sweep_([^_]+)_")
 _SESSION_SUFFIX_RE = re.compile(r"_s(\d+)$")
 
 
@@ -58,14 +57,6 @@ def sibling_kind(cycle_id: str) -> Literal["root", "fork", "diag", "sweep"]:
     if m is None:
         return "root"
     return m.group(1)  # type: ignore[return-value]
-
-
-def _sweep_batch_id(cycle_id: str) -> str:
-    """Extract ``batch_id`` from a sweep-fork cycle id (segment after ``_sweep_``)."""
-    m = _SWEEP_BATCH_ID_RE.search(cycle_id)
-    if m is None:
-        raise ValueError(f"sweep cycle id missing batch_id segment: {cycle_id!r}")
-    return m.group(1)
 
 
 def session_index(cycle_id: str) -> int:

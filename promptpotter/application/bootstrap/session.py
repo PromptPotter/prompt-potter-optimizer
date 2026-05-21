@@ -93,7 +93,6 @@ class Session:
     experiment_id: str  # Backend-side experiment id (TermNorm vocabulary). Distinct from cycle_id.
     backend_client: BackendClient
     pipeline_schema: PipelineSchema | None
-    backend_index_synced: bool
     samples: list[Sample] = field(default_factory=list)
     experiment_extract: dict = field(default_factory=dict)
     index_terms: list[str] = field(default_factory=list)

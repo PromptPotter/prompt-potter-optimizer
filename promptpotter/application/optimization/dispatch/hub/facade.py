@@ -42,12 +42,11 @@ class InjectionRenderError(Exception):
     renamed) is a programmer mistake, not an LLM mistake. The round loop
     catches this before its generic ``except Exception`` and halts with
     :attr:`StopReason.RENDER_ERROR` — distinct from ``CRASHED`` so the
-    operator sees *a renderer broke*. Carries the injection ``name`` and
-    chains the original exception via ``raise … from``.
+    operator sees *a renderer broke*. Chains the original exception via
+    ``raise … from``.
     """
 
     def __init__(self, name: str, cause: BaseException) -> None:
-        self.injection_name = name
         self.cause = cause
         super().__init__(f"injection {name!r} renderer raised {type(cause).__name__}: {cause}")
 

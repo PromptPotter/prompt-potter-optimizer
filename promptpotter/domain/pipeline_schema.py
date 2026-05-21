@@ -174,9 +174,6 @@ class PipelineSchema(BaseModel):
 
     def model_post_init(self, __context: Any) -> None:
         object.__setattr__(self, "_node_map", {n.name: i for i, n in enumerate(self.nodes)})
-        object.__setattr__(
-            self, "_param_map", {p: n.name for n in self.nodes for p in n.param_keys}
-        )
         obs_keys: frozenset[str] = frozenset(
             m.pipeline_key
             for n in self.nodes
@@ -246,10 +243,6 @@ class PipelineSchema(BaseModel):
         return self.model_copy(
             update={"nodes": [n for n in self.nodes if n.name not in names]},
         )
-
-    def node_for_param(self, param_name: str) -> str | None:
-        """Return the node name that owns *param_name* (O(1)), or None."""
-        return self._param_map.get(param_name)  # type: ignore[attr-defined]
 
     def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict]]:
         """Ordered ``[(node_name, node_config), ...]`` for this schema.

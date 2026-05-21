@@ -418,14 +418,6 @@ class CampaignStore(EntityStore):
         with graceful("Cycle completion update failed"):
             self.update(campaign_id, cycle_id, updates, remove=remove_keys)
 
-    def load_many(
-        self,
-        campaign_id: str,
-        cycle_ids: list[str],
-    ) -> list[dict[str, Any]]:
-        """Load full cycle records for *cycle_ids* within one campaign."""
-        return [c for cid in cycle_ids if (c := self.load(campaign_id, cid)) is not None]
-
     def _index_files(self) -> list[Path]:
         """Every cycle ``index.json`` under this tenant — ``campaigns/*/cycles/*/index.json``."""
         campaigns_dir = self._base_dir / "campaigns"
@@ -735,11 +727,6 @@ class CampaignStore(EntityStore):
             if round_data is not None:
                 out.append(round_data)
         return out
-
-    def complete(self, campaign_id: str, cycle_id: str) -> None:
-        """Mark a cycle as completed."""
-        self.update(campaign_id, cycle_id, {"status": "completed"})
-        logger.info("Cycle %s completed", cycle_id)
 
     def save_round_candidates(
         self,

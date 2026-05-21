@@ -188,7 +188,6 @@ async def _sync_and_extract_experiment(
             extract = await session.backend_client.sync_experiment(
                 session.store, backend_id, experiment_id, include_traces=True
             )
-            session.backend_index_synced = True
             status("Sync complete")
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
@@ -300,7 +299,6 @@ async def init_services(
         experiment_id=experiment_id,
         backend_client=client,
         pipeline_schema=pipeline_schema,
-        backend_index_synced=False,
         dataset_name=dataset_name,
         tenant=TenantContext(tenant_id=tenant_id),
         project_root=str(store.base_dir),
