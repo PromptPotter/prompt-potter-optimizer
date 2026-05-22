@@ -86,12 +86,12 @@ async def run_round_loop(
         while clean_rounds < max_rounds and round_num < HARD_CAP:
             is_probe = cycle.probe_next_round
             if is_probe:
-                round_eval_data = [s for s in dataset if s.query in cycle.warned_queries]
+                round_scoring_data = [s for s in dataset if s.query in cycle.warned_queries]
                 round_checks = None
             else:
                 # The full bank — execute_round's CAT picker narrows it to
-                # the per-round sp_budget_ttest eval subset.
-                round_eval_data = session.scoring.scoring_set
+                # the per-round sp_budget_ttest scoring subset.
+                round_scoring_data = session.scoring.scoring_set
                 round_checks = session.scoring.degradation_checks
 
             logger.debug(
@@ -115,7 +115,7 @@ async def run_round_loop(
             round_result = await execute_round(
                 cycle,
                 round_num,
-                round_eval_data,
+                round_scoring_data,
                 cb,
                 degradation_checks=round_checks,
                 skip_critique=sweep,

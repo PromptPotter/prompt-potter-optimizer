@@ -487,8 +487,8 @@ async def run_optimizer_node(
     The response model is looked up by ``template_name`` in
     :data:`OPTIMIZER_RESPONSE_MODELS`; the typed Pydantic instance lands on
     ``LLMResponse.parsed`` and is returned to the caller as the first
-    element of the tuple. Callers that need a dict shape (legacy
-    consumers, audit-trail) call ``.model_dump()`` themselves.
+    element of the tuple. Callers that need a dict shape (the
+    audit-trail) call ``.model_dump()`` themselves.
 
     When *template* is provided, it overrides the load-from-name path (used
     by L1's ``l1_template_override`` channel — L2 can rewrite L1's prompt

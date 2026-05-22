@@ -1,4 +1,4 @@
-"""Signal renderers + :data:`INJECTIONS` registry.
+"""Injection renderers + :data:`INJECTIONS` registry.
 
 Every renderer has the uniform signature ``(InjectionBundle) -> str`` and
 is layer-agnostic — same render for every layer that subscribes. Per-layer
@@ -72,7 +72,7 @@ def _rf_matches_current_config(rf: RuntimeFailure, pipeline_params: dict[str, di
 
 
 # ---------------------------------------------------------------------------
-# Signal renderers — uniform ``(InjectionBundle) -> str`` signature, layer-agnostic.
+# Injection renderers — uniform ``(InjectionBundle) -> str`` signature, layer-agnostic.
 # ---------------------------------------------------------------------------
 
 
@@ -927,7 +927,7 @@ def _format_example(trigger_id: str, ex: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Signal registry — lookup by name from layouts / templates / fill_*.
+# Injection registry — lookup by name from layouts / templates / fill_*.
 # ---------------------------------------------------------------------------
 
 

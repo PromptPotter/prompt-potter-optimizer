@@ -39,7 +39,7 @@ async def run_sweep_generation_only(
         round_num,
         cycle,
         cb.on_phase,
-        n_eval_queries=0,
+        n_scoring_samples=0,
     )
 
     if session.state.cycle_id:

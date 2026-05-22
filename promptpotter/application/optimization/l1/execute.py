@@ -50,7 +50,7 @@ locker-in commits the round-winner)."""
 async def execute_round(
     cycle: Cycle,
     round_num: int,
-    eval_pool: list[Sample],
+    scoring_pool: list[Sample],
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
     *,
@@ -74,27 +74,27 @@ async def execute_round(
         with graceful("RoundStart emit failed"):
             obs.emit(RoundStart(campaign_id=session.state.tracing_campaign_id, round_num=round_num))
 
-    # Per-round eval subset. On non-probe rounds the runner hands us the
+    # Per-round scoring subset. On non-probe rounds the runner hands us the
     # full bank (the train split); the CAT picker narrows it to
     # ``sp_budget_ttest`` samples whose outcome is least certain for the
     # leading prompt — the contested band. Origin re-score and every
     # candidate share this one subset, so PoBB compares like-for-like.
     # Probe rounds carry their own warned-query set and pass through as-is.
     if cycle.probe_next_round:
-        scoring_set = eval_pool
+        scoring_set = scoring_pool
     else:
         # Archive observations are dataset-scoped and abort-residue-free, so
         # the round-subset Rasch fit always carries cross-cycle evidence.
         observations = [*cycle.archive_observations, *build_observations(cycle.rounds)]
         scoring_set = select_round_subset(
-            eval_pool,
+            scoring_pool,
             observations,
             config.sp_budget_ttest,
             config.optimization.exploration.explore_weight,
         )
 
     candidates, yield_stats = await generate_or_load_candidates(
-        round_num, cycle, callbacks.on_phase, n_eval_queries=len(scoring_set), obs=obs
+        round_num, cycle, callbacks.on_phase, n_scoring_samples=len(scoring_set), obs=obs
     )
 
     assert cycle.tracking.current_sp is not None

@@ -87,8 +87,8 @@ Committed payloads: `datasets/{focus}/sweep/NN_*.json`. Skill drafts: `sweep/pro
 ### 🔧 Sweep verbs
 
 ```bash
-python -m promptpotter sweep time-to 66 --l1-prompt l1_v3 --dataset aime --max-rounds 10
-python -m promptpotter sweep round1     --l1-prompts l1_v3,l1_v4 --dataset aime --panel-size 6
+python -m promptpotter sweep time-to 66 --l1-prompt datasets/_optimizer/variants/l1_v3.json --dataset aime --max-rounds 10
+python -m promptpotter sweep round1     --l1-prompts datasets/_optimizer/variants/l1_v3.json,datasets/_optimizer/variants/l1_v4.json --dataset aime --panel-size 6
 python -m promptpotter sweep round2     --from-sweep <sweep_id> --top 3
 python -m promptpotter sweep rank       --dataset aime --by round1_accuracy --last 10
 ```

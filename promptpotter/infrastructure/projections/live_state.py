@@ -122,7 +122,7 @@ def accumulate_backend_spend(spend: dict[str, Any], pipeline_data: dict) -> None
 
 def apply_token_usage(spend: dict[str, Any], record: TokenUsageRecord) -> None:
     """Route an optimizer LLM call into ``spend["loop"]`` (or ``backend`` for
-    legacy backend-kind events that surface here)."""
+    backend-kind events that surface here)."""
     bucket = "loop" if record.kind == "optimizer" else "backend"
     add_to_spend_bucket(
         spend,
