@@ -21,8 +21,9 @@ interface Props {
   themeKey: string;
   datasetName: string | null;
   datasetItems: DatasetItem[];
-  datasetTrainCount: number;
-  datasetTestCount: number;
+  datasetMeasuredCount: number;
+  datasetUnmeasuredCount: number;
+  datasetSplitTest: number | null;
   archivePerSample: Map<number, MeasurementDot[]>;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
@@ -64,8 +65,9 @@ export function ChatPane({
   themeKey,
   datasetName,
   datasetItems,
-  datasetTrainCount,
-  datasetTestCount,
+  datasetMeasuredCount,
+  datasetUnmeasuredCount,
+  datasetSplitTest,
   archivePerSample,
   hardSamplesScope,
   onHardSamplesScopeChange,
@@ -237,11 +239,13 @@ export function ChatPane({
           <HardSamplesHeatmap
             dash={dash}
             isLive={isLive}
+            themeKey={themeKey}
             dashRound={dashRound}
             datasetName={datasetName}
             datasetItems={datasetItems}
-            datasetTrainCount={datasetTrainCount}
-            datasetTestCount={datasetTestCount}
+            datasetMeasuredCount={datasetMeasuredCount}
+            datasetUnmeasuredCount={datasetUnmeasuredCount}
+            datasetSplitTest={datasetSplitTest}
             archivePerSample={archivePerSample}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={onHardSamplesScopeChange}

@@ -137,13 +137,43 @@ class DatasetItem(BaseModel):
             "posterior. None when the sample has no measurement yet."
         ),
     )
+    delta: float | None = Field(
+        default=None,
+        description=(
+            "Rasch difficulty δ_s — higher means harder for an average "
+            "candidate. None when the sample has no measurement yet."
+        ),
+    )
+    delta_se: float | None = Field(
+        default=None,
+        description=(
+            "Standard error of the Rasch difficulty δ_s — how well "
+            "characterized the sample is; large means barely measured. "
+            "None when the sample has no measurement yet."
+        ),
+    )
 
 
 class DatasetPreviewResponse(BaseModel):
     name: str
     row_count: int
-    train_count: int = Field(description="Items assigned to optimizer training")
-    test_count: int = Field(description="Items held out for test evaluation")
+    measured_count: int = Field(
+        description="Dataset-cache samples with at least one archive measurement"
+    )
+    unmeasured_count: int = Field(
+        description="Dataset-cache samples the optimizer has never scored"
+    )
+    split_train: int | None = Field(
+        default=None,
+        description="Declared training-bank fold size from campaign.json "
+        "(datasets/{name}/campaign.json::campaign_config.dataset_split). "
+        "None when the dataset declares no split.",
+    )
+    split_test: int | None = Field(
+        default=None,
+        description="Declared held-out test fold size — not in the bank or "
+        "the preview's items. None when the dataset declares no split.",
+    )
     items: list[DatasetItem]
 
 
@@ -195,10 +225,10 @@ async def get_dataset_preview(
     - ``cycle``: one cycle's own fit, from
       ``campaigns/{campaign_id}/cycles/{cycle_id}/hard_samples.json``.
 
-    ``train_count`` = samples with at least one measurement in the selected
-    scope. ``test_count`` = samples in the dataset cache that have none.
-    Both counts always reflect the FULL dataset — ``max_unmeasured`` only
-    trims the rows returned in ``items``, not the totals.
+    ``measured_count`` = samples with at least one measurement in the
+    selected scope. ``unmeasured_count`` = samples in the dataset cache that
+    have none. Both counts always reflect the FULL dataset — ``max_unmeasured``
+    only trims the rows returned in ``items``, not the totals.
     """
     if not _DATASET_NAME_RE.match(name):
         raise HTTPException(400, "Invalid dataset name")
@@ -227,6 +257,9 @@ async def get_dataset_preview(
     )
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
+    delta_se_map: dict[int, float] = {
+        int(k): float(v) for k, v in rasch.get("delta_se", {}).items()
+    }
     n_obs_map: dict[int, int] = {
         int(k): int(v) for k, v in rasch.get("n_obs_per_sample", {}).items()
     }
@@ -256,16 +289,32 @@ async def get_dataset_preview(
             task=sample_lookup[sid].get("task"),
             n_obs=n_obs_map.get(sid, 0),
             miss_prob=miss_prob_of(sid),
+            delta=delta_map.get(sid),
+            delta_se=delta_se_map.get(sid),
             pick_score=pick_score_map.get(sid),
         )
         for sid in trimmed_order[:limit]
     ]
 
+    # Declared train/test split from the dataset's campaign config — a
+    # display-only fact; the held-out test fold is never materialized.
+    split_train: int | None = None
+    split_test: int | None = None
+    campaign_path = (datasets_root / name / "campaign.json").resolve()
+    if campaign_path.is_relative_to(datasets_root) and campaign_path.is_file():
+        cc = json.loads(campaign_path.read_text(encoding="utf-8"))
+        declared = (cc.get("campaign_config") or {}).get("dataset_split")
+        if isinstance(declared, dict):
+            split_train = declared.get("train")
+            split_test = declared.get("test")
+
     return DatasetPreviewResponse(
         name=raw["name"],
         row_count=len(sample_lookup),
-        train_count=len(measured),
-        test_count=len(sample_lookup) - len(measured),
+        measured_count=len(measured),
+        unmeasured_count=len(sample_lookup) - len(measured),
+        split_train=split_train,
+        split_test=split_test,
         items=items,
     )
 

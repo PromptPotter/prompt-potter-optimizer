@@ -794,7 +794,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .chat-job-dropdown .job-footer{grid-column:1/-1;margin-top:8px;padding:8px 10px;border:1px dashed var(--color-border-tertiary);border-radius:8px;color:var(--color-text-tertiary);font-size:11px;text-align:center;font-style:italic}
 @media (prefers-reduced-motion:reduce){.chat-job-toggle .chev{transition:none}}
 .wf-hero{position:relative;padding:24px 16px 42px;max-width:980px;margin:0 auto;width:100%}
-.wf-hero-status{position:absolute;top:6px;right:6px;font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--color-warn-border);border-radius:999px;background:var(--color-warn-bg)}
+.wf-hero-status{position:absolute;top:-50px;right:6px;font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--color-warn-border);border-radius:999px;background:var(--color-warn-bg)}
 .wf-hero-status .dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 8px var(--color-success)}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:18px 0 8px}
 .wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:10px;padding:14px 22px;text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:12px;position:relative;z-index:2}
@@ -1039,17 +1039,25 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .hs-heat-mini-cell{width:4px;height:4px;border-radius:1px;background:var(--color-background-tertiary)}
 .hs-heat-mini-cell.hit{background:var(--color-success)}
 .hs-heat-mini-cell.miss{background:var(--color-danger)}
-/* Expanded wrap — positions the Shrink FAB over the table's top-right corner. */
-.hs-expand-wrap{position:relative;width:100%;display:flex;justify-content:center}
-.hs-expand-wrap > .hs-zone{margin-top:0}
-.hs-heat-shrink-fab{position:absolute;top:5px;right:18px;z-index:5;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0.5px solid var(--color-border-tertiary);border-radius:4px;background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;transition:background .12s,color .12s,border-color .12s,box-shadow .12s}
+/* Expanded wrap — full-bleed breakout from the 980 px hero. Left gutter
+   tracks where a 1280 px centred block would sit (the operator's preferred
+   distance); the right edge runs to a 24 px viewport gutter. Also the
+   positioned ancestor for the Shrink FAB at the table's top-right corner. */
+.hs-expand-wrap{position:relative;align-self:stretch;width:100vw;margin-left:calc(50% - 50vw);display:flex;justify-content:flex-start;padding-left:max(8px,calc((100vw - 1280px) / 2));padding-right:24px}
+.hs-expand-wrap > .hs-zone{margin-top:0;width:100%;align-items:stretch;padding:0}
+.hs-heat-shrink-fab{position:absolute;top:8px;right:32px;z-index:5;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0.5px solid var(--color-border-tertiary);border-radius:4px;background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;transition:background .12s,color .12s,border-color .12s,box-shadow .12s}
 .hs-heat-shrink-fab:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
 .hs-heat-shrink-fab:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 /* --- Expanded view: full HardSamplesTable --- */
 .hs-zone{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:24px;padding:0 8px}
-.hs-block{width:100%;max-width:1280px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:vertical;height:320px;min-height:200px;max-height:80vh}
+/* Width tracks the columns' total via --hs-table-w (set inline), so folding
+   or narrowing a column shrinks the whole block instead of leaving dead
+   space; max-width caps it at the available width. resize:both — drag the
+   bottom-right corner on either axis; that writes an inline `width` which
+   overrides the custom property, so a manual size sticks. */
+.hs-block{width:var(--hs-table-w,fit-content);max-width:100%;min-width:360px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:both;height:320px;min-height:200px;max-height:80vh}
 .hs-scroll{flex:1;min-height:0;overflow:auto}
-.hs-grid{display:grid;grid-auto-rows:min-content;background:var(--color-background-secondary)}
+.hs-grid{display:grid;grid-auto-rows:min-content;background:var(--color-background-secondary);position:relative}
 .hs-header{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;padding:0 8px;height:30px;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border-tertiary);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600;user-select:none;overflow:hidden}
 .hs-header[data-align="right"]{justify-content:flex-end}
 .hs-header[data-align="center"]{justify-content:center}
@@ -1076,26 +1084,20 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .hs-cell.folded:hover{background:rgba(var(--color-accent-rgb),0.08)}
 .hs-cell.rank,.hs-header.rank{color:var(--color-text-tertiary);background:var(--color-background-primary)}
 .hs-cell.rank{font-variant-numeric:tabular-nums}
-.hs-cell.hs-cell-hit{color:var(--color-success);font-weight:600}
-.hs-cell.hs-cell-miss{color:var(--color-danger)}
-.hs-cell.hs-cell-cached{color:var(--color-text-tertiary)}
-.hs-cell.meas{padding:3px 6px;overflow:hidden}
-.hs-cell-meas-strip{display:grid;align-items:center;width:100%;min-width:0;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
-.hs-cell-meas-strip::-webkit-scrollbar{width:0;height:0;display:none}
-.hs-meas-master-scroll-wrap{position:sticky;bottom:0;z-index:3;background:var(--color-background-secondary);border-top:1px solid var(--color-border-tertiary)}
-.hs-meas-master-scroll{overflow-x:scroll;overflow-y:hidden;height:12px}
-.hs-meas-master-scroll-inner{height:1px}
-.hs-footer{padding:6px 10px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-primary);font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center;gap:12px}
-.hs-counts{font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap}
-.hs-reset{font-family:var(--font-mono);font-size:11px;background:transparent;border:1px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 8px;border-radius:4px;cursor:pointer}
+.hs-cell.meas{padding:0;overflow:hidden}
+/* flex-wrap so a narrow table (folded columns / shrink-wrapped width)
+   wraps whole controls onto a second row instead of squashing their text. */
+.hs-footer{padding:6px 10px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-primary);font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:center;gap:8px 12px}
+.hs-counts{margin-left:32px;font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap;flex-shrink:0}
+.hs-reset{margin-left:auto;flex-shrink:0;white-space:nowrap;font-family:var(--font-mono);font-size:11px;background:transparent;border:1px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 8px;border-radius:4px;cursor:pointer}
 .hs-reset:hover{border-color:var(--color-accent);color:var(--color-accent)}
 .hs-header.sort-locked .hs-header-label{color:var(--color-text-tertiary);cursor:default}
 .hs-header.sort-locked .hs-header-label:hover{color:var(--color-text-tertiary)}
-.hs-sync-toggle{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);letter-spacing:.04em;cursor:pointer;user-select:none}
+.hs-sync-toggle{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;white-space:nowrap;font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);letter-spacing:.04em;cursor:pointer;user-select:none}
 .hs-sync-toggle input[type="checkbox"]{accent-color:var(--color-accent);margin:0;cursor:pointer}
 .hs-sync-toggle:hover{color:var(--color-text-primary)}
-.hs-scope-toggle{display:inline-flex;border:1px solid var(--color-border-tertiary);border-radius:4px;overflow:hidden;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em}
-.hs-scope-opt{background:transparent;border:0;color:var(--color-text-secondary);padding:3px 9px;cursor:pointer;border-right:1px solid var(--color-border-tertiary)}
+.hs-scope-toggle{display:inline-flex;flex-shrink:0;border:1px solid var(--color-border-tertiary);border-radius:4px;overflow:hidden;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em}
+.hs-scope-opt{background:transparent;border:0;color:var(--color-text-secondary);padding:3px 9px;cursor:pointer;white-space:nowrap;border-right:1px solid var(--color-border-tertiary)}
 .hs-scope-opt:last-child{border-right:0}
 .hs-scope-opt:hover{color:var(--color-text-primary)}
 .hs-scope-opt.on{background:var(--color-accent);color:var(--color-background-primary)}
@@ -1108,18 +1110,15 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .hs-popover-header button:hover{color:var(--color-accent)}
 .hs-popover-body{margin:0;padding:14px;overflow:auto;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);white-space:pre-wrap;word-break:break-word}
 .hs-heat-empty{color:var(--color-text-tertiary);font-style:italic}
-.hs-heat-cell{display:block;width:100%;height:8px;border-radius:1px;cursor:pointer;transition:transform .1s}
-.hs-heat-cell:hover{transform:scale(1.6);position:relative;z-index:1}
-.hs-heat-cell.hit{background:var(--color-success)}
-.hs-heat-cell.miss{background:var(--color-danger)}
-.hs-heat-cell.empty{background:transparent;cursor:pointer}
-.hs-heat-cell.pending{background:transparent;border:1px dashed var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);animation:hs-dot-pending 1.2s ease-in-out infinite}
-.hs-heat-cell.selected{box-shadow:0 0 0 1px var(--color-accent);z-index:2;position:relative}
-.hs-heat-cell.empty.selected{background:rgba(var(--color-accent-rgb),0.28)}
-@keyframes hs-dot-pending{0%,100%{opacity:.45}50%{opacity:1}}
+/* One <canvas> per row — the whole hit/miss history compressed into the
+   column width. See MeasHeatCell.tsx / heat-canvas.ts. */
+.hs-heat-canvas{display:block;width:100%;height:20px;cursor:pointer}
+/* Selection marker — one element over the History column, anchored in
+   .hs-grid, spanning every row below the sticky header. */
+.hs-heat-marker{position:absolute;top:30px;bottom:0;width:2px;background:var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);pointer-events:none;z-index:1}
+.hs-heat-tip{position:fixed;z-index:1000;padding:3px 7px;border-radius:4px;background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);font-family:var(--font-mono);font-size:11px;color:var(--color-text-primary);white-space:nowrap;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,0.35)}
 @media (prefers-reduced-motion:reduce){
   .hs-cell[data-running="true"]{animation:none;background-color:rgba(var(--color-accent-rgb),0.12)}
-  .hs-heat-cell.pending{animation:none;opacity:.7}
 }
 
 /* Phase 4 — cadence signals readout + stuck-diagnosis verdict. */

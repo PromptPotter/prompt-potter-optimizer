@@ -14,11 +14,14 @@ interface Props {
   // Freshness gate — forwarded to HardSamplesTable so the row-scoring blink
   // stops when the optimizer process dies.
   isLive: boolean;
+  // Active theme key — forwarded to the heat-map canvas for palette repaints.
+  themeKey: string;
   dashRound: number | null;
   datasetName: string | null;
   datasetItems: DatasetItem[];
-  datasetTrainCount: number;
-  datasetTestCount: number;
+  datasetMeasuredCount: number;
+  datasetUnmeasuredCount: number;
+  datasetSplitTest: number | null;
   // Per-sample archive measurement series, fetched server-side from
   // /datasets/{name}/measurement-series. Scope toggle (this campaign vs
   // all campaigns on the dataset) is owned by DashboardPane and re-fetches
@@ -81,11 +84,13 @@ function liveMeasurements(
 export function HardSamplesHeatmap({
   dash,
   isLive,
+  themeKey,
   dashRound,
   datasetName,
   datasetItems,
-  datasetTrainCount,
-  datasetTestCount,
+  datasetMeasuredCount,
+  datasetUnmeasuredCount,
+  datasetSplitTest,
   archivePerSample,
   hardSamplesScope,
   onHardSamplesScopeChange,
@@ -123,26 +128,22 @@ export function HardSamplesHeatmap({
     return out;
   }, [archivePerSample, dash, dashRound]);
 
-  // Tile order — mirror the optimizer's live difficulty sort. Follow
-  // ``dash.hard_sample_order`` (the adaptive picker's expected order) when
-  // it's a non-empty array; samples missing from it sink to the end by
-  // sample_id. Otherwise fall back to ``datasetItems`` order (the /preview
-  // API's static Rasch miss-prob sort).
-  const hardOrder = dash?.hard_sample_order;
+  // Tile order — rank by Info gain (pick_score) descending, the same key
+  // the hard-samples table sorts on, so the heatmap and table agree.
+  // Contested samples first; always-hit / always-miss last; unmeasured
+  // rows (null pick_score) last of all, in sample_id order.
   const sortedItems = useMemo(() => {
-    if (Array.isArray(hardOrder) && hardOrder.length > 0) {
-      const rank = new Map<number, number>();
-      for (let i = 0; i < hardOrder.length; i++) rank.set(hardOrder[i], i);
-      const sink = hardOrder.length;
-      return [...datasetItems].sort((a, b) => {
-        const ra = rank.get(a.sample_id) ?? sink;
-        const rb = rank.get(b.sample_id) ?? sink;
-        if (ra !== rb) return ra - rb;
-        return a.sample_id - b.sample_id;
-      });
-    }
-    return datasetItems;
-  }, [datasetItems, hardOrder]);
+    return [...datasetItems].sort((a, b) => {
+      const pa = a.pick_score;
+      const pb = b.pick_score;
+      if (pa === null || pb === null) {
+        if (pa === pb) return a.sample_id - b.sample_id;
+        return pa === null ? 1 : -1;
+      }
+      if (pa !== pb) return pb - pa;
+      return a.sample_id - b.sample_id;
+    });
+  }, [datasetItems]);
 
   if (datasetItems.length === 0) return null;
 
@@ -175,11 +176,13 @@ export function HardSamplesHeatmap({
           <HardSamplesTable
             dash={dash}
             isLive={isLive}
+            themeKey={themeKey}
             perSample={perSample}
             datasetName={datasetName}
             datasetItems={datasetItems}
-            datasetTrainCount={datasetTrainCount}
-            datasetTestCount={datasetTestCount}
+            datasetMeasuredCount={datasetMeasuredCount}
+            datasetUnmeasuredCount={datasetUnmeasuredCount}
+            datasetSplitTest={datasetSplitTest}
             scope={hardSamplesScope}
             onScopeChange={onHardSamplesScopeChange}
           />

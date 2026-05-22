@@ -92,18 +92,21 @@ function DashboardPaneInner() {
   // Original-cased connector name (e.g. "TermNorm Local") rendered as a
   // small uppercase tag inside the multi-node chip. Same fetch as the view.
   const [targetConnector, setTargetConnector] = useState<string | null>(null);
-  // Hard-sample view scope — campaign = every cycle in this campaign
-  // (default), dataset = every campaign on this dataset (cross-campaign
-  // archive). Clicking the heat-map badge toggles it; the dataset preview
-  // re-fetches on change. Not persisted — always opens on campaign.
+  // Hard-sample view scope — campaign = only the current campaign's cycles
+  // (the default view), dataset = every campaign on this dataset, which is
+  // the real series the optimizer's picker follows. Clicking the heat-map
+  // badge toggles which sort+series is shown; both are held in memory so
+  // the switch is instant. The picker itself always runs on the dataset
+  // scope regardless of this toggle — see l1/execute.py round-subset fit.
   const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("campaign");
   // Dataset roster + per-sample measurement history for the unit in view.
   // One hook owns the fetch chain and blanks cleanly on a unit switch.
   const {
     datasetName,
     items: datasetItems,
-    trainCount: datasetTrainCount,
-    testCount: datasetTestCount,
+    measuredCount: datasetMeasuredCount,
+    unmeasuredCount: datasetUnmeasuredCount,
+    splitTest: datasetSplitTest,
     archivePerSample,
   } = useDatasetPreview(campaignId, cycleId, hardSamplesScope);
   const [themeKey, setThemeKey] = useState<string>("init");
@@ -290,8 +293,9 @@ function DashboardPaneInner() {
             themeKey={themeKey}
             datasetName={datasetName}
             datasetItems={datasetItems}
-            datasetTrainCount={datasetTrainCount}
-            datasetTestCount={datasetTestCount}
+            datasetMeasuredCount={datasetMeasuredCount}
+            datasetUnmeasuredCount={datasetUnmeasuredCount}
+            datasetSplitTest={datasetSplitTest}
             archivePerSample={archivePerSample}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={setHardSamplesScope}

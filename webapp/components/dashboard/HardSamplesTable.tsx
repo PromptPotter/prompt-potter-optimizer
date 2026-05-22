@@ -2,14 +2,14 @@
 import {
   useEffect,
   useMemo,
-  useRef,
   useState,
   type CSSProperties,
   type PointerEvent,
-  type UIEvent,
 } from "react";
 import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
-import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
+import { type DashboardSnapshot } from "@/lib/poll";
+import { MeasHeatCell } from "./MeasHeatCell";
+import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
 
 const STORAGE_KEY = "hs-grid:v1";
 const FOLDED_WIDTH = 28;
@@ -23,15 +23,7 @@ const CELL_PADDING_PX = 22;
 const HEADER_PADDING_CH = 4;
 const MAX_AUTO_CH = 50;
 
-// Heat-map cell sizing. Cells flex between MIN_CELL_PX (vertical lines
-// when the column is squeezed) and MAX_CELL_PX (the natural square). When
-// the column is narrower than ``N × MIN_CELL_PX`` the strip overflows and
-// a single sticky scrollbar at the column's bottom scrolls every row in
-// sync — never let a measurement disappear.
-const MIN_CELL_PX = 1;
-const MAX_CELL_PX = 8;
-
-export interface MeasurementDot {
+interface MeasurementDot {
   hit: boolean;
   // Composite lex-sortable key. Equal ``ord`` values across rows share
   // a roster column so the Meas heat-map aligns vertically.
@@ -45,6 +37,9 @@ interface Props {
   // this gate the matched row would pulse forever. `isLive` goes false once
   // the freshness signal lapses, so the blink stops on its own.
   isLive: boolean;
+  // Active theme key — forwarded to the heat-map canvas so a palette flip
+  // repaints it (canvas resolves colours imperatively, not via CSS vars).
+  themeKey: string;
   // Per-sample chronological measurement dots. When supplied, the table
   // shows a "measurements" column with one dot per measurement; when
   // omitted, the column is hidden.
@@ -54,8 +49,11 @@ interface Props {
   compact?: boolean;
   datasetName: string | null;
   datasetItems: DatasetItem[];
-  datasetTrainCount: number;
-  datasetTestCount: number;
+  datasetMeasuredCount: number;
+  datasetUnmeasuredCount: number;
+  // Held-out test fold size from campaign.json — shown in the footer as a
+  // held-out note; those samples are NOT rows in this table.
+  datasetSplitTest: number | null;
   // Data scope toggle. Campaign = the campaign's pooled Rasch fit over
   // every cycle in it (campaigns/{campaign_id}/hard_samples.json). Dataset
   // = the cross-campaign archive Rasch over every campaign on this dataset.
@@ -68,19 +66,12 @@ type ColId =
   | "rank"
   | "sample_id"
   | "measurements"
+  | "hit_rate"
   | "miss_prob"
   | "pick_score"
-  | "n_obs"
   | "task"
   | "query"
-  | "ground_truth"
-  | "prediction"
-  | "hit"
-  | "cached"
-  | "time_s"
-  | "terminated_at"
-  | "input_tokens"
-  | "output_tokens";
+  | "ground_truth";
 
 interface ColDef {
   id: ColId;
@@ -89,77 +80,31 @@ interface ColDef {
   numeric: boolean;
 }
 
-// Order is the visual left-to-right column order. Sortable columns receive
-// `numeric: true` for right-align + tabular-nums; wrap-toggle only appears on
-// `align: "left"` columns since other alignments are always short cells.
+// Order is the visual left-to-right column order. This is the aggregate
+// per-sample roster — every column is a sample attribute or a cross-trial
+// statistic. Per-evaluation fields (prediction, hit, latency, tokens …)
+// belong to a single trial, not an aggregate, so they are not columns here.
+// Sortable columns receive `numeric: true` for right-align + tabular-nums.
 const COLUMNS: ColDef[] = [
   { id: "rank",          label: "#",          align: "right",  numeric: true  },
   { id: "sample_id",     label: "ID",         align: "right",  numeric: true  },
-  { id: "measurements",  label: "Meas",       align: "left",   numeric: true  },
+  { id: "measurements",  label: "History",    align: "left",   numeric: true  },
+  { id: "hit_rate",      label: "Hit rate",   align: "right",  numeric: true  },
   { id: "miss_prob",     label: "P(miss)",    align: "right",  numeric: true  },
-  { id: "pick_score",    label: "Pick",       align: "right",  numeric: true  },
-  { id: "n_obs",         label: "Tries",      align: "right",  numeric: true  },
+  { id: "pick_score",    label: "Info gain",  align: "right",  numeric: true  },
   { id: "task",          label: "Task",       align: "left",   numeric: false },
   { id: "query",         label: "Input",      align: "left",   numeric: false },
   { id: "ground_truth",  label: "Output",     align: "left",   numeric: false },
-  { id: "prediction",    label: "Predicted",  align: "left",   numeric: false },
-  { id: "hit",           label: "Hit",        align: "center", numeric: false },
-  { id: "cached",        label: "Cache",      align: "center", numeric: false },
-  { id: "time_s",        label: "Time",       align: "right",  numeric: true  },
-  { id: "terminated_at", label: "Stopped at", align: "left",   numeric: false },
-  { id: "input_tokens",  label: "In tok",     align: "right",  numeric: true  },
-  { id: "output_tokens", label: "Out tok",    align: "right",  numeric: true  },
 ];
-
-interface LiveEntry {
-  prediction?: string;
-  hit?: boolean;
-  cached?: boolean;
-  time_s?: number;
-  terminated_at?: string;
-  input_tokens?: number;
-  output_tokens?: number;
-}
-
-// Drill into dashboard.json for the latest per-sample row across all
-// candidates of the current round. Multiple candidates may have measured
-// the same sample — last write wins, which gives the freshest result on the
-// fly without taking a position on "which candidate is best".
-//
-// Note: during a live round the projection writes samples as compact strings
-// (`fmt_sample_line` in live_dashboard.py). Strings have no `sample_id`, so the
-// strict typeof check below skips them and the map stays empty until the round
-// completes and full dicts land. Live columns then show em-dashes mid-round.
-function extractLive(dash: DashboardSnapshot | null): Map<number, LiveEntry> {
-  const out = new Map<number, LiveEntry>();
-  for (const c of liveL1Candidates(dash)) {
-    for (const s of c.samples ?? []) {
-      if (typeof s !== "object" || s == null) continue;
-      const sid = typeof s.sample_id === "number" ? s.sample_id : null;
-      if (sid == null) continue;
-      out.set(sid, {
-        prediction:    s.prediction,
-        hit:           s.hit,
-        cached:        s.cached,
-        time_s:        s.time_s,
-        terminated_at: s.terminated_at,
-        input_tokens:  s.input_tokens,
-        output_tokens: s.output_tokens,
-      });
-    }
-  }
-  return out;
-}
 
 interface PersistedState {
   widths: Partial<Record<ColId, number>>;
   folded: ColId[];
   wrapped: ColId[];
-  // When true, the table sort follows ``dash.hard_sample_order`` (the
-  // adaptive picker's expected per-candidate order — descending blended
-  // pick-value) and header-click sorting is suppressed. The "Pick"
-  // column carries the live-sort marker. Default ON — operator opted
-  // into the "real time mirror" framing.
+  // When true ("Auto-sort"), the table ranks every row by Info gain
+  // (pick_score) descending — the picker's expected decision-information-
+  // gain — and header-click sorting is suppressed. The Info gain column
+  // carries the sort marker. Default ON.
   syncLive: boolean;
 }
 
@@ -205,22 +150,11 @@ function missProbStyle(s: number): CSSProperties {
   return { background: `hsla(${hue},70%,45%,${alpha.toFixed(3)})` };
 }
 
-function fmtBool(v: boolean | undefined): string {
-  if (v === undefined) return "—";
-  return v ? "✓" : "✗";
-}
-
-function fmtNum(v: number | undefined, digits = 0): string {
-  if (v === undefined || !Number.isFinite(v)) return "—";
-  return v.toFixed(digits);
-}
-
 interface CellValue {
   text: string;
   raw: string | number | boolean | null;
   title?: string;
   style?: CSSProperties;
-  className?: string;
 }
 
 // Cell value for non-rank columns. Rank is computed inline in the render loop
@@ -228,8 +162,7 @@ interface CellValue {
 function cellFor(
   col: ColId,
   item: DatasetItem,
-  live: LiveEntry | undefined,
-  measCount: number,
+  meas: MeasurementDot[],
 ): CellValue {
   switch (col) {
     case "rank":
@@ -237,30 +170,55 @@ function cellFor(
     case "sample_id":
       return { text: String(item.sample_id), raw: item.sample_id };
     case "measurements":
-      // Sort key is the measurement count; visual rendering happens
-      // separately in the cell render loop (dots JSX, not text).
-      return { text: measCount > 0 ? String(measCount) : "—", raw: measCount };
+      // Sort key is the measurement count; the heat-map canvas does the
+      // visual rendering (see MeasHeatCell), not this text.
+      return { text: meas.length > 0 ? String(meas.length) : "—", raw: meas.length };
+    case "hit_rate": {
+      // Empirical hit rate over every measurement of this sample —
+      // ``hits/total``. The strongest bug-spotting signal: a 0/N row with
+      // a large N is a sample the pipeline never solves (genuinely hard,
+      // or a broken ground truth / scorer); a full N/N row is trivial.
+      // Sits next to P(miss) so the observed rate and the Rasch estimate
+      // can be eyeballed against each other.
+      const n = meas.length;
+      if (n === 0) return { text: "—", raw: null };
+      const hits = meas.reduce((k, m) => k + (m.hit ? 1 : 0), 0);
+      return {
+        text: `${hits}/${n}`,
+        raw: hits / n,
+        title: `${hits} hit of ${n} measurements — ${((hits / n) * 100).toFixed(0)}%`,
+      };
+    }
     case "miss_prob":
       return {
         text: item.miss_prob.toFixed(2),
         raw: item.miss_prob,
         style: missProbStyle(item.miss_prob),
       };
-    case "pick_score":
-      // The picker's blended objective at the population prior — higher
-      // means measuring this sample is more decision-informative. Three
-      // decimals so equal-looking-but-actually-different values don't
-      // collapse visually. ``—`` when the sample is unmeasured.
+    case "pick_score": {
+      // Info gain — the picker's expected decision-information-gain from one
+      // measurement of this sample. High = contested (the measurement tells
+      // good prompts from bad); near-zero = always-hit or always-miss
+      // (predictable, uninformative). The hover tooltip carries the Rasch
+      // breakdown so the order can be debugged row by row.
+      if (item.pick_score === null) {
+        return { text: "—", raw: null, title: "No measurements yet — info gain undefined." };
+      }
+      const dLine =
+        item.delta !== null && item.delta_se !== null
+          ? `δ ${item.delta >= 0 ? "+" : ""}${item.delta.toFixed(2)} ± ${item.delta_se.toFixed(2)}  (Rasch difficulty ± uncertainty)`
+          : "δ —  (unmeasured)";
       return {
-        text: item.pick_score !== null ? item.pick_score.toFixed(3) : "—",
+        text: item.pick_score.toFixed(4),
         raw: item.pick_score,
+        title:
+          `Info gain ${item.pick_score.toFixed(6)} nats\n` +
+          `${dLine}\n` +
+          `P(miss) ${item.miss_prob.toFixed(2)}  ·  ${item.n_obs} tries\n` +
+          `High = contested, the measurement separates good prompts from bad. ` +
+          `Near-zero = always-hit or always-miss — predictable, uninformative.`,
       };
-    case "n_obs":
-      // ``item.n_obs`` is the lifetime archive count for this backend_id
-      // (cross-cycle, cross-session — see hard_sample_archive.py). The
-      // operator reads "Tries" as in-cycle tries; use the cycle-scoped
-      // measurement count already aggregated for the Meas column instead.
-      return { text: String(measCount), raw: measCount };
+    }
     case "task": {
       const t = item.task ?? "";
       return { text: t || "—", raw: t, title: t || undefined };
@@ -269,33 +227,6 @@ function cellFor(
       return { text: item.query, raw: item.query, title: item.query };
     case "ground_truth":
       return { text: item.ground_truth, raw: item.ground_truth, title: item.ground_truth };
-    case "prediction": {
-      const v = live?.prediction ?? "";
-      return { text: v || "—", raw: v, title: v || undefined };
-    }
-    case "hit":
-      return {
-        text: fmtBool(live?.hit),
-        raw: live?.hit ?? null,
-        className:
-          live?.hit === true ? "hs-cell-hit" : live?.hit === false ? "hs-cell-miss" : "",
-      };
-    case "cached":
-      return {
-        text: fmtBool(live?.cached),
-        raw: live?.cached ?? null,
-        className: live?.cached ? "hs-cell-cached" : "",
-      };
-    case "time_s":
-      return { text: live?.time_s !== undefined ? `${fmtNum(live.time_s, 2)}s` : "—", raw: live?.time_s ?? null };
-    case "terminated_at": {
-      const v = live?.terminated_at ?? "";
-      return { text: v || "—", raw: v, title: v || undefined };
-    }
-    case "input_tokens":
-      return { text: live?.input_tokens !== undefined ? String(live.input_tokens) : "—", raw: live?.input_tokens ?? null };
-    case "output_tokens":
-      return { text: live?.output_tokens !== undefined ? String(live.output_tokens) : "—", raw: live?.output_tokens ?? null };
   }
 }
 
@@ -305,7 +236,6 @@ function cellFor(
 function autoWidthFor(
   col: ColDef,
   items: DatasetItem[],
-  live: Map<number, LiveEntry>,
   perSample: Map<number, MeasurementDot[]> | undefined,
   ordColsCount: number,
 ): number {
@@ -315,18 +245,16 @@ function autoWidthFor(
     // Rank shows row position; longest is items.length digits.
     maxCh = Math.max(headerCh, String(Math.max(1, items.length)).length + 1);
   } else if (col.id === "measurements") {
-    // Roster: cells flex into whatever width the column has — 8 px max
-    // (set in the inline ``maxWidth`` below) so wide columns don't bloat
-    // the squares, down to 1 px vertical lines when crowded. Auto-width
-    // here only sets the initial column size: target 8 px per cell up to
-    // a 280 px ceiling so the Meas column doesn't dominate the layout
-    // when ``ordCols`` runs into the hundreds. Operator-resizable from
-    // there via the header drag handle.
-    return Math.max(60, Math.min(12 + ordColsCount * 8, 280));
+    // History heat-map: one canvas per row. Auto-width only sets the
+    // initial column size — 8 px per ordinal up to a 280 px ceiling so the
+    // column never dominates the layout when ``ordCols`` runs into the
+    // thousands. Floor of 96 px keeps the "History" header from clipping
+    // (label + fold/resize tools). Operator-resizable from there; the
+    // canvas compresses the full history into whatever width it has.
+    return Math.max(96, Math.min(12 + ordColsCount * 8, 280));
   } else {
     for (const item of items) {
-      const count = perSample?.get(item.sample_id)?.length ?? 0;
-      const text = cellFor(col.id, item, live.get(item.sample_id), count).text;
+      const text = cellFor(col.id, item, perSample?.get(item.sample_id) ?? []).text;
       const ch = Math.min(text.length, MAX_AUTO_CH);
       if (ch > maxCh) maxCh = ch;
     }
@@ -339,24 +267,30 @@ const RANK_HINT = "Position in current sort order — click to clear sort";
 export function HardSamplesTable({
   dash,
   isLive,
+  themeKey,
   perSample,
   compact,
   datasetName,
   datasetItems,
-  datasetTrainCount,
-  datasetTestCount,
+  datasetMeasuredCount,
+  datasetUnmeasuredCount,
+  datasetSplitTest,
   scope,
   onScopeChange,
 }: Props) {
-  // When perSample is undefined (legacy callers), drop the dots column
-  // entirely so the table renders exactly as before.
-  const columns = useMemo<ColDef[]>(
-    () => COLUMNS.filter((c) => perSample || c.id !== "measurements"),
-    [perSample],
-  );
+  // Drop columns with nothing to show: the History heat-map needs
+  // `perSample`; the Task column needs at least one sample carrying a task
+  // label (datasets without task families never populate it).
+  const columns = useMemo<ColDef[]>(() => {
+    const hasTask = datasetItems.some((it) => (it.task ?? "") !== "");
+    return COLUMNS.filter(
+      (c) =>
+        (perSample || c.id !== "measurements") && (hasTask || c.id !== "task"),
+    );
+  }, [perSample, datasetItems]);
   const items = datasetItems;
-  const trainCount = datasetTrainCount;
-  const testCount = datasetTestCount;
+  const measuredCount = datasetMeasuredCount;
+  const unmeasuredCount = datasetUnmeasuredCount;
 
   const [persisted, setPersisted] = useState<PersistedState>(() => loadPersisted());
   const [sortBy, setSortBy] = useState<{ col: ColId; dir: "asc" | "desc" } | null>(null);
@@ -364,6 +298,10 @@ export function HardSamplesTable({
   // Currently-highlighted Meas roster column. Click a cell → its ``ord``
   // lights up across every row; arrows pan left/right; Escape clears.
   const [selectedOrd, setSelectedOrd] = useState<string | null>(null);
+  // Heat-map hover read-out — one shared tooltip, not a title per cell.
+  const [hoverTip, setHoverTip] = useState<
+    { ord: string; hit: boolean | null; x: number; y: number } | null
+  >(null);
 
   useEffect(() => savePersisted(persisted), [persisted]);
 
@@ -377,25 +315,28 @@ export function HardSamplesTable({
     return () => window.removeEventListener("keydown", onKey);
   }, [popover]);
 
-  const live = useMemo(() => extractLive(dash), [dash]);
-
-  // Stable signature of which sample_ids have live data. Auto-widths recompute
-  // when this changes (first arrival of live data; new samples join the round)
-  // but NOT when only values inside known samples update — that would jitter
-  // column widths every poll.
-  const liveSignature = useMemo(
-    () => [...live.keys()].sort((a, b) => a - b).join(","),
-    [live],
-  );
-
   // Stable signature of measurement counts per sample. Drives auto-width
-  // recompute for the dots column on real changes only.
+  // recompute for the History column on real changes only.
   const perSampleSig = useMemo(() => {
     if (!perSample) return "";
     return [...perSample.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([sid, ms]) => `${sid}:${ms.length}`)
       .join(",");
+  }, [perSample]);
+
+  // Content signature of every measurement (ord + hit), sample-sorted.
+  // Stable across polls — `perSample` is a fresh Map each poll but its
+  // contents rarely change — so it is the sole gate for canvas repaints.
+  const drawSig = useMemo(() => {
+    if (!perSample) return "";
+    return [...perSample.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(
+        ([sid, ms]) =>
+          `${sid}:${ms.map((m) => m.ord + (m.hit ? "1" : "0")).join("")}`,
+      )
+      .join("|");
   }, [perSample]);
 
   // Global ordinal universe — the union of every ord present across rows,
@@ -409,6 +350,14 @@ export function HardSamplesTable({
     for (const ms of perSample.values()) for (const m of ms) all.add(m.ord);
     return [...all].sort();
   }, [perSample]);
+
+  // Reverse index ord → position, so a row folds its own measurements into
+  // canvas columns without scanning the whole ordinal universe.
+  const ordIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < ordCols.length; i++) m.set(ordCols[i], i);
+    return m;
+  }, [ordCols]);
 
   // Arrow-key nav for the Meas column highlight. Active only while an
   // ord is selected. Escape clears; arrows pan with wrap-around so the
@@ -444,32 +393,31 @@ export function HardSamplesTable({
     if (items.length === 0) return {};
     const w: Partial<Record<ColId, number>> = {};
     for (const col of columns) {
-      w[col.id] = autoWidthFor(col, items, live, perSample, ordCols.length);
+      w[col.id] = autoWidthFor(col, items, perSample, ordCols.length);
     }
     return w;
-    // `live` is read inside via cellFor; `liveSignature` captures the set of
-    // measured samples so we recompute on cardinality change but not on every
-    // value tick. Suppress the exhaustive-deps lint for this trade-off.
+    // `perSample` is read inside via cellFor; `perSampleSig` captures its
+    // per-sample counts so widths recompute on real changes, not every poll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, liveSignature, columns, perSampleSig, ordCols.length]);
+  }, [items, columns, perSampleSig, ordCols.length]);
 
-  // Live-sort: when the operator's "sync with live sort" tick is on and
-  // the loop has emitted at least one Rasch fit, mirror that ordering
-  // verbatim. Samples missing from ``hard_sample_order`` (fresh additions
-  // the sorter hasn't seen yet) sink to the end in sample_id order.
-  const hardOrder = dash?.hard_sample_order;
-  const liveSortActive =
-    persisted.syncLive && Array.isArray(hardOrder) && hardOrder.length > 0;
+  // Live-sort ("Auto-sort"): rank the WHOLE table by Info gain (pick_score)
+  // descending — the picker's expected decision-information-gain. Contested
+  // samples rise to the top; always-hit and always-miss samples sink
+  // together at the bottom. Unmeasured rows (null pick_score) go last in
+  // sample_id order. This makes the Info gain column the literal sort key
+  // across every row, not just the round's ~20-sample live subset.
+  const liveSortActive = persisted.syncLive;
   const sortedItems = useMemo(() => {
     if (liveSortActive) {
-      const rank = new Map<number, number>();
-      const order = hardOrder ?? [];
-      for (let i = 0; i < order.length; i++) rank.set(order[i], i);
-      const sink = order.length;
       return [...items].sort((a, b) => {
-        const ra = rank.get(a.sample_id) ?? sink;
-        const rb = rank.get(b.sample_id) ?? sink;
-        if (ra !== rb) return ra - rb;
+        const pa = a.pick_score;
+        const pb = b.pick_score;
+        if (pa === null || pb === null) {
+          if (pa === pb) return a.sample_id - b.sample_id;
+          return pa === null ? 1 : -1;
+        }
+        if (pa !== pb) return pb - pa;
         return a.sample_id - b.sample_id;
       });
     }
@@ -477,8 +425,7 @@ export function HardSamplesTable({
     const { col, dir } = sortBy;
     const sign = dir === "asc" ? 1 : -1;
     const keyOf = (it: DatasetItem): number | string => {
-      const count = perSample?.get(it.sample_id)?.length ?? 0;
-      const v = cellFor(col, it, live.get(it.sample_id), count).raw;
+      const v = cellFor(col, it, perSample?.get(it.sample_id) ?? []).raw;
       if (v === null || v === undefined) return Number.NEGATIVE_INFINITY;
       if (typeof v === "boolean") return v ? 1 : 0;
       return v;
@@ -489,61 +436,23 @@ export function HardSamplesTable({
       if (typeof ka === "number" && typeof kb === "number") return (ka - kb) * sign;
       return String(ka).localeCompare(String(kb)) * sign;
     });
-  }, [items, sortBy, live, perSample, liveSortActive, hardOrder]);
+  }, [items, sortBy, perSample, liveSortActive]);
 
   const widthFor = (col: ColDef): number => {
     if (persisted.folded.includes(col.id)) return FOLDED_WIDTH;
     return persisted.widths[col.id] ?? autoWidths[col.id] ?? 80;
   };
 
-  // Heat-map gap: 1 px between cells when the Meas column has room for
-  // every cell at the natural MAX_CELL_PX width, 0 px when squeezed.
-  // Without this the squares run together once cells start shrinking —
-  // but with it always on, the gaps eat the budget at narrow widths and
-  // force cells to 0 px before the column is actually full. The
-  // breakpoint is ``N × (MAX + 1) − 1`` (N cells + N−1 1-px gaps).
+  // Meas column geometry. The per-row canvas fills this width; the
+  // selection marker is anchored at the column's left edge inside the grid.
   const measCol = columns.find((c) => c.id === "measurements");
-  const measColIdx = columns.findIndex((c) => c.id === "measurements");
   const measColWidth = measCol ? widthFor(measCol) : 0;
-  const measGapPx =
-    ordCols.length > 1 && measColWidth >= ordCols.length * (MAX_CELL_PX + 1) - 1 ? 1 : 0;
-  const measMaxWidthPx =
-    ordCols.length * MAX_CELL_PX + Math.max(0, ordCols.length - 1) * measGapPx;
-  // Width every cell needs at its minimum size; if the column is
-  // narrower, strips overflow and the master scrollbar takes over.
-  const measMinStripPx =
-    ordCols.length * MIN_CELL_PX + Math.max(0, ordCols.length - 1) * measGapPx;
-  const needsHScroll = ordCols.length > 0 && measMinStripPx > measColWidth;
-
-  // Sticky-bottom master scrollbar synced with every row strip. Each
-  // strip is overflow-x:auto with the native scrollbar hidden; wheel /
-  // touch / keyboard scroll on any strip propagates here, and the
-  // master's scrollbar drag propagates back. ``isSyncingRef`` breaks
-  // the would-be feedback loop without throttling actual user input.
-  const stripRefs = useRef<Map<number, HTMLSpanElement>>(new Map());
-  const masterScrollRef = useRef<HTMLDivElement>(null);
-  const isSyncingRef = useRef(false);
-  const setStripRef = (sid: number) => (el: HTMLSpanElement | null) => {
-    if (el) stripRefs.current.set(sid, el);
-    else stripRefs.current.delete(sid);
-  };
-  const onMeasScroll = (e: UIEvent<HTMLElement>) => {
-    if (isSyncingRef.current) return;
-    isSyncingRef.current = true;
-    const sx = e.currentTarget.scrollLeft;
-    for (const el of stripRefs.current.values()) {
-      if (el !== e.currentTarget && Math.abs(el.scrollLeft - sx) > 0.5) {
-        el.scrollLeft = sx;
-      }
-    }
-    const m = masterScrollRef.current;
-    if (m && m !== e.currentTarget && Math.abs(m.scrollLeft - sx) > 0.5) {
-      m.scrollLeft = sx;
-    }
-    requestAnimationFrame(() => {
-      isSyncingRef.current = false;
-    });
-  };
+  const measColFolded = persisted.folded.includes("measurements");
+  let measColLeft = 0;
+  for (const c of columns) {
+    if (c.id === "measurements") break;
+    measColLeft += widthFor(c);
+  }
 
   const gridTemplate = columns.map((c) => `${widthFor(c)}px`).join(" ");
   const totalWidth = columns.reduce((sum, c) => sum + widthFor(c), 0);
@@ -619,13 +528,24 @@ export function HardSamplesTable({
 
   if (items.length === 0) return null;
 
-  const total = trainCount + testCount;
+  const total = measuredCount + unmeasuredCount;
   const tag = datasetName ? `${datasetName} · ` : "";
-  const wrappable = (col: ColDef): boolean => col.align === "left";
+  // Text-wrap toggle applies to left-aligned text columns only — never the
+  // History column (a canvas, nothing to wrap; dropping it also frees the
+  // header room the "History" label needs).
+  const wrappable = (col: ColDef): boolean =>
+    col.align === "left" && col.id !== "measurements";
 
   return (
     <div className="hs-zone">
-      <div className={`hs-block${compact ? " compact" : ""}`}>
+      <div
+        className={`hs-block${compact ? " compact" : ""}`}
+        // Width tracks the columns' total — folding/narrowing a column
+        // shrinks the block. Set as a custom property, not `width`, so a
+        // manual corner-resize (which writes inline `width`) still wins
+        // and survives re-renders.
+        style={{ "--hs-table-w": `${totalWidth}px` } as CSSProperties}
+      >
         <div className="hs-scroll">
           <div
             className={`hs-grid${liveSortActive ? " sync-live" : ""}`}
@@ -650,13 +570,14 @@ export function HardSamplesTable({
               const isRank = col.id === "rank";
               const headerTitle = folded
                 ? "Unfold column"
-                : liveSortActive
-                  ? col.id === "pick_score"
-                    ? "Live sort: descending blended pick-value (the picker's order)"
-                    : "Synced to the picker's live pick-value ranking — toggle off Auto-sort to sort manually"
-                  : isRank
-                    ? RANK_HINT
-                    : `Sort by ${col.label}`;
+                : col.id === "pick_score"
+                  ? "Info gain — expected decision-information-gain from one " +
+                    "measurement. Auto-sort ranks every row by this, highest first."
+                  : liveSortActive
+                    ? "Auto-sort is ranking by Info gain — toggle it off to sort by this column."
+                    : isRank
+                      ? RANK_HINT
+                      : `Sort by ${col.label}`;
               return (
                 <div
                   key={col.id}
@@ -710,10 +631,9 @@ export function HardSamplesTable({
             })}
 
             {sortedItems.map((item, idx) => {
-              const liveEntry = live.get(item.sample_id);
               const meas = perSample?.get(item.sample_id) ?? [];
-              // Build the per-row ord → dot lookup once so the Meas
-              // render below is O(ordCols) without an inner .find().
+              // Per-row ord → dot lookup the heat-map canvas folds into
+              // pixel columns (see MeasHeatCell / heat-canvas.ts).
               const byOrd = new Map<string, MeasurementDot>();
               for (const m of meas) byOrd.set(m.ord, m);
               // Mark every cell in the row currently being scored so the
@@ -735,7 +655,7 @@ export function HardSamplesTable({
                 const isMeas = col.id === "measurements";
                 const cell = isRank
                   ? ({ text: String(idx + 1), raw: idx + 1 } as CellValue)
-                  : cellFor(col.id, item, liveEntry, meas.length);
+                  : cellFor(col.id, item, meas);
                 const isExpandable =
                   !isRank &&
                   !isMeas &&
@@ -755,7 +675,7 @@ export function HardSamplesTable({
                 return (
                   <div
                     key={`${item.sample_id}-${col.id}`}
-                    className={`hs-cell${folded ? " folded" : ""}${wrapped ? " wrapped" : ""}${isRank ? " rank" : ""}${isMeas ? " meas" : ""}${cell.className ? ` ${cell.className}` : ""}`}
+                    className={`hs-cell${folded ? " folded" : ""}${wrapped ? " wrapped" : ""}${isRank ? " rank" : ""}${isMeas ? " meas" : ""}`}
                     data-align={col.align}
                     data-running={isRunning ? "true" : undefined}
                     style={cell.style}
@@ -766,47 +686,22 @@ export function HardSamplesTable({
                       ordCols.length === 0 && !isRunning ? (
                         <span className="hs-heat-empty">—</span>
                       ) : (
-                        <span
-                          ref={setStripRef(item.sample_id)}
-                          onScroll={onMeasScroll}
-                          className="hs-cell-meas-strip"
-                          style={{
-                            // ``minmax(MIN, 1fr)`` floors every cell at
-                            // MIN_CELL_PX so cells never disappear when
-                            // squeezed — the strip overflows the column
-                            // instead and the sticky master scrollbar
-                            // below scrolls every row in sync.
-                            // ``maxWidth`` caps the strip at the natural
-                            // MAX_CELL_PX/cell width so wide columns
-                            // don't stretch the squares.
-                            gridTemplateColumns: `repeat(${ordCols.length}, minmax(${MIN_CELL_PX}px, 1fr))`,
-                            maxWidth: `${measMaxWidthPx}px`,
-                            gap: `${measGapPx}px`,
-                          }}
-                        >
-                          {ordCols.map((ord) => {
-                            const m = byOrd.get(ord);
-                            const sel = ord === selectedOrd;
-                            return (
-                              <span
-                                key={ord}
-                                className={`hs-heat-cell ${m ? (m.hit ? "hit" : "miss") : "empty"}${sel ? " selected" : ""}`}
-                                title={m ? `${m.hit ? "HIT" : "MISS"} · ${ord}` : ord}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedOrd((cur) => (cur === ord ? null : ord));
-                                }}
-                              />
-                            );
-                          })}
-                          {isRunning && (
-                            <span
-                              key="pending"
-                              className="hs-heat-cell pending"
-                              title="Currently scoring"
-                            />
-                          )}
-                        </span>
+                        <MeasHeatCell
+                          byOrd={byOrd}
+                          ordCols={ordCols}
+                          ordIndex={ordIndex}
+                          widthPx={measColWidth}
+                          isRunning={isRunning}
+                          drawSig={drawSig}
+                          themeKey={themeKey}
+                          onSelectOrd={(ord) =>
+                            setSelectedOrd((cur) => (cur === ord ? null : ord))
+                          }
+                          onHover={(ord, hit, x, y) =>
+                            setHoverTip({ ord, hit, x, y })
+                          }
+                          onHoverEnd={() => setHoverTip(null)}
+                        />
                       )
                     ) : (
                       cell.text
@@ -816,24 +711,21 @@ export function HardSamplesTable({
               });
             })}
 
-            {needsHScroll && measColIdx >= 0 && (
-              <div
-                className="hs-meas-master-scroll-wrap"
-                style={{ gridColumn: `${measColIdx + 1} / span 1` }}
-              >
-                <div
-                  ref={masterScrollRef}
-                  className="hs-meas-master-scroll"
-                  onScroll={onMeasScroll}
-                  aria-label="Heat-map horizontal scroll"
-                >
+            {selectedOrd != null &&
+              !measColFolded &&
+              (() => {
+                const idx = ordIndex.get(selectedOrd);
+                if (idx == null) return null;
+                const layout = heatLayout(ordCols.length, measColWidth);
+                const x = measColLeft + ordIndexToXCss(layout, idx);
+                return (
                   <div
-                    className="hs-meas-master-scroll-inner"
-                    style={{ width: `${measMinStripPx}px` }}
+                    className="hs-heat-marker"
+                    style={{ left: `${x - 1}px` }}
+                    aria-hidden="true"
                   />
-                </div>
-              </div>
-            )}
+                );
+              })()}
           </div>
         </div>
         <div className="hs-footer">
@@ -885,8 +777,18 @@ export function HardSamplesTable({
             />
             Auto-sort
           </label>
-          <span className="hs-counts">
-            {tag}Train {trainCount} · Test {testCount} · Total {total}
+          <span
+            className="hs-counts"
+            title={
+              datasetSplitTest != null
+                ? `This table is the ${total}-sample training bank. A separate ` +
+                  `${datasetSplitTest}-sample test fold is held out — not shown here.`
+                : undefined
+            }
+          >
+            {tag}Measured {measuredCount} · Unmeasured {unmeasuredCount} · Total{" "}
+            {total}
+            {datasetSplitTest != null ? ` · ${datasetSplitTest} test held out` : ""}
           </span>
           <button type="button" className="hs-reset" onClick={resetLayout} title="Reset column widths, folds, wraps, sort">
             Reset layout
@@ -903,6 +805,16 @@ export function HardSamplesTable({
             </div>
             <pre className="hs-popover-body">{popover.text}</pre>
           </div>
+        </div>
+      )}
+
+      {hoverTip && (
+        <div
+          className="hs-heat-tip"
+          style={{ left: `${hoverTip.x + 14}px`, top: `${hoverTip.y + 14}px` }}
+        >
+          {hoverTip.hit == null ? "—" : hoverTip.hit ? "HIT" : "MISS"} ·{" "}
+          {hoverTip.ord}
         </div>
       )}
     </div>

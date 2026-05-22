@@ -68,6 +68,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("exclude_nodes",): "data",
     ("pipeline_overrides",): "data",
     ("scoring",): "data",
+    ("dataset_split",): "policy",  # display-only metadata — no data fork
     # OptimizationConfig
     ("optimization", "max_rounds"): "policy",
     ("optimization", "l1_patience"): "policy",
@@ -228,6 +229,21 @@ class OptimizerLLMConfig(BaseModel):
     model: str | None = Field(None)
 
 
+class DatasetSplit(BaseModel):
+    """Declared train / test fold sizes for the dataset — display metadata.
+
+    ``train`` is the bank materialized in ``cache.json`` and scored against
+    each round; ``test`` is the held-out fold, recomputed on demand by the
+    dataset loader and never written to the bank. Surfaced in the dashboard
+    footer so the operator sees the full split without opening ``dataset.md``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    train: int = Field(description="Training-bank fold size — the cache.json row count")
+    test: int = Field(description="Held-out test fold size — not in the bank or the table")
+
+
 class CampaignConfig(BaseModel):
     """Top-level user-authored campaign configuration (``datasets/{name}/campaign.json``)."""
 
@@ -244,6 +260,11 @@ class CampaignConfig(BaseModel):
     exclude_nodes: list[str] = Field(default_factory=list)
     pipeline_overrides: dict = Field(default_factory=dict)
     scoring: str | dict[str, str] | None = Field(None)
+    dataset_split: DatasetSplit | None = Field(
+        None,
+        description="Canonical train/test fold sizes for the dashboard footer. "
+        "None when the dataset declares no split.",
+    )
 
     optimization: OptimizationConfig
     optimizer_llm: OptimizerLLMConfig = Field(default_factory=OptimizerLLMConfig)

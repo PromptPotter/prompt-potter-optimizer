@@ -115,13 +115,21 @@ export interface DatasetItem {
   // so this is a descriptive snapshot — not the iteration order.
   // null when the sample has no measurement yet.
   pick_score: number | null;
+  // Rasch difficulty δ_s and its standard error — fed to the Info gain
+  // column's debug tooltip. null when the sample has no measurement yet.
+  delta: number | null;
+  delta_se: number | null;
 }
 
 export interface DatasetPreview {
   name: string;
   row_count: number;
-  train_count: number;
-  test_count: number;
+  measured_count: number;
+  unmeasured_count: number;
+  // Declared train/test fold sizes from datasets/{name}/campaign.json.
+  // null when the dataset declares no split. Scope-independent.
+  split_train: number | null;
+  split_test: number | null;
   items: DatasetItem[];
 }
 

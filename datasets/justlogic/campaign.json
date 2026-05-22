@@ -5,6 +5,10 @@
     "sp_budget_ttest": 20,
     "exclude_nodes": [],
     "pipeline_overrides": {},
+    "dataset_split": {
+      "train": 400,
+      "test": 1000
+    },
     "optimization": {
       "l1_patience": 0,
       "max_rounds": 5,

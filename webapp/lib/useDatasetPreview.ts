@@ -1,8 +1,11 @@
 "use client";
 // Dataset preview for the unit in view — the sample roster + per-sample
-// measurement history that back the hard-samples heat-map. One fetch chain
-// (dataset name → preview → measurement series), owned here so a tab swap
-// (New Job ↔ View Results) reuses the result instead of re-fetching.
+// measurement history that back the hard-samples heat-map. Both data scopes
+// (campaign-only and cross-campaign dataset) are fetched once per unit and
+// held together, so the campaign ⇄ dataset toggle is an instant in-memory
+// swap — never a re-fetch, never a blank frame. The optimizer's own
+// next-sample picker always runs on the dataset scope (see
+// l1/execute.py round-subset fit); this toggle is display only.
 
 import { useEffect, useState } from "react";
 import {
@@ -14,38 +17,74 @@ import {
   type MeasurementDot,
 } from "./api";
 
-export interface DatasetPreviewState {
-  datasetName: string | null;
+// One scope's roster + measurement evidence. Held twice (campaign,
+// dataset) inside the hook; the toggle picks which one surfaces.
+interface ScopeSlice {
   items: DatasetItem[];
-  trainCount: number;
-  testCount: number;
+  measuredCount: number;
+  unmeasuredCount: number;
   archivePerSample: Map<number, MeasurementDot[]>;
 }
 
-// The bundle plus the unit key it was loaded for. The key lets a render
-// between a unit switch and the new fetch landing tell its data apart from
-// the prior unit's — see the return derivation below.
-interface Loaded extends DatasetPreviewState {
-  key: string | null;
+export interface DatasetPreviewState {
+  datasetName: string | null;
+  // Held-out test fold size declared in datasets/{name}/campaign.json —
+  // scope-independent. null when the dataset declares no split.
+  splitTest: number | null;
+  items: DatasetItem[];
+  measuredCount: number;
+  unmeasuredCount: number;
+  archivePerSample: Map<number, MeasurementDot[]>;
 }
 
-const EMPTY: DatasetPreviewState = {
-  datasetName: null,
+// Both scopes plus the unit key they were loaded for. The key lets a
+// render between a unit switch and the new fetch landing tell its data
+// apart from the prior unit's — see the return derivation below.
+interface Loaded {
+  key: string | null;
+  datasetName: string | null;
+  splitTest: number | null;
+  campaign: ScopeSlice;
+  dataset: ScopeSlice;
+}
+
+const EMPTY_SLICE: ScopeSlice = {
   items: [],
-  trainCount: 0,
-  testCount: 0,
+  measuredCount: 0,
+  unmeasuredCount: 0,
   archivePerSample: new Map(),
 };
 
-// One hook, one bundled state, one effect. `scope` is the campaign ⇄ dataset
-// heat-map toggle; changing it re-fetches the measurement dots but keeps the
-// same unit key, so the roster stays put while only the evidence swaps.
+const EMPTY: DatasetPreviewState = {
+  datasetName: null,
+  splitTest: null,
+  ...EMPTY_SLICE,
+};
+
+// Per-sample dot map from a measurement-series response.
+function dotMap(
+  items: { sample_id: number; measurements: MeasurementDot[] }[],
+): Map<number, MeasurementDot[]> {
+  const m = new Map<number, MeasurementDot[]>();
+  for (const s of items) m.set(s.sample_id, s.measurements);
+  return m;
+}
+
+// One hook, both scopes, one effect. The effect fires per unit (not per
+// scope) — `scope` only drives the pure return derivation, so toggling it
+// never re-runs the fetch.
 export function useDatasetPreview(
   campaignId: string | null,
   cycleId: string | null,
   scope: HardSamplesScope,
 ): DatasetPreviewState {
-  const [loaded, setLoaded] = useState<Loaded>({ ...EMPTY, key: null });
+  const [loaded, setLoaded] = useState<Loaded>({
+    key: null,
+    datasetName: null,
+    splitTest: null,
+    campaign: EMPTY_SLICE,
+    dataset: EMPTY_SLICE,
+  });
   const unitKey = campaignId && cycleId ? `${campaignId} ${cycleId}` : null;
 
   useEffect(() => {
@@ -56,49 +95,75 @@ export function useDatasetPreview(
       try {
         const name = await fetchActiveDatasetName(campaignId, cycleId, ac.signal);
         if (cancelled || !name) return;
-        // The sample roster is dataset-wide — fetch it at dataset scope so
-        // the heat-map always renders, even on a campaign with no
-        // hard_samples.json yet (campaign-scope /preview 404s).
-        const preview = await fetchDatasetPreview(
+
+        // Dataset scope — the cross-campaign roster + Rasch sort. This is
+        // the series the optimizer's picker actually follows; it always
+        // resolves (the archive snapshot needs no campaign artifact).
+        const dsPreview = await fetchDatasetPreview(
           name, 1000, ac.signal, "dataset", campaignId, cycleId,
         );
-        // Cell evidence follows the campaign ⇄ dataset toggle. Campaign
-        // scope is empty before the campaign's first round — fall back to
-        // the cross-campaign archive so the badge still shows hit/miss.
-        let seriesRes = await fetchMeasurementSeries(
-          name, 1000, ac.signal, scope, campaignId, cycleId,
+        const dsSeries = await fetchMeasurementSeries(
+          name, 1000, ac.signal, "dataset", campaignId, cycleId,
         ).catch(() => null);
-        if ((!seriesRes || seriesRes.items.length === 0) && scope !== "dataset") {
-          seriesRes = await fetchMeasurementSeries(
-            name, 1000, ac.signal, "dataset", campaignId, cycleId,
-          ).catch(() => null);
-        }
+
+        // Campaign scope — this campaign's own pooled fit. Before the
+        // campaign's first round it has measured nothing; fall back to the
+        // dataset slice so a campaign that simply hasn't run yet never
+        // shows an artificially-empty "fresh" sort.
+        const cmpPreview = await fetchDatasetPreview(
+          name, 1000, ac.signal, "campaign", campaignId, cycleId,
+        ).catch(() => null);
+        const cmpSeries = await fetchMeasurementSeries(
+          name, 1000, ac.signal, "campaign", campaignId, cycleId,
+        ).catch(() => null);
         if (cancelled) return;
-        const archivePerSample = new Map<number, MeasurementDot[]>();
-        for (const s of seriesRes?.items ?? []) {
-          archivePerSample.set(s.sample_id, s.measurements);
-        }
+
+        const datasetSlice: ScopeSlice = {
+          items: dsPreview.items,
+          measuredCount: dsPreview.measured_count,
+          unmeasuredCount: dsPreview.unmeasured_count,
+          archivePerSample: dotMap(dsSeries?.items ?? []),
+        };
+        const campaignHasData = !!cmpPreview && cmpPreview.measured_count > 0;
+        const campaignSlice: ScopeSlice = campaignHasData
+          ? {
+              items: cmpPreview.items,
+              measuredCount: cmpPreview.measured_count,
+              unmeasuredCount: cmpPreview.unmeasured_count,
+              archivePerSample: dotMap(
+                (cmpSeries && cmpSeries.items.length > 0
+                  ? cmpSeries
+                  : dsSeries
+                )?.items ?? [],
+              ),
+            }
+          : datasetSlice;
+
         setLoaded({
           key: `${campaignId} ${cycleId}`,
           datasetName: name,
-          items: preview.items,
-          trainCount: preview.train_count,
-          testCount: preview.test_count,
-          archivePerSample,
+          splitTest: dsPreview.split_test,
+          campaign: campaignSlice,
+          dataset: datasetSlice,
         });
       } catch {
-        /* transient fetch failure — a cycle/scope change re-runs this */
+        /* transient fetch failure — a cycle change re-runs this */
       }
     })();
     return () => {
       cancelled = true;
       ac.abort();
     };
-  }, [campaignId, cycleId, scope]);
+  }, [campaignId, cycleId]);
 
   // No stale frame: until the effect has loaded data FOR THIS unit, return
-  // EMPTY. A pure derivation — the loaded data carries the unit key it was
-  // fetched for, so a render between a unit switch and the new fetch landing
-  // can never show the prior unit's roster.
-  return loaded.key === unitKey ? loaded : EMPTY;
+  // EMPTY. A pure derivation — the toggle picks a held slice, so switching
+  // scope can never show the prior unit's roster and never re-fetches.
+  if (loaded.key !== unitKey) return EMPTY;
+  const slice = scope === "campaign" ? loaded.campaign : loaded.dataset;
+  return {
+    datasetName: loaded.datasetName,
+    splitTest: loaded.splitTest,
+    ...slice,
+  };
 }
