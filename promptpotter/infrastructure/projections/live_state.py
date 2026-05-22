@@ -32,6 +32,7 @@ __all__ = [
     "apply_p_best_update",
     "apply_phase",
     "apply_token_usage",
+    "backfill_spend_rates",
     "empty_bucket",
     "empty_spend",
     "roll_p_best_at_round_complete",
@@ -132,6 +133,41 @@ def apply_token_usage(spend: dict[str, Any], record: TokenUsageRecord) -> None:
         record.model,
         record.cost_usd,
     )
+
+
+def backfill_spend_rates(spend: dict[str, Any]) -> dict[str, Any]:
+    """Recompute ``used_usd`` on buckets whose rate didn't resolve at write
+    time but does resolve now.
+
+    Optimizer cache hits short-circuit ``emit_token_usage`` (see
+    ``llm_call.py``), so a re-run never fires fresh ``TokenUsageRecord``
+    events for the loop bucket. The persisted bucket keeps its old
+    ``rate_known: false`` even after ``shared/spend.py`` learns the model.
+    This pass re-resolves the rate on load — if it now succeeds, ``used_usd``
+    is computed from the accumulated tokens and the bucket flips to
+    ``rate_known: true``. Per-event historical rate drift is accepted as a
+    tolerable approximation (the alternative is replaying the entire ledger).
+    """
+    for b in spend.values():
+        if not isinstance(b, dict):
+            continue
+        if b.get("rate_known") is True:
+            continue
+        model = b.get("model")
+        in_tok = int(b.get("input_tokens") or 0)
+        out_tok = int(b.get("output_tokens") or 0)
+        if not model or (in_tok == 0 and out_tok == 0):
+            continue
+        usd = compute_usd(model, in_tok, out_tok)
+        if usd is None:
+            continue
+        b["used_usd"] = round(float(usd), 6)
+        b["rate_known"] = True
+    spend["total_used_usd"] = round(
+        sum(float(b.get("used_usd") or 0.0) for b in spend.values() if isinstance(b, dict)),
+        6,
+    )
+    return spend
 
 
 @dataclass

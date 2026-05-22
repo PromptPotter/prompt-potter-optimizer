@@ -18,7 +18,7 @@ Every trace gets rescored under the active scorer when crossing from disk to mem
 
 ## Deprecated samples
 
-Some traces describe non-observations — LLM exhausted reasoning budget before emitting visible content, empty response, content filter fired. The backend emits **neutral advisory** warnings (e.g. `llm_only:content_empty`) plus raw response shape (`finish_reason`, reasoning token count). PromptPotter's `classify_result()` (`application/optimization/elimination.py`) walks those signals and derives **fatal codes** — a result whose classifier returns any fatal code is deprecated.
+Some traces describe non-observations — LLM exhausted reasoning budget before emitting visible content, empty response, content filter fired. The backend emits **neutral advisory** warnings (e.g. `llm_only:content_empty`) plus raw response shape (`finish_reason`, reasoning token count). PromptPotter's `classify_result()` (`application/optimization/pobb/elimination/classification.py`) walks those signals and derives **fatal codes** — a result whose classifier returns any fatal code is deprecated.
 
 Three effects at the load boundary:
 

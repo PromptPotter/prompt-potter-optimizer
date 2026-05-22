@@ -150,7 +150,7 @@ The persisted world is a four-entity containment hierarchy
 
 - **PoBB** — Posterior of Being Best. Bayesian round-level elimination
   rule (ε=0.05, n_min=4). Joint Normal-CLT posterior + Monte Carlo
-  argmax. `application/optimization/pobb/elimination.py`.
+  argmax. `application/optimization/pobb/elimination/checks.py`.
 - **Posterior width** — `1 - max(p_best)`. Operator-visible measure of
   how confidently the leader can be locked in. Surfaced on
   `dashboard.json::current_round.pobb`.
@@ -211,7 +211,7 @@ The persisted world is a four-entity containment hierarchy
 ## Dispatch — info-flow to optimizer prompts
 
 - **INJECTIONS** — the typed registry of every `{{slot}}` an optimizer
-  prompt can reference. `application/optimization/dispatch/hub/injections.py`.
+  prompt can reference. `application/optimization/dispatch/hub/injections/registry.py`.
 - **DispatchHub** — the facade with `fill_l1` (L1 layout-driven) and
   `fill_fixed` (L1_CRITIQUE / L2 / L3 placeholder substitution).
   `application/optimization/dispatch/hub/facade.py`.

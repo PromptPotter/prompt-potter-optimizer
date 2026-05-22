@@ -58,16 +58,16 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 | `DispatchHub` | `promptpotter/application/optimization/dispatch/hub/facade.py:154` |
 | `DispatchHub.fill_l1` / `.fill_fixed` | `dispatch/hub/facade.py:207` / `:240` |
 | `build_bundle` | `promptpotter/application/optimization/dispatch/hub/builder.py:27` |
-| `INJECTIONS` (slot registry) | `promptpotter/application/optimization/dispatch/hub/injections.py:940` |
+| `INJECTIONS` (slot registry) | `promptpotter/application/optimization/dispatch/hub/injections/registry.py:118` |
 | `validate_template` | `promptpotter/application/optimization/dispatch/hub/facade.py:67` |
-| `load_optimizer_prompt` | `promptpotter/application/optimization/dispatch/llm_call.py:602` |
+| `load_optimizer_prompt` | `promptpotter/application/optimization/dispatch/llm_call/prompts.py:161` |
 | `RunCallbacks` (typed event constructor) | `promptpotter/application/run_observers.py:49` |
 | `RESUME_CHECKPOINT_GATING` | `promptpotter/application/optimization/resume_and_fork/decisions.py:53` |
 
 ### Application — scoring / bootstrap
 | Symbol | File:line |
 |---|---|
-| `score_search_point` (gateway) | `promptpotter/application/scoring/search_point_scorer.py:455` |
+| `score_search_point` (gateway) | `promptpotter/application/scoring/search_point_scorer.py:115` |
 | `measure_sample` | `promptpotter/application/scoring/sample_measurement.py:263` |
 | `compile_scorer` | `promptpotter/application/scoring/formula/compiler.py:131` |
 | `compute_composite_fitness` | `promptpotter/application/scoring/metrics.py:207` |
@@ -128,9 +128,9 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 
 **`promptpotter/application/optimization/`** — orchestration
 - `cycle.py` — `Cycle` state container (rounds / population / stall counters)
-- `l1/` — round loop: `generate.py`, `score.py`, `resume.py`, `execute.py`, `critique.py`, `population.py`, `stats.py`
-- `dispatch/` — info-flow ingress: `hub/` (`injections.py` for `INJECTIONS`, `facade.py` for `DispatchHub` + `validate_template`, `builder.py` for `build_bundle`, `bundle.py` for `InjectionBundle` types), `llm_call.py`, `schemas.py` (manifest at `datasets/_optimizer/pipeline.json`)
-- `pobb/` — `elimination.py` (PoBBCheck/Config, DegradationCheck), `elevation.py` (compare-cycle arbitration)
+- `l1/` — round loop: `generate.py`, `score/` (signal_effect/candidate/loop/winner), `resume.py`, `execute.py`, `critique.py`, `population.py`, `stats.py`
+- `dispatch/` — info-flow ingress: `hub/` (`injections/` for `INJECTIONS` + renderers, `facade.py` for `DispatchHub` + `validate_template`, `builder.py` for `build_bundle`, `bundle.py` for `InjectionBundle` types), `llm_call/` (`call.py` + `prompts.py`), `schemas.py` (manifest at `datasets/_optimizer/pipeline.json`)
+- `pobb/` — `elimination/` package (`checks.py` PoBBCheck/Config + DegradationCheck, `classification.py` classify_result), `elevation.py` (compare-cycle arbitration)
 - `validators/` — `l1_strict.py` (schema), `l1_behavior.py` + `l2_behavior.py` (soft checks), `l2_l3.py` (L2/L3 output)
 - `escalation/` — `state.py` (escalation state), `decide.py` (router), `rules.py`, `firing/` (L2/L3 drivers: `executor.py` + `l2_driver.py` + `l3_driver.py`)
 - `resume_and_fork/` — `decisions.py` (gating), `resume.py`, `replayers.py`, `fork_siblings.py`
@@ -153,7 +153,7 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 - `wiring.py` — service init: stores, LLM clients, connectors → `Session`
 
 **`promptpotter/application/sweep/`** — cheap L1 candidate A/B (`new --sweep-batch` mode)
-**`promptpotter/application/datasets.py`** — dataset loaders + per-dataset pipeline overlay
+**`promptpotter/application/datasets/`** — `loaders.py` (dataset loaders + `build_dataset_run_data`), `prompts.py` (per-dataset prompt store + pipeline overlay), `traces.py` (potter-trace loader)
 **`promptpotter/application/origin.py`** — origin cycle resolution
 
 **`promptpotter/infrastructure/`**
@@ -191,7 +191,7 @@ Six high-frequency multi-file recipes. Touch the listed files **in order**.
 4. `datasets/{dataset}/pipeline.json` — set `backend_type: "{newname}"`
 
 **2. Add a new INJECTIONS slot**
-1. `promptpotter/application/optimization/dispatch/hub/injections.py` — add `_Injection` row to `INJECTIONS` (`:940`); write its renderer fn
+1. `promptpotter/application/optimization/dispatch/hub/injections/registry.py` — add `_Injection` row to `INJECTIONS` (`:118`); write its renderer fn in the matching `injections/` module
 2. Caller side: if a new bundle field is needed, extend the `InjectionBundle` (`dispatch/hub/bundle.py`) / `build_bundle()` (`dispatch/hub/builder.py:27`)
 3. `datasets/{name}/prompts/{node}.json` — add `{{slot_name}}` to the relevant prompt
 4. Validation runs automatically at template-load time via `validate_template` (`dispatch/hub/facade.py:42`)
@@ -215,7 +215,7 @@ Six high-frequency multi-file recipes. Touch the listed files **in order**.
 
 **6. Extend L1 evidence panel / signal**
 1. `promptpotter/domain/opt_search_point.py` — add field to `OptSearchPoint` if persistent
-2. `promptpotter/application/optimization/dispatch/hub/injections.py` — add renderer fn + `INJECTIONS` row for the new signal
+2. `promptpotter/application/optimization/dispatch/hub/injections/` — add renderer fn in the matching module + the `INJECTIONS` row in `registry.py` for the new signal
 3. `promptpotter/application/optimization/l1/` — populate / use in panel-building logic
 4. `datasets/{name}/prompts/l1_generate.json` — add `{{slot_name}}` placeholder
 5. Per the **writer-needs-vocabulary** rule: any layer that *writes* this field needs its prompt to render the type/value space — wire that injection too
@@ -226,7 +226,7 @@ Self-enforcing primitives — if you're about to add a sidecar, check the matchi
 
 - `ResumeCheckpointKind` exhaustive enum + `RESUME_CHECKPOINT_GATING` registry — `domain/run_records.py:38` + `application/optimization/resume_and_fork/decisions.py:53` (import-time exhaustiveness check on `:74`)
 - `DerivedView.on_record` — `infrastructure/projections/base.py:28` — sole projection dispatch path
-- `DispatchHub.INJECTIONS` + `validate_template` — `application/optimization/dispatch/hub/injections.py:940` + `dispatch/hub/facade.py:67` — typo in a template fails at module load
+- `DispatchHub.INJECTIONS` + `validate_template` — `application/optimization/dispatch/hub/injections/registry.py:118` + `dispatch/hub/facade.py:67` — typo in a template fails at module load
 - `EscalationState` private counters / observation-only mutation — `application/optimization/escalation/state.py:88`
 - `EscalationRule` priority + first-match-wins — `escalation/rules.py:28` / `decide.py:64`
 - Layer purity tests — `tests/test_invariants.py::test_no_unexpected_runtime_layer_violations`, `::test_cycle_does_not_import_prompt_surface`, `::test_no_direct_artifact_writes_outside_stores`, `::test_artifact_sets_are_disjoint_and_well_formed`
@@ -264,9 +264,9 @@ The word **`legacy`** in code = code smell. The word **`deprecated`** is only sa
 
 | Question | Answer |
 |---|---|
-| Single LLM-call site for optimizer prompts? | `application/optimization/dispatch/llm_call.py::load_optimizer_prompt` then `DispatchHub.fill_*` then `compile_prompt` |
+| Single LLM-call site for optimizer prompts? | `application/optimization/dispatch/llm_call/prompts.py::load_optimizer_prompt` then `DispatchHub.fill_*` then `compile_prompt` |
 | Where does the loop decide to escalate? | `application/optimization/escalation/decide.py::decide_escalation` |
-| Where are prompt slots registered? | `application/optimization/dispatch/hub/injections.py::INJECTIONS` (`:940`) |
+| Where are prompt slots registered? | `application/optimization/dispatch/hub/injections/registry.py::INJECTIONS` (`:118`) |
 | Where is the ledger appended? | `infrastructure/ledger.py::CycleEventLog.append` (sole ingress) |
 | Where do CLI flags live? | `presentation/cli/parsers.py` |
 | Where is the scoring gateway? | `application/scoring/search_point_scorer.py::score_search_point` |
@@ -279,7 +279,7 @@ The word **`legacy`** in code = code smell. The word **`deprecated`** is only sa
 | Where is the connector registry? | `connectors/__init__.py::CONNECTORS` (`:16`) + `::get` (`:22`) |
 | Registered connectors today? | `termnorm` (`connectors/termnorm.py::CONNECTOR` `:214`) and `promptpotter` self-connector (`connectors/promptpotter.py`, M12 inner-cycle, wiring pending) |
 | Where is provider/model resolved per call? | `infrastructure/llm/openai_compat.py::OpenAICompatibleClient` / `llm/anthropic.py::AnthropicClient` |
-| Where is the dataset overlay merged onto wire payloads? | `application/datasets.py::load_dataset_node_overlay` (`:500`) → `application/config.py::configure_and_apply_pipeline` (`:344`) |
+| Where is the dataset overlay merged onto wire payloads? | `application/datasets/prompts.py::load_dataset_node_overlay` (`:23`) → `application/config.py::configure_and_apply_pipeline` (`:344`) |
 | Where is `Session` wired? | `application/bootstrap/wiring.py` + `application/bootstrap/session.py::Session` |
 | Where do resume divergence decisions live? | `application/optimization/resume_and_fork/decisions.py` (`RESUME_CHECKPOINT_GATING` at `:53`) |
 | Where is the typed event constructor for ledger writes? | `application/run_observers.py::RunCallbacks` |

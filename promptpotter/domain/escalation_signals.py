@@ -107,7 +107,8 @@ class RuntimeFailure:
     total_scored: int
     observed_config: dict[str, Any]  # snapshot of the offending node's config
     # Round in which this failure was first observed. Used by
-    # ``_r_runtime_failures`` (`application/optimization/dispatch_hub.py`)
+    # ``_r_runtime_failures``
+    # (`application/optimization/dispatch/hub/injections/wounds.py`)
     # to partition NEW (current round) vs ACCUMULATED (surviving earlier
     # rounds) from a single list.
     first_seen_round: int = 0

@@ -20,7 +20,7 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch/hub/injections.py`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
+**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch/hub/injections/`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
 
 **Invariant:** no prompt site summarizes its own data. If a name isn't in `INJECTIONS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear. `validate_template()` (called from `load_optimizer_prompt`) raises at module load on any `{{slot}}` name not in `INJECTIONS` — typos fail loud, not silent.
 
@@ -123,7 +123,7 @@ archive/                            MeasurementArchive
                                         sample)    config)  both)
 ```
 
-**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets.py:347`) → `archive.save(run_id, data)` (`infrastructure/store/measurement_archive.py:97`) → `AxisIndex.refresh()` pulls via `load_since()` (`application/intelligence/indexes.py:721`).
+**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/loaders.py:397`) → `archive.save(run_id, data)` (`infrastructure/store/measurement_archive.py:97`) → `AxisIndex.refresh()` pulls via `load_since()` (`application/intelligence/indexes.py:721`).
 
 **Read paths** (both return `list[Measurement]`):
 
@@ -136,7 +136,7 @@ archive/                            MeasurementArchive
 
 | Change | Files |
 |---|---|
-| New field on every measurement | `Measurement` (`domain/sample.py`), `build_dataset_run_data()` (`datasets.py:347`), `_to_measurement()` (`measurement_archive.py:418`); bump `MEASUREMENTS_SCHEMA_VERSION` (`config/settings.py:45`) |
+| New field on every measurement | `Measurement` (`domain/sample.py`), `build_dataset_run_data()` (`datasets/loaders.py:397`), `_to_measurement()` (`measurement_archive.py:418`); bump `MEASUREMENTS_SCHEMA_VERSION` (`config/settings.py:45`) |
 | New retrieval view | Method on `MeasurementArchive` parallel to `for_sample/for_config`. Pair with an index class if filtering must stay efficient. |
 | New derived index | Class with `_seen_runs` cursor + `ingest_run()`, register on `AxisIndex.refresh()` |
 

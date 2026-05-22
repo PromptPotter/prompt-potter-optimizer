@@ -230,7 +230,7 @@ priors will surface as divergence via the candidate side).
 
 | File | Role |
 |---|---|
-| `promptpotter/application/optimization/pobb/elimination.py::PoBBCheck` | Sample-keyed priors, `backfill_priors`, paired `check()`, `snapshot_priors`, `set_sample_universe` (budget for the dominance gate) |
+| `promptpotter/application/optimization/pobb/elimination/checks.py::PoBBCheck` | Sample-keyed priors, `backfill_priors`, paired `check()`, `snapshot_priors`, `set_sample_universe` (budget for the dominance gate) |
 | `promptpotter/application/intelligence/adaptive_picker.py` | Online picker: `update_theta_posterior`, `decision_information_gain`, `model_information_gain`, `pick_value`, `next_sample`, `expected_order` |
 | `promptpotter/application/optimization/l1/score.py::score_population` | Builds the `backfill_fn` closure + the `_next_sample(scored_outcomes)` closure; injects both into PoBB / the query loop |
 | `promptpotter/application/optimization/l1/score.py::score_one_candidate` | Calls `await elim_check.backfill_priors([s.id for s in dataset], samples_by_id)` over the full dataset budget before each candidate evaluates |

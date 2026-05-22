@@ -73,7 +73,7 @@ Two architectural commitments shape every bucket on this page:
 - `l1_generate` produces N candidate searchpoints from the parent.
 - `l1_score` runs each candidate against the dataset via the **sole
   scoring entry point** `score_search_point()`
-  (`application/scoring/search_point_scorer.py:455`). PromptPotter
+  (`application/scoring/search_point_scorer.py:115`). PromptPotter
   has three single-place-to-extend mechanisms — exactly one entry
   for each shape: **scoring** goes through `score_search_point()`,
   **persistence** through `CycleEventLog.append`, **prompt-fill**
@@ -112,7 +112,7 @@ mid-eval, deprecated cache entry from a transient backend hiccup) is
 **innocent** — a technical issue, not the candidate's fault. We log
 it, ignore it, and keep accumulating evidence on the same candidate.
 A candidate is aborted only when its **`DegradationCheck`**
-(`application/optimization/pobb/elimination.py:292`) fires — i.e. when its
+(`application/optimization/pobb/elimination/checks.py:68`) fires — i.e. when its
 fraction of failed measurements crosses the per-campaign
 `degradation_threshold` (`campaign.json::degradation_threshold`,
 e.g. `0.4` on gsm8k). Aggregated failures surface at round end and
@@ -374,7 +374,7 @@ PR.
 A cleanup PR that touches anything below needs an explicit case in
 the PR description.
 
-- **PoBB elimination** (`application/optimization/pobb/elimination.py`) —
+- **PoBB elimination** (`application/optimization/pobb/elimination/checks.py`) —
   the actual abort-and-continue mechanism. §0 errors-heal-tolerantly
   depends on this.
 - **DegradationCheck** mid-eval halt — the per-candidate
@@ -418,7 +418,7 @@ the PR description.
   (`application/intelligence/hard_sample_sorter.py`) + the leaderboard
   it powers — first-class per §0.
 - **`l1_signal_catalogue` + `pipeline_param_catalogue` injections**
-  (`application/optimization/dispatch/hub/injections.py`) — the
+  (`application/optimization/dispatch/hub/injections/catalogues.py`) — the
   discoverability scaffolding: the menu L2 reads to write `l1_layout`
   and the param menu L1 reads, the surface the §6 pre-flight gate's
   question 1 leans on. Don't drop "because nobody calls it from
@@ -450,7 +450,7 @@ the PR description.
   test harness). Audit during cleanup §1 for accumulated cruft, but
   don't delete the underlying scripts without operator confirmation.
 - **`score_search_point()` gateway**
-  (`application/scoring/search_point_scorer.py:455`) — sole scoring
+  (`application/scoring/search_point_scorer.py:115`) — sole scoring
   ingress. Sibling to `CycleEventLog.append` and `INJECTIONS`. Don't
   add a second scoring entry path "for convenience."
 - **`observed_node()` context manager** — the trace-emission seam

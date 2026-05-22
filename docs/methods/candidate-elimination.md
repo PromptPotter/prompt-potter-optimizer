@@ -30,7 +30,7 @@ Mechanics:
 3. For each candidate *c*, count the fraction of joint draws where *c*'s accuracy is argmax — that's `P(c is best)`.
 4. Stop candidate *c* when `P(c is best) < ε`.
 
-Code: `promptpotter/shared/statistics.py::posterior_best_probabilities()` and `pobb_should_stop()`, driven by `application/optimization/elimination.py::PoBBCheck`.
+Code: `promptpotter/shared/statistics.py::posterior_best_probabilities()` and `pobb_should_stop()`, driven by `application/optimization/pobb/elimination/checks.py::PoBBCheck`.
 
 ## Two regimes
 
@@ -71,10 +71,10 @@ Five independent mechanisms can end a candidate's evaluation early or annotate a
 |---|---|---|---|---|---|---|
 | 1 | **Validation skip** — `OptSearchPoint.wounds.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `wounds.validation_failures` | `application/optimization/l1.py::score_population` |
 | 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | annotated + possibly re-measured / swapped | — | `application/scoring/sample_measurement.py::execute_stale_data_protocol` |
-| 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
-| 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
-| 5 | **`PoBBCheck` — dominance** — `cand_max_final_hits < seed_total_hits` | every query | **1** | eliminated; `elimination_cut` with `data.dominance` | — | `application/optimization/pobb/elimination.py::_dominance_check` |
-| 6 | **`PoBBCheck` — Bayesian** — paired `P(best) < ε` | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/pobb/elimination.py` |
+| 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `application/optimization/pobb/elimination/checks.py` |
+| 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `application/optimization/pobb/elimination/checks.py` |
+| 5 | **`PoBBCheck` — dominance** — `cand_max_final_hits < seed_total_hits` | every query | **1** | eliminated; `elimination_cut` with `data.dominance` | — | `application/optimization/pobb/elimination/checks.py::_dominance_check` |
+| 6 | **`PoBBCheck` — Bayesian** — paired `P(best) < ε` | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/pobb/elimination/checks.py` |
 
 **Ordering inside the query loop.** For each query: (1) prior-result cache lookup; (2) if degraded → `execute_stale_data_protocol`; (3) `on_result` fires → display renders the line; (4) iterate every enabled check in `degradation_checks`; first to return a signal ends the candidate. Mechanisms 3–6 co-exist in that final list — fatal beats rate beats dominance beats Bayesian PoBB. Inside `PoBBCheck.check()` the dominance gate runs first (pure arithmetic) and the Bayesian posterior runs only if dominance didn't fire.
 

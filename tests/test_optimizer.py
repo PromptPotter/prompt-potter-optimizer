@@ -72,7 +72,9 @@ from promptpotter.domain.search_point import TaskDecomposition
 
 scipy = pytest.importorskip("scipy")  # transitively required by other math helpers
 
-from promptpotter.application.optimization.l1.score import is_leader_eligible  # noqa: E402
+from promptpotter.application.optimization.l1.score.winner import (  # noqa: E402
+    is_leader_eligible,
+)
 from promptpotter.application.optimization.pobb.elimination import (  # noqa: E402
     PoBBCheck,
     PoBBConfig,
@@ -1117,7 +1119,7 @@ async def test_optimizer_call_deadline_retries_once_then_raises(monkeypatch):
 
     import pytest
 
-    from promptpotter.application.optimization.dispatch import llm_call as llm_call_mod
+    from promptpotter.application.optimization.dispatch.llm_call import call as llm_call_mod
 
     monkeypatch.setattr(llm_call_mod, "OPTIMIZER_CALL_DEADLINE_S", 0.05)
 

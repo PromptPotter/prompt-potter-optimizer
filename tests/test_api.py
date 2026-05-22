@@ -305,7 +305,9 @@ def test_file_oversize_returns_null_content(
 ) -> None:
     client, campaign_id, cycle_id = seeded_tenant
     # Force the size threshold below dashboard.json's actual size.
-    monkeypatch.setattr("promptpotter.presentation.api.routers.campaigns._MAX_PREVIEW_BYTES", 1)
+    monkeypatch.setattr(
+        "promptpotter.presentation.api.routers.campaigns.files._MAX_PREVIEW_BYTES", 1
+    )
     resp = client.get(
         f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/file",
         params={"scope": "cycle", "path": "dashboard.json"},

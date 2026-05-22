@@ -41,16 +41,17 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.infrastructure.projections.base import DerivedView
+from promptpotter.infrastructure.projections.live_dashboard import candidate_block
+from promptpotter.infrastructure.projections.live_dashboard.factory import resolve_resume_state
 from promptpotter.infrastructure.projections.live_dashboard.pobb import build_pobb_block
 from promptpotter.infrastructure.projections.live_dashboard.score import build_l1_score_block
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
     accumulate_backend_spend,
-    apply_p_best_update,
     apply_phase,
     apply_token_usage,
+    backfill_spend_rates,
     empty_spend,
-    top_n_p_best,
 )
 from promptpotter.infrastructure.store import (
     cycle_dir_for,
@@ -76,62 +77,6 @@ _PHASE_TO_STATE: dict[str, str] = {
     CampaignPhase.MODIFY_PLAN: "l3_replanning",
     CampaignPhase.ESCALATION: "escalation",
 }
-
-
-def _backfill_spend_rates(spend: dict[str, Any]) -> dict[str, Any]:
-    """Recompute ``used_usd`` on buckets whose rate didn't resolve at
-    write time but does resolve now.
-
-    Optimizer cache hits short-circuit ``emit_token_usage`` (see
-    ``llm_call.py``), so a re-run never fires fresh ``TokenUsageRecord``
-    events for the loop bucket. The persisted bucket keeps its old
-    ``rate_known: false`` even after ``shared/spend.py`` learns the
-    model. This pass re-resolves the rate on load — if it now succeeds,
-    ``used_usd`` is computed from the accumulated tokens and the bucket
-    flips to ``rate_known: true``. Per-event historical rate drift is
-    accepted as a tolerable approximation (the alternative is replaying
-    the entire ledger).
-    """
-    from promptpotter.shared.spend import compute_usd
-
-    for b in spend.values():
-        if not isinstance(b, dict):
-            continue
-        if b.get("rate_known") is True:
-            continue
-        model = b.get("model")
-        in_tok = int(b.get("input_tokens") or 0)
-        out_tok = int(b.get("output_tokens") or 0)
-        if not model or (in_tok == 0 and out_tok == 0):
-            continue
-        usd = compute_usd(model, in_tok, out_tok)
-        if usd is None:
-            continue
-        b["used_usd"] = round(float(usd), 6)
-        b["rate_known"] = True
-    spend["total_used_usd"] = round(
-        sum(float(b.get("used_usd") or 0.0) for b in spend.values() if isinstance(b, dict)),
-        6,
-    )
-    return spend
-
-
-def _max_round_on_disk(rounds_dir: Path) -> int:
-    """Highest ``round_NNNN.json`` index in ``rounds_dir``, or ``0`` if none.
-
-    Used by ``LiveDashboardView.for_session`` to self-heal a stale
-    ``round`` pointer when the prior ``dashboard.json`` was zeroed by an
-    earlier re-init but completed-round checkpoints still exist on disk.
-    """
-    if not rounds_dir.is_dir():
-        return 0
-    highest = 0
-    for path in rounds_dir.glob("round_*.json"):
-        stem = path.stem  # ``round_0003``
-        suffix = stem[len("round_") :]
-        if suffix.isdigit():
-            highest = max(highest, int(suffix))
-    return highest
 
 
 class LiveDashboardView(DerivedView):
@@ -233,7 +178,7 @@ class LiveDashboardView(DerivedView):
             "wallclock_serialized_at": None,
             "n_variants": n_variants,
             "sp_budget_ttest": sp_budget_ttest,
-            "spend": _backfill_spend_rates(r.get("spend") or empty_spend()),
+            "spend": backfill_spend_rates(r.get("spend") or empty_spend()),
             # Filled by ``_handle_llm_call_start`` while a meta-prompt LLM
             # call is in progress; cleared on the paired ``LLMCallRecord``.
             # Stays ``None`` between calls — explicit so the webapp doesn't
@@ -286,33 +231,12 @@ class LiveDashboardView(DerivedView):
         family_dir = SessionFamilyDir(cycle_dir_for(tenant_root, campaign_id, session_root))
         session_dir = session_dir_for(tenant_root, session_id)
 
-        resume_from: dict[str, Any] | None = None
-        prior_state = Path(family_dir) / "dashboard.json"
-        if prior_state.exists():
-            try:
-                resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
-                resume_from["origin_accuracy"] = origin_accuracy
-            except (json.JSONDecodeError, OSError):
-                resume_from = None
-
-        # ``best`` is the rolling-max composite for the active cycle. The prior
-        # ``dashboard.json`` may hold a number from an earlier run of the same
-        # session (resume re-instantiates this projection against the same
-        # session-family dir). Don't surface that number in the UI until the
-        # active cycle has produced an on-disk round to back it; otherwise
-        # every percentage chip shows a value the loop will never confirm.
-        # Self-heal the stale ``round`` pointer in the same pass — both
-        # signals depend on ``disk_round``.
-        if resume_from is not None:
-            # The active cycle's own ``rounds/`` — under ``cycles/{cycle_id}``.
-            active_cycle_dir = cycle_dir_for(tenant_root, campaign_id, cycle_id)
-            disk_round = _max_round_on_disk(active_cycle_dir / "rounds")
-            if disk_round > int(resume_from.get("round") or 0):
-                resume_from["round"] = disk_round
-            if disk_round == 0 or (
-                resumed_from_round is not None and max(resumed_from_round - 1, 0) == 0
-            ):
-                resume_from["best"] = 0.0
+        resume_from = resolve_resume_state(
+            Path(family_dir),
+            cycle_dir_for(tenant_root, campaign_id, cycle_id),
+            origin_accuracy,
+            resumed_from_round,
+        )
 
         return cls(
             family_dir,
@@ -460,10 +384,11 @@ class LiveDashboardView(DerivedView):
             result = payload.get("result") or {}
             self._update_sample_markers(ci, ct, qi, qt)
             self._absorb_sample_scored(result, last_in_candidate=(qi + 1 >= qt))
-            self._append_sample(ci, ct, qi, qt, result)
+            candidate_block.append_sample(self._round, ci, ct, qi, qt, result)
             self._persist()
         elif ev == "candidate_started":
-            self._seed_candidate(
+            candidate_block.seed_candidate(
+                self._round,
                 ci,
                 ct,
                 payload.get("changes_description") or "",
@@ -473,10 +398,12 @@ class LiveDashboardView(DerivedView):
         elif ev == "candidate_scored":
             scores = payload.get("scores") or {}
             self._update_current_acc(scores)
-            self._set_candidate_scores(ci, ct, scores)
+            candidate_block.set_candidate_scores(self._round, ci, ct, scores)
             # flushed by next sample_scored or by round_complete.
         elif ev == "p_best_update":
-            self._update_p_best(
+            candidate_block.update_p_best(
+                self._round,
+                self._core,
                 ci,
                 ct,
                 payload.get("current_id") or "",
@@ -490,7 +417,8 @@ class LiveDashboardView(DerivedView):
                 self.state["hard_sample_order"] = [int(sid) for sid in order_raw]
                 self._persist()
         elif ev == "pobb_backfill":
-            self._append_backfill(
+            candidate_block.append_backfill(
+                self.state,
                 int(record.round or 0),
                 ci,
                 ct,
@@ -654,132 +582,6 @@ class LiveDashboardView(DerivedView):
         if accuracy > s["best"]:
             s["best"] = round(accuracy, 4)
         s["patience"] = f"{l1_stall_count}/{self.patience_max}"
-
-    # -- Per-round candidate mutations ---------------------------------------
-
-    def _candidate(self, idx: int, total: int = 0) -> dict[str, Any]:
-        """Lazy-init candidate slot. Sample/score/p_best callbacks may fire
-        before candidate_started seeds the slot, so all mutators funnel here.
-
-        ``changes_description`` holds the human-readable mutation text; the
-        canonical display ``label`` is composed in ``build_l1_score_block``
-        from the slot's round + idx via :func:`candidate_label`.
-        """
-        return self._round.setdefault("candidates", {}).setdefault(
-            idx,
-            {
-                "idx": idx,
-                "total": total,
-                "changes_description": "",
-                "samples": [],
-                "scores": None,
-            },
-        )
-
-    def _seed_candidate(
-        self,
-        idx: int,
-        total: int,
-        changes_description: str,
-        pp_override: dict | None,
-    ) -> None:
-        # Seed so CURRENT shows labelled pending slots before scoring lands.
-        entry = self._candidate(idx, total)
-        entry["total"] = total
-        entry["changes_description"] = changes_description or ""
-        entry["pp_override"] = pp_override
-
-    def _append_sample(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
-        pd = result.get("pipeline_data") or {}
-        query_time = float(pd.get("total_time", 0.0) or 0.0)
-        # Tokens may live on result or pd; prefer result, preserve 0 vs None.
-        in_tok = result.get("input_tokens")
-        out_tok = result.get("output_tokens")
-        self._candidate(ci, ct)["samples"].append(
-            {
-                "qi": qi,
-                "qt": qt,
-                "sample_id": result.get("sample_id"),
-                "hit": bool(result.get("hit")),
-                "cached": bool(result.get("cached", False)),
-                "query": result.get("query") or "",
-                "prediction": result.get("prediction") or "",
-                "ground_truth": result.get("ground_truth") or "",
-                "time_s": round(query_time, 2),
-                "terminated_at": pd.get("terminated_at") or "",
-                "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
-                "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,
-            }
-        )
-
-    def _set_candidate_scores(self, idx: int, total: int, scores: dict) -> None:
-        # Store the report verbatim — single source of truth shared with
-        # ``round_result.candidate_scores`` (same dict instance).
-        self._candidate(idx, total)["scores"] = scores
-
-    def _update_p_best(
-        self,
-        idx: int,
-        total: int,
-        current_id: str,
-        n_samples: int,
-        p_best: dict[str, float],
-    ) -> None:
-        """Merge per-sample P(best) into the candidate slot + top-5 leaderboard.
-
-        Stores each candidate's ``p_best``, signed delta vs prior query, and
-        a capped trajectory list. Also publishes the round-wide top-5 sorted
-        view at ``self._round["p_best_top"]``.
-        """
-        cand = self._candidate(idx, total)
-        current = float(p_best.get(current_id, 0.0))
-        prev = float(cand.get("p_best", current))
-        history: list[float] = list(cand.get("p_best_history") or [])
-        history.append(current)
-        # Cap history at 64 entries — round size rarely exceeds 40.
-        if len(history) > 64:
-            history = history[-64:]
-        cand["p_best"] = current
-        cand["p_best_delta"] = current - prev
-        cand["p_best_history"] = history
-        cand["p_best_n_samples"] = n_samples
-
-        # Mirror the latest snapshot into the shared core so both renderers
-        # see the same round-wide P(best) state.
-        apply_p_best_update(self._core, current_id, n_samples, p_best)
-
-        # Round-wide leaderboard (top-5 by P(best)).
-        self._round["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(p_best)]
-
-    def _append_backfill(
-        self,
-        round_num: int,
-        idx: int,
-        total: int,
-        backfilled: dict[str, list[str]],
-    ) -> None:
-        """Append a paired-PoBB backfill event to the dashboard's rolling log.
-
-        Webapp + notebook readers see this under ``dashboard.json::backfill_log``.
-        Each entry names the round/candidate the backfill ran ahead of and the
-        per-prior list of newly-measured sample IDs — so the operator can tell
-        when "the leader got measured on the hard samples" vs "everything was
-        already cached" (no entry = cached). Capped at 64 entries for size.
-        """
-        log: list[dict[str, Any]] = list(self.state.get("backfill_log") or [])
-        log.append(
-            {
-                "round": int(round_num),
-                "candidate_idx": int(idx),
-                "candidate_total": int(total),
-                "backfilled": backfilled,
-                "n_priors": len(backfilled),
-                "n_measurements": sum(len(v) for v in backfilled.values()),
-            }
-        )
-        if len(log) > 64:
-            log = log[-64:]
-        self.state["backfill_log"] = log
 
     # -- Internal --------------------------------------------------------------
 

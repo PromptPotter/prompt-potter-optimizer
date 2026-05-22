@@ -112,7 +112,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 
 ## 4. DispatchHub INJECTIONS keys
 
-`{{slot}}` names available in any optimizer prompt. Defined in `dispatch/hub/injections.py::INJECTIONS`. Adding a slot is one entry; using a slot not in the dict is a load-time `KeyError` via `validate_template`.
+`{{slot}}` names available in any optimizer prompt. Defined in `dispatch/hub/injections/registry.py::INJECTIONS`. Adding a slot is one entry; using a slot not in the dict is a load-time `KeyError` via `validate_template`.
 
 | Slot | Kind | Description |
 |---|---|---|

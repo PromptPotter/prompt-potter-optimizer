@@ -290,7 +290,7 @@ an oversized prompt before this hard ceiling.
 - `dispatch/hub/bundle.py` — `InjectionTier` enum; required `tier` +
   `char_cap` on `_Injection`; `OPTIMIZER_PROMPT_CHAR_BUDGET` +
   `TASK_CONTEXT_VALUE_CAP`; `InjectionBundle.ignore_render_errors`.
-- `dispatch/hub/injections.py` — `tier` + `char_cap` on every
+- `dispatch/hub/injections/registry.py` — `tier` + `char_cap` on every
   `INJECTIONS` entry; the `prompt_budget_status` injection +
   `_r_prompt_budget_status` + `_INJECTION_AUTHOR`; import-time
   `L1_MANDATORY ⊆ MANDATORY-tier` check; `_r_task_context` per-field

@@ -1,15 +1,17 @@
-"""Per-cycle optimization artifacts under ``campaigns/``.
+"""Campaign + cycle file I/O under ``campaigns/{campaign_id}/``.
 
-The original ``campaign_store.py`` (~722 lines) is split into:
-
-* :mod:`store` — the :class:`CampaignStore` class (the I/O surface).
+* :mod:`store` — the :class:`CampaignStore` class, composed from the four
+  mixin modules over the shared :mod:`_kernel`.
+* :mod:`_kernel` — path resolution + the campaign/cycle reads used across
+  mixins.
+* :mod:`manifest` / :mod:`cycles` / :mod:`forks` / :mod:`rounds` — the four
+  method groups: ``campaign.json`` CRUD, cycle ``index.json`` CRUD, fork
+  index writers, round + candidate file CRUD.
 * :mod:`ledger_scan` — pure ledger reader
-  (:func:`scan_ledger_max_round_complete`) used by ``rewind_to_round``
-  for admissibility checks. Pure file read, no subscribers fire.
+  (:func:`scan_ledger_max_round_complete`) used by ``rewind_to_round`` for
+  admissibility checks. Pure file read, no subscribers fire.
 * :mod:`index_helpers` — pure ``index.json`` shape helpers
   (:func:`round_summary`, :func:`fresh_sibling_index_blob`).
-
-Existing imports continue to work; :class:`CampaignStore` is re-exported here.
 """
 
 from __future__ import annotations

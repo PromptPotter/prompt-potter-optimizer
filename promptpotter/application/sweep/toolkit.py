@@ -22,8 +22,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.optimization.dispatch import llm_call as _llm_call
-from promptpotter.application.optimization.dispatch.llm_call import compute_optimizer_prompt_hashes
+from promptpotter.application.optimization.dispatch.llm_call import (
+    compute_optimizer_prompt_hashes,
+)
+from promptpotter.application.optimization.dispatch.llm_call import prompts as _opt_prompts
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
@@ -201,18 +203,18 @@ def optimizer_prompt_override(node_name: str, template: PromptTemplate | None) -
         yield
         return
 
-    original = _llm_call._load_local
+    original = _opt_prompts._load_local
 
     def _overridden(name: str) -> PromptTemplate:
         if name == node_name:
             return template
         return original(name)
 
-    _llm_call._load_local = _overridden  # type: ignore[assignment]
+    _opt_prompts._load_local = _overridden  # type: ignore[assignment]
     try:
         yield
     finally:
-        _llm_call._load_local = original  # type: ignore[assignment]
+        _opt_prompts._load_local = original  # type: ignore[assignment]
         # Drop the lru_cache so the canonical loader's first call re-reads
         # from disk rather than returning a stale override.
         with contextlib.suppress(AttributeError):

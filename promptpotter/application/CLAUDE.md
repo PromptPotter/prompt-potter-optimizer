@@ -27,7 +27,7 @@ intelligence; intelligence does not depend on either.
 - `config.py` — `CampaignConfig` model + LLM factory.
 - `origin.py` — campaign origin scoring + dataset loading.
 - `review.py` — per-cycle markdown renderer (post-cycle log).
-- `datasets.py` — dataset loaders + sample materialization.
+- `datasets/` — `loaders.py` (dataset loaders + registry + `build_dataset_run_data`), `prompts.py` (per-dataset prompt store + node overlay), `traces.py` (potter-trace loader).
 - `run_observers.py` — `RunCallbacks` typed event constructor over `CycleEventLog.append`.
 
 ## Conventions

@@ -384,7 +384,7 @@ def test_session_cycle_id_grammar() -> None:
     it as a fork. ``campaign_id`` is stable across all N sessions.
     """
     from promptpotter.application.runner.identity import campaign_id_for, declaration_hash
-    from promptpotter.infrastructure.store.campaign_store.store import _unit_kind
+    from promptpotter.infrastructure.store.campaign_store.cycles import _unit_kind
     from promptpotter.infrastructure.store.paths import (
         root_cycle_id,
         session_cycle_id,

@@ -18,7 +18,7 @@ of a candidate-under-evaluation; emits an :class:`EscalationSignal` carrying
 an :class:`EscalationTarget` that terminates the round early
 (``ELIMINATE_CANDIDATE`` / ``LEADER_LOCKED``) or routes to the optimizer
 (``L2`` / ``L3`` / ``ABORT_CAMPAIGN``). Concrete stop rules: ``DegradationCheck``,
-``PoBBCheck`` in ``application/optimization/elimination.py``.
+``PoBBCheck`` in ``application/optimization/pobb/elimination/checks.py``.
 """
 
 from __future__ import annotations

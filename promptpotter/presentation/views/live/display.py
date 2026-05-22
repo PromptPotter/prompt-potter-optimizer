@@ -411,7 +411,7 @@ class LiveDisplay(DerivedView):
         # PoBB at q<8 with hard-sample-sorted draws is too noisy to act
         # on — a candidate read P(best)=73.6% at q6 then finished
         # ±0.0% vs origin at q20 in the cycle that motivated this gate.
-        # Matches ``lock_in_n_min`` in ``pobb/elimination.py`` so display
+        # Matches ``lock_in_n_min`` in ``pobb/elimination/checks.py`` so display
         # tracks the same authoritative-read threshold the optimizer uses.
         POBB_DISPLAY_MIN_SAMPLES = 8
         if (
