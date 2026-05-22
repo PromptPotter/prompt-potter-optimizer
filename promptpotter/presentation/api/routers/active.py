@@ -354,7 +354,8 @@ async def cleanup_empty_stubs(
 async def get_optimizer_pipeline() -> dict[str, Any]:
     """Bundled ``optimizer_pipeline.json`` — nodes, pipelines, and ``view`` topology
     (containers + node positions + edges) the webapp renders the workflow from."""
-    return json.loads(_OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
+    pipeline: dict[str, Any] = json.loads(_OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
+    return pipeline
 
 
 @_active_router.get("/evaluators_meta")

@@ -118,7 +118,8 @@ async def get_cycle_hard_samples(
     path = cycle_dir / "hard_samples.json"
     if not path.is_file():
         raise HTTPException(404, "hard_samples.json not present (cycle has no rounds yet)")
-    return json.loads(path.read_text(encoding="utf-8"))
+    artifact: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return artifact
 
 
 @campaigns_router.get(

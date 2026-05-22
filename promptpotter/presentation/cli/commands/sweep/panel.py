@@ -26,6 +26,8 @@ from promptpotter.presentation.cli.session import load_session
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.domain.sample import Sample
+    from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -43,7 +45,7 @@ def _mint_toolkit_batch_id() -> str:
 
 async def _fork_and_bind(
     args: argparse.Namespace,
-    parent_ctx,
+    parent_ctx: SessionCtx,
     sweep_id: str,
     batch_id: str,
     variant: _Variant,
@@ -100,9 +102,9 @@ async def _fork_and_bind(
 
 async def _run_one_panel_variant(
     args: argparse.Namespace,
-    ctx,
+    ctx: SessionCtx,
     session: Session,
-    train_data: list,
+    train_data: list[Sample],
     variant: _Variant,
     campaign_config: CampaignConfig,
 ) -> tuple[Any, Any]:

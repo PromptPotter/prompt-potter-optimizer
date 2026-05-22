@@ -176,7 +176,7 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
 
         immediate_parent = index.get("parent_cycle_id") or None
         _fork = index.get("fork")
-        fork_block: dict = _fork if isinstance(_fork, dict) else {}
+        fork_block: dict[str, Any] = _fork if isinstance(_fork, dict) else {}
         trigger = str(fork_block.get("trigger") or "")
 
         # Two sources for fork_from_round, tried in this order:
@@ -227,7 +227,7 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
         out_cycles.append(
             CampaignLineageCycle(
                 cycle_id=cid,
-                sibling_kind=str(index.get("sibling_kind") or sibling_kind(cid)),  # type: ignore[arg-type]
+                sibling_kind=str(index.get("sibling_kind") or sibling_kind(cid)),
                 immediate_parent_cycle_id=immediate_parent,
                 fork_from_round=from_round,
                 fork_from_candidate_id=from_candidate_str,

@@ -7,6 +7,8 @@ function readable.
 
 from __future__ import annotations
 
+from typing import Any
+
 from promptpotter.application.optimization.pobb.elimination import classify_result
 from promptpotter.application.scoring.formula import extract_display_answer
 from promptpotter.presentation.views.display import (
@@ -35,7 +37,7 @@ def _append_annotation(line: str, indent: str, color: str, emoji: str, text: str
 
 
 def fmt_query_result(
-    r: dict,
+    r: dict[str, Any],
     cached: bool = False,
     *,
     prefix: str = "",

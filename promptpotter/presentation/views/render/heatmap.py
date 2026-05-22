@@ -15,7 +15,7 @@ _HEATMAP_LABEL_W = 10
 _HEATMAP_CELL_W = 2
 
 
-def _cell_index(artifact: dict) -> dict[tuple[str, int], bool]:
+def _cell_index(artifact: dict[str, Any]) -> dict[tuple[str, int], bool]:
     return {(c["c"], int(c["s"])): bool(c["hit"]) for c in artifact.get("cells", [])}
 
 

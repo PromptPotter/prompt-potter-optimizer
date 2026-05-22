@@ -7,7 +7,7 @@ last things that hit the terminal before the next round starts.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.presentation.views.display import (
     GREEN,
@@ -32,7 +32,7 @@ def fmt_elapsed(seconds: float) -> str:
     return f"{s // 3600}h {(s % 3600) // 60:02d}m"
 
 
-def render_progress_table(rounds: list[dict], window: int = 8) -> str:
+def render_progress_table(rounds: list[dict[str, Any]], window: int = 8) -> str:
     """Round-over-round trajectory table: accuracy, composite_fitness, rolling avg, trend, plateau.
 
     Items in ``rounds`` must have at minimum ``round`` and ``accuracy``.

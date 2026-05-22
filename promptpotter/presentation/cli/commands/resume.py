@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
@@ -37,6 +37,9 @@ from promptpotter.presentation.cli.session import load_session
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.domain.results import CycleResult
+    from promptpotter.domain.sample import Sample
+    from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -50,13 +53,13 @@ class _PivotToFreshError(Exception):
 
 def _prepare_cycle_for_resume(
     args: argparse.Namespace,
-    ctx,
+    ctx: SessionCtx,
     session: Session,
     campaign_config: CampaignConfig,
-    train_data: list,
+    train_data: list[Sample],
     *,
     pivot_prompt: bool = True,
-) -> dict:
+) -> dict[Any, Any]:
     """Apply pipeline to session + verify the campaign config still matches.
 
     Drift is detected by recomputing the current config's content hash and
@@ -207,7 +210,7 @@ def _prepare_cycle_for_resume(
     return pipeline_params
 
 
-def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx, session) -> None:
+def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session: Session) -> None:
     """Diag-BFS: re-running ``--diag`` against a finalized diag cycle branches
     off a counted sibling (``{root}_diag_NNN``) instead of overwriting the
     parent's archive. Each probe is its own cycle with ``parent_cycle_id`` set;
@@ -244,13 +247,13 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx, session) -> None:
 
 async def _drive_optimization(
     args: argparse.Namespace,
-    ctx,
-    campaign_config,
-    session,
-    train_data,
+    ctx: SessionCtx,
+    campaign_config: CampaignConfig,
+    session: Session,
+    train_data: list[Sample],
     *,
     fork_on_divergence: bool,
-):
+) -> CycleResult:
     """One pass through the loop. Caller handles divergence menu + re-invoke."""
     from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
@@ -283,7 +286,11 @@ async def _drive_optimization(
 
 
 async def _run_loop(
-    args: argparse.Namespace, ctx, campaign_config, session, train_data
+    args: argparse.Namespace,
+    ctx: SessionCtx,
+    campaign_config: CampaignConfig,
+    session: Session,
+    train_data: list[Sample],
 ) -> CommandResult:
     """Drive the loop. On ``ResumeDivergenceError``, prompt the operator (if
     TTY) to fork inline; on yes, re-run the loop once with

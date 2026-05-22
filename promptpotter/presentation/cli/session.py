@@ -11,7 +11,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.store import Stores, build_stores
 
@@ -24,19 +24,21 @@ class SessionCtx:
     """Loaded session state with typed accessors over the raw state dict."""
 
     store: Stores
-    state: dict
+    state: dict[str, Any]
     backend_id: str
     session_id: str
     campaign_id: str
     cycle_id: str
 
     @property
-    def init_params(self) -> dict:
-        return self.state["init_params"]
+    def init_params(self) -> dict[str, Any]:
+        params: dict[str, Any] = self.state["init_params"]
+        return params
 
     @property
     def backend_url(self) -> str:
-        return self.init_params["backend_url"]
+        url: str = self.init_params["backend_url"]
+        return url
 
     @property
     def campaign_config(self) -> CampaignConfig:
@@ -54,7 +56,7 @@ class SessionCtx:
         from promptpotter.infrastructure.store.paths import DEFAULT_DATASETS_ROOT
 
         dataset_name = self.init_params.get("dataset_name") or ""
-        raw: dict = {}
+        raw: dict[str, Any] = {}
         if dataset_name:
             ds_path = DEFAULT_DATASETS_ROOT / dataset_name / "campaign.json"
             if ds_path.is_file():
@@ -66,7 +68,7 @@ class SessionCtx:
         return validate_campaign_config(raw)
 
     @property
-    def task_context(self) -> dict | None:
+    def task_context(self) -> dict[str, Any] | None:
         return self.state.get("task_context")
 
     def save_phase(self, phase: str) -> None:
@@ -108,13 +110,14 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
     return SessionCtx(store, state, backend_id, session_id, campaign_id, cycle_id)
 
 
-def load_campaign_config(config_path: str | None) -> dict:
+def load_campaign_config(config_path: str | None) -> dict[str, Any]:
     """Load campaign config JSON, unwrapping the optional outer ``campaign_config`` key."""
     if not config_path:
         return {}
     with open(config_path) as f:
         data = json.load(f)
-    return data.get("campaign_config", data) or {}
+    result: dict[str, Any] = data.get("campaign_config", data) or {}
+    return result
 
 
 __all__ = ["SessionCtx", "load_campaign_config", "load_session", "no_dataset_hint"]

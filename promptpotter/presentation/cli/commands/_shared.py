@@ -28,6 +28,8 @@ from promptpotter.config.settings import (
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -56,7 +58,7 @@ def get_verbose() -> bool:
 
 def log_startup_summary(
     session: Session,
-    pipeline_params: dict | None,
+    pipeline_params: dict[str, Any] | None,
     dataset_len: int,
     backend_url: str,
     dataset_name: str | None,
@@ -120,7 +122,9 @@ async def init_services_cli(
     )
 
 
-def _prepare_cycle(session: Session, campaign_config: CampaignConfig, dataset: list):
+def _prepare_cycle(
+    session: Session, campaign_config: CampaignConfig, dataset: list[Sample]
+) -> tuple[dict[Any, Any], OptSearchPoint, str]:
     """Apply pipeline → load origin → compute cycle_id. Returns (pipeline_params, origin, cycle_id)."""
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.origin import load_origin_prompt
@@ -143,9 +147,9 @@ def _mint_session_and_cycle(
     campaign_config: CampaignConfig,
     *,
     cycle_id: str,
-    init_params: dict,
-    pipeline_params: dict,
-    origin,
+    init_params: dict[str, Any],
+    pipeline_params: dict[str, Any],
+    origin: OptSearchPoint,
     dataset_count: int,
 ) -> tuple[str, str, str]:
     """Mint session + campaign + root cycle with the CLI's pipeline-snapshot extras.

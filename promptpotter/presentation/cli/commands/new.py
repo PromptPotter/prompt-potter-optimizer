@@ -33,6 +33,9 @@ if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.run_observers import RunObservers
+    from promptpotter.domain.sample import Sample
+    from promptpotter.presentation.cli.session import SessionCtx
+    from promptpotter.presentation.views.live import LiveDisplay
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -178,7 +181,7 @@ def _build_live_display(
     session: Session,
     campaign_config: CampaignConfig,
     origin_acc: float,
-):
+) -> LiveDisplay:
     """Build the CLI's LiveDisplay — verbose (-v) gets full notebook parity, else concise."""
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.presentation.views.display import set_display_tags
@@ -208,7 +211,7 @@ def _build_observers(
     args: argparse.Namespace,
     session: Session,
     campaign_config: CampaignConfig,
-    train_data: list,
+    train_data: list[Sample],
     origin_acc: float,
 ) -> RunObservers:
     """CLI thin shim around ``build_run_observers`` — passes ``args``-derived display."""
@@ -230,9 +233,9 @@ def _build_observers(
 
 async def _run_sweep_batch(
     args: argparse.Namespace,
-    root_ctx,
+    root_ctx: SessionCtx,
     campaign_config: CampaignConfig,
-    train_data: list,
+    train_data: list[Sample],
     sweep_payloads: list[tuple[Path, Any]],
 ) -> CommandResult:
     """Thin shim — defers to ``application.sweep.run_sweep_batch``.
@@ -265,7 +268,10 @@ async def _run_sweep_batch(
 
 
 async def _maybe_dispatch_sweep_batch(
-    args: argparse.Namespace, ctx, campaign_config, train_data
+    args: argparse.Namespace,
+    ctx: SessionCtx,
+    campaign_config: CampaignConfig,
+    train_data: list[Sample],
 ) -> CommandResult | None:
     """Multi-fork sweep dispatch: with --sweep-batch AND a non-empty
     ``datasets/{name}/sweep/*.json`` directory, mint one fork per
@@ -290,7 +296,11 @@ async def _maybe_dispatch_sweep_batch(
 
 
 async def _run_loop(
-    args: argparse.Namespace, ctx, campaign_config, session, train_data
+    args: argparse.Namespace,
+    ctx: SessionCtx,
+    campaign_config: CampaignConfig,
+    session: Session,
+    train_data: list[Sample],
 ) -> CommandResult:
     """Build observers, drive the optimization loop."""
     from promptpotter.application.runner import (

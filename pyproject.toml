@@ -109,7 +109,6 @@ namespace_packages = false
 module = [
     "promptpotter.application.*",
     "promptpotter.infrastructure.*",
-    "promptpotter.presentation.*",
 ]
 disallow_any_generics = false
 disallow_untyped_defs = false

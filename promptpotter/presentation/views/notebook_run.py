@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bootstrap import (
     init_services as _init_services,
@@ -92,16 +92,16 @@ def _try_display_html(html_body: str) -> bool:
         from IPython.display import HTML, display
     except ImportError:
         return False
-    if get_ipython() is None:
+    if get_ipython() is None:  # type: ignore[no-untyped-call]
         return False
-    display(HTML(html_body))
+    display(HTML(html_body))  # type: ignore[no-untyped-call]
     return True
 
 
 def render_completion(
     result: CycleResult,
     *,
-    best_round: dict,
+    best_round: dict[str, Any],
     pipeline_schema: PipelineSchema | None = None,
     dataset_name: str | None = None,
     campaign_id: str | None = None,
@@ -196,7 +196,7 @@ async def prepare_origin_notebook(
     train_data: list[Sample],
     campaign_config: CampaignConfig,
     *,
-    pipeline_params: dict | None = None,
+    pipeline_params: dict[str, Any] | None = None,
     experiment_id: str | None = None,
 ) -> tuple[RunObservers, list[Sample], CampaignOrigin]:
     """Build observers + score origin as a separate notebook cell.
@@ -247,7 +247,7 @@ async def run_optimization_notebook(
     session: Session,
     langfuse_session_id: str | None = None,
     experiment_id: str | None = None,
-    task_context: TaskDecomposition | dict | None = None,
+    task_context: TaskDecomposition | dict[str, Any] | None = None,
 ) -> CycleResult | None:
     """Run optimization with the observers built in the prior cell."""
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")

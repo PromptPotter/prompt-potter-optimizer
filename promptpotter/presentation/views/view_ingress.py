@@ -70,7 +70,7 @@ def _truncate(s: str, max_len: int) -> str:
 # --- per-phase typed builders (live; with ctx side effects) ---------------
 
 
-def _init_enter(d: dict, ctx: dict) -> InitEnterView:
+def _init_enter(d: dict[str, Any], ctx: dict[str, Any]) -> InitEnterView:
     config = d["config"]
     dataset = d["dataset"]
     session = d.get("env")
@@ -130,7 +130,7 @@ def _init_enter(d: dict, ctx: dict) -> InitEnterView:
     )
 
 
-def _init_exit(d: dict, ctx: dict) -> InitExitView:
+def _init_exit(d: dict[str, Any], ctx: dict[str, Any]) -> InitExitView:
     cycle = d["state"]
     session = d["env"]
     ctx["origin_accuracy"] = cycle.tracking.current_accuracy
@@ -174,7 +174,7 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
     )
 
 
-def _l1_generate_enter(d: dict, ctx: dict) -> RoundStartView:
+def _l1_generate_enter(d: dict[str, Any], ctx: dict[str, Any]) -> RoundStartView:
     # The header is rendered at L1_GENERATE.enter — BEFORE L1 produces
     # candidates. It describes the parent SP this round is mutating from;
     # it cannot honestly describe the round's mutation mode (params-only
@@ -214,7 +214,7 @@ def _l1_generate_enter(d: dict, ctx: dict) -> RoundStartView:
     )
 
 
-def _l1_generate_exit(d: dict, ctx: dict) -> CandidatesGeneratedView:
+def _l1_generate_exit(d: dict[str, Any], ctx: dict[str, Any]) -> CandidatesGeneratedView:
     candidates_meta = d.get("candidates", [])
     parent = ctx.get("current_sp_flat") or {}
     columns: list[tuple[str, dict[str, str]]] = [
@@ -253,7 +253,7 @@ def _l1_generate_exit(d: dict, ctx: dict) -> CandidatesGeneratedView:
     )
 
 
-def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
+def _l1_score_exit(d: dict[str, Any], ctx: dict[str, Any]) -> RoundCompleteView:
     score_entries = [score_entry_from_dict(s) for s in d.get("candidate_scores") or []]
 
     winner = pick_round_winner(score_entries)
@@ -305,7 +305,7 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
     )
 
 
-def _escalation_enter(d: dict, ctx: dict) -> EscalationEnterView:
+def _escalation_enter(d: dict[str, Any], ctx: dict[str, Any]) -> EscalationEnterView:
     return EscalationEnterView(
         check_name=d.get("check_name", "?"),
         target=d.get("target", "?"),
@@ -314,7 +314,7 @@ def _escalation_enter(d: dict, ctx: dict) -> EscalationEnterView:
     )
 
 
-def _escalation_exit(d: dict, ctx: dict) -> EscalationExitView:
+def _escalation_exit(d: dict[str, Any], ctx: dict[str, Any]) -> EscalationExitView:
     return EscalationExitView(
         classifications=tuple(
             (c.get("warning_type", ""), c.get("status", ""))
@@ -323,7 +323,7 @@ def _escalation_exit(d: dict, ctx: dict) -> EscalationExitView:
     )
 
 
-def _refine_enter(d: dict, ctx: dict) -> L2RefineEnterView:
+def _refine_enter(d: dict[str, Any], ctx: dict[str, Any]) -> L2RefineEnterView:
     params = d.get("l1_overrides") or {}
     return L2RefineEnterView(
         l2_round=d.get("l2_round", "?"),
@@ -335,7 +335,7 @@ def _refine_enter(d: dict, ctx: dict) -> L2RefineEnterView:
     )
 
 
-def _refine_exit(d: dict, ctx: dict) -> L2RefineExitView:
+def _refine_exit(d: dict[str, Any], ctx: dict[str, Any]) -> L2RefineExitView:
     return L2RefineExitView(
         param_changes_count=d.get("param_changes_count", 0),
         task_context_changed=bool(d.get("task_context_changed", False)),
@@ -348,7 +348,7 @@ def _refine_exit(d: dict, ctx: dict) -> L2RefineExitView:
     )
 
 
-def _probe_enter(d: dict, ctx: dict) -> ProbeEnterView:
+def _probe_enter(d: dict[str, Any], ctx: dict[str, Any]) -> ProbeEnterView:
     queries = list(d.get("probe_queries") or [])
     return ProbeEnterView(
         n_probe_samples=d.get("n_probe_samples", len(queries)),
@@ -356,14 +356,14 @@ def _probe_enter(d: dict, ctx: dict) -> ProbeEnterView:
     )
 
 
-def _probe_exit(d: dict, ctx: dict) -> ProbeExitView:
+def _probe_exit(d: dict[str, Any], ctx: dict[str, Any]) -> ProbeExitView:
     return ProbeExitView(
         n_probed=d.get("n_probed", 0),
         probe_hits=d.get("probe_hits", 0),
     )
 
 
-def _plan_enter(d: dict, ctx: dict) -> PlanEnterView:
+def _plan_enter(d: dict[str, Any], ctx: dict[str, Any]) -> PlanEnterView:
     return PlanEnterView(
         l3_round=d.get("l3_round", "?"),
         l2_stall_count=d.get("l2_stall_count", "?"),
@@ -371,7 +371,7 @@ def _plan_enter(d: dict, ctx: dict) -> PlanEnterView:
     )
 
 
-def _plan_exit(d: dict, ctx: dict) -> PlanExitView:
+def _plan_exit(d: dict[str, Any], ctx: dict[str, Any]) -> PlanExitView:
     return PlanExitView(
         new_plan_preview=_truncate(d.get("new_plan_preview", "") or "", 55),
         changes_description=d.get("changes_description", ""),
@@ -398,7 +398,7 @@ _BUILDERS: dict[str, Any] = {
 # --- live entry points ----------------------------------------------------
 
 
-def from_phase_event(event: PhaseEvent, ctx: dict) -> AnyView | None:
+def from_phase_event(event: PhaseEvent, ctx: dict[str, Any]) -> AnyView | None:
     """Build a typed view from a ``PhaseEvent``; ``None`` for unregistered phases."""
     if event.round is not None:
         ctx["round_num"] = event.round
@@ -414,7 +414,7 @@ def view_to_wire_dict(view: AnyView | None) -> dict[str, Any] | None:
 # --- wire-dict → typed reconstruction (for ledger subscribers) ------------
 
 
-def _sp_diff_from_dict(d: dict | None) -> SpDiffView:
+def _sp_diff_from_dict(d: dict[str, Any] | None) -> SpDiffView:
     if not d:
         return SpDiffView((), None, None, (), 1.0, 0, 0)
     return SpDiffView(
@@ -440,7 +440,7 @@ def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
     return max(non_aborted, key=lambda s: round_winner_key(s.composite_fitness, s.accuracy))
 
 
-def score_entry_from_dict(s: dict) -> ScoreEntry:
+def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
     """Project a candidate-score wire dict (``CandidateScore.to_dict()`` shape)
     into a ``ScoreEntry``. ``label`` is read from the dict (set canonically by
     ``build_score_report``); ``ci_lo``/``ci_hi`` are recomputed from hits/total
@@ -478,7 +478,7 @@ def score_entry_from_dict(s: dict) -> ScoreEntry:
     )
 
 
-def _init_enter_from_dict(v: dict) -> InitEnterView:
+def _init_enter_from_dict(v: dict[str, Any]) -> InitEnterView:
     return InitEnterView(
         warnings=tuple(
             WarningEntry(title=w.get("title", ""), detail=w.get("detail", ""))
@@ -496,7 +496,7 @@ def _init_enter_from_dict(v: dict) -> InitEnterView:
     )
 
 
-def _l1_generate_exit_from_dict(v: dict) -> CandidatesGeneratedView:
+def _l1_generate_exit_from_dict(v: dict[str, Any]) -> CandidatesGeneratedView:
     return CandidatesGeneratedView(
         **{k: v[k] for k in v if k != "sp_diff" and k != "clone_labels"},
         clone_labels=tuple(v.get("clone_labels") or []),
@@ -504,7 +504,7 @@ def _l1_generate_exit_from_dict(v: dict) -> CandidatesGeneratedView:
     )
 
 
-def _l1_score_exit_from_dict(v: dict) -> RoundCompleteView:
+def _l1_score_exit_from_dict(v: dict[str, Any]) -> RoundCompleteView:
     return RoundCompleteView(
         **{k: v[k] for k in v if k != "scores"},
         scores=tuple(score_entry_from_dict(s) for s in v.get("scores") or []),
@@ -512,7 +512,7 @@ def _l1_score_exit_from_dict(v: dict) -> RoundCompleteView:
 
 
 # Pure ``XxxView(**v)`` cases — registry of phase:event → dataclass.
-_PURE_RECONSTRUCT: dict[str, type] = {
+_PURE_RECONSTRUCT: dict[str, type[AnyView]] = {
     "init:exit": InitExitView,
     "l1_generate:enter": RoundStartView,
     "escalation:enter": EscalationEnterView,
@@ -524,7 +524,7 @@ _PURE_RECONSTRUCT: dict[str, type] = {
 }
 
 # Cases that need wire-dict adaptation (tuples, nested views, etc.).
-_CUSTOM_RECONSTRUCT: dict[str, Callable[[dict], AnyView]] = {
+_CUSTOM_RECONSTRUCT: dict[str, Callable[[dict[str, Any]], AnyView]] = {
     "init:enter": _init_enter_from_dict,
     "l1_generate:exit": _l1_generate_exit_from_dict,
     "l1_score:exit": _l1_score_exit_from_dict,

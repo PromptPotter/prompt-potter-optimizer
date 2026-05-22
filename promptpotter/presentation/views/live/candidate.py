@@ -12,7 +12,7 @@ Pure: no I/O, no mutation. Two flows:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.presentation.views.display import (
@@ -29,7 +29,7 @@ from promptpotter.shared.composite import render_composite_fitness_oneliner
 from promptpotter.shared.statistics import wilson_ci
 
 
-def fmt_pp_override(pp: dict | None) -> str:
+def fmt_pp_override(pp: dict[str, Any] | None) -> str:
     """Flatten a nested pipeline_params override to ``node.key: val  …``.
 
     Returns ``""`` when the override is empty or None. Callers supply the
@@ -51,7 +51,7 @@ def fmt_individual_header(
     idx: int,
     total: int,
     changes_description: str,
-    pp_override: dict | None,
+    pp_override: dict[str, Any] | None,
 ) -> str:
     """One-line pre-scoring header: ``ind k/N  <mutation>`` or ``ind k/N  parent re-eval``.
 
@@ -92,7 +92,7 @@ class IndividualSummary:
 
 
 def individual_summary_from_dict(
-    scores: dict,
+    scores: dict[str, Any],
     origin_acc: float,
     *,
     origin_composite_fitness: float | None = None,

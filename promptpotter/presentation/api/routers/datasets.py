@@ -66,7 +66,8 @@ def _resolve_scope_artifact(
         path = cycle_dir / "hard_samples.json"
         if not path.is_file():
             return {}
-        return json.loads(path.read_text(encoding="utf-8"))
+        cycle_artifact: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return cycle_artifact
     if scope == "campaign":
         if not campaign_id:
             raise HTTPException(400, "scope=campaign requires campaign_id")
@@ -76,7 +77,8 @@ def _resolve_scope_artifact(
         path = campaign_dir / "hard_samples.json"
         if not path.is_file():
             return {}
-        return json.loads(path.read_text(encoding="utf-8"))
+        campaign_artifact: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return campaign_artifact
     # scope == "dataset" — cross-campaign archive snapshot. Cross-dataset
     # pooling would be meaningless, so this is always per-dataset. The
     # cross-campaign view has no single campaign config, so the picker's

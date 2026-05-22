@@ -9,7 +9,7 @@ a ledger.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import OPTIMIZER_PROMPT_WARN_CHARS
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -79,7 +79,7 @@ class LiveDisplay(DerivedView):
         l1_patience: int,
         pipeline_schema: PipelineSchema | None,
         scoring_formula: str | None = None,
-        campaign_rounds: list | None = None,
+        campaign_rounds: list[dict[str, Any]] | None = None,
     ) -> None:
         # Per-cycle scalars live on a shared ``LiveStateCore`` (round number,
         # origin + best anchors, P(best) round snapshot) so the dashboard
@@ -98,7 +98,7 @@ class LiveDisplay(DerivedView):
         # ``RunCallbacks`` wires its shared ctx onto ``self._phase_ctx``
         # after construction so the display sees the same dict the
         # phase-view builder writes to.
-        self._phase_ctx: dict = {}
+        self._phase_ctx: dict[str, Any] = {}
         # Mid-round running leader — updated after each
         # ``on_candidate_scored`` so the operator sees a one-line
         # scoreboard between candidates instead of waiting for the
@@ -306,7 +306,7 @@ class LiveDisplay(DerivedView):
     # the per-cycle ledger exists). The ``on_record`` dispatcher above
     # forwards ledger-driven events into the same handlers.
 
-    def on_phase(self, event: PhaseEvent, view: dict | None = None) -> None:
+    def on_phase(self, event: PhaseEvent, view: dict[str, Any] | None = None) -> None:
         if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
             self._write("\n" + _node_top("SCORE"))
         if view is not None:
@@ -373,7 +373,7 @@ class LiveDisplay(DerivedView):
                 self._phase_ctx["composite_fitness_formula"] = new_formula
 
     def on_sample_scored(
-        self, cand_idx: int, n_cands: int, result: dict, sample_idx: int, n_samples: int
+        self, cand_idx: int, n_cands: int, result: dict[str, Any], sample_idx: int, n_samples: int
     ) -> None:
         # ``cand_idx < 0`` is the paired-PoBB backfill sentinel — these
         # measurements are on the leader, not the current candidate, so
@@ -496,11 +496,11 @@ class LiveDisplay(DerivedView):
         idx: int,
         total: int,
         changes_description: str,
-        pp_override: dict | None,
+        pp_override: dict[str, Any] | None,
     ) -> None:
         self._write(fmt_individual_header(idx, total, changes_description, pp_override))
 
-    def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
+    def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:
         w = 66
         label = scores.get("label") or candidate_label(self._core.round_num, idx)
         origin_acc = self._phase_ctx.get("origin_accuracy", self.origin_acc)

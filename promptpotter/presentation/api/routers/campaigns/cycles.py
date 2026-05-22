@@ -160,4 +160,5 @@ async def get_cycle_dashboard(store: StoreDep, campaign_id: str, cycle_id: str) 
     path = cycle_dir_for(store.base_dir, campaign_id, session_root) / "dashboard.json"
     if not path.is_file():
         raise HTTPException(404, f"dashboard.json not present for {campaign_id}/{session_root}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    dashboard: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return dashboard

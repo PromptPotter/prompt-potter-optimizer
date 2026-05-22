@@ -204,7 +204,7 @@ def _pp_val(v: object) -> str:
 
 
 def _scoreboard(
-    candidate_scores: list[dict],
+    candidate_scores: list[dict[str, Any]],
     winner_label: str,
     origin_accuracy: float,
 ) -> str:
@@ -279,7 +279,7 @@ _WIRE_TYPE_TAGS: dict[str, str] = {
 }
 
 
-def _build_display_tags(schema) -> dict[str, str]:
+def _build_display_tags(schema: PipelineSchema) -> dict[str, str]:
     """Compute ``{node_name: tag}`` with auto-enumeration for duplicates.
 
     Resolution: ``_WIRE_TYPE_TAGS[node.wire_type]`` → ``node.name[:4]``.
@@ -301,7 +301,7 @@ def _build_display_tags(schema) -> dict[str, str]:
     return result
 
 
-def set_display_tags(schema) -> None:
+def set_display_tags(schema: PipelineSchema | None) -> None:
     """Set display tags from a PipelineSchema. Call once at pipeline init.
 
     Mutates ``DISPLAY_TAGS`` in place so other modules importing it keep
@@ -346,7 +346,7 @@ def render_markdown_box(title: str, content: str, empty_label: str, *, width: in
 
 
 def render_pipeline_overrides(
-    pipeline_params: dict | None,
+    pipeline_params: dict[str, Any] | None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> str:
     """Render ``pipeline_params`` as a copy-paste-ready ``pipeline_overrides`` block.
@@ -359,11 +359,11 @@ def render_pipeline_overrides(
     if not pipeline_params:
         return ""
 
-    node_entries: list[tuple[str, dict]] = []
+    node_entries: list[tuple[str, dict[str, Any]]] = []
     for key, val in pipeline_params.items():
         if key == "steps" or not isinstance(val, dict):
             continue
-        tunable: dict = {}
+        tunable: dict[str, Any] = {}
         if pipeline_schema:
             node = pipeline_schema.get_node(key)
             if node:

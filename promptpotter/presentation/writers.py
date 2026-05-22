@@ -63,7 +63,9 @@ __all__ = [
 ]
 
 
-def _filter_artifact_to_live_candidates(artifact: dict, live_cids: set[str]) -> dict:
+def _filter_artifact_to_live_candidates(
+    artifact: dict[str, Any], live_cids: set[str]
+) -> dict[str, Any]:
     """Restrict candidate_order + cells to ``live_cids`` (Y-axis hygiene).
 
     The Rasch fit stays joint (archive observations still contribute to
@@ -90,7 +92,7 @@ def _filter_artifact_to_live_candidates(artifact: dict, live_cids: set[str]) -> 
     return out
 
 
-def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict | None:
+def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, Any] | None:
     """Build + persist the hard-sample heatmap artifacts at each data scope.
 
     Three files, named by data scope:
@@ -361,7 +363,7 @@ def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
     )
 
 
-def write_log_md(session: Session, *, hard_samples_artifact: dict | None = None) -> None:
+def write_log_md(session: Session, *, hard_samples_artifact: dict[str, Any] | None = None) -> None:
     """Render the per-cycle log.md and refresh the campaign digest."""
     if not session.state.cycle_id or session.store is None:
         return
@@ -377,7 +379,7 @@ def _render_cycle_log_md(
     store: CampaignStore,
     campaign_id: str,
     cycle_id: str,
-    hard_samples_artifact: dict | None,
+    hard_samples_artifact: dict[str, Any] | None,
 ) -> None:
     """Per-cycle ``cycles/{cycle_id}/log.md`` — this cycle's rounds only."""
     index = store.load(campaign_id, cycle_id)
@@ -430,12 +432,12 @@ def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
 
 def _load_sibling_indices(
     store: CampaignStore, campaign_id: str, *, exclude: str
-) -> list[dict] | None:
+) -> list[dict[str, Any]] | None:
     """Every cycle ``index.json`` in the campaign except ``exclude``. ``None`` when empty."""
     cycles_dir = store.campaign_root_dir(campaign_id) / "cycles"
     if not cycles_dir.is_dir():
         return None
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for cycle_dir in sorted(cycles_dir.iterdir()):
         if not cycle_dir.is_dir() or cycle_dir.name == exclude:
             continue

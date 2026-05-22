@@ -23,6 +23,8 @@ from promptpotter.presentation.cli.session import load_session
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
+    from promptpotter.domain.sample import Sample
+    from promptpotter.presentation.cli.session import SessionCtx
 
 
 def _sweep_early_exit_reason(stop_reason: str) -> str:
@@ -143,10 +145,10 @@ async def _setup_sweep_cycle(
 
 async def _run_sweep_optimize(
     args: argparse.Namespace,
-    ctx,
+    ctx: SessionCtx,
     campaign_config: CampaignConfig,
     session: Session,
-    train_data: list,
+    train_data: list[Sample],
     *,
     halt_at_accuracy: float | None = None,
     max_spend_usd: float | None = None,

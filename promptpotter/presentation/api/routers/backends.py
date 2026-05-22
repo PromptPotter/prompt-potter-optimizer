@@ -56,7 +56,9 @@ class PipelineViewResponse(BaseModel):
 
 
 @backends_router.post("", response_model=RegisterBackendResponse, status_code=201)
-async def register_backend(request: RegisterBackendRequest, store: StoreDep):
+async def register_backend(
+    request: RegisterBackendRequest, store: StoreDep
+) -> RegisterBackendResponse:
     """Register a new backend connection."""
     backend_id = request.id or re.sub(r"[^a-z0-9]+", "-", request.name.lower().strip()).strip("-")
     if store.backends.get(backend_id):
@@ -80,7 +82,7 @@ async def register_backend(request: RegisterBackendRequest, store: StoreDep):
 
 
 @backends_router.get("", response_model=list[RegisterBackendResponse])
-async def list_backends(store: StoreDep):
+async def list_backends(store: StoreDep) -> list[RegisterBackendResponse]:
     """List all registered backends."""
     return [
         RegisterBackendResponse(
@@ -95,7 +97,7 @@ async def list_backends(store: StoreDep):
 
 
 @backends_router.get("/{backend_id}", response_model=RegisterBackendResponse)
-async def get_backend(backend_id: str, store: StoreDep):
+async def get_backend(backend_id: str, store: StoreDep) -> RegisterBackendResponse:
     """Get backend details."""
     b = get_backend_or_404(backend_id, store)
     return RegisterBackendResponse(
@@ -108,7 +110,7 @@ async def get_backend(backend_id: str, store: StoreDep):
 
 
 @backends_router.post("/{backend_id}/sync", response_model=SyncResponse)
-async def sync_experiments(backend_id: str, store: StoreDep):
+async def sync_experiments(backend_id: str, store: StoreDep) -> SyncResponse:
     """Sync experiments from backend API into project store (verbatim)."""
     backend = get_backend_or_404(backend_id, store)
     connector = connectors.get(backend.backend_type)
@@ -139,12 +141,12 @@ async def sync_experiments(backend_id: str, store: StoreDep):
 
 
 @backends_router.get("/{backend_id}/experiments")
-async def list_experiments(backend_id: str, store: StoreDep):
+async def list_experiments(backend_id: str, store: StoreDep) -> dict[str, Any]:
     """List synced experiments (from local store, native format)."""
     get_backend_or_404(backend_id, store)
 
     # First try the experiments list file
-    data = store.backends.load_sync(backend_id, "experiments.json")
+    data: dict[str, Any] | None = store.backends.load_sync(backend_id, "experiments.json")
     if data:
         return data
 
@@ -159,10 +161,12 @@ async def list_experiments(backend_id: str, store: StoreDep):
 
 
 @backends_router.get("/{backend_id}/experiments/{experiment_id}")
-async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep):
+async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep) -> dict[str, Any]:
     """Get a synced experiment in native backend format."""
     get_backend_or_404(backend_id, store)
-    data = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
+    data: dict[str, Any] | None = store.backends.load_sync(
+        backend_id, f"experiments/{experiment_id}.json"
+    )
     if not data:
         raise HTTPException(
             status_code=404,
@@ -172,7 +176,7 @@ async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep):
 
 
 @backends_router.get("/{backend_id}/pipeline", response_model=PipelineViewResponse)
-async def get_pipeline(backend_id: str, store: StoreDep):
+async def get_pipeline(backend_id: str, store: StoreDep) -> PipelineViewResponse:
     """Dynamic pipeline view from the backend."""
     backend = get_backend_or_404(backend_id, store)
     connector = connectors.get(backend.backend_type)
