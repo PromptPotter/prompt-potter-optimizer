@@ -6,14 +6,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Line } from "react-chartjs-2";
-import type { ChartData, ChartOptions } from "chart.js";
+import type { ChartData } from "chart.js";
+import { lineChartDefaults } from "@/lib/chart-options";
 import {
   fetchCampaignDetail,
   type CampaignDetail,
   type CycleListEntry,
 } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
-import { campaignOriginHash } from "@/lib/ids";
+import { campaignOriginHash, unitKey, UNIT_SEP } from "@/lib/ids";
 import { fmtPct1, fmtDelta } from "@/lib/format";
 
 interface Props {
@@ -27,22 +28,16 @@ interface LoadedCampaign {
 
 // A unit is the pair (campaign_id, cycle_id) — a cycle_id alone is
 // ambiguous across the re-run campaigns of one dataset. The pickers key,
-// value, and store the composite; `findUnit` splits it back.
-const SEP = "::";
-
-function unitKey(campaignId: string, cycleId: string): string {
-  return `${campaignId}${SEP}${cycleId}`;
-}
-
+// value, and store the composite (unitKey); `findUnit` splits it back.
 function findUnit(
   cycles: CycleListEntry[] | null,
   key: string | null,
 ): CycleListEntry | null {
   if (!cycles || !key) return null;
-  const i = key.indexOf(SEP);
+  const i = key.indexOf(UNIT_SEP);
   if (i < 0) return null;
   const cmp = key.slice(0, i);
-  const cyc = key.slice(i + SEP.length);
+  const cyc = key.slice(i + UNIT_SEP.length);
   return cycles.find((c) => c.campaign_id === cmp && c.cycle_id === cyc) ?? null;
 }
 
@@ -380,12 +375,10 @@ function TrajectoryChart({
       },
     ],
   };
-  const options: ChartOptions<"line"> = {
-    responsive: true,
-    maintainAspectRatio: false,
+  const options = lineChartDefaults({
     plugins: { legend: { display: true } },
     scales: { y: { min: 0, max: 1, ticks: { callback: (v) => `${Math.round(Number(v) * 100)}%` } } },
-  };
+  });
   return (
     <div className="compare-chart">
       <div className="compare-chart-title">Best-of-round accuracy</div>

@@ -8,7 +8,8 @@ import {
 } from "@/lib/poll";
 import { rootCycleId, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
-import { parseSampleLine } from "@/lib/sample-line";
+import { computeAccuracyFromSamples } from "@/lib/sample-line";
+import { CardFrame } from "@/components/ui/card";
 import { useSelection } from "./SelectionContext";
 import { FamilyTree } from "./FamilyTree";
 
@@ -84,22 +85,10 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
     if (inflight.length > 0 && currentRound != null && !out.some((r) => r.round === currentRound)) {
       const scoreboard: Candidate[] = inflight.map((c) => {
         const i = Number(c.idx);
-        let acc: number | null = null;
-        if (typeof c.stats?.accuracy === "number") {
-          acc = c.stats.accuracy;
-        } else if (c.samples && c.samples.length > 0) {
-          let hits = 0, total = 0;
-          for (const raw of c.samples) {
-            const p = typeof raw === "string" ? parseSampleLine(raw) : null;
-            if (p?.status === "HIT") { hits += 1; total += 1; }
-            else if (p?.status === "MISS") { total += 1; }
-            else if (raw && typeof raw === "object" && typeof raw.hit === "boolean") {
-              if (raw.hit) hits += 1;
-              total += 1;
-            }
-          }
-          acc = total > 0 ? hits / total : null;
-        }
+        const acc =
+          typeof c.stats?.accuracy === "number"
+            ? c.stats.accuracy
+            : computeAccuracyFromSamples(c.samples);
         return {
           candidate_id: `r${currentRound}_${i}`,
           label: c.label,
@@ -188,11 +177,11 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
       (dash as { best?: number } | null)?.best ??
       null;
     return (
-      <div className="card lineage-card">
-        <div className="card-title">
-          <span>Lineage</span>
-          <span className="badge">{isInheritedSibling ? "inherited" : "waiting"}</span>
-        </div>
+      <CardFrame
+        className="lineage-card"
+        title={<span>Lineage</span>}
+        actions={<span className="badge">{isInheritedSibling ? "inherited" : "waiting"}</span>}
+      >
         {/* Even when this cycle has no candidate rounds yet, the family
             cladogram (root + descendants) is still informative — operator
             can scan + click siblings. Self-hides when the family has no
@@ -227,16 +216,18 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
             "No rounds on disk yet — the tree appears once round 1 lands."
           )}
         </div>
-      </div>
+      </CardFrame>
     );
   }
 
   return (
-    <div className="card lineage-card">
-      <div className="card-title">
-        <span>Lineage</span>
+    <CardFrame
+      className="lineage-card"
+      title={<span>Lineage</span>}
+      actions={
         <span className="badge">{branches.children.length} candidates · {rounds.length} round{rounds.length === 1 ? "" : "s"}</span>
-      </div>
+      }
+    >
       {/* Campaign cladogram sits above the candidate cladogram — same
           visual language, different scale (cross-cycle vs within-cycle).
           Self-hides for single-cycle campaigns so it stays out of the way. */}
@@ -331,6 +322,6 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
           })}
         </svg>
       </div>
-    </div>
+    </CardFrame>
   );
 }

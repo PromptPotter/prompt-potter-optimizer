@@ -6,7 +6,8 @@ import { getCss } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
 import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
-import type { ChartOptions } from "chart.js";
+import { CardFrame } from "@/components/ui/card";
+import { barChartDefaults } from "@/lib/chart-options";
 
 ensureChartRegistered();
 
@@ -81,22 +82,19 @@ export function FreqChart({ dash, themeKey }: Props) {
     labels: LABELS,
     datasets: [{ data, backgroundColor: colors, borderRadius: 2 }],
   };
-  const options: ChartOptions<"bar"> = {
-    responsive: true,
-    maintainAspectRatio: false,
+  const options = barChartDefaults({
     plugins: { legend: { display: false } },
     scales: { x: { display: false }, y: { display: false } },
-  };
+  });
 
   return (
-    <div className="card">
-      <div className="card-title">
-        <span title={TERMS.stub_score_freq}>Score Frequency</span>
-        <span className="badge">{useLive ? "live" : "round"}</span>
-      </div>
+    <CardFrame
+      title={<span title={TERMS.stub_score_freq}>Score Frequency</span>}
+      actions={<span className="badge">{useLive ? "live" : "round"}</span>}
+    >
       <div style={{ position: "relative", height: 140 }}>
         <Bar key={themeKey} ref={chartRef} data={chartData} options={options} />
       </div>
-    </div>
+    </CardFrame>
   );
 }

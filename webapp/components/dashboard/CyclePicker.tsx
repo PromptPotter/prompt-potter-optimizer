@@ -1,7 +1,7 @@
 "use client";
 import { useWorkspace } from "@/lib/workspace";
 import type { Campaign, CycleListEntry } from "@/lib/api";
-import { rootCycleId, sessionIndexOf, campaignOriginHash } from "@/lib/ids";
+import { rootCycleId, sessionIndexOf, campaignOriginHash, unitKey, UNIT_SEP } from "@/lib/ids";
 import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
 
@@ -11,14 +11,8 @@ import { fmtPct0 } from "@/lib/format";
 // clicks it and gets a native dropdown grouped by campaign, then by session.
 //
 // A `cycle_id` is unique only within its campaign, so every option is keyed
-// and valued by the composite `campaign_id::cycle_id`; selecting one passes
-// BOTH ids back.
-
-const SEP = "::";
-
-function unitKey(campaignId: string, cycleId: string): string {
-  return `${campaignId}${SEP}${cycleId}`;
-}
+// and valued by the composite `campaign_id::cycle_id` (unitKey); selecting
+// one passes BOTH ids back.
 
 // Breadcrumb-variant option label — unit name + its best score + status.
 function breadcrumbLabel(c: CycleListEntry): string {
@@ -100,11 +94,11 @@ export function CyclePicker({
       <select
         value={currentKey}
         onChange={(e) => {
-          const idx = e.target.value.indexOf(SEP);
+          const idx = e.target.value.indexOf(UNIT_SEP);
           if (idx < 0) return;
           selectCycle(
             e.target.value.slice(0, idx),
-            e.target.value.slice(idx + SEP.length),
+            e.target.value.slice(idx + UNIT_SEP.length),
           );
         }}
         aria-label="Switch campaign or session"

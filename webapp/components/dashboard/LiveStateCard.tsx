@@ -1,6 +1,7 @@
 "use client";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { fmtNum, fmtClock } from "@/lib/format";
+import { CardFrame } from "@/components/ui/card";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -72,13 +73,16 @@ export function LiveStateCard({ dash }: Props) {
     : (typeof payload === "string" ? payload : JSON.stringify(payload, null, 2));
 
   return (
-    <div className="card live-state-card">
-      <h2 className="card-title">
-        Live state
+    <CardFrame
+      className="live-state-card"
+      headingTag="h2"
+      title="Live state"
+      actions={
         <span style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontWeight: 400 }}>
           all dashboard.json fields
         </span>
-      </h2>
+      }
+    >
       <div className="formula-row" title="composite_fitness_formula">{formula}</div>
       <div className="kv-grid">
         {items.map(([k, v]) => {
@@ -107,7 +111,7 @@ export function LiveStateCard({ dash }: Props) {
       <div className={`payload-block${payloadEmpty ? " empty" : ""}`}>{payloadText}</div>
       <BackendWarnings dash={dash} />
       <PoBBBackfillLog dash={dash} />
-    </div>
+    </CardFrame>
   );
 }
 

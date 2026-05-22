@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { CardFrame } from "@/components/ui/card";
 
 interface ScoreboardEntry {
   rank?: number;
@@ -85,8 +86,11 @@ export function RoundFileView({ doc, raw }: Props) {
       </div>
 
       {scoreboard.length > 0 && (
-        <div className="card" style={{ margin: "8px 0" }}>
-          <div className="card-title"><span>Scoreboard</span><span className="badge">{scoreboard.length}</span></div>
+        <CardFrame
+          style={{ margin: "8px 0" }}
+          title={<span>Scoreboard</span>}
+          actions={<span className="badge">{scoreboard.length}</span>}
+        >
           <div className="table-wrap">
             <table>
               <thead>
@@ -115,12 +119,15 @@ export function RoundFileView({ doc, raw }: Props) {
               </tbody>
             </table>
           </div>
-        </div>
+        </CardFrame>
       )}
 
       {results.length > 0 && (
-        <div className="card" style={{ margin: "8px 0" }}>
-          <div className="card-title"><span>Per-sample results</span><span className="badge">{results.length}</span></div>
+        <CardFrame
+          style={{ margin: "8px 0" }}
+          title={<span>Per-sample results</span>}
+          actions={<span className="badge">{results.length}</span>}
+        >
           <div className="table-wrap">
             <table>
               <thead>
@@ -155,7 +162,7 @@ export function RoundFileView({ doc, raw }: Props) {
               </tbody>
             </table>
           </div>
-        </div>
+        </CardFrame>
       )}
 
       <details open={showRaw} onToggle={(e) => setShowRaw((e.target as HTMLDetailsElement).open)} style={{ margin: "8px 0" }}>

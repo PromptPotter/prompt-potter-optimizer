@@ -2,6 +2,7 @@
 import { liveL1Candidates, type DashboardSnapshot, type StatusKind } from "@/lib/poll";
 import { parseSampleLine } from "@/lib/sample-line";
 import { candidateLabel } from "@/lib/candidate-label";
+import { CardFrame } from "@/components/ui/card";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -34,11 +35,12 @@ export function LiveSamplesCard({ dash, dashRound, status }: Props) {
   const liveness = status === "live" ? "rolling" : "snapshot";
 
   return (
-    <div className="card samples-card">
-      <h2 className="card-title">
-        Live samples
-        <span className="badge">{liveness} · {latest.length} shown</span>
-      </h2>
+    <CardFrame
+      className="samples-card"
+      headingTag="h2"
+      title="Live samples"
+      actions={<span className="badge">{liveness} · {latest.length} shown</span>}
+    >
       <div className="samples-list" role="log" aria-live="polite" aria-atomic="false">
         {latest.length === 0 ? (
           <EmptyState status={status} dashRound={dashRound} />
@@ -65,7 +67,7 @@ export function LiveSamplesCard({ dash, dashRound, status }: Props) {
           })
         )}
       </div>
-    </div>
+    </CardFrame>
   );
 }
 

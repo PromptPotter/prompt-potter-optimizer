@@ -212,13 +212,6 @@ export interface StopCycleResponse {
   flag_written: boolean;
 }
 
-export interface DeleteCycleResponse {
-  campaign_id: string;
-  cycle_id: string;
-  deleted: boolean;
-  reason: string;
-}
-
 export interface CleanupEmptyResponse {
   campaign_id: string;
   root_cycle_id: string;

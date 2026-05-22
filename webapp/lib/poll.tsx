@@ -16,6 +16,7 @@ import {
 } from "react";
 import { fetchCycleFile, fetchDashboard, fetchFiles } from "./api";
 import { rootCycleId } from "./ids";
+import { usePoll } from "./usePoll";
 
 export type StatusKind = "live" | "stale" | "offline";
 
@@ -236,8 +237,9 @@ function useCycleStreamSource(
   intervalMs: number,
 ): CycleStreamState {
   const [state, setState] = useState<CycleStreamState>(INITIAL_STATE);
-  const abortRef = useRef<AbortController | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Bumped on every unit switch so `usePoll` fires an immediate tick — the
+  // hand-rolled loop used to restart (and tick at once) on each cycle change.
+  const [revalCount, setRevalCount] = useState(0);
   const cycleRef = useRef<string | null>(null);
   const campaignRef = useRef<string | null>(null);
   // Highest round number seen on the live dashboard; bumping it triggers a
@@ -267,8 +269,11 @@ function useCycleStreamSource(
     // unit's rounds, dash snapshot, and `● Live` badge can't linger for a
     // frame while the first poll of the new unit is in flight.
     setState({ ...INITIAL_STATE, statusText: "Switching to active campaign…" });
+    setRevalCount((c) => c + 1);
   }
 
+  // No active campaign — the static prompt. The poll itself is gated off
+  // via `enabled` on the usePoll call below.
   useEffect(() => {
     if (!cycleId || !campaignId) {
       setState({
@@ -277,162 +282,133 @@ function useCycleStreamSource(
         statusHint:
           "Start a campaign: `python -m promptpotter new <dataset>` in another terminal.",
       });
-      return;
     }
+  }, [campaignId, cycleId]);
 
-    let cancelled = false;
-
-    // Round-files refresh. Single-flight: if a prior fetch is still running,
-    // the next round-change tick will pick it up. The listing is the SoT for
-    // which round files exist on disk; we re-fetch the whole set rather than
-    // diffing — round files are small JSON blobs and the prior arch proved
-    // race-free with this shape.
-    const refreshRounds = async () => {
-      const id = cycleRef.current;
-      const cmp = campaignRef.current;
-      if (!id || !cmp || id !== cycleId || roundsFetchingRef.current) return;
-      roundsFetchingRef.current = true;
-      try {
-        const listing = await fetchFiles(cmp, id);
-        if (cancelled || cycleRef.current !== id) return;
-        const roundFiles = listing.entries
-          .filter(
-            (e) => e.scope === "cycle" && /^rounds\/round_\d+\.json$/.test(e.path),
-          )
-          .sort((a, b) => a.path.localeCompare(b.path));
-        const fetched = await Promise.all(
-          roundFiles.map(async (f) => {
-            try {
-              const r = await fetchCycleFile(cmp, id, "cycle", f.path);
-              return r.content ? (JSON.parse(r.content) as RoundFileDoc) : null;
-            } catch {
-              return null;
-            }
-          }),
-        );
-        if (cancelled || cycleRef.current !== id) return;
-        const valid = fetched
-          .filter((p): p is RoundFileDoc => p !== null)
-          .sort((a, b) => (a.round ?? 0) - (b.round ?? 0));
-        setState((prev) => ({ ...prev, rounds: valid }));
-      } catch {
-        // listing failed — retry on the next round-change tick
-      } finally {
-        roundsFetchingRef.current = false;
-      }
-    };
-
-    const tick = async () => {
-      if (abortRef.current) abortRef.current.abort();
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
-      const id = cycleRef.current;
-      const cmp = campaignRef.current;
-      if (!id || !cmp) return;
-      try {
-        // dashboard.json is per-session — it lives in the session's root
-        // cycle dir, shared by that session's forks. The server resolves
-        // the session-family root from the viewed cycle id.
-        const dash = (await fetchDashboard(cmp, id, ctrl.signal)) as DashboardSnapshot;
-        if (cancelled) return;
-        // Payload-identity guard: dashboard.json self-stamps the
-        // session-family it describes. Drop any payload that doesn't match
-        // the unit we polled for — a late response from the prior cycle, or
-        // a transient identity/payload disagreement during a `new` or a
-        // cycle switch. Stale data never reaches the UI; the next tick
-        // retries against the correct unit.
-        if (dash.campaign_id !== cmp || dash.cycle_id !== rootCycleId(id)) {
-          const reported = `(${dash.campaign_id ?? "none"}, ${dash.cycle_id ?? "none"})`;
-          const expected = `(${cmp}, ${rootCycleId(id)})`;
-          console.debug(
-            `[cycle-stream] dropped dashboard payload — stamp ${reported} != unit ${expected}`,
-          );
-          stampMismatchRef.current += 1;
-          // One re-instantiation tick is normal; a stamp that *never* matches
-          // is a real fault — surface it instead of polling silently forever.
-          if (stampMismatchRef.current >= STAMP_MISMATCH_LIMIT) {
-            setState((prev) => ({
-              ...prev,
-              status: "stale",
-              statusText: "Dashboard identity mismatch",
-              statusHint:
-                `dashboard.json reports ${reported} but this view expects ${expected} — ` +
-                "the optimizer may be re-instantiating, or this unit's session " +
-                "never wrote a dashboard.",
-              termKey: "status_stamp_mismatch",
-              isLive: false,
-            }));
+  // Round-files refresh. Single-flight: if a prior fetch is still running,
+  // the next round-change tick will pick it up. The listing is the SoT for
+  // which round files exist on disk; we re-fetch the whole set rather than
+  // diffing — round files are small JSON blobs and the prior arch proved
+  // race-free with this shape.
+  const refreshRounds = async (signal: AbortSignal) => {
+    const id = cycleRef.current;
+    const cmp = campaignRef.current;
+    if (!id || !cmp || roundsFetchingRef.current) return;
+    roundsFetchingRef.current = true;
+    try {
+      const listing = await fetchFiles(cmp, id, signal);
+      if (signal.aborted || cycleRef.current !== id) return;
+      const roundFiles = listing.entries
+        .filter(
+          (e) => e.scope === "cycle" && /^rounds\/round_\d+\.json$/.test(e.path),
+        )
+        .sort((a, b) => a.path.localeCompare(b.path));
+      const fetched = await Promise.all(
+        roundFiles.map(async (f) => {
+          try {
+            const r = await fetchCycleFile(cmp, id, "cycle", f.path, signal);
+            return r.content ? (JSON.parse(r.content) as RoundFileDoc) : null;
+          } catch {
+            return null;
           }
-          return;
+        }),
+      );
+      if (signal.aborted || cycleRef.current !== id) return;
+      const valid = fetched
+        .filter((p): p is RoundFileDoc => p !== null)
+        .sort((a, b) => (a.round ?? 0) - (b.round ?? 0));
+      setState((prev) => ({ ...prev, rounds: valid }));
+    } catch {
+      // listing failed — retry on the next round-change tick
+    } finally {
+      roundsFetchingRef.current = false;
+    }
+  };
+
+  // The poll tick. `usePoll` owns the interval, the hidden-tab pause, and
+  // the per-tick AbortController; this fetches dashboard.json, guards its
+  // identity stamp, and refreshes the round-files cache on a round bump.
+  const tick = async (signal: AbortSignal) => {
+    const id = cycleRef.current;
+    const cmp = campaignRef.current;
+    if (!id || !cmp) return;
+    try {
+      // dashboard.json is per-session — it lives in the session's root
+      // cycle dir, shared by that session's forks. The server resolves
+      // the session-family root from the viewed cycle id.
+      const dash = (await fetchDashboard(cmp, id, signal)) as DashboardSnapshot;
+      if (signal.aborted) return;
+      // Payload-identity guard: dashboard.json self-stamps the
+      // session-family it describes. Drop any payload that doesn't match
+      // the unit we polled for — a late response from the prior cycle, or
+      // a transient identity/payload disagreement during a `new` or a
+      // cycle switch. Stale data never reaches the UI; the next tick
+      // retries against the correct unit.
+      if (dash.campaign_id !== cmp || dash.cycle_id !== rootCycleId(id)) {
+        const reported = `(${dash.campaign_id ?? "none"}, ${dash.cycle_id ?? "none"})`;
+        const expected = `(${cmp}, ${rootCycleId(id)})`;
+        console.debug(
+          `[cycle-stream] dropped dashboard payload — stamp ${reported} != unit ${expected}`,
+        );
+        stampMismatchRef.current += 1;
+        // One re-instantiation tick is normal; a stamp that *never* matches
+        // is a real fault — surface it instead of polling silently forever.
+        if (stampMismatchRef.current >= STAMP_MISMATCH_LIMIT) {
+          setState((prev) => ({
+            ...prev,
+            status: "stale",
+            statusText: "Dashboard identity mismatch",
+            statusHint:
+              `dashboard.json reports ${reported} but this view expects ${expected} — ` +
+              "the optimizer may be re-instantiating, or this unit's session " +
+              "never wrote a dashboard.",
+            termKey: "status_stamp_mismatch",
+            isLive: false,
+          }));
         }
-        // A matching payload clears any prior mismatch streak.
-        stampMismatchRef.current = 0;
-        const wall = Date.parse(dash.wallclock_serialized_at || "");
-        const ageS = Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
-        const bucket = ageBucket(ageS);
-        const liveRound = roundOf(dash);
-        setState((prev) => ({
-          ...prev,
-          dash,
-          status: bucket.status,
-          statusText: bucket.statusText,
-          statusHint: bucket.statusHint,
-          ageS,
-          termKey: bucket.termKey,
-          error: null,
-          isLive: bucket.status === "live",
-          phase: typeof dash.state === "string" ? dash.state : null,
-        }));
-        if (liveRound != null && liveRound !== lastRoundRef.current) {
-          lastRoundRef.current = liveRound;
-          void refreshRounds();
-        }
-      } catch (e) {
-        if ((e as Error).name === "AbortError") return;
-        if (cancelled) return;
-        setState((prev) => ({
-          ...prev,
-          status: "offline",
-          statusText: `dashboard.json unreachable for ${id}`,
-          statusHint: "Resume the active campaign: `python -m promptpotter resume`",
-          termKey: "status_offline",
-          error: (e as Error).message,
-          isLive: false,
-        }));
+        return;
       }
-    };
-
-    const start = () => {
-      if (timerRef.current != null) return;
-      timerRef.current = setInterval(tick, intervalMs);
-      tick();
-    };
-
-    const stop = () => {
-      if (timerRef.current != null) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
+      // A matching payload clears any prior mismatch streak.
+      stampMismatchRef.current = 0;
+      const wall = Date.parse(dash.wallclock_serialized_at || "");
+      const ageS = Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
+      const bucket = ageBucket(ageS);
+      const liveRound = roundOf(dash);
+      setState((prev) => ({
+        ...prev,
+        dash,
+        status: bucket.status,
+        statusText: bucket.statusText,
+        statusHint: bucket.statusHint,
+        ageS,
+        termKey: bucket.termKey,
+        error: null,
+        isLive: bucket.status === "live",
+        phase: typeof dash.state === "string" ? dash.state : null,
+      }));
+      if (liveRound != null && liveRound !== lastRoundRef.current) {
+        lastRoundRef.current = liveRound;
+        void refreshRounds(signal);
       }
-      if (abortRef.current) {
-        abortRef.current.abort();
-        abortRef.current = null;
-      }
-    };
+    } catch (e) {
+      if ((e as Error).name === "AbortError" || signal.aborted) return;
+      setState((prev) => ({
+        ...prev,
+        status: "offline",
+        statusText: `dashboard.json unreachable for ${id}`,
+        statusHint: "Resume the active campaign: `python -m promptpotter resume`",
+        termKey: "status_offline",
+        error: (e as Error).message,
+        isLive: false,
+      }));
+    }
+  };
 
-    const onVis = () => {
-      if (document.hidden) stop();
-      else start();
-    };
-
-    start();
-    document.addEventListener("visibilitychange", onVis);
-
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", onVis);
-      stop();
-    };
-  }, [campaignId, cycleId, intervalMs]);
+  usePoll(tick, {
+    intervalMs,
+    enabled: !!campaignId && !!cycleId,
+    revalidateOn: revalCount,
+  });
 
   return state;
 }

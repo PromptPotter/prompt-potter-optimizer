@@ -5,7 +5,8 @@ import { WHATIF_INLINE_META, buildRows, setsEqual, whatifIdentifiersInFormula, t
 import { whatifIconFor } from "./icons";
 import { FitnessChart, type BarSlot } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
-import { parseSampleLine } from "@/lib/sample-line";
+import { computeAccuracyFromSamples } from "@/lib/sample-line";
+import { CardFrame } from "@/components/ui/card";
 import { candidateLabel } from "@/lib/candidate-label";
 import {
   liveL1Candidates,
@@ -56,23 +57,6 @@ function correctedFromEvaluators(
     n += 1;
   }
   return n > 0 ? sum / n : null;
-}
-
-function runningFromSamples(samples: LiveCandidate["samples"] | undefined): number | null {
-  if (!samples || samples.length === 0) return null;
-  let hits = 0;
-  let total = 0;
-  for (const raw of samples) {
-    if (typeof raw === "string") {
-      const p = parseSampleLine(raw);
-      if (p.status === "HIT") { hits += 1; total += 1; }
-      else if (p.status === "MISS") { total += 1; }
-    } else if (raw && typeof raw === "object" && typeof raw.hit === "boolean") {
-      if (raw.hit) hits += 1;
-      total += 1;
-    }
-  }
-  return total > 0 ? hits / total : null;
 }
 
 function ranks(lines: { key: string; v: number | null }[]): Map<string, number> {
@@ -350,7 +334,7 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
         const ev = c.stats?.evaluators ?? {};
         const acc = typeof c.stats?.accuracy === "number"
           ? c.stats.accuracy
-          : runningFromSamples(c.samples);
+          : computeAccuracyFromSamples(c.samples);
         const comp = typeof c.stats?.composite_fitness === "number"
           ? c.stats.composite_fitness
           : null;
@@ -442,12 +426,15 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
   }
 
   return (
-    <div className={`card fitness-card${showWhatIf ? " whatif-open" : ""}`}>
-      <div className="card-title">
+    <CardFrame
+      className={`fitness-card${showWhatIf ? " whatif-open" : ""}`}
+      title={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
           <span>Per-candidate fitness</span>
           <span className="badge" title="Bars span every round, origin first; chip = current optimization round">R{currentRound}</span>
         </span>
+      }
+      actions={
         <div className="fitness-toggles" role="group" aria-label="Score views">
           <button
             type="button"
@@ -468,7 +455,8 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
             What-If
           </button>
         </div>
-      </div>
+      }
+    >
       {(showComposite || showWhatIf) && (
         <div className="fitness-legend">
           <span><span className="dot accuracy" />accuracy</span>
@@ -574,6 +562,6 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
         </div>
       )}
       </div>
-    </div>
+    </CardFrame>
   );
 }

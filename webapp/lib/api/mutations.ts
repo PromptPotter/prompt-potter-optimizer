@@ -12,7 +12,6 @@ import { API } from "./client";
 import type {
   CleanupEmptyResponse,
   CreateForkResponse,
-  DeleteCycleResponse,
   StopCycleResponse,
 } from "./types";
 
@@ -34,29 +33,6 @@ export async function postCreateFork(
   );
   if (!r.ok) throw new Error(`${r.status} POST /forks`);
   return (await r.json()) as CreateForkResponse;
-}
-
-// Retained for the M12 control plane — no caller wires it yet.
-export async function deleteCycle(
-  campaignId: string,
-  cycleId: string,
-): Promise<DeleteCycleResponse> {
-  const r = await fetch(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
-      `/cycles/${encodeURIComponent(cycleId)}`,
-    { method: "DELETE", cache: "no-store" },
-  );
-  if (!r.ok) {
-    let msg = `${r.status} DELETE /cycles`;
-    try {
-      const body = (await r.json()) as { detail?: string };
-      if (body?.detail) msg = body.detail;
-    } catch {
-      /* keep status-only message */
-    }
-    throw new Error(msg);
-  }
-  return (await r.json()) as DeleteCycleResponse;
 }
 
 export async function postCleanupEmpty(

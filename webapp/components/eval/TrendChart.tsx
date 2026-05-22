@@ -4,7 +4,8 @@ import { Line } from "react-chartjs-2";
 import { ensureChartRegistered } from "@/lib/chart-init";
 import { cssRgba, getCss } from "@/lib/theme";
 import { useCycleStream } from "@/lib/poll";
-import type { ChartOptions } from "chart.js";
+import { CardFrame } from "@/components/ui/card";
+import { lineChartDefaults } from "@/lib/chart-options";
 
 ensureChartRegistered();
 
@@ -44,19 +45,13 @@ export function TrendChart({ themeKey }: Props) {
       { data: curData, borderColor: getCss("--color-accent-strong"), tension: 0.3, pointRadius: 2, borderWidth: 1.5 },
     ],
   };
-  const options: ChartOptions<"line"> = {
-    responsive: true,
-    maintainAspectRatio: false,
+  const options = lineChartDefaults({
     plugins: { legend: { display: false } },
     scales: { x: { display: false }, y: { display: false, min: 0, max: 1 } },
-  };
+  });
 
   return (
-    <div className="card">
-      <div className="card-title">
-        <span>Trend</span>
-        <span className="badge">campaign</span>
-      </div>
+    <CardFrame title={<span>Trend</span>} actions={<span className="badge">campaign</span>}>
       <div style={{ position: "relative", height: 140 }}>
         {points.length === 0 ? (
           <div style={{ color: "var(--color-text-tertiary)", fontSize: 12, padding: 16 }}>
@@ -66,6 +61,6 @@ export function TrendChart({ themeKey }: Props) {
           <Line key={themeKey} data={data} options={options} />
         )}
       </div>
-    </div>
+    </CardFrame>
   );
 }
