@@ -1236,10 +1236,9 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .leverage-num strong{color:var(--color-accent);font-weight:600}
 .leverage-when{color:var(--color-text-tertiary);white-space:nowrap;width:88px}
 .leverage-truncated{padding:10px 12px;font-size:12px;color:var(--color-text-tertiary);border-top:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
-.leverage-loading,.leverage-error,.leverage-empty{padding:40px 32px;color:var(--color-text-secondary);font-size:13px}
+.leverage-empty{padding:40px 32px;color:var(--color-text-secondary);font-size:13px}
 .leverage-empty h2{margin:0 0 8px;font-size:16px;font-weight:600;color:var(--color-text-primary)}
 .leverage-empty p{margin:0;max-width:520px;line-height:1.55}
-.leverage-error{color:var(--color-status-error,#c53030)}
 
 /* Honor user vestibular preference. The wizard mascot, sparkles,
    pulse-active border, and chevron rotations all stop being motion under

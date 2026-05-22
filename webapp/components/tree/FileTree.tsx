@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { fetchFiles, type FileEntry } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
+import { useFetch } from "@/lib/useFetch";
 import { Empty, Loading, ErrorNote } from "@/components/ui/states";
 
 interface DirNode {
@@ -55,29 +56,17 @@ interface Props {
 }
 
 export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
-  const [entries, setEntries] = useState<FileEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   // Workspace-level reachability — so the no-unit state can tell a network
   // failure apart from a genuinely empty workspace.
   const { activeError, cyclesError } = useWorkspace();
-
-  useEffect(() => {
-    if (!campaignId || !cycleId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetchFiles(campaignId, cycleId);
-        if (!cancelled) setEntries(r.entries);
-      } catch (e) {
-        if (!cancelled) setError((e as Error).message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [campaignId, cycleId]);
-
-  const tree = useMemo(() => (entries ? buildTree(entries) : null), [entries]);
+  const { data: listing, error } = useFetch(
+    campaignId && cycleId ? (s) => fetchFiles(campaignId, cycleId, s) : null,
+    [campaignId, cycleId],
+  );
+  const tree = useMemo(
+    () => (listing ? buildTree(listing.entries) : null),
+    [listing],
+  );
 
   if (!cycleId) {
     return activeError || cyclesError ? (

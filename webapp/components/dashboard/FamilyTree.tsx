@@ -1,12 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  fetchCampaignLineage,
-  postCleanupEmpty,
-  type CampaignLineageResponse,
-} from "@/lib/api";
+import { fetchCampaignLineage, postCleanupEmpty } from "@/lib/api";
 import { sessionIndexOf } from "@/lib/ids";
 import { bumpRevalidation } from "@/lib/revalidate";
+import { useFetch } from "@/lib/useFetch";
 import { buildTree, countDescendants, type CycleNode } from "./family-tree/layout";
 import { Forest } from "./family-tree/Forest";
 import { CleanupConfirmModal } from "./family-tree/CleanupConfirmModal";
@@ -24,8 +21,11 @@ interface Props {
 }
 
 export function FamilyTree({ campaignId, cycleId, onSelectCycle }: Props) {
-  const [data, setData] = useState<CampaignLineageResponse | null>(null);
   const [tick, setTick] = useState(0);
+  const { data } = useFetch(
+    campaignId ? (s) => fetchCampaignLineage(campaignId, s) : null,
+    [campaignId, tick],
+  );
   // The campaign's session roots — one cladogram per session. A campaign
   // is a forest: every `sibling_kind === "root"` cycle is a session.
   const rootCycleIds = useMemo(() => {
@@ -64,26 +64,13 @@ export function FamilyTree({ campaignId, cycleId, onSelectCycle }: Props) {
     }
   }, [campaignId, rootCycleIds]);
 
+  // Window refocus ⇒ re-fetch the lineage, so forks/cleanups made from
+  // another tab or the CLI surface without a manual reload.
   useEffect(() => {
-    if (!campaignId) return;
-    let cancelled = false;
-    const ac = new AbortController();
-    (async () => {
-      try {
-        const r = await fetchCampaignLineage(campaignId, ac.signal);
-        if (!cancelled) setData(r);
-      } catch {
-        // Silent — sidebar covers navigation. Empty render below.
-      }
-    })();
     const onFocus = () => setTick((t) => t + 1);
     window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      ac.abort();
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [campaignId, tick]);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   // Campaign-wide stub count — every empty non-root cycle, across every
   // session. Same definition the server-side cleanup guard uses.

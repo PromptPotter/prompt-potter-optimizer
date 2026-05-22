@@ -3,9 +3,10 @@
 // Reads GET /api/v1/measurements/leverage and renders a table sorted by
 // reuse intensity. M13 Slice C; see docs/specs/m13-chat-first-user-web.md.
 
-import { useEffect, useState } from "react";
-import { fetchLeverage, type LeverageResponse, type PerQueryRow } from "@/lib/api";
+import { fetchLeverage, type PerQueryRow } from "@/lib/api";
 import { fmtPct0, fmtFitness, ageText } from "@/lib/format";
+import { useFetch } from "@/lib/useFetch";
+import { Loading, ErrorNote } from "@/components/ui/states";
 
 const ROW_LIMIT = 200;
 
@@ -15,30 +16,12 @@ function truncate(s: string, n: number): string {
 }
 
 export function LeveragePanel() {
-  const [data, setData] = useState<LeverageResponse | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const { data, error } = useFetch((s) => fetchLeverage(ROW_LIMIT, s), []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const ac = new AbortController();
-    (async () => {
-      try {
-        const r = await fetchLeverage(ROW_LIMIT, ac.signal);
-        if (!cancelled) setData(r);
-      } catch (e) {
-        if (!cancelled) setErr((e as Error).message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      ac.abort();
-    };
-  }, []);
-
-  if (err) {
+  if (error) {
     return (
       <div className="leverage-pane">
-        <div className="leverage-error">Failed to load leverage: {err}</div>
+        <ErrorNote>Failed to load leverage: {error}</ErrorNote>
       </div>
     );
   }
@@ -46,7 +29,7 @@ export function LeveragePanel() {
   if (data === null) {
     return (
       <div className="leverage-pane">
-        <div className="leverage-loading">Loading accumulated measurements…</div>
+        <Loading>Loading accumulated measurements…</Loading>
       </div>
     );
   }

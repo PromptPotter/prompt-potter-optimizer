@@ -8,6 +8,7 @@ import {
 import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { HardSamplesTable } from "./HardSamplesTable";
+import { type MeasurementDot } from "./hard-samples/columns";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -31,23 +32,14 @@ interface Props {
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
 }
 
-interface Measurement {
-  hit: boolean;
-  // Stable composite key — server-derived for archive rows
-  // ("created_at/run_id/idx") or client-derived for in-flight live samples
-  // ("live/{round:04d}/{cand_idx:02d}"). Lex-sortable; the table aligns
-  // rows on this key so equal ords share a column.
-  ord: string;
-}
-
 // Fold in live mid-round measurements that haven't landed in the archive
 // yet. Live samples are compact strings ("0.0s #000 HIT ..."); the parser
 // yields idx + status. They sit at the right edge of each row.
 function liveMeasurements(
   dash: DashboardSnapshot | null,
   dashRound: number | null,
-): Map<number, Measurement[]> {
-  const out = new Map<number, Measurement[]>();
+): Map<number, MeasurementDot[]> {
+  const out = new Map<number, MeasurementDot[]>();
   const round = dashRound ?? 0;
   liveL1Candidates(dash).forEach((c, ci) => {
     for (const s of c.samples ?? []) {
@@ -101,7 +93,7 @@ export function HardSamplesHeatmap({
   // mid-round samples (client-only, current cycle). De-dupe on (ord, hit)
   // in case a live measurement has already landed in the archive.
   const perSample = useMemo(() => {
-    const out = new Map<number, Measurement[]>();
+    const out = new Map<number, MeasurementDot[]>();
     for (const [sid, ms] of archivePerSample) {
       out.set(
         sid,
