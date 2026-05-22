@@ -12,8 +12,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.dispatch.schemas import L3PlanOutput
-from promptpotter.application.optimization.escalation.firing.executor import LayerStrategy
-from promptpotter.application.optimization.transitions import TransitionResult
+from promptpotter.application.optimization.transitions import LayerStrategy, TransitionResult
 from promptpotter.application.optimization.validators.l2_l3 import run_l3_output_validators
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase

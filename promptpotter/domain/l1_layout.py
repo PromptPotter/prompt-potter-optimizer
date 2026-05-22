@@ -20,6 +20,8 @@ Layout validation is split into HARD and SOFT outcomes
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.domain.validators import ValidatorOutcome
@@ -127,6 +129,32 @@ def default_l1_layout() -> L1Layout:
     )
 
 
+def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
+    """Best-effort coerce ``{slot: [placeholder, …]}`` → :class:`L1Layout`.
+
+    Returns ``None`` when the input is empty (``{}``) or shaped wrong.
+    An empty dict is the **sanctioned omit-sentinel** for L2 LLM
+    output (L2's prompt accepts both omit and ``{}`` as "keep current
+    layout") — the L2 driver treats ``None`` as "no layout proposed"
+    and skips validation. Non-empty but malformed input also returns
+    ``None`` so the validator surfaces mandatory-presence /
+    unknown-name failures uniformly rather than crashing here.
+    """
+    if not isinstance(raw_layout, dict) or not raw_layout:
+        return None
+    sanitised: dict[str, list[str]] = {}
+    for slot in L1_LAYOUT_SLOTS:
+        vals = raw_layout.get(slot)
+        if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
+            sanitised[slot] = list(vals)
+    if not sanitised:
+        return None
+    try:
+        return L1Layout(**sanitised)
+    except Exception:
+        return None
+
+
 class LayoutValidationResult:
     """Bundle of outcomes from validating an L2-proposed L1 layout.
 
@@ -220,6 +248,7 @@ __all__ = [
     "L1_POSSIBLE",
     "L1Layout",
     "LayoutValidationResult",
+    "coerce_l1_layout",
     "default_l1_layout",
     "validate_l1_layout",
 ]

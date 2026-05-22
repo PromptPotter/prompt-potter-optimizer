@@ -12,17 +12,13 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.dispatch.schemas import L2ContextOutput
-from promptpotter.application.optimization.escalation.firing.executor import (
-    LayerStrategy,
-    coerce_l1_layout,
-)
 from promptpotter.application.optimization.resume_and_fork import (
     ResumeCheckpointKind,
     record_decision,
 )
-from promptpotter.application.optimization.transitions import TransitionResult
+from promptpotter.application.optimization.transitions import LayerStrategy, TransitionResult
 from promptpotter.application.optimization.validators.l2_l3 import run_l2_output_validators
-from promptpotter.domain.l1_layout import L1Layout, validate_l1_layout
+from promptpotter.domain.l1_layout import L1Layout, coerce_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.shared.strings import truncate

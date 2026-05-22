@@ -1,4 +1,4 @@
-"""Layer-escalation executor — :class:`LayerStrategy` + transition harness +
+"""Layer-escalation executor — the shared L2/L3 transition runner +
 ``escalate_l2`` cascade.
 
 V1 contract:
@@ -11,40 +11,37 @@ V1 contract:
 
 One-way arrow: this module imports from ``cycle.py``; the reverse is
 forbidden by ``tests/test_invariants.py::test_no_unexpected_runtime_layer_violations``.
-Per-layer parse/apply/enter/exit live in :mod:`.l2_driver` and
-:mod:`.l3_driver`; this module owns the layer-agnostic shape and the
-cascade orchestrator.
+The ``LayerStrategy`` spec + ``TransitionResult`` live in
+``optimization/transitions.py``; the per-layer ``L2`` / ``L3`` instances and
+their parse/apply/enter/exit callables live in :mod:`.l2_driver` and
+:mod:`.l3_driver`.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.dispatch.hub import (
     DispatchHub,
     build_bundle,
 )
-from promptpotter.application.optimization.dispatch.llm_call import load_optimizer_prompt
+from promptpotter.application.optimization.dispatch.llm_call import (
+    load_optimizer_prompt,
+    run_optimizer_node,
+)
+from promptpotter.application.optimization.escalation.firing.l2_driver import L2
+from promptpotter.application.optimization.escalation.firing.l3_driver import L3
 from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.resume_and_fork import (
     ResumeCheckpointKind,
     record_decision,
 )
-from promptpotter.application.optimization.transitions import (
-    TransitionResult,
-    run_layer_transition,
-)
-from promptpotter.domain.l1_layout import (
-    L1_LAYOUT_SLOTS,
-    L1Layout,
-    default_l1_layout,
-    validate_l1_layout,
-)
+from promptpotter.application.optimization.transitions import LayerStrategy
+from promptpotter.domain.l1_layout import coerce_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopReason, emit_phase
+from promptpotter.domain.phases import PhaseEvent, StopReason, emit_phase
 from promptpotter.domain.run_records import ForkPayload
 from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
@@ -58,70 +55,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-ParseFn = Callable[[Any, OptSearchPoint, str], TransitionResult]
-ApplyFn = Callable[["Cycle", TransitionResult, int], None]
-PayloadFn = Callable[["Cycle"], dict[str, Any]]
-ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
-
-
-@dataclass(frozen=True)
-class LayerStrategy:
-    layer_id: Literal["L2", "L3"]
-    template_name: str
-    default_temperature: float
-    phase: CampaignPhase
-    parse: ParseFn
-    apply: ApplyFn
-    enter_payload_fn: PayloadFn
-    exit_payload_fn: ExitFn
-
-    def build_prompt_vars(self, cycle: Cycle) -> dict[str, str]:
-        bundle = build_bundle(cycle)
-        template = load_optimizer_prompt(self.template_name)
-        return DispatchHub.fill_fixed(template, bundle)
-
-    def build_result(self, raw: Any, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
-        return self.parse(raw, opt_sp, prompt)
-
-    def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-        self.apply(cycle, result, round_num)
-
-    def enter_payload(self, cycle: Cycle) -> dict[str, Any]:
-        return self.enter_payload_fn(cycle)
-
-    def exit_payload(self, cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-        return self.exit_payload_fn(cycle, result)
-
-
 # ---------------------------------------------------------------------------
 # Fork payload — applies operator/LLM-issued OSP deltas at fork mint time.
 # ---------------------------------------------------------------------------
-
-
-def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
-    """Best-effort coerce ``{slot: [placeholder, …]}`` → :class:`L1Layout`.
-
-    Returns ``None`` when the input is empty (``{}``) or shaped wrong.
-    An empty dict is the **sanctioned omit-sentinel** for L2 LLM
-    output (L2's prompt accepts both omit and ``{}`` as "keep current
-    layout") — the L2 driver treats ``None`` as "no layout proposed"
-    and skips validation. Non-empty but malformed input also returns
-    ``None`` so the validator surfaces mandatory-presence /
-    unknown-name failures uniformly rather than crashing here.
-    """
-    if not isinstance(raw_layout, dict) or not raw_layout:
-        return None
-    sanitised: dict[str, list[str]] = {}
-    for slot in L1_LAYOUT_SLOTS:
-        vals = raw_layout.get(slot)
-        if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
-            sanitised[slot] = list(vals)
-    if not sanitised:
-        return None
-    try:
-        return L1Layout(**sanitised)
-    except Exception:
-        return None
 
 
 def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkPayload) -> None:
@@ -148,19 +84,9 @@ def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkPayload) -> N
         opt_sp.l1_layout = layout
 
 
-# Module-default L1 layout — keep the import live so apply_fork_payload_to_osp
-# callers can rely on the symbol being importable from this package.
-_ = default_l1_layout
-
-
 # ---------------------------------------------------------------------------
 # Cascade — escalate_l2 walks the L2/L3 patience ladder + wound-4 force-L3.
 # ---------------------------------------------------------------------------
-
-
-_LAYER_TEMPERATURE: dict[str, float] = {"L2": 0.3, "L3": 0.5}
-"""LLM sampling temperature per escalation layer — refinement is conservative,
-replanning explores wider."""
 
 
 async def _run_transition(
@@ -173,14 +99,18 @@ async def _run_transition(
     *,
     obs: ObservabilityBridge | None,
     tracing_campaign_id: str,
-) -> Any:
-    """enter → call → adopt → LayerApplied → side-effects → exit."""
+) -> None:
+    """enter → LLM call → parse → adopt → LayerApplied → side-effects → exit.
+
+    The layer-agnostic mechanics; everything layer-specific is read off
+    ``transition`` (the ``L2`` / ``L3`` :class:`LayerStrategy` spec).
+    """
     assert cycle.tracking.current_sp is not None
     client = _llm_client.get_llm_client(config.optimizer_llm.provider)
     current_pp = cycle.tracking.current_sp.pipeline_params
 
     emit_phase(
-        on_phase, transition.phase, "enter", round=round_num, **transition.enter_payload(cycle)
+        on_phase, transition.phase, "enter", round=round_num, **transition.enter_payload_fn(cycle)
     )
     async with observed_node(
         f"{transition.template_name}_r{round_num}",
@@ -189,14 +119,20 @@ async def _run_transition(
         campaign_id=tracing_campaign_id,
         round_num=round_num,
     ):
-        result = await run_layer_transition(
-            transition,
-            cycle,
-            client,
+        template = load_optimizer_prompt(transition.template_name)
+        prompt_vars = DispatchHub.fill_fixed(template, build_bundle(cycle))
+        raw, prompt = await run_optimizer_node(
+            template_name=transition.template_name,
+            prompt_vars=prompt_vars,
+            llm_client=client,
             model=config.optimizer_llm.model,
-            temperature=_LAYER_TEMPERATURE[transition.layer_id],
+            temperature=transition.default_temperature,
+            ledger=cycle.session.state.ledger,
             round_num=round_num,
+            optimizer_call_cache=cycle.session.store.optimizer_calls,
         )
+        result = transition.parse(raw, cycle.opt_sp, prompt)
+
     new_opt = result.opt_search_point
     cycle.opt_sp.copy_memory_to(new_opt)
     cycle.opt_sp = new_opt
@@ -212,15 +148,14 @@ async def _run_transition(
                 round_num=round_num,
                 changes_description=result.opt_search_point.lineage.changes_description or "",
             )
-    transition.apply_side_effects(cycle, result, round_num)
+    transition.apply(cycle, result, round_num)
     emit_phase(
         on_phase,
         transition.phase,
         "exit",
         round=round_num,
-        **transition.exit_payload(cycle, result),
+        **transition.exit_payload_fn(cycle, result),
     )
-    return result
 
 
 def _trigger_payload(
@@ -268,11 +203,6 @@ async def escalate_l2(
     ``EscalationState.observe_l2_escalation``) and the L3 force-trigger heal
     on L2 validator failures.
     """
-    # Lazy imports — l2_driver / l3_driver import LayerStrategy from this
-    # module; loading them at module-import time would create a cycle.
-    from promptpotter.application.optimization.escalation.firing.l2_driver import L2
-    from promptpotter.application.optimization.escalation.firing.l3_driver import L3
-
     opt = config.optimization
     esc = cycle.escalation
 
@@ -378,12 +308,6 @@ async def escalate_l2(
 
 
 __all__ = [
-    "ApplyFn",
-    "ExitFn",
-    "LayerStrategy",
-    "ParseFn",
-    "PayloadFn",
     "apply_fork_payload_to_osp",
-    "coerce_l1_layout",
     "escalate_l2",
 ]

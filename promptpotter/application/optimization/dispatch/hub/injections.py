@@ -37,6 +37,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.l1_layout import L1_MANDATORY, L1_POSSIBLE
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, PARAM_SCOPE_KEYS
+from promptpotter.domain.validators import ValidatorOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -356,36 +357,29 @@ def _r_runtime_failures(b: InjectionBundle) -> str:
     return fence_untrusted("\n".join(sec))
 
 
-def _r_l2_guard_breaches(b: InjectionBundle) -> str:
-    """Wound 4 — L2_CONTEXT post-parse guard outcomes.
+def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
+    """Post-parse guard-breach list for one layer.
 
-    Set by ``run_l2_output_validators`` after parsing L2's LLM output;
-    non-empty triggers immediate L3 fire. "Guard breach" — programmatic
-    guards on L2's LLM output, distinct from ``validation_failures`` /
-    ``runtime_failures`` (pipeline evidence from L1 candidate runs).
-    Plain (only ``validator_id`` from a controlled registry + ``score``
-    float — no untrusted content).
+    "Guard breach" — programmatic guards on a layer's LLM output, distinct
+    from ``validation_failures`` / ``runtime_failures`` (pipeline evidence
+    from L1 candidate runs). Plain: only ``validator_id`` (controlled
+    registry) + ``score`` float, no untrusted content.
     """
-    outcomes = b.opt_sp.wounds.l2_guard_breaches
     if not outcomes:
         return ""
-    lines = ["L2 GUARD BREACHES (post-parse guards on L2's output caught thrashing):"]
+    lines = [f"{layer} GUARD BREACHES (post-parse guards on {layer}'s output caught thrashing):"]
     lines.extend(f"  • {o.validator_id} (score={o.score:.2f})" for o in outcomes)
     return "\n".join(lines)
+
+
+def _r_l2_guard_breaches(b: InjectionBundle) -> str:
+    """Wound 4 — L2_CONTEXT guard outcomes; non-empty force-triggers an L3 heal."""
+    return _render_guard_breaches(b.opt_sp.wounds.l2_guard_breaches, "L2")
 
 
 def _r_l3_guard_breaches(b: InjectionBundle) -> str:
-    """L3_PLAN post-parse guard outcomes — L3's self-healing evidence.
-
-    L3 sees its own past breaches to avoid repeating them. Plain (only
-    ``validator_id`` + ``score``).
-    """
-    outcomes = b.opt_sp.wounds.l3_guard_breaches
-    if not outcomes:
-        return ""
-    lines = ["L3 GUARD BREACHES (post-parse guards on L3's output caught thrashing):"]
-    lines.extend(f"  • {o.validator_id} (score={o.score:.2f})" for o in outcomes)
-    return "\n".join(lines)
+    """L3_PLAN guard outcomes — L3 reads its own past breaches to avoid repeating them."""
+    return _render_guard_breaches(b.opt_sp.wounds.l3_guard_breaches, "L3")
 
 
 def _format_runtime_failure_lines(rf: Any) -> list[str]:
