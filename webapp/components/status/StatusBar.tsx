@@ -2,6 +2,7 @@
 import { TERMS } from "@/lib/terms";
 import { roundOf, type DashboardSnapshot, type StatusKind } from "@/lib/poll";
 import { cycleStatusLabel } from "@/lib/cycle-status";
+import { fmtPct1, fmtSecs, fmtUsd, fmtTokens, ageText } from "@/lib/format";
 import { StopButton } from "@/components/dashboard/StopButton";
 
 // Pinned status row. Visible on every tab (Chat / Dashboard / Files) so the
@@ -23,40 +24,9 @@ interface Props {
   onOpenFiles: () => void;
 }
 
-function fmtPct(v: number | null | undefined): string {
-  return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : "—";
-}
-
 function shortCycleId(id: string | null): string {
   if (!id) return "—";
   return id.length > 22 ? `${id.slice(0, 14)}…${id.slice(-4)}` : id;
-}
-
-function ageText(iso: string | undefined | null): string {
-  if (!iso) return "—";
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "—";
-  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  return `${Math.round(s / 3600)}h ago`;
-}
-
-function fmtUsd(n: number): string {
-  return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k tok`;
-  return `${n} tok`;
-}
-
-function fmtElapsed(s: number | null | undefined): string | null {
-  if (typeof s !== "number" || !Number.isFinite(s)) return null;
-  if (s < 1) return `${(s * 1000).toFixed(0)}ms`;
-  if (s < 60) return `${s.toFixed(2)}s`;
-  return `${(s / 60).toFixed(1)}m`;
 }
 
 interface SpendBucket {
@@ -132,7 +102,11 @@ export function StatusBar({
   const delta = best != null && origin != null ? best - origin : null;
   const deltaSign = delta == null ? "" : delta > 0 ? "+" : "";
   const deltaCls = delta == null ? "" : delta > 0 ? "up" : delta < 0 ? "down" : "flat";
-  const lastQuery = fmtElapsed(dash?.last_query_elapsed_s);
+  const lastQueryS = dash?.last_query_elapsed_s;
+  const lastQuery =
+    typeof lastQueryS === "number" && Number.isFinite(lastQueryS)
+      ? fmtSecs(lastQueryS)
+      : null;
   const spend = readSpend(dash);
   return (
     <div
@@ -161,7 +135,7 @@ export function StatusBar({
       </span>
       <span className="dash-strip-cell">
         <span className="dash-strip-label">best</span>
-        <strong>{fmtPct(best)}</strong>
+        <strong>{fmtPct1(best)}</strong>
         {delta != null && origin != null ? (
           <span className={`dash-strip-delta ${deltaCls}`}>
             {deltaSign}

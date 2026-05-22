@@ -27,7 +27,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { fetchActive, fetchCycles, type CycleListEntry } from "./api";
+import {
+  fetchActive,
+  fetchCampaigns,
+  fetchCycles,
+  type Campaign,
+  type CycleListEntry,
+} from "./api";
+import { usePoll } from "./usePoll";
+import { useRevalidation } from "./revalidate";
 
 export interface WorkspaceState {
   sessionId: string | null;
@@ -43,6 +51,10 @@ export interface WorkspaceState {
   cycles: CycleListEntry[];
   cyclesLoaded: boolean; // first /cycles poll has resolved (success or fail)
   cyclesError: string | null;
+  // Campaign manifests (GET /campaigns) — polled in the same tick as
+  // /cycles. Carries the operator-editable `label`; surfaces resolve a
+  // campaign's display name from here. Last-good list survives a failed tick.
+  campaigns: Campaign[];
   activeError: string | null;
   // User pin → following=false. Both ids required: a cycle_id alone is
   // ambiguous across campaigns.
@@ -90,6 +102,7 @@ export function WorkspaceProvider({
   const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [cycles, setCycles] = useState<CycleListEntry[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [cyclesLoaded, setCyclesLoaded] = useState(false);
   const [cyclesError, setCyclesError] = useState<string | null>(null);
   const [activeError, setActiveError] = useState<string | null>(null);
@@ -104,64 +117,54 @@ export function WorkspaceProvider({
     setInitialized(true);
   }, []);
 
-  // One poll loop — active pointer and cycle list move together so the
-  // list and the `●` pointer can never disagree.
-  useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      const [activeRes, cyclesRes] = await Promise.allSettled([
-        fetchActive(),
-        fetchCycles(),
-      ]);
-      if (cancelled) return;
-      if (activeRes.status === "fulfilled") {
-        setSessionId(activeRes.value.session_id || null);
-        setActiveCycleId(activeRes.value.cycle_id || null);
-        setActiveCampaignId(activeRes.value.campaign_id || null);
-        setActiveError(null);
-      } else {
-        setActiveError(
-          (activeRes.reason as Error)?.message ?? "active session unavailable",
-        );
-      }
-      if (cyclesRes.status === "fulfilled") {
-        setCycles(cyclesRes.value.cycles);
-        // `/cycles` also carries the active pointer — use it as a fallback
-        // only when `/active` itself failed this tick.
-        if (activeRes.status !== "fulfilled") {
-          if (cyclesRes.value.active_cycle_id) {
-            setActiveCycleId(cyclesRes.value.active_cycle_id);
-          }
-          if (cyclesRes.value.active_campaign_id) {
-            setActiveCampaignId(cyclesRes.value.active_campaign_id);
-          }
+  // One poll — active pointer, cycle list, and campaign registry move
+  // together so the list, the `●` pointer, and the sidebar can never
+  // disagree. `usePoll` owns the interval, the hidden-tab pause, the focus
+  // wake (a `new` run in another terminal shows within a frame), and
+  // per-tick aborts; a mutation bump (`useRevalidation`) forces an
+  // immediate re-tick so a fork / stop lands without a poll-interval wait.
+  const tick = useCallback(async (signal: AbortSignal) => {
+    const [activeRes, cyclesRes, campaignsRes] = await Promise.allSettled([
+      fetchActive(signal),
+      fetchCycles(signal),
+      fetchCampaigns(undefined, signal),
+    ]);
+    if (signal.aborted) return;
+    if (activeRes.status === "fulfilled") {
+      setSessionId(activeRes.value.session_id || null);
+      setActiveCycleId(activeRes.value.cycle_id || null);
+      setActiveCampaignId(activeRes.value.campaign_id || null);
+      setActiveError(null);
+    } else {
+      setActiveError(
+        (activeRes.reason as Error)?.message ?? "active session unavailable",
+      );
+    }
+    if (cyclesRes.status === "fulfilled") {
+      setCycles(cyclesRes.value.cycles);
+      // `/cycles` also carries the active pointer — use it as a fallback
+      // only when `/active` itself failed this tick.
+      if (activeRes.status !== "fulfilled") {
+        if (cyclesRes.value.active_cycle_id) {
+          setActiveCycleId(cyclesRes.value.active_cycle_id);
         }
-        setCyclesError(null);
-      } else {
-        setCyclesError(
-          (cyclesRes.reason as Error)?.message ?? "campaign list unavailable",
-        );
+        if (cyclesRes.value.active_campaign_id) {
+          setActiveCampaignId(cyclesRes.value.active_campaign_id);
+        }
       }
-      setCyclesLoaded(true);
-    };
-    void tick();
-    const handle = window.setInterval(() => void tick(), intervalMs);
-    // Re-resolve the active pointer the instant the operator returns to the
-    // tab — a `new` run in another terminal is reflected within a frame,
-    // not after a full poll interval.
-    const onWake = () => void tick();
-    window.addEventListener("focus", onWake);
-    const onVis = () => {
-      if (!document.hidden) onWake();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      cancelled = true;
-      window.clearInterval(handle);
-      window.removeEventListener("focus", onWake);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, [intervalMs]);
+      setCyclesError(null);
+    } else {
+      setCyclesError(
+        (cyclesRes.reason as Error)?.message ?? "campaign list unavailable",
+      );
+    }
+    // Campaign registry — keep the last good list on a failed tick.
+    if (campaignsRes.status === "fulfilled") {
+      setCampaigns(campaignsRes.value.campaigns);
+    }
+    setCyclesLoaded(true);
+  }, []);
+  usePoll(tick, { intervalMs, tickOnFocus: true, revalidateOn: useRevalidation() });
 
   // The viewed unit: the server pointer while following, else the pin.
   // campaignId is authoritative on both sides — never inferred from a
@@ -223,6 +226,7 @@ export function WorkspaceProvider({
     cycles,
     cyclesLoaded,
     cyclesError,
+    campaigns,
     activeError,
     selectCycle,
     followActive,

@@ -10,6 +10,7 @@ import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { MeasHeatCell } from "./MeasHeatCell";
 import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
+import { useLocalStorage } from "@/lib/useLocalStorage";
 
 const STORAGE_KEY = "hs-grid:v1";
 const FOLDED_WIDTH = 28;
@@ -114,32 +115,6 @@ const EMPTY_PERSISTED: PersistedState = {
   wrapped: [],
   syncLive: true,
 };
-
-function loadPersisted(): PersistedState {
-  if (typeof window === "undefined") return EMPTY_PERSISTED;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return EMPTY_PERSISTED;
-    const p = JSON.parse(raw) as Partial<PersistedState>;
-    return {
-      widths:  p.widths  ?? {},
-      folded:  p.folded  ?? [],
-      wrapped: p.wrapped ?? [],
-      syncLive: p.syncLive ?? true,
-    };
-  } catch {
-    return EMPTY_PERSISTED;
-  }
-}
-
-function savePersisted(s: PersistedState): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-  } catch {
-    /* localStorage may be unavailable (privacy mode); silently skip */
-  }
-}
 
 // Miss-probability → hue. 0 = cool green (always-hit), 0.5 =
 // neutral grey (no signal yet), 1 = warm red (always-miss).
@@ -292,7 +267,13 @@ export function HardSamplesTable({
   const measuredCount = datasetMeasuredCount;
   const unmeasuredCount = datasetUnmeasuredCount;
 
-  const [persisted, setPersisted] = useState<PersistedState>(() => loadPersisted());
+  const [persisted, setPersisted] = useLocalStorage<PersistedState>(
+    STORAGE_KEY,
+    EMPTY_PERSISTED,
+    // Merge a stored blob over the defaults so a field added since it was
+    // written is still present.
+    { deserialize: (raw) => ({ ...EMPTY_PERSISTED, ...(JSON.parse(raw) as Partial<PersistedState>) }) },
+  );
   const [sortBy, setSortBy] = useState<{ col: ColId; dir: "asc" | "desc" } | null>(null);
   const [popover, setPopover] = useState<{ col: ColId; sampleId: number; text: string } | null>(null);
   // Currently-highlighted Meas roster column. Click a cell → its ``ord``
@@ -302,8 +283,6 @@ export function HardSamplesTable({
   const [hoverTip, setHoverTip] = useState<
     { ord: string; hit: boolean | null; x: number; y: number } | null
   >(null);
-
-  useEffect(() => savePersisted(persisted), [persisted]);
 
   // Dismiss popover on Escape.
   useEffect(() => {

@@ -8,6 +8,8 @@ import {
   type SiblingKind,
 } from "@/lib/api";
 import { rootCycleId, shortFamilyTail, sessionIndexOf } from "@/lib/ids";
+import { fmtPct0 } from "@/lib/format";
+import { bumpRevalidation } from "@/lib/revalidate";
 
 interface Props {
   // The campaign whose lineage to render. A campaign is a FOREST: it holds
@@ -282,11 +284,6 @@ function placeNodes(layouts: Map<string, LaneLayout>): {
   return { nodes, segs, nodeByRowKey };
 }
 
-function fmtAcc(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return `${(v * 100).toFixed(0)}%`;
-}
-
 export function FamilyTree({ campaignId, cycleId, onSelectCycle }: Props) {
   const [data, setData] = useState<CampaignLineageResponse | null>(null);
   const [tick, setTick] = useState(0);
@@ -318,6 +315,9 @@ export function FamilyTree({ campaignId, cycleId, onSelectCycle }: Props) {
       setLastCleanupCount(r.deleted_cycle_ids.length);
       setCleanupOpen(false);
       setTick((t) => t + 1);
+      // Re-tick the workspace poll so the sidebar drops the deleted cycles
+      // at once, not on its next interval.
+      bumpRevalidation();
     } catch (err) {
       setCleanupError((err as Error).message);
     } finally {
@@ -582,7 +582,7 @@ function Forest({
                   className="family-cladogram-roundlabel"
                   textAnchor="middle"
                 >
-                  R{n.round} {fmtAcc(n.accuracy)}
+                  R{n.round} {fmtPct0(n.accuracy)}
                 </text>
                 {rowLabelText && (
                   <text
@@ -604,7 +604,7 @@ function Forest({
                   fill="transparent"
                 />
                 <title>
-                  {n.cycleId} · R{n.round} · {fmtAcc(n.accuracy)}
+                  {n.cycleId} · R{n.round} · {fmtPct0(n.accuracy)}
                   {n.label ? `\n${n.label}` : ""}
                 </title>
               </g>
@@ -633,7 +633,7 @@ function Forest({
                   {`\n${cyc.sibling_kind}`}
                   {cyc.status ? ` · ${cyc.status}` : ""}
                   {cyc.best_accuracy != null
-                    ? ` · best ${fmtAcc(cyc.best_accuracy)}`
+                    ? ` · best ${fmtPct0(cyc.best_accuracy)}`
                     : ""}
                   {isEmpty
                     ? "\nNo post-divergence rounds — use Clean up in the header to prune"

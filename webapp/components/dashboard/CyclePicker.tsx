@@ -1,11 +1,14 @@
 "use client";
 import { useWorkspace } from "@/lib/workspace";
-import type { CycleListEntry } from "@/lib/api";
-import { rootCycleId, shortFamilyTail, sessionIndexOf, campaignOriginHash } from "@/lib/ids";
+import type { Campaign, CycleListEntry } from "@/lib/api";
+import { rootCycleId, sessionIndexOf, campaignOriginHash } from "@/lib/ids";
+import { campaignDisplayName, unitDisplayName } from "@/lib/names";
+import { fmtPct0 } from "@/lib/format";
 
-// Inline unit picker for the dashboard breadcrumb. The breadcrumb text
-// becomes a `<select>` styled to read as text — the operator clicks it and
-// gets a native dropdown grouped by campaign, then by session.
+// Inline unit picker. The `breadcrumb` variant styles a native `<select>` to
+// read as breadcrumb text (dashboard); the `standalone` variant prints the
+// campaign + session name on its own (chat header). Either way the operator
+// clicks it and gets a native dropdown grouped by campaign, then by session.
 //
 // A `cycle_id` is unique only within its campaign, so every option is keyed
 // and valued by the composite `campaign_id::cycle_id`; selecting one passes
@@ -17,18 +20,20 @@ function unitKey(campaignId: string, cycleId: string): string {
   return `${campaignId}${SEP}${cycleId}`;
 }
 
-// Operator-facing unit-kind labels — the time-horizon taxonomy.
-const UNIT_KIND_LABEL: Record<string, string> = {
-  session: "session",
-  divergent_resume: "divergent resume",
-  user_fork: "user fork",
-  l3_fork: "L3 fork",
-};
+// Breadcrumb-variant option label — unit name + its best score + status.
+function breadcrumbLabel(c: CycleListEntry): string {
+  return `${unitDisplayName(c)} · best ${fmtPct0(c.best_accuracy)} · ${c.status}`;
+}
 
-export function CyclePicker() {
+export function CyclePicker({
+  variant = "breadcrumb",
+}: {
+  variant?: "breadcrumb" | "standalone";
+}) {
   const {
     cycleId,
     campaignId,
+    campaigns,
     cycles,
     cyclesLoaded,
     cyclesError,
@@ -37,15 +42,29 @@ export function CyclePicker() {
     selectCycle,
   } = useWorkspace();
 
+  const standalone = variant === "standalone";
+
   if (cyclesError && cycles.length === 0) {
     return <span className="cycle-picker-err">campaigns: {cyclesError}</span>;
   }
   if (!cyclesLoaded) {
-    return <span>{cycleId || "loading…"}</span>;
+    return <span>{standalone ? "New Job" : cycleId || "loading…"}</span>;
   }
   if (cycles.length === 0) {
-    return <span>{cycleId || "no campaigns"}</span>;
+    return <span>{standalone ? "New Job" : cycleId || "no campaigns"}</span>;
   }
+
+  // Campaign manifests by id — resolves the operator-facing campaign name
+  // (label when set, else dataset name). The standalone variant prints it
+  // into every option so the collapsed `<select>` trigger reads "Campaign ·
+  // Session N" — a native trigger only ever shows the selected option text.
+  const campaignById = new Map<string, Campaign>(
+    campaigns.map((c) => [c.campaign_id, c]),
+  );
+  const campaignNameOf = (id: string, fallbackDataset: string): string => {
+    const camp = campaignById.get(id);
+    return camp ? campaignDisplayName(camp) : fallbackDataset || id;
+  };
 
   // Group options by campaign. Within a campaign, order by session index;
   // each session root is followed by its forks (root first, then by recency).
@@ -77,7 +96,7 @@ export function CyclePicker() {
   );
 
   return (
-    <span className="cycle-picker">
+    <span className={`cycle-picker${standalone ? " standalone" : ""}`}>
       <select
         value={currentKey}
         onChange={(e) => {
@@ -88,7 +107,7 @@ export function CyclePicker() {
             e.target.value.slice(idx + SEP.length),
           );
         }}
-        aria-label="Switch unit"
+        aria-label="Switch campaign or session"
       >
         {!selectedKnown && currentKey && (
           <option value={currentKey} disabled>
@@ -98,20 +117,24 @@ export function CyclePicker() {
         {groupKeys.map((cid) => {
           const entries = groups.get(cid)!;
           const dataset = entries[0]?.dataset_name || "(unknown)";
+          const campName = campaignNameOf(cid, dataset);
+          const groupLabel = standalone
+            ? campName
+            : `${dataset} · ${campaignOriginHash(cid).slice(0, 6)}`;
           return (
-            <optgroup
-              key={cid}
-              label={`${dataset} · ${campaignOriginHash(cid).slice(0, 6)}`}
-            >
+            <optgroup key={cid} label={groupLabel}>
               {entries.map((c) => {
                 const k = unitKey(c.campaign_id, c.cycle_id);
                 const isActive =
                   c.campaign_id === activeCampaignId &&
                   c.cycle_id === activeCycleId;
+                const text = standalone
+                  ? `${campName} · ${unitDisplayName(c)}`
+                  : breadcrumbLabel(c);
                 return (
                   <option key={k} value={k}>
                     {isActive ? "● " : ""}
-                    {labelFor(c)}
+                    {text}
                   </option>
                 );
               })}
@@ -121,14 +144,4 @@ export function CyclePicker() {
       </select>
     </span>
   );
-}
-
-function labelFor(c: CycleListEntry): string {
-  const best = c.best_accuracy == null ? "—" : `${(c.best_accuracy * 100).toFixed(0)}%`;
-  // A session root reads as "session N"; a branch reads as its kind + the
-  // short id tail (shortFamilyTail already prefixes a kind glyph).
-  const name = c.is_root
-    ? `session ${sessionIndexOf(c.cycle_id)}`
-    : `${UNIT_KIND_LABEL[c.unit_kind] ?? c.unit_kind} ${shortFamilyTail(c.cycle_id)}`;
-  return `${name} · best ${best} · ${c.status}`;
 }

@@ -3,9 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
 import type { DatasetItem, HardSamplesScope, MeasurementDot } from "@/lib/api";
 import { TERMS } from "@/lib/terms";
+import { fmtText, fmtDuration, fmtUsd } from "@/lib/format";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
 import { ConfigMenu } from "@/components/dashboard/ConfigMenu";
+import { CyclePicker } from "@/components/dashboard/CyclePicker";
 import { TargetPipelineHero } from "@/components/dashboard/TargetPipelineHero";
 import type { NodeDataLike, PipelineView } from "@/components/workflow/types";
 
@@ -32,22 +34,6 @@ interface Props {
   // glassmorphic LLM chip; N nodes = dot+outside-label chain.
   targetPipelineView: PipelineView | null;
   targetConnector: string | null;
-}
-
-function fmt(v: unknown): string {
-  if (v == null || v === "") return "—";
-  return String(v);
-}
-
-// Format a duration in seconds as compact "Xh Ym" / "Xm" / "Xs".
-function fmtDuration(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) return "—";
-  if (sec < 90) return `${Math.round(sec)}s`;
-  const m = Math.round(sec / 60);
-  if (m < 90) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const rm = m % 60;
-  return rm === 0 ? `${h}h` : `${h}h ${rm}m`;
 }
 
 // Vanilla "New Job" pane, ported verbatim. Inert UI — chat input + most
@@ -129,7 +115,6 @@ export function ChatPane({
   const usedUsd = totalUsd > 0 ? totalUsd : null;
   const budgetUsd = typeof spendBlock?.budget_usd === "number" ? spendBlock.budget_usd : null;
   const rateKnown = !!(backendBucket.rate_known || loopBucket.rate_known);
-  const fmtUsd = (n: number): string => (n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
   const budgetChip = budgetUsd != null ? `$${budgetUsd.toFixed(2)}` : "—";
   const deltaPerSpend =
     best != null && origin != null && usedUsd != null && usedUsd > 0
@@ -164,46 +149,49 @@ export function ChatPane({
   return (
     <div className="content chat-content" id="content-chat">
       <div className={`chat-job-bar${jobOpen ? " open" : ""}`}>
-        <button
-          type="button"
-          className="chat-job-toggle"
-          aria-expanded={jobOpen}
-          onClick={() => setJobOpen((v) => !v)}
-        >
+        <div className="chat-job-head">
           <svg className="grid" width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
             <rect x="1" y="1" width="5" height="5" rx="1" />
             <rect x="8" y="1" width="5" height="5" rx="1" opacity=".55" />
             <rect x="1" y="8" width="5" height="5" rx="1" opacity=".55" />
             <rect x="8" y="8" width="5" height="5" rx="1" opacity=".35" />
           </svg>
-          <span className="ds">{datasetTitle || cycleId || "New Job"}</span>
-          <span className="chip-row">
-            <span className="chip" title={TERMS.newjob_bar_best}>
-              <span className="chip-lbl">Best</span> <strong>{bestPctOnly}</strong>
-              {originPct && <span className="chip-origin"> / {originPct}</span>}
+          <CyclePicker variant="standalone" />
+          <button
+            type="button"
+            className="chat-job-toggle"
+            aria-expanded={jobOpen}
+            onClick={() => setJobOpen((v) => !v)}
+            aria-label="Job status and configuration"
+          >
+            <span className="chip-row">
+              <span className="chip" title={TERMS.newjob_bar_best}>
+                <span className="chip-lbl">Best</span> <strong>{bestPctOnly}</strong>
+                {originPct && <span className="chip-origin"> / {originPct}</span>}
+              </span>
+              <span className="chip" title={TERMS.newjob_bar_budget}>
+                <span className="chip-lbl">Budget</span> <strong>{budgetChip}</strong>
+              </span>
+              <span className="chip" title={TERMS.newjob_bar_eta}>
+                <span className="chip-lbl">ETA</span> <strong>{etaChip}</strong>
+              </span>
+              <span className="chip" title={TERMS.newjob_bar_eff}>
+                <span className="chip-lbl">Δ/$</span> <strong>{effChip}</strong>
+              </span>
             </span>
-            <span className="chip" title={TERMS.newjob_bar_budget}>
-              <span className="chip-lbl">Budget</span> <strong>{budgetChip}</strong>
-            </span>
-            <span className="chip" title={TERMS.newjob_bar_eta}>
-              <span className="chip-lbl">ETA</span> <strong>{etaChip}</strong>
-            </span>
-            <span className="chip" title={TERMS.newjob_bar_eff}>
-              <span className="chip-lbl">Δ/$</span> <strong>{effChip}</strong>
-            </span>
-          </span>
-          <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="m3 4.5 3 3 3-3" />
-          </svg>
-        </button>
+            <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m3 4.5 3 3 3-3" />
+            </svg>
+          </button>
+        </div>
         {jobOpen && (
           <div className="chat-job-dropdown" role="region" aria-label="Job status and configuration">
             <div className="job-section">
               <div className="section-title">Identity</div>
-              <div className="row"><span className="lbl">Unit</span><span className="val">{fmt(cycleId)}</span></div>
-              <div className="row"><span className="lbl">Session</span><span className="val">{fmt(sessionId)}</span></div>
-              <div className="row"><span className="lbl">Project</span><span className="val">{fmt(datasetTitle)}</span></div>
-              <div className="row"><span className="lbl">Updated</span><span className="val">{fmt(dash?.wallclock_serialized_at)}</span></div>
+              <div className="row"><span className="lbl">Unit</span><span className="val">{fmtText(cycleId)}</span></div>
+              <div className="row"><span className="lbl">Session</span><span className="val">{fmtText(sessionId)}</span></div>
+              <div className="row"><span className="lbl">Project</span><span className="val">{fmtText(datasetTitle)}</span></div>
+              <div className="row"><span className="lbl">Updated</span><span className="val">{fmtText(dash?.wallclock_serialized_at)}</span></div>
               <div className="section-title" style={{ marginTop: 12 }}>Spend</div>
               <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${(backendBucket.input_tokens ?? 0) + (backendBucket.output_tokens ?? 0)} tok`}</span></div>
               <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${(loopBucket.input_tokens ?? 0) + (loopBucket.output_tokens ?? 0)} tok`}</span></div>

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { postStopCycle } from "@/lib/api";
+import { bumpRevalidation } from "@/lib/revalidate";
 import { Modal } from "@/components/shell/Modal";
 
 interface Props {
@@ -28,6 +29,8 @@ export function StopButton({ campaignId, cycleId, isLive }: Props) {
     try {
       await postStopCycle(campaignId, cycleId);
       setDone(true);
+      // Re-tick the workspace poll now so the status flips without a wait.
+      bumpRevalidation();
     } catch (e) {
       setErr((e as Error).message);
     } finally {

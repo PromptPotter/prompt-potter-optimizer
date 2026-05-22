@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchFiles, type FileEntry } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
+import { Empty, Loading, ErrorNote } from "@/components/ui/states";
 
 interface DirNode {
   dirs: Record<string, DirNode>;
@@ -79,24 +80,17 @@ export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
   const tree = useMemo(() => (entries ? buildTree(entries) : null), [entries]);
 
   if (!cycleId) {
-    const netDown = Boolean(activeError || cyclesError);
-    return (
-      <div
-        style={{
-          padding: 8,
-          color: netDown ? "var(--color-danger)" : "var(--color-text-tertiary)",
-          fontSize: 13,
-        }}
-      >
-        {netDown ? "Server unreachable — retrying" : "No active campaign yet."}
-      </div>
+    return activeError || cyclesError ? (
+      <ErrorNote>Server unreachable — retrying</ErrorNote>
+    ) : (
+      <Empty>No active campaign yet.</Empty>
     );
   }
   if (error) {
-    return <div style={{ padding: 8, color: "var(--color-danger)", fontSize: 13 }}>Failed to load files: {error}</div>;
+    return <ErrorNote>Failed to load files: {error}</ErrorNote>;
   }
   if (!tree) {
-    return <div style={{ padding: 8, color: "var(--color-text-tertiary)", fontSize: 13 }}>Loading file tree…</div>;
+    return <Loading>Loading file tree…</Loading>;
   }
 
   return (

@@ -1,5 +1,6 @@
 "use client";
 import type { DashboardSnapshot } from "@/lib/poll";
+import { fmtNum, fmtClock } from "@/lib/format";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -38,21 +39,10 @@ interface BackendWarning {
   query?: string;
 }
 
-function fmtNum(v: unknown, digits = 3): string {
-  if (v == null) return "—";
-  if (typeof v === "number") return v.toFixed(digits);
-  return String(v);
-}
-
-function fmtTime(s: unknown): string {
-  if (!s) return "—";
-  try { return new Date(String(s)).toLocaleTimeString(); } catch { return String(s); }
-}
-
 const FORMATTERS: Record<string, (v: unknown) => string> = {
   origin: (v) => fmtNum(v),
   current_acc: (v) => fmtNum(v),
-  state_since: fmtTime,
+  state_since: fmtClock,
 };
 
 export function LiveStateCard({ dash }: Props) {

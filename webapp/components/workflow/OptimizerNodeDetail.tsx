@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import type { PipelineDoc } from "./types";
 import { type DashboardSnapshot, roundOf, type RoundFileDoc } from "@/lib/poll";
 import { phaseToNodeId } from "./layout";
+import { fmtSecs } from "@/lib/format";
 
 // Node block as written by AuditTrailView._handle_llm_call
 // (promptpotter/infrastructure/projections/audit_trail.py:222-243).
@@ -31,13 +32,6 @@ interface Props {
   isLive: boolean;
   rounds: RoundFileDoc[];
   onClose: () => void;
-}
-
-function fmtSecs(s: number | undefined | null): string {
-  if (s == null) return "—";
-  if (s < 1) return `${(s * 1000).toFixed(0)}ms`;
-  if (s < 60) return `${s.toFixed(2)}s`;
-  return `${(s / 60).toFixed(1)}m`;
 }
 
 function fmtVal(v: unknown): string {

@@ -1,13 +1,11 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  fetchCampaigns,
-  type Campaign,
-  type CycleListEntry,
-  type UnitKind,
-} from "@/lib/api";
+import type { Campaign, CycleListEntry } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { rootCycleId, shortFamilyTail, sessionIndexOf, campaignOriginHash } from "@/lib/ids";
+import { campaignDisplayName, unitDisplayName, UNIT_KIND_LABEL } from "@/lib/names";
+import { fmtPct0 } from "@/lib/format";
+import { useLocalStorage } from "@/lib/useLocalStorage";
 import { TERMS } from "@/lib/terms";
 
 interface Props {
@@ -49,14 +47,6 @@ interface CampaignGroup {
   // one being actively worked on stays at the top.
   updatedAt: string;
 }
-
-// Operator-facing badge for a non-session unit. The session root carries
-// no badge — it's the trunk, not a branch.
-const UNIT_KIND_LABEL: Record<Exclude<UnitKind, "session">, string> = {
-  divergent_resume: "divergent resume",
-  user_fork: "user fork",
-  l3_fork: "L3 fork",
-};
 
 // One node in a session's fork-tree: a unit plus the units forked off it.
 interface UnitNode {
@@ -153,86 +143,45 @@ function groupCampaigns(
   return groups;
 }
 
-function fmtAcc(v: number | null): string {
-  return v == null ? "—" : `${(v * 100).toFixed(0)}%`;
-}
-
-// Campaign row name — the operator label when present, else the dataset
-// name (the campaign IS "the {dataset} experiment").
-function campaignName(c: Campaign): string {
-  return c.label || c.dataset_name || c.campaign_id;
-}
-
 // We store the COLLAPSED set, not the expanded one — campaigns + sessions
 // default to expanded, so empty storage = "show everything." Keys are
 // prefixed (`cmp:` / `sess:`) so campaign and session ids never collide.
 const COLLAPSED_STORAGE_KEY = "promptpotter.sidebar.collapsedNodes";
+const EMPTY_COLLAPSED: Set<string> = new Set();
 
-function loadCollapsed(): Set<string> {
-  try {
-    const raw = window.localStorage.getItem(COLLAPSED_STORAGE_KEY);
-    if (!raw) return new Set();
+// A Set doesn't JSON round-trip — persist it as a string array.
+const collapsedCodec = {
+  serialize: (s: Set<string>) => JSON.stringify([...s]),
+  deserialize: (raw: string): Set<string> => {
     const parsed = JSON.parse(raw);
     return new Set(Array.isArray(parsed) ? parsed : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveCollapsed(s: Set<string>) {
-  try {
-    window.localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify([...s]));
-  } catch {
-    /* private mode etc. */
-  }
-}
+  },
+};
 
 const sessKey = (campaignId: string, rootId: string) =>
   `sess:${campaignId}::${rootId}`;
 
 export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse }: Props) {
-  // Cycle list + active pointer + current selection come from the shared
-  // workspace context (one poll for the whole app). Campaigns are a
-  // separate small read polled here — the campaign registry isn't on the
-  // hot per-cycle path the workspace context owns.
-  const { cycleId, campaignId, cycles, cyclesLoaded, activeCycleId, activeCampaignId } =
-    useWorkspace();
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [campaignsLoaded, setCampaignsLoaded] = useState(false);
+  // Cycle list + campaign registry + active pointer + current selection all
+  // come from the shared workspace context — one poll for the whole app.
+  const {
+    cycleId,
+    campaignId,
+    campaigns,
+    cycles,
+    cyclesLoaded,
+    activeCycleId,
+    activeCampaignId,
+  } = useWorkspace();
   // Campaign/session collapse state — nodes expand by default, so we
   // persist the ones the operator explicitly collapsed.
-  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => new Set());
+  const [collapsedNodes, setCollapsedNodes] = useLocalStorage<Set<string>>(
+    COLLAPSED_STORAGE_KEY,
+    EMPTY_COLLAPSED,
+    collapsedCodec,
+  );
   // Dataset filter — null = all datasets. Not persisted; resets per visit.
   const [datasetFilter, setDatasetFilter] = useState<string | null>(null);
-
-  // Hydrate stored collapsed set after mount (localStorage is browser-only).
-  useEffect(() => {
-    setCollapsedNodes(loadCollapsed());
-  }, []);
-
-  // Poll the campaign registry alongside the workspace poll cadence.
-  useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const res = await fetchCampaigns();
-        if (!cancelled) setCampaigns(res.campaigns);
-      } catch {
-        /* sidebar still renders from the last good list */
-      } finally {
-        if (!cancelled) setCampaignsLoaded(true);
-      }
-    };
-    void tick();
-    const handle = window.setInterval(() => void tick(), 3000);
-    const onFocus = () => void tick();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      window.clearInterval(handle);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, []);
 
   const allGroups = useMemo(
     () => groupCampaigns(campaigns, cycles),
@@ -273,22 +222,23 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
       const next = new Set(prev);
       next.delete(focusKeys.cmp);
       next.delete(focusKeys.sess);
-      saveCollapsed(next);
       return next;
     });
-  }, [focusKeys]);
+  }, [focusKeys, setCollapsedNodes]);
 
-  const toggleNode = useCallback((key: string) => {
-    setCollapsedNodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      saveCollapsed(next);
-      return next;
-    });
-  }, []);
+  const toggleNode = useCallback(
+    (key: string) => {
+      setCollapsedNodes((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+    },
+    [setCollapsedNodes],
+  );
 
-  const loaded = cyclesLoaded && campaignsLoaded;
+  const loaded = cyclesLoaded;
 
   return (
     <nav className="sidebar" aria-label="Primary">
@@ -480,7 +430,7 @@ function CampaignNode({
           <span className="cycle-library-mark">{containsActive ? "●" : ""}</span>
           <span className="cycle-library-row">
             <span className="cycle-library-name">
-              {campaignName(group.campaign)}
+              {campaignDisplayName(group.campaign)}
               {!group.campaign.label && (
                 <span className="cycle-library-hash" title={cid}>
                   #{campaignOriginHash(cid).slice(0, 6)}
@@ -488,7 +438,7 @@ function CampaignNode({
               )}
             </span>
             <span className="cycle-library-meta">
-              {group.sessions.length} sessions · {fmtAcc(best)}
+              {group.sessions.length} sessions · {fmtPct0(best)}
             </span>
           </span>
         </button>
@@ -565,9 +515,7 @@ function SessionSubtree({
     { kind: "diag", glyph: "Δ", count: counts.diag },
   ].filter((c) => c.count > 0);
 
-  const label = isCampaignRow
-    ? campaignName(campaign)
-    : `session ${sessionIndexOf(root.cycle_id)}`;
+  const label = isCampaignRow ? campaignDisplayName(campaign) : unitDisplayName(root);
 
   return (
     <>
@@ -605,7 +553,7 @@ function SessionSubtree({
                 </span>
               )}
             </span>
-            <span className="cycle-library-meta">{fmtAcc(root.best_accuracy)}</span>
+            <span className="cycle-library-meta">{fmtPct0(root.best_accuracy)}</span>
           </span>
         </button>
         {chips.length > 0 && (
@@ -731,7 +679,7 @@ function UnitRow({
           )}
           {live && <span className="cycle-library-live" title="Unit status is running">●</span>}
         </span>
-        <span className="cycle-library-meta">{fmtAcc(unit.best_accuracy)}</span>
+        <span className="cycle-library-meta">{fmtPct0(unit.best_accuracy)}</span>
       </span>
     </button>
   );

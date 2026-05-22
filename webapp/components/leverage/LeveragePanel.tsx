@@ -5,33 +5,13 @@
 
 import { useEffect, useState } from "react";
 import { fetchLeverage, type LeverageResponse, type PerQueryRow } from "@/lib/api";
+import { fmtPct0, fmtFitness, ageText } from "@/lib/format";
 
 const ROW_LIMIT = 200;
-
-function fmtPct(v: number | null | undefined): string {
-  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
-  return `${(v * 100).toFixed(0)}%`;
-}
-
-function fmtFitness(v: number | null): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return v.toFixed(2);
-}
 
 function truncate(s: string, n: number): string {
   const trimmed = s.replace(/\s+/g, " ").trim();
   return trimmed.length > n ? `${trimmed.slice(0, n)}…` : trimmed;
-}
-
-function ageText(iso: string): string {
-  if (!iso) return "—";
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return iso;
-  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
 }
 
 export function LeveragePanel() {
@@ -154,7 +134,7 @@ function LeverageRow({ row }: { row: PerQueryRow }) {
       <td className="leverage-num"><strong>{row.n_measurements}</strong></td>
       <td className="leverage-num">{row.n_unique_configs}</td>
       <td className="leverage-num">{fmtFitness(row.mean_fitness)}</td>
-      <td className="leverage-num">{fmtPct(row.hit_rate)}</td>
+      <td className="leverage-num">{fmtPct0(row.hit_rate)}</td>
       <td className="leverage-when">{ageText(row.last_seen)}</td>
     </tr>
   );

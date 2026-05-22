@@ -7,6 +7,7 @@ import {
   type DashboardSnapshot,
 } from "@/lib/poll";
 import { rootCycleId, shortFamilyTail } from "@/lib/ids";
+import { fmtPct0 } from "@/lib/format";
 import { parseSampleLine } from "@/lib/sample-line";
 import { useSelection } from "./SelectionContext";
 import { FamilyTree } from "./FamilyTree";
@@ -58,11 +59,6 @@ interface ChildPos {
   x: number;           // start of child's horizontal stub
   y: number;
   labelX: number;
-}
-
-function fmtPct(v: number | undefined | null): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return `${(v * 100).toFixed(0)}%`;
 }
 
 export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props) {
@@ -222,11 +218,11 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
               ) : (
                 <span>{shortFamilyTail(parentId) || parentId}</span>
               )}
-              {inheritedBest != null ? ` · best ${fmtPct(inheritedBest)}` : ""}
+              {inheritedBest != null ? ` · best ${fmtPct0(inheritedBest)}` : ""}
               {" · no new rounds yet"}
             </>
           ) : originAcc != null ? (
-            `origin ${fmtPct(originAcc)} · waiting for round 1`
+            `origin ${fmtPct0(originAcc)} · waiting for round 1`
           ) : (
             "No rounds on disk yet — the tree appears once round 1 lands."
           )}
@@ -266,7 +262,7 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
             className="lineage-label"
             textAnchor="end"
           >
-            origin {fmtPct(originAcc)}
+            origin {fmtPct0(originAcc)}
           </text>
 
           {/* Slanted branches from parent point to each child's stub start. */}
@@ -318,7 +314,7 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
                   y={c.y + 3}
                   className={`lineage-label${c.cand.is_winner ? " winner" : ""}`}
                 >
-                  R{c.round}.{c.idx + 1} {fmtPct(c.cand.accuracy)}
+                  R{c.round}.{c.idx + 1} {fmtPct0(c.cand.accuracy)}
                 </text>
                 {/* Invisible hit-rect over the label so the row catches clicks
                    beyond just the thin stub. */}

@@ -1,8 +1,10 @@
 "use client";
 import { useMemo, useState } from "react";
 import { postCreateFork, postStopCycle } from "@/lib/api";
+import { bumpRevalidation } from "@/lib/revalidate";
 import { useCycleStream } from "@/lib/poll";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
+import { fmtPct1 } from "@/lib/format";
 import type { SelectedCandidate } from "./SelectionContext";
 
 interface Props {
@@ -72,6 +74,9 @@ export function ScoringInspector({
         selected.candidate_id,
       );
       setForkResult({ id: r.fork_cycle_id, cli: r.cli_command });
+      // Force the workspace poll to re-tick now — the new fork (and the
+      // stop, if any) show up at once instead of a poll-interval later.
+      bumpRevalidation();
     } catch (e) {
       setForkErr((e as Error).message);
     } finally {
@@ -118,7 +123,7 @@ export function ScoringInspector({
         </div>
         <div className="inspector-row">
           <span className="inspector-key">accuracy</span>
-          <span className="inspector-val">{fmtPct(selected.accuracy)}</span>
+          <span className="inspector-val">{fmtPct1(selected.accuracy)}</span>
         </div>
         {data && typeof data.composite === "number" && (
           <div className="inspector-row">
@@ -189,8 +194,4 @@ export function ScoringInspector({
       )}
     </section>
   );
-}
-
-function fmtPct(v: number | null | undefined): string {
-  return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : "—";
 }

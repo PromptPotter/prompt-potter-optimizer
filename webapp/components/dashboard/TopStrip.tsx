@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { TERMS } from "@/lib/terms";
 import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 import { cycleStatusLabel } from "@/lib/cycle-status";
+import { fmtSecs } from "@/lib/format";
 
 // Merged Hero + Progress card. Replaces the prior dash-hero double-card
 // (HeroSummary on the right of the breadcrumb + ProgressCard underneath).
@@ -29,13 +30,6 @@ interface QpsState {
   lastQ: number | null;
   lastT: number | null;
   qps: number | null;
-}
-
-function fmtSecs(s: number | null | undefined): string {
-  if (s == null) return "—";
-  if (s < 1) return `${(s * 1000).toFixed(0)}ms`;
-  if (s < 60) return `${s.toFixed(2)}s`;
-  return `${(s / 60).toFixed(1)}m`;
 }
 
 function parseProgress(raw: string | undefined): { cur: number; tot: number } | null {

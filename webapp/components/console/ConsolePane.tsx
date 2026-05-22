@@ -15,41 +15,15 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { fetchCycleFile } from "@/lib/api";
+import { useLocalStorage } from "@/lib/useLocalStorage";
+import { usePoll } from "@/lib/usePoll";
 
 const KEY = "promptpotter.console.open";
 const MAX_LINES = 200;
 const POLL_MS = 1000;
-
-const subscribers = new Set<() => void>();
-function subscribe(cb: () => void): () => void {
-  subscribers.add(cb);
-  return () => {
-    subscribers.delete(cb);
-  };
-}
-function emit(): void {
-  for (const cb of subscribers) cb();
-}
-function readOpen(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-function writeOpen(next: boolean): void {
-  try {
-    window.localStorage.setItem(KEY, next ? "1" : "0");
-    emit();
-  } catch {
-    /* ignore */
-  }
-}
 
 interface Props {
   campaignId: string | null;
@@ -57,12 +31,11 @@ interface Props {
 }
 
 export function ConsolePane({ campaignId, cycleId }: Props) {
-  const open = useSyncExternalStore(
-    subscribe,
-    () => readOpen(),
-    () => false,
-  );
-  const toggle = () => writeOpen(!open);
+  const [open, setOpen] = useLocalStorage<boolean>(KEY, false, {
+    serialize: (v) => (v ? "1" : "0"),
+    deserialize: (raw) => raw === "1",
+  });
+  const toggle = () => setOpen((o) => !o);
   return (
     <section className={`console-pane${open ? " open" : " closed"}`} aria-label="Optimizer console">
       <button
@@ -98,9 +71,9 @@ function ConsoleBody({
   const stickyBottomRef = useRef(true);
 
   // Cycle change ⇒ wipe immediately so the prior cycle's tail can't linger
-  // visible during the first new fetch. Lines/error use the prev-prop
-  // pattern at the React state layer; the stickyBottom ref is reset inside
-  // the poll effect below (refs MUST NOT be written during render).
+  // visible during the first new fetch. The prev-prop pattern resets the
+  // React state (lines / error); the unit effect below resets the
+  // stickyBottom ref (refs MUST NOT be written during render).
   const [prevCycleId, setPrevCycleId] = useState<string | null>(cycleId);
   if (cycleId !== prevCycleId) {
     setPrevCycleId(cycleId);
@@ -108,38 +81,45 @@ function ConsoleBody({
     setError(null);
   }
 
+  // Latest viewed unit — lets a tick already in flight when the operator
+  // switches cycles discard its now-stale result.
+  const unit = campaignId && cycleId ? `${campaignId}::${cycleId}` : "";
+  const unitRef = useRef(unit);
   useEffect(() => {
-    if (!campaignId || !cycleId) return;
-    let cancelled = false;
-    // Fresh cycle ⇒ re-grab stick-to-bottom; the operator hasn't yet scrolled
-    // the new cycle's tail.
+    unitRef.current = unit;
+    // Fresh cycle ⇒ re-grab stick-to-bottom; the operator hasn't scrolled
+    // the new cycle's tail yet.
     stickyBottomRef.current = true;
+  }, [unit]);
 
-    const tick = async () => {
+  const tick = useCallback(
+    async (signal: AbortSignal) => {
+      if (!campaignId || !cycleId) return;
+      const launchedFor = unit;
       try {
-        const r = await fetchCycleFile(campaignId, cycleId, "cycle", "output.log");
-        if (cancelled) return;
-        // Split, trim trailing empty (the log ends with a newline), keep
-        // the last MAX_LINES so the DOM doesn't grow unbounded for long
-        // cycles. The full file is still on disk for the operator to open.
+        const r = await fetchCycleFile(
+          campaignId,
+          cycleId,
+          "cycle",
+          "output.log",
+          signal,
+        );
+        if (signal.aborted || unitRef.current !== launchedFor) return;
+        // Split, trim the trailing empty (the log ends with a newline),
+        // keep the last MAX_LINES so the DOM can't grow unbounded.
         const split = (r.content ?? "").split("\n");
         if (split.length > 0 && split[split.length - 1] === "") split.pop();
-        const tail = split.length > MAX_LINES ? split.slice(split.length - MAX_LINES) : split;
-        setLines(tail);
+        setLines(split.length > MAX_LINES ? split.slice(-MAX_LINES) : split);
         setError(null);
       } catch (e) {
-        if (cancelled) return;
+        if ((e as Error).name === "AbortError" || signal.aborted) return;
+        if (unitRef.current !== launchedFor) return;
         setError((e as Error).message);
       }
-    };
-
-    const id = setInterval(tick, POLL_MS);
-    tick();
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [campaignId, cycleId]);
+    },
+    [campaignId, cycleId, unit],
+  );
+  usePoll(tick, { intervalMs: POLL_MS, enabled: !!campaignId && !!cycleId });
 
   const onScroll = useCallback(() => {
     const el = containerRef.current;

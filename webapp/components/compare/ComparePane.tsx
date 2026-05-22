@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { campaignOriginHash } from "@/lib/ids";
+import { fmtPct1, fmtDelta } from "@/lib/format";
 
 interface Props {
   themeKey: string;
@@ -22,18 +23,6 @@ interface Props {
 interface LoadedCampaign {
   cycle: CycleListEntry;
   detail: CampaignDetail;
-}
-
-function fmtPct(v: number | null | undefined): string {
-  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
-  return `${(v * 100).toFixed(1)}%`;
-}
-
-function fmtDelta(a: number | null, b: number | null): string {
-  if (a == null || b == null) return "—";
-  const d = (b - a) * 100;
-  if (Math.abs(d) < 0.05) return "0.0pp";
-  return `${d > 0 ? "+" : ""}${d.toFixed(1)}pp`;
 }
 
 // A unit is the pair (campaign_id, cycle_id) — a cycle_id alone is
@@ -202,13 +191,13 @@ export function ComparePane({ themeKey }: Props) {
               label="Best vs origin"
               left={left.detail.best_accuracy}
               right={right.detail.best_accuracy}
-              format={fmtPct}
+              format={fmtPct1}
             />
             <DeltaCard
               label="Origin"
               left={left.detail.origin_accuracy}
               right={right.detail.origin_accuracy}
-              format={fmtPct}
+              format={fmtPct1}
             />
             <DeltaCard
               label="Rounds"
@@ -299,11 +288,11 @@ function SummaryCard({ side, loaded }: { side: string; loaded: LoadedCampaign })
       </div>
       <div className="compare-card-stats">
         <div>
-          <div className="compare-card-val">{fmtPct(detail.best_accuracy)}</div>
+          <div className="compare-card-val">{fmtPct1(detail.best_accuracy)}</div>
           <div className="compare-card-lbl">best</div>
         </div>
         <div>
-          <div className="compare-card-val">{fmtPct(detail.origin_accuracy)}</div>
+          <div className="compare-card-val">{fmtPct1(detail.origin_accuracy)}</div>
           <div className="compare-card-lbl">origin</div>
         </div>
         <div>

@@ -15,6 +15,7 @@ import {
 } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/useDatasetPreview";
+import { useLocalStorage } from "@/lib/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
 import { Chart as ChartJS } from "chart.js";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -118,25 +119,15 @@ function DashboardPaneInner() {
   // expanded; once the user collapses it, that sticks until they toggle
   // again. Tab switches never touch this state — that's the whole point
   // of the manual control.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  useEffect(() => {
-    try {
-      setSidebarCollapsed(window.localStorage.getItem("promptpotter.sidebar.collapsed") === "1");
-    } catch {
-      /* private mode etc. */
-    }
-  }, []);
-  const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem("promptpotter.sidebar.collapsed", next ? "1" : "0");
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }, []);
+  const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage<boolean>(
+    "promptpotter.sidebar.collapsed",
+    false,
+    { serialize: (v) => (v ? "1" : "0"), deserialize: (raw) => raw === "1" },
+  );
+  const toggleSidebar = useCallback(
+    () => setSidebarCollapsed((prev) => !prev),
+    [setSidebarCollapsed],
+  );
 
   const dashState = useCycleStream();
   const dash: DashboardSnapshot | null = dashState.dash;
