@@ -8,7 +8,7 @@ produces the round's :class:`RoundResult`.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.optimization.l1.population import parse_population
 from promptpotter.application.optimization.l1.score.loop import score_population
@@ -39,6 +39,7 @@ from promptpotter.shared.statistics import proportion_test
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.domain.sample import Sample
 
 
 def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
@@ -82,10 +83,10 @@ def is_leader_eligible(cs: CandidateScore) -> bool:
 async def l1_score(
     cycle: Cycle,
     candidates: list[CandidateProposal],
-    dataset: list,
+    dataset: list[Sample],
     origin: RoundOrigin,
     *,
-    pipeline_params: dict | None = None,
+    pipeline_params: dict[str, Any] | None = None,
     improvement_threshold: float = 0.01,
     improvement_significance: float = 0.10,
     callbacks: RunCallbacks,
@@ -138,7 +139,7 @@ async def l1_score(
     best_acc = origin.accuracy
     best_comp = origin.composite_fitness
     best_osp: OptSearchPoint = origin.osp
-    best_results: list = list(origin.results)
+    best_results: list[QueryMeasurement] = list(cast("list[QueryMeasurement]", origin.results))
     best_label = origin.label
     best_scores: dict[str, float] = dict(origin.evaluators)
     best_matched_origin_acc = origin.accuracy

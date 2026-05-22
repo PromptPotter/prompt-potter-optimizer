@@ -21,6 +21,7 @@ from promptpotter.application.optimization.validators.l2_l3 import run_l2_output
 from promptpotter.domain.l1_layout import L1Layout, coerce_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase
+from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.strings import truncate
 
 if TYPE_CHECKING:
@@ -43,7 +44,7 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
             new_task_context = merged
 
     proposed_layout = coerce_l1_layout(raw.l1_layout)
-    layout_outcomes: list = []
+    layout_outcomes: list[ValidatorOutcome] = []
     accepted_layout: L1Layout | None = None
     if proposed_layout is not None:
         layout_result = validate_l1_layout(proposed_layout, prior_layout=opt_sp.l1_layout)

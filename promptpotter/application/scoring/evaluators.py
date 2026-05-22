@@ -191,7 +191,7 @@ def _compute_recall(
     for r in scoped:
         pd = r.get("pipeline_data") or {}
         raw = pd.get(candidate_key)
-        candidates: list = list(raw) if isinstance(raw, list) else []
+        candidates: list[Any] = list(raw) if isinstance(raw, list) else []
         gt = r.get("ground_truth", "")
         if any(extract_item_label(c) == gt for c in candidates):
             found += 1

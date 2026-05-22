@@ -46,7 +46,8 @@ def _load_optimizer_manifest() -> dict[str, Any]:
     and the bodies live in the top-level ``resolved_schemas`` /
     ``resolved_prompts`` registries.
     """
-    return json.loads(_PIPELINE_PATH.read_text(encoding="utf-8"))
+    manifest: dict[str, Any] = json.loads(_PIPELINE_PATH.read_text(encoding="utf-8"))
+    return manifest
 
 
 def _resolved_key(family: str, version: Any) -> str:
@@ -95,7 +96,7 @@ _LANGFUSE_PREFIX = "optimizer_"
 _LANGFUSE_CACHE_TTL = 300  # seconds
 
 
-def _resolved_prompt_for_node(name: str) -> dict | None:
+def _resolved_prompt_for_node(name: str) -> dict[str, Any] | None:
     """Look up a node's prompt body in ``resolved_prompts``.
 
     Joins the node's ``config.prompt_family``/``prompt_version`` against

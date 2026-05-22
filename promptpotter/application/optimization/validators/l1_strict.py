@@ -44,7 +44,7 @@ __all__ = [
 ]
 
 
-def _inline_refs(node: Any, defs: dict[str, dict]) -> Any:
+def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
     """Resolve ``$ref`` references in a Pydantic-emitted JSON Schema in place.
 
     Pydantic's ``model_json_schema()`` factors nested models into a top-level
@@ -65,7 +65,7 @@ def _inline_refs(node: Any, defs: dict[str, dict]) -> Any:
     return node
 
 
-def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
+def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict[str, Any]:
     """l1_generate response_schema — three constrained slots per variant.
 
     The base shape comes from :class:`L1GenerateOutput` (the Pydantic SoT
@@ -112,7 +112,7 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
     for node in pipeline_schema.nodes:
         if not node.param_keys:
             continue
-        param_props: dict[str, dict] = {}
+        param_props: dict[str, dict[str, Any]] = {}
         for param in sorted(node.param_keys):
             # Operator-locked axes (model, provider) live in the dataset
             # overlay and are off L1's surface. Keeping them out of the
@@ -173,7 +173,7 @@ def _matches_declared_type(value: Any, declared: str) -> bool:
 
 
 def validate_overrides(
-    pipeline_params_override: dict[str, dict],
+    pipeline_params_override: dict[str, dict[str, Any]],
     pipeline_schema: PipelineSchema,
     *,
     forbidden_axes_strict: bool = True,
@@ -399,7 +399,7 @@ def detect_invariants(
         cp.osp.wounds.validation_failures = [
             vf for vf in cp.osp.wounds.validation_failures if vf.reason not in _INVARIANT_REASONS
         ]
-    seen: dict[tuple, int] = {}
+    seen: dict[tuple[Any, ...], int] = {}
     n_no_op = 0
     n_duplicate = 0
     parent_tc = parent_osp.task_context.to_dict()

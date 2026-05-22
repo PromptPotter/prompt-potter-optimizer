@@ -156,15 +156,15 @@ async def llm_call(
     messages: list[dict[str, str]],
     *,
     node: str | None = None,
-    config: dict | None = None,
-    trace_meta: dict | None = None,
+    config: dict[str, Any] | None = None,
+    trace_meta: dict[str, Any] | None = None,
     response_model: type[BaseModel] | None = None,
-    response_schema: dict | None = None,
+    response_schema: dict[str, Any] | None = None,
     ledger: CycleEventLog | None = None,
     round_num: int | None = None,
     candidate_idx: int | None = None,
     cache: OptimizerCallCache | None = None,
-    **overrides,
+    **overrides: Any,
 ) -> LLMResponse:
     """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides.
 
@@ -202,7 +202,7 @@ async def llm_call(
     merged = {**_LLM_DEFAULTS, **config, **overrides}
 
     cache_key: str | None = None
-    cached_payload: dict | None = None
+    cached_payload: dict[str, Any] | None = None
     if cache is not None:
         cache_key = hash_call(
             messages=messages,
@@ -357,7 +357,7 @@ async def llm_call(
             cache.save(cache_key, response.model_dump())
 
     if ledger is not None:
-        payload: dict = {
+        payload: dict[str, Any] = {
             "type": node or "llm_call",
             "config": {
                 "model": merged.get("model"),
@@ -396,11 +396,11 @@ async def llm_call(
 async def run_optimizer_node(
     *,
     template_name: str,
-    prompt_vars: dict,
+    prompt_vars: dict[str, Any],
     llm_client: LLMClientBase,
     model: str | None,
     temperature: float = 0.0,
-    response_schema: dict | None = None,
+    response_schema: dict[str, Any] | None = None,
     user_content: str | None = None,
     ledger: CycleEventLog | None = None,
     round_num: int | None = None,

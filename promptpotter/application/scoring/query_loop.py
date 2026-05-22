@@ -73,7 +73,7 @@ def _materialize_cached(
 ) -> QueryMeasurement:
     """Mark prior as cached + rescored; warn on hit/no-hit drift unless explained by bold-strip."""
     archived_hit = item.get("hit") if "hit" in item else None
-    r: dict = {**item, "cached": True}
+    r: dict[str, Any] = {**item, "cached": True}
     pd = r.get("pipeline_data")
     if isinstance(pd, dict):
         r["pipeline_data"] = {**pd, "total_time": 0.0}

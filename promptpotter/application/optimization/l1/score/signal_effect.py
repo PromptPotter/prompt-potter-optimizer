@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from promptpotter.application.optimization.l1.population import pobb_decision_data
 from promptpotter.application.optimization.pobb.elimination import PoBBCheck
@@ -52,18 +53,18 @@ class SignalEffect:
     leader_locked_loose: bool
     leader_id: str
     runtime_failure: RuntimeFailure | None
-    elim_context: dict | None
-    degradation_context: dict | None
-    elimination_decision: tuple[dict, dict] | None
-    leader_lock_decision: tuple[dict, dict] | None
+    elim_context: dict[str, Any] | None
+    degradation_context: dict[str, Any] | None
+    elimination_decision: tuple[dict[str, Any], dict[str, Any]] | None
+    leader_lock_decision: tuple[dict[str, Any], dict[str, Any]] | None
 
 
 def decode_signal_effect(
     signal: EscalationSignal | None,
     *,
-    results: list,
-    dataset: list,
-    merged_pp: dict | None,
+    results: list[Any],
+    dataset: list[Any],
+    merged_pp: dict[str, Any] | None,
     round_num: int,
     elim_check: PoBBCheck,
     candidate_id: str,
@@ -110,7 +111,7 @@ def decode_signal_effect(
             candidate_label=candidate_label,
         )
 
-    elim_ctx: dict | None = None
+    elim_ctx: dict[str, Any] | None = None
     leader_id = ""
     if (elimination_stopped or leader_locked_loose) and signal.check_name == "elimination":
         leader_id = str(cr.get("leader_id", ""))
@@ -127,7 +128,7 @@ def decode_signal_effect(
     # Degradation context — populated when DegradationCheck (or scoring-
     # error abort) fires. Disjoint from elim_ctx: the renderer reads one
     # or the other based on which check name attached to the signal.
-    degrad_ctx: dict | None = None
+    degrad_ctx: dict[str, Any] | None = None
     if elimination_stopped and signal.check_name in ("degradation", "scoring_error_abort"):
         degrad_ctx = {
             "degraded_rate": float(cr.get("degraded_rate", 0.0)),
@@ -150,7 +151,7 @@ def decode_signal_effect(
         if r.get("sample_id") is not None
     ]
     prior_histories_snapshot = elim_check.snapshot_priors(candidate_sample_ids)
-    elimination_decision: tuple[dict, dict] | None = None
+    elimination_decision: tuple[dict[str, Any], dict[str, Any]] | None = None
     if elimination_stopped and signal.check_name == elim_check.name:
         elimination_decision = (
             {
@@ -168,7 +169,7 @@ def decode_signal_effect(
                 prior_histories=prior_histories_snapshot,
             ),
         )
-    leader_lock_decision: tuple[dict, dict] | None = None
+    leader_lock_decision: tuple[dict[str, Any], dict[str, Any]] | None = None
     if leader_locked:
         leader_lock_decision = (
             {

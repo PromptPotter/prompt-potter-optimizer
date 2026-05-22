@@ -9,6 +9,7 @@ this seam collapses display + audit for the round.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
@@ -52,7 +53,7 @@ async def escalate_or_stop(
 def persist_round(
     cycle: Cycle,
     round_result: RoundResult,
-    trial_dict: dict,
+    trial_dict: dict[str, Any],
     round_num: int,
     session: Session,
     *,
@@ -132,7 +133,7 @@ def count_positive_yield_axes(cycle: Cycle) -> int | None:
 async def close_round(
     cycle: Cycle,
     round_result: RoundResult,
-    trial_dict: dict,
+    trial_dict: dict[str, Any],
     round_num: int,
     session: Session,
     cb: RunCallbacks,
@@ -165,7 +166,7 @@ async def close_round(
 async def post_round(
     cycle: Cycle,
     round_result: RoundResult,
-    trial_dict: dict,
+    trial_dict: dict[str, Any],
     round_num: int,
     config: CampaignConfig,
     session: Session,

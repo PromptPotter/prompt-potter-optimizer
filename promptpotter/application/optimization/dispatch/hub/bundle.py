@@ -18,7 +18,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -155,7 +155,7 @@ class CycleSlice:
     l2_stall_count: int
     l3_round: int
     l3_stall_count: int
-    pipeline_params: dict[str, dict] = field(default_factory=dict)
+    pipeline_params: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -180,7 +180,7 @@ class RoundDigest:
     """
 
     diagnostics: RoundDiagnostics | None
-    critique: dict | None
+    critique: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -205,8 +205,8 @@ class InjectionBundle:
     cycle_slice: CycleSlice
     digest: RoundDigest
     axes: AxisIndex | None
-    origin_per_sample: list[dict] = field(default_factory=list)
-    trajectory_misses: list[dict] = field(default_factory=list)
+    origin_per_sample: list[dict[str, Any]] = field(default_factory=list)
+    trajectory_misses: list[dict[str, Any]] = field(default_factory=list)
     # Mirrors OptimizationConfig.forbidden_axes_strict — gates whether the
     # pipeline-param catalogue advertises locked-axis options (model list).
     # Default True matches the production OptimizationConfig default.

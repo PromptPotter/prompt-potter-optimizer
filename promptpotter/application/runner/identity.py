@@ -30,10 +30,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
 
 
-def content_hash_of(jsp: JobSearchPoint, dataset: list) -> str:
+def content_hash_of(jsp: JobSearchPoint, dataset: list[Sample]) -> str:
     """Bare content hash (12 hex) of an origin ``JobSearchPoint``.
 
     Covers the rendered prompt, dataset, and full ``pipeline_params``
@@ -43,7 +44,7 @@ def content_hash_of(jsp: JobSearchPoint, dataset: list) -> str:
     return jsp.content_hash(dataset)[:12]
 
 
-def cycle_config_identity(jsp: JobSearchPoint, dataset: list) -> str:
+def cycle_config_identity(jsp: JobSearchPoint, dataset: list[Sample]) -> str:
     """Root cycle id for an origin ``JobSearchPoint`` — ``cycle_<content_hash>``."""
     return f"cycle_{content_hash_of(jsp, dataset)}"
 
@@ -77,7 +78,7 @@ def campaign_id_for(dataset_name: str, decl_hash: str) -> str:
 def build_origin_cycle_id(
     osp: OptSearchPoint,
     schema: PipelineSchema | None,
-    dataset: list,
+    dataset: list[Sample],
 ) -> str:
     """Cycle ID for an origin ``OptSearchPoint`` — the OSP → JSP projection ceremony."""
     base_pp = schema.to_pipeline_params() if schema else {}

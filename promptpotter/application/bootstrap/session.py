@@ -94,12 +94,12 @@ class Session:
     backend_client: BackendClient
     pipeline_schema: PipelineSchema | None
     samples: list[Sample] = field(default_factory=list)
-    experiment_extract: dict = field(default_factory=dict)
+    experiment_extract: dict[str, Any] = field(default_factory=dict)
     index_terms: list[str] = field(default_factory=list)
     tenant: TenantContext | None = None
     dataset_name: str | None = None
     project_root: str = ""
-    pipeline_params: dict = field(default_factory=dict)
+    pipeline_params: dict[str, Any] = field(default_factory=dict)
     langfuse: LangfuseLogger | None = None
 
     # -- Identity --------------------------------------------------------
@@ -121,9 +121,9 @@ class Session:
 
 def new_session_state(
     *,
-    init_params: dict,
-    campaign_config: dict,
-    pipeline_params: dict,
+    init_params: dict[str, Any],
+    campaign_config: dict[str, Any],
+    pipeline_params: dict[str, Any],
     active_steps: list[str],
 ) -> dict[str, Any]:
     """Fresh campaign session-state dict (shared by CLI init + orchestrator)."""
@@ -165,10 +165,10 @@ def auto_mint_session(
     *,
     cycle_id: str,
     origin_acc: float = 0.0,
-    origin_prompt_fields: dict | None = None,
+    origin_prompt_fields: dict[str, Any] | None = None,
     dataset_size: int = 0,
     experiment_id: str | None = None,
-    pipeline_params: dict | None = None,
+    pipeline_params: dict[str, Any] | None = None,
     active_steps: list[str] | None = None,
     label: str = "",
 ) -> tuple[str, str, str]:

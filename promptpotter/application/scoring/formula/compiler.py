@@ -14,6 +14,7 @@ import logging
 import math
 from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.domain.scoring import DEFAULT_SCORER_ID, ScoringSpec
@@ -96,7 +97,7 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
         )
 
 
-def _build_namespace(result: dict) -> dict:
+def _build_namespace(result: dict[str, Any]) -> dict[str, Any]:
     pd = result.get("pipeline_data") or {}
 
     step_tokens = pd.get("step_tokens") or {}
@@ -107,7 +108,7 @@ def _build_namespace(result: dict) -> dict:
             input_tokens += int(entry.get("input", 0))
             output_tokens += int(entry.get("output", 0))
 
-    ns: dict = {
+    ns: dict[str, Any] = {
         "hit": int(result.get("hit", False)),
         "ground_truth_rank": result.get("ground_truth_rank"),
         "n_candidates": result.get("n_candidates", 0),
@@ -128,7 +129,7 @@ def _build_namespace(result: dict) -> dict:
     return ns
 
 
-def compile_scorer(formula: str | None) -> Callable[[dict], float]:
+def compile_scorer(formula: str | None) -> Callable[[dict[str, Any]], float]:
     """Pre-compile a scoring formula into a callable returning a [0, 1]-clamped float."""
     if not formula:
         raise ValueError(
@@ -142,7 +143,7 @@ def compile_scorer(formula: str | None) -> Callable[[dict], float]:
     validate_ast(tree, source="per_sample scoring formula")
     code = compile(tree, "<scoring>", "eval")
 
-    def _scorer(result: dict) -> float:
+    def _scorer(result: dict[str, Any]) -> float:
         ns = _build_namespace(result)
         try:
             raw = eval(code, _SAFE_BUILTINS, ns)

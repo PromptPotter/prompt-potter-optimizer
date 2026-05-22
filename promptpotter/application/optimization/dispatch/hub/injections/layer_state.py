@@ -96,7 +96,7 @@ def _valid_axis_set(schema: Any) -> set[str]:
     return out
 
 
-def format_l1_critique_for_prompt(critique: dict, pipeline_schema: Any = None) -> str:
+def format_l1_critique_for_prompt(critique: dict[str, Any], pipeline_schema: Any = None) -> str:
     """L1 critique dict → compact text for L1_GENERATE + L2_CONTEXT consumption.
 
     Three load-bearing fields only: ``priority_fix`` (axis+change+quoted
@@ -225,7 +225,7 @@ def _r_l1_situational_examples(b: InjectionBundle) -> str:
     return "WORKED EXAMPLES:\n" + "\n".join(blocks)
 
 
-def _format_example(trigger_id: str, ex: dict) -> str:
+def _format_example(trigger_id: str, ex: dict[str, Any]) -> str:
     """Compact worked-example block — trigger header + ✗/✓/→ lines.
 
     Parent excerpt is dropped: it almost always duplicates the rule body

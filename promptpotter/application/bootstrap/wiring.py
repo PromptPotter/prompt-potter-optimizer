@@ -17,6 +17,7 @@ import copy
 import logging
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from promptpotter import connectors
 from promptpotter.application.bootstrap.session import Session, TenantContext
@@ -60,7 +61,9 @@ def _apply_tenant_guard(tenant_id: str, take_over: bool, status: Callable[[str],
     status(f"Took over active session: cleared pointer (was tenant {active_tid!r})")
 
 
-def _apply_dataset_overlay(backend_resp: dict, local_raw: dict) -> dict:
+def _apply_dataset_overlay(
+    backend_resp: dict[str, Any], local_raw: dict[str, Any]
+) -> dict[str, Any]:
     """Merge dataset pipeline.json overlay onto the backend response.
 
     Dataset overlay can carry: ``pipelines.default`` (which subset of nodes
@@ -98,7 +101,7 @@ async def _resolve_pipeline_schema(
     here before parsing — backend underneath, dataset on top. Backend
     unreachable → fall back to the local file alone (offline mode).
     """
-    backend_resp: dict | None = None
+    backend_resp: dict[str, Any] | None = None
     try:
         backend_resp = await client.fetch_pipeline()
     except (KeyboardInterrupt, asyncio.CancelledError):
@@ -106,7 +109,7 @@ async def _resolve_pipeline_schema(
     except Exception as exc:
         logger.info("Could not fetch pipeline schema from backend: %s", exc)
 
-    local_raw: dict | None = None
+    local_raw: dict[str, Any] | None = None
     if dataset_name:
         local_raw = read_json_optional(project_root / "datasets" / dataset_name / "pipeline.json")
 

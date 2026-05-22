@@ -100,7 +100,7 @@ def replay_decisions(
     return None
 
 
-def _mean_score(results: list[dict]) -> float:
+def _mean_score(results: list[dict[str, Any]]) -> float:
     """Mean of rescored ``score`` projection."""
     if not results:
         return 0.0
@@ -111,7 +111,7 @@ def _replay_round_winner(
     ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
 ) -> str:
     """Re-derive round winner from rescored per-candidate results; beat-threshold derived, not read."""
-    all_results: dict[str, list[dict]] = ctx.round_data.get("all_candidate_results") or {}
+    all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
     if ctx.prior_rounds:
         best_acc = _mean_score(list(ctx.prior_rounds[-1].get("results") or []))
     else:
@@ -145,7 +145,7 @@ def _pobb_replay_snapshot(
     if not candidate_sample_ids or not prior_histories:
         return None
 
-    all_results: dict[str, list[dict]] = ctx.round_data.get("all_candidate_results") or {}
+    all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
     cur_results = all_results.get(candidate_id) or []
     cur_by_sample = {
         str(r.get("sample_id")): float(r.get("fitness", 0.0))

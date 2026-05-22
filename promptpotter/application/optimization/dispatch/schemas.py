@@ -40,6 +40,7 @@ on every round. With distinct slots the LLM cannot conflate the buckets.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
@@ -51,7 +52,7 @@ from promptpotter.domain.opt_search_point import (
 )
 
 
-def _truncate(max_len: int):
+def _truncate(max_len: int) -> Callable[[Any], Any]:
     """Silent string truncation for LLM outputs that overshoot a Field max_length.
 
     Pydantic's max_length raises ValidationError on overflow, which would

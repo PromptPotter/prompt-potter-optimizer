@@ -34,7 +34,7 @@ SHEET_COLUMN_MAP: dict[str, dict[str, str]] = {
 }
 
 
-def samples_from_dicts(items: list[dict]) -> list[Sample]:
+def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
     """Convert a list of dicts (e.g. from on-disk JSON) into Samples.
 
     Assigns a positional ``id`` to items lacking one. Extra keys are ignored.
@@ -45,7 +45,7 @@ def samples_from_dicts(items: list[dict]) -> list[Sample]:
 def load_excel_ground_truth(
     path: str | Path,
     sheet_column_map: dict[str, dict[str, str]] = SHEET_COLUMN_MAP,
-) -> list[dict]:
+) -> list[dict[str, str]]:
     """Read sheets from an Excel file; returns internal staging dicts.
 
     Staging format carries ``source_sheet`` for downstream partitioning in
@@ -61,7 +61,7 @@ def load_excel_ground_truth(
         ) from None
 
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    rows: list[dict] = []
+    rows: list[dict[str, str]] = []
 
     for sheet_name, col_map in sheet_column_map.items():
         if sheet_name not in wb.sheetnames:
@@ -114,7 +114,7 @@ def load_excel_ground_truth(
 
 
 def split_train_test(
-    data: list[dict],
+    data: list[dict[str, Any]],
     test_fraction: float = 0.2,
     seed: int = 42,
 ) -> tuple[list[Sample], dict[str, list[Sample]]]:
@@ -132,7 +132,9 @@ def split_train_test(
     processes = [r for r in enumerated if r["source_sheet"] in _proc_sheets]
     material = [r for r in enumerated if r["source_sheet"] not in _proc_sheets]
 
-    def _split(items: list[dict]) -> tuple[list[dict], list[dict]]:
+    def _split(
+        items: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         shuffled = items[:]
         rng.shuffle(shuffled)
         n_test = max(1, round(len(shuffled) * test_fraction))
@@ -189,7 +191,7 @@ def load_gsm8k(
     Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``.
     """
     try:
-        from datasets import load_dataset  # type: ignore[import-not-found,import-untyped]
+        from datasets import load_dataset
     except ModuleNotFoundError:
         raise ModuleNotFoundError(
             "The 'datasets' library is required for GSM8K. "
@@ -223,7 +225,7 @@ def load_aime_2025(
     Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``.
     """
     try:
-        from datasets import load_dataset  # type: ignore[import-not-found,import-untyped]
+        from datasets import load_dataset
     except ModuleNotFoundError:
         raise ModuleNotFoundError(
             "The 'datasets' library is required for AIME 2025. "
@@ -256,7 +258,7 @@ def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[Sample]:
     dropped (no consumers after pass 2).
     """
     try:
-        from datasets import load_dataset  # type: ignore[import-not-found,import-untyped]
+        from datasets import load_dataset
     except ModuleNotFoundError:
         raise ModuleNotFoundError(
             "The 'datasets' library is required for BBEH. "
@@ -319,7 +321,7 @@ def load_justlogic(
     if split not in ("train", "test"):
         raise ValueError(f"load_justlogic split must be 'train' or 'test', got {split!r}")
     try:
-        from datasets import load_dataset  # type: ignore[import-not-found,import-untyped]
+        from datasets import load_dataset
     except ModuleNotFoundError:
         raise ModuleNotFoundError(
             "The 'datasets' library is required for JustLogic. "
@@ -328,7 +330,7 @@ def load_justlogic(
     from collections import defaultdict
 
     ds = load_dataset("michaelchenkj/JustLogic", split="train")
-    by_depth: dict[int, list] = defaultdict(list)
+    by_depth: dict[int, list[Any]] = defaultdict(list)
     for row in ds:
         if row["depth"] in _JUSTLOGIC_DEPTHS:
             by_depth[row["depth"]].append(row)
@@ -399,14 +401,14 @@ def build_dataset_run_data(
     name: str,
     content_hash: str,
     search_point: JobSearchPoint,
-    scores: dict,
-    results: list,
+    scores: dict[str, Any],
+    results: list[Any],
     *,
     dataset_name: str | None,
     source: str = "",
     experiment_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Build a measurement-batch dict ready for ``Stores.archive.save()``.
 
     ``dataset_name`` is required (keyword-only, no default) so every write
@@ -416,7 +418,7 @@ def build_dataset_run_data(
     """
     rendered_prompt = search_point.render()
     sp_h = search_point.sp_hash(pipeline_schema)
-    data: dict = {
+    data: dict[str, Any] = {
         "run_id": run_id,
         "name": name,
         "dataset_name": dataset_name,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.dispatch.hub import (
     DispatchHub,
@@ -35,7 +35,7 @@ async def run_l1_critique(
     round_num: int,
     model: str | None = None,
     ledger: CycleEventLog | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Build critique from pipeline stats + LLM analysis. Returns dict form for storage.
 
     L1-critique has no per-section override channel: the template body

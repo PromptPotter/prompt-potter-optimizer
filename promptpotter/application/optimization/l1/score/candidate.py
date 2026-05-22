@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.l1.population import (
     INVALID_SCORES,
@@ -36,6 +36,7 @@ from promptpotter.domain.validators import StopRule
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.domain.sample import Sample
 
 
 @dataclass(frozen=True)
@@ -55,11 +56,11 @@ async def score_one_candidate(
     *,
     idx: int,
     osp_c: OptSearchPoint,
-    pipeline_params_override: dict | None,
+    pipeline_params_override: dict[str, Any] | None,
     cycle: Cycle,
-    dataset: list,
+    dataset: list[Sample],
     n_total: int,
-    merged_pp: dict | None,
+    merged_pp: dict[str, Any] | None,
     elim_check: PoBBCheck,
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None,

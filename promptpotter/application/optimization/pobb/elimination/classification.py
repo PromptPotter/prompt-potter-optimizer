@@ -182,11 +182,11 @@ def ranked_item_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
     return keys
 
 
-def get_ranked_items(r: Mapping[str, Any], ranked_item_keys: list[str] | None = None) -> list:
+def get_ranked_items(r: Mapping[str, Any], ranked_item_keys: list[str] | None = None) -> list[Any]:
     """Extract ranked items from a result dict, checking keys in order."""
     pd = r.get("pipeline_data") or {}
     for key in ranked_item_keys or []:
-        val = pd.get(key)
+        val: list[Any] | None = pd.get(key)
         if val:
             return val
     return []

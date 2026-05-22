@@ -17,7 +17,7 @@ so the error-flag and missing-sample-id policy is defined in exactly one place.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.adaptive_picker import pick_value
 from promptpotter.application.intelligence.exploration import build_observations, fit_rasch
@@ -130,7 +130,7 @@ def empty_artifact(
     *,
     cycle_id: str | None = None,
     disabled: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Schema-valid stub artifact for zero-observation or disabled campaigns.
 
     Renderers short-circuit on ``n_observations == 0``; persisting a stub keeps
@@ -163,7 +163,7 @@ def build_hard_samples_artifact(
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
     posterior: RaschPosterior | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Build the hard-samples artifact dict from round observations.
 
     Thin wrapper over :func:`build_hard_samples_artifact_from_observations`
@@ -191,7 +191,7 @@ def build_hard_samples_artifact_from_observations(
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
     posterior: RaschPosterior | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Same as :func:`build_hard_samples_artifact` but takes pre-built
     observations directly. Used by the cross-cycle archive aggregator
     (``hard_sample_archive``) which builds observations from the

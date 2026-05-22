@@ -214,7 +214,7 @@ def optimizer_prompt_override(node_name: str, template: PromptTemplate | None) -
     try:
         yield
     finally:
-        _opt_prompts._load_local = original  # type: ignore[assignment]
+        _opt_prompts._load_local = original
         # Drop the lru_cache so the canonical loader's first call re-reads
         # from disk rather than returning a stale override.
         with contextlib.suppress(AttributeError):

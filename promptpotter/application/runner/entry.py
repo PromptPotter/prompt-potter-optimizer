@@ -53,7 +53,7 @@ async def run_optimization(
     observers: RunObservers,
     origin: CampaignOrigin | None = None,
     experiment_id: str | None = None,
-    task_context: TaskDecomposition | dict | None = None,
+    task_context: TaskDecomposition | dict[str, Any] | None = None,
     langfuse_session_id: str | None = None,
     resume_from_round_override: int | None = None,
     no_divergence_check: bool = False,

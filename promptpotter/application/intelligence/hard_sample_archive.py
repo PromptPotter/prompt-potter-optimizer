@@ -13,7 +13,7 @@ Pure read-only — every archive access goes through
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.exploration import Observation
 from promptpotter.application.intelligence.hard_sample_sorter import (
@@ -89,7 +89,7 @@ def build_archive_hard_samples_artifact(
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
     include_unknown: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Per-dataset hard-samples artifact, fit on every archive measurement for that dataset.
 
     Same shape as :func:`hard_sample_sorter.build_hard_samples_artifact`.

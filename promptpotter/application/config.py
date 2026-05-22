@@ -19,6 +19,7 @@ from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
+    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.llm import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -258,7 +259,7 @@ class CampaignConfig(BaseModel):
         "samples from it. Not the dataset/pool size.",
     )
     exclude_nodes: list[str] = Field(default_factory=list)
-    pipeline_overrides: dict = Field(default_factory=dict)
+    pipeline_overrides: dict[str, Any] = Field(default_factory=dict)
     scoring: str | dict[str, str] | None = Field(None)
     dataset_split: DatasetSplit | None = Field(
         None,
@@ -269,7 +270,7 @@ class CampaignConfig(BaseModel):
     optimization: OptimizationConfig
     optimizer_llm: OptimizerLLMConfig = Field(default_factory=OptimizerLLMConfig)
 
-    def classify_diff_against(self, frozen: dict) -> tuple[DiffScope, list[str]]:
+    def classify_diff_against(self, frozen: dict[str, Any]) -> tuple[DiffScope, list[str]]:
         """Classify the diff between this active config and a frozen snapshot.
 
         Returns ``(scope, diffed_paths)`` where ``diffed_paths`` are
@@ -301,7 +302,7 @@ class CampaignConfig(BaseModel):
         return DiffScope.POLICY_ONLY, diff_strs
 
 
-def load_campaign_config(raw: dict | CampaignConfig) -> CampaignConfig:
+def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig:
     """Normalize raw dict / Pydantic input into a validated ``CampaignConfig``."""
     if isinstance(raw, CampaignConfig):
         return raw
@@ -317,7 +318,9 @@ class PreflightWarning:
     detail: str
 
 
-def _check_sp_budget_vs_dataset(config: CampaignConfig, dataset: list) -> PreflightWarning | None:
+def _check_sp_budget_vs_dataset(
+    config: CampaignConfig, dataset: list[Sample]
+) -> PreflightWarning | None:
     n = config.sp_budget_ttest
     m = len(dataset)
     if m > 0 and n > m:
@@ -333,7 +336,7 @@ def _check_sp_budget_vs_dataset(config: CampaignConfig, dataset: list) -> Prefli
     return None
 
 
-def run_preflight_checks(config: CampaignConfig, dataset: list) -> list[PreflightWarning]:
+def run_preflight_checks(config: CampaignConfig, dataset: list[Sample]) -> list[PreflightWarning]:
     """Run all preflight checks. Pure — no mutation, no I/O."""
     warnings: list[PreflightWarning] = []
     if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
@@ -346,7 +349,7 @@ def configure_and_apply_pipeline(
     campaign_config: CampaignConfig,
     *,
     log: Callable[[str], None] = logger.info,
-) -> dict:
+) -> dict[str, Any]:
     """Build pipeline identity, apply filtered schema + overrides onto *session*."""
     from promptpotter.application.datasets import (
         has_dataset_prompts,
@@ -356,7 +359,7 @@ def configure_and_apply_pipeline(
     from promptpotter.infrastructure.backend import extract_pipeline_config
 
     pipeline_schema = session.pipeline_schema
-    experiment_extract: dict = session.experiment_extract
+    experiment_extract: dict[str, Any] = session.experiment_extract
     exclude = list(campaign_config.exclude_nodes)
     overrides = campaign_config.pipeline_overrides
 
@@ -374,7 +377,7 @@ def configure_and_apply_pipeline(
     if pipeline_schema and exclude:
         filtered = pipeline_schema.filter_to_steps(active)
 
-    valid_overrides: dict[str, dict] = {}
+    valid_overrides: dict[str, dict[str, Any]] = {}
     dataset_name = campaign_config.dataset_name or (session.dataset_name or "")
 
     # Per-dataset operator overlay from ``datasets/{name}/pipeline.json::

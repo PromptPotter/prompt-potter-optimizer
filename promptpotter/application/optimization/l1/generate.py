@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.dispatch.hub import DispatchHub, build_bundle
 from promptpotter.application.optimization.dispatch.llm_call import (
@@ -53,7 +53,7 @@ def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceG
     return EvidenceGrounding(field=raw.field, citation=raw.citation.strip())
 
 
-def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict]:
+def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict[str, Any]]:
     """Build compact per-candidate summary dicts for phase event data.
 
     Each summary carries ``label`` (canonical ``CN.M``), set once here so the
@@ -63,7 +63,7 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
     summaries = []
     for i, cp in enumerate(proposals):
         prompt_fields = cp.osp.prompt_fields()
-        summary: dict = {
+        summary: dict[str, Any] = {
             "idx": i,
             "label": candidate_label(round_num, i),
             "changes_description": cp.osp.lineage.changes_description or "",

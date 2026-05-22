@@ -34,7 +34,7 @@ _FINISHED_STOP_REASONS = frozenset(
 )
 
 
-def _rf_dedup_key(rf_dict: dict) -> tuple:
+def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
     """Mirror of `Cycle._rf_dedup_key` so cross-cycle dedup matches intra-cycle."""
     cfg = rf_dict.get("observed_config") or {}
     return (
@@ -66,7 +66,7 @@ def gather_sibling_runtime_failures(
     from promptpotter.infrastructure.store import root_cycle_id as _root_of
 
     out: list[RuntimeFailure] = []
-    seen_keys: set[tuple] = set()
+    seen_keys: set[tuple[str, str, str]] = set()
 
     cycles_dir = stores.campaigns.campaign_root_dir(campaign_id) / "cycles"
     if not cycles_dir.exists():

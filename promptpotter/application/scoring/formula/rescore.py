@@ -6,15 +6,17 @@ on result dicts. Idempotent under the same ``scorer_id``.
 
 from __future__ import annotations
 
+from typing import Any
+
 from promptpotter.domain.scoring import Scorer
 
 
 def rescore_results(
-    results: list[dict],
+    results: list[dict[str, Any]],
     scorer: Scorer,
     scorer_id: str = "none",
     formula: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Apply *scorer* to each result, accumulating a multi-scorer audit map.
 
     Sole writer of top-level ``hit``/``fitness`` on result dicts. Skips error

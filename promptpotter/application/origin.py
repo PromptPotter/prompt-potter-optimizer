@@ -63,13 +63,13 @@ def build_campaign_emitter(
 class CampaignOrigin(NamedTuple):
     """Extracted origin state from campaign_rounds."""
 
-    origin_ps: dict | None
+    origin_ps: dict[str, Any] | None
     origin_acc: float
-    origin_results: list | None
+    origin_results: list[Any] | None
     instruction: str
 
 
-def extract_campaign_origin(campaign_rounds: list[dict]) -> CampaignOrigin:
+def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOrigin:
     """Extract origin prompt state, accuracy, and results from campaign rounds.
 
     Searches reversed rounds for the last with actual scoring ``results``,
@@ -88,7 +88,7 @@ def extract_campaign_origin(campaign_rounds: list[dict]) -> CampaignOrigin:
     # Prefer accuracy from the last round with scoring results; fall back to
     # the tip's accuracy (e.g. scan winner carries accuracy but no results).
     origin_acc = tip.get("accuracy", 0.0)
-    origin_results: list = []
+    origin_results: list[Any] = []
     for rd in reversed(campaign_rounds):
         if rd.get("results"):
             origin_acc = rd.get("accuracy", origin_acc)
@@ -106,7 +106,7 @@ def extract_campaign_origin(campaign_rounds: list[dict]) -> CampaignOrigin:
 
 
 def load_origin_prompt(
-    experiment_extract: dict,
+    experiment_extract: dict[str, Any],
     prompt_node_names: list[str] | None = None,
     dataset_name: str | None = None,
 ) -> OptSearchPoint:
@@ -171,16 +171,16 @@ def load_origin_prompt(
 
 
 async def prepare_scoring_context(
-    experiment_extract: dict | None,
+    experiment_extract: dict[str, Any] | None,
     train_data: list[Sample] | None,
     campaign_config: CampaignConfig | None = None,
     *,
-    pipeline_params: dict | None = None,
+    pipeline_params: dict[str, Any] | None = None,
     pipeline_schema: PipelineSchema | None = None,
     svc: Any = None,
     listener: Any | None = None,
     obs: Any | None = None,
-) -> tuple[OptSearchPoint, list[Sample], list, list]:
+) -> tuple[OptSearchPoint, list[Sample], list[dict[str, Any]], list[Any]]:
     """Load origin prompt, set dataset, and produce a populated ``campaign_rounds[0]``."""
     from promptpotter.application.datasets import sample_dataset
 
@@ -193,8 +193,8 @@ async def prepare_scoring_context(
     )
     dataset = train_data or []
 
-    campaign_rounds: list = []
-    origin_results: list = []
+    campaign_rounds: list[dict[str, Any]] = []
+    origin_results: list[Any] = []
     if not (
         campaign_config is not None and svc is not None and dataset and origin.render().strip()
     ):
@@ -347,7 +347,7 @@ class DatasetRunSummary(NamedTuple):
     best_name: str
 
 
-def summarize_archive_runs(runs: list[dict]) -> DatasetRunSummary:
+def summarize_archive_runs(runs: list[dict[str, Any]]) -> DatasetRunSummary:
     """Aggregate measurement-archive runs by source prefix and find best accuracy."""
     by_source: dict[str, int] = {}
     best_acc = 0.0

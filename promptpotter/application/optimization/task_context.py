@@ -38,7 +38,7 @@ async def decompose_prompt_fields(
     context_input: Any,
     llm_client: LLMClientBase,
     model: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """LLM check-in: raw context → Layer 1 prompt fields + task_context sub-dict."""
     if isinstance(context_input, dict):
         user_content = (
@@ -84,14 +84,15 @@ def load_cached_decomposition(
     base_dir: Path,
     backend_id: str,
     rp_hash: str,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Load the cached checkin result for *rp_hash* (one key — read == write)."""
     cache = read_json_optional(_decomposition_cache_path(base_dir, backend_id))
     if not cache:
         return None
     entry = cache.get(rp_hash)
     if entry:
-        return entry["layer1_fields"]
+        layer1_fields: dict[str, Any] = entry["layer1_fields"]
+        return layer1_fields
     return None
 
 
@@ -99,7 +100,7 @@ def save_decomposition_cache(
     base_dir: Path,
     backend_id: str,
     rp_hash: str,
-    layer1_fields: dict,
+    layer1_fields: dict[str, Any],
 ) -> None:
     """Persist checkin output keyed by *rp_hash*."""
     path = _decomposition_cache_path(base_dir, backend_id)
@@ -120,7 +121,7 @@ async def decompose_prompt_fields_cached(
     backend_id: str = "",
     rp_hash: str,
     force: bool = False,
-) -> tuple[dict, bool]:
+) -> tuple[dict[str, Any], bool]:
     """Disk-cached decompose_prompt_fields; returns (layer1_fields, was_cached).
 
     *rp_hash* is the single content-hash key used for both the cache read

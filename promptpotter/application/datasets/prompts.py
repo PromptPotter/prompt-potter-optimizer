@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 import json
 from pathlib import Path
+from typing import Any
 
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.infrastructure.store.base import read_json_optional
@@ -20,7 +21,7 @@ from promptpotter.infrastructure.store.base import read_json_optional
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def load_dataset_node_overlay(dataset: str) -> dict[str, dict]:
+def load_dataset_node_overlay(dataset: str) -> dict[str, dict[str, Any]]:
     """Read per-node config overrides from ``datasets/{name}/pipeline.json``.
 
     Returns ``{node_name: {key: value}}`` — a sparse overlay layered onto
@@ -33,7 +34,7 @@ def load_dataset_node_overlay(dataset: str) -> dict[str, dict]:
     raw = read_json_optional(_REPO_ROOT / "datasets" / dataset / "pipeline.json")
     if not raw:
         return {}
-    out: dict[str, dict] = {}
+    out: dict[str, dict[str, Any]] = {}
     for node_name, node_def in (raw.get("nodes") or {}).items():
         cfg = node_def.get("config") if isinstance(node_def, dict) else None
         if isinstance(cfg, dict) and cfg:

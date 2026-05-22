@@ -8,7 +8,7 @@ per-candidate body lives in :func:`score_one_candidate`.
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.intelligence.adaptive_picker import (
     expected_order,
@@ -37,15 +37,16 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
 
 
 async def score_population(
     cycle: Cycle,
     population: list[OptSearchPoint],
-    merged_pp: list[dict | None],
+    merged_pp: list[dict[str, Any] | None],
     proposals: list[CandidateProposal],
-    dataset: list,
+    dataset: list[Sample],
     *,
     degradation_checks: list[StopRule] | None = None,
     callbacks: RunCallbacks,
@@ -68,7 +69,7 @@ async def score_population(
     candidate_scores: list[CandidateScore] = []
     escalation_signal: EscalationSignal | None = None
 
-    async def _pobb_backfill(sp: JobSearchPoint, samples: list) -> list[QueryMeasurement]:
+    async def _pobb_backfill(sp: JobSearchPoint, samples: list[Sample]) -> list[QueryMeasurement]:
         """Score *sp* on *samples* and return the measurements.
 
         Used by PoBBCheck to fill in missing (prior, sample) pairs so paired
@@ -131,7 +132,7 @@ async def score_population(
     pop_min_obs = max(1, len(dataset) // 2)
 
     def _filtered_obs(
-        results_by_cid: dict[str, list[QueryMeasurement]] | dict[str, list[dict]],
+        results_by_cid: dict[str, list[QueryMeasurement]] | dict[str, list[dict[str, Any]]],
     ) -> list[Observation]:
         out: list[Observation] = []
         for cid, results in results_by_cid.items():

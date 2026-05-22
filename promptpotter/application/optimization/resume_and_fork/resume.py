@@ -66,8 +66,8 @@ def resume_with_divergence_check(
     assert scorer is not None, "session.scoring.scorer required for divergence replay"
     prior = campaign_store.load_rounds_range(campaign_id, cycle_id, 0, resumed_from_round - 1)
 
-    def _rescore(items: Any) -> list:
-        out = list(items or [])
+    def _rescore(items: Any) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = list(items or [])
         rescore_results(out, scorer, sc.scorer_id, sc.scorer_formula)
         return out
 

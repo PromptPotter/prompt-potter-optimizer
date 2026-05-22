@@ -126,8 +126,8 @@ class SampleIndex:
         self,
         round_num: int,
         changes_description: str,
-        prev_results: list[dict],
-        new_results: list[dict],
+        prev_results: list[dict[str, Any]],
+        new_results: list[dict[str, Any]],
     ) -> int:
         """Record hit/miss flips between rounds; return the count."""
         prev_hits: dict[int, bool] = {}
@@ -172,13 +172,13 @@ class SampleIndex:
             return 0.0
         return self._degradation_counts.get(sample_id, 0) / n
 
-    def flips(self, sample_id: int | None = None, limit: int = 20) -> list[dict]:
+    def flips(self, sample_id: int | None = None, limit: int = 20) -> list[dict[str, Any]]:
         flips = self._flips
         if sample_id is not None:
             flips = [f for f in flips if f.get("sample_id") == sample_id]
         return flips[-limit:]
 
-    def all_flips(self) -> list[dict]:
+    def all_flips(self) -> list[dict[str, Any]]:
         return self._flips
 
     def records(self) -> list[SampleRecord]:

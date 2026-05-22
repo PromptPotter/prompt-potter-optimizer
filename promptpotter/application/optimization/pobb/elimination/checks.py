@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.pobb.elimination.classification import (
     classify_result,
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
 
 def _eliminate(
-    name: str, check_result: dict, candidate_idx: int, n_total_candidates: int
+    name: str, check_result: dict[str, Any], candidate_idx: int, n_total_candidates: int
 ) -> EscalationSignal:
     return EscalationSignal(
         check_name=name,
@@ -52,7 +52,7 @@ def _eliminate(
 
 
 def _leader_locked(
-    name: str, check_result: dict, candidate_idx: int, n_total_candidates: int
+    name: str, check_result: dict[str, Any], candidate_idx: int, n_total_candidates: int
 ) -> EscalationSignal:
     """Lock in the current candidate as round leader; skip remaining candidates."""
     return EscalationSignal(

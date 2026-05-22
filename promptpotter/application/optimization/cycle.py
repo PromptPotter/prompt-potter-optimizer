@@ -81,7 +81,7 @@ def _build_scoreboard(
 # ---------------------------------------------------------------------------
 
 
-def _rf_dedup_key(rf_dict: dict) -> tuple:
+def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
     cfg = rf_dict.get("observed_config") or {}
     return (
         rf_dict.get("source", ""),
@@ -90,7 +90,9 @@ def _rf_dedup_key(rf_dict: dict) -> tuple:
     )
 
 
-def _merge_into_cumulative(prior: list[dict], incoming: list[dict]) -> list[dict]:
+def _merge_into_cumulative(
+    prior: list[dict[str, Any]], incoming: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Merge ``incoming`` per-sample measurements into ``prior``, keyed by sample_id.
 
     Winner overwrites for shared samples (the winner's measurement is the
@@ -101,7 +103,9 @@ def _merge_into_cumulative(prior: list[dict], incoming: list[dict]) -> list[dict
     probe-round filtering, and L2/L3 stall detection. Entries without a
     ``sample_id`` are dropped (the cumulative pool is sample-keyed).
     """
-    by_sid: dict = {r.get("sample_id"): r for r in prior if r.get("sample_id") is not None}
+    by_sid: dict[Any, dict[str, Any]] = {
+        r.get("sample_id"): r for r in prior if r.get("sample_id") is not None
+    }
     for r in incoming:
         sid = r.get("sample_id")
         if sid is not None:
@@ -130,14 +134,14 @@ class TrackingState:
     current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
     current_composite_fitness: float = 0.0
-    current_results: list[dict] = field(default_factory=list)
+    current_results: list[dict[str, Any]] = field(default_factory=list)
     best_accuracy: float = 0.0
     best_composite_fitness: float = 0.0
     best_round: int = -1
     best_sp: JobSearchPoint | None = None
     origin_accuracy: float = 0.0
     origin_composite_fitness: float = 0.0
-    origin_per_sample_results: list[dict] = field(default_factory=list)
+    origin_per_sample_results: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -191,7 +195,7 @@ class Cycle:
         *,
         task_context: TaskDecomposition,
         schema: PipelineSchema | None,
-        origin_results: list[dict] | None = None,
+        origin_results: list[dict[str, Any]] | None = None,
         round_scorer: Any = None,
         session: Session,
         config: CampaignConfig,
@@ -343,7 +347,7 @@ class Cycle:
         # high-water-mark, not whichever round happened to land the hardest
         # leader-locked subset. Without this, resume/fork after a lock-in
         # would reseed PoBB priors with whatever subset the last winner saw.
-        acc_cum: list[dict] = []
+        acc_cum: list[dict[str, Any]] = []
         for i, rr in enumerate(self.rounds, start=1):
             acc_cum = _merge_into_cumulative(acc_cum, list(rr.results))
             if schema is not None:
@@ -397,7 +401,7 @@ class Cycle:
         tr = self.tracking
 
         # 1. opt_sp memory — runtime failures + cumulative warned-query set.
-        all_results: list = [r for rs in rr.all_candidate_results.values() for r in rs]
+        all_results: list[Any] = [r for rs in rr.all_candidate_results.values() for r in rs]
         for r in all_results:
             if extract_warning_types(r) and (q := r.get("query")):
                 self.warned_queries.add(q)
@@ -490,7 +494,7 @@ class Cycle:
         tr = self.tracking
         accuracy = tr.current_accuracy
         composite_fitness = tr.current_composite_fitness
-        results: list[dict] = list(tr.current_results)
+        results: list[dict[str, Any]] = list(tr.current_results)
         if self.probe_next_round and tr.current_results and schema is not None:
             probe_queries = {s.query for s in scoring_set}
             subset = [r for r in tr.current_results if r.get("query") in probe_queries]

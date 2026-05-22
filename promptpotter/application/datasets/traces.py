@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
 
 
-def _infer_escalation_layer(prev_fields: dict, next_fields: dict) -> str:
+def _infer_escalation_layer(prev_fields: dict[str, Any], next_fields: dict[str, Any]) -> str:
     """Classify the transition by which piece of optimizer state changed.
 
     Deterministic, inside-this-file rule (no import from optimization/):
@@ -37,7 +37,7 @@ def _infer_escalation_layer(prev_fields: dict, next_fields: dict) -> str:
     return "L1"
 
 
-def _rehydrate(fields: dict) -> OptSearchPoint:
+def _rehydrate(fields: dict[str, Any]) -> OptSearchPoint:
     return OptSearchPoint.model_validate(fields)
 
 
@@ -80,7 +80,7 @@ def load_potter_traces(
     store: Stores,
     backend_id: str,
     cycle_ids: list[str] | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Emit one row per round-to-round transition across archived campaigns.
 
     Args:
@@ -93,7 +93,7 @@ def load_potter_traces(
         List of rows conforming to the dataset-row contract.  Empty list if
         no transitions are recoverable.
     """
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     for entry in store.campaigns.enumerate_cycles():
         cycle_id = entry["cycle_id"]
         if cycle_ids is not None and cycle_id not in cycle_ids:

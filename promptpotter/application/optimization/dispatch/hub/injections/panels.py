@@ -9,6 +9,8 @@ All share the uniform ``(InjectionBundle) -> str`` renderer signature.
 
 from __future__ import annotations
 
+from typing import Any
+
 from promptpotter.application.optimization.dispatch.hub.bundle import (
     INTRACTABLE_SAMPLES_RENDER_CAP,
     NEAR_MISS_RENDER_CAP,
@@ -170,7 +172,7 @@ _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
 )
 
 
-def _critique_is_all_prompt_field(critique: dict | None) -> bool:
+def _critique_is_all_prompt_field(critique: dict[str, Any] | None) -> bool:
     """True when every entry in ``critique.suggested_axes`` is a prompt-field axis.
 
     Drives the axis-memory filter: when the last L1_CRITIQUE flagged
@@ -263,7 +265,7 @@ def _r_axis_memory(b: InjectionBundle) -> str:
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
-def _query_stem(row: dict, n: int = 70) -> str:
+def _query_stem(row: dict[str, Any], n: int = 70) -> str:
     q = (row.get("query") or "").replace("\n", " ").strip()
     return q[:n]
 

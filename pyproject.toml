@@ -98,25 +98,6 @@ plugins = ["pydantic.mypy"]
 exclude = ["^datasets/"]
 namespace_packages = false
 
-# Strict-migration ledger. `strict` is the project default; the pure core
-# (domain/, shared/, config/) is fully migrated and carries no override.
-# The I/O layers below are not yet migrated — this block relaxes the
-# annotation-debt flags so CI stays green while the debt drains as feature
-# work touches each package. Migrating a package = drop its pattern from
-# `module` and fix that package's annotations; when the list empties,
-# delete the block. New modules land strict — never extend this list.
-[[tool.mypy.overrides]]
-module = [
-    "promptpotter.application.*",
-]
-disallow_any_generics = false
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-disallow_untyped_calls = false
-check_untyped_defs = false
-warn_return_any = false
-warn_unused_ignores = false
-
 # Tests are loosely typed by charter — strict applies to shipped code only.
 [[tool.mypy.overrides]]
 module = "tests.*"

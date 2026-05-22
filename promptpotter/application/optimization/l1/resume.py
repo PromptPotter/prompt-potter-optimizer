@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.l1.generate import (
@@ -13,7 +14,7 @@ from promptpotter.application.optimization.validators.l1_strict import (
     L1YieldStats,
     detect_invariants,
 )
-from promptpotter.domain.phases import CampaignPhase, emit_phase
+from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.domain.results import CandidateProposal
 
 # Module-level alias for test monkeypatching.
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 async def generate_or_load_candidates(
     round_num: int,
     cycle: Cycle,
-    on_phase=None,
+    on_phase: Callable[[PhaseEvent], None] | None = None,
     n_scoring_samples: int = 0,
     *,
     obs: ObservabilityBridge | None = None,

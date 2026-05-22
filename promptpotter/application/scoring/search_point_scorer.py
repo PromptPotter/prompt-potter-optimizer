@@ -54,7 +54,7 @@ def merge_with_unprocessed_priors(
             continue
         entry = cast(QueryMeasurement, dict(prior))
         if scorer is not None:
-            rescore_results([cast(dict, entry)], scorer, scorer_id, scorer_formula)
+            rescore_results([cast("dict[str, Any]", entry)], scorer, scorer_id, scorer_formula)
         merged.append(entry)
     return merged
 

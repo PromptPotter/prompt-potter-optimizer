@@ -97,7 +97,7 @@ class RunCallbacks:
         event: str,
         ci: int,
         ct: int,
-        payload: dict,
+        payload: dict[str, Any],
         *,
         round_num: int | None = None,
         sample_idx: int | None = None,
@@ -116,7 +116,11 @@ class RunCallbacks:
         )
 
     def on_candidate_started(
-        self, idx: int, total: int, changes_description: str, pp_override: dict | None
+        self,
+        idx: int,
+        total: int,
+        changes_description: str,
+        pp_override: dict[str, Any] | None,
     ) -> None:
         self._snapshot(
             "candidate_started",
@@ -125,7 +129,7 @@ class RunCallbacks:
             {"changes_description": changes_description, "pp_override": pp_override},
         )
 
-    def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
+    def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:
         self._snapshot(
             "candidate_scored",
             idx,
@@ -145,7 +149,7 @@ class RunCallbacks:
             sample_total=qt,
         )
 
-    def on_sample_scored(self, ci: int, ct: int, result: dict, qi: int, qt: int) -> None:
+    def on_sample_scored(self, ci: int, ct: int, result: dict[str, Any], qi: int, qt: int) -> None:
         self._snapshot("sample_scored", ci, ct, {"result": result}, sample_idx=qi, sample_total=qt)
 
     def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: Any) -> None:

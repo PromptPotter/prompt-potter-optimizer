@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from typing import Any
 
 from promptpotter.application.optimization.pobb.elimination import (
     get_ranked_items,
@@ -105,7 +106,7 @@ def compute_round_diagnostics(
 
 
 def _rank_analysis(
-    results: list[dict], ranked_item_keys: list[str] | None
+    results: list[dict[str, Any]], ranked_item_keys: list[str] | None
 ) -> tuple[dict[str, int], dict[int, float], list[NearMiss], set[str], int]:
     """Where did ground truth land in each sample's ranked-item list?"""
     keys = ranked_item_keys or None
@@ -148,7 +149,7 @@ def _rank_analysis(
     return buckets, top_k, near_misses, nm_queries, n_valid
 
 
-def _pipeline_health(results: list[dict]) -> tuple[dict[str, int], float, float]:
+def _pipeline_health(results: list[dict[str, Any]]) -> tuple[dict[str, int], float, float]:
     """Termination distribution + error/warning rates."""
     total = len(results)
     if not total:
@@ -191,7 +192,7 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], int, list
     plateau_run = 0
     max_plateau = 0
     prev_acc: float | None = None
-    prev_pp: dict | None = None
+    prev_pp: dict[str, Any] | None = None
     for r in rounds:
         delta = (r.accuracy - prev_acc) if prev_acc is not None else 0.0
         changed_axes: list[str] = []
@@ -320,7 +321,7 @@ def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
 
 
 def _sample_diagnostics(
-    results: list[dict],
+    results: list[dict[str, Any]],
     ranked_item_keys: list[str] | None,
     pipeline_schema: PipelineSchema | None,
 ) -> list[SampleDiag]:
@@ -332,7 +333,7 @@ def _sample_diagnostics(
         pd = r.get("pipeline_data") or {}
         diag = pd.get("diagnostics") or {}
         rank = find_rank(get_ranked_items(r, ranked_item_keys), r.get("ground_truth", ""))
-        sd: dict | None = None
+        sd: dict[str, Any] | None = None
         if pipeline_schema is not None:
             sd = extract_sample_diagnostics(r, pipeline_schema)
         out.append(

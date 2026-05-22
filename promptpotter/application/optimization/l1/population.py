@@ -45,14 +45,14 @@ __all__ = [
 
 
 def merge_pipeline_params(
-    base: dict | None,
-    overrides: dict | None,
+    base: dict[str, Any] | None,
+    overrides: dict[str, Any] | None,
     schema: PipelineSchema | None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Deep-merge ``overrides`` into ``base``; drop overrides for nodes outside active steps."""
     if not overrides:
         return base
-    merged: dict = copy.deepcopy(base or {})
+    merged: dict[str, Any] = copy.deepcopy(base or {})
     for k, v in overrides.items():
         if isinstance(v, dict) and isinstance(merged.get(k), dict):
             merged[k] = {**merged[k], **v}
@@ -69,11 +69,11 @@ def merge_pipeline_params(
 
 def parse_population(
     proposals: list[CandidateProposal],
-    pipeline_params: dict | None,
+    pipeline_params: dict[str, Any] | None,
     schema: PipelineSchema | None,
     *,
     forbidden_axes_strict: bool = True,
-) -> tuple[list[OptSearchPoint], list[dict | None]]:
+) -> tuple[list[OptSearchPoint], list[dict[str, Any] | None]]:
     """Project proposals → OptSearchPoints + merged pp; attaches validation failures.
 
     ``forbidden_axes_strict`` (default on) gates the strict-mode rejection
@@ -81,7 +81,7 @@ def parse_population(
     ``OptimizationConfig.forbidden_axes_strict``.
     """
     osp_list: list[OptSearchPoint] = []
-    merged: list[dict | None] = []
+    merged: list[dict[str, Any] | None] = []
     for cp in proposals:
         pipeline_params_override = cp.pipeline_params_override or None
         osp = cp.osp
@@ -122,16 +122,16 @@ def parse_population(
 
 def build_score_report(
     osp: OptSearchPoint,
-    pipeline_params_override: dict | None,
-    score_summary: dict,
-    query_results: list,
-    dataset: list,
+    pipeline_params_override: dict[str, Any] | None,
+    score_summary: dict[str, Any],
+    query_results: list[Any],
+    dataset: list[Any],
     *,
     label: str,
     aborted: bool = False,
     elimination_stopped: bool = False,
-    elimination_context: dict | None = None,
-    degradation_context: dict | None = None,
+    elimination_context: dict[str, Any] | None = None,
+    degradation_context: dict[str, Any] | None = None,
     resumed_from_cache: bool = False,
     invalid: bool = False,
     new_runtime_failure: RuntimeFailure | None = None,
@@ -173,7 +173,7 @@ def build_score_report(
 
 
 def pobb_decision_data(
-    candidate_score: dict,
+    candidate_score: dict[str, Any],
     *,
     candidate_sample_ids: list[str] | None = None,
     prior_histories: dict[str, dict[str, float]] | None = None,

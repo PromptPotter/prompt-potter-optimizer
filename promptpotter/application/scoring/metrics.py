@@ -44,7 +44,7 @@ __all__ = [
 ]
 
 
-def find_rank(items: list, ground_truth: str) -> int | None:
+def find_rank(items: list[Any], ground_truth: str) -> int | None:
     """Return 1-based rank of *ground_truth* in *items*, or None."""
     if not items or not ground_truth:
         return None
@@ -54,7 +54,7 @@ def find_rank(items: list, ground_truth: str) -> int | None:
     return None
 
 
-def _compute_accuracy(results: list[QueryMeasurement]) -> dict:
+def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     """Base scalars: hits, total, accuracy, errors, deprecated.
 
     Deprecated samples (those whose ``classify_result()`` returns any fatal
@@ -123,7 +123,7 @@ def extract_sample_diagnostics(
     return diag
 
 
-def _gt_pos(items: list, gt: str) -> int | None:
+def _gt_pos(items: list[Any], gt: str) -> int | None:
     """0-based position of *gt* in *items*, or None."""
     for i, c in enumerate(items):
         if extract_item_label(c) == gt:

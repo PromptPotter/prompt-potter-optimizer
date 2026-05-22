@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable
+from typing import Any
 
 GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
 """Matches the GSM8K answer-field format ``#### N``. Shared with the
@@ -26,7 +27,8 @@ def _extract_bold(text: str) -> str:
         return ""
     matches = _BOLD_RE.findall(text)
     if matches:
-        return matches[-1].strip()
+        last: str = matches[-1]
+        return last.strip()
     return text
 
 
@@ -126,14 +128,16 @@ def _extract_boxed_display(text: str) -> str:
         return ""
     boxed = _BOXED_RE.findall(text)
     if boxed:
-        return boxed[-1].strip()
+        last_boxed: str = boxed[-1]
+        return last_boxed.strip()
     nums = _NUMBER_RE.findall(text)
     if nums:
-        return nums[-1]
+        last_num: str = nums[-1]
+        return last_num
     return text.strip()
 
 
-SCORING_FUNCTIONS: dict[str, Callable] = {
+SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "rr": _rr,
     "gsm8k_match": _gsm8k_match,
     "aime_match": _aime_match,

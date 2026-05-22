@@ -263,7 +263,7 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
 async def measure_sample(
     sample: Sample,
     session: Session,
-    pipeline_params: dict | None = None,
+    pipeline_params: dict[str, Any] | None = None,
 ) -> QueryMeasurement:
     """Measure one Sample: run query through pipeline, score against ground truth."""
     query = sample.query
@@ -318,7 +318,7 @@ async def measure_sample(
         )
 
         # Project wire response → pipeline_data.
-        pd: dict = {"final_ranking": ranked}
+        pd: dict[str, Any] = {"final_ranking": ranked}
         for key in pipeline_schema.observation_keys | _INFRA_KEYS:
             val = data.get(key)
             if val is not None:
@@ -336,7 +336,7 @@ async def measure_sample(
         if step_tokens:
             pd["step_tokens"] = step_tokens
 
-        result: dict = {
+        result: dict[str, Any] = {
             "sample_id": sample.id,
             "query": query,
             "predicted": predicted,
@@ -356,7 +356,7 @@ async def measure_sample(
 
         assert session.scoring.scorer is not None, "session.scoring.scorer required for measurement"
         rescore_results(
-            [result],  # type: ignore[list-item]
+            [result],
             session.scoring.scorer,
             session.scoring.scorer_id,
             session.scoring.scorer_formula,
@@ -391,7 +391,9 @@ def find_gt_rank(result: Mapping[str, Any]) -> int | None:
     return find_rank(pd.get("final_ranking", []), gt)
 
 
-def compare_rerun(cached_result: Mapping[str, Any], rerun_result: Mapping[str, Any]) -> dict:
+def compare_rerun(
+    cached_result: Mapping[str, Any], rerun_result: Mapping[str, Any]
+) -> dict[str, Any]:
     """Compare rerun to cached result. Returns improvement summary."""
     cached_hit = cached_result.get("hit", False)
     rerun_hit = rerun_result.get("hit", False)
@@ -414,7 +416,7 @@ def compare_rerun(cached_result: Mapping[str, Any], rerun_result: Mapping[str, A
 
 def _rerun_would_repeat_token_budget_failure(
     cached_result: Mapping[str, Any],
-    rerun_pipeline_params: dict | None,
+    rerun_pipeline_params: dict[str, Any] | None,
 ) -> bool:
     """Short-circuit gate: skip the rerun branch when the cached failure was
     a token-budget exhaustion (``finish_reason=length``) AND the rerun's
@@ -466,7 +468,7 @@ async def execute_stale_data_protocol(
     cached_result: dict[str, Any],
     session: Session,
     *,
-    pipeline_params: dict | None = None,
+    pipeline_params: dict[str, Any] | None = None,
     axes: AxisIndex | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Walk the stale data load protocol ladder for a degraded cached query.

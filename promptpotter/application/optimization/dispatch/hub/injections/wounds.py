@@ -23,7 +23,9 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.validators import ValidatorOutcome
 
 
-def _rf_matches_current_config(rf: RuntimeFailure, pipeline_params: dict[str, dict]) -> bool:
+def _rf_matches_current_config(
+    rf: RuntimeFailure, pipeline_params: dict[str, dict[str, Any]]
+) -> bool:
     """Filter ACCUMULATED runtime failures to the current backend config.
 
     A RuntimeFailure carries an ``observed_config`` snapshot of the

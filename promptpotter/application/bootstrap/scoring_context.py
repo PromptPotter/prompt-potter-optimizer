@@ -45,7 +45,7 @@ def bootstrap_cycle(
     session: Session,
     origin_jsp: JobSearchPoint,
     origin_accuracy: float,
-    dataset: list,
+    dataset: list[Sample],
     cycle_id_override: str | None,
     *,
     resume_from_round_override: int | None = None,

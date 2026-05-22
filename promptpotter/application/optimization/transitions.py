@@ -73,7 +73,7 @@ class TransitionResult:
     l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     fork_proposal: ForkProposal | None = None
     debug_prompt: str = ""
-    debug_response: dict | None = None
+    debug_response: dict[str, Any] | None = None
 
 
 # Per-layer callable slots carried on ``LayerStrategy``.
