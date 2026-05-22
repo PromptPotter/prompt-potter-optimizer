@@ -55,8 +55,8 @@ Decision deferred until after the architectural skeleton is reviewed.
 
 ## Conventions
 
-- Self-register via `register(Connector(...))` at import. No import-side
-  effects beyond the registry write.
+- Declare the connector as a data row in the `CONNECTORS` dict in
+  `__init__.py` — no `register()` call, no import-side effects.
 - Wire adapters are pure functions: `(query, pipeline_params) -> dict`.
   No I/O, no logging beyond debug-level drops.
 - `extract_experiment` returns `(queries, index_terms)` — the index_terms

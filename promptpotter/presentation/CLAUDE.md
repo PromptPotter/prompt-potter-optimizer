@@ -22,7 +22,7 @@ points MUST NOT write campaign artifacts directly — they call into
   (display); the per-cycle markdown writers (`log.md`, `review.md`) in
   `writers.py` are the documented exception, audited in §1.
 - **No business logic in CLI commands or API handlers.** `cli/` and
-  `api.py` are thin shells: parse args / route requests, call into
+  `api/` are thin shells: parse args / route requests, call into
   `application/`, format the result. Business logic that creeps in here
   is drift — push it into `application/`.
 - **Notebook + webapp parity.** Three entry points, one orchestration
@@ -32,7 +32,7 @@ points MUST NOT write campaign artifacts directly — they call into
 
 ## Read-only API stance
 
-`api.py` is **read-only by design** beyond the explicitly-sanctioned
+`api/` is **read-only by design** beyond the explicitly-sanctioned
 mutating endpoints. Webapp panels poll `dashboard.json` + a few JSON
 endpoints; they don't drive the loop. Adding any other mutating route
 is M12 daemon territory and out of charter here.

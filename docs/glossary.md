@@ -20,13 +20,14 @@ implementation site lands, or rename to a term already on the list.
 
 - **L2** — `l2_context`: the task-framing refinement layer. Fires on
   L1 stall. Writes `OptSearchPoint.task_context`. Cannot mutate
-  `pipeline_params`. Implementation:
-  `application/optimization/transitions.py::run_layer_transition` (L2
-  branch); rule firing in `escalation/firing.py`.
+  `pipeline_params`. Implementation: `escalate_l2` in
+  `application/optimization/escalation/firing/executor.py`; per-layer
+  parse/apply in `firing/l2_driver.py`.
 
 - **L3** — `l3_plan`: the strategic-replan layer. Fires on L2 stall.
   Writes `OptSearchPoint.plan`. Rewrites the framing surface, not the
-  next variant. Implementation: same modules as L2.
+  next variant. Implementation: `escalate_l2`'s L3 cascade in
+  `firing/executor.py`; parse/apply in `firing/l3_driver.py`.
 
 - **Critique** — L1's per-round LLM self-analysis. `run_l1_critique`
   in `application/optimization/l1/critique.py`. Output dict

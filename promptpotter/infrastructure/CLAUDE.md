@@ -67,9 +67,9 @@ not raw `str`/`Path`. `archive/` is cross-cycle/session/tenant;
 
 ## LLM client
 
-`llm/client.py`: `OpenAICompatibleClient` serves Groq/OpenAI/OpenRouter as
-instances (no subclasses) parameterized by a `ProviderSpec` registry.
-`AnthropicClient` is its peer. SDK `max_retries` handles 503/429 +
+`llm/openai_compat.py`: `OpenAICompatibleClient` serves Groq/OpenAI/OpenRouter
+as instances (no subclasses) parameterized by a `ProviderSpec` registry.
+`llm/anthropic.py::AnthropicClient` is its peer. SDK `max_retries` handles 503/429 +
 Retry-After.
 
 ## Backend wire

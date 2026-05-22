@@ -212,8 +212,8 @@ Control plane: webapp launch / monitor / control sequences independently of
 | Token-usage record | `domain/run_records.py:115-141` (`TokenUsageRecord`) |
 | Spend rollup | `infrastructure/projections/live_state.py`; `shared/spend.py` |
 | Per-sample scorer | `application/scoring/formula/compiler.py::compile_scorer` |
-| FastAPI surface | `presentation/api.py` |
-| Webapp | `webapp/` (M11 MVP) · `webapp-react/` (source) |
+| FastAPI surface | `presentation/api/` |
+| Webapp | `webapp/` (Next.js source + `out/` static export) |
 
 ## Risks
 

@@ -101,7 +101,7 @@ After an interrupted run, check for orphan processes (`tasklist | findstr python
 
 ## Pipeline params threading
 
-`configure_pipeline(svc, campaign_config)` applies `exclude_nodes` and `pipeline_overrides` and returns `pipeline_params`, which flows unchanged through both `new` and `resume`. If `pipeline_params` is `None`, the backend runs the full pipeline.
+`configure_and_apply_pipeline(session, campaign_config)` applies `exclude_nodes` and `pipeline_overrides` and returns `pipeline_params`, which flows unchanged through both `new` and `resume`. If `pipeline_params` is `None`, the backend runs the full pipeline.
 
 ---
 

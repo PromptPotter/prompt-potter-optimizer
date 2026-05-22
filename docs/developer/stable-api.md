@@ -97,7 +97,7 @@ Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::C
 
 **`optimizer_llm` knobs:** `provider` (`groq`/`openai`/`anthropic`/`openrouter`), `model` (provider-specific). Per-node temperature + max_tokens come from `datasets/_optimizer/pipeline.json`, not the campaign config.
 
-Constants moved out of `campaign.json` (they live next to their consumer): L1 candidate-generation temperature (`l1/generate.py::L1_CREATIVITY`), L2/L3 transition temperatures (`escalation/firing.py::_LAYER_TEMPERATURE`), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
+Constants moved out of `campaign.json` (they live next to their consumer): L1 candidate-generation temperature (`l1/generate.py::L1_CREATIVITY`), L2/L3 transition temperatures (`LayerStrategy.default_temperature` in `escalation/firing/{l2,l3}_driver.py`), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
 
 The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. L2 and L3 are always-on architecture.
 

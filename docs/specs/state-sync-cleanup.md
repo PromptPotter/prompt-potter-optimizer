@@ -134,7 +134,7 @@ Goal: webapp reads live state from the ledger, not from a file.
 Files:
 - New `promptpotter/presentation/api/routers/live.py` — `GET /api/v1/live` reads `active_session.json`, opens the active cycle's `CycleEventLog`, returns `derive_live_state(events_tail)`.
 - New `promptpotter/application/scoring/live_state.py` (or similar) — pure function `derive_live_state(events) → LiveStateView`. Shared with CLI `LiveDisplay`.
-- Webapp `webapp-react/` — replace dashboard.json polling with `/api/v1/live` polling for the active cycle's live block. Per-cycle `state.json` reads stay (now correctly named).
+- Webapp `webapp/` — replace dashboard.json polling with `/api/v1/live` polling for the active cycle's live block. Per-cycle `state.json` reads stay (now correctly named).
 - Live tick rate stays 2 s; the file race is gone because there is no file.
 
 ### Phase 4 — Delete the sidecars

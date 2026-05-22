@@ -39,10 +39,10 @@ intelligence; intelligence does not depend on either.
 - New optimizer state MUST flow through `OptSearchPoint` — no sidecar state.
 - Backend tunables ride the per-dataset overlay
   (`datasets/{name}/pipeline.json::nodes.{name}.config`) merged by
-  `configure_pipeline()` (`config.py:301`). See **Backend overlay** below for the merge contract.
+  `configure_and_apply_pipeline()` (`config.py:344`). See **Backend overlay** below for the merge contract.
 
 ## Backend overlay
 
-`nodes.{name}.config` in the dataset's `pipeline.json` is a sparse overlay merged onto each wire payload by `load_dataset_node_overlay` → `configure_pipeline()` (`config.py:301`). It's the sole route for changing a backend tunable — model, provider, temperature, anything in the node's `optimizer.param_keys`. AIME's overlay routes through OpenRouter+Mistral while the backend default stays Groq+gpt-oss. The sibling `llm_defaults` is the `GET /pipeline` snapshot — keep it accurate, don't repurpose it.
+`nodes.{name}.config` in the dataset's `pipeline.json` is a sparse overlay merged onto each wire payload by `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`config.py:344`). It's the sole route for changing a backend tunable — model, provider, temperature, anything in the node's `optimizer.param_keys`. AIME's overlay routes through OpenRouter+Mistral while the backend default stays Groq+gpt-oss. The sibling `llm_defaults` is the `GET /pipeline` snapshot — keep it accurate, don't repurpose it.
 
 **Never edit the backend repo to achieve a switch** (even co-owned ones like TermNorm at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`); if a needed key isn't in the dataset's `param_keys`, extend the snapshot, not the backend. Pipeline-agnostic is a §0 commitment.
