@@ -9,6 +9,7 @@ export const TERMS: Record<string, string> = {
   status_snapshot:    "Last write >5m ago. No live optimizer — viewing a frozen unit.",
   status_offline:     "No active session, or dashboard.json unreachable. Run `python -m promptpotter new <dataset>` or `resume`.",
   status_nowall:      "Dashboard has no wallclock yet — optimizer probably has not started.",
+  status_stamp_mismatch: "dashboard.json keeps reporting a different (campaign, cycle) than this view expects — the optimizer may be re-instantiating, or this unit's session never wrote a dashboard.",
 
   // Phase tag (dash.state) → one-sentence definition
   phase_origin:           "Origin scoring of the unmodified starting prompt — the floor the optimizer beats.",

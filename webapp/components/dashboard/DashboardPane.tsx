@@ -1,15 +1,10 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import {
-  fetchActiveDatasetName,
   fetchCycleFile,
   fetchDatasetPipeline,
-  fetchDatasetPreview,
-  fetchMeasurementSeries,
   fetchPipeline,
-  type DatasetItem,
   type HardSamplesScope,
-  type MeasurementDot,
 } from "@/lib/api";
 import {
   CycleStreamProvider,
@@ -19,6 +14,7 @@ import {
   type RoundFileDoc,
 } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
+import { useDatasetPreview } from "@/lib/useDatasetPreview";
 import { applyChartDefaults } from "@/lib/theme";
 import { Chart as ChartJS } from "chart.js";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -69,6 +65,9 @@ function DashboardPaneInner() {
     cycleId,
     sessionId,
     activeError,
+    cyclesError,
+    cyclesLoaded,
+    cycles,
     following,
     selectCycle,
     followActive,
@@ -93,22 +92,20 @@ function DashboardPaneInner() {
   // Original-cased connector name (e.g. "TermNorm Local") rendered as a
   // small uppercase tag inside the multi-node chip. Same fetch as the view.
   const [targetConnector, setTargetConnector] = useState<string | null>(null);
-  const [datasetName, setDatasetName] = useState<string | null>(null);
-  const [datasetItems, setDatasetItems] = useState<DatasetItem[]>([]);
-  const [datasetTrainCount, setDatasetTrainCount] = useState(0);
-  const [datasetTestCount, setDatasetTestCount] = useState(0);
-  // Per-sample measurement series feeding the Meas heat-map column. Sourced
-  // from the new /datasets/{name}/measurement-series endpoint, refreshed
-  // whenever the scope toggle flips so workspace/campaign actually swap the
-  // dot history (not just miss_prob).
-  const [archivePerSample, setArchivePerSample] = useState<Map<number, MeasurementDot[]>>(
-    () => new Map(),
-  );
   // Hard-sample view scope — campaign = every cycle in this campaign
   // (default), dataset = every campaign on this dataset (cross-campaign
   // archive). Clicking the heat-map badge toggles it; the dataset preview
   // re-fetches on change. Not persisted — always opens on campaign.
   const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("campaign");
+  // Dataset roster + per-sample measurement history for the unit in view.
+  // One hook owns the fetch chain and blanks cleanly on a unit switch.
+  const {
+    datasetName,
+    items: datasetItems,
+    trainCount: datasetTrainCount,
+    testCount: datasetTestCount,
+    archivePerSample,
+  } = useDatasetPreview(campaignId, cycleId, hardSamplesScope);
   const [themeKey, setThemeKey] = useState<string>("init");
   // Edit mode — off by default; gates Stop run + Fork-from-here. Never
   // persisted across reloads (no URL param, no localStorage) so the
@@ -224,77 +221,6 @@ function DashboardPaneInner() {
     };
   }, [campaignId, cycleId]);
 
-  // Dataset preview — one fetch per cycle, threaded down through ChatPane to
-  // HardSamplesHeatmap. Owning it here means a tab swap (New Job ↔ View
-  // Results) reuses the result instead of running its own fetch chain.
-  //
-  // No mint-race retry: `auto_mint_session` writes `index.json` and a
-  // stamped `dashboard.json` before it flips the active pointer, so by the
-  // time the webapp resolves the new unit both files already exist.
-  useEffect(() => {
-    if (!campaignId || !cycleId) return;
-    let cancelled = false;
-    const ac = new AbortController();
-    (async () => {
-      try {
-        const name = await fetchActiveDatasetName(campaignId, cycleId, ac.signal);
-        if (cancelled || !name) return;
-        setDatasetName(name);
-        // The sample roster is dataset-wide — fetch it at dataset scope so
-        // the heat-map always renders, even on a campaign with no
-        // hard_samples.json yet (campaign-scope /preview 404s).
-        const preview = await fetchDatasetPreview(
-          name, 1000, ac.signal, "dataset", campaignId, cycleId,
-        );
-        // Cell evidence follows the campaign ⇄ dataset toggle. Campaign
-        // scope is empty before the campaign's first round — fall back to
-        // the cross-campaign archive so the badge still shows hit/miss.
-        let seriesRes = await fetchMeasurementSeries(
-          name, 1000, ac.signal, hardSamplesScope, campaignId, cycleId,
-        ).catch(() => null);
-        if (
-          (!seriesRes || seriesRes.items.length === 0) &&
-          hardSamplesScope !== "dataset"
-        ) {
-          seriesRes = await fetchMeasurementSeries(
-            name, 1000, ac.signal, "dataset", campaignId, cycleId,
-          ).catch(() => null);
-        }
-        if (cancelled) return;
-        setDatasetItems(preview.items);
-        setDatasetTrainCount(preview.train_count);
-        setDatasetTestCount(preview.test_count);
-        const m = new Map<number, MeasurementDot[]>();
-        for (const s of seriesRes?.items ?? []) m.set(s.sample_id, s.measurements);
-        setArchivePerSample(m);
-      } catch {
-        /* transient fetch failure — a cycle/scope change re-runs this */
-      }
-    })();
-    return () => {
-      cancelled = true;
-      ac.abort();
-    };
-  }, [campaignId, cycleId, hardSamplesScope]);
-
-  // Unit change ⇒ clear per-cycle derived state. The unit identity is the
-  // (campaign, cycle) PAIR — a cycle_id alone is ambiguous across
-  // campaigns, so a campaign-only switch must still clear. Prev-prop
-  // pattern (React's documented "adjusting state when a prop changes"
-  // recipe) avoids the cascading render a `setState` in `useEffect` costs.
-  // The CycleStreamProvider owns the round-file + dashboard reset; this
-  // only handles the dataset preview owned by this component.
-  const unitKey = campaignId && cycleId ? `${campaignId} ${cycleId}` : null;
-  const [prevUnitKey, setPrevUnitKey] = useState<string | null>(unitKey);
-  if (unitKey !== prevUnitKey) {
-    setPrevUnitKey(unitKey);
-    setDatasetName(null);
-    setDatasetItems([]);
-    setDatasetTrainCount(0);
-    setDatasetTestCount(0);
-    setArchivePerSample(new Map());
-  }
-
   // Re-applies chart defaults on theme swap; the themeKey bump forces all
   // chart components to remount so they pick up the new --color-* values.
   const onThemeChange = useCallback(() => {
@@ -306,6 +232,26 @@ function DashboardPaneInner() {
   useEffect(() => {
     applyChartDefaults(ChartJS);
   }, []);
+
+  // Status banner with no unit in view: a network failure and a genuinely
+  // empty workspace both end with no cycleId — but only one means the
+  // operator should go check the server. Tell them apart. Order matters: a
+  // down server also reports zero cycles, so the netDown branch goes first.
+  const noUnit = !cycleId;
+  const netDown = Boolean(activeError || cyclesError);
+  let bannerStatus = dashState.status;
+  let bannerText = dashState.statusText;
+  let bannerHint = dashState.statusHint;
+  if (noUnit && netDown) {
+    bannerStatus = "offline";
+    bannerText = "Server unreachable — retrying";
+    bannerHint = activeError ?? cyclesError ?? "";
+  } else if (noUnit && cyclesLoaded && cycles.length === 0) {
+    bannerStatus = "offline";
+    bannerText = "No active campaign yet";
+    bannerHint =
+      "Start a campaign: `python -m promptpotter new <dataset>` in another terminal.";
+  }
 
   return (
     <SelectionProvider cycleId={cycleId}>
@@ -322,13 +268,9 @@ function DashboardPaneInner() {
       <main className="main">
         <Topbar tab={tab} onTabChange={setTab} onThemeChange={onThemeChange} />
         <StatusBar
-          status={dashState.status}
-          statusText={activeError && !cycleId ? "No active campaign" : dashState.statusText}
-          statusHint={
-            activeError && !cycleId
-              ? "Start a campaign: `python -m promptpotter new <dataset>` in another terminal."
-              : dashState.statusHint
-          }
+          status={bannerStatus}
+          statusText={bannerText}
+          statusHint={bannerHint}
           termKey={dashState.termKey}
           campaignId={campaignId}
           cycleId={cycleId}

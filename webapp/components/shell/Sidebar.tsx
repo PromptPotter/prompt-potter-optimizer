@@ -7,7 +7,7 @@ import {
   type UnitKind,
 } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
-import { rootCycleId, shortFamilyTail } from "@/lib/ids";
+import { rootCycleId, shortFamilyTail, sessionIndexOf, campaignOriginHash } from "@/lib/ids";
 import { TERMS } from "@/lib/terms";
 
 interface Props {
@@ -66,13 +66,6 @@ interface UnitNode {
 
 const byUpdatedDesc = (a: CycleListEntry, b: CycleListEntry) =>
   a.updated_at < b.updated_at ? 1 : -1;
-
-// Session ordinal from a root cycle id — `cycle_{hash}` → 1,
-// `cycle_{hash}_s3` → 3. Mirrors `session_index()` in paths.py.
-function sessionIndexOf(rootId: string): number {
-  const m = rootId.match(/_s(\d+)$/);
-  return m ? Number(m[1]) : 1;
-}
 
 // Build a session's fork-tree from `parent_cycle_id`. The root is the
 // trunk; every branch nests under its parent. A branch whose parent isn't
@@ -162,13 +155,6 @@ function groupCampaigns(
 
 function fmtAcc(v: number | null): string {
   return v == null ? "—" : `${(v * 100).toFixed(0)}%`;
-}
-
-// Short origin-hash tail of a campaign id (`{dataset}__{hash}` → the
-// hash) — disambiguates two campaigns on the same dataset.
-function originHash(campaignId: string): string {
-  const sep = campaignId.indexOf("__");
-  return sep >= 0 ? campaignId.slice(sep + 2) : campaignId;
 }
 
 // Campaign row name — the operator label when present, else the dataset
@@ -497,7 +483,7 @@ function CampaignNode({
               {campaignName(group.campaign)}
               {!group.campaign.label && (
                 <span className="cycle-library-hash" title={cid}>
-                  #{originHash(cid).slice(0, 6)}
+                  #{campaignOriginHash(cid).slice(0, 6)}
                 </span>
               )}
             </span>
@@ -610,7 +596,7 @@ function SessionSubtree({
               {label}
               {isCampaignRow && !campaign.label && (
                 <span className="cycle-library-hash" title={cid}>
-                  #{originHash(cid).slice(0, 6)}
+                  #{campaignOriginHash(cid).slice(0, 6)}
                 </span>
               )}
               {live && (

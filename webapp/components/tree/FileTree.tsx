@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { fetchFiles, type FileEntry } from "@/lib/api";
+import { useWorkspace } from "@/lib/workspace";
 
 interface DirNode {
   dirs: Record<string, DirNode>;
@@ -55,6 +56,9 @@ interface Props {
 export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Workspace-level reachability — so the no-unit state can tell a network
+  // failure apart from a genuinely empty workspace.
+  const { activeError, cyclesError } = useWorkspace();
 
   useEffect(() => {
     if (!campaignId || !cycleId) return;
@@ -75,7 +79,18 @@ export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
   const tree = useMemo(() => (entries ? buildTree(entries) : null), [entries]);
 
   if (!cycleId) {
-    return <div style={{ padding: 8, color: "var(--color-text-tertiary)", fontSize: 13 }}>No active campaign.</div>;
+    const netDown = Boolean(activeError || cyclesError);
+    return (
+      <div
+        style={{
+          padding: 8,
+          color: netDown ? "var(--color-danger)" : "var(--color-text-tertiary)",
+          fontSize: 13,
+        }}
+      >
+        {netDown ? "Server unreachable — retrying" : "No active campaign yet."}
+      </div>
+    );
   }
   if (error) {
     return <div style={{ padding: 8, color: "var(--color-danger)", fontSize: 13 }}>Failed to load files: {error}</div>;

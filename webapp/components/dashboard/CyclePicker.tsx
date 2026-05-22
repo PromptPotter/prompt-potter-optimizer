@@ -1,7 +1,7 @@
 "use client";
 import { useWorkspace } from "@/lib/workspace";
 import type { CycleListEntry } from "@/lib/api";
-import { rootCycleId, shortFamilyTail } from "@/lib/ids";
+import { rootCycleId, shortFamilyTail, sessionIndexOf, campaignOriginHash } from "@/lib/ids";
 
 // Inline unit picker for the dashboard breadcrumb. The breadcrumb text
 // becomes a `<select>` styled to read as text — the operator clicks it and
@@ -15,20 +15,6 @@ const SEP = "::";
 
 function unitKey(campaignId: string, cycleId: string): string {
   return `${campaignId}${SEP}${cycleId}`;
-}
-
-// `{dataset}__{hash}` → the origin-hash tail; disambiguates two campaigns
-// on the same dataset in the optgroup label.
-function campaignHash(campaignId: string): string {
-  const i = campaignId.indexOf("__");
-  return i >= 0 ? campaignId.slice(i + 2) : campaignId;
-}
-
-// Session ordinal from a root cycle id — `cycle_{hash}` → 1,
-// `cycle_{hash}_s3` → 3.
-function sessionIndexOf(rootId: string): number {
-  const m = rootId.match(/_s(\d+)$/);
-  return m ? Number(m[1]) : 1;
 }
 
 // Operator-facing unit-kind labels — the time-horizon taxonomy.
@@ -115,7 +101,7 @@ export function CyclePicker() {
           return (
             <optgroup
               key={cid}
-              label={`${dataset} · ${campaignHash(cid).slice(0, 6)}`}
+              label={`${dataset} · ${campaignOriginHash(cid).slice(0, 6)}`}
             >
               {entries.map((c) => {
                 const k = unitKey(c.campaign_id, c.cycle_id);

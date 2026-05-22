@@ -7,7 +7,7 @@ import {
   type CampaignLineageResponse,
   type SiblingKind,
 } from "@/lib/api";
-import { rootCycleId, shortFamilyTail } from "@/lib/ids";
+import { rootCycleId, shortFamilyTail, sessionIndexOf } from "@/lib/ids";
 
 interface Props {
   // The campaign whose lineage to render. A campaign is a FOREST: it holds
@@ -40,13 +40,6 @@ const KIND_GLYPH: Record<SiblingKind, string> = {
   sweep: "~",
   diag: "Δ",
 };
-
-// Session ordinal from a root cycle id — `cycle_{hash}` → 1,
-// `cycle_{hash}_s3` → 3. Mirrors `session_index()` in paths.py.
-function sessionIndexOf(rootId: string): number {
-  const m = rootId.match(/_s(\d+)$/);
-  return m ? Number(m[1]) : 1;
-}
 
 // Build immediate-parent map + per-parent child list (sorted by recency
 // of fork) so the BFS lays out forks under their parent in a stable order.

@@ -15,6 +15,7 @@ import {
   type ReactNode,
 } from "react";
 import { fetchCycleFile, fetchDashboard, fetchFiles } from "./api";
+import { rootCycleId } from "./ids";
 
 export type StatusKind = "live" | "stale" | "offline";
 
@@ -156,6 +157,12 @@ const INITIAL_STATE: CycleStreamState = {
   phase: null,
 };
 
+// Consecutive stamp-mismatch drops before the banner surfaces the problem.
+// 3 drops ≈ 6s at the 2s cadence — long enough to ride out a one-tick
+// re-instantiation during `new`, short enough the operator isn't left
+// staring at "Connecting…" with no reason.
+const STAMP_MISMATCH_LIMIT = 3;
+
 // Status banner age buckets — same thresholds as vanilla setStatus call sites.
 export interface BucketResult {
   status: StatusKind;
@@ -172,18 +179,6 @@ export interface BucketResult {
 export function roundOf(dash: DashboardSnapshot | null): number | null {
   const r = dash?.current_round?.round ?? dash?.round;
   return typeof r === "number" ? r : null;
-}
-
-// Frontend port of `root_cycle_id` in
-// promptpotter/infrastructure/store/paths.py — the session-family root is
-// the prefix before the FIRST sibling separator (`_fork_` / `_diag_` /
-// `_sweep_`). dashboard.json is per-session-family and self-stamps that
-// root, so the payload guard must compare the viewed cycle's root, not its
-// raw id (a fork view fetches its session root's dashboard.json).
-const SIBLING_SEP_RE = /_(?:fork|diag|sweep)_/;
-function rootCycleId(cycleId: string): string {
-  const m = SIBLING_SEP_RE.exec(cycleId);
-  return m ? cycleId.slice(0, m.index) : cycleId;
 }
 
 export function ageBucket(ageS: number | null): BucketResult {
@@ -250,6 +245,10 @@ function useCycleStreamSource(
   // we hold — that's encoded in `state.rounds`.
   const lastRoundRef = useRef<number | null>(null);
   const roundsFetchingRef = useRef(false);
+  // Consecutive dashboard.json payloads whose identity stamp didn't match
+  // the polled unit. Once it crosses STAMP_MISMATCH_LIMIT the banner says
+  // so — a never-matching stamp can't leave the UI silently on "Connecting…".
+  const stampMismatchRef = useRef(0);
 
   // Change-detect on the COMPOSITE unit identity (campaign + cycle). A
   // cycle_id is unique only within its campaign — switching to another
@@ -263,6 +262,7 @@ function useCycleStreamSource(
     cycleRef.current = cycleId;
     campaignRef.current = campaignId;
     lastRoundRef.current = null;
+    stampMismatchRef.current = 0;
     // Identity changed — hard-reset every cycle-scoped field so the prior
     // unit's rounds, dash snapshot, and `● Live` badge can't linger for a
     // frame while the first poll of the new unit is in flight.
@@ -342,13 +342,31 @@ function useCycleStreamSource(
         // cycle switch. Stale data never reaches the UI; the next tick
         // retries against the correct unit.
         if (dash.campaign_id !== cmp || dash.cycle_id !== rootCycleId(id)) {
+          const reported = `(${dash.campaign_id ?? "none"}, ${dash.cycle_id ?? "none"})`;
+          const expected = `(${cmp}, ${rootCycleId(id)})`;
           console.debug(
-            "[cycle-stream] dropped dashboard payload — stamp " +
-              `(${dash.campaign_id ?? "none"}, ${dash.cycle_id ?? "none"}) ` +
-              `!= unit (${cmp}, ${rootCycleId(id)})`,
+            `[cycle-stream] dropped dashboard payload — stamp ${reported} != unit ${expected}`,
           );
+          stampMismatchRef.current += 1;
+          // One re-instantiation tick is normal; a stamp that *never* matches
+          // is a real fault — surface it instead of polling silently forever.
+          if (stampMismatchRef.current >= STAMP_MISMATCH_LIMIT) {
+            setState((prev) => ({
+              ...prev,
+              status: "stale",
+              statusText: "Dashboard identity mismatch",
+              statusHint:
+                `dashboard.json reports ${reported} but this view expects ${expected} — ` +
+                "the optimizer may be re-instantiating, or this unit's session " +
+                "never wrote a dashboard.",
+              termKey: "status_stamp_mismatch",
+              isLive: false,
+            }));
+          }
           return;
         }
+        // A matching payload clears any prior mismatch streak.
+        stampMismatchRef.current = 0;
         const wall = Date.parse(dash.wallclock_serialized_at || "");
         const ageS = Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
         const bucket = ageBucket(ageS);

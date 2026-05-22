@@ -13,6 +13,7 @@ import {
   type CycleListEntry,
 } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
+import { campaignOriginHash } from "@/lib/ids";
 
 interface Props {
   themeKey: string;
@@ -54,11 +55,6 @@ function findUnit(
   const cmp = key.slice(0, i);
   const cyc = key.slice(i + SEP.length);
   return cycles.find((c) => c.campaign_id === cmp && c.cycle_id === cyc) ?? null;
-}
-
-function campaignTail(campaignId: string): string {
-  const i = campaignId.indexOf("__");
-  return i >= 0 ? campaignId.slice(i + 2) : campaignId;
 }
 
 function trajectory(detail: CampaignDetail): { x: number; y: number }[] {
@@ -269,7 +265,7 @@ function ComparePicker({ label, cycles, selected, onChange, disabled }: PickerPr
               const k = unitKey(c.campaign_id, c.cycle_id);
               return (
                 <option key={k} value={k}>
-                  {campaignTail(c.campaign_id)} · {c.sibling_kind}
+                  {campaignOriginHash(c.campaign_id)} · {c.sibling_kind}
                   {" · "}
                   best{" "}
                   {c.best_accuracy == null
