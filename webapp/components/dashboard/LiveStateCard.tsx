@@ -21,7 +21,7 @@ const SHOWN_ELSEWHERE = new Set([
 ]);
 
 const KNOWN_ORDER = [
-  "origin", "current_acc", "n_variants", "sp_budget_ttest",
+  "origin_accuracy", "current_acc", "n_variants", "sp_budget_ttest",
   "total_backend_calls", "error_count", "degraded_count", "backend_retry_count",
   "state_since", "stop_reason",
 ];
@@ -41,7 +41,7 @@ interface BackendWarning {
 }
 
 const FORMATTERS: Record<string, (v: unknown) => string> = {
-  origin: (v) => fmtNum(v),
+  origin_accuracy: (v) => fmtNum(v),
   current_acc: (v) => fmtNum(v),
   state_since: fmtClock,
 };

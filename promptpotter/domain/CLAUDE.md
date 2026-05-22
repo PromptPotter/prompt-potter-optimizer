@@ -8,7 +8,7 @@ encoded by `derive()`.
 
 | Primitive | File | Why it's settled |
 |---|---|---|
-| `JobSearchPoint` | `search_point.py` | Frozen target spec, content-hashed via `content_hash(eval_data)`. First positional arg to `score_search_point()`. |
+| `JobSearchPoint` | `search_point.py` | Frozen target spec, content-hashed via `content_hash(dataset)`. First positional arg to `score_search_point()`. |
 | `PromptTemplate` | `opt_search_point.py` | 8-field prompt scheme with `render()` / `compile_prompt()`. Canonical prompts at `datasets/{name}/prompts/{node}.json`. |
 | `OptSearchPoint` | `opt_search_point.py` | Optimizer state: lineage, L2/L3 overrides, per-individual memory, `task_context`, `plan`, `l1_layout`. **All new optimizer state flows through here** — no sidecar state. |
 | `ResumeCheckpointKind` + `RESUME_CHECKPOINT_GATING` | `run_records.py` | Import-time exhaustiveness — adding a kind without a gating mode raises before the module loads. SoT for replayed-vs-archival gating. |
@@ -41,6 +41,10 @@ back-compat shims. The word `legacy` is **never** sanctioned.
 ## Conventions
 
 - PEP 604 type hints (`X | None`, `list[str]`).
+- Fully `mypy --strict` — no override in `pyproject.toml`. New domain
+  code passes strict: typed defs, parameterized `dict`/`list`, no `Any`
+  returns. The pure core (`domain/` + `shared/` + `config/`) is the
+  migrated strict zone; the I/O layers still sit behind the ledger.
 - Frozen Pydantic models default; lineage via `derive()`, never mutation.
 - Pure: no I/O, no `BackendClient`, no `Stores`. If a function needs
   infrastructure, it lives in `application/`.

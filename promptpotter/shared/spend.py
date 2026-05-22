@@ -41,6 +41,7 @@ import urllib.error
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +68,9 @@ _MAX_BODY_BYTES = 8 * 1024 * 1024  # upstream is ~1 MB; cap defends against runa
 _TTL_SECONDS = 24 * 60 * 60
 
 
-def _strip_upstream(raw: dict) -> dict:
+def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
     """Keep only cost-bearing entries with the four fields we use."""
-    out: dict = {}
+    out: dict[str, Any] = {}
     for name, body in raw.items():
         if not isinstance(body, dict):
             continue
@@ -79,7 +80,7 @@ def _strip_upstream(raw: dict) -> dict:
     return out
 
 
-def _wrap(models: dict) -> dict:
+def _wrap(models: dict[str, Any]) -> dict[str, Any]:
     """Wrap the stripped models dict with a fetched-at timestamp for TTL."""
     return {"fetched_at": datetime.now(UTC).isoformat(timespec="seconds"), "models": models}
 
@@ -146,7 +147,7 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
     return True
 
 
-def _read_models(path: Path) -> dict | None:
+def _read_models(path: Path) -> dict[str, Any] | None:
     """Return the ``models`` dict from a wrapped rates file, or None."""
     if not path.exists():
         return None
@@ -161,7 +162,7 @@ def _read_models(path: Path) -> dict | None:
     return models if isinstance(models, dict) else None
 
 
-def _models_to_rates(models: dict) -> dict[str, tuple[float, float]]:
+def _models_to_rates(models: dict[str, Any]) -> dict[str, tuple[float, float]]:
     rates: dict[str, tuple[float, float]] = {}
     for name, body in models.items():
         if not isinstance(body, dict):

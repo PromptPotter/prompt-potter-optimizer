@@ -25,8 +25,8 @@ def qg_pair(d: Any) -> tuple[str, str]:
 
 def content_hash(
     rendered_prompt: str,
-    dataset: list,
-    pipeline_params: dict | None = None,
+    dataset: list[Any],
+    pipeline_params: dict[str, Any] | None = None,
 ) -> str:
     """Content-addressed hash for measurement deduplication.
 
@@ -38,7 +38,7 @@ def content_hash(
     pipeline configurations produce distinct hashes.
     """
     pairs = sorted(qg_pair(d) for d in dataset)
-    blob_dict: dict = {
+    blob_dict: dict[str, Any] = {
         "prompt": rendered_prompt,
         "pairs": pairs,
     }

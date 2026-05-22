@@ -60,17 +60,17 @@ class CandidateScore:
     hits: int
     total: int
     evaluators: dict[str, float]
-    pipeline_params_override: dict | None = None
+    pipeline_params_override: dict[str, Any] | None = None
     escalation_aborted: bool = False
     elimination_stopped: bool = False
     scored_samples: int = 0
     expected_samples: int = 0
     invalid: bool = False
     resumed_from_cache: bool = False
-    validation_failures: list[dict] = field(default_factory=list)
-    runtime_failures: list[dict] = field(default_factory=list)
-    elimination_context: dict = field(default_factory=dict)
-    degradation_context: dict = field(default_factory=dict)
+    validation_failures: list[dict[str, Any]] = field(default_factory=list)
+    runtime_failures: list[dict[str, Any]] = field(default_factory=list)
+    elimination_context: dict[str, Any] = field(default_factory=dict)
+    degradation_context: dict[str, Any] = field(default_factory=dict)
     # Origin's stats restricted to *this* candidate's measured samples — the
     # apples-to-apples comparison surface for PoBB-locked candidates that
     # only ran the hardest q8/20 before the lock fired. Equals the full-set
@@ -126,7 +126,7 @@ class CandidateProposal(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     osp: OptSearchPoint
-    pipeline_params_override: dict[str, dict] = Field(default_factory=dict)
+    pipeline_params_override: dict[str, dict[str, Any]] = Field(default_factory=dict)
     evidence_grounding: EvidenceGrounding | None = Field(
         default=None,
         description="L1-declared panel evidence for this proposal. Mirrors "
@@ -148,7 +148,7 @@ class RoundOrigin(BaseModel):
     accuracy: float
     composite_fitness: float
     osp: OptSearchPoint
-    results: list[dict] = Field(default_factory=list)
+    results: list[dict[str, Any]] = Field(default_factory=list)
     label: str
     evaluators: dict[str, float] = Field(default_factory=dict)
 
@@ -216,23 +216,23 @@ class RoundPayload(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    prompt_fields: dict
-    pipeline_params: dict | None = None
+    prompt_fields: dict[str, Any]
+    pipeline_params: dict[str, Any] | None = None
     # Comparison anchor for this round: prior round's accuracy (or campaign
     # origin for round 0). Persisted so the scoreboard can render
     # delta-vs-origin without resolving the prior round_data.
     origin_accuracy: float = 0.0
-    results: list[dict] = Field(default_factory=list)
+    results: list[dict[str, Any]] = Field(default_factory=list)
     # Per-candidate scored results — persisted so resume can rescore
     # them under a changed scorer and replay decisions without needing
     # to re-run the pipeline. Keyed by candidate id.
-    all_candidate_results: dict[str, list[dict]] = Field(default_factory=dict)
+    all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     candidates_scored: int
-    candidate_scores: list[dict] = Field(default_factory=list)
+    candidate_scores: list[dict[str, Any]] = Field(default_factory=list)
     # ResumeCheckpointRecord records produced this round (round_winner, elimination_cut,
     # escalate_l2, …). Consumed by the divergence replay walker in
     # ``application/optimization/cycle.py``.
-    decisions: list[dict] = Field(default_factory=list)
+    decisions: list[dict[str, Any]] = Field(default_factory=list)
     evaluators: dict[str, float] = Field(default_factory=dict)
     # L1 generation quality — fraction of variants that proposed a non-empty
     # unique mutation, plus the per-failure-class counts. Defaults preserve
@@ -265,7 +265,7 @@ class RoundResult(RoundMetadata, RoundPayload):
     diagnostics: RoundDiagnostics | None = None
     # Filled in by ``execute_round`` after ``run_l1_critique`` returns;
     # read by the dispatch hub's ``critique`` signal renderer.
-    critique: dict | None = None
+    critique: dict[str, Any] | None = None
 
 
 class CycleResult(BaseModel):
@@ -276,8 +276,8 @@ class CycleResult(BaseModel):
     best_accuracy: float
     best_round: int
     origin_accuracy: float
-    winner_prompt_fields: dict
-    winner_pipeline_params: dict | None = None
+    winner_prompt_fields: dict[str, Any]
+    winner_pipeline_params: dict[str, Any] | None = None
     stop_reason: str
     started_at: str
     finished_at: str

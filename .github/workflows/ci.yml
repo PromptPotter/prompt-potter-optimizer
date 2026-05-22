@@ -18,6 +18,11 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      # Cheap, dependency-free — fail fast before the pip install if a
+      # `.ai/CODEMAP.md` symbol citation has gone stale.
+      - name: CODEMAP anti-rot check
+        run: python scripts/check_codemap.py
+
       - name: Install dependencies
         run: pip install -e ".[stats,dev]"
 
@@ -35,3 +40,33 @@ jobs:
 
       - name: Tests
         run: pytest tests/ -q --tb=short --cov=promptpotter --cov-report=term-missing
+
+  webapp:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: webapp
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Explicit type check — `next build` does not hard-fail on every type
+      # error, so this is what makes tsconfig.json's strict mode enforced.
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build

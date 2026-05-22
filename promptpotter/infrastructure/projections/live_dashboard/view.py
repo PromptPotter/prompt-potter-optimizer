@@ -137,12 +137,7 @@ class LiveDashboardView(DerivedView):
             "candidate": "",
             "query": "",
             "patience": f"0/{l1_patience}",
-            # ``origin`` and ``origin_accuracy`` are two names for the same
-            # value. INIT:exit now writes both, but existing dashboards have
-            # ``origin_accuracy: 0.0`` from older runs where only ``origin``
-            # was written. Backfill on load so the webapp's LineageTree
-            # doesn't render "origin 0%" until the next INIT:exit fires.
-            "origin_accuracy": r.get("origin_accuracy") or r.get("origin") or 0.0,
+            "origin_accuracy": r.get("origin_accuracy") or 0.0,
             "origin_samples": r.get("origin_samples", 0),
             "best": r.get("best", 0.0),
             "current_acc": 0.0,
@@ -460,12 +455,6 @@ class LiveDashboardView(DerivedView):
             # The (campaign_id, cycle_id, session_id) identity stamp is set
             # once at construction; no phase event mutates it.
             del loop_env
-            s["origin"] = cycle.tracking.current_accuracy
-            # ``origin`` and ``origin_accuracy`` are two names for the same
-            # value — TopStrip reads ``origin`` (works) while LineageTree
-            # reads ``origin_accuracy`` (rendered as "origin 0%" because
-            # nothing updated it). Keep both in sync at the single write
-            # site so subscribers never see a drift between them.
             s["origin_accuracy"] = cycle.tracking.current_accuracy
             # Sample count behind the origin score — the webapp prints it
             # above the C0 bar before round 1's file exists on disk.

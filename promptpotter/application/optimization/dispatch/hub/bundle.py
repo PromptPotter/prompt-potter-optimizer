@@ -140,9 +140,10 @@ class CycleSlice:
     unit-testable with a plain fixture and don't drag the orchestration
     state into the rendering layer.
 
-    ``pipeline_params`` is the active JobSearchPoint's nested
-    ``{node: {param: value}}`` dict, snapshotted so wound renderers
-    can filter ACCUMULATED rows by the current backend config.
+    ``pipeline_params`` is the active JobSearchPoint's node-keyed config
+    (``{node: {param: value}}``, plus the reserved ``steps`` list),
+    snapshotted so wound renderers can filter ACCUMULATED rows by the
+    current backend config.
     """
 
     round_num: int

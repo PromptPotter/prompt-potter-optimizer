@@ -23,7 +23,7 @@ PromptPotter works with any backend that implements a small contract. The pipeli
 
 ### `POST /matches`
 
-Request: a query + `pipeline_params` (nested dicts keyed by node name). Response: prediction, ranked candidates, and `diagnostics.warnings[]` — per-query warnings with `{step, code, message}` PromptPotter uses for self-healing. See [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md) + [`../developer/node-standard.md`](../developer/node-standard.md).
+Request: a query + `pipeline_params` (node-keyed config dicts plus a `steps` list). Response: prediction, ranked candidates, and `diagnostics.warnings[]` — per-query warnings with `{step, code, message}` PromptPotter uses for self-healing. See [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md) + [`../developer/node-standard.md`](../developer/node-standard.md).
 
 ### `GET /pipeline`
 

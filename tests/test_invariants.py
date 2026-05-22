@@ -1447,3 +1447,104 @@ def test_run_round_loop_continue_paths_route_through_close_round() -> None:
         "round-loop branches must route through close_round before continuing:\n  "
         + "\n  ".join(offenders)
     )
+
+
+# ===========================================================================
+# Dispatch + domain-shape guardrails
+# ===========================================================================
+#
+# Three self-enforcing rules the pre-flight gate (CLAUDE.md) names but the
+# rest of the suite did not yet machine-check:
+#   - every INJECTIONS slot resolves to a renderer, and no renderer is orphaned;
+#   - every raw LLM call funnels through the one traced dispatch module (Q8);
+#   - pipeline_params is nested-by-node — a flat param map cannot be built.
+
+
+def test_every_injection_renderer_is_wired() -> None:
+    """Every INJECTIONS slot resolves to a renderer, and no renderer is orphaned.
+
+    Forward: each ``_Injection`` carries a callable renderer and its
+    ``name`` matches its registry key. Reverse: every ``_r_*`` renderer
+    defined across the ``injections/`` package is referenced by some
+    INJECTIONS entry — a renderer written but never wired (or stranded
+    after a slot was deleted) is dead code the dispatch hub never reaches.
+    """
+    import importlib
+    import inspect
+    import pkgutil
+
+    from promptpotter.application.optimization.dispatch.hub import injections as injpkg
+    from promptpotter.application.optimization.dispatch.hub.injections.registry import (
+        INJECTIONS,
+    )
+
+    for key, inj in INJECTIONS.items():
+        assert inj.name == key, f"INJECTIONS['{key}'] has mismatched name {inj.name!r}"
+        assert callable(inj.render), f"INJECTIONS['{key}'].render is not callable"
+
+    wired = {inj.render for inj in INJECTIONS.values()}
+    orphans: list[str] = []
+    for mod_info in pkgutil.iter_modules(injpkg.__path__):
+        mod = importlib.import_module(f"{injpkg.__name__}.{mod_info.name}")
+        for name, fn in inspect.getmembers(mod, inspect.isfunction):
+            if name.startswith("_r_") and fn.__module__ == mod.__name__ and fn not in wired:
+                orphans.append(f"{mod.__name__}.{name}")
+    assert not orphans, (
+        "Orphaned injection renderers — defined but never wired into INJECTIONS:\n  "
+        + "\n  ".join(sorted(orphans))
+    )
+
+
+def test_llm_calls_funnel_through_dispatch() -> None:
+    """The raw provider call ``.chat()`` has exactly one call-site module.
+
+    Every optimizer LLM call goes ``llm_call() → _chat_under_deadline() →
+    llm_client.chat()`` inside ``dispatch/llm_call/call.py``. That module
+    emits the ``LLMCallRecord`` to the ledger, and its caller sites
+    (l1_generate, l1_critique, L2, L3) wrap the call in ``observed_node()``.
+    A ``.chat()`` invoked anywhere else is an untraced LLM call —
+    pre-flight gate Q8. AST-walk ``promptpotter/`` and forbid the bypass.
+    """
+    allowed = "application/optimization/dispatch/llm_call/call.py"
+    offenders: list[str] = []
+    for src_path in ROOT.rglob("*.py"):
+        rel = src_path.relative_to(ROOT).as_posix()
+        if rel == allowed:
+            continue
+        tree = ast.parse(src_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "chat"
+            ):
+                offenders.append(f"{rel}:{node.lineno}")
+    assert not offenders, (
+        "Direct ``.chat()`` call outside dispatch/llm_call/call.py — route the "
+        "LLM call through ``llm_call()`` so it is traced (observed_node + "
+        "LLMCallRecord):\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_pipeline_params_rejects_flat_param_map() -> None:
+    """``JobSearchPoint.pipeline_params`` is nested-by-node — a flat map is rejected.
+
+    The nested shape ``{node: {param: value}}`` is the only format; the
+    pre-nested flat ``{param: value}`` map was removed everywhere. A field
+    validator on the frozen model rejects it at construction, so a new
+    caller cannot reintroduce the flat format silently.
+    """
+    from pydantic import ValidationError
+
+    from promptpotter.domain.search_point import JobSearchPoint
+
+    # Nested node configs, the reserved ``steps`` list, empty, and unset
+    # all construct cleanly.
+    JobSearchPoint(pipeline_params={"llm_only": {"model": "x", "temperature": 0.1}})
+    JobSearchPoint(pipeline_params={"steps": ["llm_ranking"], "llm_ranking": {"prompt": "x"}})
+    JobSearchPoint(pipeline_params={})
+    JobSearchPoint(pipeline_params=None)
+
+    # A flat param map (bare scalar values) fails at construction.
+    with pytest.raises(ValidationError):
+        JobSearchPoint(pipeline_params={"model": "x", "temperature": 0.1})

@@ -245,8 +245,9 @@ The persisted world is a four-entity containment hierarchy
 - **Overlay** — per-dataset operator delta merged onto each wire
   payload. Lives at `datasets/{name}/pipeline.json::nodes.{name}.config`.
   The sole route for changing a backend tunable.
-- **pipeline_params** — nested dict keyed by node
-  (`{"llm_only": {"model": …}}`). The canonical optimizer-layer shape.
+- **pipeline_params** — node-keyed config dicts plus the reserved `steps`
+  list of active node names (`{"steps": [...], "llm_only": {"model": …}}`).
+  The canonical optimizer-layer shape; never a flat `{param: value}` map.
 
 ## Persistence — what writes where
 

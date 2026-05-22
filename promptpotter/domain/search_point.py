@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, fields
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import content_hash
@@ -66,8 +66,30 @@ class JobSearchPoint(SearchPoint):
 
     model_config = {"frozen": True}
 
-    pipeline_params: dict | None = None
-    prompt_fields: dict | None = None
+    pipeline_params: dict[str, Any] | None = None
+    prompt_fields: dict[str, Any] | None = None
+
+    @field_validator("pipeline_params")
+    @classmethod
+    def _params_nested_by_node(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Reject a flat param map — ``pipeline_params`` is nested-by-node only.
+
+        The shape is ``{node_name: {param: value}, "steps": [...]}``: a node
+        key carries a config dict, a reserved key (``steps``) carries a
+        list. A bare scalar at the top level is the pre-nested flat
+        ``{param: value}`` format that no longer exists anywhere in the
+        codebase; rejecting it at construction stops a new caller
+        reintroducing it.
+        """
+        if v is None:
+            return v
+        flat = sorted(k for k, val in v.items() if isinstance(val, (str, int, float)))
+        if flat:
+            raise ValueError(
+                f"pipeline_params must be nested-by-node — keys {flat} carry "
+                "scalar values. Expected {node: {param: value}}, not a flat map."
+            )
+        return v
 
     def render(self) -> str:
         """Read the cached rendered prompt out of ``pipeline_params``.
@@ -79,7 +101,7 @@ class JobSearchPoint(SearchPoint):
         """
         for node_config in (self.pipeline_params or {}).values():
             if isinstance(node_config, dict) and "prompt" in node_config:
-                return node_config["prompt"]
+                return str(node_config["prompt"])
         return ""
 
     def sp_hash(self, pipeline_schema: PipelineSchema | None = None) -> str:
@@ -95,7 +117,7 @@ class JobSearchPoint(SearchPoint):
 
         return stable_hash(self.pipeline_params or {})
 
-    def content_hash(self, dataset: list) -> str:
+    def content_hash(self, dataset: list[Any]) -> str:
         """Content-addressed hash for measurement deduplication."""
         return content_hash(
             self.render(),
@@ -103,7 +125,7 @@ class JobSearchPoint(SearchPoint):
             self.pipeline_params,
         )
 
-    def derive(self, **changes) -> JobSearchPoint:
+    def derive(self, **changes: Any) -> JobSearchPoint:
         """Create a new JobSearchPoint with modifications.
 
         Accepts ``prompt_fields`` as a partial dict of field overrides.

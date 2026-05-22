@@ -69,7 +69,7 @@ class QueryMeasurement(TypedDict):
 # Scorer type aliases + sentinel ids
 # ---------------------------------------------------------------------------
 
-Scorer = Callable[[dict], float]
+Scorer = Callable[[dict[str, Any]], float]
 RoundScorer = Callable[[dict[str, float]], float]
 
 DEFAULT_SCORER_ID = "default_hit"

@@ -2,7 +2,7 @@
 
 import logging
 import sys
-from typing import Literal
+from typing import Literal, TextIO
 
 from promptpotter.config.log_redaction import SecretRedactionFilter
 
@@ -23,7 +23,7 @@ class _CliFormatter(logging.Formatter):
         return line
 
 
-class _TqdmStreamHandler(logging.StreamHandler):
+class _TqdmStreamHandler(logging.StreamHandler[TextIO]):
     """Writes through ``tqdm.write`` so log lines don't trample an active progress bar."""
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -73,7 +73,7 @@ def setup_logging(
     root = logging.getLogger()
     if root.handlers:
         return  # already configured (e.g. by pytest)
-    handler: logging.StreamHandler = (
+    handler: logging.StreamHandler[TextIO] = (
         _TqdmStreamHandler(sys.stderr) if style == "cli" else logging.StreamHandler(sys.stderr)
     )
     if style == "cli":

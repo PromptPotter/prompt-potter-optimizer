@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
@@ -140,7 +140,7 @@ def is_degraded(result: Mapping[str, Any]) -> bool:
 
 
 @contextmanager
-def graceful(msg: str, *, level: int = logging.WARNING):
+def graceful(msg: str, *, level: int = logging.WARNING) -> Iterator[None]:
     """Suppress non-interrupt exceptions with a log message.
 
     Re-raises ``KeyboardInterrupt`` and ``asyncio.CancelledError``

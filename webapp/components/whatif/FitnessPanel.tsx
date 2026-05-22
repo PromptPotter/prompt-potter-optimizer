@@ -199,17 +199,11 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
     // When selected matches the formula's evaluators, reuse the backend's composite byte-for-byte — recomputing as a mean drifts by float ε and can't represent non-mean formulas.
     const useComposite = setsEqual(selected, inActive);
 
-    // Origin — take from any round file (they all carry origin_accuracy)
-    // or fall back to the dash field. No evaluator breakdown for origin.
-    // Prefer ``dash.origin`` over ``dash.origin_accuracy``: both are the same
-    // scalar at the source, but legacy backend writes left
-    // ``origin_accuracy`` at 0.0 while populating ``origin``. The prior
-    // ``typeof === number`` check accepted the 0.0 and rendered C0 at 0%.
+    // Origin — ``dash.origin_accuracy`` is the live value; fall back to any
+    // round file (they all carry it). No evaluator breakdown for origin.
+    // The ``> 0`` guard skips a not-yet-scored 0.0.
     let originAccuracy: number | null = null;
-    const dashOrigin = (dash as { origin?: number } | null)?.origin;
-    if (typeof dashOrigin === "number" && dashOrigin > 0) {
-      originAccuracy = dashOrigin;
-    } else if (typeof dash?.origin_accuracy === "number" && dash.origin_accuracy > 0) {
+    if (typeof dash?.origin_accuracy === "number" && dash.origin_accuracy > 0) {
       originAccuracy = dash.origin_accuracy;
     } else {
       const firstWithOrigin = history.find(

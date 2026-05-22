@@ -64,6 +64,19 @@ export function ComparePane({ themeKey }: Props) {
   const [right, setRight] = useState<LoadedCampaign | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  // Drop loaded detail render-phase when a pick changes or clears — the
+  // load effects below refetch. Keeps a stale frame off-screen.
+  const [prevLeftId, setPrevLeftId] = useState(leftId);
+  if (leftId !== prevLeftId) {
+    setPrevLeftId(leftId);
+    setLeft(null);
+  }
+  const [prevRightId, setPrevRightId] = useState(rightId);
+  if (rightId !== prevRightId) {
+    setPrevRightId(rightId);
+    setRight(null);
+  }
+
   // Filter eligible right-side cycles to the same dataset as the left pick
   // (apples-to-apples). When no left pick yet, show all.
   const leftEntry = findUnit(cycles, leftId);
@@ -82,10 +95,7 @@ export function ComparePane({ themeKey }: Props) {
 
   // Load left/right details on selection.
   useEffect(() => {
-    if (!leftId || !cycles) {
-      setLeft(null);
-      return;
-    }
+    if (!leftId || !cycles) return;
     const c = findUnit(cycles, leftId);
     if (!c) return;
     let cancelled = false;
@@ -103,10 +113,7 @@ export function ComparePane({ themeKey }: Props) {
   }, [leftId, cycles]);
 
   useEffect(() => {
-    if (!rightId || !cycles) {
-      setRight(null);
-      return;
-    }
+    if (!rightId || !cycles) return;
     const c = findUnit(cycles, rightId);
     if (!c) return;
     let cancelled = false;
@@ -123,16 +130,15 @@ export function ComparePane({ themeKey }: Props) {
     };
   }, [rightId, cycles]);
 
-  // Clear right-side pick when left-side dataset changes (would otherwise leave
-  // an apples-to-oranges comparison showing).
-  useEffect(() => {
-    if (rightId && leftEntry) {
-      const r = findUnit(cycles, rightId);
-      if (r && r.dataset_name !== leftEntry.dataset_name) {
-        setRightId(null);
-      }
+  // Clear the right pick render-phase when the left dataset changes and the
+  // two no longer match — an apples-to-oranges comparison must not show.
+  // Converges: once rightId is null the guard is false.
+  if (rightId && leftEntry) {
+    const rightUnit = findUnit(cycles, rightId);
+    if (rightUnit && rightUnit.dataset_name !== leftEntry.dataset_name) {
+      setRightId(null);
     }
-  }, [leftEntry, rightId, cycles]);
+  }
 
   return (
     <div className="compare-pane">

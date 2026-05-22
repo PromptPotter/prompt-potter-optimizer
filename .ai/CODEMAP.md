@@ -16,9 +16,9 @@ LLM-driven program evolution for prompts + pipeline params. Critique-guided gene
 
 | Bucket | Lives in |
 |---|---|
-| Central loop (L1 generate / measure / score / critique) | `promptpotter/application/optimization/l1/` (`generate.py`, `critique.py`, `score.py`, `execute.py`, `population.py`, `stats.py`, `resume.py`) |
+| Central loop (L1 generate / measure / score / critique) | `promptpotter/application/optimization/l1/` (`generate.py`, `critique.py`, `score/`, `execute.py`, `population.py`, `stats.py`, `resume.py`) |
 | Escalation (L2/L3 routing + firing) | `promptpotter/application/optimization/escalation/`, `transitions.py` |
-| Dispatch (info ingress to every prompt) | `promptpotter/application/optimization/dispatch/hub/`, `dispatch/llm_call.py` |
+| Dispatch (info ingress to every prompt) | `promptpotter/application/optimization/dispatch/hub/`, `dispatch/llm_call/` |
 | State + persistence | `promptpotter/infrastructure/ledger.py`, `infrastructure/projections/`, `infrastructure/store/` |
 | Resume / fork | `promptpotter/application/optimization/resume_and_fork/` |
 | On-disk artifacts | `.promptpotter/{sessions,campaigns}/…`, `datasets/{name}/…` |
@@ -44,7 +44,7 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 | Symbol | File:line |
 |---|---|
 | `l1_generate` | `promptpotter/application/optimization/l1/generate.py:87` |
-| `l1_score` | `promptpotter/application/optimization/l1/score.py:803` |
+| `l1_score` | `promptpotter/application/optimization/l1/score/winner.py:82` |
 | `execute_round` (round loop) | `promptpotter/application/optimization/l1/execute.py:50` |
 | `run_l1_critique` | `promptpotter/application/optimization/l1/critique.py:29` |
 | `TransitionResult` (L2/L3 transition result) | `promptpotter/application/optimization/transitions.py:42` |
@@ -79,7 +79,7 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 |---|---|
 | `CycleEventLog` (sole ledger ingress) | `promptpotter/infrastructure/ledger.py:41` |
 | `DerivedView` (projection base) | `promptpotter/infrastructure/projections/base.py:29` |
-| `LiveDashboardView` (root-only) | `promptpotter/infrastructure/projections/live_dashboard/view.py:137` |
+| `LiveDashboardView` (root-only) | `promptpotter/infrastructure/projections/live_dashboard/view.py:82` |
 | `AuditTrailView` (per-cycle) | `promptpotter/infrastructure/projections/audit_trail.py:105` |
 | `PoBBStreamView` | `promptpotter/infrastructure/projections/pobb_stream.py:32` |
 | `Stores` (frozen composite) | `promptpotter/infrastructure/store/stores.py:96` |

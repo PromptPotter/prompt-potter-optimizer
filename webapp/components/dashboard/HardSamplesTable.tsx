@@ -185,13 +185,12 @@ export function HardSamplesTable({
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedOrd, ordCols]);
 
-  // Drop the selection silently when the underlying ord vanishes (scope
-  // toggle, cycle change). Avoids a stale highlight pinned to nothing.
-  useEffect(() => {
-    if (selectedOrd != null && !ordCols.includes(selectedOrd)) {
-      setSelectedOrd(null);
-    }
-  }, [selectedOrd, ordCols]);
+  // Drop the selection render-phase when its ord vanishes (scope toggle,
+  // cycle change) — avoids a stale highlight pinned to nothing. Converges:
+  // once null, the guard is false.
+  if (selectedOrd != null && !ordCols.includes(selectedOrd)) {
+    setSelectedOrd(null);
+  }
 
   const autoWidths = useMemo<Partial<Record<ColId, number>>>(() => {
     if (items.length === 0) return {};

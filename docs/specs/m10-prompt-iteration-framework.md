@@ -117,7 +117,7 @@ class ForkPayload(BaseModel):
     scoring_swap: dict | None = None     # explicit scorer change at fork
 ```
 
-`DecisionRecord(kind=FORK_CUT)` keeps `inputs_ref={"from_round": N}` + `outcome=new_cycle_id`; the payload moves into `data.fork: ForkPayload`. Scoring-divergence forks keep working — runner backfills `trigger=SCORING_DIVERGENCE`, `issued_by="system"`, `reason="scorer_mismatch:<decision_kind>"`. `FORK_CUT` stays `ARCHIVAL` in `DECISION_GATING`.
+`ResumeCheckpointRecord(kind=FORK_CUT)` keeps `inputs_ref={"from_round": N}` + `outcome=new_cycle_id`; the payload moves into `data.fork: ForkPayload`. Scoring-divergence forks keep working — runner backfills `trigger=SCORING_DIVERGENCE`, `issued_by="system"`, `reason="scorer_mismatch:<checkpoint_kind>"`. `FORK_CUT` stays `ARCHIVAL` in `RESUME_CHECKPOINT_GATING`.
 
 **Mechanism.** Rename `_fork_at_divergence()` → `_mint_fork(parent, fork_from_round, payload)` in `application/optimization/cycle.py`. Body unchanged: parent ledger gets `FORK_CUT` with `data.fork`, fork dir under `campaigns/{root}/forks/{cycle_id}/`, rounds/candidates copied for rounds `< fork_from_round`, active pointer retargeted, `CycleEventLog.inherit_from(parent, parent.next_offset)`.
 
@@ -246,11 +246,11 @@ Biggest-blocker first — Track 5a (the fork primitive) gates the breadth-first 
 | Prompt snapshots | `campaigns/{cycle_id}/prompts/optimizer_prompt/{hash}/` |
 | Existing log renderer | `presentation/views/render/markdown.py::to_markdown` (purity pattern) |
 | Reusable formatters | `presentation/views/display.py` |
-| Surface compile path | `application/optimization/pipeline.py::compile_l1_surface`, `compile_l2_surface`, `compile_l1_critique_blob` |
+| Prompt compile path | `dispatch/llm_call/prompts.py::load_optimizer_prompt` → `DispatchHub.fill_l1` / `fill_fixed` (`dispatch/hub/facade.py`) → `compile_prompt` |
 | Cycle finalize / round emission | `application/runner/` |
 | Operator skills | `.claude/skills/potter-run/SKILL.md`, `.claude/skills/potter-l1-meta-campaign/SKILL.md` |
 | Parity test | `tests/test_invariants.py::PER_CYCLE_OPERATOR_ARTIFACTS` |
-| **Fork substrate** | `domain/run_records.py::DecisionKind.FORK_CUT` + `DECISION_GATING`; `infrastructure/ledger.py::CycleEventLog.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner/entry.py::fork_on_divergence` plumbing; `presentation/cli/commands/resume.py::--fork-on-divergence`; `presentation/api/` ForksResponse |
+| **Fork substrate** | `domain/run_records.py::ResumeCheckpointKind.FORK_CUT` + `RESUME_CHECKPOINT_GATING`; `infrastructure/ledger.py::CycleEventLog.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner/entry.py::fork_on_divergence` plumbing; `presentation/cli/commands/resume.py::--fork-on-divergence`; `presentation/api/` ForksResponse |
 | **Active-pointer + family-root binding** | `infrastructure/store/stores.py::save_active_pointer`; `infrastructure/projections/live_dashboard/view.py` (telemetry binds to root with no `parent_cycle_id`) |
 
 ## Risks

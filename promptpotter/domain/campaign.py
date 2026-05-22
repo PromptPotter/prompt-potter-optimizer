@@ -25,6 +25,8 @@ OR an optimizer meta-prompt mints a distinct campaign.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -43,7 +45,7 @@ class Campaign(BaseModel):
     root_content_hash: str = ""
     optimizer_prompt_hash: str = ""
     backend_id: str = ""
-    config: dict = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 __all__ = ["Campaign"]

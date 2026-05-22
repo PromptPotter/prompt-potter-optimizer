@@ -9,7 +9,7 @@ import hashlib
 import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 
 def stable_hash(value: Any) -> str:
@@ -45,7 +45,7 @@ class NodeOutputSchema(BaseModel):
 
     fields: list[str] = Field(default_factory=list)
     field_descriptions: dict[str, str] = Field(default_factory=dict)
-    json_schema: dict = Field(default_factory=dict)
+    json_schema: dict[str, Any] = Field(default_factory=dict)
 
 
 class NodePromptMeta(BaseModel):
@@ -172,15 +172,20 @@ class PipelineSchema(BaseModel):
     # overlay can render without authoring view bookkeeping by hand.
     view: PipelineView | None = None
 
+    # Identity indexes built once in ``model_post_init`` — the schema is
+    # frozen, so these never go stale. Private attrs (not fields): mutable
+    # even on a frozen model and excluded from serialization + hashing.
+    _node_map: dict[str, int] = PrivateAttr(default_factory=dict)
+    _observation_keys: frozenset[str] = PrivateAttr(default_factory=frozenset)
+
     def model_post_init(self, __context: Any) -> None:
-        object.__setattr__(self, "_node_map", {n.name: i for i, n in enumerate(self.nodes)})
-        obs_keys: frozenset[str] = frozenset(
+        self._node_map = {n.name: i for i, n in enumerate(self.nodes)}
+        self._observation_keys = frozenset(
             m.pipeline_key
             for n in self.nodes
             if n.observation_name and n.observation_mappings
             for m in n.observation_mappings
         )
-        object.__setattr__(self, "_observation_keys", obs_keys)
 
     # -------------------------------------------------------------------
     # Pipeline identity — derived from nodes
@@ -199,9 +204,9 @@ class PipelineSchema(BaseModel):
         by ``sample_measurement`` when projecting wire-response fields into
         a ``QueryMeasurement``'s ``pipeline_data`` dict.
         """
-        return self._observation_keys  # type: ignore[attr-defined]
+        return self._observation_keys
 
-    def to_pipeline_params(self) -> dict:
+    def to_pipeline_params(self) -> dict[str, Any]:
         """Build the empty wire-format scaffold from this schema.
 
         Returns ``{"steps": [...]}`` only — no per-node config seeded.
@@ -222,11 +227,11 @@ class PipelineSchema(BaseModel):
 
     def has_node(self, name: str) -> bool:
         """Whether *name* is a node in this schema (O(1))."""
-        return name in self._node_map  # type: ignore[attr-defined]
+        return name in self._node_map
 
     def get_node(self, name: str) -> PipelineNode | None:
         """Find a node by name (O(1)), or None if not found."""
-        idx = self._node_map.get(name)  # type: ignore[attr-defined]
+        idx = self._node_map.get(name)
         return self.nodes[idx] if idx is not None else None
 
     def filter_to_steps(self, steps: list[str]) -> "PipelineSchema":
@@ -244,14 +249,14 @@ class PipelineSchema(BaseModel):
             update={"nodes": [n for n in self.nodes if n.name not in names]},
         )
 
-    def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict]]:
+    def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         """Ordered ``[(node_name, node_config), ...]`` for this schema.
 
         The canonical SearchPoint identity at the archive layer: hashed
         by ``sp_hash`` and compared element-wise by
         ``MeasurementArchive.find_by_node_configs``.
         """
-        result: list[tuple[str, dict]] = []
+        result: list[tuple[str, dict[str, Any]]] = []
         for node in self.nodes:
             cfg = pipeline_params.get(node.name, {})
             if not isinstance(cfg, dict):

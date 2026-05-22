@@ -90,7 +90,8 @@ class PromptTemplate(SearchPoint):
         ``task_context.upstream_context`` / ``downstream_context`` around
         ``problem_description`` without re-implementing the full render loop.
         """
-        return getattr(self, name)
+        value: str = getattr(self, name)
+        return value
 
     def _render_few_shot_block(self) -> str:
         """Format few-shot examples into a text block (empty string if none)."""
@@ -360,7 +361,7 @@ class OptSearchPoint(PromptTemplate):
 
     def _field_value(self, name: str) -> str:
         """Wrap ``problem_description`` with ``task_context`` up/downstream context."""
-        v = getattr(self, name)
+        v: str = getattr(self, name)
         if name != "problem_description" or not v:
             return v
         tc = self.task_context
@@ -372,7 +373,7 @@ class OptSearchPoint(PromptTemplate):
 
     def to_job_search_point(
         self,
-        base_pipeline_params: dict | None = None,
+        base_pipeline_params: dict[str, Any] | None = None,
         *,
         schema: PipelineSchema | None = None,
     ) -> JobSearchPoint:
@@ -456,7 +457,7 @@ def _fmt_pp_val(v: object) -> str:
     return str(v)
 
 
-def flatten_sp_summary(pp: dict | None) -> dict[str, str]:
+def flatten_sp_summary(pp: dict[str, Any] | None) -> dict[str, str]:
     """Flatten ``{node: {param: value}}`` pipeline_params into a ``node.param`` display dict."""
     flat: dict[str, str] = {}
     for k, v in (pp or {}).items():
@@ -467,7 +468,7 @@ def flatten_sp_summary(pp: dict | None) -> dict[str, str]:
     return flat
 
 
-def build_candidate_flat(parent: dict[str, str], candidate_meta: dict) -> dict[str, str]:
+def build_candidate_flat(parent: dict[str, str], candidate_meta: dict[str, Any]) -> dict[str, str]:
     """Merge candidate overrides onto parent across the three L1 slots.
 
     pipeline_params, prompt_fields, and task_context layer into disjoint

@@ -20,7 +20,7 @@ Layout validation is split into HARD and SOFT outcomes
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -97,7 +97,7 @@ class L1Layout(BaseModel):
         """Return the placeholder list for *name*; raise on unknown slot."""
         if name not in L1_LAYOUT_SLOTS:
             raise KeyError(f"Unknown L1 layout slot: {name}")
-        return getattr(self, name)
+        return cast("list[str]", getattr(self, name))
 
 
 def default_l1_layout() -> L1Layout:

@@ -156,13 +156,7 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
   }, [rounds]);
 
   // Live origin if available — surfaces before the first round file lands.
-  // Prefer ``origin`` over ``origin_accuracy``: both are the same scalar at the
-  // source, but legacy backend writes left ``origin_accuracy`` at 0.0 while
-  // populating ``origin`` correctly. ``typeof === number`` would otherwise
-  // accept the 0.0 and render "origin 0%" against a real 50% campaign.
-  const originDash =
-    (dash as { origin?: number } | null)?.origin ?? dash?.origin_accuracy ?? null;
-  const originAcc = originDash ?? rounds[0]?.origin_accuracy ?? null;
+  const originAcc = dash?.origin_accuracy ?? rounds[0]?.origin_accuracy ?? null;
 
   if (rounds.length === 0) {
     // Inherited fork: dashboard.json is shared at the family root, so

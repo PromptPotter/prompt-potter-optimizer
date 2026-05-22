@@ -24,7 +24,7 @@ One canonical name per concept. Code names live in the right column for cross-re
 | **OSP mutation** | L2's canonical write onto the candidate. State that's not on the OSP doesn't survive between rounds. | — | [`state-record.md`](state-record.md) |
 | **Patience** | Consecutive-no-improvement counter per layer. `l1_patience` triggers L2; `l2_patience` triggers L3. | `EscalationState` | [`the-loop.md`](the-loop.md) |
 | **Pipeline** | Multi-step computation the backend runs per query. | `PipelineSchema` | [`nodes-and-pipelines.md`](nodes-and-pipelines.md) |
-| **Pipeline parameters** | Nested dicts keyed by node name. Everything in a candidate other than prompt fields. | `pipeline_params`, `pipeline_params_override` | [`state-record.md`](state-record.md) |
+| **Pipeline parameters** | Node-keyed config dicts plus a reserved `steps` list. Everything in a candidate other than prompt fields. | `pipeline_params`, `pipeline_params_override` | [`state-record.md`](state-record.md) |
 | **Plan** | L3's strategic write onto the candidate. Persistent — survives `clear_volatile`. Read by both L1 and L2. | `OptSearchPoint.plan` | [`the-loop.md`](the-loop.md) |
 | **Probe round** | Round scoped to warned queries only. `action = "probe_round"`. | — | [`the-loop.md`](the-loop.md) |
 | **Prompt fields** | Six prompt-string fields plus two appended sections (few-shot, plan). | `PromptTemplate` | [`state-record.md`](state-record.md) |

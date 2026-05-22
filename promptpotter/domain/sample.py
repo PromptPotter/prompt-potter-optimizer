@@ -42,7 +42,7 @@ class Sample(BaseModel):
     run_ids: list[str] = Field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, data: dict, fallback_id: int | None = None) -> Sample:
+    def from_dict(cls, data: dict[str, Any], fallback_id: int | None = None) -> Sample:
         """Construct from a plain dict.
 
         ``id`` falls back to ``fallback_id`` (positional) when absent.

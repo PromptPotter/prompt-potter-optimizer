@@ -157,16 +157,10 @@ def _r_diagnostics(b: InjectionBundle) -> str:
 
 
 # Order in which AxisIndex.digest() keys are surfaced to the optimizer LLM.
-# Effect-driven items first (rankings, top values, trends, exhausted axes)
-# so attention lands on what to mutate; sample-side findings second
+# Effect-driven items first (rankings, top values, exhausted axes) so
+# attention lands on what to mutate; sample-side findings second
 # (persistent failures, clusters, bottleneck); narrative tail last
 # (improvement attribution). Keys absent from the digest are skipped.
-# ``value_trends`` removed: peaked-axis tags are now inlined into the
-# ``axis_rankings`` entries themselves (see
-# ``intelligence/indexes/format._fmt_axis_rankings``). A separate trend
-# line on the side let L1 read "highest effect → mutate" and "peaked →
-# don't" as two independent facts on the same axis; collapsing to one
-# annotated line removes the contradiction.
 _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
     "axis_rankings",
     "top_values",

@@ -30,6 +30,16 @@ const EMPTY: ViewerState = {
   error: null,
 };
 
+const LOADING: ViewerState = {
+  meta: "loading file…",
+  body: "",
+  contentType: "",
+  isMarkdown: false,
+  roundDoc: null,
+  rawJson: "",
+  error: null,
+};
+
 const ROUND_FILE_RE = /^rounds\/round_\d+\.json$/;
 
 function isRoundFile(selected: { scope: string; path: string } | null): boolean {
@@ -37,15 +47,22 @@ function isRoundFile(selected: { scope: string; path: string } | null): boolean 
 }
 
 export function FileViewer({ campaignId, cycleId, selected }: Props) {
-  const [state, setState] = useState<ViewerState>(EMPTY);
+  const hasSelection = !!(campaignId && cycleId && selected);
+  const [state, setState] = useState<ViewerState>(hasSelection ? LOADING : EMPTY);
+
+  // Set the placeholder render-phase on a selection change — LOADING while
+  // the effect below fetches, EMPTY when nothing is selected. Keeps the
+  // effect itself free of synchronous setState.
+  const fileKey = `${campaignId}|${cycleId}|${selected?.scope ?? ""}|${selected?.path ?? ""}`;
+  const [prevFileKey, setPrevFileKey] = useState(fileKey);
+  if (fileKey !== prevFileKey) {
+    setPrevFileKey(fileKey);
+    setState(hasSelection ? LOADING : EMPTY);
+  }
 
   useEffect(() => {
-    if (!campaignId || !cycleId || !selected) {
-      setState(EMPTY);
-      return;
-    }
+    if (!campaignId || !cycleId || !selected) return;
     let cancelled = false;
-    setState({ meta: "loading file…", body: "", contentType: "", isMarkdown: false, roundDoc: null, rawJson: "", error: null });
     (async () => {
       try {
         const r = await fetchCycleFile(campaignId, cycleId, selected.scope, selected.path);

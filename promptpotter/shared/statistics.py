@@ -19,7 +19,7 @@ def wilson_ci(hits: int, total: int, alpha: float = 0.05) -> tuple[float, float]
     if total == 0:
         return (0.0, 0.0)
 
-    from scipy.stats import norm  # type: ignore[import-untyped]
+    from scipy.stats import norm
 
     z = norm.ppf(1 - alpha / 2)
     p_hat = hits / total
@@ -71,7 +71,7 @@ def proportion_test(
     if total_a == 0 or total_b == 0:
         return 1.0
 
-    from scipy.stats import norm  # type: ignore[import-untyped]
+    from scipy.stats import norm
 
     p_pool = (hits_a + hits_b) / (total_a + total_b)
     se = math.sqrt(p_pool * (1 - p_pool) * (1 / total_a + 1 / total_b))
@@ -90,12 +90,12 @@ def min_detectable_effect(n: int, alpha: float = 0.05, power: float = 0.8) -> fl
     if n <= 0:
         return 1.0
 
-    from scipy.stats import norm  # type: ignore[import-untyped]
+    from scipy.stats import norm
 
     z_alpha = norm.ppf(1 - alpha / 2)
     z_beta = norm.ppf(power)
     mde = (z_alpha + z_beta) * math.sqrt(0.25 / n)
-    return min(mde, 1.0)
+    return float(min(mde, 1.0))
 
 
 # ---------------------------------------------------------------------------

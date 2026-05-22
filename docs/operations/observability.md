@@ -13,7 +13,7 @@ Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_p
 | Source | Event type | Payload |
 |--------|-----------|---------|
 | L1 Generate | LLM call | meta-prompt (compiled from `L1GenerateSurface`), candidate outputs, token counts |
-| L1 Critique | LLM call | critique-phase blob (`compile_l1_critique_blob`), structured output |
+| L1 Critique | LLM call | critique meta-prompt (`DispatchHub.fill_fixed`), structured output |
 | L2 Refine | LLM call | meta-prompt (from `L2Surface` incl. `l1_generate_field_catalogue`), parsed `TransitionResult` |
 | L3 Plan | LLM call | plan template (axes_digest + L2 history + pipeline + runtime failures), new plan text |
 | Backend match | Span | query, params, result, `diagnostics.warnings` |

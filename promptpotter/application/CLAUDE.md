@@ -32,7 +32,7 @@ intelligence; intelligence does not depend on either.
 
 ## Conventions
 
-- Optimizer LLM calls go through `llm_call()` (`optimization/dispatch/llm_call.py`),
+- Optimizer LLM calls go through `llm_call()` (`optimization/dispatch/llm_call/call.py`),
   never `chat()`.
 - Escalation flows via return value (`QueryLoopResult.escalation_signal`),
   not exception.

@@ -1,5 +1,4 @@
 "use client";
-import { useEffect, useState } from "react";
 import { applyTheme, readStoredTheme, type Theme } from "@/lib/theme";
 
 interface Props {
@@ -7,15 +6,10 @@ interface Props {
 }
 
 export function ThemeToggle({ onThemeChange }: Props) {
-  const [theme, setTheme] = useState<Theme>("light");
-
-  useEffect(() => {
-    setTheme(readStoredTheme());
-  }, []);
-
+  // No theme state: the button's sun/moon is pure CSS off `data-theme`.
+  // Read the current theme from storage at click time, flip, persist.
   const flip = () => {
-    const next: Theme = theme === "light" ? "dark" : "light";
-    setTheme(next);
+    const next: Theme = readStoredTheme() === "light" ? "dark" : "light";
     applyTheme(next);
     onThemeChange?.(next);
   };

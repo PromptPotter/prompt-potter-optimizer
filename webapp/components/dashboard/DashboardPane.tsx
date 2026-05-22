@@ -160,15 +160,21 @@ function DashboardPaneInner() {
     };
   }, []);
 
+  // The active dataset is bound at cycle-identity time, but a unit switch
+  // changes it — drop the stale target-pipeline view render-phase so the
+  // effect below refetches cleanly.
+  const [prevDatasetName, setPrevDatasetName] = useState(datasetName);
+  if (datasetName !== prevDatasetName) {
+    setPrevDatasetName(datasetName);
+    setTargetPipelineView(null);
+    setTargetConnector(null);
+  }
+
   // Target connector pipeline view per active dataset. Same one-shot pattern
   // as the optimizer pipeline — the dataset's `pipelines.default` is bound
   // at cycle-identity hash time and doesn't mutate mid-loop.
   useEffect(() => {
-    if (!datasetName) {
-      setTargetPipelineView(null);
-      setTargetConnector(null);
-      return;
-    }
+    if (!datasetName) return;
     let cancelled = false;
     (async () => {
       try {

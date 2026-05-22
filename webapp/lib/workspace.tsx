@@ -108,6 +108,12 @@ export function WorkspaceProvider({
   const [activeError, setActiveError] = useState<string | null>(null);
 
   // Mount: honour a `?campaign=&cycle=` deep-link as an explicit pin.
+  // The synchronous setState here is load-bearing, not an oversight — the
+  // deep-link is read in a mount effect (not a useState initializer) so
+  // the static-export HTML and the first client render agree, then
+  // corrected post-hydration. See the `initialized` comment above. This
+  // is the one place set-state-in-effect is deliberately waived.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const deepLink = urlPin();
     if (deepLink) {
@@ -116,6 +122,7 @@ export function WorkspaceProvider({
     }
     setInitialized(true);
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // One poll — active pointer, cycle list, and campaign registry move
   // together so the list, the `●` pointer, and the sidebar can never
