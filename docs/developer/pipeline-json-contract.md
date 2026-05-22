@@ -118,7 +118,7 @@ PromptPotter's own meta-prompt pipeline at
 the **same shape** as a backend's `pipeline.json`:
 
 - Same `nodes` dict, keyed by node name (`l1_generate`, `l1_critique`,
-  `l2_context`, `l3_plan`, `l1_score`, `restructure`).
+  `l2_context`, `l3_plan`, `l1_score`, `checkin`).
 - Same `config` + `optimizer` per-node sub-objects.
 - Same `pipelines` dict over node names (the optimizer publishes
   `l1_round`, `l1_round_with_l1_critique`, `l2_escalation`,

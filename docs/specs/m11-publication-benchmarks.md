@@ -98,7 +98,7 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
    - **Family-tree / speciation view.** Read-only. Root on the left (origin searchpoint), branches rightward as the population speciates through L2/L3 transitions. Source: `OptSearchPoint.lineage` + `campaigns/{cycle_id}/rounds/round_NNNN.json`. Likely sidebar slot: Evaluations. Operator-flagged "very important."
    - **Dataset preview view on drop.** When the user attaches a dataset, render a dedicated preview surface (not just a filename pill). Pairs with the canonical entry-flow shape — drop dataset → see preview → wand toggle on → quiet evolution starts.
 7. **M12 launcher draft scaffolding** — first-draft surfaces staged in M11 to inform M12's launcher / control design (the resolved shape ships in M12 Wave 3). Both drafts coexist with the structured-form shape from deliverable 3 above; M11–M12 designs *one* launcher that covers both.
-   - Chat panel staged as a candidate user-facing front-end for the existing `restructure` optimizer node (downstream of `l3_plan`). Prefilled conversation is illustrative of the eventual UX. Yet to fulfill what the campaign configuration form covers — both shapes are in play.
+   - Chat panel staged as a candidate user-facing front-end for the existing `checkin` optimizer node (downstream of `l3_plan`). Prefilled conversation is illustrative of the eventual UX. Yet to fulfill what the campaign configuration form covers — both shapes are in play.
    - Wand "always-on background optimization" toggle staged as a candidate control surface (live optimization vs offline campaign framing). Coexists with discrete start / pause / resume / stop until M12 resolves which surface ships.
 8. **Benchmark results display** — comparison tables from `docs/research/benchmarks.md` data (populated in Track 1), interactive convergence plots.
 
@@ -142,7 +142,7 @@ the right milestone to land the connector itself, because:
 **Deliverables:**
 
 1. **`promptpotter/connectors/promptpotter.py`** — wraps L1, L2, L3,
-   `l1_critique`, and `restructure` as a `Connector` (sibling shape
+   `l1_critique`, and `checkin` as a `Connector` (sibling shape
    to `promptpotter/connectors/termnorm.py`). Self-registers via
    `register(Connector(...))` at import.
 2. **Connector wire shape.** Implements the four hooks bundled per
@@ -153,7 +153,7 @@ the right milestone to land the connector itself, because:
    PromptPotter dataset), `resolve_ground_truth` (compares the
    meta-prompt's `next_brief` to the archived `score_delta`).
 3. **`datasets/promptpotter/pipeline.json`** — describes the L1 /
-   L2 / L3 / `l1_critique` / `restructure` nodes against the
+   L2 / L3 / `l1_critique` / `checkin` nodes against the
    pinned `pipeline.json` contract from M10 §3.5. Validates against
    the M10 parity test alongside `optimizer_pipeline.json`.
 4. **Bootstrap lookup hook.** `bootstrap.py` `connectors.get(...)`

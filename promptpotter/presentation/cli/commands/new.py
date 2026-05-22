@@ -25,9 +25,9 @@ from promptpotter.presentation.cli.commands._shared import (
     campaign_result_human,
     get_verbose,
     init_services_cli,
-    log_startup_summary,
 )
 from promptpotter.presentation.cli.session import load_campaign_config, load_session
+from promptpotter.presentation.views.startup_checklist import checkin_line
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-async def _maybe_decompose_task(
+async def _checkin_task(
     session: Session,
     campaign_config: CampaignConfig,
     session_id: str,
@@ -46,11 +46,12 @@ async def _maybe_decompose_task(
     task_file: str | None,
     task_text: str | None,
 ) -> None:
-    """Decompose task description once at session-creation time.
+    """Check in the task description — decompose it once into Layer-1 fields.
 
     ``datasets/{name}/task_description.md`` is the canonical source;
-    ``--task-file`` and ``--task-text`` override for ad-hoc cases. Result
-    is disk-cached, so re-init against the same dataset is free.
+    ``--task-file`` and ``--task-text`` override for ad-hoc cases. The
+    decomposition is content-hash cached, so a re-run against an unchanged
+    description is a free cache hit — no LLM call.
     """
     from promptpotter.application.config import create_llm_client
     from promptpotter.application.optimization.task_context import decompose_task_context
@@ -65,6 +66,7 @@ async def _maybe_decompose_task(
         )
 
     if not task_description:
+        checkin_line("task check-in", "no task description — skipped")
         return
 
     llm_client, model = create_llm_client(campaign_config)
@@ -75,17 +77,19 @@ async def _maybe_decompose_task(
         store_base_dir=session.store.base_dir if session.store else None,
         backend_id=session.backend_id,
     )
-    logger.info(
-        "Task context decomposed%s: %d fields",
-        " (cached)" if was_cached else "",
-        len(task_context),
+    n = len(task_context)
+    checkin_line(
+        "task check-in",
+        f"{'cached' if was_cached else 'decomposed'} ({n} field{'' if n == 1 else 's'})",
     )
     state = session.store.sessions.read(session_id) or {}
     state["task_context"] = task_context.to_dict()
     session.store.sessions.update(session_id, state)
 
 
-async def _mint_fresh_session(args: argparse.Namespace) -> tuple[dict[str, Any], Session]:
+async def _mint_fresh_session(
+    args: argparse.Namespace,
+) -> tuple[Session, CampaignConfig, str, str]:
     """Find-or-create the campaign + mint a session + root cycle.
 
     ``campaign_id`` is derived from the origin declaration's content hash,
@@ -94,13 +98,12 @@ async def _mint_fresh_session(args: argparse.Namespace) -> tuple[dict[str, Any],
     only), the session's root cycle index, and the 4-key active pointer.
 
     No scoring calls here — the origin runs as phase 0 of the optimize
-    loop on the ``sp_budget_ttest`` slice. The one LLM cost is the
-    ``restructure`` template call via :func:`_maybe_decompose_task`,
-    content-hash cached at ``restructure_cache.json`` so subsequent ``new``
-    runs against the same dataset are free.
+    loop. Returns ``(session, campaign_config, dataset_name, session_id)``
+    for the caller's pre-flight check-in sequence.
     """
     from promptpotter.application.config import load_campaign_config as _load_cfg
     from promptpotter.application.origin import prepare_datasets
+    from promptpotter.infrastructure.store import session_index
 
     file_config = load_campaign_config(args.config)
     # Resolution order: positional dataset → --dataset-name → config["dataset_name"]
@@ -137,8 +140,6 @@ async def _mint_fresh_session(args: argparse.Namespace) -> tuple[dict[str, Any],
     profile = session.store.backends.load_connector_profile(backend_id) or {}
     campaign_config = _load_cfg({**profile, **file_config})
 
-    excluded = list(campaign_config.exclude_nodes)
-
     if args.excel_path:
         train_data = prepare_datasets(session.store, args.excel_path).train_data or []
     else:
@@ -146,7 +147,6 @@ async def _mint_fresh_session(args: argparse.Namespace) -> tuple[dict[str, Any],
 
     pipeline_params, origin, cycle_id = _prepare_cycle(session, campaign_config, train_data)
 
-    active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     init_params = {
         "backend_url": args.backend_url,
         "backend_id": backend_id,
@@ -163,48 +163,13 @@ async def _mint_fresh_session(args: argparse.Namespace) -> tuple[dict[str, Any],
         dataset_count=len(train_data),
     )
 
-    await _maybe_decompose_task(
-        session,
-        campaign_config,
-        session_id,
-        dataset_name=dataset_name,
-        task_file=args.task_file,
-        task_text=args.task_text,
-    )
-
-    from promptpotter.infrastructure.store import session_index
-
     sess_n = session_index(cycle_id)
     if sess_n == 1:
-        logger.info(
-            "Fresh campaign minted: campaign=%s session=%s cycle=%s dataset=%s (%d queries)",
-            campaign_id,
-            session_id,
-            cycle_id,
-            dataset_name,
-            len(train_data),
-        )
+        checkin_line("campaign", f"minted {campaign_id} — session #1")
     else:
-        logger.info(
-            "Joined campaign %s as session #%d: session=%s cycle=%s dataset=%s (%d queries)",
-            campaign_id,
-            sess_n,
-            session_id,
-            cycle_id,
-            dataset_name,
-            len(train_data),
-        )
+        checkin_line("campaign", f"joined {campaign_id} — session #{sess_n}")
 
-    info = {
-        "session_id": session_id,
-        "campaign_id": campaign_id,
-        "cycle_id": cycle_id,
-        "backend_id": backend_id,
-        "dataset_count": len(train_data),
-        "active_steps": active,
-        "excluded_nodes": excluded,
-    }
-    return info, session
+    return session, campaign_config, dataset_name, session_id
 
 
 def _build_live_display(
@@ -371,12 +336,25 @@ async def _run_loop(
     )
 
 
+def _pipeline_detail(session: Session) -> str:
+    """Pipeline name + active-node summary for the pre-flight check-in line."""
+    ps = session.pipeline_schema
+    pipe = f"{ps.name} v{ps.version}" if ps else "pipeline unavailable"
+    active = list((session.pipeline_params or {}).get("steps") or [])
+    nodes = f"{len(active)} node{'' if len(active) == 1 else 's'}"
+    if active:
+        nodes += f" ({', '.join(active)})"
+    return f"{pipe} · {nodes}"
+
+
 async def cmd_new(args: argparse.Namespace) -> CommandResult:
     """Start (or join) a campaign and run the loop from round 0.
 
     Find-or-create on the origin declaration's content hash: a new
     declaration mints a fresh campaign, a re-run of an unchanged one adds
-    a session to the existing campaign. Live state is
+    a session to the existing campaign. The startup runs an ordered
+    pre-flight check-in (campaign → backend → dataset → pipeline → task →
+    origin), each step echoed as a ``✓`` line. Live state is
     ``cycles/{cycle_id}/dashboard.json``; the campaign digest is
     ``campaigns/{campaign_id}/log.md``; the final summary is
     ``cycles/{cycle_id}/index.json::final``. Stop with Ctrl+C.
@@ -385,30 +363,35 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
 
     refresh_rates(force=bool(getattr(args, "refresh_rates", False)))
 
-    _info, session = await _mint_fresh_session(args)
-
-    ctx = load_session(args)
-    campaign_config = ctx.campaign_config
+    session, campaign_config, dataset_name, session_id = await _mint_fresh_session(args)
 
     status = await session.backend_client.check_status()
     if status.get("status") == "unreachable":
         return CommandResult(
-            data={"error": "backend_unreachable", "backend_url": ctx.backend_url},
-            human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
+            data={"error": "backend_unreachable", "backend_url": args.backend_url},
+            human=f"Backend unreachable at {args.backend_url}. Start the backend and retry.",
         )
+    checkin_line("backend", f"reachable at {args.backend_url}")
 
     train_data = session.samples or []
+    checkin_line("dataset", f"{dataset_name} ({len(train_data)} queries)")
+    checkin_line("pipeline", _pipeline_detail(session))
+
+    await _checkin_task(
+        session,
+        campaign_config,
+        session_id,
+        dataset_name=dataset_name,
+        task_file=args.task_file,
+        task_text=args.task_text,
+    )
+
+    ctx = load_session(args)
+    campaign_config = ctx.campaign_config
     session.session_id = ctx.session_id
     session.campaign_id = ctx.campaign_id
     session.state.cycle_id = ctx.cycle_id
 
-    log_startup_summary(
-        session,
-        session.pipeline_params,
-        len(train_data),
-        ctx.backend_url,
-        ctx.init_params["dataset_name"],
-    )
     logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
 
@@ -417,6 +400,7 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     ) is not None:
         return sweep_result
 
+    checkin_line("origin", "launching origin scoring")
     return await _run_loop(args, ctx, campaign_config, session, train_data)
 
 

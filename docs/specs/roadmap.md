@@ -89,7 +89,7 @@ PipelineSchema model, `GET /pipeline` self-describing config, schema derivation 
 
 ## M7: Optimizer-as-Pipeline -- Complete
 
-5-node optimizer pipeline (now `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`, `restructure` after subsequent renames) with `llm_call()` primitive, `observed_node()` tracing, `OptSearchPoint` consolidation, warning inventory, L2 probe rounds, broadcast `task_context` channel. Spec: see git history (pre-`c94aaa83`).
+5-node optimizer pipeline (now `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`, `checkin` after subsequent renames) with `llm_call()` primitive, `observed_node()` tracing, `OptSearchPoint` consolidation, warning inventory, L2 probe rounds, broadcast `task_context` channel. Spec: see git history (pre-`c94aaa83`).
 
 ---
 

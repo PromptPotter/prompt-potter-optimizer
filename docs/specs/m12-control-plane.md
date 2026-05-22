@@ -83,7 +83,7 @@ Activates the `TenantContext` seam shaped in M9
 The M10 mini-milestone ships the campaign **configuration form** (dataset +
 launch). M12 adds the second launcher shape — the **chat panel**: drop a
 dataset → see a preview → toggle quiet evolution on. It wires to the
-`restructure` optimizer node as the user-facing surface and matches the
+`checkin` optimizer node as the user-facing surface and matches the
 "fix a broken LLM pipeline in half a day, then it just works" positioning.
 Both shapes coexist; the form serves power users + reproducibility, the chat
 panel serves low-friction onboarding.

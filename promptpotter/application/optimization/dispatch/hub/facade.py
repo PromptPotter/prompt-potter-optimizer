@@ -60,7 +60,7 @@ _TEMPLATE_EXTRAS: dict[str, set[str]] = {
     "l1_critique": set(),
     "l2_context": set(),
     "l3_plan": set(),
-    "restructure": {"consultation_instruction"},
+    "checkin": {"consultation_instruction"},
 }
 
 

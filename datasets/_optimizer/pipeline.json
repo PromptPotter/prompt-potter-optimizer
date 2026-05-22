@@ -73,12 +73,12 @@
         "max_tokens": 10000
       }
     },
-    "restructure": {
+    "checkin": {
       "type": "llm/meta",
       "config": {
         "temperature": 0.3,
         "output_format": "json",
-        "prompt_family": "restructure",
+        "prompt_family": "checkin",
         "prompt_version": 1,
         "reasoning_effort": "high",
         "max_tokens": 10000
@@ -122,8 +122,8 @@
         "kind": "io"
       },
       {
-        "id": "restructure",
-        "label": "restructure",
+        "id": "checkin",
+        "label": "checkin",
         "kind": "llm"
       },
       {
@@ -165,11 +165,11 @@
     "edges": [
       {
         "from": "input",
-        "to": "restructure",
+        "to": "checkin",
         "kind": "forward"
       },
       {
-        "from": "restructure",
+        "from": "checkin",
         "to": "origin",
         "kind": "forward"
       },
@@ -621,7 +621,7 @@
         }
       }
     },
-    "restructure/1": {
+    "checkin/1": {
       "fields": [
         "answer_format",
         "consultation",
@@ -633,13 +633,13 @@
         "thinking_style"
       ],
       "json_schema": {
-        "name": "restructure",
+        "name": "checkin",
         "strict": true,
         "schema": {
           "$defs": {
-            "RestructureTaskContext": {
+            "CheckinTaskContext": {
               "additionalProperties": false,
-              "description": "Domain-context sub-object inside the restructure output.",
+              "description": "Domain-context sub-object inside the checkin output.",
               "properties": {
                 "domain": {
                   "default": "",
@@ -677,12 +677,12 @@
                   "type": "string"
                 }
               },
-              "title": "RestructureTaskContext",
+              "title": "CheckinTaskContext",
               "type": "object"
             }
           },
           "additionalProperties": false,
-          "description": "Output of the one-shot restructure prompt \u2014 Layer-1 prompt fields\nplus a domain-context sub-object.",
+          "description": "Output of the one-shot checkin prompt \u2014 Layer-1 prompt fields\nplus a domain-context sub-object.",
           "properties": {
             "persona": {
               "default": "",
@@ -715,7 +715,7 @@
               "type": "string"
             },
             "task_context": {
-              "$ref": "#/$defs/RestructureTaskContext"
+              "$ref": "#/$defs/CheckinTaskContext"
             },
             "consultation": {
               "default": "",
@@ -723,7 +723,7 @@
               "type": "string"
             }
           },
-          "title": "RestructureOutput",
+          "title": "CheckinOutput",
           "type": "object"
         }
       }
@@ -762,7 +762,7 @@
       "thinking_style": "Consider:\n- Which pipeline dimensions the data shows as under-explored\n- Which runtime constraints have been discovered and must be respected\n- Whether L2 itself is the problem (validator failures on L2's output) and the plan must coach L2's next pass",
       "answer_format": "\nReturn a JSON object with:\n  \"plan\": new strategy text for guiding future optimization (required)\n  \"note\": OPTIONAL sticky pointer for the L2-layer (string or null). Persists across L2 fires until your next replan replaces it. Use it when the L2-layer keeps drifting away from a constraint your replan needs it to honor \u2014 e.g. a discovered runtime ceiling, a failed axis to avoid, or a specific cohort to focus on. Omit or null when the plan itself is enough.\n  \"rationale\": 1-2 sentence explanation of the strategic shift\n  \"fork_proposal\": OPTIONAL ({\"round_offset\": int, \"reason\": str} or null). Set ONLY when the current subtree is exhausted AND a specific earlier round looks more promising than continuing forward. round_offset = the 0-indexed round to rewind to (must be < current round). reason = 1-2 sentences naming the dead-end being escaped and the deferred branch worth re-expanding. Observation-only in v1 \u2014 operator reads it on `round_NNNN.json` and decides whether to fork manually. Omit or null in the normal case."
     },
-    "restructure/1": {
+    "checkin/1": {
       "persona": "You are a prompt engineering assistant.",
       "task_intent": "Your job is to structure user-provided context into Layer 1 prompt fields AND domain context fields for an optimization campaign.",
       "instruction": "Layer 1 fields (for prompt construction):\n- persona: Who the LLM should act as (e.g., 'You are a domain expert...')\n- task_intent: What the prompt needs to accomplish\n- problem_description: Description of the problem domain\n- instruction: Core instruction text (may contain template variables)\n- thinking_style: How to reason (e.g., 'Think step by step')\n- answer_format: Expected output format\n\nDomain context fields (for optimization guidance):\n- domain: Research/industry domain (e.g., 'Life Cycle Assessment', 'Medical NLP')\n- pipeline_purpose: What the pipeline does end-to-end in 1-2 sentences\n- data_characteristics: What kind of data flows through (input format, volume, language)\n- optimization_goals: What 'better' means in this context (accuracy metric, edge cases)\n- key_challenges: Known difficulties, ambiguities, or edge cases the optimizer should know about\n- upstream_context: What happens BEFORE this step \u2014 what data/processing feeds into it (e.g., 'Web search retrieves raw content from 7 pages'). Gets injected into the target prompt.\n- downstream_context: What happens AFTER this step \u2014 how the output is consumed (e.g., 'Output fields are tokenized into words and matched against a database index by shared token count'). Gets injected into the target prompt.",

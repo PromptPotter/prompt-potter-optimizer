@@ -36,7 +36,7 @@ halt meet on one concern. That is what "tier 2" means here.
 ## Problem
 
 Optimizer meta-prompts (`l1_generate`, `l1_critique`, `l2_context`,
-`l3_plan`, `restructure`) are composed by `DispatchHub` from a static
+`l3_plan`, `checkin`) are composed by `DispatchHub` from a static
 template body plus N injection renderers. On loaded mid-campaign rounds
 the injection set grows large enough to push the rendered prompt past
 ~13k chars. Large meta-prompts cost latency, risk provider TPM caps, and

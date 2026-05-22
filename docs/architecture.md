@@ -444,7 +444,7 @@ the PR description.
 - **The `new` verb + `/potter-run` onboarding flow** — operator's
   first-run path; cruft-audit yes, mechanism delete no.
 - **`new`-verb decomposition into `task_context`** — the one-time
-  `restructure` LLM call that seeds the campaign when `new <name>`
+  `checkin` LLM call that seeds the campaign when `new <name>`
   first sees a dataset. Don't fold into `l1_generate`.
 - **`MeasurementArchive` (`archive/measurements/{run_id}.json` +
   `archive/measurements.json` index + retrieval views

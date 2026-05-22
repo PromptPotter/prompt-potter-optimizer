@@ -19,7 +19,7 @@ export interface NodePoint {
 
 export const LAYOUT: Record<string, NodePoint> = {
   input:       { cx:  50, cy:  60 },
-  restructure: { cx:  50, cy: 120 },
+  checkin:     { cx:  50, cy: 120 },
   origin:      { cx:  50, cy: 192 },
   l3_plan:     { cx: 290, cy:  32 },
   l2_context:  { cx: 290, cy:  89 },
@@ -39,8 +39,8 @@ export interface EdgeGeometry {
 }
 
 export const EDGES: Record<string, EdgeGeometry> = {
-  "input>restructure":        { kind: "forward",   d: "M50,71 L50,109" },
-  "restructure>origin":       { kind: "forward",   d: "M50,131 L50,181" },
+  "input>checkin":            { kind: "forward",   d: "M50,71 L50,109" },
+  "checkin>origin":           { kind: "forward",   d: "M50,131 L50,181" },
   "origin>l1_generate":       { kind: "forward",   d: "M61,192 L174,192" },
   "l1_generate>l1_score":     { kind: "forward",   d: "M196,192 L284,192" },
   "l1_score>l1_critique":     { kind: "forward",   d: "M306,192 L389,192" },

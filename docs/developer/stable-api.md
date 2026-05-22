@@ -131,7 +131,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 | `l1_signal_catalogue` | DERIVED | Sorted L1_POSSIBLE names L2 may use in l1_layout. |
 | `axis_memory` | DERIVED | Cross-cycle axis-keyed digest from AxisIndex. |
 
-**Per-template extras** (caller-supplied via `compile_prompt(**hub_dict, **extras)`): `l1_generate` → `{n_variants}` · `l1_critique`/`l2_context`/`l3_plan` → `{}` · `restructure` → `{consultation_instruction}`.
+**Per-template extras** (caller-supplied via `compile_prompt(**hub_dict, **extras)`): `l1_generate` → `{n_variants}` · `l1_critique`/`l2_context`/`l3_plan` → `{}` · `checkin` → `{consultation_instruction}`.
 
 ## 5. CLI flags — `new` and `resume`
 

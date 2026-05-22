@@ -138,7 +138,7 @@ class Settings(BaseSettings):
     # ``TERMNORM_REQUIRE_AUTH`` flag (see backend-api/config/middleware.py).
     TERMNORM_TOKEN: str = ""
 
-    # Warn when an optimizer meta-prompt (L1/L2/L3/critique/restructure) exceeds
+    # Warn when an optimizer meta-prompt (L1/L2/L3/critique/checkin) exceeds
     # this input-token count. Our in-house threshold — signals "tune the node
     # template"; not tied to any provider cap.
     OPTIMIZER_PROMPT_WARN_TOKENS: int = 8000

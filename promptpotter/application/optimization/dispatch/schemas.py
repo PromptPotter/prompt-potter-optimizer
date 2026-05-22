@@ -2,7 +2,7 @@
 
 One Pydantic model per node in ``optimizer_pipeline.json::nodes``. These are
 the source of truth for what each ``l1_generate`` / ``l1_critique`` /
-``l2_context`` / ``l3_plan`` / ``restructure`` LLM call is allowed to
+``l2_context`` / ``l3_plan`` / ``checkin`` LLM call is allowed to
 return. The provider validates server-side via the JSON Schema emitted by
 ``Model.model_json_schema()``; the SDK populates the typed instance on
 ``response.choices[0].message.parsed`` — no hand-rolled regex repair on
@@ -70,6 +70,8 @@ def _truncate(max_len: int):
 
 __all__ = [
     "OPTIMIZER_RESPONSE_MODELS",
+    "CheckinOutput",
+    "CheckinTaskContext",
     "L1CritiqueOutput",
     "L1GenerateOutput",
     "L1SituationalExample",
@@ -77,8 +79,6 @@ __all__ = [
     "L1Variant",
     "L2ContextOutput",
     "L3PlanOutput",
-    "RestructureOutput",
-    "RestructureTaskContext",
     "VariantEvidenceGrounding",
 ]
 
@@ -291,12 +291,12 @@ class L3PlanOutput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# restructure — one-time decomposition of user context into Layer-1 fields.
+# checkin — one-time decomposition of user context into Layer-1 fields.
 # ---------------------------------------------------------------------------
 
 
-class RestructureTaskContext(BaseModel):
-    """Domain-context sub-object inside the restructure output."""
+class CheckinTaskContext(BaseModel):
+    """Domain-context sub-object inside the checkin output."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -309,8 +309,8 @@ class RestructureTaskContext(BaseModel):
     downstream_context: str = ""
 
 
-class RestructureOutput(BaseModel):
-    """Output of the one-shot restructure prompt — Layer-1 prompt fields
+class CheckinOutput(BaseModel):
+    """Output of the one-shot checkin prompt — Layer-1 prompt fields
     plus a domain-context sub-object."""
 
     model_config = ConfigDict(extra="forbid")
@@ -321,7 +321,7 @@ class RestructureOutput(BaseModel):
     instruction: str = ""
     thinking_style: str = ""
     answer_format: str = ""
-    task_context: RestructureTaskContext = Field(default_factory=RestructureTaskContext)
+    task_context: CheckinTaskContext = Field(default_factory=CheckinTaskContext)
     consultation: str = ""
 
 
@@ -335,5 +335,5 @@ OPTIMIZER_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "l1_critique": L1CritiqueOutput,
     "l2_context": L2ContextOutput,
     "l3_plan": L3PlanOutput,
-    "restructure": RestructureOutput,
+    "checkin": CheckinOutput,
 }
