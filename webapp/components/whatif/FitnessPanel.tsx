@@ -1,8 +1,6 @@
 "use client";
 import { useEffect, useMemo } from "react";
-import { TERMS } from "@/lib/terms";
 import { WHATIF_INLINE_META, buildRows, setsEqual, whatifIdentifiersInFormula, type Row } from "./meta";
-import { whatifIconFor } from "./icons";
 import { FitnessChart, type BarSlot } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
 import { computeAccuracyFromSamples } from "@/lib/sample-line";
@@ -15,68 +13,18 @@ import {
   type LiveCandidate,
 } from "@/lib/poll";
 import { useSelection } from "@/components/dashboard/SelectionContext";
-
-interface HistoricalCandidate {
-  candidate_id?: string;
-  label?: string;
-  changes_description?: string;
-  accuracy?: number;
-  composite_fitness?: number;
-  evaluators?: Record<string, number>;
-  invalid?: boolean;
-  is_winner?: boolean;
-  scored_samples?: number;
-  expected_samples?: number;
-}
-
-interface HistoricalRound {
-  round: number;                   // canonical round_num (0 = origin, 1..N = L1)
-  candidate_scores?: HistoricalCandidate[];
-  origin_accuracy?: number;
-}
+import {
+  correctedFromEvaluators,
+  type HistoricalCandidate,
+  type HistoricalRound,
+} from "./fitness-bars";
+import { WhatIfGrid } from "./WhatIfGrid";
 
 interface Props {
   dash: DashboardSnapshot | null;
   dashRound: number | null;
   cycleId: string | null;          // still used for one-shot evaluator-seed scoping
   themeKey: string;
-}
-
-function correctedFromEvaluators(
-  evaluators: Record<string, number>,
-  selected: Set<string>,
-  rows: Row[],
-): number | null {
-  let sum = 0;
-  let n = 0;
-  for (const sel of selected) {
-    const v = evaluators[sel];
-    if (v == null) continue;
-    const direction = rows.find((rr) => rr.displayName === sel)?.direction ?? "high";
-    sum += direction === "low" ? 1 - v : v;
-    n += 1;
-  }
-  return n > 0 ? sum / n : null;
-}
-
-function ranks(lines: { key: string; v: number | null }[]): Map<string, number> {
-  const sortable = lines.filter((l) => l.v != null).slice().sort((a, b) => (b.v as number) - (a.v as number));
-  const m = new Map<string, number>();
-  sortable.forEach((l, i) => m.set(l.key, i + 1));
-  return m;
-}
-
-function pickWinner(lines: { key: string; v: number | null }[]): string | null {
-  let best: string | null = null;
-  let bestVal = -Infinity;
-  for (const l of lines) {
-    if (l.v == null) continue;
-    if (l.v > bestVal) {
-      bestVal = l.v;
-      best = l.key;
-    }
-  }
-  return best;
 }
 
 export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
@@ -361,70 +309,6 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
     return out;
   }, [dash, history, inflightCandidates, selected, rows, currentRound, inActive]);
 
-  // Rank summary (only rendered when What-If is open) — now spans every bar
-  // including origin and historical rounds.
-  let summary: React.ReactNode;
-  if (bars.length === 0) {
-    summary = (
-      <span className="empty">
-        Evaluator registry loads with round 1, then candidates surface here as scoring completes — toggle these on/off to preview alternative scoring without re-running.
-      </span>
-    );
-  } else if (selected.size === 0) {
-    summary = <span className="empty">No evaluators selected — pick one or more tiles above to recompute scores.</span>;
-  } else {
-    const lines = bars.map((b) => ({
-      key: b.key,
-      label: b.label,
-      actual: b.composite ?? b.accuracy,
-      whatif: b.whatif,
-    }));
-    const rankActual = ranks(lines.map((l) => ({ key: l.key, v: l.actual })));
-    const rankWhatif = ranks(lines.map((l) => ({ key: l.key, v: l.whatif })));
-    const wA = pickWinner(lines.map((l) => ({ key: l.key, v: l.actual })));
-    const wW = pickWinner(lines.map((l) => ({ key: l.key, v: l.whatif })));
-    const winnerLabel = (k: string | null) =>
-      k == null ? "—" : (lines.find((l) => l.key === k)?.label ?? "—");
-    let movedUp = 0, movedDown = 0, flat = 0;
-    for (const l of lines) {
-      const rA = rankActual.get(l.key);
-      const rW = rankWhatif.get(l.key);
-      if (rA == null || rW == null) continue;
-      if (rA > rW) movedUp += 1;
-      else if (rA < rW) movedDown += 1;
-      else flat += 1;
-    }
-    const winnerSwap = wA != null && wW != null && wA !== wW;
-    const fmt = (v: number | null) => (v == null ? "—" : v.toFixed(3));
-    summary = (
-      <>
-        <div>
-          {winnerSwap
-            ? <span className="rank-up">winner flips {winnerLabel(wA)} → {winnerLabel(wW)}</span>
-            : <span className="rank-flat">winner unchanged ({winnerLabel(wA)})</span>}
-        </div>
-        <div>
-          <span className="rank-up">▲ {movedUp}</span> moved up · <span className="rank-down">▼ {movedDown}</span> moved down · <span className="rank-flat">· {flat}</span> unchanged
-        </div>
-        <div style={{ marginTop: 6 }}>
-          candidates: {lines.map((l, i) => {
-            const rA = rankActual.get(l.key);
-            const rW = rankWhatif.get(l.key);
-            const arrow = rA != null && rW != null
-              ? (rA > rW ? <span className="rank-up">▲</span> : rA < rW ? <span className="rank-down">▼</span> : <span className="rank-flat">·</span>)
-              : <span className="rank-flat">—</span>;
-            return (
-              <span key={l.key}>
-                {i > 0 && " · "}
-                {l.label} {fmt(l.actual)}→{fmt(l.whatif)} {arrow}
-              </span>
-            );
-          })}
-        </div>
-      </>
-    );
-  }
-
   return (
     <CardFrame
       className={`fitness-card${showWhatIf ? " whatif-open" : ""}`}
@@ -494,72 +378,17 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
         }}
       />
       {showWhatIf && (
-        <div className="fitness-whatif">
-          <div className="whatif-intro">
-            Toggle evaluators on/off to recompute candidate scores as <code>mean(direction-corrected selected)</code> and watch the candidate ranking shift. The actual <code>composite_fitness</code> on disk is unchanged — this is a client-side preview to explore <em>&quot;what if I scored without X?&quot;</em>
-          </div>
-          <div className="whatif-legend">
-            <span><span className="swatch checked">✓</span>selected (counts in what-if)</span>
-            <span><span className="swatch active" />used in actual formula</span>
-            <span><span className="swatch optional" />available, not in formula</span>
-            <span><span className="swatch disabled" />not applicable to this pipeline</span>
-          </div>
-          <div className="whatif-controls">
-            <span className="whatif-status">{selected.size} of {selectableCount} evaluator{selectableCount === 1 ? "" : "s"} selected</span>
-            <div className="whatif-actions">
-              <button type="button" className="whatif-btn" onClick={resetActual}>Reset to actual</button>
-              <button type="button" className="whatif-btn" onClick={selectNone}>None</button>
-              <button type="button" className="whatif-btn" onClick={selectAll}>All</button>
-            </div>
-          </div>
-          <div className="whatif-grid-wrap">
-            <div className="whatif-grid">
-              {rows.map((r, idx) => {
-                const enabled = selected.has(r.displayName);
-                const inAct = inActive.has(r.displayName);
-                const cls = ["whatif-sq"];
-                if (enabled) cls.push("on");
-                if (inAct) cls.push("in-active");
-                if (!r.applicable) cls.push("disabled");
-                const dirClass = r.direction === "low" ? "down" : "up";
-                const dirGlyph = r.direction === "low" ? "↓" : "↑";
-                const dirTip = r.direction === "low" ? TERMS.whatif_down : TERMS.whatif_up;
-                return (
-                  <button
-                    key={`${r.registryName}__${r.displayName}__${idx}`}
-                    type="button"
-                    className={cls.join(" ")}
-                    disabled={!r.applicable}
-                    role="checkbox"
-                    aria-checked={enabled}
-                    aria-disabled={!r.applicable}
-                    aria-label={r.displayName}
-                    tabIndex={r.applicable ? 0 : -1}
-                    title={r.description || r.displayName}
-                    onClick={() => r.applicable && toggle(r.displayName)}
-                  >
-                    <span className="whatif-tick" aria-hidden="true">
-                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M2.5 8.5 L6.5 12.5 L13.5 3.5" />
-                      </svg>
-                    </span>
-                    <span className={`whatif-dir ${dirClass}`} title={dirTip} aria-hidden="true">{dirGlyph}</span>
-                    <span className="whatif-ico">
-                      {whatifIconFor(r.displayName, r.registryName)}
-                    </span>
-                    <span className="whatif-name">{r.displayName}</span>
-                  </button>
-                );
-              })}
-              {rows.length === 0 && (
-                <div className="fitness-empty" style={{ gridColumn: "1 / -1" }}>
-                  Evaluator registry loads once the optimizer publishes round 1.
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="whatif-summary">{summary}</div>
-        </div>
+        <WhatIfGrid
+          rows={rows}
+          selected={selected}
+          inActive={inActive}
+          selectableCount={selectableCount}
+          bars={bars}
+          onToggle={toggle}
+          onResetActual={resetActual}
+          onSelectNone={selectNone}
+          onSelectAll={selectAll}
+        />
       )}
       </div>
     </CardFrame>

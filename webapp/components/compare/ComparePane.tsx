@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Line } from "react-chartjs-2";
 import type { ChartData } from "chart.js";
-import { lineChartDefaults } from "@/lib/chart-options";
+import { lineChartDefaults } from "@/lib/chart-config";
 import {
   fetchCampaignDetail,
   type CampaignDetail,

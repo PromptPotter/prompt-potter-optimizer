@@ -1,13 +1,12 @@
 "use client";
 import { useEffect, useMemo, useRef } from "react";
 import { Bar } from "react-chartjs-2";
-import { ensureChartRegistered } from "@/lib/chart-init";
+import { barChartDefaults, ensureChartRegistered } from "@/lib/chart-config";
 import { getCss } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
 import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 import { CardFrame } from "@/components/ui/card";
-import { barChartDefaults } from "@/lib/chart-options";
 
 ensureChartRegistered();
 

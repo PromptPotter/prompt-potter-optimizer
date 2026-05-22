@@ -1,11 +1,10 @@
 "use client";
 import { useMemo } from "react";
 import { Line } from "react-chartjs-2";
-import { ensureChartRegistered } from "@/lib/chart-init";
+import { ensureChartRegistered, lineChartDefaults } from "@/lib/chart-config";
 import { cssRgba, getCss } from "@/lib/theme";
 import { useCycleStream } from "@/lib/poll";
 import { CardFrame } from "@/components/ui/card";
-import { lineChartDefaults } from "@/lib/chart-options";
 
 ensureChartRegistered();
 
