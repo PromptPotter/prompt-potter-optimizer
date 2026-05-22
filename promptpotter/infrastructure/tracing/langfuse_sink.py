@@ -402,7 +402,7 @@ class LangfuseSink:
         existing_items: dict[str, Any] = {}
         ds = self._lf.get_dataset(dataset_name)
         if ds and hasattr(ds, "items"):
-            for it in ds.items:  # type: ignore[attr-defined]
+            for it in ds.items:
                 input_data = getattr(it, "input", None) or {}
                 q = input_data.get("query", "") if isinstance(input_data, dict) else ""
                 if q:

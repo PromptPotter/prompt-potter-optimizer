@@ -10,10 +10,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import DATASET_NAME, settings
 from promptpotter.infrastructure.tracing.events import (
@@ -38,6 +39,9 @@ from promptpotter.infrastructure.tracing.events import (
 )
 from promptpotter.infrastructure.tracing.file_sink import FileSink
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
+
+if TYPE_CHECKING:
+    from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.tracing.langfuse_sink import LangfuseSink
 from promptpotter.infrastructure.tracing.mlflow_sink import MLflowSink
 from promptpotter.shared.errors import graceful
@@ -170,7 +174,9 @@ class ObservabilityBridge:
     def langfuse_sink(self) -> LangfuseSink | None:
         return self._langfuse
 
-    def register_dataset(self, dataset_name: str, dataset: list) -> dict[str, str]:
+    def register_dataset(
+        self, dataset_name: str, dataset: Sequence[Sample | dict[str, Any]]
+    ) -> dict[str, str]:
         """Emit ``DatasetRegistered``, return ``{query: file_item_id}``."""
         if not self._enabled:
             return {}
@@ -179,12 +185,12 @@ class ObservabilityBridge:
         seen: set[str] = set()
         items: list[tuple[str, str]] = []
         for entry in dataset:
-            if hasattr(entry, "query"):
-                query = entry.query
-                ground_truth = entry.ground_truth
-            else:
+            if isinstance(entry, dict):
                 query = entry.get("query", "")
                 ground_truth = entry.get("ground_truth", "")
+            else:
+                query = entry.query
+                ground_truth = entry.ground_truth
             if not query or query in seen:
                 continue
             seen.add(query)
@@ -204,7 +210,7 @@ class ObservabilityBridge:
         *,
         config_snapshot: dict[str, Any],
         origin_accuracy: float,
-        dataset: list,
+        dataset: Sequence[Sample | dict[str, Any]],
         tracing_campaign_id: str,
         campaign_id: str,
         langfuse_session_id: str | None,
@@ -275,7 +281,7 @@ async def observed_node(
     campaign_id: str,
     round_num: int,
     as_type: str = "generation",
-):
+) -> AsyncIterator[NodeTrace]:
     """Time a node and emit ``NodeStart`` / ``NodeEnd`` (Langfuse generation or span observation) around the body."""
     trace = NodeTrace()
     opened = False

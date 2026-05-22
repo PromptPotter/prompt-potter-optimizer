@@ -68,7 +68,8 @@ class LangfuseLogger:
         if not self.enabled or not self.client:
             return None
         try:
-            return self.client.create_trace_id()
+            trace_id: str = self.client.create_trace_id()
+            return trace_id
         except Exception:
             logger.debug("Failed to create Langfuse trace ID", exc_info=True)
             return None
@@ -88,7 +89,7 @@ class LangfuseLogger:
             return None
 
         try:
-            trace_id = self.client.create_trace_id()
+            trace_id: str = self.client.create_trace_id()
             root = self.client.start_observation(
                 trace_context={"trace_id": trace_id},
                 as_type="chain",
@@ -325,7 +326,8 @@ class LangfuseLogger:
         if not self.enabled or not self.client:
             return None
         try:
-            return self.client.get_dataset(name=name)
+            dataset: object = self.client.get_dataset(name=name)
+            return dataset
         except Exception:
             logger.debug("Failed to get Langfuse dataset", exc_info=True)
             return None

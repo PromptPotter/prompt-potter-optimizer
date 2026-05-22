@@ -307,7 +307,7 @@ class LiveDashboardView(DerivedView):
                 "final": bool(payload.get("final", False)),
                 "query": payload.get("query"),
             }
-            recent: list[dict] = list(self.state.get("recent_backend_warnings") or [])
+            recent: list[dict[str, Any]] = list(self.state.get("recent_backend_warnings") or [])
             recent.append(warning)
             self.state["recent_backend_warnings"] = recent[-10:]
             self._persist()
@@ -426,7 +426,7 @@ class LiveDashboardView(DerivedView):
 
     # -- Scalar mutations -----------------------------------------------------
 
-    def _apply_phase(self, event: PhaseEvent, view: dict | None) -> None:
+    def _apply_phase(self, event: PhaseEvent, view: dict[str, Any] | None) -> None:
         s = self.state
         if event.round is not None:
             s["round"] = event.round
@@ -486,7 +486,7 @@ class LiveDashboardView(DerivedView):
         s["candidate"] = f"{candidate_label(round_num, ci)}/{ct}"
         s["query"] = f"{qi + 1}/{qt}"
 
-    def _absorb_sample_scored(self, result: dict, *, last_in_candidate: bool) -> None:
+    def _absorb_sample_scored(self, result: dict[str, Any], *, last_in_candidate: bool) -> None:
         s = self.state
         pd = result.get("pipeline_data") or {}
         query_time = float(pd.get("total_time", 0.0) or 0.0)
@@ -563,7 +563,7 @@ class LiveDashboardView(DerivedView):
         del record
         self._persist()
 
-    def _update_current_acc(self, scores: dict) -> None:
+    def _update_current_acc(self, scores: dict[str, Any]) -> None:
         self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)
 
     def _absorb_round_complete(self, accuracy: float, l1_stall_count: int) -> None:

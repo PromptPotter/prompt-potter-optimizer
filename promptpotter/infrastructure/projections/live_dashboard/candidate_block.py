@@ -27,7 +27,7 @@ def candidate_slot(round_dict: dict[str, Any], idx: int, total: int = 0) -> dict
     canonical display ``label`` is composed in ``build_l1_score_block`` from
     the slot's round + idx via :func:`candidate_label`.
     """
-    return round_dict.setdefault("candidates", {}).setdefault(
+    slot: dict[str, Any] = round_dict.setdefault("candidates", {}).setdefault(
         idx,
         {
             "idx": idx,
@@ -37,6 +37,7 @@ def candidate_slot(round_dict: dict[str, Any], idx: int, total: int = 0) -> dict
             "scores": None,
         },
     )
+    return slot
 
 
 def seed_candidate(
@@ -44,7 +45,7 @@ def seed_candidate(
     idx: int,
     total: int,
     changes_description: str,
-    pp_override: dict | None,
+    pp_override: dict[str, Any] | None,
 ) -> None:
     """Seed a slot so CURRENT shows labelled pending rows before scoring lands."""
     entry = candidate_slot(round_dict, idx, total)
@@ -59,7 +60,7 @@ def append_sample(
     ct: int,
     qi: int,
     qt: int,
-    result: dict,
+    result: dict[str, Any],
 ) -> None:
     """Append one scored sample to its candidate slot."""
     pd = result.get("pipeline_data") or {}
@@ -89,7 +90,7 @@ def set_candidate_scores(
     round_dict: dict[str, Any],
     idx: int,
     total: int,
-    scores: dict,
+    scores: dict[str, Any],
 ) -> None:
     """Store the score report verbatim — single source of truth shared with
     ``round_result.candidate_scores`` (same dict instance)."""

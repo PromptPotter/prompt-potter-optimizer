@@ -39,7 +39,7 @@ __all__ = [
 ]
 
 
-def extract_pipeline_config(experiment_extract: dict) -> dict:
+def extract_pipeline_config(experiment_extract: dict[str, Any]) -> dict[str, Any]:
     """Extract pipeline config (steps + params) from synced experiment data."""
     runs = experiment_extract.get("runs", [])
     if not runs:
@@ -107,7 +107,8 @@ class BackendClient:
             **kwargs,
         )
         resp.raise_for_status()
-        return resp.json()
+        data: dict[str, Any] = resp.json()
+        return data
 
     async def aclose(self) -> None:
         """Close the shared HTTP client."""
@@ -128,7 +129,8 @@ class BackendClient:
         try:
             resp = await self._get_http().get(f"{self.base_url}/status")
             resp.raise_for_status()
-            return resp.json()
+            status: dict[str, Any] = resp.json()
+            return status
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 logger.info("Backend /status endpoint not found (404)")
@@ -311,7 +313,8 @@ class BackendClient:
             )
 
         resp.raise_for_status()
-        return resp.json()
+        match_result: dict[str, Any] = resp.json()
+        return match_result
 
     # -- high-level sync --------------------------------------------------
 

@@ -136,7 +136,7 @@ def read_text_optional(path: Path, default: str = "") -> str:
         return f.read()
 
 
-def append_jsonl(path: Path, item: dict) -> Path:
+def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
     """Append one JSON object as a line to a JSONL file.
 
     Creates parent directories if needed.  Returns *path*.

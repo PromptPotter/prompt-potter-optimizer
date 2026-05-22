@@ -101,7 +101,7 @@ def extract_parsed_json(response: Any) -> Any:
 def parse_response_content(
     content: str,
     response_model: type[BaseModel] | None,
-    response_schema: dict | None,
+    response_schema: dict[str, Any] | None,
     provider_name: str,
 ) -> Any | None:
     """Decode + (optionally) validate provider-returned content.

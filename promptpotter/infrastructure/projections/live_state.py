@@ -90,7 +90,7 @@ def add_to_spend_bucket(
     )
 
 
-def accumulate_backend_spend(spend: dict[str, Any], pipeline_data: dict) -> None:
+def accumulate_backend_spend(spend: dict[str, Any], pipeline_data: dict[str, Any]) -> None:
     """Sum per-sample backend tokens into ``spend["backend"]``.
 
     Reads ``pipeline_data.step_tokens`` (per-LLM-node ``{input, output,
@@ -183,7 +183,7 @@ class LiveStateCore:
     current_p_best_n: int = 0
 
 
-def apply_phase(core: LiveStateCore, event: PhaseEvent, view: dict | None = None) -> None:
+def apply_phase(core: LiveStateCore, event: PhaseEvent, view: dict[str, Any] | None = None) -> None:
     """Update *core* from a ``PhaseEvent``.
 
     Round number tracks ``event.round`` directly. Origin is set once on

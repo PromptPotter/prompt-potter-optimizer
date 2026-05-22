@@ -63,7 +63,7 @@ class LangfuseObservation:
 
 
 def extract_pipeline_nodes(
-    pipeline_data: dict,
+    pipeline_data: dict[str, Any],
     query: str,
     schema: PipelineSchema,
 ) -> list[LangfuseObservation]:
@@ -123,7 +123,7 @@ def _save_state(store: Stores, backend_id: str, state: dict[str, Any]) -> None:
 def _collect_ground_truth(
     store: Stores,
     backend_id: str,
-    summaries: list[dict],
+    summaries: list[dict[str, Any]],
 ) -> dict[str, str]:
     gt_map: dict[str, str] = {}
     for s in summaries:
@@ -227,7 +227,7 @@ def sync_langfuse_runs(
     dataset_name: str = "ground_truth",
     backfill: bool = True,
     reset: bool = False,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Configure Langfuse dataset name and optionally replay all runs."""
     if not backfill:
         logger.info("Langfuse dataset: %s (backfill disabled)", dataset_name)
@@ -287,7 +287,7 @@ def push_all_runs(
         return {"skipped": True, "reason": str(exc)}
     state["dataset_items"] = query_to_item_id
 
-    groups: dict[str, list[dict]] = {origin: [] for origin in ORIGIN_ORDER}
+    groups: dict[str, list[dict[str, Any]]] = {origin: [] for origin in ORIGIN_ORDER}
     for s in summaries:
         rid = s.get("run_id", "")
         if rid in already_done:

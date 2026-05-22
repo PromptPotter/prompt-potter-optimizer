@@ -78,8 +78,8 @@ class OpenAICompatibleClient(LLMClientBase):
         temperature: float = 0.0,
         max_tokens: int | None = None,
         response_model: type[BaseModel] | None = None,
-        response_schema: dict | None = None,
-        **kwargs,
+        response_schema: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> LLMResponse:
         client = self._ensure_client()
 
@@ -208,7 +208,7 @@ class OpenAICompatibleClient(LLMClientBase):
         client: AsyncOpenAI,
         request_params: dict[str, Any],
         response_model: type[BaseModel] | None,
-        response_schema: dict | None,
+        response_schema: dict[str, Any] | None,
     ) -> LLMResponse | tuple[Any, str, ValidationError | None]:
         """One round-trip to the provider plus a parse pre-flight.
 

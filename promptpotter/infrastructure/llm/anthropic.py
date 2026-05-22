@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -18,6 +18,9 @@ from promptpotter.infrastructure.llm.rate_limit import (
     apply_discovered_caps,
 )
 
+if TYPE_CHECKING:
+    from anthropic import AsyncAnthropic
+
 
 class AnthropicClient(LLMClientBase):
     """Anthropic API client."""
@@ -29,9 +32,9 @@ class AnthropicClient(LLMClientBase):
     ):
         self._api_key = api_key or settings.ANTHROPIC_API_KEY
         self._rate_limiter = rate_limiter
-        self._client = None
+        self._client: AsyncAnthropic | None = None
 
-    def _ensure_client(self):
+    def _ensure_client(self) -> AsyncAnthropic:
         """Lazy-initialize the async Anthropic client."""
         if self._client is None:
             try:
@@ -51,8 +54,8 @@ class AnthropicClient(LLMClientBase):
         temperature: float = 0.0,
         max_tokens: int | None = None,
         response_model: type[BaseModel] | None = None,
-        response_schema: dict | None = None,
-        **kwargs,
+        response_schema: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> LLMResponse:
         # Anthropic doesn't accept ``response_format`` on the wire — JSON
         # output is contractual via the prompt body (the optimizer's

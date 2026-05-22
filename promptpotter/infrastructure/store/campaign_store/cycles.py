@@ -12,7 +12,7 @@ import os
 import shutil
 import stat
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -40,7 +40,7 @@ def _rmtree_robust(path: Path) -> None:
     if os.name == "nt" and not target_str.startswith("\\\\?\\"):
         target_str = "\\\\?\\" + target_str
 
-    def _onexc(func, target, exc):
+    def _onexc(func: Callable[[str], object], target: str, exc: BaseException) -> None:
         if isinstance(exc, PermissionError):
             try:
                 os.chmod(target, stat.S_IWRITE)
@@ -90,7 +90,7 @@ class CycleIndexMixin(CampaignStoreKernel):
 
     def load(self, campaign_id: str, cycle_id: str) -> dict[str, Any] | None:
         """Load a cycle's ``index.json``; ``cycle_id`` is injected from the dir name."""
-        data = read_json_optional(self._index_path(campaign_id, cycle_id))
+        data: dict[str, Any] | None = read_json_optional(self._index_path(campaign_id, cycle_id))
         if data is None:
             return None
         data["cycle_id"] = cycle_id

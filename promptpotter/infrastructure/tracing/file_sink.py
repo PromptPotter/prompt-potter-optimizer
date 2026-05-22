@@ -61,16 +61,16 @@ class FileSink:
         # under archive/obs/ so it doesn't compete with operator views.
         return self._tenant_root / "archive" / "obs"
 
-    def _log_event(self, event: dict) -> None:
+    def _log_event(self, event: dict[str, Any]) -> None:
         event["timestamp"] = utcnow_iso()
         append_jsonl(self._scope_dir() / "langfuse" / "events.jsonl", event)
 
     def _write_trace(
         self,
         name: str,
-        input_data: dict,
-        output_data: dict | None = None,
-        metadata: dict | None = None,
+        input_data: dict[str, Any],
+        output_data: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         tags: list[str] | None = None,
     ) -> str:
         trace_id = generate_observation_id()
@@ -91,9 +91,9 @@ class FileSink:
         trace_id: str,
         as_type: str,
         name: str,
-        input_data: dict | None = None,
-        output_data: dict | None = None,
-        metadata: dict | None = None,
+        input_data: dict[str, Any] | None = None,
+        output_data: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         parent_observation_id: str | None = None,
     ) -> str:
         observation_id = f"obs-{uuid.uuid4().hex[:12]}"

@@ -187,7 +187,7 @@ def runs_since(
 def find_by_prefix(
     stores: Stores,
     backend_id: str,
-    node_configs: list[tuple[str, dict]],
+    node_configs: list[tuple[str, dict[str, Any]]],
     *,
     dataset_name: str | None = None,
     include_unknown: bool = False,
@@ -201,7 +201,7 @@ def find_by_prefix(
 def reusable_results(
     stores: Stores,
     backend_id: str,
-    node_configs: list[tuple[str, dict]],
+    node_configs: list[tuple[str, dict[str, Any]]],
     is_fatal: Callable[[dict[str, Any]], bool] | None = None,
     *,
     dataset_name: str | None = None,

@@ -41,7 +41,7 @@ def hash_call(
     model: str | None,
     provider: str,
     temperature: float,
-    json_schema: dict | None,
+    json_schema: dict[str, Any] | None,
     response_model: str | None = None,
 ) -> str:
     """SHA-256 (truncated to 24 hex) of the byte-identical LLM-call inputs.

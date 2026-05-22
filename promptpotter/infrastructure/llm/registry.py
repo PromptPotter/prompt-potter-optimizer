@@ -80,10 +80,11 @@ def _make_anthropic_client() -> AnthropicClient:
 def _make_mock_client() -> LLMClientBase:
     """Lazy-load MockLLMClient (lives in tests package)."""
     try:
-        from tests.mock_llm_client import MockLLMClient  # type: ignore[import-not-found]
+        from tests.mock_llm_client import MockLLMClient
     except ImportError as err:
         raise ValueError("Test mock unavailable outside the test environment.") from err
-    return MockLLMClient()
+    client: LLMClientBase = MockLLMClient()
+    return client
 
 
 def _bind_openai_compat(spec: ProviderSpec) -> Callable[[], LLMClientBase]:

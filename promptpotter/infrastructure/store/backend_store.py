@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.store.base import (
@@ -13,6 +14,9 @@ from promptpotter.infrastructure.store.base import (
     validate_path_component,
     write_json,
 )
+
+if TYPE_CHECKING:
+    from promptpotter.domain.sample import Sample
 
 
 class BackendStore:
@@ -104,7 +108,7 @@ class BackendStore:
     def save_dataset(
         self,
         name: str,
-        items: list,
+        items: Sequence[Sample | dict[str, Any]],
         *,
         source_file: str = "",
     ) -> Path:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -20,8 +21,8 @@ class LLMClientBase(ABC):
         temperature: float = 0.0,
         max_tokens: int | None = None,
         response_model: type[BaseModel] | None = None,
-        response_schema: dict | None = None,
-        **kwargs,
+        response_schema: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> LLMResponse:
         """Send a chat completion request.
 
