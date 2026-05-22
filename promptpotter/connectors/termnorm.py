@@ -45,7 +45,7 @@ def termnorm_wire_adapter(
     if "steps" in _pp:
         payload["steps"] = _pp["steps"]
 
-    wire_overrides: dict[str, dict] = {}
+    wire_overrides: dict[str, dict[str, Any]] = {}
     for k, v in _pp.items():
         if k == "steps":
             continue
@@ -98,7 +98,8 @@ class TermNormSession:
         resp = await http.post(f"{base_url}/sessions", json={"terms": terms})
         resp.raise_for_status()
         self._terms = terms
-        return resp.json()
+        result: dict[str, Any] = resp.json()
+        return result
 
     async def recover(self, http: httpx.AsyncClient, base_url: str) -> bool:
         """Reinit the session using stored terms. Returns True on success."""
@@ -149,7 +150,7 @@ def _build_query_item(query: str, ground_truth: str = "") -> dict[str, Any]:
     return item
 
 
-def _extract_index_terms(experiment_data: dict) -> list[str]:
+def _extract_index_terms(experiment_data: dict[str, Any]) -> list[str]:
     """Extract unique non-empty ``dataset_entry`` values from mappings."""
     entries = set()
     for m in experiment_data.get("mappings", []):
@@ -159,7 +160,7 @@ def _extract_index_terms(experiment_data: dict) -> list[str]:
     return sorted(entries)
 
 
-def _extract_ground_truth_map(experiment_data: dict) -> dict[str, str]:
+def _extract_ground_truth_map(experiment_data: dict[str, Any]) -> dict[str, str]:
     """Build ``{bom_material: ground_truth}`` from experiment mappings."""
     gt_map: dict[str, str] = {}
     for m in experiment_data.get("mappings", []):
@@ -170,7 +171,7 @@ def _extract_ground_truth_map(experiment_data: dict) -> dict[str, str]:
     return gt_map
 
 
-def _extract_queries(experiment_data: dict) -> list[dict[str, Any]]:
+def _extract_queries(experiment_data: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract queries with valid ground truth — joins evaluation_result queries to mappings via bom_material."""
     gt_map = _extract_ground_truth_map(experiment_data)
 
@@ -199,11 +200,13 @@ def _extract_queries(experiment_data: dict) -> list[dict[str, Any]]:
     return queries
 
 
-def _extract_experiment(experiment_data: dict) -> tuple[list[dict], list[str]]:
+def _extract_experiment(
+    experiment_data: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str]]:
     return _extract_queries(experiment_data), _extract_index_terms(experiment_data)
 
 
-def _resolve_ground_truth(experiment_data: dict, query: str) -> str | None:
+def _resolve_ground_truth(experiment_data: dict[str, Any], query: str) -> str | None:
     return _extract_ground_truth_map(experiment_data).get(_split_query(query)[0])
 
 

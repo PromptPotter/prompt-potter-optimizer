@@ -72,7 +72,7 @@ def promptpotter_wire_adapter(
 
     _pp = pipeline_params or {}
 
-    meta_prompt_overrides: dict[str, dict] = {}
+    meta_prompt_overrides: dict[str, dict[str, Any]] = {}
     for k, v in _pp.items():
         if isinstance(v, dict):
             meta_prompt_overrides[k] = v
@@ -120,7 +120,9 @@ class PromptPotterSession:
 # ---------------------------------------------------------------------------
 
 
-def _extract_experiment(experiment_data: dict) -> tuple[list[dict], list[str]]:
+def _extract_experiment(
+    experiment_data: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str]]:
     """Inner-benchmark tasks → ``(queries, index_terms)``.
 
     PromptPotter-self ``experiment_data`` is a small JSON describing the
@@ -153,7 +155,7 @@ def _extract_experiment(experiment_data: dict) -> tuple[list[dict], list[str]]:
     return queries, []
 
 
-def _resolve_ground_truth(experiment_data: dict, query: str) -> str | None:
+def _resolve_ground_truth(experiment_data: dict[str, Any], query: str) -> str | None:
     """Return the inner cycle's target score for the given task."""
     for t in experiment_data.get("tasks", []):
         if t.get("id") == query:

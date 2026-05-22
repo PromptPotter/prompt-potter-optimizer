@@ -3,16 +3,18 @@ PromptPotter Optimizer API — main FastAPI application entry point.
 """
 
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
+from starlette.middleware.base import RequestResponseEndpoint
 
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import APP_VERSION, settings
@@ -23,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application startup and shutdown lifecycle."""
     logger.info("Starting %s v%s", app.title, app.version)
     logger.info("Environment: %s", settings.ENVIRONMENT)
@@ -44,20 +46,21 @@ app = FastAPI(
 
 
 @app.get("/docs", include_in_schema=False)
-async def scalar_docs():
-    return get_scalar_api_reference(
+async def scalar_docs() -> Response:
+    doc: Response = get_scalar_api_reference(
         openapi_url=app.openapi_url,
         title=app.title,
     )
+    return doc
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_error_handler(request: Request, exc: RequestValidationError):
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
@@ -73,7 +76,7 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def no_store_on_api(request: Request, call_next):
+async def no_store_on_api(request: Request, call_next: RequestResponseEndpoint) -> Response:
     """Set ``Cache-Control: no-store`` on every ``/api/v1/*`` response.
 
     The API is the webapp's live polling surface — ``dashboard.json``,
@@ -94,7 +97,7 @@ _health = APIRouter()
 
 
 @_health.get("/health")
-async def health_check():
+async def health_check() -> dict[str, str]:
     return {
         "status": "healthy",
         "service": "PromptPotter Optimizer",
@@ -120,7 +123,7 @@ if WEBAPP_DIR.exists():
     # Root redirect — Uvicorn's startup banner prints the bare host:port, so
     # land the operator on the webapp instead of a 404.
     @app.get("/", include_in_schema=False)
-    async def root_redirect():
+    async def root_redirect() -> RedirectResponse:
         return RedirectResponse(url="/ui/", status_code=307)
 
 

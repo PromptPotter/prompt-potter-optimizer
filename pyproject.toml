@@ -110,8 +110,6 @@ module = [
     "promptpotter.application.*",
     "promptpotter.infrastructure.*",
     "promptpotter.presentation.*",
-    "promptpotter.connectors.*",
-    "promptpotter.main",
 ]
 disallow_any_generics = false
 disallow_untyped_defs = false

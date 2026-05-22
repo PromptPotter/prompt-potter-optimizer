@@ -39,10 +39,10 @@ class Connector:
     session_factory: Callable[[], SessionProtocol]
     """Fresh session instance per ``BackendClient`` — sessions hold per-client state."""
 
-    extract_experiment: Callable[[dict], tuple[list[dict], list[str]]]
+    extract_experiment: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], list[str]]]
     """Backend experiment data → ``(queries, index_terms)``."""
 
-    resolve_ground_truth: Callable[[dict, str], str | None]
+    resolve_ground_truth: Callable[[dict[str, Any], str], str | None]
     """Resolve ground truth for a single query string from experiment data."""
 
     def to_dict(self) -> dict[str, Any]:
