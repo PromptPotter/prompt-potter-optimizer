@@ -1,11 +1,17 @@
 "use client";
 // Dataset preview for the unit in view — the sample roster + per-sample
-// measurement history that back the hard-samples heat-map. Both data scopes
+// measurement history that back the hard-samples table. Both data scopes
 // (campaign-only and cross-campaign dataset) are fetched once per unit and
 // held together, so the campaign ⇄ dataset toggle is an instant in-memory
 // swap — never a re-fetch, never a blank frame. The optimizer's own
 // next-sample picker always runs on the dataset scope (see
 // l1/execute.py round-subset fit); this toggle is display only.
+//
+// Each scope is purely itself: the campaign slice carries this campaign's
+// measured/unmeasured counts + this campaign's per-sample dots, full stop.
+// No fallback to the dataset slice — that would let dataset-wide numbers
+// leak into "This campaign" mode, which is the opposite of what the toggle
+// is for.
 
 import { useEffect, useState } from "react";
 import {
@@ -26,15 +32,11 @@ interface ScopeSlice {
   archivePerSample: Map<number, MeasurementDot[]>;
 }
 
-export interface DatasetPreviewState {
+export interface DatasetPreviewState extends ScopeSlice {
   datasetName: string | null;
   // Held-out test fold size declared in datasets/{name}/campaign.json —
   // scope-independent. null when the dataset declares no split.
   splitTest: number | null;
-  items: DatasetItem[];
-  measuredCount: number;
-  unmeasuredCount: number;
-  archivePerSample: Map<number, MeasurementDot[]>;
 }
 
 // Both scopes plus the unit key they were loaded for. The key lets a
@@ -61,13 +63,33 @@ const EMPTY: DatasetPreviewState = {
   ...EMPTY_SLICE,
 };
 
-// Per-sample dot map from a measurement-series response.
 function dotMap(
-  items: { sample_id: number; measurements: MeasurementDot[] }[],
+  items: { sample_id: number; measurements: MeasurementDot[] }[] | undefined,
 ): Map<number, MeasurementDot[]> {
   const m = new Map<number, MeasurementDot[]>();
-  for (const s of items) m.set(s.sample_id, s.measurements);
+  if (items) for (const s of items) m.set(s.sample_id, s.measurements);
   return m;
+}
+
+// Build a scope slice with counts derived from the dot data, not the
+// preview endpoint. "Measured" = at least one dot in the History column —
+// same signal the "Hide unmeasured" tick uses, so the footer never lies
+// about what the tick would hide.
+function sliceFrom(
+  items: DatasetItem[],
+  series: { sample_id: number; measurements: MeasurementDot[] }[] | undefined,
+): ScopeSlice {
+  const archivePerSample = dotMap(series);
+  let measured = 0;
+  for (const it of items) {
+    if ((archivePerSample.get(it.sample_id)?.length ?? 0) > 0) measured += 1;
+  }
+  return {
+    items,
+    measuredCount: measured,
+    unmeasuredCount: items.length - measured,
+    archivePerSample,
+  };
 }
 
 // One hook, both scopes, one effect. The effect fires per unit (not per
@@ -95,49 +117,25 @@ export function useDatasetPreview(
       try {
         const name = await fetchActiveDatasetName(campaignId, cycleId, ac.signal);
         if (cancelled || !name) return;
-
-        // Dataset scope — the cross-campaign roster + Rasch sort. This is
-        // the series the optimizer's picker actually follows; it always
-        // resolves (the archive snapshot needs no campaign artifact).
-        const dsPreview = await fetchDatasetPreview(
-          name, 1000, ac.signal, "dataset", campaignId, cycleId,
-        );
-        const dsSeries = await fetchMeasurementSeries(
-          name, 1000, ac.signal, "dataset", campaignId, cycleId,
-        ).catch(() => null);
-
-        // Campaign scope — this campaign's own pooled fit. Before the
-        // campaign's first round it has measured nothing; fall back to the
-        // dataset slice so a campaign that simply hasn't run yet never
-        // shows an artificially-empty "fresh" sort.
-        const cmpPreview = await fetchDatasetPreview(
-          name, 1000, ac.signal, "campaign", campaignId, cycleId,
-        ).catch(() => null);
-        const cmpSeries = await fetchMeasurementSeries(
-          name, 1000, ac.signal, "campaign", campaignId, cycleId,
-        ).catch(() => null);
+        // Four independent fetches: dataset + campaign × preview + series.
+        // Run in parallel; campaign-scope fetches may 404 for a fresh
+        // campaign with no `hard_samples.json` yet — their `.catch` floors
+        // them to null and the empty slice falls out cleanly.
+        const [dsPreview, dsSeries, cmpPreview, cmpSeries] = await Promise.all([
+          fetchDatasetPreview(name, 1000, ac.signal, "dataset", campaignId, cycleId),
+          fetchMeasurementSeries(name, 1000, ac.signal, "dataset", campaignId, cycleId).catch(() => null),
+          fetchDatasetPreview(name, 1000, ac.signal, "campaign", campaignId, cycleId).catch(() => null),
+          fetchMeasurementSeries(name, 1000, ac.signal, "campaign", campaignId, cycleId).catch(() => null),
+        ]);
         if (cancelled) return;
 
-        const datasetSlice: ScopeSlice = {
-          items: dsPreview.items,
-          measuredCount: dsPreview.measured_count,
-          unmeasuredCount: dsPreview.unmeasured_count,
-          archivePerSample: dotMap(dsSeries?.items ?? []),
-        };
-        const campaignHasData = !!cmpPreview && cmpPreview.measured_count > 0;
-        const campaignSlice: ScopeSlice = campaignHasData
-          ? {
-              items: cmpPreview.items,
-              measuredCount: cmpPreview.measured_count,
-              unmeasuredCount: cmpPreview.unmeasured_count,
-              archivePerSample: dotMap(
-                (cmpSeries && cmpSeries.items.length > 0
-                  ? cmpSeries
-                  : dsSeries
-                )?.items ?? [],
-              ),
-            }
-          : datasetSlice;
+        // Counts come from the same signal the "Hide unmeasured" tick
+        // uses — presence of an actual measurement dot — so the footer
+        // and the filter never disagree about what "measured" means.
+        const datasetSlice = sliceFrom(dsPreview.items, dsSeries?.items);
+        const campaignSlice = cmpPreview
+          ? sliceFrom(cmpPreview.items, cmpSeries?.items)
+          : EMPTY_SLICE;
 
         setLoaded({
           key: `${campaignId} ${cycleId}`,

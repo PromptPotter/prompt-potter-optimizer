@@ -88,7 +88,6 @@ export function HardSamplesTable({
         (perSample || c.id !== "measurements") && (hasTask || c.id !== "task"),
     );
   }, [perSample, datasetItems]);
-  const items = datasetItems;
   const measuredCount = datasetMeasuredCount;
   const unmeasuredCount = datasetUnmeasuredCount;
 
@@ -192,6 +191,21 @@ export function HardSamplesTable({
     setSelectedOrd(null);
   }
 
+  // Filter unmeasured rows out when the operator has ticked "Hide
+  // unmeasured". The signal is the same one their eye is reading: does
+  // the row have any dot in the History column. `pick_score` is the
+  // WRONG signal — the Rasch model assigns a prior to every sample, so
+  // `pick_score !== null` is true for rows with zero actual
+  // measurements. The footer's API-sourced measured/unmeasured counts
+  // mean something different (Rasch-fit population) and are unrelated.
+  const items = useMemo(() => {
+    if (!persisted.hideUnmeasured) return datasetItems;
+    if (!perSample) return datasetItems;
+    return datasetItems.filter(
+      (it) => (perSample.get(it.sample_id)?.length ?? 0) > 0,
+    );
+  }, [datasetItems, perSample, persisted.hideUnmeasured]);
+
   const autoWidths = useMemo<Partial<Record<ColId, number>>>(() => {
     if (items.length === 0) return {};
     const w: Partial<Record<ColId, number>> = {};
@@ -207,19 +221,22 @@ export function HardSamplesTable({
   // Live-sort ("Auto-sort"): rank the WHOLE table by Info gain (pick_score)
   // descending — the picker's expected decision-information-gain. Contested
   // samples rise to the top; always-hit and always-miss samples sink
-  // together at the bottom. Unmeasured rows (null pick_score) go last in
-  // sample_id order. This makes the Info gain column the literal sort key
-  // across every row, not just the round's ~20-sample live subset.
+  // together at the bottom. Rows without any actual measurement in this
+  // scope sink last in sample_id order. Dot-presence is the
+  // "measured-in-scope" signal — `pick_score !== null` is non-null on
+  // prior-only rows too, so it overcounts under campaign scope.
   const liveSortActive = persisted.syncLive;
   const sortedItems = useMemo(() => {
+    const measuredIn = (it: DatasetItem): boolean =>
+      (perSample?.get(it.sample_id)?.length ?? 0) > 0;
     if (liveSortActive) {
       return [...items].sort((a, b) => {
-        const pa = a.pick_score;
-        const pb = b.pick_score;
-        if (pa === null || pb === null) {
-          if (pa === pb) return a.sample_id - b.sample_id;
-          return pa === null ? 1 : -1;
-        }
+        const ma = measuredIn(a);
+        const mb = measuredIn(b);
+        if (ma !== mb) return ma ? -1 : 1;
+        if (!ma) return a.sample_id - b.sample_id;
+        const pa = a.pick_score ?? Number.NEGATIVE_INFINITY;
+        const pb = b.pick_score ?? Number.NEGATIVE_INFINITY;
         if (pa !== pb) return pb - pa;
         return a.sample_id - b.sample_id;
       });
@@ -329,7 +346,7 @@ export function HardSamplesTable({
     setSortBy(null);
   };
 
-  if (items.length === 0) return null;
+  if (datasetItems.length === 0) return null;
 
   // Text-wrap toggle applies to left-aligned text columns only — never the
   // History column (a canvas, nothing to wrap; dropping it also frees the
@@ -535,6 +552,10 @@ export function HardSamplesTable({
           syncLive={persisted.syncLive}
           onToggleSyncLive={() =>
             setPersisted((p) => ({ ...p, syncLive: !p.syncLive }))
+          }
+          hideUnmeasured={persisted.hideUnmeasured}
+          onToggleHideUnmeasured={() =>
+            setPersisted((p) => ({ ...p, hideUnmeasured: !p.hideUnmeasured }))
           }
           datasetName={datasetName}
           measuredCount={measuredCount}

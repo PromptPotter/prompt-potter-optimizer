@@ -47,7 +47,6 @@ def _resolve_scope_artifact(
       pooled fit over all the campaign's cycles.
     - ``dataset``: the cross-campaign archive snapshot for ``name``.
     """
-    from promptpotter.application.config import ExplorationConfig
     from promptpotter.application.intelligence.hard_sample_archive import (
         build_archive_hard_samples_artifact,
     )
@@ -80,14 +79,11 @@ def _resolve_scope_artifact(
         campaign_artifact: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         return campaign_artifact
     # scope == "dataset" — cross-campaign archive snapshot. Cross-dataset
-    # pooling would be meaningless, so this is always per-dataset. The
-    # cross-campaign view has no single campaign config, so the picker's
-    # explore weight reads the declared ExplorationConfig default.
+    # pooling would be meaningless, so this is always per-dataset.
     return build_archive_hard_samples_artifact(
         store,
         backend_id,
         dataset_name=name,
-        explore_weight=ExplorationConfig().explore_weight,
         top_k_samples=None,
     )
 
@@ -95,15 +91,17 @@ def _resolve_scope_artifact(
 def _trim_unmeasured(
     order: list[int],
     measured: set[int],
-    cap: int,
+    cap: int | None,
 ) -> list[int]:
     """Walk *order*, keep every measured sample, keep at most *cap* unmeasured.
 
     Preserves the sort position of the unmeasured samples that survive — the
     cap drops the tail of the contiguous unmeasured block, not a random
-    slice. With *cap* = 0 the unmeasured rows vanish entirely; with
-    *cap* >= ``len(order)`` the function is a no-op.
+    slice. *cap* = 0 drops every unmeasured row; *cap* = None (default) is
+    a no-op.
     """
+    if cap is None:
+        return list(order)
     kept_unmeasured = 0
     out: list[int] = []
     for sid in order:
@@ -159,12 +157,6 @@ class DatasetItem(BaseModel):
 class DatasetPreviewResponse(BaseModel):
     name: str
     row_count: int
-    measured_count: int = Field(
-        description="Dataset-cache samples with at least one archive measurement"
-    )
-    unmeasured_count: int = Field(
-        description="Dataset-cache samples the optimizer has never scored"
-    )
     split_train: int | None = Field(
         default=None,
         description="Declared training-bank fold size from campaign.json "
@@ -185,15 +177,15 @@ async def get_dataset_preview(
     store: StoreDep,
     backend_id: str = Query(default="local"),
     limit: int = Query(default=50, ge=1, le=1000),
-    max_unmeasured: int = Query(
-        default=20,
+    max_unmeasured: int | None = Query(
+        default=None,
         ge=0,
         le=1000,
         description=(
-            "Cap on unmeasured (miss_prob=0.5 prior) samples retained in the "
-            "Rasch-sorted output. Measured samples are always kept; the "
-            "unmeasured tail is truncated past this count so the heat-map "
-            "doesn't drown signal in 'no evidence yet' rows."
+            "Optional cap on unmeasured (miss_prob=0.5 prior) samples retained "
+            "in the Rasch-sorted output. None (default) = no trim — every "
+            "dataset-cache row is eligible, bounded only by ``limit``. Set a "
+            "positive cap to truncate the unmeasured tail past that count."
         ),
     ),
     scope: Literal["cycle", "campaign", "dataset"] = Query(
@@ -227,10 +219,11 @@ async def get_dataset_preview(
     - ``cycle``: one cycle's own fit, from
       ``campaigns/{campaign_id}/cycles/{cycle_id}/hard_samples.json``.
 
-    ``measured_count`` = samples with at least one measurement in the
-    selected scope. ``unmeasured_count`` = samples in the dataset cache that
-    have none. Both counts always reflect the FULL dataset — ``max_unmeasured``
-    only trims the rows returned in ``items``, not the totals.
+    Clients derive measured/unmeasured counts from the companion
+    ``/measurement-series`` response — counting samples whose series carries
+    at least one dot. That is the only honest definition of "measured" in
+    the selected scope: Rasch δ entries persist across rounds and inherit
+    from parent fits, so they overcount.
     """
     if not _DATASET_NAME_RE.match(name):
         raise HTTPException(400, "Invalid dataset name")
@@ -313,8 +306,6 @@ async def get_dataset_preview(
     return DatasetPreviewResponse(
         name=raw["name"],
         row_count=len(sample_lookup),
-        measured_count=len(measured),
-        unmeasured_count=len(sample_lookup) - len(measured),
         split_train=split_train,
         split_test=split_test,
         items=items,
@@ -431,14 +422,14 @@ async def get_dataset_measurement_series(
     store: StoreDep,
     backend_id: str = Query(default="local"),
     limit: int = Query(default=50, ge=1, le=1000),
-    max_unmeasured: int = Query(
-        default=20,
+    max_unmeasured: int | None = Query(
+        default=None,
         ge=0,
         le=1000,
         description=(
-            "Mirrors ``/preview``: cap on unmeasured rows kept in the "
-            "Rasch-sorted output. Must match the value the client passed "
-            "to ``/preview`` so the two responses stay aligned by index."
+            "Mirrors ``/preview``: optional cap on unmeasured rows. None "
+            "(default) = no trim. Must match the value the caller passed to "
+            "``/preview`` so the two responses stay aligned by index."
         ),
     ),
     scope: Literal["cycle", "campaign", "dataset"] = Query(

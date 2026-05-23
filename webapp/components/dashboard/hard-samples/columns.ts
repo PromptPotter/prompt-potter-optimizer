@@ -68,6 +68,11 @@ export interface PersistedState {
   // gain — and header-click sorting is suppressed. The Info gain column
   // carries the sort marker. Default ON.
   syncLive: boolean;
+  // When true ("Hide unmeasured"), rows with no measurements yet
+  // (pick_score === null) are filtered out. Same behaviour under both
+  // scopes — the operator can focus on what the optimizer has actually
+  // touched. Default OFF.
+  hideUnmeasured: boolean;
 }
 
 export const EMPTY_PERSISTED: PersistedState = {
@@ -75,6 +80,7 @@ export const EMPTY_PERSISTED: PersistedState = {
   folded: [],
   wrapped: [],
   syncLive: true,
+  hideUnmeasured: false,
 };
 
 // Miss-probability → hue. 0 = cool green (always-hit), 0.5 =

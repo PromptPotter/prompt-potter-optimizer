@@ -63,8 +63,6 @@ export interface DatasetItem {
 export interface DatasetPreview {
   name: string;
   row_count: number;
-  measured_count: number;
-  unmeasured_count: number;
   // Declared train/test fold sizes from datasets/{name}/campaign.json.
   // null when the dataset declares no split. Scope-independent.
   split_train: number | null;

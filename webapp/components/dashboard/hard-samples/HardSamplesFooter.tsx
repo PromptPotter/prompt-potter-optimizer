@@ -10,6 +10,10 @@ interface Props {
   // difficulty sort when on.
   syncLive: boolean;
   onToggleSyncLive: () => void;
+  // Hide-unmeasured toggle state — rows without any measurements are
+  // filtered out when on.
+  hideUnmeasured: boolean;
+  onToggleHideUnmeasured: () => void;
   datasetName: string | null;
   measuredCount: number;
   unmeasuredCount: number;
@@ -26,6 +30,8 @@ export function HardSamplesFooter({
   onScopeChange,
   syncLive,
   onToggleSyncLive,
+  hideUnmeasured,
+  onToggleHideUnmeasured,
   datasetName,
   measuredCount,
   unmeasuredCount,
@@ -78,6 +84,21 @@ export function HardSamplesFooter({
       >
         <input type="checkbox" checked={syncLive} onChange={onToggleSyncLive} />
         Auto-sort
+      </label>
+      <label
+        className="hs-sync-toggle"
+        title={
+          hideUnmeasured
+            ? "Showing only samples with at least one measurement. Untick to show every sample."
+            : "Showing every sample, including those the optimizer hasn't measured yet. Tick to hide unmeasured rows."
+        }
+      >
+        <input
+          type="checkbox"
+          checked={hideUnmeasured}
+          onChange={onToggleHideUnmeasured}
+        />
+        Hide unmeasured
       </label>
       <span
         className="hs-counts"
