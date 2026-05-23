@@ -77,6 +77,13 @@ export interface BarSlot {
   candidateId?: string;
   round?: number;
   isWinner?: boolean;
+  // Workspace-verify overlay — `accuracy` is the workspace accuracy
+  // (mean hit rate) over every archive measurement for this candidate's
+  // config; `workspaceN` is the total sample count behind it (typically
+  // >> the campaign n). Same metric as the blue accuracy bar so the two
+  // are visually apples-to-apples. Set only on bars that have a matching
+  // DiagnosticRunRecord on disk; drives the red `verify` series.
+  diag?: { accuracy: number; workspaceN: number; samplesAdded: number };
 }
 
 interface Props {
@@ -109,20 +116,26 @@ export function FitnessChart({
   // paints a stub). Unstarted bars stay null so chart.js leaves the slot
   // blank — distinguishing "still computing" from "not yet started".
   // Sized to the padded slot count; padding slots stay null (no bar).
-  const { accRaw, compRaw, whatifRaw, accPlot, compPlot, whatifPlot } = useMemo(() => {
+  const { accRaw, compRaw, whatifRaw, verifyRaw, accPlot, compPlot, whatifPlot, verifyPlot } = useMemo(() => {
     const aR: (number | null)[] = [];
     const cR: (number | null)[] = [];
     const wR: (number | null)[] = [];
+    const vR: (number | null)[] = [];
     for (let i = 0; i < labels.length; i++) {
       aR.push(bars[i]?.accuracy ?? null);
       cR.push(bars[i]?.composite ?? null);
       wR.push(bars[i]?.whatif ?? null);
+      vR.push(bars[i]?.diag?.accuracy ?? null);
     }
     const coerce = (v: number | null, i: number): number | null =>
       v == null ? (bars[i]?.started ? 0 : null) : v;
+    // The verify series stays strictly sparse — no started-floor coercion.
+    // A bar without a diagnostic-run record must render NO red bar, not a
+    // 0-height stub, or every column would carry a misleading red dot.
     return {
-      accRaw: aR, compRaw: cR, whatifRaw: wR,
+      accRaw: aR, compRaw: cR, whatifRaw: wR, verifyRaw: vR,
       accPlot: aR.map(coerce), compPlot: cR.map(coerce), whatifPlot: wR.map(coerce),
+      verifyPlot: vR,
     };
   }, [bars, labels]);
 
@@ -138,9 +151,12 @@ export function FitnessChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bars, selectedKey, themeKey]);
 
+  const hasVerify = useMemo(() => bars.some((b) => b?.diag != null), [bars]);
   const data = useMemo<ChartData<"bar">>(() => {
-    const seriesCount = 1 + (showComposite ? 1 : 0) + (showWhatIf ? 1 : 0);
-    const cat = seriesCount === 1 ? 0.55 : seriesCount === 2 ? 0.75 : 0.9;
+    const seriesCount =
+      1 + (showComposite ? 1 : 0) + (showWhatIf ? 1 : 0) + (hasVerify ? 1 : 0);
+    const cat =
+      seriesCount === 1 ? 0.55 : seriesCount === 2 ? 0.75 : seriesCount === 3 ? 0.9 : 0.95;
     // Dynamic bar thickness ceiling: chart frame fans out to ~720px on
     // wide layouts, so 25 bars × 3 series should leave room without
     // clipping. Scale max thickness down as the bar count grows; min 6.
@@ -196,11 +212,35 @@ export function FitnessChart({
         minBarLength: 2,
       });
     }
+    if (hasVerify) {
+      // Workspace-verify overlay — populated only on bars with a matching
+      // DiagnosticRunRecord. Red is the only series colour outside the
+      // accent palette: this is the operator's "did the verdict hold on
+      // more samples?" signal, intentionally visually distinct.
+      datasets.push({
+        label: "verify",
+        data: verifyPlot,
+        backgroundColor: "#e74c3c",
+        borderColor: "#e74c3c",
+        borderWidth: 0,
+        barPercentage: 0.95,
+        categoryPercentage: cat,
+        maxBarThickness: maxBar,
+        minBarLength: 2,
+      });
+    }
     return { labels, datasets };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, accPlot, compPlot, whatifPlot, showComposite, showWhatIf, themeKey, selectionBorder]);
+  }, [labels, accPlot, compPlot, whatifPlot, verifyPlot, showComposite, showWhatIf, hasVerify, themeKey, selectionBorder]);
 
   const tooltipFor = (label: string, idx: number): string => {
+    if (label === "verify") {
+      const v = verifyRaw[idx];
+      if (v == null) return "verify: —";
+      const diag = bars[idx]?.diag;
+      const tail = diag ? ` (workspace acc on n=${diag.workspaceN}, +${diag.samplesAdded} fresh)` : "";
+      return `verify: ${v.toFixed(3)}${tail}`;
+    }
     const src = label === "accuracy" ? accRaw : label === "composite" ? compRaw : whatifRaw;
     const v = src[idx];
     return `${label}: ${v == null ? "—" : v.toFixed(3)}`;
@@ -250,7 +290,7 @@ export function FitnessChart({
       sampleCount: { counts: bars.map((b) => b.nSamples) },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeKey, accRaw, compRaw, whatifRaw, rotate, bars, selectedKey, onSelect]);
+  }), [themeKey, accRaw, compRaw, whatifRaw, verifyRaw, rotate, bars, selectedKey, onSelect]);
 
   return (
     <div className="fitness-chart-frame">

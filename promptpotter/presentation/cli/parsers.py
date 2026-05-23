@@ -375,6 +375,43 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
+    """Campaign + candidate selectors + sample budget for ``verify``."""
+    p_verify.add_argument(
+        "campaign",
+        help="Campaign id, 6-hex suffix, or unambiguous prefix "
+        "(e.g. 'justlogic__ca6d4d' or 'ca6d4d').",
+    )
+    p_verify.add_argument(
+        "label",
+        help="Candidate label as persisted on the round file: 'C{round}.{n}' "
+        "(1-indexed within the round, e.g. 'C4.1').",
+    )
+    p_verify.add_argument(
+        "--cycle",
+        dest="cycle",
+        default=None,
+        help="Cycle id (full or prefix) when the campaign has more than one cycle. "
+        "Omit when the campaign has exactly one cycle.",
+    )
+    p_verify.add_argument(
+        "--samples",
+        dest="samples",
+        type=int,
+        default=20,
+        help="Number of additional samples to score (default 20). The picker "
+        "skips samples this candidate has already been measured on across "
+        "the cross-cycle archive.",
+    )
+    p_verify.add_argument(
+        "--seed",
+        dest="seed",
+        type=int,
+        default=None,
+        help="RNG seed for reproducible sample picks (default: random).",
+    )
+
+
 def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
     """Tenant scope + safety flags for ``reset``.
 
@@ -442,7 +479,7 @@ def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Argparse schema for ``new`` / ``resume`` / ``sweep`` / ``compare`` / ``reset``.
+    """Argparse schema for ``new`` / ``resume`` / ``sweep`` / ``compare`` / ``reset`` / ``verify``.
 
     Bare ``python -m promptpotter`` (no subcommand) defaults to ``resume`` —
     the most common operator action gets the shortest invocation.
@@ -498,6 +535,16 @@ def build_parser() -> argparse.ArgumentParser:
             "+ sweeps). The escape hatch for cycles obsoleted by code changes "
             "— per-sample measurements survive so the next `new` hits cache "
             "immediately.",
+        )
+    )
+
+    _add_verify_args(
+        sub.add_parser(
+            "verify",
+            help="Re-score one campaign candidate on more samples and persist a "
+            "workspace-scope diagnostic-run record. Use to doublecheck whether "
+            "a PoBB-locked candidate's verdict generalises beyond the round's "
+            "leader-locked sample budget. Does not mutate the source cycle.",
         )
     )
 

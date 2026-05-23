@@ -113,6 +113,7 @@ app.include_router(api.campaigns_router, prefix="/api/v1", tags=["Campaigns"])
 app.include_router(api._active_router, prefix="/api/v1")
 app.include_router(api._datasets_router, prefix="/api/v1", tags=["Datasets"])
 app.include_router(api._measurements_router, prefix="/api/v1")
+app.include_router(api._verify_router, prefix="/api/v1")
 
 # Static webapp mount — read-only operator dashboard at /ui (Next.js export
 # from webapp/, built via `npm run build` in that directory).

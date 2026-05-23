@@ -38,6 +38,7 @@ from promptpotter.presentation.cli.commands import (
     cmd_reset,
     cmd_resume,
     cmd_sweep,
+    cmd_verify,
 )
 from promptpotter.presentation.cli.commands._shared import _DIVERGENCE_HINT, set_verbose
 from promptpotter.presentation.cli.parsers import build_parser
@@ -51,6 +52,7 @@ COMMANDS = {
     "compare": cmd_compare,
     "sweep": cmd_sweep,
     "reset": cmd_reset,
+    "verify": cmd_verify,
 }
 
 

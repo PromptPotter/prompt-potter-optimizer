@@ -12,5 +12,6 @@ from promptpotter.presentation.cli.commands.new import cmd_new
 from promptpotter.presentation.cli.commands.reset import cmd_reset
 from promptpotter.presentation.cli.commands.resume import cmd_resume
 from promptpotter.presentation.cli.commands.sweep import cmd_sweep
+from promptpotter.presentation.cli.commands.verify import cmd_verify
 
-__all__ = ["cmd_compare", "cmd_new", "cmd_reset", "cmd_resume", "cmd_sweep"]
+__all__ = ["cmd_compare", "cmd_new", "cmd_reset", "cmd_resume", "cmd_sweep", "cmd_verify"]

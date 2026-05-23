@@ -8,6 +8,7 @@ import type {
   CampaignListResponse,
   CyclesResponse,
   DatasetPreview,
+  DiagnosticRunListResponse,
   FileResponse,
   FilesListing,
   HardSamplesScope,
@@ -158,6 +159,16 @@ export function fetchLeverage(
   signal?: AbortSignal,
 ): Promise<LeverageResponse> {
   return jget<LeverageResponse>(`${API}/measurements/leverage?limit=${limit}`, signal);
+}
+
+// Workspace-scope diagnostic-run records — sidecars written by `verify` CLI.
+// `dataset` filters to one dataset's records; omit for everything on disk.
+export function fetchDiagnosticRuns(
+  dataset?: string | null,
+  signal?: AbortSignal,
+): Promise<DiagnosticRunListResponse> {
+  const qs = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
+  return jget<DiagnosticRunListResponse>(`${API}/workspace/diagnostic-runs${qs}`, signal);
 }
 
 // Cycle detail — reads index.json via the generic cycle-file endpoint (the

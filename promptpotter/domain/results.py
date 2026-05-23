@@ -15,6 +15,7 @@ __all__ = [
     "CandidateProposal",
     "CandidateScore",
     "CycleResult",
+    "DiagnosticRunRecord",
     "PayloadOutcome",
     "RoundMetadata",
     "RoundOrigin",
@@ -285,6 +286,37 @@ class CycleResult(BaseModel):
     cycle_id: str | None = None
     session_id: str | None = None
     resumed_from_round: int = 1
+
+
+class DiagnosticRunRecord(BaseModel):
+    """One on-demand verification of a campaign candidate against more samples.
+
+    Written by ``cmd_verify`` after a successful ``score_search_point`` pass:
+    the per-sample measurements land in the cross-cycle ``archive/measurements/``
+    (the existing scoring gateway handles that), and this record captures the
+    workspace-scope verdict — what was verified, on how many samples, and
+    whether the source-campaign composite holds when the same config is scored
+    against everything the archive knows about. The webapp's Verify tab is the
+    sole consumer.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    ts: str
+    dataset: str
+    source_campaign: str
+    source_cycle: str
+    source_label: str
+    source_candidate_id: str
+    config_hash: str
+    samples_requested: int
+    samples_added: int
+    workspace_n: int
+    workspace_accuracy: float
+    workspace_composite: float
+    source_campaign_accuracy: float
+    source_campaign_composite: float
+    source_campaign_n: int
 
 
 class PayloadOutcome(BaseModel):

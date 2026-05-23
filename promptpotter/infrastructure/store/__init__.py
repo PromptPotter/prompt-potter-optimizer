@@ -18,6 +18,7 @@ from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.backend_store import BackendStore
 from promptpotter.infrastructure.store.base import validate_path_component, write_json
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
+from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.paths import (
     campaign_root_dir_for,
@@ -113,6 +114,7 @@ def walk_cycle_lineage(tenant_root: Path, campaign_id: str, cycle_id: str) -> li
 __all__ = [
     "BackendStore",
     "CampaignStore",
+    "DiagnosticRunStore",
     "MeasurementArchive",
     "OptimizerCallCache",
     "SessionStore",

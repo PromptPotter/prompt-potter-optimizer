@@ -241,6 +241,32 @@ export interface LeverageResponse {
   per_query: PerQueryRow[];
 }
 
+// Workspace-scope diagnostic-run records — one row per `verify` CLI invocation.
+// Sidecar JSON lives at archive/diagnostic_runs/; feeds the Verify tab.
+
+export interface DiagnosticRunRecord {
+  ts: string;
+  dataset: string;
+  source_campaign: string;
+  source_cycle: string;
+  source_label: string;
+  source_candidate_id: string;
+  config_hash: string;
+  samples_requested: number;
+  samples_added: number;
+  workspace_n: number;
+  workspace_accuracy: number;
+  workspace_composite: number;
+  source_campaign_accuracy: number;
+  source_campaign_composite: number;
+  source_campaign_n: number;
+}
+
+export interface DiagnosticRunListResponse {
+  n: number;
+  runs: DiagnosticRunRecord[];
+}
+
 // Cycle detail — feeds the compare-campaigns view, read from index.json.
 
 export interface CampaignRoundSummary {

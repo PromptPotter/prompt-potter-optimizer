@@ -42,6 +42,7 @@ import { SharedInspector } from "./SharedInspector";
 import { FilesPane } from "@/components/tree/FilesPane";
 import { LeveragePanel } from "@/components/leverage/LeveragePanel";
 import { ComparePane } from "@/components/compare/ComparePane";
+import { VerifyPane } from "@/components/verify/VerifyPane";
 
 import type { PipelineDoc, PipelineView } from "@/components/workflow/types";
 
@@ -363,8 +364,10 @@ function DashboardPaneInner() {
           <FilesPane campaignId={campaignId} cycleId={cycleId} />
         ) : tab === "compare" ? (
           <ComparePane themeKey={themeKey} />
-        ) : (
+        ) : tab === "leverage" ? (
           <LeveragePanel />
+        ) : (
+          <VerifyPane />
         )}
         <ConsolePane campaignId={campaignId} cycleId={cycleId} />
       </main>

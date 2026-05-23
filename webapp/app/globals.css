@@ -1240,6 +1240,37 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .leverage-empty h2{margin:0 0 8px;font-size:16px;font-weight:600;color:var(--color-text-primary)}
 .leverage-empty p{margin:0;max-width:520px;line-height:1.55}
 
+/* Verify panel — workspace-scope diagnostic-run table.
+   Mirrors .leverage-* styles. The two-segment trend bar is the panel's
+   distinguishing visual: grey strip = source-campaign composite, red
+   overlay = workspace composite (held = green-tinted, dropped = red). */
+.verify-pane{padding:24px 32px;overflow-y:auto;flex:1;min-height:0}
+.verify-header{margin-bottom:18px}
+.verify-header h2{margin:0 0 6px;font-size:18px;font-weight:600;color:var(--color-text-primary)}
+.verify-subtitle{margin:0 0 8px;font-size:13px;color:var(--color-text-secondary);max-width:680px;line-height:1.55}
+.verify-cli{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:6px;padding:8px 12px;margin:8px 0;font-family:var(--font-mono,monospace);font-size:12px;color:var(--color-text-primary)}
+.verify-table-wrap{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;overflow:hidden}
+.verify-table{width:100%;border-collapse:collapse;font-size:13px}
+.verify-table thead{background:var(--color-background-secondary)}
+.verify-table th{text-align:left;padding:8px 12px;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary);border-bottom:0.5px solid var(--color-border-tertiary)}
+.verify-table tbody tr{border-bottom:0.5px solid var(--color-border-tertiary)}
+.verify-table tbody tr:last-child{border-bottom:0}
+.verify-table tbody tr:hover{background:var(--color-background-hover)}
+.verify-table td{padding:8px 12px;color:var(--color-text-secondary);vertical-align:middle}
+.verify-source{font-family:var(--font-mono,monospace);font-size:12px;color:var(--color-text-primary);max-width:280px;word-break:break-all}
+.verify-source code{font-size:11px;color:var(--color-text-tertiary)}
+.verify-source strong{color:var(--color-accent);font-weight:600;margin-left:4px}
+.verify-sep{color:var(--color-text-tertiary)}
+.verify-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.verify-num strong{color:var(--color-accent);font-weight:600}
+.verify-add{font-size:11px;color:var(--color-text-tertiary);margin-left:4px}
+.verify-when{color:var(--color-text-tertiary);white-space:nowrap;width:88px;font-size:12px}
+.verify-bar-cell{width:160px;padding:6px 12px !important}
+.verify-bar{position:relative;height:14px;width:140px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:3px;overflow:hidden}
+.verify-bar-source{position:absolute;top:0;left:0;bottom:0;background:var(--color-text-tertiary);opacity:0.4}
+.verify-bar-workspace{position:absolute;top:0;left:0;bottom:0;background:#e74c3c;opacity:0.85}
+.verify-bar-workspace.held{background:#27ae60}
+
 /* Honor user vestibular preference. The wizard mascot, sparkles,
    pulse-active border, and chevron rotations all stop being motion under
    this. transition: 0.01ms keeps state changes instant rather than abrupt. */

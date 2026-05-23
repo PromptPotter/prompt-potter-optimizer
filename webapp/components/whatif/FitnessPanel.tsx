@@ -19,6 +19,9 @@ import {
   type HistoricalRound,
 } from "./fitness-bars";
 import { WhatIfGrid } from "./WhatIfGrid";
+import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
+import { useFetch } from "@/lib/useFetch";
+import { useWorkspace } from "@/lib/workspace";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -76,6 +79,29 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
     }
     return out;
   }, [historyDocs]);
+
+  // ── 2b. Diagnostic-run records — one per `python -m promptpotter verify`
+  // invocation, persisted at archive/diagnostic_runs/*.json. Fetched per
+  // cycle switch; not polled (the panel never auto-refreshes verify state,
+  // re-run verify + reload for a fresh red bar). Filtered to runs whose
+  // (source_campaign, source_cycle) match the unit currently in view, then
+  // keyed by source_label so the bars-assembly memo can attach diag data
+  // to the matching candidate.
+  const { campaignId } = useWorkspace();
+  const { data: diagRunsResp } = useFetch(
+    (s) => fetchDiagnosticRuns(undefined, s),
+    [campaignId, cycleId],
+  );
+  const diagByLabel = useMemo(() => {
+    const m = new Map<string, DiagnosticRunRecord>();
+    if (!campaignId || !cycleId) return m;
+    for (const r of diagRunsResp?.runs ?? []) {
+      if (r.source_campaign !== campaignId || r.source_cycle !== cycleId) continue;
+      const prior = m.get(r.source_label);
+      if (!prior || r.ts > prior.ts) m.set(r.source_label, r);
+    }
+    return m;
+  }, [diagRunsResp, campaignId, cycleId]);
 
   // ── 3. The applicable evaluator set unions every candidate we plot. The
   // origin row has no evaluators; in-flight stats and historical
@@ -249,9 +275,11 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
         const ev = c.evaluators ?? {};
         const acc = typeof c.accuracy === "number" ? c.accuracy : null;
         const comp = typeof c.composite_fitness === "number" ? c.composite_fitness : null;
+        const label = c.label || candidateLabel(roundNum, i);
+        const diag = diagByLabel.get(label);
         out.push({
           key: `R${roundNum}.${i}`,
-          label: c.label || candidateLabel(roundNum, i),
+          label,
           accuracy: acc,
           composite: comp,
           whatif: useComposite && comp != null ? comp : correctedFromEvaluators(ev, selected, rows),
@@ -261,6 +289,13 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
           candidateId: c.candidate_id ?? `r${roundNum}_${i}`,
           round: roundNum,
           isWinner: !!c.is_winner,
+          diag: diag
+            ? {
+                accuracy: diag.workspace_accuracy,
+                workspaceN: diag.workspace_n,
+                samplesAdded: diag.samples_added,
+              }
+            : undefined,
         });
       });
     }
@@ -301,7 +336,7 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
     }
 
     return out;
-  }, [dash, history, inflightCandidates, selected, rows, currentRound, inActive]);
+  }, [dash, history, inflightCandidates, selected, rows, currentRound, inActive, diagByLabel]);
 
   return (
     <CardFrame
