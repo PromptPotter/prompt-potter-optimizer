@@ -30,6 +30,10 @@ export type ColId =
   | "measurements"
   | "hit_rate"
   | "pick_score"
+  | "p_hat"
+  | "delta"
+  | "delta_se"
+  | "n_obs"
   | "task"
   | "query"
   | "ground_truth";
@@ -52,6 +56,15 @@ export const COLUMNS: ColDef[] = [
   { id: "measurements",  label: "History",    align: "left",   numeric: true  },
   { id: "hit_rate",      label: "Hit rate",   align: "right",  numeric: true  },
   { id: "pick_score",    label: "Info gain",  align: "right",  numeric: true  },
+  // Diagnostic columns — what feeds the Info gain. Promoted from the
+  // Info-gain tooltip so the operator can read the picker's inputs
+  // row-by-row without hovering. p_hat is the smoking gun for "always-miss
+  // sample ranking high": EB-shrunk δ_s + tight se(δ_s) leave p_hat near
+  // 0.5 even when hit rate is 0/N.
+  { id: "p_hat",         label: "p̂",          align: "right",  numeric: true  },
+  { id: "delta",         label: "δ",          align: "right",  numeric: true  },
+  { id: "delta_se",      label: "se(δ)",      align: "right",  numeric: true  },
+  { id: "n_obs",         label: "n",          align: "right",  numeric: true  },
   { id: "task",          label: "Task",       align: "left",   numeric: false },
   { id: "query",         label: "Input",      align: "left",   numeric: false },
   { id: "ground_truth",  label: "Output",     align: "left",   numeric: false },
@@ -135,8 +148,9 @@ export function cellFor(
       // Info gain — the picker's expected decision-information-gain from one
       // measurement of this sample. High = contested (the measurement tells
       // good prompts from bad); near-zero = always-hit or always-miss
-      // (predictable, uninformative). The hover tooltip carries the Rasch
-      // breakdown so the order can be debugged row by row.
+      // (predictable, uninformative). The hover tooltip + the δ / se(δ) /
+      // p̂ / n diagnostic columns explain why a given row ranks where it
+      // ranks.
       if (item.pick_score === null) {
         return { text: "—", raw: null, title: "No measurements yet — info gain undefined." };
       }
@@ -144,15 +158,78 @@ export function cellFor(
         item.delta !== null && item.delta_se !== null
           ? `δ ${item.delta >= 0 ? "+" : ""}${item.delta.toFixed(2)} ± ${item.delta_se.toFixed(2)}  (Rasch difficulty ± uncertainty)`
           : "δ —  (unmeasured)";
+      const pLine =
+        item.p_hat !== null
+          ? `p̂(hit | seed)=${(item.p_hat * 100).toFixed(0)}%  (marginal hit prob the picker reads)`
+          : "p̂ —  (unmeasured)";
       return {
         text: item.pick_score.toFixed(4),
         raw: item.pick_score,
         title:
           `Info gain ${item.pick_score.toFixed(6)} nats\n` +
           `${dLine}\n` +
+          `${pLine}\n` +
           `${item.n_obs} tries\n` +
           `High = contested, the measurement separates good prompts from bad. ` +
           `Near-zero = always-hit or always-miss — predictable, uninformative.`,
+      };
+    }
+    case "p_hat": {
+      // Marginal hit probability at the seed's ability — what
+      // decision-IG actually reads. 0.5 = contested; 0 or 1 = predictable.
+      // The picker rewards contested + tight se(δ) — a 0/17 row whose
+      // EB-shrunk δ keeps p̂ near 0.5 can outrank an honestly contested 1/2
+      // row, which is the explanation operators want when reading the sort.
+      if (item.p_hat === null) return { text: "—", raw: null };
+      return {
+        text: `${(item.p_hat * 100).toFixed(0)}%`,
+        raw: item.p_hat,
+        title:
+          `p̂(hit | seed) = ${(item.p_hat * 100).toFixed(1)}%\n` +
+          `σ((θ_seed − δ_s) / √(1 + π·(σ_θ² + se(δ)²)/8))\n` +
+          `0.5 → contested at the seed's ability (high info gain potential).\n` +
+          `0 or 1 → predictable; even a hit/miss tells the picker little.`,
+      };
+    }
+    case "delta": {
+      // Rasch difficulty δ_s — higher = harder for an average candidate.
+      // EB-shrunk toward the population mean μ_δ, so extreme samples don't
+      // peg infinity even at 0/N or N/N.
+      if (item.delta === null) return { text: "—", raw: null };
+      const sign = item.delta >= 0 ? "+" : "";
+      return {
+        text: `${sign}${item.delta.toFixed(2)}`,
+        raw: item.delta,
+        title:
+          `Rasch difficulty δ_s = ${item.delta.toFixed(4)}\n` +
+          `Empirical-Bayes shrinks δ toward μ_δ, so 0/N rows don't go to +∞.`,
+      };
+    }
+    case "delta_se": {
+      // SE of δ_s — how confidently the Rasch model places this sample's
+      // difficulty. Small even at low n on boundary samples (prior precision
+      // dominates observed Fisher when p(1−p) → 0); that's how a 0/17 row
+      // ends up with tight se(δ) and the picker treating it as a
+      // high-confidence, near-boundary measurement.
+      if (item.delta_se === null) return { text: "—", raw: null };
+      return {
+        text: item.delta_se.toFixed(2),
+        raw: item.delta_se,
+        title:
+          `se(δ_s) = ${item.delta_se.toFixed(4)}\n` +
+          `Small se(δ) on a low-hit-rate row = EB tightness from prior precision, ` +
+          `not data confidence in extremity. Picker reads it as "well-characterized" ` +
+          `and rewards it.`,
+      };
+    }
+    case "n_obs": {
+      // Measurements feeding the Rasch fit. Disambiguates the EB
+      // tight-se(δ) artefact — a tight se(δ) at n=2 is the prior talking,
+      // not the data.
+      return {
+        text: String(item.n_obs),
+        raw: item.n_obs,
+        title: `${item.n_obs} measurements feeding the Rasch fit for this sample.`,
       };
     }
     case "task": {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any, Literal
 
@@ -144,6 +145,18 @@ class DatasetItem(BaseModel):
             "None when the sample has no measurement yet."
         ),
     )
+    p_hat: float | None = Field(
+        default=None,
+        description=(
+            "Marginal hit probability the seed-centred decision-IG reads on "
+            "this sample: ``sigmoid((theta_seed - delta_s) / "
+            "sqrt(1 + pi * (sigma_theta**2 + se_delta_s**2) / 8))``. Close to "
+            "0.5 = contested at the seed's ability; close to 0 or 1 = "
+            "predictable. Explains why a low-hit-rate sample can still rank "
+            "high on Info gain (tight ``se_delta_s`` from EB on a boundary "
+            "sample). None when the sample has no measurement yet."
+        ),
+    )
 
 
 class DatasetPreviewResponse(BaseModel):
@@ -255,6 +268,38 @@ async def get_dataset_preview(
     # cross-cycle archive artifact.
     pick_score_block = artifact.get("pick_score", {}).get("per_sample", {})
     pick_score_map: dict[int, float] = {int(k): float(v) for k, v in pick_score_block.items()}
+
+    # Marginal hit probability ``p_hat`` per sample — what the seed-centred
+    # decision-IG actually reads. ``σ((θ_seed − δ_s) / scale)`` where
+    # ``scale = √(1 + π·(σ_θ² + se_δ_s²) / 8)``. Mirrors the math in
+    # ``application/intelligence/adaptive_picker._sigmoid`` /
+    # ``decision_information_gain`` so the column is the same number the
+    # picker sees. None when the sample's δ_s is undefined.
+    sigma_theta = float(rasch.get("sigma_theta", 0.0))
+    theta_map: dict[str, float] = {str(k): float(v) for k, v in rasch.get("theta", {}).items()}
+    candidate_order_raw = artifact.get("candidate_order") or []
+    seed_theta = (
+        theta_map.get(str(candidate_order_raw[0]), 0.0)
+        if candidate_order_raw and theta_map
+        else 0.0
+    )
+    probit_scale = math.pi / 8.0
+    var_c = sigma_theta**2  # brand-new candidate's ability prior variance
+
+    def _p_hat(sid: int) -> float | None:
+        if sid not in delta_map:
+            return None
+        delta_s = delta_map[sid]
+        se_delta_s = delta_se_map.get(sid, 0.0)
+        v = var_c + se_delta_s * se_delta_s
+        scale = math.sqrt(1.0 + probit_scale * v)
+        x = (seed_theta - delta_s) / scale
+        # Numerically stable sigmoid; mirrors ``_sigmoid`` in adaptive_picker.
+        if x >= 0:
+            return 1.0 / (1.0 + math.exp(-x))
+        ex = math.exp(x)
+        return ex / (1.0 + ex)
+
     measured = {sid for sid in delta_map if sid in sample_lookup}
 
     # Hardest first — desc δ_s, ascending sample_id as tiebreak. Unmeasured
@@ -272,6 +317,7 @@ async def get_dataset_preview(
             n_obs=n_obs_map.get(sid, 0),
             delta=delta_map.get(sid),
             delta_se=delta_se_map.get(sid),
+            p_hat=_p_hat(sid),
             pick_score=pick_score_map.get(sid),
         )
         for sid in trimmed_order[:limit]

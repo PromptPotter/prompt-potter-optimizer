@@ -226,22 +226,56 @@ export function HardSamplesTable({
   // "measured-in-scope" signal — `pick_score !== null` is non-null on
   // prior-only rows too, so it overcounts under campaign scope.
   const liveSortActive = persisted.syncLive;
-  const sortedItems = useMemo(() => {
+  // Stable content signature of the sort-affecting fields. ``pick_score``
+  // only refreshes when the hard-samples artifact regenerates (round
+  // boundary). When this signature is constant across polls, the sorted-id
+  // memo below short-circuits to the prior reference and the table doesn't
+  // flash.
+  const liveSortSig = useMemo(() => {
+    if (!liveSortActive) return "";
+    return items
+      .map((it) => {
+        const m = (perSample?.get(it.sample_id)?.length ?? 0) > 0 ? "m" : "u";
+        const p = it.pick_score === null ? "n" : it.pick_score.toFixed(6);
+        return `${it.sample_id}:${m}:${p}`;
+      })
+      .join("|");
+  }, [items, perSample, liveSortActive]);
+  // Manual-sort signature for when Auto-sort is off. Keys on the picked
+  // column's raw value so a poll that only moved an unrelated field doesn't
+  // shuffle the visible sort.
+  const manualSortSig = useMemo(() => {
+    if (liveSortActive || !sortBy) return "";
+    return items
+      .map((it) => {
+        const v = cellFor(sortBy.col, it, perSample?.get(it.sample_id) ?? []).raw;
+        const k = v === null || v === undefined ? "n" : String(v);
+        return `${it.sample_id}:${k}`;
+      })
+      .join("|");
+  }, [items, perSample, sortBy, liveSortActive]);
+  // Sort the IDs, not the items. ID order is the actual stability surface;
+  // the render loop projects items by ID downstream so cell values always
+  // reflect the latest poll. Dependencies are the content signatures, so
+  // unchanged-content polls return the prior reference.
+  const sortedIds = useMemo<number[]>(() => {
     const measuredIn = (it: DatasetItem): boolean =>
       (perSample?.get(it.sample_id)?.length ?? 0) > 0;
     if (liveSortActive) {
-      return [...items].sort((a, b) => {
-        const ma = measuredIn(a);
-        const mb = measuredIn(b);
-        if (ma !== mb) return ma ? -1 : 1;
-        if (!ma) return a.sample_id - b.sample_id;
-        const pa = a.pick_score ?? Number.NEGATIVE_INFINITY;
-        const pb = b.pick_score ?? Number.NEGATIVE_INFINITY;
-        if (pa !== pb) return pb - pa;
-        return a.sample_id - b.sample_id;
-      });
+      return [...items]
+        .sort((a, b) => {
+          const ma = measuredIn(a);
+          const mb = measuredIn(b);
+          if (ma !== mb) return ma ? -1 : 1;
+          if (!ma) return a.sample_id - b.sample_id;
+          const pa = a.pick_score ?? Number.NEGATIVE_INFINITY;
+          const pb = b.pick_score ?? Number.NEGATIVE_INFINITY;
+          if (pa !== pb) return pb - pa;
+          return a.sample_id - b.sample_id;
+        })
+        .map((it) => it.sample_id);
     }
-    if (!sortBy) return items;
+    if (!sortBy) return items.map((it) => it.sample_id);
     const { col, dir } = sortBy;
     const sign = dir === "asc" ? 1 : -1;
     const keyOf = (it: DatasetItem): number | string => {
@@ -250,13 +284,32 @@ export function HardSamplesTable({
       if (typeof v === "boolean") return v ? 1 : 0;
       return v;
     };
-    return [...items].sort((a, b) => {
-      const ka = keyOf(a);
-      const kb = keyOf(b);
-      if (typeof ka === "number" && typeof kb === "number") return (ka - kb) * sign;
-      return String(ka).localeCompare(String(kb)) * sign;
-    });
-  }, [items, sortBy, perSample, liveSortActive]);
+    return [...items]
+      .sort((a, b) => {
+        const ka = keyOf(a);
+        const kb = keyOf(b);
+        if (typeof ka === "number" && typeof kb === "number") return (ka - kb) * sign;
+        return String(ka).localeCompare(String(kb)) * sign;
+      })
+      .map((it) => it.sample_id);
+    // items / perSample / sortBy are captured into the closure via the
+    // signatures above; redeclaring them as deps would re-run on every
+    // poll and defeat the damping.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveSortActive, sortBy, liveSortSig, manualSortSig]);
+  // Project items in the stable order. ``items`` may re-identify each
+  // poll, so this fresh map keeps cell values current; row position
+  // tracks ``sortedIds`` and stays stable.
+  const sortedItems = useMemo(() => {
+    const byId = new Map<number, DatasetItem>();
+    for (const it of items) byId.set(it.sample_id, it);
+    const out: DatasetItem[] = [];
+    for (const sid of sortedIds) {
+      const it = byId.get(sid);
+      if (it) out.push(it);
+    }
+    return out;
+  }, [items, sortedIds]);
 
   const widthFor = (col: ColDef): number => {
     if (persisted.folded.includes(col.id)) return FOLDED_WIDTH;

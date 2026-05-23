@@ -52,9 +52,16 @@ export interface DatasetItem {
   // null when the sample has no measurement yet.
   pick_score: number | null;
   // Rasch difficulty δ_s and its standard error — fed to the Info gain
-  // column's debug tooltip. null when the sample has no measurement yet.
+  // column's debug tooltip and the δ / se(δ) diagnostic columns. null when
+  // the sample has no measurement yet.
   delta: number | null;
   delta_se: number | null;
+  // Marginal hit probability ``σ((θ_seed − δ_s) / scale)`` — what the
+  // seed-centred decision-IG actually reads. 0.5 = contested at the seed's
+  // ability; 0 or 1 = predictable. Explains why a low-hit-rate row can rank
+  // high on Info gain (tight ``se_δ_s`` from EB shrinkage on boundary data).
+  // null when the sample has no measurement yet.
+  p_hat: number | null;
 }
 
 export interface DatasetPreview {
