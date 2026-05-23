@@ -210,23 +210,23 @@ class RunCallbacks:
         round_num: int,
         ci: int,
         ct: int,
-        backfilled: dict[str, list[str]],
+        sample_id: int,
+        prior_ids: list[str],
     ) -> None:
-        """Paired-PoBB leader backfill — per-prior list of newly-measured samples.
+        """Paired-PoBB priors caught up on the just-measured sample.
 
-        Fired after ``PoBBCheck.backfill_priors`` resolves, only when at
-        least one prior gained new measurements. Empty/no-op backfills
-        (all priors already cover the candidate's sample order) are NOT
-        emitted — the absence of an event means the cache covered it.
-        Payload shape: ``{prior_id: [sample_id, ...]}``.
+        Fired by the candidate loop's per-sample backfill closure when at
+        least one prior gained a measurement on ``sample_id``. Sample-hits
+        where every prior was already cached are NOT emitted — absence
+        means the cache covered it.
         """
-        if not backfilled:
+        if not prior_ids:
             return
         self._snapshot(
             "pobb_backfill",
             ci,
             ct,
-            {"backfilled": {str(k): [str(s) for s in v] for k, v in backfilled.items()}},
+            {"sample_id": int(sample_id), "prior_ids": [str(p) for p in prior_ids]},
             round_num=round_num,
         )
 

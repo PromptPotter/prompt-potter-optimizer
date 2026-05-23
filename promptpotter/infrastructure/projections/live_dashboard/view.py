@@ -417,10 +417,8 @@ class LiveDashboardView(DerivedView):
                 int(record.round or 0),
                 ci,
                 ct,
-                {
-                    str(k): [str(s) for s in (v or [])]
-                    for k, v in (payload.get("backfilled") or {}).items()
-                },
+                int(payload.get("sample_id") or 0),
+                [str(p) for p in (payload.get("prior_ids") or [])],
             )
             self._persist()
 

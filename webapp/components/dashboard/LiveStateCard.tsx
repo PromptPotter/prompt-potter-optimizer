@@ -119,18 +119,17 @@ interface BackfillEntry {
   round?: number;
   candidate_idx?: number;
   candidate_total?: number;
-  backfilled?: Record<string, string[]>;
-  n_priors?: number;
-  n_measurements?: number;
+  sample_id?: number;
+  prior_ids?: string[];
 }
 
 function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
-  // ``backfill_log`` is the paired-PoBB telemetry stream: each entry names
-  // the round/candidate the backfill ran ahead of and which prior gained
-  // measurements on which samples. Absence of entries = every prior was
-  // cached on this round's hard samples (the cheap path); presence means
-  // the leader was just measured on samples it had never seen, so the
-  // PoBB comparison is genuinely paired going forward.
+  // ``backfill_log`` is the paired-PoBB telemetry stream: one entry per
+  // sample where at least one prior gained a fresh measurement (cache-
+  // covered samples emit nothing). Each entry names the round/candidate
+  // the backfill fired during, the sample id, and which priors got
+  // caught up on that sample — so the operator can see paired comparison
+  // becoming valid sample-by-sample.
   // See docs/concepts/paired-sample-pobb.md.
   const log = (dash as { backfill_log?: BackfillEntry[] } | null)?.backfill_log;
   if (!log || log.length === 0) return null;
@@ -144,19 +143,18 @@ function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
           const round = e.round ?? "?";
           const cidx = e.candidate_idx ?? 0;
           const ctot = e.candidate_total ?? 0;
-          const nm = e.n_measurements ?? 0;
-          const priors = e.backfilled ?? {};
-          const summary = Object.entries(priors)
-            .map(([pid, sids]) => `${pid}+${sids.length}`)
-            .join("  ");
+          const sid = e.sample_id ?? 0;
+          const priors = e.prior_ids ?? [];
           return (
             <div key={i} style={{ marginBottom: 2 }}>
               <span style={{ color: "var(--color-text-tertiary)" }}>
                 R{round} C{cidx + 1}/{ctot}
               </span>{" "}
               <span style={{ color: "var(--color-accent, #2563eb)" }}>↻</span>{" "}
-              {nm} new {nm === 1 ? "measurement" : "measurements"}
-              {summary && <span style={{ color: "var(--color-text-tertiary)" }}> — {summary}</span>}
+              #{sid}
+              {priors.length > 0 && (
+                <span style={{ color: "var(--color-text-tertiary)" }}> — {priors.join(", ")}</span>
+              )}
             </div>
           );
         })}

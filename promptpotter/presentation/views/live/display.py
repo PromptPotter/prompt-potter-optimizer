@@ -294,9 +294,9 @@ class LiveDisplay(DerivedView):
             ]
             self.on_sample_order_preview(preview, int(payload.get("n_priors") or 0))
         elif ev == "pobb_backfill":
-            backfilled = payload.get("backfilled") or {}
             self.on_pobb_backfill(
-                {str(k): [str(s) for s in (v or [])] for k, v in backfilled.items()}
+                int(payload.get("sample_id") or 0),
+                [str(p) for p in (payload.get("prior_ids") or [])],
             )
 
     # --- Public callback API ------------------------------------------
@@ -456,22 +456,18 @@ class LiveDisplay(DerivedView):
         picks = ", ".join(f"#{sid:03d} (info={val:.3f})" for sid, val in preview)
         self._write(f"  {DIM}next samples:{RESET} {picks}  ({n_priors} candidate prior{prior_s})")
 
-    def on_pobb_backfill(self, backfilled: dict[str, list[str]]) -> None:
-        """Print which priors got fresh leader-on-hard-sample measurements.
+    def on_pobb_backfill(self, sample_id: int, prior_ids: list[str]) -> None:
+        """Print which priors got caught up on the just-measured sample.
 
-        Fires only when backfill actually measured something (the
-        ``RunCallbacks`` constructor suppresses no-op events). Empty
-        priors-with-zero-additions are filtered upstream so a quiet
-        line here means every prior was already cached on this
-        candidate's sample set.
+        Fires per sample, only when at least one prior gained a
+        measurement (cache-covered priors are filtered upstream by
+        ``RunCallbacks.on_pobb_backfill``). A quiet line for a sample
+        means every prior was already cached for it.
         """
-        if not backfilled:
+        if not prior_ids:
             return
-        parts = []
-        for cid, sids in backfilled.items():
-            tag = cid if cid in ("origin",) or cid.endswith("_winner") else cid[:6]
-            parts.append(f"{tag} +{len(sids)} ({','.join('#' + s for s in sids[:5])})")
-        self._write(f"  {DIM}↻ pobb backfill:{RESET} " + "  ".join(parts))
+        tags = [cid if cid == "origin" or cid.endswith("_winner") else cid[:6] for cid in prior_ids]
+        self._write(f"  {DIM}↻ pobb backfill #{sample_id}:{RESET} " + ", ".join(tags))
 
     def _render_p_best_line(self) -> str | None:
         """Top-5 P(best) snapshot with cross-round arrow glyphs (▲/▼).

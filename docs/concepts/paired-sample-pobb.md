@@ -79,25 +79,30 @@ prior_sps:        dict[str, JobSearchPoint]      # cid → the SP that produced 
 builds the sample-keyed map, and remembers the prior's `JobSearchPoint`
 so its measurements can be extended later.
 
-### 2. Backfill before evaluation
+### 2. Reactive per-sample backfill
 
-`PoBBCheck` accepts a `backfill_fn` at construction. Inside the per-round
-loop in `score_population`, right before each candidate's `score_search_point`
-call:
+`PoBBCheck` accepts a `backfill_fn` at construction. The candidate loop
+(`score_one_candidate`) builds an async closure and hands it to the
+query loop via the `on_sample_pre_check` hook; the query loop fires it
+after each sample lands, before degradation checks read prior coverage:
 
 ```python
-samples_by_id = {str(s.id): s for s in dataset}
-await elim_check.backfill_priors([s.id for s in dataset], samples_by_id)
+async def _catch_priors_up(sample: Sample) -> None:
+    fresh = await elim_check.backfill_for_sample(sample)
+    if fresh:
+        callbacks.on_pobb_backfill(round_num, idx, n_total, sample.id, fresh)
 ```
 
-The candidate's budget under the adaptive picker is the full dataset
-(the picker chooses *which* sample to measure next, but the candidate
-runs until PoBB eliminates or the dataset is exhausted), so backfill
-covers the whole dataset rather than a static prefix. `backfill_priors`
-walks every prior in the pool, finds the sample IDs the prior hasn't
-been measured on yet, and calls `backfill_fn(prior_sp, missing_samples)`.
-The backfill function is a thin closure over `score_search_point` so
-the new measurements:
+`backfill_for_sample` is idempotent: priors already covering `sample.id`
+are skipped, and the method returns the list of priors that actually
+gained a measurement (so the telemetry event suppresses itself when
+every prior was cached for this sample). Priors get caught up
+sample-by-sample as the candidate measures them — paired comparison
+always sees up-to-date priors without paying for a full-dataset upfront
+wall. Candidates that abort early (PoBB-eliminated mid-run) never pay
+for prior coverage on samples they won't reach. The backfill function
+itself is a thin closure over `score_search_point` so the new
+measurements:
 
 * Hit the per-sample archive cache when those `(prior_sp, sample)`
   pairs already exist (cross-cycle, cross-fork — the MeasurementArchive
@@ -129,12 +134,13 @@ Walk through the AIME example with paired-PoBB enabled:
   sample-keyed history is `{"0": 1, "1": 1, ..., "7": 1}`.
 * Round 2 starts. Candidate C2.0's sample order is `{9, 12, 13, 6,
   14, 8}` (hard-first).
-* `backfill_priors` looks at `3b6553…`'s coverage, finds it missing
-  `{8, 9, 12, 13, 14}`. Calls `backfill_fn(3b6553…_sp, [s8, s9, s12,
-  s13, s14])`. These measurements run fresh (or hit cache from a
-  sibling cycle) and almost certainly include several misses — the
-  same prompt family that produces 50% on the full set will miss
-  most of these.
+* As C2.0 measures each of `{9, 12, 13, 6, 14, 8}`, the query loop
+  fires `backfill_for_sample(sample)` for that sample. The hook walks
+  every prior, finds `3b6553…` missing this sample id, and calls
+  `backfill_fn(3b6553…_sp, [sample])`. Sample 6 is cached; the other
+  five run fresh (or hit cache from a sibling cycle) and almost
+  certainly include several misses — the same prompt family that
+  produces 50% on the full set will miss most of these.
 * `3b6553…`'s history is now `{"0": 1, ..., "7": 1, "8": 0, "9": 0,
   "12": 0, "13": 1, "14": 0}` — actual coverage of the round's
   hard samples.
@@ -230,11 +236,11 @@ priors will surface as divergence via the candidate side).
 
 | File | Role |
 |---|---|
-| `promptpotter/application/optimization/pobb/elimination/checks.py::PoBBCheck` | Sample-keyed priors, `backfill_priors`, paired `check()`, `snapshot_priors`, `set_sample_universe` (budget for the dominance gate) |
+| `promptpotter/application/optimization/pobb/elimination/checks.py::PoBBCheck` | Sample-keyed priors, `backfill_for_sample`, paired `check()`, `snapshot_priors`, `set_sample_universe` (budget for the dominance gate) |
 | `promptpotter/application/intelligence/adaptive_picker.py` | Online picker: `update_theta_posterior`, `decision_information_gain`, `model_information_gain`, `pick_value`, `next_sample`, `expected_order` |
 | `promptpotter/application/optimization/l1/score.py::score_population` | Builds the `backfill_fn` closure + the `_next_sample(scored_outcomes)` closure; injects both into PoBB / the query loop |
-| `promptpotter/application/optimization/l1/score.py::score_one_candidate` | Calls `await elim_check.backfill_priors([s.id for s in dataset], samples_by_id)` over the full dataset budget before each candidate evaluates |
-| `promptpotter/application/scoring/search_point_scorer.py::_run_query_loop` | Per-step call to `next_sample(scored_outcomes)` — no static iteration order |
+| `promptpotter/application/optimization/l1/score/candidate.py::score_one_candidate` | Builds `_backfill_for_sample(sample_id)` closure and passes it as `on_sample_pre_check` — reactive per-sample backfill, no upfront wall |
+| `promptpotter/application/scoring/query_loop.py::run_query_loop` | Per-step `next_sample(scored_outcomes)` + fires `on_sample_pre_check(sample.id)` after each sample lands, before degradation checks read prior coverage |
 | `promptpotter/application/optimization/l1/population.py::pobb_decision_data` | Embeds `candidate_sample_ids` + `prior_histories` into the decision record |
 | `promptpotter/application/optimization/resume_and_fork/replayers.py::_pobb_replay_snapshot` | Reads paired snapshot from `data`; no cross-round resolver |
 

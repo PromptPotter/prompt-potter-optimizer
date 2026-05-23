@@ -102,14 +102,11 @@ async def score_one_candidate(
     candidate_sp = osp_c.to_job_search_point(
         base_pipeline_params=merged_pp, schema=cycle.session.pipeline_schema
     )
-    # Backfill paired priors on the candidate's full sample budget BEFORE
-    # eval starts. This is what restores PoBB's iid premise: every prior
-    # in the pool gets measured on the same samples this candidate is
-    # about to see (cache-first via per-sample archive; fresh LLM call
-    # on miss). See docs/concepts/paired-sample-pobb.md.
-    samples_by_id = {str(s.id): s for s in dataset}
-    backfilled = await elim_check.backfill_priors([s.id for s in dataset], samples_by_id)
-    callbacks.on_pobb_backfill(round_num, idx, n_total, backfilled)
+
+    async def _catch_priors_up(sample: Sample) -> None:
+        fresh = await elim_check.backfill_for_sample(sample)
+        if fresh:
+            callbacks.on_pobb_backfill(round_num, idx, n_total, sample.id, fresh)
 
     results, scores, was_cached, signal = await score_search_point(
         candidate_sp,
@@ -124,6 +121,7 @@ async def score_one_candidate(
         axes=cycle.axes,
         l1_diversity=l1_diversity,
         next_sample=next_sample,
+        on_sample_pre_check=_catch_priors_up,
     )
 
     # Path 2 — full-run cache replay.

@@ -8,7 +8,7 @@ fresh measurement to the archive, and emits the ``DatasetRun`` trace.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.datasets import build_dataset_run_data
@@ -127,6 +127,7 @@ async def score_search_point(
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
     next_sample: Callable[[dict[int, bool]], int | None] | None = None,
+    on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], bool, EscalationSignal | None]:
     """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe).
 
@@ -256,6 +257,7 @@ async def score_search_point(
         axes=axes,
         persist_fresh=_persist_fresh,
         next_sample=next_sample,
+        on_sample_pre_check=on_sample_pre_check,
     )
     results = batch.results
     escalation_signal = batch.escalation_signal

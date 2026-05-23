@@ -641,11 +641,11 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         candidate_id="R1_lucky_winner",
         sp=_DUMMY_SP,
     )
-    samples_by_id = {str(sid): types.SimpleNamespace(id=sid) for sid in candidate_samples}
-    await check_paired.backfill_priors(candidate_samples, samples_by_id)
+    for sid in candidate_samples:
+        await check_paired.backfill_for_sample(types.SimpleNamespace(id=sid))
 
-    assert backfill_calls == [(9, 12, 13, 14, 8)], (
-        "backfill must request exactly the candidate's hard samples on the leader"
+    assert backfill_calls == [(9,), (12,), (13,), (14,), (8,)], (
+        "per-sample backfill must request one sample per call, in iteration order"
     )
     leader_paired = check_paired.priors_by_sample["R1_lucky_winner"]
     assert all(str(sid) in leader_paired for sid in candidate_samples), (

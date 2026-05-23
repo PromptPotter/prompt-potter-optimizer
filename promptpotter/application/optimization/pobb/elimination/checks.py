@@ -249,45 +249,32 @@ class PoBBCheck:
         if candidate_id not in self.prior_ids:
             self.prior_ids.append(candidate_id)
 
-    async def backfill_priors(
-        self,
-        target_sample_ids: list[int | str],
-        samples_by_id: dict[str, Sample],
-    ) -> dict[str, list[str]]:
-        """Ensure every prior has fitness on each target sample; score on miss.
+    async def backfill_for_sample(self, sample: Sample) -> list[str]:
+        """Catch each prior up on ``sample``; score on miss. Returns priors that gained a measurement.
 
-        Idempotent: priors that already cover ``target_sample_ids`` are
-        skipped. When ``backfill_fn`` is None (e.g. unit tests), this is
-        a no-op — paired ``check()`` will see incomplete priors and skip
-        them, which surfaces the gap rather than silently substituting 0.
-
-        Returns ``{prior_id: [newly_measured_sample_ids]}`` so the caller
-        can surface backfill activity through the telemetry channel.
-        Priors with zero new measurements are omitted from the return.
+        Idempotent: priors already covering ``sample.id`` are skipped. When
+        ``backfill_fn`` is None (e.g. unit tests), this is a no-op — paired
+        ``check()`` will see incomplete priors and skip them, surfacing the
+        gap rather than silently substituting 0. Fired per-sample by the
+        query loop's ``on_sample_pre_check`` hook so paired comparison sees
+        caught-up priors without an upfront full-dataset wall.
         """
-        if not self._backfill_fn or not target_sample_ids:
-            return {}
-        targets = [str(sid) for sid in target_sample_ids]
-        fresh: dict[str, list[str]] = {}
+        if not self._backfill_fn:
+            return []
+        key = str(sample.id)
+        fresh: list[str] = []
         for cid in self.prior_ids:
             existing = self.priors_by_sample[cid]
-            missing_sids = [sid for sid in targets if sid not in existing]
-            if not missing_sids:
+            if key in existing:
                 continue
-            missing_samples = [samples_by_id[sid] for sid in missing_sids if sid in samples_by_id]
-            if not missing_samples:
-                continue
-            new_results = await self._backfill_fn(self.prior_sps[cid], missing_samples)
-            added: list[str] = []
+            new_results = await self._backfill_fn(self.prior_sps[cid], [sample])
             for r in new_results:
                 sid_new = r.get("sample_id")
                 if sid_new is None:
                     continue
-                key = str(sid_new)
-                existing[key] = float(r.get("fitness", 0.0))
-                added.append(key)
-            if added:
-                fresh[cid] = added
+                existing[str(sid_new)] = float(r.get("fitness", 0.0))
+            if key in existing:
+                fresh.append(cid)
         return fresh
 
     def snapshot_priors(self, sample_ids: Sequence[int | str]) -> dict[str, dict[str, float]]:
@@ -327,10 +314,10 @@ class PoBBCheck:
             return dominance_signal
 
         # Paired vectors — a prior is included only when it covers every
-        # sample the candidate has measured. ``backfill_priors`` is supposed
-        # to have closed any gaps before this fires; an incomplete prior
-        # here means backfill was skipped (no backfill_fn) or failed, in
-        # which case we exclude rather than silently 0-fill.
+        # sample the candidate has measured. ``backfill_for_sample`` runs
+        # per-sample ahead of ``check()`` to close gaps as they appear; an
+        # incomplete prior here means the backfill hook was wired off (no
+        # backfill_fn) or its score failed — exclude rather than 0-fill.
         paired_priors: dict[str, list[float]] = {}
         for cid in self.prior_ids:
             prior_map = self.priors_by_sample[cid]

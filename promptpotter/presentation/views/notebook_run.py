@@ -92,9 +92,9 @@ def _try_display_html(html_body: str) -> bool:
         from IPython.display import HTML, display
     except ImportError:
         return False
-    if get_ipython() is None:  # type: ignore[no-untyped-call]
+    if get_ipython() is None:  # type: ignore[no-untyped-call, unused-ignore]
         return False
-    display(HTML(html_body))  # type: ignore[no-untyped-call]
+    display(HTML(html_body))  # type: ignore[no-untyped-call, unused-ignore]
     return True
 
 

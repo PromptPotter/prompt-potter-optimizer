@@ -100,8 +100,8 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 | Symbol | File:line |
 |---|---|
 | `_mint_fresh_session` (fresh-mint helper) | `promptpotter/presentation/cli/commands/new.py:90` |
-| `cmd_new` | `promptpotter/presentation/cli/commands/new.py:350` |
-| `cmd_resume` | `promptpotter/presentation/cli/commands/resume.py:367` |
+| `cmd_new` | `promptpotter/presentation/cli/commands/new.py:360` |
+| `cmd_resume` | `promptpotter/presentation/cli/commands/resume.py:374` |
 | `main()` (entry point) | `promptpotter/presentation/cli/campaign_runner.py:57` |
 | `--from` flag | `promptpotter/presentation/cli/parsers.py:147` |
 | `--fork-on-divergence` flag | `promptpotter/presentation/cli/parsers.py:162` |

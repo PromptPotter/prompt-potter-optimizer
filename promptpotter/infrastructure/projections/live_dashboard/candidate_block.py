@@ -138,15 +138,17 @@ def append_backfill(
     round_num: int,
     idx: int,
     total: int,
-    backfilled: dict[str, list[str]],
+    sample_id: int,
+    prior_ids: list[str],
 ) -> None:
-    """Append a paired-PoBB backfill event to ``state["backfill_log"]``.
+    """Append a per-sample paired-PoBB backfill event to ``state["backfill_log"]``.
 
     Webapp + notebook readers see this under ``dashboard.json::backfill_log``.
-    Each entry names the round/candidate the backfill ran ahead of and the
-    per-prior list of newly-measured sample IDs — so the operator can tell
-    when "the leader got measured on the hard samples" vs "everything was
-    already cached" (no entry = cached). Capped at 64 entries for size.
+    Each entry names the round/candidate the backfill fired during, the
+    sample the priors were caught up on, and which priors gained a
+    measurement — absence of an entry for a given sample means every prior
+    was already cached for it. Capped at 256 entries (per-sample events can
+    accumulate quickly: ~N samples × M priors × K candidates per round).
     """
     log: list[dict[str, Any]] = list(state.get("backfill_log") or [])
     log.append(
@@ -154,13 +156,12 @@ def append_backfill(
             "round": int(round_num),
             "candidate_idx": int(idx),
             "candidate_total": int(total),
-            "backfilled": backfilled,
-            "n_priors": len(backfilled),
-            "n_measurements": sum(len(v) for v in backfilled.values()),
+            "sample_id": int(sample_id),
+            "prior_ids": list(prior_ids),
         }
     )
-    if len(log) > 64:
-        log = log[-64:]
+    if len(log) > 256:
+        log = log[-256:]
     state["backfill_log"] = log
 
 

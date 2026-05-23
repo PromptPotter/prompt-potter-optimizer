@@ -3,7 +3,7 @@ PromptPotter Optimizer API — main FastAPI application entry point.
 """
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,7 +14,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
-from starlette.middleware.base import RequestResponseEndpoint
 
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import APP_VERSION, settings
@@ -76,7 +75,9 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def no_store_on_api(request: Request, call_next: RequestResponseEndpoint) -> Response:
+async def no_store_on_api(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     """Set ``Cache-Control: no-store`` on every ``/api/v1/*`` response.
 
     The API is the webapp's live polling surface — ``dashboard.json``,

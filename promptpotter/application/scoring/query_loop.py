@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -113,6 +113,11 @@ class _LoopContext:
     # Persist the results-so-far after each fresh measurement. Cache hits do
     # not call this — their on-disk row is unchanged.
     persist_fresh: Callable[[list[QueryMeasurement]], None]
+    # Async hook fired after each sample lands, before degradation checks
+    # read prior coverage. The candidate loop uses it to catch PoBB priors
+    # up on the just-measured sample so paired comparison sees full coverage
+    # without an upfront full-dataset wall.
+    on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None
 
 
 @dataclass
@@ -187,6 +192,8 @@ async def _process_cache_hit(
     state.results.append(cached_r)
     if ctx.on_sample_scored is not None:
         ctx.on_sample_scored(cached_r, idx, dataset_len)
+    if ctx.on_sample_pre_check is not None:
+        await ctx.on_sample_pre_check(sample)
     # Elimination must see cached rows too — otherwise a candidate
     # whose priors already dominate it runs one extra real query.
     esc = check_escalation()
@@ -237,6 +244,9 @@ async def _process_fresh_sample(
     if ctx.on_sample_scored is not None:
         ctx.on_sample_scored(result, idx, dataset_len)
 
+    if ctx.on_sample_pre_check is not None:
+        await ctx.on_sample_pre_check(sample)
+
     esc = check_escalation()
     return _SampleOutcome(escalation=esc) if esc else _SampleOutcome()
 
@@ -259,6 +269,7 @@ async def run_query_loop(
     axes: AxisIndex | None,
     persist_fresh: Callable[[list[QueryMeasurement]], None],
     next_sample: Callable[[dict[int, bool]], int | None] | None = None,
+    on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
 ) -> QueryLoopResult:
     """Score dataset samples, reusing prior results where available.
 
@@ -284,6 +295,7 @@ async def run_query_loop(
         scorer_formula=session.scoring.scorer_formula,
         deprecated_samples=deprecated_samples,
         persist_fresh=persist_fresh,
+        on_sample_pre_check=on_sample_pre_check,
     )
 
     def _check_escalation() -> EscalationSignal | None:
