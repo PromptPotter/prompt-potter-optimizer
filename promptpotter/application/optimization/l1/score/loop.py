@@ -156,7 +156,6 @@ async def score_population(
     # every cross-cycle measurement, not just this cycle's rounds.
     round_boundary_obs: list[Observation] = list(cycle.archive_observations) + prior_round_obs
 
-    explore_weight = cycle.config.optimization.exploration.explore_weight
     dataset_sample_ids = [int(s.id) for s in dataset]
 
     def _picker_maps(
@@ -268,17 +267,11 @@ async def score_population(
             # Re-emit the live leaderboard at the candidate's *current*
             # posterior so the webapp hard-samples table reorders on every
             # score and the console preview matches the pick actually made.
-            order = expected_order(
-                mu_c, var_c, s_mu, s_var, d_map, d_se_map, dataset_sample_ids, explore_weight
-            )
+            order = expected_order(mu_c, var_c, s_mu, s_var, d_map, d_se_map, dataset_sample_ids)
             preview = [
                 (
                     sid,
-                    float(
-                        pick_value(
-                            mu_c, var_c, s_mu, s_var, d_map[sid], d_se_map[sid], explore_weight
-                        )
-                    ),
+                    float(pick_value(mu_c, var_c, s_mu, s_var, d_map[sid], d_se_map[sid])),
                 )
                 for sid in order
                 if sid not in scored_outcomes
@@ -292,7 +285,7 @@ async def score_population(
                 sample_order=order,
             )
             remaining = set(dataset_sample_ids) - scored_outcomes.keys()
-            return next_sample(mu_c, var_c, s_mu, s_var, d_map, d_se_map, remaining, explore_weight)
+            return next_sample(mu_c, var_c, s_mu, s_var, d_map, d_se_map, remaining)
 
         # Bind the candidate's sample budget so PoBB's dominance gate
         # can compute ``cand_max_hits = cand_hits + remaining`` against

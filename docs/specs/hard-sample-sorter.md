@@ -2,6 +2,8 @@
 
 **Status:** Phase 1 (seed). Phases 2 and 3 unscheduled; ship opportunistically alongside M11 webapp work.
 
+> **`pick_score` contract is in flux.** The blended `decision_information_gain + explore_weight · model_information_gain` formula described in the *Data contract (phase 1)* section below has an exploration tiebreaker (0.05 weight) that promotes stranded poorly-measured rows to the top. [`verdict-resolution-picker.md`](verdict-resolution-picker.md) drops that exploration term and unifies the persisted ranking with the live picker — one statistical model (mutual information between sample outcome and keep/abort verdict), one ranking, written to this same artifact whenever conditioning updates. The *Data contract* section below describes today's behaviour; semantics change when that spec lands.
+
 ---
 
 ## Context

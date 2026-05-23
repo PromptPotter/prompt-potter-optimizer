@@ -64,32 +64,25 @@ def _pick_score_under_prior(
     sigma_theta: float,
     seed_mu: float,
     seed_var: float,
-    explore_weight: float,
 ) -> dict[int, float]:
-    """Per-sample blended pick-value for a brand-new candidate vs the seed.
+    """Per-sample pick-value for a brand-new candidate vs the seed.
 
     A brand-new candidate is a fresh mutation of the seed — the best fitted
     candidate — so its ability prior is ``N(θ_seed, σ_θ²)``: a mutation is a
     small edit of its parent and starts at the parent's ability, not the
-    population-mean anchor ``0``. Centred there, the decision term peaks on
-    the contested band (δ near the seed's ability); centred at 0 it would
-    fall flat and the explore term would rank unmeasured samples on top.
-    Each sample's pick-value is the picker's one objective:
-    decision-information-gain against the seed plus ``explore_weight`` times
-    the model-information-gain explore term.
-
-    This is the snapshot consumed by the webapp's per-sample ``pick_score``
-    column and the dashboard ``hard_sample_order`` table. The live picker
-    (``adaptive_picker.py``) re-evaluates per step against the *candidate's*
-    running θ̂ posterior — so the artifact value is a "what's expected to be
-    informative on a brand-new candidate" snapshot, not the live iteration
-    order.
+    population-mean anchor ``0``. Centred there, ``pick_value`` (mutual
+    information between sample outcome and keep/abort verdict) varies across
+    samples through the prediction layer: contested samples (δ near the
+    seed's ability) score high, always-hit and always-miss samples score
+    near zero. Same function the live picker calls — this is the same
+    statistical model serialized at the brand-new-candidate conditioning
+    point. As the candidate accumulates measurements, the live picker
+    re-evaluates against its running θ̂ posterior; the persisted ranking
+    here is the round-boundary state.
     """
     var_theta = sigma_theta * sigma_theta
     return {
-        sid: pick_value(
-            seed_mu, var_theta, seed_mu, seed_var, d, delta_se.get(sid, 0.0), explore_weight
-        )
+        sid: pick_value(seed_mu, var_theta, seed_mu, seed_var, d, delta_se.get(sid, 0.0))
         for sid, d in delta.items()
     }
 
@@ -158,7 +151,6 @@ def empty_artifact(
 def build_hard_samples_artifact(
     rounds: list[RoundResult],
     *,
-    explore_weight: float,
     cycle_id: str | None = None,
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
@@ -175,7 +167,6 @@ def build_hard_samples_artifact(
     """
     return build_hard_samples_artifact_from_observations(
         build_observations(rounds),
-        explore_weight=explore_weight,
         cycle_id=cycle_id,
         top_k_candidates=top_k_candidates,
         top_k_samples=top_k_samples,
@@ -186,7 +177,6 @@ def build_hard_samples_artifact(
 def build_hard_samples_artifact_from_observations(
     observations: list[Observation],
     *,
-    explore_weight: float,
     cycle_id: str | None = None,
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
@@ -228,7 +218,6 @@ def build_hard_samples_artifact_from_observations(
         posterior.sigma_theta,
         seed_mu,
         seed_var,
-        explore_weight,
     )
 
     full_candidate_order = _resolve_candidate_order(posterior, hit_rates)

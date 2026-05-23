@@ -466,24 +466,6 @@ def test_update_theta_posterior_hits_raise_mean_misses_lower_it() -> None:
     assert 0.0 < mu_hit_uncertain < mu_hit, "large se_δ damps the ability update"
 
 
-def test_model_information_gain_rewards_difficulty_uncertainty() -> None:
-    """The explore term rises with sample-difficulty uncertainty and is zero
-    when the difficulty is pinned.
-
-    ``model_information_gain`` is the explore half of the picker's objective:
-    how much one measurement would sharpen a sample's difficulty estimate. A
-    well-measured sample (se_δ → 0) has nothing left to learn, so the term is
-    exactly zero and the decision term decides alone."""
-    from promptpotter.application.intelligence.adaptive_picker import (
-        model_information_gain,
-    )
-
-    pinned = model_information_gain(0.0, var_c=1.0, delta_s=0.0, se_delta_s=0.0)
-    uncertain = model_information_gain(0.0, var_c=1.0, delta_s=0.0, se_delta_s=1.5)
-    assert pinned == pytest.approx(0.0, abs=1e-12), "a pinned sample has nothing to explore"
-    assert uncertain > pinned, "a poorly-characterized sample is worth probing"
-
-
 def test_decision_information_gain_peaks_at_candidate_ability() -> None:
     """The decision objective scores a measurement by how much it moves the
     keep/abort verdict ``θ_c > θ_s``. Since only the candidate is measured,
@@ -504,38 +486,15 @@ def test_decision_information_gain_peaks_at_candidate_ability() -> None:
     assert near > far_hard, "a sample at the candidate's ability beats a too-hard one"
 
 
-def test_pick_value_is_decision_dominated_with_small_explore_weight() -> None:
-    """The blended objective ``decision + explore_weight·model`` ranks by
-    decision relevance, with the explore term only a tiebreaker.
-
-    A small ``explore_weight`` must leave the decision term in charge — a
-    decision-rich sample beats a decision-poor one regardless of se_δ — yet
-    still lift an uncertain sample above an equally decision-valued pinned
-    twin. The intended mild interleaving, never a takeover."""
-    from promptpotter.application.intelligence.adaptive_picker import pick_value
-
-    # Decision-rich (δ at the candidate's ability) vs decision-poor (δ far
-    # easy): the decision-rich sample wins even though it is well-pinned.
-    rich = pick_value(0.0, 1.0, 1.0, 1.0, delta_s=0.0, se_delta_s=0.1, explore_weight=0.15)
-    poor = pick_value(0.0, 1.0, 1.0, 1.0, delta_s=-4.0, se_delta_s=0.1, explore_weight=0.15)
-    assert rich > poor, "small explore_weight stays decision-dominated"
-
-    # Same δ (same decision value), differing only in se_δ: the explore term
-    # breaks the tie toward the sample with more to learn.
-    pinned = pick_value(0.0, 1.0, 1.0, 1.0, delta_s=-4.0, se_delta_s=0.1, explore_weight=0.15)
-    fuzzy = pick_value(0.0, 1.0, 1.0, 1.0, delta_s=-4.0, se_delta_s=2.0, explore_weight=0.15)
-    assert fuzzy > pinned, "the explore term lifts the barely-measured twin"
-
-
 # ===========================================================================
-# Hard-sample sorter — pick_score artifact (descriptive snapshot)
+# Hard-sample sorter — pick_score artifact
 # ===========================================================================
 
 
-def test_pick_score_artifact_carries_blended_pick_value() -> None:
-    """Artifact ``pick_score.per_sample`` carries the picker's blended
-    objective for a brand-new candidate ``N(θ_seed, σ_θ²)`` — a fresh
-    mutation of the best fitted candidate, centred on its ability.
+def test_pick_score_artifact_ranks_contested_above_settled() -> None:
+    """Artifact ``pick_score.per_sample`` carries the picker's pick-value for a
+    brand-new candidate ``N(θ_seed, σ_θ²)`` — a fresh mutation of the best
+    fitted candidate, centred on its ability.
 
     Construction: sample 1 measured by every candidate, all HIT (settled,
     easy — a fresh candidate's outcome there is predictable, low decision
@@ -557,7 +516,7 @@ def test_pick_score_artifact_carries_blended_pick_value() -> None:
         Observation(candidate_id="c", sample_id=2, hit=True),
         Observation(candidate_id="d", sample_id=2, hit=False),
     ]
-    artifact = build_hard_samples_artifact_from_observations(obs, explore_weight=0.15)
+    artifact = build_hard_samples_artifact_from_observations(obs)
     assert artifact["schema_version"] == ARTIFACT_SCHEMA_VERSION == 3
 
     per_sample = artifact["pick_score"]["per_sample"]

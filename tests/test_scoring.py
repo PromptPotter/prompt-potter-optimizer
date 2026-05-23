@@ -437,17 +437,17 @@ def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() ->
     bank = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(6)]
 
     # Cold start (no observations) → deterministic bank-order prefix.
-    assert select_round_subset(bank, [], 3, explore_weight=0.15) == bank[:3]
+    assert select_round_subset(bank, [], 3) == bank[:3]
     # Budget at/above bank size → the whole bank; non-positive budget → empty.
-    assert select_round_subset(bank, [], 99, explore_weight=0.15) == bank
-    assert select_round_subset(bank, [], 0, explore_weight=0.15) == []
+    assert select_round_subset(bank, [], 99) == bank
+    assert select_round_subset(bank, [], 0) == []
 
     # Warm: samples 0-2 split ~50/50 across candidates (mid difficulty — the
     # contested band where a mutation can still flip the verdict); samples
     # 3-5 always HIT (easy, settled — a fresh candidate's outcome there is
     # predictable, no decision signal). Both groups are measured equally
-    # often, so se_δ can't decide it; the decision-led blended objective
-    # surfaces the contested band.
+    # often, so se_δ can't decide it; the decision objective surfaces the
+    # contested band.
     obs: list[Observation] = []
     for sid in (0, 1, 2):
         for cid in ("a", "b", "c"):
@@ -456,7 +456,7 @@ def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() ->
     for sid in (3, 4, 5):
         for cid in ("a", "b", "c"):
             obs.extend(Observation(cid, sid, True) for _ in range(2))
-    picked_ids = {s.id for s in select_round_subset(bank, obs, 3, explore_weight=0.15)}
+    picked_ids = {s.id for s in select_round_subset(bank, obs, 3)}
     assert picked_ids == {0, 1, 2}
 
 

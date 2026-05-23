@@ -38,7 +38,8 @@
 | Item | Status |
 |------|--------|
 | [Hard-Sample Sorter](hard-sample-sorter.md) | capability spec, unscheduled — `promptpotter/application/intelligence/{hard_sample_sorter,exploration}.py`, `docs/methods/exploration-exploitation.md` |
-| [Bayesian Sample Picker](bayesian-sample-picker.md) | shipped (Phases 1–3), then partly superseded — hierarchical IRT stands; the two-objective `picker_objective` gave way to one blended decision-led objective in `adaptive_picker.py` (2026-05-21) |
+| [Verdict-Resolution Picker](verdict-resolution-picker.md) | draft, not yet implemented — Phase 1 unifies persisted ranking with the live picker behind one statistical model (mutual info between sample outcome and keep/abort verdict); drops `explore_weight`; Phase 2 sketches origin-relative weighting |
+| [Bayesian Sample Picker](bayesian-sample-picker.md) | shipped (Phases 1–3), then **fully superseded** by [verdict-resolution-picker.md](verdict-resolution-picker.md) — hierarchical IRT + `RaschPosterior` stand; blended `decision + explore_weight·model` objective gets replaced |
 | [State-Sync Cleanup](state-sync-cleanup.md) | pre-whitelabel foundation, 4 phases — `promptpotter/infrastructure/store/`, `promptpotter/infrastructure/projections/live_dashboard/`, `promptpotter/presentation/api/routers/active.py`, `webapp/` |
 | [Security audit](security-audit.md) | first hardening pass complete 2026-05-05 — `promptpotter/application/scoring/formula/`, `promptpotter/config/log_redaction.py`, `promptpotter/application/optimization/dispatch/hub/` |
 | [Code-Debt Cleanup](code-debt-cleanup.md) | tech-debt backlog, unscheduled — 5 tiers; `promptpotter/application/optimization/l1/score.py`, `dispatch/hub/injections.py`, `dispatch/llm_call.py` |

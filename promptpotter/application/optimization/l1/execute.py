@@ -90,7 +90,6 @@ async def execute_round(
             scoring_pool,
             observations,
             config.sp_budget_ttest,
-            config.optimization.exploration.explore_weight,
         )
 
     candidates, yield_stats = await generate_or_load_candidates(

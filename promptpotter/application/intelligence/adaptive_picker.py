@@ -1,30 +1,25 @@
-"""Online adaptive sample picker — 1PL Rasch CAT with one blended objective.
+"""Online adaptive sample picker — 1PL Rasch CAT with one knob-free objective.
 
 After each observation the picker re-estimates the candidate's latent-ability
 posterior ``θ_c ~ N(μ_c, var_c)`` and re-picks the next sample. It is one-step
-greedy and has **one** objective — a blend of two terms, both in nats:
+greedy and has **one** objective:
 
-    pick_value(s) = decision_information_gain(s)
-                    + explore_weight · model_information_gain(s)
+    score(s) = decision_information_gain(s)
 
-* **decision_information_gain (exploit, dominant).** Mutual information between
-  the next outcome and the keep/abort verdict ``θ_c > θ_s`` against the seed.
-  Peaks where an outcome would move the stop decision — the difficulty band
-  from the candidate's ability up to the seed's — and falls to zero on
-  trivially-easy (hit predictable) and super-hard (miss predictable) samples,
-  the wasted measurements. The means-known limit recovers Bernoulli Chernoff
-  information (Garivier-Kaufmann 2016 Track-and-Stop).
+— the mutual information between the next outcome and the keep/abort verdict
+``θ_c > θ_s`` against the seed. Peaks where an outcome would move the stop
+decision — the difficulty band from the candidate's ability up to the seed's —
+and falls to zero on trivially-easy (hit predictable) and super-hard (miss
+predictable) samples, the wasted measurements. The means-known limit recovers
+Bernoulli Chernoff information (Garivier-Kaufmann 2016 Track-and-Stop).
 
-* **model_information_gain (explore, small weight).** Expected reduction in a
-  sample's difficulty uncertainty ``se_δ``. Keeps a small pull toward
-  poorly-characterized / never-solved samples so the global Rasch model keeps
-  improving. Zero when ``se_δ → 0`` (a well-measured sample needs no probing),
-  so it never fights the decision term where the model is already sharp.
-
-Both terms read the se_δ-aware ability update: an outcome on a
+The score reads the ``se_δ``-aware ability update: an outcome on a
 poorly-characterized sample (large ``se_δ``) updates ``θ_c`` less, because it
-cannot be told apart from a hard-sample miss. Knob-free apart from
-``explore_weight``; pure module — no I/O, no mutation of inputs.
+cannot be told apart from a hard-sample miss. Knob-free; pure module — no I/O,
+no mutation of inputs. The same scoring path is called by the live picker
+(``loop.py::_next_sample``) and the persisted ranking writer
+(``hard_sample_sorter::_pick_score_under_prior``); both serialize the same
+statistical model at different conditioning points.
 """
 
 from __future__ import annotations
@@ -35,11 +30,9 @@ from collections.abc import Iterable
 __all__ = [
     "decision_information_gain",
     "expected_order",
-    "model_information_gain",
     "next_sample",
     "pick_value",
     "posterior_from_outcomes",
-    "predictive_hit_prob",
     "update_theta_posterior",
 ]
 
@@ -85,9 +78,9 @@ def update_theta_posterior(
         μ'    = μ + σ'² · score
 
     where ``y = 1`` if hit else ``0``. A poorly-characterized sample (large
-    ``se_δ_s`` ⇒ large ``s``) damps both the score and the information, so its
-    outcome moves ``θ_c`` less — you cannot tell a candidate-miss from a
-    hard-sample miss. As ``se_δ_s → 0`` (``s → 1``) this is the plain 1PL
+    ``se_delta_s`` ⇒ large ``s``) damps both the score and the information, so
+    its outcome moves ``θ_c`` less — you cannot tell a candidate-miss from a
+    hard-sample miss. As ``se_delta_s → 0`` (``s → 1``) this is the plain 1PL
     Laplace update. Closed form, no iteration; variance floored at ``1e-6``.
     """
     scale = math.sqrt(1.0 + _PROBIT_SCALE * se_delta_s * se_delta_s)
@@ -117,23 +110,6 @@ def posterior_from_outcomes(
     return mu, var
 
 
-def predictive_hit_prob(mu_c: float, var_c: float, delta_s: float, se_delta_s: float) -> float:
-    """Posterior-predictive hit probability of candidate ``c`` on sample ``s``.
-
-    Marginalizes the 1PL likelihood ``σ(θ_c − δ_s)`` over the Gaussian
-    posteriors ``θ_c ~ N(μ_c, var_c)`` and ``δ_s ~ N(δ̂_s, se_δ_s²)`` with the
-    probit approximation ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))``.
-    """
-    m = mu_c - delta_s
-    v = var_c + se_delta_s * se_delta_s
-    return _sigmoid(m / math.sqrt(1.0 + _PROBIT_SCALE * v))
-
-
-# ---------------------------------------------------------------------------
-# Exploit term — mutual information with the keep/abort verdict
-# ---------------------------------------------------------------------------
-
-
 def decision_information_gain(
     mu_c: float,
     var_c: float,
@@ -148,50 +124,24 @@ def decision_information_gain(
     ``I(Y_s ; verdict) = H_b(P₀) − E_Y[H_b(P | Y)]`` where
     ``P = Φ((μ_c − μ_s) / √(var_c + var_s))`` is the probability the candidate
     beats the seed, the one-step Newton update folds a hit / miss into ``θ_c``,
-    and the outcome ``Y`` is weighted by the predictive hit probability.
-    Knob-free; the means-known limit recovers Bernoulli Chernoff information.
+    and the outcome ``Y`` is weighted by the marginal hit probability under the
+    candidate's posterior. Knob-free; the means-known limit recovers Bernoulli
+    Chernoff information.
     """
     p0 = _normal_cdf((mu_c - mu_s) / math.sqrt(var_c + var_s))
     mu_hit, var_hit = update_theta_posterior(mu_c, var_c, delta_s, se_delta_s, True)
     mu_miss, var_miss = update_theta_posterior(mu_c, var_c, delta_s, se_delta_s, False)
     p_hit = _normal_cdf((mu_hit - mu_s) / math.sqrt(var_hit + var_s))
     p_miss = _normal_cdf((mu_miss - mu_s) / math.sqrt(var_miss + var_s))
-    p_bar = predictive_hit_prob(mu_c, var_c, delta_s, se_delta_s)
+    # Marginal hit probability for outcome weighting: probit approximation
+    # ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))`` over the joint candidate /
+    # sample uncertainty.
+    m = mu_c - delta_s
+    v = var_c + se_delta_s * se_delta_s
+    p_bar = _sigmoid(m / math.sqrt(1.0 + _PROBIT_SCALE * v))
     return _binary_entropy(p0) - (
         p_bar * _binary_entropy(p_hit) + (1.0 - p_bar) * _binary_entropy(p_miss)
     )
-
-
-# ---------------------------------------------------------------------------
-# Explore term — expected reduction in sample-difficulty uncertainty
-# ---------------------------------------------------------------------------
-
-
-def model_information_gain(mu_c: float, var_c: float, delta_s: float, se_delta_s: float) -> float:
-    """Expected reduction in sample ``s``'s difficulty uncertainty, in nats.
-
-    A single Bernoulli measurement adds observed information ``w̄ = p̄(1−p̄)``
-    onto ``δ_s``'s precision (``p̄`` the predictive hit probability — a certain
-    outcome teaches nothing). The difficulty-posterior entropy reduction is
-    then closed form::
-
-        model_information_gain = ½ · log(1 + w̄ · se_δ_s²)
-
-    This is the explore term: it rewards probing poorly-characterized
-    samples — a never-solved sample carries large ``se_δ_s`` — and is exactly
-    zero when ``se_δ_s → 0``, so a well-measured sample contributes nothing and
-    the decision term decides alone. It deliberately omits the candidate-ability
-    variance ``var_c`` so it does not double-count the verdict information the
-    decision term already scores.
-    """
-    p_bar = predictive_hit_prob(mu_c, var_c, delta_s, se_delta_s)
-    w_bar = p_bar * (1.0 - p_bar)
-    return 0.5 * math.log1p(w_bar * se_delta_s * se_delta_s)
-
-
-# ---------------------------------------------------------------------------
-# Blended objective + one-step greedy picker
-# ---------------------------------------------------------------------------
 
 
 def pick_value(
@@ -201,18 +151,15 @@ def pick_value(
     var_s: float,
     delta_s: float,
     se_delta_s: float,
-    explore_weight: float,
 ) -> float:
-    """The picker's single objective: exploit + ``explore_weight`` · explore.
+    """The picker's single objective: mutual information with the keep/abort verdict.
 
-    Both terms are in nats, so ``explore_weight`` is dimensionless and small
-    (``< 1``) keeps the picker decision-dominated — it re-measures
-    well-characterized samples that resolve the stop verdict, with a mild pull
-    toward uncertain samples that sharpen the global model.
+    Thin alias over :func:`decision_information_gain` kept as the public name
+    for picker call sites so the call shape (``pick_value(...)``) reads as
+    "the picker's score for this sample" without leaking the math into the
+    caller. In nats.
     """
-    return decision_information_gain(
-        mu_c, var_c, mu_s, var_s, delta_s, se_delta_s
-    ) + explore_weight * model_information_gain(mu_c, var_c, delta_s, se_delta_s)
+    return decision_information_gain(mu_c, var_c, mu_s, var_s, delta_s, se_delta_s)
 
 
 def next_sample(
@@ -223,9 +170,8 @@ def next_sample(
     delta_map: dict[int, float],
     delta_se_map: dict[int, float],
     remaining: set[int],
-    explore_weight: float,
 ) -> int | None:
-    """Pick the remaining sample with the highest blended pick-value.
+    """Pick the remaining sample with the highest pick-value.
 
     Returns ``None`` when ``remaining`` is empty (loop-exit signal). Ties break
     by ascending sample id (deterministic, matching :func:`expected_order`). A
@@ -244,7 +190,6 @@ def next_sample(
                 var_s,
                 delta_map.get(sid, 0.0),
                 delta_se_map.get(sid, 1.0),
-                explore_weight,
             ),
             -sid,
         ),
@@ -259,16 +204,15 @@ def expected_order(
     delta_map: dict[int, float],
     delta_se_map: dict[int, float],
     sample_ids: Iterable[int],
-    explore_weight: float,
 ) -> list[int]:
-    """Full ranking of ``sample_ids`` by descending blended pick-value.
+    """Full ranking of ``sample_ids`` by descending pick-value.
 
-    Telemetry snapshot consumed by ``dashboard.json::hard_sample_order`` so
-    the webapp's hard-samples table mirrors the picker's ranking at the
-    ``(μ_c, var_c)`` the caller supplies — the candidate's live posterior
-    during a round, its seed-centred prior for a pre-round snapshot. The live
-    pick comes from :func:`next_sample` on the same posterior. Ties break by
-    ascending sample id — the same head as :func:`next_sample`.
+    Serialized into ``dashboard.json::hard_sample_order`` so the webapp's
+    hard-samples table mirrors the picker's ranking at the ``(μ_c, var_c)``
+    the caller supplies — the candidate's live posterior during a round, its
+    seed-centred prior for the round-boundary ranking. The live pick comes
+    from :func:`next_sample` on the same posterior. Ties break by ascending
+    sample id — the same head as :func:`next_sample`.
     """
     return sorted(
         sample_ids,
@@ -280,7 +224,6 @@ def expected_order(
                 var_s,
                 delta_map.get(sid, 0.0),
                 delta_se_map.get(sid, 1.0),
-                explore_weight,
             ),
             sid,
         ),

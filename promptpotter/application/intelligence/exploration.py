@@ -295,20 +295,16 @@ def select_round_subset(
     bank: list[Sample],
     observations: list[Observation],
     budget: int,
-    explore_weight: float,
 ) -> list[Sample]:
     """Pick the ``budget`` most-informative samples from ``bank`` for one round.
 
     Fits Rasch on ``observations``, then ranks the bank by the CAT picker's
-    blended objective for a fresh mutation of the leading candidate. The
-    mutation's ability prior is ``N(θ_leader, σ_θ²)`` — a mutation is a small
-    edit of its parent, so it starts at the parent's ability, not the
-    population-mean anchor ``0``. Centred there, the decision term peaks on
-    the contested band — measured samples whose difficulty sits at the
-    leader's ability, where a mutation can still flip the verdict — with a
-    small ``explore_weight`` pull toward poorly-characterized samples. A
-    centred-at-0 prior would instead make the decision term flat and let the
-    explore term sweep up fresh unmeasured blocks. Cold start (no
+    objective for a fresh mutation of the leading candidate. The mutation's
+    ability prior is ``N(θ_leader, σ_θ²)`` — a mutation is a small edit of its
+    parent, so it starts at the parent's ability, not the population-mean
+    anchor ``0``. Centred there, the verdict-information score peaks on the
+    contested band — measured samples whose difficulty sits at the leader's
+    ability, where a mutation can still flip the verdict. Cold start (no
     observations, hence no δ estimates) falls back to the bank-order prefix,
     byte-identical to the pre-decoupling ``dataset[:budget]`` slice. Pure: no I/O.
     """
@@ -341,6 +337,5 @@ def select_round_subset(
         delta_map,
         delta_se_map,
         list(by_id),
-        explore_weight,
     )
     return [by_id[sid] for sid in ranked[:budget]]

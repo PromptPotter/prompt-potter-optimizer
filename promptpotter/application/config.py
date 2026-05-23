@@ -144,19 +144,6 @@ class ExplorationConfig(BaseModel):
             "is off."
         ),
     )
-    explore_weight: float = Field(
-        0.05,
-        description=(
-            "Blend weight of the sample picker's explore term. The picker has "
-            "one objective: decision-information-gain (exploit) plus this "
-            "weight times model-information-gain (explore — the pull toward "
-            "poorly-characterized / never-solved samples). Both terms are in "
-            "nats, so this is dimensionless. Kept low so the picker stays "
-            "decision-dominated — it re-measures the informative samples it "
-            "already knows about and only sporadically pulls in a fresh one, "
-            "rather than chasing whole blocks of never-measured samples."
-        ),
-    )
 
 
 class OptimizationConfig(BaseModel):
