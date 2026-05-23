@@ -54,7 +54,8 @@ def _eliminate(
 def _leader_locked(
     name: str, check_result: dict[str, Any], candidate_idx: int, n_total_candidates: int
 ) -> EscalationSignal:
-    """Lock in the current candidate as round leader; skip remaining candidates."""
+    """Stop measuring this candidate — its posterior clears ``lock_in`` against
+    every prior."""
     return EscalationSignal(
         check_name=name,
         target=EscalationTarget.LEADER_LOCKED,
@@ -343,7 +344,7 @@ class PoBBCheck:
 
         # Leader lock-in (preempts loser elimination): when current is the
         # leader and its posterior P(best) ≥ lock_in threshold past the
-        # lock-in floor, terminate the round early. Disabled when lock_in≥1.
+        # lock-in floor, stop measuring this candidate. Disabled when lock_in≥1.
         if (
             self.lock_in < 1.0
             and n >= self.lock_in_n_min

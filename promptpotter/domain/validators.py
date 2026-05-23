@@ -15,7 +15,7 @@ the same channel as evaluators.
 
 **Stop rule** — :class:`StopRule`. Mid-round check on the running result stream
 of a candidate-under-evaluation; emits an :class:`EscalationSignal` carrying
-an :class:`EscalationTarget` that terminates the round early
+an :class:`EscalationTarget` that stops measuring the current candidate
 (``ELIMINATE_CANDIDATE`` / ``LEADER_LOCKED``) or routes to the optimizer
 (``L2`` / ``L3`` / ``ABORT_CAMPAIGN``). Concrete stop rules: ``DegradationCheck``,
 ``PoBBCheck`` in ``application/optimization/pobb/elimination/checks.py``.

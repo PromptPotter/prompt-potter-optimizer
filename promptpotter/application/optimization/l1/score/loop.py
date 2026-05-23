@@ -1,8 +1,8 @@
 """Per-population scoring loop — :func:`score_population`.
 
 Owns the per-candidate loop, the shared accumulators, the online Rasch CAT
-picker plumbing, and the LEADER_LOCKED / ESCALATED break conditions. The
-per-candidate body lives in :func:`score_one_candidate`.
+picker plumbing, and the ESCALATED break condition. The per-candidate body
+lives in :func:`score_one_candidate`.
 """
 
 from __future__ import annotations
@@ -59,8 +59,7 @@ async def score_population(
 
     Per-candidate body lives in ``score_one_candidate``; this function owns
     the loop, the shared accumulators (``candidate_scores``, ``decisions``,
-    ``all_candidate_results``), and the break conditions on
-    LEADER_LOCKED / ESCALATED outcomes."""
+    ``all_candidate_results``), and the ESCALATED break condition."""
     session = cycle.session
     obs = session.state.obs
     n = len(population)
@@ -339,8 +338,6 @@ async def score_population(
                     report=cr_result.report.to_dict(),
                 )
 
-        if cr_result.outcome == CandidateOutcome.LEADER_LOCKED:
-            break  # round leader confirmed — skip remaining candidates
         if cr_result.outcome == CandidateOutcome.ESCALATED:
             escalation_signal = cr_result.escalation_signal
             break  # true degradation — abort remaining candidates

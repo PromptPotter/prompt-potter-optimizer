@@ -24,7 +24,8 @@ class CandidateOutcome(StrEnum):
 
     SCORED is the default exit. SKIPPED_VALIDATION / REPLAYED_FROM_CACHE are
     early returns from paths 1 and 2; both still produce a report. LEADER_LOCKED
-    and ESCALATED are scored-path tags that signal the caller to break."""
+    tags a candidate whose posterior cleared ``lock_in`` (per-candidate stop —
+    the outer loop continues). ESCALATED signals the caller to break."""
 
     SKIPPED_VALIDATION = "skipped_validation"
     REPLAYED_FROM_CACHE = "replayed_from_cache"
