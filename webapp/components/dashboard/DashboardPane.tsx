@@ -69,9 +69,7 @@ function DashboardPaneInner() {
     cyclesError,
     cyclesLoaded,
     cycles,
-    following,
     selectCycle,
-    followActive,
   } = useWorkspace();
   // Replit-style sub-tabs (Chat / Dashboard / Files) scoped to the
   // currently-selected cycle. The sidebar is persistent across all
@@ -307,21 +305,6 @@ function DashboardPaneInner() {
                   <div className="breadcrumb">
                     Campaign »{" "}
                     <CyclePicker />
-                    {!following && (
-                      <button
-                        type="button"
-                        className="follow-active-btn"
-                        onClick={followActive}
-                        title="Pinned to this campaign. Click to resume following the campaign the CLI is currently running."
-                      >
-                        ↪ Follow active
-                      </button>
-                    )}
-                    {isLive && (
-                      <span className="live-badge" title="Campaign is actively running — dashboard updated in the last 60s">
-                        ● Live
-                      </span>
-                    )}
                     <span className="cycle-toolbar">
                       <EditModeToggle on={editMode} onToggle={setEditMode} />
                     </span>

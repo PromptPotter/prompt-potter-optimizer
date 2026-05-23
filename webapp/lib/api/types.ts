@@ -44,9 +44,6 @@ export interface DatasetItem {
   ground_truth: string;
   task?: string | null;
   n_obs: number;
-  // Miss-probability for an average candidate, sigmoid(δ_s) from Rasch.
-  // 0.5 prior for unmeasured samples. Drives the static-mode sort.
-  miss_prob: number;
   // Expected information gain of measuring this sample on a brand-new
   // candidate (ability prior N(0, σ_θ²)). Reads the Rasch δ_s standard
   // error, so a barely-measured sample scores high. The live picker

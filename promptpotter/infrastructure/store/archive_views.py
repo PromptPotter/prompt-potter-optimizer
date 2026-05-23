@@ -96,6 +96,13 @@ def measurement_series_for_samples(
     with no archive measurements come back as empty lists; samples
     outside *sample_ids* are skipped.
 
+    Errored items (``item["error"]`` truthy or ``predicted == "ERROR"``) are
+    dropped — they are not observations of the sample's difficulty, just
+    pipeline-side failures. This matches the Rasch-fit filter in
+    :func:`promptpotter.application.intelligence.hard_sample_archive.build_archive_observations`
+    so the dashboard's empirical hit-rate column and the Rasch δ_s estimate
+    see the same observation set.
+
     Powers the read-only ``/datasets/{name}/measurement-series`` endpoint:
     the hard-sample leaderboard's Meas heat-map column needs the full series
     per visible sample under the workspace scope, and walking the archive
@@ -114,6 +121,8 @@ def measurement_series_for_samples(
         for idx, item in enumerate(detail.get("measurements", [])):
             sid = item.get("sample_id")
             if not isinstance(sid, int) or sid not in wanted:
+                continue
+            if item.get("error") or item.get("predicted") == "ERROR":
                 continue
             out[sid].append(
                 {

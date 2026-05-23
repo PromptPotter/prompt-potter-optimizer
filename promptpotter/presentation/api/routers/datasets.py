@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 from typing import Any, Literal
 
@@ -119,13 +118,6 @@ class DatasetItem(BaseModel):
     ground_truth: str
     task: str | None = None
     n_obs: int = Field(description="Times this sample has been tried")
-    miss_prob: float = Field(
-        description=(
-            "Miss-probability for an average candidate (θ=0), derived from "
-            "Rasch δ_s via sigmoid. 0.5 prior for unmeasured samples (no "
-            "signal yet — coin flip). Drives the static-mode sort."
-        ),
-    )
     pick_score: float | None = Field(
         default=None,
         description=(
@@ -182,7 +174,7 @@ async def get_dataset_preview(
         ge=0,
         le=1000,
         description=(
-            "Optional cap on unmeasured (miss_prob=0.5 prior) samples retained "
+            "Optional cap on unmeasured samples (no Rasch δ_s yet) retained "
             "in the Rasch-sorted output. None (default) = no trim — every "
             "dataset-cache row is eligible, bounded only by ``limit``. Set a "
             "positive cap to truncate the unmeasured tail past that count."
@@ -265,15 +257,10 @@ async def get_dataset_preview(
     pick_score_map: dict[int, float] = {int(k): float(v) for k, v in pick_score_block.items()}
     measured = {sid for sid in delta_map if sid in sample_lookup}
 
-    # Miss-prob = miss-probability for an average candidate (theta=0), via
-    # sigmoid(delta). Unmeasured samples get the 0.5 prior (no signal yet —
-    # genuinely a coin flip for the optimizer).
-    def miss_prob_of(sid: int) -> float:
-        if sid in delta_map:
-            return 1.0 / (1.0 + math.exp(-delta_map[sid]))
-        return 0.5
-
-    full_order = sorted(sample_lookup.keys(), key=lambda s: (-miss_prob_of(s), s))
+    # Hardest first — desc δ_s, ascending sample_id as tiebreak. Unmeasured
+    # samples fall at δ=0 (the population-mean prior) and trail the measured
+    # tail via ``_trim_unmeasured``.
+    full_order = sorted(sample_lookup.keys(), key=lambda s: (-delta_map.get(s, 0.0), s))
     trimmed_order = _trim_unmeasured(full_order, measured, max_unmeasured)
 
     items = [
@@ -283,7 +270,6 @@ async def get_dataset_preview(
             ground_truth=sample_lookup[sid]["ground_truth"],
             task=sample_lookup[sid].get("task"),
             n_obs=n_obs_map.get(sid, 0),
-            miss_prob=miss_prob_of(sid),
             delta=delta_map.get(sid),
             delta_se=delta_se_map.get(sid),
             pick_score=pick_score_map.get(sid),
@@ -344,6 +330,11 @@ def _cycle_series(
     Ord = ``{round:04d}/{cand_idx:02d}`` so series sort chronologically by
     round then by scoreboard position within the round. Candidates not
     appearing in the round's scoreboard sink to slot 99.
+
+    Errored items (``error`` truthy or ``predicted == "ERROR"``) are dropped
+    so the empirical hit-rate column and the Rasch fit see the same
+    observation set — same filter as :func:`build_observations` in
+    ``application/intelligence/exploration.py``.
     """
     cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     rounds_dir = cycle_dir / "rounds"
@@ -378,6 +369,8 @@ def _cycle_series(
                 if not isinstance(sid, int) or not isinstance(hit, bool):
                     continue
                 if sid not in sample_ids:
+                    continue
+                if item.get("error") or item.get("predicted") == "ERROR":
                     continue
                 out[sid].append(
                     {
@@ -483,12 +476,9 @@ async def get_dataset_measurement_series(
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
 
-    def miss_prob_of(sid: int) -> float:
-        if sid in delta_map:
-            return 1.0 / (1.0 + math.exp(-delta_map[sid]))
-        return 0.5
-
-    full_order = sorted(sample_lookup.keys(), key=lambda s: (-miss_prob_of(s), s))
+    # Same sort key as ``/preview``: hardest first by δ_s, unmeasured samples
+    # fall at δ=0 and trail the measured tail.
+    full_order = sorted(sample_lookup.keys(), key=lambda s: (-delta_map.get(s, 0.0), s))
     measured = {sid for sid in delta_map if sid in sample_lookup}
     trimmed_order = _trim_unmeasured(full_order, measured, max_unmeasured)
     selected = trimmed_order[:limit]

@@ -24,6 +24,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -107,6 +108,16 @@ export function WorkspaceProvider({
   const [cyclesError, setCyclesError] = useState<string | null>(null);
   const [activeError, setActiveError] = useState<string | null>(null);
 
+  // Tracks the active pointer from the last successful poll. When the
+  // server-side pointer transitions to a *different* cycle (CLI ran
+  // `new`, fork, or sweep — all three mint a fresh cycle id and
+  // re-write active_session.json), we auto-snap follow=true so the
+  // viewed unit yanks to the new session. Resume does not move the
+  // pointer, so a pinned operator studying a finished cycle stays put.
+  // Ref (not state) so the comparison happens inline in the tick
+  // callback without re-render churn.
+  const prevActivePointerRef = useRef<string | null>(null);
+
   // Mount: honour a `?campaign=&cycle=` deep-link as an explicit pin.
   // The synchronous setState here is load-bearing, not an oversight — the
   // deep-link is read in a mount effect (not a useState initializer) so
@@ -137,10 +148,14 @@ export function WorkspaceProvider({
       fetchCampaigns(undefined, signal),
     ]);
     if (signal.aborted) return;
+    let nextActiveCycle: string | null = null;
+    let nextActiveCampaign: string | null = null;
     if (activeRes.status === "fulfilled") {
       setSessionId(activeRes.value.session_id || null);
-      setActiveCycleId(activeRes.value.cycle_id || null);
-      setActiveCampaignId(activeRes.value.campaign_id || null);
+      nextActiveCycle = activeRes.value.cycle_id || null;
+      nextActiveCampaign = activeRes.value.campaign_id || null;
+      setActiveCycleId(nextActiveCycle);
+      setActiveCampaignId(nextActiveCampaign);
       setActiveError(null);
     } else {
       setActiveError(
@@ -153,10 +168,12 @@ export function WorkspaceProvider({
       // only when `/active` itself failed this tick.
       if (activeRes.status !== "fulfilled") {
         if (cyclesRes.value.active_cycle_id) {
-          setActiveCycleId(cyclesRes.value.active_cycle_id);
+          nextActiveCycle = cyclesRes.value.active_cycle_id;
+          setActiveCycleId(nextActiveCycle);
         }
         if (cyclesRes.value.active_campaign_id) {
-          setActiveCampaignId(cyclesRes.value.active_campaign_id);
+          nextActiveCampaign = cyclesRes.value.active_campaign_id;
+          setActiveCampaignId(nextActiveCampaign);
         }
       }
       setCyclesError(null);
@@ -164,6 +181,20 @@ export function WorkspaceProvider({
       setCyclesError(
         (cyclesRes.reason as Error)?.message ?? "campaign list unavailable",
       );
+    }
+    // Auto-snap to the active pointer when it transitions to a fresh
+    // cycle. The first poll's `prev === null` establishes the baseline
+    // (no snap); subsequent transitions are CLI-driven mints. A
+    // deliberately-pinned operator running `new` opted in to the new
+    // session by issuing the command.
+    if (nextActiveCycle && nextActiveCampaign) {
+      const nextPointer = `${nextActiveCampaign}::${nextActiveCycle}`;
+      const prevPointer = prevActivePointerRef.current;
+      if (prevPointer !== null && prevPointer !== nextPointer) {
+        setFollowing(true);
+        setPinned(null);
+      }
+      prevActivePointerRef.current = nextPointer;
     }
     // Campaign registry — keep the last good list on a failed tick.
     if (campaignsRes.status === "fulfilled") {

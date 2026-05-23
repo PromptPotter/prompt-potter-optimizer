@@ -29,7 +29,6 @@ export type ColId =
   | "sample_id"
   | "measurements"
   | "hit_rate"
-  | "miss_prob"
   | "pick_score"
   | "task"
   | "query"
@@ -52,7 +51,6 @@ export const COLUMNS: ColDef[] = [
   { id: "sample_id",     label: "ID",         align: "right",  numeric: true  },
   { id: "measurements",  label: "History",    align: "left",   numeric: true  },
   { id: "hit_rate",      label: "Hit rate",   align: "right",  numeric: true  },
-  { id: "miss_prob",     label: "P(miss)",    align: "right",  numeric: true  },
   { id: "pick_score",    label: "Info gain",  align: "right",  numeric: true  },
   { id: "task",          label: "Task",       align: "left",   numeric: false },
   { id: "query",         label: "Input",      align: "left",   numeric: false },
@@ -83,12 +81,12 @@ export const EMPTY_PERSISTED: PersistedState = {
   hideUnmeasured: false,
 };
 
-// Miss-probability → hue. 0 = cool green (always-hit), 0.5 =
-// neutral grey (no signal yet), 1 = warm red (always-miss).
-function missProbStyle(s: number): CSSProperties {
-  const clamped = Math.max(0, Math.min(1, s));
-  const hue = 130 - clamped * 125;
-  const alpha = 0.18 + Math.abs(clamped - 0.5) * 0.4;
+// Hit-rate → hue. 1 = cool green (always-hit), 0.5 = neutral grey
+// (mixed), 0 = warm red (always-miss). Rows with zero measurements skip
+// the style.
+function hitRateStyle(hitRate: number): CSSProperties {
+  const hue = 5 + hitRate * 125;
+  const alpha = 0.18 + Math.abs(hitRate - 0.5) * 0.4;
   return { background: `hsla(${hue},70%,45%,${alpha.toFixed(3)})` };
 }
 
@@ -120,23 +118,19 @@ export function cellFor(
       // ``hits/total``. The strongest bug-spotting signal: a 0/N row with
       // a large N is a sample the pipeline never solves (genuinely hard,
       // or a broken ground truth / scorer); a full N/N row is trivial.
-      // Sits next to P(miss) so the observed rate and the Rasch estimate
-      // can be eyeballed against each other.
+      // Cell hue tracks the rate: green for always-hit, red for
+      // always-miss, grey in between.
       const n = meas.length;
       if (n === 0) return { text: "—", raw: null };
       const hits = meas.reduce((k, m) => k + (m.hit ? 1 : 0), 0);
+      const rate = hits / n;
       return {
         text: `${hits}/${n}`,
-        raw: hits / n,
-        title: `${hits} hit of ${n} measurements — ${((hits / n) * 100).toFixed(0)}%`,
+        raw: rate,
+        title: `${hits} hit of ${n} measurements — ${(rate * 100).toFixed(0)}%`,
+        style: hitRateStyle(rate),
       };
     }
-    case "miss_prob":
-      return {
-        text: item.miss_prob.toFixed(2),
-        raw: item.miss_prob,
-        style: missProbStyle(item.miss_prob),
-      };
     case "pick_score": {
       // Info gain — the picker's expected decision-information-gain from one
       // measurement of this sample. High = contested (the measurement tells
@@ -156,7 +150,7 @@ export function cellFor(
         title:
           `Info gain ${item.pick_score.toFixed(6)} nats\n` +
           `${dLine}\n` +
-          `P(miss) ${item.miss_prob.toFixed(2)}  ·  ${item.n_obs} tries\n` +
+          `${item.n_obs} tries\n` +
           `High = contested, the measurement separates good prompts from bad. ` +
           `Near-zero = always-hit or always-miss — predictable, uninformative.`,
       };
