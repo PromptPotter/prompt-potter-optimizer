@@ -421,15 +421,20 @@ class LiveDisplay(DerivedView):
         ):
             self._pobb_printed_for = current_id
             current_p = p_best.get(current_id, 0.0)
-            leader_id, leader_p = (
-                max(p_best.items(), key=lambda kv: kv[1]) if p_best else (current_id, current_p)
-            )
-            leader_tag = "*self*" if leader_id == current_id else leader_id[:6]
-            n_priors = max(0, len(p_best) - 1)
+            # Paired PoBB: priors are the per-prior P(cand > prior) entries;
+            # the hardest is the one with smallest P. The candidate's
+            # summary entry under ``current_id`` is the min over priors.
+            prior_entries = {pid: pv for pid, pv in p_best.items() if pid != current_id}
+            if prior_entries:
+                hardest_id, hardest_p = min(prior_entries.items(), key=lambda kv: kv[1])
+                hardest_tag = hardest_id[:6]
+            else:
+                hardest_tag, hardest_p = "*self*", current_p
+            n_priors = len(prior_entries)
             prior_s = "" if n_priors == 1 else "s"
             self._write(
                 f"  {DIM}pobb:{RESET} P(best)={current_p:.1%} @ q{n_samples}  "
-                f"leader={leader_tag} ({leader_p:.1%})  "
+                f"vs hardest={hardest_tag} (P(c>p)={hardest_p:.1%})  "
                 f"(of {n_priors} prior{prior_s})"
             )
 

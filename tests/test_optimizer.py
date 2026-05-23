@@ -556,7 +556,14 @@ def test_pobb_dominance_aborts_when_catch_up_impossible():
 
 
 def test_pobb_locks_in_dominant_leader():
-    """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED."""
+    """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED.
+
+    Under paired PoBB, ``leader_id`` in the trace dict is the *hardest
+    prior* — the prior the candidate just beat with the lowest
+    ``P(cand > prior)``. The candidate is locked in as the round leader
+    whenever ``min(per-prior P(cand > prior)) >= lock_in``; no separate
+    ``leader == current`` guard is needed.
+    """
     check = PoBBCheck(
         PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8), n_samples=20
     )
@@ -567,8 +574,8 @@ def test_pobb_locks_in_dominant_leader():
     assert sig is not None
     assert sig.target == EscalationTarget.LEADER_LOCKED
     cr = sig.check_result
-    assert cr["leader_id"] == "strong_current"
-    assert cr["p_best"] >= 0.95
+    assert cr["leader_id"] == "weak_prior"  # hardest (and only) prior
+    assert cr["p_best"] >= 0.95  # min over per-prior P(cand > prior) is ≥ 0.95
     assert cr["queries_scored"] == 8
     # Two candidates remain unscored (idx=1 of 3).
     assert sig.candidates_skipped == 1

@@ -24,8 +24,8 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointKind,
 )
 from promptpotter.shared.statistics import (
+    paired_better_probabilities,
     pobb_should_stop,
-    posterior_best_probabilities,
 )
 
 __all__ = [
@@ -165,7 +165,11 @@ def _pobb_replay_snapshot(
 
     round_num = int(inputs_ref.get("round_num", ctx.round_data.get("round", 0)))
     rng = pobb_rng(round_num, candidate_id, list(paired_priors.keys()), len(current))
-    snapshot = posterior_best_probabilities({**paired_priors, candidate_id: current}, rng=rng)
+    p_better = paired_better_probabilities(current, paired_priors, rng=rng)
+    # Snapshot mirrors PoBBCheck.check's shape: per-prior P(cand > prior)
+    # plus ``candidate_id → min(values())`` summary entry so replayers
+    # read ``snapshot[candidate_id]`` exactly like the live path.
+    snapshot: dict[str, float] = {**p_better, candidate_id: min(p_better.values())}
     return candidate_id, snapshot
 
 
@@ -201,9 +205,8 @@ def _replay_leader_lock_in(
     if snap is None:
         return False
     candidate_id, snapshot = snap
-    leader = max(snapshot.items(), key=lambda kv: kv[1])[0]
-    if leader != candidate_id:
-        return False
+    # Under paired PoBB, ``candidate_id → min(per-prior P(cand > prior))``
+    # is already the lock-in metric; no separate ``leader == cid`` guard.
     fresh = float(snapshot.get(candidate_id, 0.0))
     threshold = float(inputs_ref.get("lock_in", 0.95))
     recorded = inputs_ref.get("recorded_p_best")

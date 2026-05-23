@@ -78,6 +78,14 @@ class PoBBStreamView(DerivedView):
             cid: float(p_best[cid] - self._last_p_best.get(cid, p_best[cid])) for cid in p_best
         }
 
+        # Per-prior paired-diff posterior (mean_d, se_d, n_paired, p_better)
+        # — the operator's main triangulation surface. When one prior gates
+        # the abort, its mean_d / se_d on this line tells the story.
+        paired_breakdown: dict[str, dict[str, float]] = {
+            str(pid): {str(k): float(v) for k, v in (entry or {}).items()}
+            for pid, entry in (payload.get("paired_breakdown") or {}).items()
+        }
+
         line = {
             "round": int(record.round),
             "sample_idx": int(record.sample_idx if record.sample_idx is not None else -1),
@@ -85,6 +93,7 @@ class PoBBStreamView(DerivedView):
             "n_samples": int(payload.get("n_samples", 0)),
             "p_best": p_best,
             "p_best_delta": deltas,
+            "paired_breakdown": paired_breakdown,
         }
 
         self._append(record.round, line)

@@ -24,9 +24,10 @@ from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.statistics import (
+    paired_better_probabilities,
+    paired_diff_ci_overlaps_zero,
+    paired_diff_posterior,
     pobb_should_stop,
-    posterior_best_probabilities,
-    wilson_overlap,
 )
 
 if TYPE_CHECKING:
@@ -125,11 +126,20 @@ class DegradationCheck:
 
 @dataclass(frozen=True)
 class PoBBSnapshot:
-    """Per-sample PoBB snapshot for telemetry."""
+    """Per-sample PoBB snapshot for telemetry.
+
+    ``p_best`` carries the per-prior ``P(cand > prior)`` map plus a
+    ``current_id → min(values())`` summary entry — the operator reads
+    the per-prior breakdown to see which prior is gating the abort.
+    ``paired_breakdown`` adds the underlying ``(mean_d, se_d, n_paired)``
+    per prior so the live stream shows the diff posterior the candidate
+    is sitting on.
+    """
 
     p_best: dict[str, float]
     current_id: str
     n_samples: int
+    paired_breakdown: dict[str, dict[str, float]]
 
 
 @dataclass(frozen=True)
@@ -330,27 +340,51 @@ class PoBBCheck:
             return None
 
         cid = self._current_id or "__current__"
-        histories: dict[str, list[float]] = {**paired_priors, cid: scores}
-        snapshot = posterior_best_probabilities(
-            histories,
+        p_better = paired_better_probabilities(
+            scores,
+            paired_priors,
             rng=pobb_rng(self.round_num, cid, list(paired_priors.keys()), n),
         )
-        snap = PoBBSnapshot(p_best=snapshot, current_id=cid, n_samples=n)
+        # Candidate's P(best) is bounded above by min over priors of
+        # P(cand > prior_i) — beating ALL priors cannot be more probable
+        # than beating the single hardest one.
+        p_best_current = min(p_better.values())
+        hardest_prior_id = min(p_better, key=lambda k: p_better[k])
+
+        # Per-prior paired-diff posterior for the audit + stream telemetry.
+        # The operator triangulates "did the abort threshold fire because
+        # the candidate genuinely lost, or because a single prior moved?"
+        # by reading the per-prior (mean_d, se_d, n_paired) breakdown.
+        paired_breakdown: dict[str, dict[str, float]] = {}
+        for pid, prior_scores in paired_priors.items():
+            mean_d, se_d, n_paired = paired_diff_posterior(scores, prior_scores)
+            paired_breakdown[pid] = {
+                "mean_d": float(mean_d),
+                "se_d": float(se_d),
+                "n_paired": float(n_paired),
+                "p_better": float(p_better[pid]),
+            }
+
+        # PoBBSnapshot.p_best carries per-prior P(cand > prior) plus a
+        # ``cid → p_best_current`` summary entry; the stream's delta math
+        # tracks each prior independently across queries.
+        snapshot_dict: dict[str, float] = {**p_better, cid: float(p_best_current)}
+        snap = PoBBSnapshot(
+            p_best=snapshot_dict,
+            current_id=cid,
+            n_samples=n,
+            paired_breakdown=paired_breakdown,
+        )
         if self._on_snapshot is not None:
             self._on_snapshot(snap)
 
-        p_best_current = snapshot.get(cid, 1.0)
-        leader_id = max(snapshot.items(), key=lambda kv: kv[1])[0]
-
-        # Leader lock-in (preempts loser elimination): when current is the
-        # leader and its posterior P(best) ≥ lock_in threshold past the
-        # lock-in floor, stop measuring this candidate. Disabled when lock_in≥1.
-        if (
-            self.lock_in < 1.0
-            and n >= self.lock_in_n_min
-            and leader_id == cid
-            and p_best_current >= self.lock_in
-        ):
+        # Leader lock-in (preempts loser elimination): when the candidate
+        # beats every prior with probability ≥ lock_in, stop measuring
+        # this candidate. Paired ``p_best_current ≥ 0.5`` already implies
+        # candidate is the leader against every prior, so the
+        # ``leader_id == cid`` guard collapses into the threshold check.
+        # Disabled when lock_in ≥ 1.0.
+        if self.lock_in < 1.0 and n >= self.lock_in_n_min and p_best_current >= self.lock_in:
             return _leader_locked(
                 self.name,
                 {
@@ -360,8 +394,9 @@ class PoBBCheck:
                     "p_best": float(p_best_current),
                     "lock_in": float(self.lock_in),
                     "lock_in_n_min": int(self.lock_in_n_min),
-                    "p_best_snapshot": snapshot,
-                    "leader_id": leader_id,
+                    "p_best_snapshot": snapshot_dict,
+                    "leader_id": hardest_prior_id,
+                    "paired_breakdown": paired_breakdown,
                 },
                 candidate_idx,
                 n_total_candidates,
@@ -370,19 +405,15 @@ class PoBBCheck:
         if not pobb_should_stop(p_best_current, self.epsilon):
             return None
 
-        # Separability floor — don't eliminate while the candidate's
-        # hit-rate CI overlaps the leader's. At the picker's preferred
-        # samples (high expected information gain at the candidate's
-        # running θ̂_c posterior), binomial noise alone produces 0/4 vs
-        # 2/4 outcomes for arms that are actually equivalent. The
-        # information-theoretic adaptive picker is asymptotic; at small n
-        # the posterior gate can fire on noise before the CI separates.
-        # The floor keeps the picker honest until the
-        # binomial actually splits the two arms. See
-        # ``project_pobb_separability_floor`` memory.
-        if leader_id in paired_priors and wilson_overlap(
-            scores, paired_priors[leader_id], alpha=0.05
-        ):
+        # Separability floor — don't eliminate while the paired-difference
+        # CI against the hardest prior still crosses zero. At the picker's
+        # preferred samples (high expected information gain at the
+        # candidate's running θ̂_c posterior), binomial noise alone can
+        # push one-sided posterior tails past ε before the two-sided CI
+        # separates. Paired analogue of ``wilson_overlap``; preserves the
+        # AIME-binomial-noise protection from 2026-05-18 (memory:
+        # ``project_pobb_separability_floor``).
+        if paired_diff_ci_overlaps_zero(scores, paired_priors[hardest_prior_id], alpha=0.05):
             return None
 
         return _eliminate(
@@ -393,8 +424,9 @@ class PoBBCheck:
                 "n_priors": len(paired_priors),
                 "p_best": float(p_best_current),
                 "epsilon": float(self.epsilon),
-                "p_best_snapshot": snapshot,
-                "leader_id": leader_id,
+                "p_best_snapshot": snapshot_dict,
+                "leader_id": hardest_prior_id,
+                "paired_breakdown": paired_breakdown,
             },
             candidate_idx,
             n_total_candidates,

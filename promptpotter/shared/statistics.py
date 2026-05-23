@@ -181,8 +181,142 @@ def pobb_should_stop(p_best: float, epsilon: float) -> bool:
     return p_best < epsilon
 
 
+# ---------------------------------------------------------------------------
+# Paired-difference posterior — for cand-vs-priors comparisons on shared samples
+# ---------------------------------------------------------------------------
+#
+# When a candidate and a prior are evaluated on the *same* sample set, the
+# per-sample paired difference ``d_i = c_i − p_i`` cancels sample-difficulty
+# noise that ``posterior_best_probabilities`` (independent Normals per arm)
+# leaves on the table. PoBBCheck uses this path; ``elevate_to_decisive``
+# does not (its arms grow asymmetric measured-sets via top-up).
+# ---------------------------------------------------------------------------
+
+
+def _paired_diff_posterior(diffs: list[float]) -> tuple[float, float]:
+    """Normal posterior (mean, se) on the mean paired difference.
+
+    SE floored at ``1/(4n)`` for the same reason as ``_normal_posterior``:
+    keeps small-n binary regimes from over-stopping under perfect-agreement
+    (``var = 0``) sequences.
+    """
+    n = len(diffs)
+    if n == 0:
+        return (0.0, 1.0)
+    arr = np.asarray(diffs, dtype=np.float64)
+    mean = float(arr.mean())
+    if n == 1:
+        return (mean, 0.5)
+    variance = float(arr.var(ddof=1))
+    se = math.sqrt(variance / n)
+    se_floor = 1.0 / (4.0 * n)
+    return (mean, max(se, se_floor))
+
+
+def paired_better_probabilities(
+    candidate_scores: list[float],
+    paired_priors: dict[str, list[float]],
+    n_samples: int = 1000,
+    rng: np.random.Generator | None = None,
+) -> dict[str, float]:
+    """Per-prior posterior probability that ``candidate > prior`` on shared samples.
+
+    For each prior ``p`` we compute paired differences ``d_i = c_i − p_i``
+    over the shared sample set, fit a Normal posterior on the mean
+    difference, and Monte-Carlo P(mean_d > 0). All priors must have the
+    same length as ``candidate_scores`` — caller is responsible for the
+    paired alignment (``PoBBCheck.check`` does this via
+    ``priors_by_sample``).
+
+    Returns ``{prior_id: P(cand > prior_id)}``. The caller derives
+    ``p_best = min(values())`` — the most pessimistic per-prior comparison
+    is an upper bound on ``P(cand is best of all)`` and the right
+    elimination criterion. Empty input returns an empty dict.
+
+    Args:
+        candidate_scores: candidate's per-sample fitness on the shared set.
+        paired_priors: prior_id → paired fitness list (same length as
+            ``candidate_scores``).
+        n_samples: Monte Carlo draws per prior; MC error ≈ ``√(p(1−p)/N)``.
+        rng: optional pre-seeded numpy Generator for reproducible draws.
+    """
+    if not paired_priors:
+        return {}
+    n_cand = len(candidate_scores)
+    gen = rng if rng is not None else np.random.default_rng()
+    out: dict[str, float] = {}
+    for prior_id, prior_scores in paired_priors.items():
+        if len(prior_scores) != n_cand:
+            raise ValueError(
+                f"paired_better_probabilities: prior {prior_id!r} has "
+                f"{len(prior_scores)} scores; candidate has {n_cand}"
+            )
+        diffs = [c - p for c, p in zip(candidate_scores, prior_scores, strict=True)]
+        mean_d, se_d = _paired_diff_posterior(diffs)
+        z = gen.standard_normal(n_samples)
+        draws = mean_d + se_d * z
+        out[prior_id] = float((draws > 0.0).mean())
+    return out
+
+
+def paired_diff_posterior(
+    candidate_scores: list[float],
+    prior_scores: list[float],
+) -> tuple[float, float, int]:
+    """Closed-form paired-difference posterior summary; for telemetry.
+
+    Returns ``(mean_d, se_d, n_paired)``. Mirrors the math of
+    ``paired_better_probabilities`` without the MC draw, so the round
+    audit record can carry the per-prior diff posterior without rolling
+    fresh randomness.
+    """
+    n = len(candidate_scores)
+    if len(prior_scores) != n:
+        raise ValueError(
+            f"paired_diff_posterior: prior has {len(prior_scores)} scores; candidate has {n}"
+        )
+    diffs = [c - p for c, p in zip(candidate_scores, prior_scores, strict=True)]
+    mean_d, se_d = _paired_diff_posterior(diffs)
+    return (mean_d, se_d, n)
+
+
+def paired_diff_ci_overlaps_zero(
+    candidate_scores: list[float],
+    prior_scores: list[float],
+    alpha: float = 0.05,
+) -> bool:
+    """Paired-difference confidence interval analogue of ``wilson_overlap``.
+
+    Computes the ``(1 − alpha)`` two-sided Normal CI for the mean paired
+    difference (using the same SE floor as
+    ``paired_better_probabilities``) and returns ``True`` if the CI
+    contains zero — i.e. the paired arms are not separated at the
+    requested confidence.
+
+    Used by ``PoBBCheck.check`` as the paired analogue of
+    ``wilson_overlap``: block elimination when the paired diff CI still
+    crosses zero, even if the one-sided posterior gate fired. At
+    ``alpha = 0.05`` this is the standard 95% CI; under the SE floor
+    ``1/(4n)``, n=4 perfect wins (mean_d = 1.0, se_d = 0) still cross
+    zero only when mean_d=0, so the AIME-binomial-noise protection from
+    2026-05-18 (memory: ``project_pobb_separability_floor``) is
+    preserved.
+    """
+    if not candidate_scores or not prior_scores:
+        return True
+    mean_d, se_d, _n = paired_diff_posterior(candidate_scores, prior_scores)
+    from scipy.stats import norm
+
+    z = float(norm.ppf(1 - alpha / 2))
+    half_width = z * se_d
+    return (mean_d - half_width) <= 0.0 <= (mean_d + half_width)
+
+
 __all__ = [
     "min_detectable_effect",
+    "paired_better_probabilities",
+    "paired_diff_ci_overlaps_zero",
+    "paired_diff_posterior",
     "pobb_should_stop",
     "posterior_best_probabilities",
     "proportion_test",

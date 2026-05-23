@@ -185,11 +185,18 @@ def pobb_decision_data(
     measured, and each prior's fitness map restricted to those samples.
     Replay reconstructs the paired vectors directly from these without
     needing to crawl prior rounds or backfill the archive.
+
+    ``paired_breakdown`` (per-prior mean_d, se_d, n_paired, p_better) is
+    pulled through from ``check_result`` so the round audit + the live
+    PoBB stream both carry the per-prior comparison the operator reads
+    to triangulate whether a stall is candidate-wide or driven by one
+    sticky prior.
     """
     return {
         "p_best": float(candidate_score.get("p_best", 0.0)),
         "leader_id": str(candidate_score.get("leader_id", "")),
         "p_best_snapshot": dict(candidate_score.get("p_best_snapshot") or {}),
+        "paired_breakdown": dict(candidate_score.get("paired_breakdown") or {}),
         "candidate_sample_ids": list(candidate_sample_ids or []),
         "prior_histories": dict(prior_histories or {}),
     }
