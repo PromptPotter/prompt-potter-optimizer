@@ -234,12 +234,11 @@ def combined_optimizer_prompt_hash() -> str:
     """One 12-hex hash over the whole optimizer meta-prompt set.
 
     Folds the per-prompt hashes from :func:`compute_optimizer_prompt_hashes`
-    into a single deterministic digest. This is the *optimizer* half of a
-    campaign's identity: ``campaign_id = {dataset}__{declaration_hash}``,
-    where ``declaration_hash`` combines this with the target content hash
-    (see :func:`promptpotter.application.runner.identity.declaration_hash`).
-    Editing any optimizer meta-prompt shifts this hash, so the next ``new``
-    mints a distinct campaign.
+    into a single deterministic digest. Recorded on ``campaign.json`` as
+    ``optimizer_prompt_hash``; resume compares the stored value against a
+    fresh recomputation and warns on drift. Not part of ``campaign_id``
+    (campaign ids are random per ``new`` call) — it's a drift-detection
+    property only.
     """
     per_prompt = compute_optimizer_prompt_hashes()
     blob = json.dumps(per_prompt, sort_keys=True)

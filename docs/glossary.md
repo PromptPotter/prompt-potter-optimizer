@@ -68,21 +68,21 @@ The persisted world is a four-entity containment hierarchy
   `datasets/{name}/`.
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, and the optimizer meta-prompts it runs
-  under. A first-class entity and a **forest** — it holds N sessions.
-  Directory `campaigns/{campaign_id}/` + `campaign.json` manifest.
-  `campaign_id = {dataset}__{declaration_hash}` — the 12-hex
-  **declaration hash** folds the target content hash with the optimizer
-  meta-prompt hash; **stable**, so re-running `new` on an unchanged
-  declaration find-or-creates the same campaign, while editing an
-  optimizer meta-prompt mints a distinct one. `domain/campaign.py`.
-- **Session** — one run of `new` on a campaign's declaration. A campaign
-  holds N sessions; re-running `new` on the same declaration adds one,
-  `resume` extends the active one. Identity is the `session_id`
-  (`s_xxxx`). Each session is a tree: a root cycle plus its fork
-  descendants. Session root cycle id is `cycle_{hash}` for session 1,
-  `cycle_{hash}_s{N}` for session N — the `_s{N}` suffix disambiguates
-  the directory, not a sibling separator.
-  `application/bootstrap/session.py`.
+  under. A first-class entity holding one session root + its fork/diag/
+  sweep descendants. Directory `campaigns/{campaign_id}/` +
+  `campaign.json` manifest. `campaign_id = {dataset}__{rand6_hex}` —
+  minted fresh per `new` call by `mint_campaign_id`; each `new` produces
+  a distinct campaign. The declaration (target hash +
+  optimizer-prompt hash) is recorded as properties on `campaign.json`
+  for drift detection on resume, not as the id. `domain/campaign.py`.
+- **Session** — one run of `new` on a campaign. A campaign holds one
+  session — the `new` invocation that minted it. `resume` extends that
+  session. Identity is the `session_id` (`s_xxxx`). Each session is a
+  tree: a root cycle (bare `cycle_<target_hash>`) plus its fork
+  descendants. `application/bootstrap/session.py`. Pre-existing
+  campaigns minted under the previous content-addressed scheme may
+  carry multiple session roots (`cycle_<hash>`, `_s2`, `_s3`, …);
+  the readers still parse them.
 - **Unit** — one continuous-parameter run inside a session. A session
   starts with one unit; `resume` extends the current unit; each fork
   (human / L3 / divergence) branches a new unit. The operator-facing
@@ -90,9 +90,10 @@ The persisted world is a four-entity containment hierarchy
   identifier stays `cycle_id`.
 - **Cycle** — the round-loop state container; the internal name for a
   Unit. `cycle_{content_hash[:12]}` from the origin JSP content hash
-  (+ `_s{N}` for session-root cycles, `_fork_`/`_diag_`/`_sweep_` for
-  branches). `cycle_id` is campaign-scoped — path resolution is
-  `(campaign_id, cycle_id)`. `application/optimization/cycle.py`.
+  (+ `_fork_`/`_diag_`/`_sweep_` for branches). `cycle_id` is
+  campaign-scoped — path resolution is `(campaign_id, cycle_id)`.
+  `application/optimization/cycle.py`. Pre-existing campaigns may also
+  carry `_s{N}` session-root suffixes; the readers still parse them.
 - **unit_kind** — operator-facing label on the webapp sidebar, computed
   server-side from `(sibling_kind, fork_trigger)`: `session` (a session
   root run; `resume` extends it), `divergent_resume` (a `resume

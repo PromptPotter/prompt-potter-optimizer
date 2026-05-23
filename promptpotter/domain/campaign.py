@@ -1,26 +1,31 @@
 """``Campaign`` — the first-class optimization-effort entity.
 
 A campaign is one declared optimization effort: a dataset + pipeline
-origin + context text + the optimizer meta-prompts it runs under. It is a
-**forest** — it holds N *sessions* (every ``new`` on the same declaration
-adds one) plus their fork descendants, all flat under ``cycles/``. The
-campaign is the single owner of the frozen ``CampaignConfig`` snapshot.
-``campaign.json`` at ``campaigns/{campaign_id}/`` is this model's dump.
+origin + context text + the optimizer meta-prompts it runs under. It
+holds one session root (``cycle_<target_hash>``) plus any fork/diag/sweep
+descendants, all flat under ``cycles/``. The campaign is the single
+owner of the frozen ``CampaignConfig`` snapshot. ``campaign.json`` at
+``campaigns/{campaign_id}/`` is this model's dump.
 
-``campaign_id`` is ``{dataset}__{declaration_hash}`` — the declaration
-hash folds the **target** content hash (``root_content_hash``) together
-with the **optimizer** meta-prompt hash (``optimizer_prompt_hash``); see
-:func:`promptpotter.application.runner.identity.declaration_hash`. It is
-therefore *stable*: re-running ``new`` on an unchanged declaration
-resolves to the same campaign and adds a session; editing a target field
-OR an optimizer meta-prompt mints a distinct campaign.
+``campaign_id`` is ``{dataset}__{rand6_hex}`` — minted once per ``new``
+invocation by :func:`promptpotter.application.runner.identity.mint_campaign_id`.
+Each ``new`` produces a distinct campaign, regardless of whether the
+declaration matches an existing campaign on disk. Two ``new`` calls on
+an unchanged declaration share their root cycle id
+(``cycle_<target_hash>`` is content-addressed) and their origin score
+(the dataset-scoped archive cache-hits every sample), but differ in
+``campaign_id`` and diverge from round 1 onward.
 
-* ``root_content_hash`` — the target content hash. ``root_cycle_id`` is
-  ``cycle_<root_content_hash>`` (the first session's root cycle, a
-  convenience pointer; the forest may hold more sessions —
-  ``CampaignStore.list_sessions``). Resume recomputes it for target-drift.
-* ``optimizer_prompt_hash`` — the optimizer meta-prompt set's hash; resume
-  recomputes it to detect optimizer-prompt drift.
+* ``root_content_hash`` — the target content hash; the campaign's root
+  cycle dir is ``cycle_<root_content_hash>``. Resume recomputes it to
+  detect target drift.
+* ``optimizer_prompt_hash`` — the optimizer meta-prompt set's hash;
+  resume recomputes it to detect optimizer-prompt drift.
+
+Pre-existing campaigns minted under the previous content-addressed
+scheme (``{dataset}__{declaration_hash}``) with N session roots
+``cycle_<hash>``, ``_s2``, ``_s3``, … remain readable; the picker still
+enumerates and orders those roots.
 """
 
 from __future__ import annotations

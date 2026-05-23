@@ -4,30 +4,33 @@
 
 A **Campaign** is **one declared optimization effort** — a **dataset**, a
 **pipeline origin**, the **context text**, and the **optimizer meta-prompts**
-it runs under. It is a **forest**: a campaign holds N **sessions**. It owns the
-directory `campaigns/{campaign_id}/`, a `campaign.json` manifest, and a
-campaign-wide `log.md` + `hard_samples.json`.
+it runs under. It owns the directory `campaigns/{campaign_id}/`, a
+`campaign.json` manifest, and a campaign-wide `log.md` + `hard_samples.json`.
 
-`campaign_id = {dataset}__{declaration_hash}` — the `declaration_hash` is the
-12-hex hash of the *complete* declaration: it folds the **target** content
-hash (`root_content_hash`, the same hash that is the root cycle id) with the
-**optimizer** meta-prompt hash (`optimizer_prompt_hash`, over
-`datasets/_optimizer/`). The id is **stable**: re-running `python -m
-promptpotter new <dataset>` on an unchanged declaration resolves to the
-**same** campaign (find-or-create), never a fresh one — while editing a target
-field OR an optimizer meta-prompt mints a distinct campaign. Multiple campaigns
-may share a dataset — each distinct declaration is its own campaign.
+`campaign_id = {dataset}__{rand6_hex}` — minted fresh per `new` invocation by
+`mint_campaign_id`. Each `python -m promptpotter new <dataset>` produces a
+distinct campaign, regardless of whether the declaration matches an existing
+campaign on disk. The declaration (target hash + optimizer-prompt hash) is
+recorded as properties on `campaign.json` (`root_content_hash` +
+`optimizer_prompt_hash`) and used by resume to warn on drift, not to derive
+the id. Cross-campaign evidence pooling on the same declaration rides the
+dataset-scoped `archive/measurements/`, so two `new` calls on an unchanged
+declaration share their root cycle id (content-addressed) and origin score
+(cache-served) but get distinct `campaign_id`s and diverge from round 1
+onward.
 
-A **Session** is **one run of `new`** on a campaign's declaration. The first
-`new` mints the campaign and its first session; each subsequent `new` on the
-same declaration **adds** a session to the existing campaign. `resume` extends
-the *active* session — it does not add one. A session's identity is its
-`session_id` (`s_xxxx`). Each session is itself a tree: a root cycle plus its
-fork descendants. The session root cycle id is `cycle_{hash}` for session 1 and
-`cycle_{hash}_s{N}` for session N — the `_s{N}` suffix only disambiguates the
-directory; it is **not** a sibling separator (`root_cycle_id` / `sibling_kind`
-treat `cycle_X_s2` as its own family root, `cycle_X_s2_fork_abc` as a fork
-rooted at it).
+A **Session** is **one run of `new`** on a campaign. A campaign holds one
+session — the `new` invocation that minted it. `resume` extends that session;
+`resume --fork-on-divergence` adds sibling cycles within it. A session's
+identity is its `session_id` (`s_xxxx`). Each session is itself a tree: a
+root cycle (bare `cycle_<target_hash>`) plus its fork descendants.
+
+> **Legacy on-disk shape.** Pre-existing campaigns minted under the previous
+> content-addressed scheme (`{dataset}__{declaration_hash}`, find-or-create
+> on duplicate) carry multiple session roots — `cycle_<hash>` for session 1,
+> `cycle_<hash>_s{N}` for session N — under one `campaign_id`. The picker
+> still parses and displays them; the `_s{N}` suffix is no longer written
+> for new campaigns.
 
 A **Unit** is one continuous-parameter run *inside* a session. A session starts
 with one unit — its root cycle. `resume` — even after a Ctrl+C — keeps
@@ -39,12 +42,11 @@ and a new one **branches** off it on a **fork**, of which there are three kinds:
 - **divergence** — the same session is run with one changed parameter, and the
   trace diverges from the recorded one mid-run (`resume --fork-on-divergence`).
 
-So a session's units form a tree: the root unit, plus a branch unit per fork; a
-campaign is the forest of those N session trees. "Unit" is the operator-facing
-name. On disk and in the API the identifier is `cycle_id` — **a unit is exactly
-one cycle**; "cycle" is the internal name for the same thing. The webapp sidebar
-shows units (the trees), never raw cycle ids, tagging each with its
-`unit_kind` — see below.
+So a session's units form a tree: the root unit, plus a branch unit per fork.
+"Unit" is the operator-facing name. On disk and in the API the identifier is
+`cycle_id` — **a unit is exactly one cycle**; "cycle" is the internal name for
+the same thing. The webapp sidebar shows units (the trees), never raw cycle
+ids, tagging each with its `unit_kind` — see below.
 
 The Campaign sits inside the four-entity hierarchy: **Workspace** → **Dataset**
 → **Campaign** → **Unit** (`cycle` internally), with **Session** a unit of a
@@ -80,23 +82,21 @@ from the parent's history up to the cut. That's it.
 
 ```
 campaigns/
-  justlogic__a1b2c3d4e5f6/            # one Campaign — {dataset}__{declaration_hash}
-    campaign.json                     # manifest: dataset, config, root_cycle_id, …
-    log.md                            # campaign digest (every session + its forks + rounds)
+  justlogic__a1b2c3/                  # one Campaign — {dataset}__{rand6_hex}
+    campaign.json                     # manifest: dataset, config, root_cycle_id,
+                                      #   root_content_hash, optimizer_prompt_hash, …
+    log.md                            # campaign digest (the session + its forks + rounds)
     cycles/
-      cycle_abc123/                   # session 1 root cycle (no parent_cycle_id)
-        dashboard.json                # live telemetry for session 1 (+ its forks)
+      cycle_abc123/                   # session root cycle (no parent_cycle_id)
+        dashboard.json                # live telemetry for the session (+ its forks)
         index.json                    # sibling_kind: root
         ledger (events.jsonl)         # …, FORK_CUT → fork_x, …
-      cycle_abc123_fork_x/            # branch of session 1 — flat alongside the root
+      cycle_abc123_fork_x/            # branch — flat alongside the root
         index.json                    # parent_cycle_id: cycle_abc123, sibling_kind: fork
         ledger                        # inherit_from(parent, offset_at_cut)
-      cycle_abc123_s2/                # session 2 root cycle (re-run of `new`)
-        dashboard.json                # live telemetry for session 2 (+ its forks)
-        index.json                    # sibling_kind: root
 ```
 
-Every session root and every fork lands flat under the same `cycles/` directory — the trees are reconstructed from `parent_cycle_id` metadata, not directory nesting. A flat store keyed by `parent_cycle_id` scales as the fork tree grows; nested fork-of-fork directories do not. No new file format, no separate "branches" registry — the FORK_CUT decision is the edge, `parent_cycle_id` is the link. `dashboard.json` is **per-session** — each session root carries its own live stream, shared by that session's forks (a fork's family root is its session root).
+The session root and every fork land flat under the same `cycles/` directory — the trees are reconstructed from `parent_cycle_id` metadata, not directory nesting. A flat store keyed by `parent_cycle_id` scales as the fork tree grows; nested fork-of-fork directories do not. No new file format, no separate "branches" registry — the FORK_CUT decision is the edge, `parent_cycle_id` is the link. `dashboard.json` lives in the session-family root cycle, shared by that session's forks.
 
 ## Three callers, one primitive
 

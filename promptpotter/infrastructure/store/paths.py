@@ -69,26 +69,10 @@ def session_index(cycle_id: str) -> int:
     return int(m.group(1)) if m else 1
 
 
-def session_cycle_id(base_cycle_id: str, index: int) -> str:
-    """Root cycle id for the Nth session of a campaign.
-
-    ``index <= 1`` keeps the bare ``cycle_{hash}`` (session 1); ``index >= 2``
-    appends ``_s{index}``. ``base_cycle_id`` is the bare origin root id from
-    :func:`cycle_config_identity`. The ``_s{N}`` suffix only disambiguates
-    the Nth re-run's root dir within one campaign's flat ``cycles/`` tree —
-    it is NOT a sibling separator, so :func:`root_cycle_id` /
-    :func:`sibling_kind` still treat ``cycle_X_s2`` as its own family root
-    and ``cycle_X_s2_fork_abc`` as a fork rooted at it."""
-    if index <= 1:
-        return base_cycle_id
-    return f"{base_cycle_id}_s{index}"
-
-
 def campaign_root_dir_for(tenant_root: Path, campaign_id: str) -> Path:
     """Campaign dir — holds ``campaign.json``, ``log.md``, the campaign-scope
-    ``hard_samples.json``, and the ``cycles/`` subtree (the campaign's whole
-    forest). Per-session telemetry binds one level down, at each
-    session-family root cycle dir, not here."""
+    ``hard_samples.json``, and the ``cycles/`` subtree. Per-session telemetry
+    binds one level down, at each session-family root cycle dir, not here."""
     return tenant_root / "campaigns" / validate_path_component(campaign_id)
 
 
@@ -126,7 +110,6 @@ __all__ = [
     "campaign_root_dir_for",
     "cycle_dir_for",
     "root_cycle_id",
-    "session_cycle_id",
     "session_dir_for",
     "session_index",
     "sibling_kind",

@@ -373,53 +373,37 @@ def test_campaign_records_parent_session(
     assert data["parent_session_id"], "index.json must carry parent_session_id"
 
 
-def test_session_cycle_id_grammar() -> None:
-    """The ``_s{N}`` session suffix disambiguates a campaign's N session
-    roots without colliding with the fork/diag/sweep separators.
+def test_legacy_session_suffix_still_parses() -> None:
+    """Pre-existing on-disk campaigns minted under the old "forest of N
+    sessions" scheme carry ``cycle_<hash>_s{N}`` roots; the readers
+    (``root_cycle_id``, ``sibling_kind``, ``session_index``) must still
+    parse them so those campaigns continue to enumerate in the picker.
 
-    A campaign is a forest of N sessions: session 1 is the bare
-    ``cycle_{hash}``, session N is ``cycle_{hash}_s{N}``. The suffix must
-    NOT read as a sibling separator — ``root_cycle_id`` / ``sibling_kind``
-    have to treat a ``_s{N}`` root as its own family root, and a fork of
-    it as a fork. ``campaign_id`` is stable across all N sessions.
+    New campaigns hold a single session root at the bare
+    ``cycle_<target_hash>``. The ``_s{N}`` suffix is no longer written.
     """
-    from promptpotter.application.runner.identity import campaign_id_for, declaration_hash
     from promptpotter.infrastructure.store.campaign_store.cycles import _unit_kind
     from promptpotter.infrastructure.store.paths import (
         root_cycle_id,
-        session_cycle_id,
         session_index,
         sibling_kind,
     )
 
     base = "cycle_2451d3cf6ebc"
-    # session_cycle_id numbering: session 1 stays bare, N>=2 gets _s{N}.
-    assert session_cycle_id(base, 1) == base
-    assert session_cycle_id(base, 3) == "cycle_2451d3cf6ebc_s3"
+    # Bare cycle id reads as session 1, its own family root.
     assert session_index(base) == 1
-    assert session_index("cycle_2451d3cf6ebc_s3") == 3
+    assert root_cycle_id(base) == base
+    assert sibling_kind(base) == "root"
 
-    # A _s{N} session root is its own family root, kind "root".
-    s2 = "cycle_2451d3cf6ebc_s2"
-    assert root_cycle_id(s2) == s2
-    assert sibling_kind(s2) == "root"
-    # A fork of a _s{N} session roots back at that session, kind "fork".
+    # Legacy _s{N} on-disk shape still parses: own root, kind "root", index N.
+    s3 = "cycle_2451d3cf6ebc_s3"
+    assert session_index(s3) == 3
+    assert root_cycle_id(s3) == s3
+    assert sibling_kind(s3) == "root"
+    # A fork of a legacy session root still roots back at that session.
     s2_fork = "cycle_2451d3cf6ebc_s2_fork_abc123"
-    assert root_cycle_id(s2_fork) == s2
+    assert root_cycle_id(s2_fork) == "cycle_2451d3cf6ebc_s2"
     assert sibling_kind(s2_fork) == "fork"
-
-    # campaign_id is {dataset}__{declaration_hash}.
-    assert campaign_id_for("justlogic", "2451d3cf6ebc") == "justlogic__2451d3cf6ebc"
-
-    # declaration_hash folds the target hash + the optimizer-prompt hash —
-    # the campaign's identity. Pure, deterministic, 12-hex, and sensitive
-    # to BOTH halves (and their order).
-    d1 = declaration_hash("aaaa", "bbbb")
-    assert d1 == declaration_hash("aaaa", "bbbb")  # deterministic
-    assert d1 != declaration_hash("bbbb", "aaaa")  # order matters
-    assert d1 != declaration_hash("aaaa", "cccc")  # optimizer half matters
-    assert d1 != declaration_hash("dddd", "bbbb")  # target half matters
-    assert len(d1) == 12 and all(c in "0123456789abcdef" for c in d1)
 
     # Diag + sweep both fold to the operator-facing "user_fork" kind; a
     # root reads as "session".

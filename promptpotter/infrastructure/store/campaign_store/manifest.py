@@ -1,9 +1,16 @@
-"""Campaign-manifest CRUD — ``campaign.json`` + the session forest.
+"""Campaign-manifest CRUD — ``campaign.json`` + the cycle tree.
 
-A campaign is a forest: it holds N *session* roots (one per ``new`` on
-the same origin declaration) plus their fork descendants. The campaign
-owns the frozen ``CampaignConfig`` snapshot and the forest's identity
-(``campaign_id = {dataset}__{hash}``).
+A campaign holds one session root (the bare ``cycle_<target_hash>``)
+plus any fork/diag/sweep descendants of it. ``campaign_id`` is a fresh
+per-call random (``{dataset}__{rand6_hex}``) so each ``new`` mints a
+distinct campaign; the declaration is recorded as properties on
+``campaign.json`` for drift detection on resume.
+
+Pre-existing on-disk campaigns minted under the previous "forest of N
+sessions" scheme (``cycle_<hash>_s2``, ``_s3``, …) still enumerate
+correctly — :meth:`list_sessions` walks every session-root cycle in the
+``cycles/`` tree, ordered by the ``_s{N}`` suffix parsed via
+:func:`session_index`.
 """
 
 from __future__ import annotations
@@ -57,22 +64,21 @@ class CampaignManifestMixin(CampaignStoreKernel):
         return out
 
     def mark_campaign_finished(self, campaign_id: str, *, status: str, finished_at: str) -> None:
-        """Stamp the terminal ``status`` + ``finished_at`` onto ``campaign.json``.
-
-        ``status`` reflects the campaign's most-recent session — a fresh
-        ``new`` reactivates the campaign (see ``auto_mint_session``)."""
+        """Stamp the terminal ``status`` + ``finished_at`` onto ``campaign.json``."""
         if self.load_campaign(campaign_id) is None:
             return
         self.update_campaign(campaign_id, {"status": status, "finished_at": finished_at})
 
     def list_sessions(self, campaign_id: str) -> list[str]:
-        """Every session-root cycle id in the campaign's forest, ordered by
+        """Every session-root cycle id in the campaign's cycle tree, ordered by
         session index.
 
         A session root is a cycle that is its own family root — no
-        ``_fork_``/``_diag_``/``_sweep_`` separator. The bare ``cycle_{hash}``
-        is session 1; ``cycle_{hash}_s{N}`` is the Nth ``new`` re-run of the
-        same origin declaration.
+        ``_fork_``/``_diag_``/``_sweep_`` separator. New campaigns hold a
+        single session root (bare ``cycle_<target_hash>``); pre-existing
+        campaigns minted under the old "forest of N sessions" scheme also
+        carry ``cycle_<hash>_s2``, ``_s3``, … roots, which :func:`session_index`
+        still parses for ordering.
         """
         cycles_dir = self.campaign_root_dir(campaign_id) / "cycles"
         if not cycles_dir.exists():
@@ -83,10 +89,3 @@ class CampaignManifestMixin(CampaignStoreKernel):
             if p.is_dir() and (p / "index.json").is_file() and root_cycle_id(p.name) == p.name
         ]
         return sorted(roots, key=session_index)
-
-    def next_session_index(self, campaign_id: str) -> int:
-        """Index for the next session minted into this campaign (1 if empty)."""
-        sessions = self.list_sessions(campaign_id)
-        if not sessions:
-            return 1
-        return max(session_index(s) for s in sessions) + 1

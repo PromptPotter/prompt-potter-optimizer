@@ -1,30 +1,26 @@
 """Campaign + cycle identity helpers — pure, no I/O.
 
-**Two hashes, two jobs.**
+**One hash, one mint.**
 
 * ``content_hash_of`` — the *target* content hash (rendered target prompt +
   dataset + target ``pipeline_params``). It is the bare 12-hex value stored
   on ``campaign.json::root_content_hash``, the root cycle's directory name
   (``cycle_<hash>`` via ``cycle_config_identity``), and the archive run key.
-* ``declaration_hash`` — the **campaign's identity**: it folds the target
-  hash together with the *optimizer*-prompt hash (the four optimizer
-  meta-prompts; see
-  :func:`promptpotter.application.optimization.dispatch.llm_call.combined_optimizer_prompt_hash`).
-  ``campaign_id_for`` builds ``{dataset}__{declaration_hash}`` from it.
+* ``mint_campaign_id`` — the **campaign's identity**: a fresh per-call random
+  6-hex suffix glued to the dataset name. Each ``new`` run mints a distinct
+  campaign; the declaration is recorded as *properties* on ``campaign.json``
+  (``root_content_hash`` + ``optimizer_prompt_hash``) and used by resume to
+  warn on drift, not to derive the id.
 
-A campaign is therefore a *complete* optimization declaration: re-running
-``new`` on an unchanged dataset + target + optimizer prompts resolves to the
-same campaign (a new session); editing a target field OR an optimizer
-meta-prompt shifts the declaration hash and mints a distinct campaign.
-
-Loop-control / strategy knobs on ``CampaignConfig`` are deliberately
-excluded from both hashes so tweaking optimizer strategy or resuming with
-different budgets does not register as drift.
+The dataset-scoped ``archive/measurements/`` still pools evidence across
+campaigns on the same declaration, so two fresh ``new`` calls on an unchanged
+declaration produce campaigns with byte-identical origin scores (every
+sample cache-hits) — just with different ``campaign_id``s.
 """
 
 from __future__ import annotations
 
-import hashlib
+import secrets
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -49,30 +45,20 @@ def cycle_config_identity(jsp: JobSearchPoint, dataset: list[Sample]) -> str:
     return f"cycle_{content_hash_of(jsp, dataset)}"
 
 
-def declaration_hash(target_hash: str, optimizer_hash: str) -> str:
-    """Campaign-identity hash — folds the target hash + the optimizer hash.
+def mint_campaign_id(dataset_name: str) -> str:
+    """Fresh campaign id — ``{dataset}__{rand6_hex}``.
 
-    A campaign's identity is the *complete* declaration: the target
-    (``content_hash_of``) AND the optimizer meta-prompt set
-    (``combined_optimizer_prompt_hash``). Either side changing yields a
-    distinct campaign. Pure — a deterministic 12-hex digest of the two
-    inputs.
+    Each ``new`` invocation mints a distinct campaign, regardless of whether
+    a campaign with the same declaration already exists on disk. The random
+    6-hex suffix matches the shape of the previous content-addressed scheme
+    (``justlogic__5d4c26``) but is no longer derivable from the declaration.
+
+    The declaration (target hash + optimizer-prompt hash) is recorded as
+    *properties* on ``campaign.json`` for drift detection on resume, not as
+    the id. Two campaigns on the same declaration share their root cycle id
+    (``cycle_<content_hash>``) but differ in ``campaign_id``.
     """
-    blob = f"{target_hash}:{optimizer_hash}"
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
-
-
-def campaign_id_for(dataset_name: str, decl_hash: str) -> str:
-    """Stable campaign id — ``{dataset}__{decl_hash}``.
-
-    The campaign's identity is the declaration hash (see
-    :func:`declaration_hash`) — the target content hash folded with the
-    optimizer-prompt hash. Re-running ``new`` on an unchanged declaration
-    lands in the *same* campaign (find-or-create adds a session); changing
-    a target field or an optimizer meta-prompt produces a different hash
-    and a distinct campaign. ``decl_hash`` is the bare 12-hex value.
-    """
-    return f"{dataset_name or 'campaign'}__{decl_hash}"
+    return f"{dataset_name or 'campaign'}__{secrets.token_hex(3)}"
 
 
 def build_origin_cycle_id(
@@ -88,8 +74,7 @@ def build_origin_cycle_id(
 
 __all__ = [
     "build_origin_cycle_id",
-    "campaign_id_for",
     "content_hash_of",
     "cycle_config_identity",
-    "declaration_hash",
+    "mint_campaign_id",
 ]

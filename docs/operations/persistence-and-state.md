@@ -15,9 +15,9 @@ PromptPotter's persisted world is a strict containment hierarchy:
 
 - **Workspace** — the tenant-level container and queryable datastore (`projects/{tenant}/`): every dataset, every campaign, the shared `archive/`.
 - **Dataset** — the optimization target plus its config (`datasets/{name}/`).
-- **Campaign** — one declared optimization effort: a dataset, a pipeline origin, and context text. A first-class entity with its own directory and `campaign.json` manifest, and a **forest** — it holds N **sessions**. `campaign_id = {dataset}__{origin_content_hash}`, where `origin_content_hash` is the origin declaration's 12-hex content hash (the same hash that is the root cycle id). The id is **stable**: re-running `new <dataset>` on an unchanged declaration resolves to the *same* campaign (find-or-create). The dataset is embedded so "campaigns for dataset X" is a prefix scan.
-- **Session** — one run of `new` on a campaign's declaration. A campaign holds N sessions; re-running `new` on the same declaration **adds** a session. `resume` extends the *active* session — it does not add one. A session's identity is its `session_id` (`s_xxxx`). Each session is a tree: a root cycle plus its fork descendants. The session root cycle id is `cycle_{hash}` for session 1 and `cycle_{hash}_s{N}` for session N — the `_s{N}` suffix only disambiguates the directory, it is **not** a sibling separator (`root_cycle_id` / `sibling_kind` treat `cycle_X_s2` as its own family root, `cycle_X_s2_fork_abc` as a fork rooted at it).
-- **Cycle** — one node in a session's lineage tree: root | fork | diag | sweep. Identity is `cycle_{content_hash[:12]}` (+ the `_s{N}` session-root suffix, or `_fork_`/`_diag_`/`_sweep_` for branches); `cycle_id` is campaign-scoped, so path resolution is always `(campaign_id, cycle_id)`.
+- **Campaign** — one declared optimization effort: a dataset, a pipeline origin, and context text. A first-class entity with its own directory and `campaign.json` manifest. `campaign_id = {dataset}__{rand6_hex}` — minted fresh per `new` call by `mint_campaign_id`, so each `new` produces a distinct campaign. The declaration (target hash + optimizer-prompt hash) is recorded as `root_content_hash` + `optimizer_prompt_hash` properties on `campaign.json` for drift detection on resume, not as the id. The dataset is embedded so "campaigns for dataset X" is a prefix scan.
+- **Session** — one run of `new` on a campaign. A campaign holds one session — the `new` invocation that minted it. `resume` extends that session; `resume --fork-on-divergence` adds sibling cycles within it. A session's identity is its `session_id` (`s_xxxx`). Each session is a tree: a root cycle (bare `cycle_<target_hash>`) plus its fork descendants. Pre-existing campaigns minted under the previous content-addressed scheme may carry multiple session roots (`cycle_<hash>`, `_s2`, `_s3`, …); the readers still parse them.
+- **Cycle** — one node in a session's lineage tree: root | fork | diag | sweep. Identity is `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_` for branches); `cycle_id` is campaign-scoped, so path resolution is always `(campaign_id, cycle_id)`.
 
 The **Session** is a unit of a campaign — its identity is the `session_id`. `active_session.json` is your active pointer/lens into the Workspace: which tenant, session, campaign, and cycle are live.
 
@@ -27,7 +27,7 @@ The **Session** is a unit of a campaign — its identity is the `session_id`. `a
 
 PromptPotter remembers which session you're on via `.promptpotter/active_session.json` — `{tenant_id, session_id, campaign_id, cycle_id}`, like a browser's active tab.
 
-- **`new`** find-or-creates the Campaign for the dataset's declaration (`campaign_id` is the stable `{dataset}__{origin_content_hash}`), mints a fresh Session + its root cycle inside it, and overwrites the pointer. Re-running `new` on an unchanged declaration adds another session to the *same* campaign.
+- **`new`** mints a fresh Campaign (`campaign_id = {dataset}__{rand6_hex}`, distinct per call) plus its Session + root cycle, and overwrites the pointer. Re-running `new` on an unchanged declaration produces a new campaign with the same root cycle id (content-addressed) and origin score (cache-served); the two campaigns diverge from round 1 onward.
 - **`resume`** reads `{campaign_id, cycle_id}` and operates on that cycle automatically, extending the active session.
 - **`fork`** mints a new cycle inside the same session and retargets the pointer's `cycle_id`.
 - **`--session <id>`** overrides the pointer for one command.
@@ -51,14 +51,15 @@ Sessions and campaigns are separate. The Session is a pointer/lens; the Campaign
   projects/{tenant_id}/
     sessions/{session_id}/
       session.json
-    campaigns/{campaign_id}/            # one campaign — {dataset}__{origin_content_hash}
+    campaigns/{campaign_id}/            # one campaign — {dataset}__{rand6_hex}, fresh per `new`
       # ── Campaign-level artifacts ──
       campaign.json                    # manifest: dataset_name, label, created_at, status,
-                                       #   root_cycle_id, root_content_hash, backend_id, config
-      log.md                           # campaign digest — every session + its forks + rounds, heatmap
+                                       #   root_cycle_id, root_content_hash, optimizer_prompt_hash,
+                                       #   backend_id, config
+      log.md                           # campaign digest — the session + its forks + rounds, heatmap
       hard_samples.json                # campaign-scope hard-sample artifact (all the campaign's cycles)
-      # ── Cycles — every session root + forks + diag + sweeps, ALL FLAT ──
-      cycles/{session_root_cycle_id}/   # session 1 root: cycle_{hash}; session N: cycle_{hash}_s{N}
+      # ── Cycles — session root + forks + diag + sweeps, ALL FLAT ──
+      cycles/{session_root_cycle_id}/   # session root: cycle_{target_hash}
         dashboard.json                 # live PER-SESSION telemetry; shared by this session's forks
         index.json                     # phase, trial index, final block, sibling_kind: root
         log.md                         # per-cycle narrative digest
@@ -85,9 +86,9 @@ Sessions and campaigns are separate. The Session is a pointer/lens; the Campaign
       # AxisIndex + SampleIndex are in-memory only — rebuilt every refresh.
 ```
 
-**Why split this way?** Telemetry is *temporal* — a stream that flows through whichever cycle of a session is active. Anchoring it at the session's root cycle means a single `tail cycles/{session_root}/dashboard.json` covers that session and all its forks. A campaign carries N such streams, one per session. Audit is *structural* — frozen records keyed by the cycle that produced them, where per-cycle detail belongs. The flat `cycles/` store is deliberate: a fork tree keyed by `parent_cycle_id` metadata scales where nested fork-of-fork directories do not.
+**Why split this way?** Telemetry is *temporal* — a stream that flows through whichever cycle of a session is active. Anchoring it at the session's root cycle means a single `tail cycles/{session_root}/dashboard.json` covers that session and all its forks. Audit is *structural* — frozen records keyed by the cycle that produced them, where per-cycle detail belongs. The flat `cycles/` store is deliberate: a fork tree keyed by `parent_cycle_id` metadata scales where nested fork-of-fork directories do not.
 
-**Why Campaign is first-class.** The campaign directory is self-describing: `campaigns/justlogic__a1b2c3d4e5f6/` groups every session run against one declared origin — dataset grouping is a prefix scan, and re-running `new` on the unchanged declaration find-or-creates the same campaign rather than scattering hash-soup directories. The campaign root is self-describing — `campaign.json` (manifest), `log.md` (human digest spanning every session) — and each session's `dashboard.json` lives in its root cycle, so you can read a campaign and any of its live sessions without guessing directory names.
+**Why Campaign is first-class.** The campaign directory is self-describing: `campaigns/justlogic__a1b2c3/` groups one declared optimization effort under one prefix-scannable id — dataset grouping is a prefix scan. The campaign root is self-describing — `campaign.json` (manifest), `log.md` (human digest) — and the session's `dashboard.json` lives in its root cycle, so you can read a campaign and its live session without guessing directory names. Cross-campaign evidence pooling on the same declaration rides the dataset-scoped `archive/measurements/`, not the campaign-id, so a fresh `new` on an unchanged declaration cache-hits every origin sample (zero LLM calls during origin scoring) and produces a byte-identical origin score — while still getting its own `campaign_id` for the optimization trajectory.
 
 Prior evaluation results replay without backend calls when a new config shares a matching prefix with a stored run. `langfuse/events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume / rewind are driven entirely by `rounds/round_NNNN.json`.
 

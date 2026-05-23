@@ -172,38 +172,32 @@ def auto_mint_session(
     active_steps: list[str] | None = None,
     label: str = "",
 ) -> tuple[str, str, str]:
-    """Find-or-create the campaign, mint a session into it, claim the pointer.
+    """Mint a fresh campaign + session + root cycle, claim the pointer.
 
-    The ``campaign_id`` is the **declaration hash** — the target content
-    hash (carried in *cycle_id* = ``cycle_{target_hash}``) folded with the
-    optimizer meta-prompt hash. A re-run of ``new`` on an unchanged
-    declaration (same target AND same optimizer prompts) resolves to the
-    existing campaign:
+    Each ``new`` invocation mints a distinct campaign with a random id
+    (``{dataset}__{rand6_hex}`` via :func:`mint_campaign_id`), regardless of
+    whether a campaign with the same declaration already exists on disk.
+    The declaration (target content hash + optimizer-prompt hash) is
+    recorded as *properties* on ``campaign.json`` and used by resume to
+    warn on drift, not to derive the id.
 
-    * **campaign exists** — mint a fresh session: a new ``session_id`` and a
-      session-root cycle ``cycle_{target_hash}_s{N}`` (N = next free index).
-      ``campaign.json``'s frozen snapshot is not rewritten; its status flips
-      back to ``active``.
-    * **new campaign** — write ``campaign.json`` (the declaration snapshot)
-      and create the first session at the bare ``cycle_{target_hash}``.
-
-    The root/session cycle ids stay *target*-based; only ``campaign_id``
-    carries the optimizer half — so editing an optimizer meta-prompt mints
-    a distinct campaign while two campaigns on one target still share their
-    root cycle id (unique only within a campaign).
+    Two ``new`` calls on the same declaration produce campaigns with the
+    same root cycle id (``cycle_<target_hash>`` is content-addressed) and
+    byte-identical origin scores (the dataset-scoped archive cache-hits
+    every sample), but different ``campaign_id``s and independent
+    optimization trajectories from there.
 
     Mutates *session* in place (``session_id``, ``campaign_id``,
     ``state.cycle_id``) and claims the 4-key active pointer. Returns
-    ``(session_id, campaign_id, session_root_cycle_id)``.
+    ``(session_id, campaign_id, root_cycle_id)``.
     """
     from datetime import UTC, datetime
 
     from promptpotter.application.optimization.dispatch.llm_call import (
         combined_optimizer_prompt_hash,
     )
-    from promptpotter.application.runner.identity import campaign_id_for, declaration_hash
+    from promptpotter.application.runner.identity import mint_campaign_id
     from promptpotter.domain.campaign import Campaign
-    from promptpotter.infrastructure.store import session_cycle_id
 
     target_hash = cycle_id.removeprefix("cycle_")
     validate_path_component(target_hash)
@@ -211,16 +205,8 @@ def auto_mint_session(
     now = datetime.now(UTC)
     dataset_name = session.dataset_name or campaign_config.dataset_name or ""
     optimizer_hash = combined_optimizer_prompt_hash()
-    campaign_id = campaign_id_for(dataset_name, declaration_hash(target_hash, optimizer_hash))
-
-    campaigns = session.store.campaigns
-    existing_campaign = campaigns.load_campaign(campaign_id)
-    if existing_campaign is None:
-        next_index = 1
-        root_cycle = cycle_id
-    else:
-        next_index = campaigns.next_session_index(campaign_id)
-        root_cycle = session_cycle_id(cycle_id, next_index)
+    campaign_id = mint_campaign_id(dataset_name)
+    root_cycle = cycle_id
 
     state = new_session_state(
         init_params={
@@ -240,25 +226,21 @@ def auto_mint_session(
     sessions = session.store.sessions
     sessions.create(session_id, state)
 
-    if existing_campaign is None:
-        campaigns.create_campaign(
-            Campaign(
-                campaign_id=campaign_id,
-                dataset_name=dataset_name,
-                label=label,
-                created_at=now.isoformat(),
-                status="active",
-                root_cycle_id=root_cycle,
-                root_content_hash=target_hash,
-                optimizer_prompt_hash=optimizer_hash,
-                backend_id=session.backend_id,
-                config=campaign_config.model_dump(mode="json"),
-            )
+    campaigns = session.store.campaigns
+    campaigns.create_campaign(
+        Campaign(
+            campaign_id=campaign_id,
+            dataset_name=dataset_name,
+            label=label,
+            created_at=now.isoformat(),
+            status="active",
+            root_cycle_id=root_cycle,
+            root_content_hash=target_hash,
+            optimizer_prompt_hash=optimizer_hash,
+            backend_id=session.backend_id,
+            config=campaign_config.model_dump(mode="json"),
         )
-    else:
-        # A fresh `new` on this declaration reactivates the campaign — its
-        # status reflects its most-recent session.
-        campaigns.update_campaign(campaign_id, {"status": "active", "finished_at": ""})
+    )
 
     campaigns.create(
         campaign_id,
@@ -288,12 +270,10 @@ def auto_mint_session(
         build_campaign_emitter(session, campaign_config, origin_accuracy=origin_acc)
 
     logger.info(
-        "Auto-minted session %s (#%d) in campaign %s — cycle %s%s",
-        session_id,
-        next_index,
+        "Minted fresh campaign %s — session %s, cycle %s",
         campaign_id,
+        session_id,
         root_cycle,
-        "" if existing_campaign is None else " (existing campaign)",
     )
     return session_id, campaign_id, root_cycle
 

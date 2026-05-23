@@ -1057,7 +1057,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    space; max-width caps it at the available width. resize:both — drag the
    bottom-right corner on either axis; that writes an inline `width` which
    overrides the custom property, so a manual size sticks. */
-.hs-block{width:var(--hs-table-w,fit-content);max-width:100%;min-width:360px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:both;height:320px;min-height:200px;max-height:80vh}
+.hs-block{width:var(--hs-table-w,fit-content);max-width:100%;min-width:360px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:both;height:calc(30px + 16.5 * 26px + 33px);min-height:200px;max-height:80vh}
 .hs-scroll{flex:1;min-height:0;overflow:auto}
 .hs-grid{display:grid;grid-auto-rows:min-content;background:var(--color-background-secondary);position:relative}
 .hs-header{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;padding:0 8px;height:30px;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border-tertiary);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600;user-select:none;overflow:hidden}

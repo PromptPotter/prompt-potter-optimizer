@@ -149,45 +149,42 @@ world is a strict containment hierarchy:
   (`datasets/{name}/`).
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, **and the optimizer meta-prompts it
-  runs under**. A **first-class entity** and a **forest** — it holds N
-  **sessions**. `campaign_id = {dataset}__{declaration_hash}`, where
-  `declaration_hash` is the 12-hex hash of the *complete* declaration:
-  it folds the **target** content hash (`root_content_hash` — the same
-  hash that is the root cycle id) with the **optimizer** meta-prompt
-  hash (`optimizer_prompt_hash` — `datasets/_optimizer/`). The id is
-  **stable**: re-running `new <dataset>` on an unchanged declaration
-  resolves to the **same** campaign (find-or-create), not a fresh one;
-  editing a target field OR an optimizer meta-prompt mints a distinct
-  campaign. The dataset is embedded so "campaigns for dataset X" is a
-  prefix scan.
-- **Session** — one run of `new` on a campaign's declaration. A campaign
-  holds N sessions; re-running `new` on the same declaration **adds** a
-  session to the existing campaign. `resume` extends the *active*
-  session — it does not add one. A session's identity is its
-  `session_id` (`s_xxxx`). Each session is a tree: a root cycle plus its
-  fork descendants. The session root cycle id is `cycle_{hash}` for
-  session 1 and `cycle_{hash}_s{N}` for session N — the `_s{N}` suffix
-  only disambiguates the directory, it is **not** a sibling separator
-  (`root_cycle_id` / `sibling_kind` treat `cycle_X_s2` as its own family
-  root, `cycle_X_s2_fork_abc` as a fork rooted at it).
+  runs under**. A **first-class entity** and a **cycle tree** — root
+  + its fork/diag/sweep descendants. `campaign_id = {dataset}__{rand6_hex}`,
+  minted fresh per `new` invocation by `mint_campaign_id` — each `new`
+  produces a distinct campaign regardless of declaration. The
+  declaration (target hash + optimizer-prompt hash) is recorded as
+  *properties* on `campaign.json` (`root_content_hash` +
+  `optimizer_prompt_hash`) for drift detection on resume, not as the id.
+  The dataset is embedded so "campaigns for dataset X" is a prefix scan.
+- **Session** — one run of `new` on a campaign. A campaign holds one
+  session — the `new` invocation that minted it. `resume` extends that
+  session; `resume --fork-on-divergence` adds sibling cycles within it.
+  A session's identity is its `session_id` (`s_xxxx`). Each session is
+  a tree: a root cycle (the bare `cycle_<target_hash>`) plus its fork
+  descendants.
 - **Cycle** — one node in a session's lineage tree: root | fork | diag
   | sweep. The operator-facing name is **Unit** — one continuous-parameter
   run; `resume` extends the current unit, each fork branches a new one
   (the webapp + docs say "unit", the on-disk / API id stays `cycle_id`).
-  Identity stays `cycle_{target_hash[:12]}` (+ the `_s{N}` session-root
-  suffix, `_fork_`/`_diag_`/`_sweep_` for branches) — the *target*
-  content hash, distinct from the campaign's declaration hash. It keeps
+  Identity stays `cycle_{target_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_`
+  for branches) — the *target* content hash, content-addressed. It keeps
   two jobs: archive cache-reuse keying and target-drift detection.
   `cycle_id` is campaign-scoped — all path resolution is
-  `(campaign_id, cycle_id)`.
+  `(campaign_id, cycle_id)`. Pre-existing campaigns minted under the
+  previous content-addressed `campaign_id` scheme may also carry
+  `_s{N}` session-root suffixes; the readers still parse them.
 
 The **Session** is a unit of a campaign (its identity is the
 `session_id`). `active_session.json` is the operator's *pointer/lens*
 into the Workspace — which tenant, session, campaign, and cycle are
-live. `new` resolves (find-or-create) the Campaign for the declaration
-and mints a fresh Session + its root cycle inside it. `resume` follows
-the pointer into the active session. `fork` mints a new cycle **inside
-the same session**.
+live. `new` mints a fresh Campaign + Session + root cycle. `resume`
+follows the pointer into the active session. `fork` mints a new cycle
+**inside the same session**. Two `new` calls on an unchanged
+declaration get distinct `campaign_id`s but share their root cycle id
+(content-addressed) and origin score (the dataset-scoped archive cache-
+hits every sample) — cross-campaign evidence pooling on a declaration
+rides the `archive/measurements/` layer, not campaign identity.
 
 **`unit_kind` taxonomy.** An operator-facing label, computed
 server-side from `(sibling_kind, fork_trigger)`, used by the webapp
@@ -397,21 +394,24 @@ the PR description.
   (`Decision`/`ResumeCheckpointKind`) and the post-cleanup symbols
   (`ResumeCheckpoint*`) appear in §0's vocabulary table; mechanism
   stays through the rename.
-- **Campaign as a first-class entity, holding N sessions** —
+- **Campaign as a first-class entity** —
   `campaign.json` manifest, the `campaigns/{campaign_id}/` directory
   with `log.md` + `hard_samples.json` at its root and
-  `cycles/{cycle_id}/` flat below (every session root plus every
-  fork). `campaign_id = {dataset}__{declaration_hash}` (the declaration
-  hash folds the target hash + the optimizer meta-prompt hash) is
-  stable — re-running `new` on an unchanged declaration find-or-creates
-  the same campaign and adds a session; editing an optimizer meta-prompt
-  mints a distinct campaign. `dashboard.json` is per-session, at
-  `cycles/{session_root}/dashboard.json` — one live stream per session,
-  never one per campaign. The four-entity hierarchy (Workspace /
-  Dataset / Campaign / Cycle, with Session a unit of a Campaign) and
-  the three data scopes (campaign / dataset / workspace) are §0
-  invariants — a cleanup PR cannot collapse Campaign back into a single
-  session-family or back into the root cycle.
+  `cycles/{cycle_id}/` flat below (the session root plus every fork /
+  diag / sweep). `campaign_id = {dataset}__{rand6_hex}` is minted fresh
+  per `new` invocation by `mint_campaign_id`; the declaration is
+  recorded as `root_content_hash` + `optimizer_prompt_hash` properties
+  on `campaign.json` and used by resume to warn on drift, not to derive
+  the id. `dashboard.json` is per-session, at
+  `cycles/{session_root}/dashboard.json`. Cross-campaign evidence
+  pooling on the same declaration rides the dataset-scoped
+  `archive/measurements/` layer, so two `new` calls on an unchanged
+  declaration get distinct `campaign_id`s, share their root cycle id
+  (content-addressed) and origin score (cache-served), and diverge
+  from round 1 onward. The four-entity hierarchy (Workspace / Dataset
+  / Campaign / Cycle, with Session a unit of a Campaign) and the three
+  data scopes (campaign / dataset / workspace) are §0 invariants — a
+  cleanup PR cannot collapse Campaign back into the root cycle.
 - **Per-cycle `CycleEventLog` + `DerivedView` dispatch** — the
   persistence backbone. No second ingress, ever.
 - **Hard-sample sorter (Rasch)**
