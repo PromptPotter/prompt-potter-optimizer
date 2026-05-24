@@ -16,7 +16,7 @@ export const TERMS: Record<string, string> = {
   phase_l1_generate:        "L1 Generate — produces candidate prompt mutations from current framing + critique.",
   phase_l1_critique:        "L1 Critique — reads round results, writes the critique L1 Generate consumes next round.",
   phase_scoring:            "Scoring — running candidates against the dataset to compute composite_fitness.",
-  phase_l2_refining:        "L2 — task-context refinement. Fires when L1 stalls; rewrites the framing L1 reads.",
+  phase_l2_refining:        "L2 — framing refinement. Fires when L1 stalls; rewrites the task framing L1 reads.",
   phase_l3_replanning:      "L3 — strategic plan. Fires when L2 stalls; replans the optimizer approach.",
   phase_between_samples:    "Between samples — short pause between dataset queries during scoring.",
   phase_between_candidates: "Between candidates — short pause between candidate evaluations.",
@@ -40,17 +40,15 @@ export const TERMS: Record<string, string> = {
   stub_inferred:      "Heuristic display — derived client-side, not authoritative. Real value lives in archive/measurements.",
   stub_score_freq:    "Inferred bucket counts. Real per-sample scores live in archive/measurements.",
   badge_top:          "Page-anchor card — primary signal for round health.",
-  placeholder:        "Placeholder label. Not wired up yet; final feature shape may change.",
-  brand_live_preview: "This page polls dashboard.json every 2s. Read-only — no control plane in this slice.",
+  brand_live_preview: "This page polls dashboard.json every 2s. Read-only.",
 
   // New Job status / spend bar — collapsed chips + expand-down panel
   newjob_bar_best:   "Best composite-fitness accuracy / origin. '62% / 50%' reads as 'best 62%, origin 50%' — the gain is the spend's return.",
   newjob_bar_round:  "Current round number. The campaign's progress through its round budget.",
-  newjob_bar_spend:  "Total LLM cost on this campaign: backend (per-sample wire calls) + loop (optimizer L1/L2/L3/critique). USD when the provider returns it (OpenRouter) or the model resolves in the bundled rate table; falls back to a token count otherwise. Tooltip splits Backend vs Loop. Source: dashboard.json::spend.",
-  newjob_bar_budget: "Spend ceiling for the campaign. Currently always uncapped — operator-set budgets land with the M11 spend-tracking spec.",
-  newjob_bar_eta:    "Estimated time until spend hits the budget at the current burn rate. Renders '—' until spend tracking is wired or the budget is uncapped.",
+  newjob_bar_spend:  "Total LLM cost on this campaign: backend (per-sample wire calls) + loop (optimizer generate / critique / refine / replan). USD when the provider returns it (OpenRouter) or the model resolves in the bundled rate table; falls back to a token count otherwise. Tooltip splits Backend vs Loop. Source: dashboard.json::spend.",
+  newjob_bar_budget: "Spend ceiling for the campaign — no cap enforced.",
+  newjob_bar_eta:    "Estimated time until spend hits the budget at the current burn rate. Renders '—' when the budget is uncapped or spend is unknown.",
   newjob_bar_eff:    "Improvement-per-spend overall: (best − origin) / spend_used, in percentage points per dollar. The headline efficiency number.",
-  newjob_bar_adjust: "Adjusting spend or finishing criteria from the UI is wired in M12. For now, edit campaign.json and run `python -m promptpotter resume`.",
 };
 
 export type TermKey = keyof typeof TERMS;

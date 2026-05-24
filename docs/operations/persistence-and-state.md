@@ -63,7 +63,7 @@ Sessions and campaigns are separate. The Session is a pointer/lens; the Campaign
         dashboard.json                 # live PER-SESSION telemetry; shared by this session's forks
         index.json                     # phase, trial index, final block, sibling_kind: root
         log.md                         # per-cycle narrative digest
-        review.md                      # per-cycle review (M10)
+        review.md                      # per-cycle review (markdown digest)
         rounds/round_NNNN.json         # resume source of truth
         hard_samples.json              # cycle-scope hard-sample artifact (this cycle only)
         langfuse/                      # trace persistence
@@ -106,7 +106,7 @@ Prior evaluation results replay without backend calls when a new config shares a
 | `hard_samples.json` (campaign) | campaign dir | round-complete + finalize | Campaign-scope hard-sample artifact — aggregated across all the campaign's cycles. |
 | `index.json` | per cycle | phase / finalize | `pipeline_params`, `cycle_id`, `parent_cycle_id` (forks), `sibling_kind`, `sweep_batch_id` (sweeps), `best_accuracy`, `trials[]`, `final` block (winner + stop_reason on completion). The frozen config lives in `campaign.json`, not here. |
 | `log.md` (cycle) | per cycle | round-complete + finalize | Per-cycle narrative digest. Pure derived view — safe to delete and recompute. |
-| `review.md` | per cycle | round-complete + finalize | Per-cycle review (M10). |
+| `review.md` | per cycle | round-complete + finalize | Per-cycle review (markdown digest). |
 | `rounds/round_NNNN.json` | per cycle | each completed round | Serialized `OptSearchPoint` for resume. |
 | `hard_samples.json` (cycle) | per cycle | round-complete + finalize | Cycle-scope hard-sample artifact — this cycle only. |
 | `langfuse/` | per cycle | during optimization | Trace shadow + `events.jsonl` mirror. Not read for state reconstruction. |
@@ -244,7 +244,7 @@ The runner: parses every `*.json` under `datasets/{name}/sweep/` (sorted by file
 
 Side-by-side: `python scripts/ppot_review.py --sweep`. Sweep view groups by parent root, sorts by `round_1_top_lift` desc, reports `proxy_lift_corr` once at least 4 paired (sweep, full) branches share an `l1_generate_hash`.
 
-**Sweep is screening, not validation.** Promote winners to a full `new` run. Sweep is for L1-surface overrides — pipeline / scoring changes are intentionally absent from the operator file shape (the unified `ForkPayload` reserves `pipeline_swap` / `scoring_swap` slots for M11/M12 LLM-rebase callers, but operators don't author those). Forks run sequentially (the active session pointer doesn't tolerate concurrent mints).
+**Sweep is screening, not validation.** Promote winners to a full `new` run. Sweep is for L1-surface overrides — pipeline / scoring changes are intentionally absent from the operator file shape (the unified `ForkPayload` reserves `pipeline_swap` / `scoring_swap` slots for future LLM-rebase callers, but operators don't author those). Forks run sequentially (the active session pointer doesn't tolerate concurrent mints).
 
 ---
 

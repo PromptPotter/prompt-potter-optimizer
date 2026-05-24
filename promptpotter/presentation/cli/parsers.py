@@ -48,7 +48,7 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
-    """Shared --halt-at / --max-spend / --refresh-rates flags (new + resume)."""
+    """Shared --halt-at / --max-spend flags (new + resume)."""
     p.add_argument(
         "--halt-at",
         dest="halt_at_accuracy",
@@ -64,14 +64,6 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="USD",
         help="Halt when cumulative cycle spend (optimizer + backend) ≥ USD.",
-    )
-    p.add_argument(
-        "--refresh-rates",
-        dest="refresh_rates",
-        action="store_true",
-        help="Force-refetch the LLM provider rate table from upstream "
-        "(otherwise the cached table is reused for 24 h, with the "
-        "in-repo bundled floor as fallback).",
     )
 
 
@@ -121,16 +113,16 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
         "--sweep-batch",
         dest="sweep",
         action="store_true",
-        help="Multi-fork dispatch from datasets/<name>/sweep/*.json: mint "
-        "one OPERATOR_SWEEP fork per payload, run each.",
+        help="Multi-fork batch from datasets/<name>/sweep/*.json: mint "
+        "one sweep fork per payload, run each.",
     )
     mode_group.add_argument(
         "--diag",
         dest="diag",
         action="store_true",
         help="Diagnostic mode: origin → 1 full scored round → force "
-        "L2-context (regardless of stall) → 1 generation-only round 2 "
-        "(L2 overrides applied, no scoring) → halt. "
+        "task-framing refinement (regardless of stall) → 1 generation-only "
+        "round 2 (refinement overrides applied, no scoring) → halt. "
         "index.json::final.mode lands as 'diag'.",
     )
 
@@ -164,15 +156,6 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
         action="store_true",
         help="On divergence, mint a sibling cycle (with parent_cycle_id) "
         "and re-run the divergent round under the current scorer.",
-    )
-    p_resume.add_argument(
-        "--ignore-render-errors",
-        dest="ignore_render_errors",
-        action="store_true",
-        help="If an injection renderer raises (code drift — usually a renamed "
-        "data-model field), log it and render that block empty instead of "
-        "halting with stop_reason=render_error. Escape hatch only: the "
-        "renderer is still broken and should be fixed.",
     )
     p_resume.add_argument(
         "--diag",
@@ -213,8 +196,8 @@ def _add_sweep_prompt_args(p: argparse.ArgumentParser, *, allow_multi: bool = Tr
                 f"--{node}-prompts",
                 dest=f"{node}_prompts",
                 default=None,
-                help="Comma-separated paths to PromptTemplate JSON files to A/B "
-                "in one invocation. Each variant runs in its own OPERATOR_SWEEP "
+                help="Comma-separated paths to prompt-template JSON files to A/B "
+                "in one invocation. Each variant runs in its own sweep "
                 "fork; results share a sweep_id. Omit to use the currently "
                 f"loaded {flag} template.",
             )
@@ -223,7 +206,7 @@ def _add_sweep_prompt_args(p: argparse.ArgumentParser, *, allow_multi: bool = Tr
                 f"--{node}-prompt",
                 dest=f"{node}_prompt",
                 default=None,
-                help=f"Path to a PromptTemplate JSON to swap in for {flag}. "
+                help=f"Path to a prompt-template JSON to swap in for {flag}. "
                 "Omit to use the currently loaded template.",
             )
         p.add_argument(
@@ -269,12 +252,6 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
     )
     _add_sweep_prompt_args(p_time_to, allow_multi=False)
     _add_sweep_slice_args(p_time_to)
-    p_time_to.add_argument(
-        "--refresh-rates",
-        dest="refresh_rates",
-        action="store_true",
-        help="Force-refetch the LLM provider rate table (same semantics as ``new --refresh-rates``).",
-    )
 
     # round1 -----------------------------------------------------------------
     p_round1 = sweep_sub.add_parser(
@@ -291,12 +268,6 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
     )
     _add_sweep_prompt_args(p_round1)
     _add_sweep_slice_args(p_round1)
-    p_round1.add_argument(
-        "--refresh-rates",
-        dest="refresh_rates",
-        action="store_true",
-        help="Force-refetch the LLM provider rate table.",
-    )
 
     # round2 -----------------------------------------------------------------
     p_round2 = sweep_sub.add_parser(
@@ -328,12 +299,6 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
     )
     _add_sweep_prompt_args(p_round2)
     _add_sweep_slice_args(p_round2)
-    p_round2.add_argument(
-        "--refresh-rates",
-        dest="refresh_rates",
-        action="store_true",
-        help="Force-refetch the LLM provider rate table.",
-    )
 
     # rank -------------------------------------------------------------------
     p_rank = sweep_sub.add_parser(
@@ -441,7 +406,7 @@ def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
 
 
 def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
-    """Cycle list + PoBB knobs for ``compare``."""
+    """Cycle list + statistical-confidence knobs for ``compare``."""
     p_cmp.add_argument(
         "cycle_ids",
         nargs="*",
@@ -460,7 +425,7 @@ def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
         "--epsilon",
         type=float,
         default=POBB_DEFAULT_EPSILON,
-        help="PoBB threshold (default 0.05)",
+        help="Statistical-confidence threshold for elimination (default 0.05)",
     )
     p_cmp.add_argument(
         "--max-topups",
@@ -512,16 +477,16 @@ def build_parser() -> argparse.ArgumentParser:
     _add_compare_args(
         sub.add_parser(
             "compare",
-            help="PoBB-compare cycle winners across the family with adaptive top-up. "
-            "Each cycle's index.json::final.winner_pipeline_params is one arm; "
-            "under-measured arms get one extra score per round until a decisive "
-            "P(best) emerges or the topup budget is exhausted.",
+            help="Compare cycle winners across the family by statistical confidence "
+            "with adaptive top-up. Each cycle's index.json::final.winner_pipeline_params "
+            "is one arm; under-measured arms get one extra score per round until a "
+            "decisive winner emerges or the top-up budget is exhausted.",
         )
     )
     _add_sweep_args(
         sub.add_parser(
             "sweep",
-            help="Sweep-toolkit verbs — cheap-grade L1 meta-prompt edits. "
+            help="Sweep-toolkit verbs — cheap A/B of optimizer meta-prompt edits. "
             "Each verb wraps the optimizer with halt gates and persists one "
             "result JSON.",
         )
@@ -543,7 +508,7 @@ def build_parser() -> argparse.ArgumentParser:
             "verify",
             help="Re-score one campaign candidate on more samples and persist a "
             "workspace-scope diagnostic-run record. Use to doublecheck whether "
-            "a PoBB-locked candidate's verdict generalises beyond the round's "
+            "a confidence-locked candidate's verdict generalises beyond the round's "
             "leader-locked sample budget. Does not mutate the source cycle.",
         )
     )

@@ -64,6 +64,7 @@ all = [
     "datasets>=2.14.0",
     "langfuse>=2.0.0",
     "mlflow>=2.12.0",
+    "anthropic>=0.18.0",
 ]
 dev = [
     "pytest>=8.0.0",          # why kept: test runner
@@ -76,6 +77,9 @@ dev = [
 
 [project.urls]
 Repository = "https://github.com/runfish5/prompt-potter-optimizer"
+
+[project.scripts]
+promptpotter = "promptpotter.presentation.cli.campaign_runner:main"
 
 [tool.setuptools.packages.find]
 include = ["promptpotter*"]

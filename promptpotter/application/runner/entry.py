@@ -61,7 +61,6 @@ async def run_optimization(
     fork_payload: ForkPayload | None = None,
     halt_at_accuracy: float | None = None,
     max_spend_usd: float | None = None,
-    ignore_render_errors: bool = False,
 ) -> CycleResult:
     """End-to-end optimization. *observers* MUST be pre-built (ledger bound before origin).
     *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
@@ -114,9 +113,6 @@ async def run_optimization(
             session=session,
             started_at=started_at,
         )
-
-        # ``--ignore-render-errors`` escape hatch — propagates to every InjectionBundle.
-        cycle.ignore_render_errors = ignore_render_errors
 
         # Operator forks (sweep, rebase) stamp L1-surface deltas; triggers without deltas skip.
         if fork_payload is not None and fork_payload.l1_layout is not None:

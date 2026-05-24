@@ -38,7 +38,7 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
     from promptpotter.shared.errors import ResumeDivergenceError
     from promptpotter.shared.spend import refresh_rates
 
-    refresh_rates(force=bool(getattr(args, "refresh_rates", False)))
+    refresh_rates()
 
     campaign_config = load_session(args).campaign_config
     target_acc = args.target / 100.0

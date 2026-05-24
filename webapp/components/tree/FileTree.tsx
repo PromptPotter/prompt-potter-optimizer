@@ -72,7 +72,7 @@ export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
     return activeError || cyclesError ? (
       <ErrorNote>Server unreachable — retrying</ErrorNote>
     ) : (
-      <Empty>No active campaign yet.</Empty>
+      <Empty>No active campaign — pick one from the sidebar, or start one in a terminal.</Empty>
     );
   }
   if (error) {

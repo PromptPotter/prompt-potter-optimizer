@@ -333,7 +333,7 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     final: ``cycles/{cycle_id}/index.json::final``. Stop with Ctrl+C."""
     from promptpotter.shared.spend import refresh_rates
 
-    refresh_rates(force=bool(getattr(args, "refresh_rates", False)))
+    refresh_rates()
 
     session, campaign_config, dataset_name, session_id = await _mint_fresh_session(args)
 
@@ -341,7 +341,13 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     if status.get("status") == "unreachable":
         return CommandResult(
             data={"error": "backend_unreachable", "backend_url": args.backend_url},
-            human=f"Backend unreachable at {args.backend_url}. Start the backend and retry.",
+            human=(
+                f"Backend unreachable at {args.backend_url}.\n\n"
+                "The TermNorm backend ships in a sibling repo. Clone it next to "
+                "PromptPotter, then start it:\n"
+                "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
+                "Install guide: docs/manual/02-install.md"
+            ),
         )
     checkin_line("backend", f"reachable at {args.backend_url}")
 

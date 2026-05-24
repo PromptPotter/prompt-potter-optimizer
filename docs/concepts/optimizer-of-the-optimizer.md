@@ -1,5 +1,7 @@
 # Optimizer of the optimizer
 
+> **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
+
 PromptPotter can optimize **its own meta-prompts**. The four optimizer LLM
 calls — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — are
 themselves prompts driven by the six-field `PromptTemplate` scheme. Expose

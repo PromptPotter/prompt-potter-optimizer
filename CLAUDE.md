@@ -81,7 +81,7 @@ Non-negotiables only — full style, code-shape, tests, CLI, git rules in [`docs
 
 ## Known issues
 
-- **TermNorm backend at** `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`. User's own project — cross-repo edits authorized; coordinate explicitly.
+- **TermNorm backend** lives in a sibling repo (`TermNorm-excel/backend-api`); clone alongside PromptPotter. Co-owned by this project's maintainer — cross-repo edits authorized; coordinate explicitly.
 - **`llm_ranking` broken — always set `"exclude_nodes": ["llm_ranking"]`** (`json_validate_failed` ~50% of queries). Effective pipeline: `cache_lookup → fuzzy_matching → web_search → entity_profiling → token_matching`.
 
 ## Roadmap

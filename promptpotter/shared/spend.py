@@ -14,7 +14,7 @@ Three layers, in priority order:
    it wrapped as ``{"fetched_at": <iso>, "models": {...}}``. Subsequent
    calls within ``_TTL_SECONDS`` (24 h) are no-ops; the CLI calls this
    once per ``optimize`` start, so a fresh cache survives across runs.
-   ``--refresh-rates`` forces a fetch.
+   Run ``python scripts/refresh_rates.py`` to force a manual refresh.
 
 3. **Bundled floor** at ``promptpotter/shared/data/rates.json`` — checked
    into the repo, same wrapped format. ``load_rates()`` falls back to

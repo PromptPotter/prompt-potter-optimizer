@@ -49,8 +49,30 @@ def main() -> None:
 
     # Bare invocation defaults to `resume`. Re-parse with the verb injected so
     # `resume`'s own defaults populate (--from, --fork-on-divergence, halt/spend, etc.).
+    # First-run guard: if no active session exists, print a friendly landing
+    # instead of letting resume fail with a confusing error.
     if args.command is None:
+        from promptpotter.infrastructure.store import active_pointer_exists
+
+        if not active_pointer_exists():
+            print(
+                "Welcome to PromptPotter.\n\n"
+                "Pick a verb to get started:\n"
+                "  promptpotter new <dataset>   mint a fresh campaign on the named dataset\n"
+                "  promptpotter resume          continue the active campaign\n"
+                "  promptpotter verify          re-score a candidate on more samples\n"
+                "  promptpotter sweep           cheap A/B of optimizer meta-prompt edits\n"
+                "  promptpotter compare         compare cycle winners across the family\n\n"
+                "Run `promptpotter <verb> --help` for per-verb options.\n"
+                "Docs: https://github.com/runfish5/prompt-potter-optimizer"
+            )
+            return
         args = parser.parse_args(["resume"])
+
+    if args.command in ("new", "resume", "sweep"):
+        from promptpotter.config.env_bootstrap import ensure_api_key
+
+        ensure_api_key()
 
     try:
         result = asyncio.run(COMMANDS[args.command](args))

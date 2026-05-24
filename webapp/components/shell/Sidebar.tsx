@@ -163,8 +163,15 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
         )}
         {!loaded && <div className="unit-library-note">loading…</div>}
         {loaded && groups.length === 0 && (
-          <div className="unit-library-note">
-            None on disk yet — run <code>python -m promptpotter new &lt;dataset&gt;</code>.
+          <div className="unit-library-empty">
+            <div className="empty-headline">No campaigns yet</div>
+            <div className="empty-body">
+              Start your first campaign from a terminal:
+            </div>
+            <pre className="empty-cmd"><code>python -m promptpotter new &lt;dataset&gt;</code></pre>
+            <div className="empty-hint">
+              See <code>docs/manual/</code> for the quickstart.
+            </div>
           </div>
         )}
         {loaded && groups.length > 0 && (

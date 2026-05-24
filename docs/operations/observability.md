@@ -12,9 +12,9 @@ Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_p
 
 | Source | Event type | Payload |
 |--------|-----------|---------|
-| L1 Generate | LLM call | meta-prompt (compiled from `L1GenerateSurface`), candidate outputs, token counts |
-| L1 Critique | LLM call | critique meta-prompt (`DispatchHub.fill_fixed`), structured output |
-| L2 Refine | LLM call | meta-prompt (from `L2Surface` incl. `l1_generate_field_catalogue`), parsed `TransitionResult` |
+| L1 Generate | LLM call | rendered meta-prompt, candidate outputs, token counts |
+| L1 Critique | LLM call | rendered critique meta-prompt, structured output |
+| L2 Refine | LLM call | rendered refinement meta-prompt (incl. the L1 field catalogue), parsed transition result |
 | L3 Plan | LLM call | plan template (axes_digest + L2 history + pipeline + runtime failures), new plan text |
 | Backend match | Span | query, params, result, `diagnostics.warnings` |
 | Escalation rule firing | `phase` event (`escalation/rule_fired`) | `{layer, rule_name, rule_priority, next_action, reason, signal_inputs}` |
@@ -41,7 +41,7 @@ tail -f .promptpotter/projects/default/campaigns/<cycle_id>/.runtime/streams/rou
 
 ## Escalation rule firing
 
-Every escalation-rule firing — `decide_escalation` over `DEFAULT_ESCALATION_RULES` — emits a `escalation/rule_fired` PhaseRecord through the writer-side ingress (`RunCallbacks.on_phase`). The ledger event lands in `events.jsonl` and is consumed by the audit projection. Operator-facing read: `events.jsonl` itself (the standalone `signals.jsonl` mirror + dashboard `recent_rules` were dropped in the M10 cleanup; the ledger is the canonical record).
+Every escalation-rule firing — `decide_escalation` over `DEFAULT_ESCALATION_RULES` — emits a `escalation/rule_fired` PhaseRecord through the writer-side ingress (`RunCallbacks.on_phase`). The ledger event lands in `events.jsonl` and is consumed by the audit projection. Operator-facing read: `events.jsonl` itself — it is the canonical record (there is no separate signals stream).
 
 ## Langfuse cloud
 

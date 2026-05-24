@@ -6,7 +6,7 @@ Parallel to [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) (per-da
 
 ## Frame — BBEH is the headline; meta-campaign needs signal
 
-**BBEH stays the headline benchmark** for publication and milestone framing (M11 Publication Benchmarks). Nothing about the candidate list below changes that.
+**BBEH stays the headline benchmark** for publication framing. Nothing about the candidate list below changes that.
 
 **But** at the optimizer's current maturity, BBEH is the wrong *iteration* target for L1 meta-prompt evolution. `gpt-oss-20b @ low` scores in the floor band on BBEH (~14% public, see [BBEH score anomaly](../../README.md) and `project_bbeh_score_anomaly.md`) — every cycle ties at noise, PoBB can't separate candidates, and the L1 meta-campaign can't tell good edits from bad ones.
 
@@ -30,7 +30,7 @@ A focus dataset for L1 meta-prompt evolution must satisfy:
 
 | Role | Dataset(s) | Why |
 |---|---|---|
-| **Headline benchmark** (M11 publication) | BBEH | Hardest reasoning benchmark, established competitor comparison, public leaderboards. |
+| **Headline benchmark** (publication) | BBEH | Hardest reasoning benchmark, established competitor comparison, public leaderboards. |
 | **Meta-campaign focus** (L1/L2/L3 iteration) | **JustLogic depth ≥ 6** (`justlogic`) | Wired 2026-05-19 after 9-dataset recon trail. 400/1000 cut on depths 6-7 only. See "Wired — primary" below. BBEH-mini @ `low` held as secondary in-band candidate. **Next-priority queue (Round 8, 2026-05-19)**: **PlanBench task_1** (36%, PDDL planning — brand-new family) and **NaturalPlan** (36% macro; `meeting_planning`-only at 43% is the clean cut) — both diversify into planning, no overlap with current portfolio. |
 | **Connector validation** | TermNorm (lca-termnorm) | Per-connector regression, not optimizer iteration. |
 
@@ -155,7 +155,7 @@ Captured here so they don't get re-investigated next time:
 - **LogiQA 2.0** — translation artifacts; English subset overlaps AGIEval.
 - **HumanEval / CRUX** — single axis (code format); no decomposition lever.
 - **IFEval** — predecessor to IFBench; superseded by IFBench's expanded constraint set and 2025-12 release.
-- **Tau-Bench** — needs tool-call infra. M12 territory.
+- **Tau-Bench** — needs tool-call infrastructure; outside the current connector boundary.
 - **AA-LCR** — LLM-judge per sample at cycle scale = budget-incompatible. Same disqualifier as GDPval-AA.
 - **GDPval-AA** — pairwise Elo scoring (breaks PoBB), artifact outputs (docs/slides/diagrams — beyond `llm_only` node), agentic published scores (tool use, not raw completion). Right tool for benchmarking agents, wrong tool for L1 meta-prompt evolution.
 

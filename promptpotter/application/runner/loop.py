@@ -185,11 +185,11 @@ async def run_round_loop(
         logger.warning("Optimization interrupted at round %d (%s).", round_num, cause)
         return StopReason.INTERRUPTED
     except InjectionRenderError:
-        # Renderer raised (code drift) — distinct from CRASHED so operator fixes a renderer / uses --ignore-render-errors.
+        # Renderer raised (code drift) — distinct from CRASHED so the operator can pinpoint a broken renderer.
         session.state.crash_traceback = traceback.format_exc()
         logger.exception(
             "Optimization halted at round %d — an injection renderer failed. "
-            "Fix the renderer and resume, or `resume --ignore-render-errors`.",
+            "Fix the renderer and resume.",
             round_num,
         )
         return StopReason.RENDER_ERROR

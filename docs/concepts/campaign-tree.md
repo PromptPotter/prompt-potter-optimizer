@@ -1,5 +1,7 @@
 # The Campaign Tree
 
+> **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
+
 A **Campaign** is one declared optimization effort — a **dataset**, a **pipeline origin**, the **context text**, and the **optimizer meta-prompts** it runs under. It owns `campaigns/{campaign_id}/`, a `campaign.json` manifest, a campaign-wide `log.md`, and `hard_samples.json`.
 
 `campaign_id = {dataset}__{rand6_hex}` — minted fresh per `new` invocation. Each `python -m promptpotter new <dataset>` produces a distinct campaign. The declaration (target hash + optimizer-prompt hash) is recorded as properties on `campaign.json` (`root_content_hash`, `optimizer_prompt_hash`) and used by resume to warn on drift, not to derive the id. Cross-campaign evidence pooling on the same declaration rides the dataset-scoped `archive/measurements/`.

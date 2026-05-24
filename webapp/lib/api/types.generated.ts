@@ -314,6 +314,35 @@ export interface SessionSummary {
   updated_at: string;
 }
 
+export interface FileEntry {
+  /** Path relative to the scope root, forward slashes */
+  path: string;
+  /** Which root the path is under */
+  scope: 'cycle' | 'campaign';
+  /** File size in bytes */
+  size: number;
+  /** ISO 8601 UTC modification time */
+  mtime: string;
+}
+
+export interface FilesResponse {
+  campaign_id: string;
+  cycle_id: string;
+  entries: FileEntry[];
+}
+
+export interface FileContentResponse {
+  campaign_id: string;
+  cycle_id: string;
+  scope: 'cycle' | 'campaign';
+  path: string;
+  size: number;
+  mtime: string;
+  content_type: 'json' | 'markdown' | 'log' | 'text' | 'binary';
+  /** UTF-8 text content; None when binary or oversized */
+  content: string | null;
+}
+
 export interface CampaignLineageCandidate {
   /** Stable id assigned at L1-score time */
   candidate_id: string;

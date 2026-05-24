@@ -40,6 +40,11 @@ from promptpotter.presentation.api.routers.active import (
     DeleteCycleResponse,
     StopCycleResponse,
 )
+from promptpotter.presentation.api.routers.campaigns.files import (
+    FileContentResponse,
+    FileEntry,
+    FilesResponse,
+)
 from promptpotter.presentation.api.routers.campaigns.lineage import (
     CampaignLineageCandidate,
     CampaignLineageCycle,
@@ -98,6 +103,10 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     CampaignSummary,
     CampaignListResponse,
     SessionSummary,
+    # --- campaigns/files router ---
+    FileEntry,
+    FilesResponse,
+    FileContentResponse,
     # --- campaigns/lineage router ---
     CampaignLineageCandidate,
     CampaignLineageRound,

@@ -1,5 +1,7 @@
 # Concepts
 
+> **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
+
 How the loop works. One page per topic. Code anchors live in [`../developer/`](../developer/README.md).
 
 ## The loop

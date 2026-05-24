@@ -211,7 +211,7 @@ async def _run_panel_verb(
     from promptpotter.shared.errors import ResumeDivergenceError
     from promptpotter.shared.spend import refresh_rates
 
-    refresh_rates(force=bool(getattr(args, "refresh_rates", False)))
+    refresh_rates()
 
     panel_size = int(args.panel_size)
     campaign_config = load_session(args).campaign_config

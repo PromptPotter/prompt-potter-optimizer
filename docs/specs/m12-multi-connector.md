@@ -1,6 +1,8 @@
 # M12: Multi-Connector, Competitor Comparison, L4 Closure, Composite Fitness
 
-**Status:** Track 1 foundation shipped (`ed95509`). Second connector + competitor numbers + L4 closure + composite fitness open.
+> **Status:** Partial — Track 1 (connector boundary + TermNorm) shipped (`ed95509`); remainder forward direction.
+
+Second connector + competitor numbers + L4 closure + composite fitness still open.
 
 ## What this covers
 
@@ -20,7 +22,8 @@ Generalize the connector boundary (TermNorm is currently the only registered con
 - **Competitor numbers.** DSPy / MIPROv2 / GEPA / Promptomatix / adv-CoT / PromptWizard — cited; MIPROv2 reproduction only if reviewers object.
 - **L4 closure.** Outer-loop campaign on `datasets/promptpotter/` using the PromptPotter connector; `proxy_lift_corr ≥ 0.6` re-validation on the meta-task; findings doc at `docs/research/l4-self-optimization-results.md`.
 - **Composite fitness.** Per-candidate cost / latency rollup → multi-objective post-aggregate formula. Phases: P1 surface data (done by [`m11-spend-tracking.md`](m11-spend-tracking.md)) · P2 per-candidate rollup + dashboard scatter · P3 `compile_post_aggregate_fitness(formula)` + `campaign.json::scoring_post_aggregate` · P4 Pareto-aware PoBB (M12+ stretch).
-- **Multi-tenant `TenantId` newtype + prompt-injection Phase 2** — see [`security-audit.md`](security-audit.md).
+- **Multi-tenant `TenantId` newtype** — see [`m12-control-plane.md`](m12-control-plane.md) for the embedding.
+- **Prompt-injection Phase 2.** First-pass `fence_untrusted` already wraps `diagnostics` / `validation_failures` / `runtime_failures` in the dispatch bundle. Phase 2 covers: separate `TrustedText` / `UntrustedText` renderer types so the type system catches accidental concatenation at the call site; L1 + L1-critique output validators that flag suspected prompt-injection echoes in generated candidates; a cross-call repeat-detection circuit breaker that halts a cycle when the optimizer's own outputs start echoing untrusted dataset content verbatim.
 
 ## Code surface
 

@@ -56,7 +56,7 @@ export function CyclePicker({
     return <span>{standalone ? "New Job" : cycleId || "loading…"}</span>;
   }
   if (cycles.length === 0) {
-    return <span>{standalone ? "New Job" : cycleId || "no campaigns"}</span>;
+    return <span>{standalone ? "New Job" : cycleId || "No campaigns yet"}</span>;
   }
 
   // Group options by campaign. Within a campaign, order by session index;

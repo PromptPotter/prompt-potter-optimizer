@@ -19,6 +19,26 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 >
 > **Five ways to run it:** 1) `/potter-run` Claude Code skill · 2) CLI · 3) Python / Jupyter notebook · 4) REST API · 5) WebApp (localhost)
 
+## First run
+
+**System requirements**
+
+- **Python 3.13+** with `pip`.
+- **`.env` with an LLM provider key** at the repo root — one of `GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY`.
+- **TermNorm backend** running locally for backends that need it — clone the sibling repo (`TermNorm-excel/backend-api`) and run its `start-server-py-LLMs.bat`. Datasets like `llm_only` and `bbeh` don't require it; pipeline-driven datasets do.
+- Recommended: **VS Code + Claude Code** for the `/potter-run` skill experience.
+
+**Three-command path**
+
+```bash
+pip install -e ".[all]"
+python -m promptpotter new <dataset>     # e.g. llm_only or bbeh
+python -m uvicorn promptpotter.main:app --port 8001
+# Open http://localhost:8001/ui/
+```
+
+The first command installs dependencies. The second mints a campaign and starts the optimization loop in your terminal. The third (in a separate terminal) serves the read-only dashboard webapp. Full walkthrough: [`docs/manual/`](docs/manual/README.md).
+
 ## Why PromptPotter?
 
 Manual prompt tuning is slow, inconsistent, and doesn't compound. PromptPotter automates the loop: it tries variations, measures what works, and remembers across runs. Every measurement costs money, so the design is built to **maximize fitness, minimize spend**:
@@ -123,12 +143,12 @@ PromptPotter is a **tree search over prompt programs**: an LLM proposes prompt v
 | **Evolutionary search** | 🟢 shipped | Generate / score / select / mutate over a candidate population; explicit `population` + `individual` + `generation` vocabulary throughout the codebase. |
 | **Automated evaluation** | 🟢 shipped | `score_search_point()` is the single scoring gateway; per-dataset scoring formula in `campaign.json` is compiled once and injected into every eval path. No human-in-the-loop scoring. |
 | **Library learning** | 🟡 partial | PromptPotter's "library" is the cross-cycle **MeasurementArchive** (`archive/measurements/`) + `AxisIndex` / `SampleIndex` / `ConfigIndex` digests — a *measurement* library, not the *program* library AlphaEvolve carries. Informs every L1 mutation via `cycle.axes.digest()` + `sibling_yield`. |
-| **Meta-learning** | 🟡 partial | The optimizer can be pointed at its own meta-prompts (L4 outer loop) — concept: [`optimizer-of-the-optimizer.md`](docs/concepts/optimizer-of-the-optimizer.md); the `potter-l1-meta-campaign` skill ships the state machine that evolves `l1_generate` / `l1_critique` / `l2_context` / `l3_plan` over assess → screen → promote cycles. Full L4 loop sequenced across M10 → M11 → M12. |
-| **MCTS** | 🟡 selection-signal shipped | L3 emits an observation-only `fork_proposal` ({round_offset, reason}) when it judges the current subtree exhausted; the operator forks manually. Backprop up the lineage + UCB-style ancestor selection + auto-fork → M13+ (see Aspiration below). |
+| **Meta-learning** | 🟡 partial | The optimizer can be pointed at its own meta-prompts (L4 outer loop) — concept: [`optimizer-of-the-optimizer.md`](docs/concepts/optimizer-of-the-optimizer.md); the `potter-l1-meta-campaign` skill ships the state machine that evolves `l1_generate` / `l1_critique` / `l2_context` / `l3_plan` over assess → screen → promote cycles. The full L4 loop is planned. |
+| **MCTS** | 🟡 selection-signal shipped | L3 emits an observation-only `fork_proposal` ({round_offset, reason}) when it judges the current subtree exhausted; the operator forks manually. Backprop up the lineage + UCB-style ancestor selection + auto-fork are planned (see Aspiration below). |
 
 Full capability table including AlphaEvolve and the prompt-tooling neighbors: [`docs/research/related-work.md#capability-matrix`](docs/research/related-work.md).
 
-**Aspiration — towards AlphaZero-shaped MCTS.** L3 (the strategic replan layer) is gaining MCTS-style selection in three steps. **Step 1 — shipped:** L3 may now emit an observation-only `fork_proposal` (`{round_offset, reason}`) alongside its `plan` rewrite when it judges the current subtree exhausted and a deferred ancestor more promising. The proposal lands in `round_NNNN.json::nodes[l3_plan].exit.fork_proposal`; the operator reads it and forks manually via `resume --from N` if they agree. **Step 2 — M13+:** propagate round outcomes as node statistics up the lineage tree. **Step 3 — M13+:** UCB-style ancestor-selection rule for automatic L3 forking. The three together = AlphaZero-shaped MCTS, categorically capable of *recovering from dead-end branches* that today the loop can only stall on. Backlog: [`docs/specs/roadmap.md`](docs/specs/roadmap.md#backlog-unscheduled).
+**Aspiration — towards AlphaZero-shaped MCTS.** L3 (the strategic replan layer) is gaining MCTS-style selection in three steps. **Step 1 — shipped:** L3 may now emit an observation-only `fork_proposal` (`{round_offset, reason}`) alongside its `plan` rewrite when it judges the current subtree exhausted and a deferred ancestor more promising. The proposal lands in `round_NNNN.json::nodes[l3_plan].exit.fork_proposal`; the operator reads it and forks manually via `resume --from N` if they agree. **Step 2 — planned:** propagate round outcomes as node statistics up the lineage tree. **Step 3 — planned:** UCB-style ancestor-selection rule for automatic L3 forking. The three together = AlphaZero-shaped MCTS, categorically capable of *recovering from dead-end branches* that today the loop can only stall on. Backlog: [`docs/specs/roadmap.md`](docs/specs/roadmap.md#backlog-unscheduled).
 
 [![OpenEvolve: Towards Open Evolutionary Agents](https://img.youtube.com/vi/mWBT-szUutI/hqdefault.jpg)](https://www.youtube.com/watch?v=mWBT-szUutI)
 
@@ -138,6 +158,10 @@ Peer systems in the same family — full comparison + benchmark notes in [`docs/
 
 - Code evolution: [AlphaEvolve](docs/research/related-work.md#eight-systems-under-the-umbrella) · [OpenEvolve](docs/research/related-work.md#eight-systems-under-the-umbrella) · [AlgoTuner](docs/research/related-work.md#eight-systems-under-the-umbrella) · [AutoResearch](docs/research/related-work.md#eight-systems-under-the-umbrella)
 - Prompt evolution: [PromptWizard](docs/research/related-work.md#eight-systems-under-the-umbrella) · [MIPROv2](docs/research/related-work.md#eight-systems-under-the-umbrella) · [GEPA](docs/research/related-work.md#eight-systems-under-the-umbrella)
+
+# Roadmap
+
+Short version: [`docs/roadmap.md`](docs/roadmap.md). Full development plan with milestones + specs: [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
 # Citation
 

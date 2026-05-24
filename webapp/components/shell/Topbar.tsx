@@ -1,6 +1,5 @@
 "use client";
-import { ThemeToggle } from "./ThemeToggle";
-import type { Theme } from "@/lib/theme";
+import { applyTheme, readStoredTheme, type Theme } from "@/lib/theme";
 
 // Per-cycle sub-tabs (Replit-style): the sidebar carries the campaign
 // library; the topbar carries the views over the *currently-selected*
@@ -24,9 +23,15 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export function Topbar({ tab, onTabChange, onThemeChange }: Props) {
+  // Theme button has no React state — sun/moon icons are pure CSS off `data-theme`.
+  const flipTheme = () => {
+    const next: Theme = readStoredTheme() === "light" ? "dark" : "light";
+    applyTheme(next);
+    onThemeChange?.(next);
+  };
+
   return (
     <header className="topbar">
-      <input className="search" placeholder="Search analytics..." disabled aria-label="Search analytics" />
       <div className="tabs" role="tablist" aria-label="Campaign view">
         {TABS.map((t) => (
           <button
@@ -40,7 +45,21 @@ export function Topbar({ tab, onTabChange, onThemeChange }: Props) {
           >{t.label}</button>
         ))}
       </div>
-      <ThemeToggle onThemeChange={onThemeChange} />
+      <button
+        className="theme-toggle"
+        type="button"
+        onClick={flipTheme}
+        title="Toggle bright / dark theme"
+        aria-label="Toggle theme"
+      >
+        <svg className="sun" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+          <circle cx="8" cy="8" r="3" />
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.4 1.4M11.55 11.55l1.4 1.4M3.05 12.95l1.4-1.4M11.55 4.45l1.4-1.4" />
+        </svg>
+        <svg className="moon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M6 1.5A6.5 6.5 0 1 0 14.5 10 5 5 0 0 1 6 1.5z" />
+        </svg>
+      </button>
     </header>
   );
 }

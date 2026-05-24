@@ -19,7 +19,6 @@ campaign event stream.
 |---|---|---|---|
 | `LiveDashboardView` | session-family root cycle | `dashboard.json`, `output.log` | **Display surface** — origin + completed-round summaries (`dash.rounds[]`) + in-flight `current_round` block. Sole webapp source for the chart, lineage tree, trend sparkline. |
 | `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
-| `LiveStateProjection` | per cycle | derived live state snapshot | |
 | `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
 `LiveDashboardView` writes into the **session-family root cycle dir**

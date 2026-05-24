@@ -910,7 +910,6 @@ def test_dispatch_budget_caps_injections_and_sheds_by_tier(monkeypatch):
     )
     with pytest.raises(InjectionRenderError):
         DispatchHub.render("plan", _bundle())
-    assert DispatchHub.render("plan", _bundle(ignore_render_errors=True)) == ""
 
 
 async def test_optimizer_call_deadline_retries_once_then_raises(monkeypatch):

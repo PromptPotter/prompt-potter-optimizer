@@ -1,10 +1,9 @@
 """Cross-campaign measurement leverage — read-only aggregation over the archive.
 
-Single endpoint backing the webapp's leverage panel (M13 Slice C). Walks the
-tenant's ``archive/measurements_index.json`` + per-run detail files, groups
-items by query, and returns per-query stats so the operator can see how much
-measurement reuse has accumulated across every campaign on the install. See
-``docs/specs/m13-chat-first-user-web.md`` for the surface direction.
+Single endpoint backing the webapp's leverage panel. Walks the tenant's
+``archive/measurements_index.json`` + per-run detail files, groups items by
+query, and returns per-query stats so the operator can see how much
+measurement reuse has accumulated across every campaign on the install.
 """
 
 from __future__ import annotations

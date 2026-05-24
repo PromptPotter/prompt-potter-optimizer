@@ -20,7 +20,7 @@ Six router objects mounted at ``/api/v1`` from ``main.py``:
    for the New Job view.
 
 5. **Measurements** (``_measurements_router``) — cross-campaign measurement
-   leverage aggregation for the M13 leverage panel.
+   leverage aggregation for the webapp's leverage panel.
 
 6. **Verify** (``_verify_router``) — workspace-scope diagnostic-run records
    produced by ``cmd_verify``; feeds the Verify tab.

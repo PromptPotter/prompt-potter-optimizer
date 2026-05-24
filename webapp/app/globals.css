@@ -133,6 +133,14 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .unit-library-head{display:flex;align-items:center;padding:0 8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
 .unit-library-note{padding:4px 8px;font-size:12px;color:var(--color-text-tertiary)}
 .unit-library-note code{font-size:11px}
+/* Empty-state onboarding card — shown when the sidebar has zero campaigns. */
+.unit-library-empty{padding:12px 10px;display:flex;flex-direction:column;gap:6px}
+.unit-library-empty .empty-headline{font-size:13px;font-weight:500;color:var(--color-text-secondary)}
+.unit-library-empty .empty-body{font-size:12px;color:var(--color-text-tertiary)}
+.unit-library-empty .empty-cmd{margin:2px 0;padding:6px 8px;background:var(--color-surface-elev,rgba(255,255,255,.04));border:0.5px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;overflow-x:auto;white-space:nowrap}
+.unit-library-empty .empty-cmd code{font-family:var(--font-mono,monospace);color:var(--color-text-secondary)}
+.unit-library-empty .empty-hint{font-size:11px;color:var(--color-text-tertiary)}
+.unit-library-empty .empty-hint code{font-size:11px}
 /* Dataset filter chip-bar — narrows the flat campaign list to one dataset.
    Shown only when 2+ datasets have campaigns on disk. */
 .unit-library-filter{display:flex;flex-wrap:wrap;gap:4px;padding:0 8px 8px}

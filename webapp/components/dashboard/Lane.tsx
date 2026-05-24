@@ -1,47 +1,13 @@
 "use client";
-import { useSyncExternalStore, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { useLocalStorage } from "@/lib/useLocalStorage";
 
 // Collapsible signal section. Three of these stack on the Dashboard tab
 // (Now / Verdict / Why). Each lane's open/closed state persists in
 // localStorage under `promptpotter.dash.lane.{id}` so a reload returns the
-// operator to the layout they last left. State reads via
-// `useSyncExternalStore` so the static-export build's pre-rendered HTML
-// matches `defaultOpen` and hydrates to the stored value without a mismatch.
+// operator to the layout they last left.
 
 const KEY_PREFIX = "promptpotter.dash.lane.";
-const subscribers = new Set<() => void>();
-
-function subscribe(callback: () => void): () => void {
-  subscribers.add(callback);
-  return () => {
-    subscribers.delete(callback);
-  };
-}
-
-function emit(): void {
-  for (const cb of subscribers) cb();
-}
-
-function readStored(id: string, defaultOpen: boolean): boolean {
-  if (typeof window === "undefined") return defaultOpen;
-  try {
-    const v = window.localStorage.getItem(`${KEY_PREFIX}${id}`);
-    if (v === "0") return false;
-    if (v === "1") return true;
-  } catch {
-    /* localStorage may be unavailable in private mode */
-  }
-  return defaultOpen;
-}
-
-function writeStored(id: string, next: boolean): void {
-  try {
-    window.localStorage.setItem(`${KEY_PREFIX}${id}`, next ? "1" : "0");
-    emit();
-  } catch {
-    /* ignore */
-  }
-}
 
 interface Props {
   id: string;
@@ -52,12 +18,12 @@ interface Props {
 }
 
 export function Lane({ id, title, subtitle, defaultOpen = true, children }: Props) {
-  const open = useSyncExternalStore(
-    subscribe,
-    () => readStored(id, defaultOpen),
-    () => defaultOpen,
+  const [open, setOpen] = useLocalStorage<boolean>(
+    `${KEY_PREFIX}${id}`,
+    defaultOpen,
+    { serialize: (v) => (v ? "1" : "0"), deserialize: (raw) => raw === "1" },
   );
-  const toggle = () => writeStored(id, !open);
+  const toggle = () => setOpen((prev) => !prev);
 
   return (
     <section

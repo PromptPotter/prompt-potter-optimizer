@@ -20,14 +20,17 @@
 
 ## Reference (capability specs, not on the roadmap)
 
-| Spec | What |
-|---|---|
-| [hard-sample-sorter](hard-sample-sorter.md) | δ_s leaderboard primitive; Phase 1 shipped, phases 2/3 unscheduled |
-| [security-audit](security-audit.md) | First hardening pass complete 2026-05-05; deferred items track multi-tenant + webapp hardening |
-| [code-debt-cleanup](code-debt-cleanup.md) | Known bloat hotspots; Tier 0 shipped, Tiers 1–4 unscheduled |
+| Spec | Status | What |
+|---|---|---|
+| [code-debt-cleanup](code-debt-cleanup.md) | REFERENCE | Known bloat hotspots; Tier 0 shipped, Tiers 1–4 unscheduled. Public-release polish arc tracked at the bottom of the same file. |
 
 ## Archive
 
-[`archive/`](archive/) holds done + superseded specs (M0–M10 cleanup arcs, webapp display-source unification, bayesian-sample-picker, dispatch-prompt-budget, rasch-validation-plan, M9 / M11 / M12 ancestors, etc.). Read for historical context.
+[`archive/`](archive/) holds done + superseded specs. Recent moves:
+
+- [hard-sample-sorter](archive/hard-sample-sorter.md) — δ_s leaderboard Phase 1 shipped; phases 2–3 captured in [`m12-plus-backlog.md`](m12-plus-backlog.md).
+- [security-audit](archive/security-audit.md) — first hardening pass complete 2026-05-05; deferred items embedded in [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) (endpoint hardening) and [`m12-control-plane.md`](m12-control-plane.md) (tenancy + auth).
+
+Plus M0–M10 cleanup arcs, webapp display-source unification, bayesian-sample-picker, dispatch-prompt-budget, rasch-validation-plan, and M9 / M11 / M12 ancestors. Read for historical context.
 
 Cross-repo: Proper Step Loop → backend repo `docs/spec/proper-step-loop.md`.

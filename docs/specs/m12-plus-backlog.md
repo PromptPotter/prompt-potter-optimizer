@@ -25,6 +25,7 @@ M12+ is the opportunistic bucket. Items here ship after M12 as user demand, time
 | Notebook tests | Catch notebook import drift |
 | Metrics | Prometheus exporter for campaign progress, queue depth, LLM latency |
 | Fat-file splits | Each offender from M9 hierarchy refactor gets its own splitting spec. See `archive/m9-hierarchy-refactor.md` § "Fat Files" |
+| Hard-Sample Sorter Phase 2 + 3 | Phase 2: compact ASCII heatmap inline in `log.md` at finalize + round boundaries (`presentation/views/log_md.py::render_hard_sample_heatmap`). Phase 3: webapp heatmap consuming the same `build_hard_samples_artifact` primitive. Both deferred from `archive/hard-sample-sorter.md`; Phase 1 (the primitive) is shipped |
 
 ### New Capabilities
 

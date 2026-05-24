@@ -1,5 +1,7 @@
 # Paired-Sample PoBB
 
+> **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
+
 PoBB (Posterior-of-Being-Best, Russo 2016) compares the round's current
 candidate against the pool of completed priors and abandons it when its
 posterior probability of being the best falls below ε. The original
@@ -332,7 +334,7 @@ approximating it via a tunable multiplier.
   catches every backfilled `(leader_sp, sample)` measurement.
 * `docs/operations/rewind-and-fork.md` — how decision replay drives
   divergence + fork behavior.
-* `docs/specs/hard-sample-sorter.md` — the artifact contract carrying
+* `docs/specs/archive/hard-sample-sorter.md` — the artifact contract carrying
   the heatmap's `sample_order` (δ_s desc) and the descriptive
   `pick_score.per_sample` blended-pick-value snapshot.
 * `promptpotter/application/intelligence/adaptive_picker.py` — the

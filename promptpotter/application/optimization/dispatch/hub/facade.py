@@ -125,22 +125,13 @@ class DispatchHub:
     @staticmethod
     def render(name: str, bundle: InjectionBundle) -> str:
         """Render one injection with ``char_cap`` enforcement. LLM overruns truncate + warn;
-        raises become ``InjectionRenderError`` (downgraded to warn + "" when ``bundle.ignore_render_errors``)."""
+        raises become ``InjectionRenderError`` (halts with ``StopReason.RENDER_ERROR``)."""
         sig = INJECTIONS.get(name)
         if sig is None:
             raise KeyError(f"Unknown signal: {name}")
         try:
             text = sig.render(bundle)
         except Exception as exc:
-            if bundle.ignore_render_errors:
-                logger.warning(
-                    "injection %r renderer raised %s — ignoring per "
-                    "--ignore-render-errors; rendering empty",
-                    name,
-                    type(exc).__name__,
-                    exc_info=True,
-                )
-                return ""
             raise InjectionRenderError(name, exc) from exc
         cap = sig.char_cap
         if cap is not None and len(text) > cap:
@@ -234,7 +225,6 @@ def build_bundle(
         origin_per_sample=origin_per_sample,
         trajectory_misses=trajectory_misses,
         forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
-        ignore_render_errors=cycle.ignore_render_errors,
     )
 
 

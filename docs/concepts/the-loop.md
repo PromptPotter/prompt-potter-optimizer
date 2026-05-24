@@ -1,5 +1,7 @@
 # The Three-Layer Loop
 
+> **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
+
 Three layers, repeating every round. L1 fires every round. L2 fires only when L1 stalls. L3 fires when L2's strategy stops moving the needle.
 
 ```

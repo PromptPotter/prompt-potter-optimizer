@@ -29,15 +29,13 @@ import { TrendChart } from "@/components/eval/TrendChart";
 import { RawJsonCard } from "@/components/raw/RawJsonCard";
 import { TopStrip } from "./TopStrip";
 import { ChatPane } from "./ChatPane";
-import { NarrowSpine, WideSpine } from "./DashboardLayout";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "./LiveStateCard";
 import { LiveSamplesCard } from "./LiveSamplesCard";
 import { LineageTree } from "./LineageTree";
 import { CyclePicker } from "./CyclePicker";
-import { EditModeToggle } from "./EditModeToggle";
 import { SelectionProvider, useSelection } from "./SelectionContext";
-import { SharedInspector } from "./SharedInspector";
+import { ScoringInspector } from "./ScoringInspector";
 import { FilesPane } from "@/components/tree/FilesPane";
 import { LeveragePanel } from "@/components/leverage/LeveragePanel";
 import { ComparePane } from "@/components/compare/ComparePane";
@@ -297,24 +295,32 @@ function DashboardPaneInner() {
           />
         ) : tab === "dashboard" ? (
           <div className="content" id="content-dashboard">
-            <NarrowSpine>
+            <div className="dash-spine-narrow">
               <header className="dash-hero">
                 <div className="page-header">
                   <div className="breadcrumb">
                     Campaign »{" "}
                     <CyclePicker />
                     <span className="cycle-toolbar">
-                      <EditModeToggle on={editMode} onToggle={setEditMode} />
+                      <button
+                        type="button"
+                        className={`edit-mode-toggle${editMode ? " on" : ""}`}
+                        onClick={() => setEditMode(!editMode)}
+                        aria-pressed={editMode}
+                        title={editMode ? "Editing — risky actions exposed" : "Read-only view"}
+                      >
+                        {editMode ? "● Editing" : "Edit"}
+                      </button>
                     </span>
                   </div>
                 </div>
               </header>
-            </NarrowSpine>
+            </div>
             <Lane id="now" title="Now" subtitle="What's running right now" defaultOpen>
-              <NarrowSpine>
+              <div className="dash-spine-narrow">
                 <TopStrip dash={dash} dashRound={dashRound} />
-              </NarrowSpine>
-              <NarrowSpine>
+              </div>
+              <div className="dash-spine-narrow">
                 <NowRow
                   dash={dash}
                   dashRound={dashRound}
@@ -325,35 +331,35 @@ function DashboardPaneInner() {
                   onSelectCycle={selectCycle}
                   isLive={isLive}
                 />
-              </NarrowSpine>
-              <NarrowSpine>
+              </div>
+              <div className="dash-spine-narrow">
                 <LiveStateCard dash={dash} />
-              </NarrowSpine>
-              <WideSpine>
+              </div>
+              <div className="dash-spine-wide">
                 <section className="dash-samples-wide" aria-label="Live samples">
                   <LiveSamplesCard dash={dash} dashRound={dashRound} status={dashState.status} />
                 </section>
-              </WideSpine>
+              </div>
             </Lane>
             <Lane id="verdict" title="Verdict" subtitle="Has it improved? By how much?" defaultOpen>
-              <NarrowSpine>
+              <div className="dash-spine-narrow">
                 <div className="dash-charts">
                   <FreqChart dash={dash} themeKey={themeKey} />
                   <TrendChart dash={dash} themeKey={themeKey} />
                 </div>
-              </NarrowSpine>
+              </div>
             </Lane>
             <Lane id="why" title="Why" subtitle="Drill into a candidate" defaultOpen={false}>
-              <WideSpine>
-                <SharedInspector
+              <div className="dash-spine-wide">
+                <WhyInspector
                   campaignId={campaignId}
                   cycleId={cycleId}
                   isLive={isLive}
                 />
-              </WideSpine>
-              <NarrowSpine>
+              </div>
+              <div className="dash-spine-narrow">
                 <RawJsonCard dash={dash} />
-              </NarrowSpine>
+              </div>
             </Lane>
           </div>
         ) : tab === "files" ? (
@@ -427,6 +433,38 @@ function NowRow({
         />
       )}
     </>
+  );
+}
+
+// Inspector slot inside the Why lane. Lives inside SelectionProvider so it
+// can read the candidate selection that LineageTree + FitnessPanel write to.
+function WhyInspector({
+  campaignId,
+  cycleId,
+  isLive,
+}: {
+  campaignId: string | null;
+  cycleId: string | null;
+  isLive: boolean;
+}) {
+  const { selected, setSelected } = useSelection();
+  if (!selected) {
+    return (
+      <div className="shared-inspector empty">
+        Select a lineage stub or a fitness bar above to inspect its searchpoint here.
+      </div>
+    );
+  }
+  return (
+    <div className="shared-inspector">
+      <ScoringInspector
+        campaignId={campaignId}
+        cycleId={cycleId}
+        selected={selected}
+        isLive={isLive}
+        onClose={() => setSelected(null)}
+      />
+    </div>
   );
 }
 

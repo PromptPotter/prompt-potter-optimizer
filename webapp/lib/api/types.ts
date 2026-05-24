@@ -4,20 +4,21 @@
 // Most shapes come from `types.generated.ts`, which `scripts/build_ts_types.py`
 // keeps in sync with the Pydantic source of truth. Edits to those shapes go
 // in the Python model + regenerate; hand-editing the generated file is
-// forbidden. A few shapes are still hand-maintained — the campaign-files
-// router + cycle-detail compare view (read straight from `index.json`)
-// haven't been wired into the generator yet.
+// forbidden.
 //
 // Old webapp-side names (`Campaign`, `ActiveSession`, `DatasetPreview`,
-// `Dashboard*`) are kept as aliases over the generated server-side names
-// so consumers don't have to be touched in this commit. Collapsing the
-// aliases is tracked as Tier 5 cosmetic in `docs/specs/code-debt-cleanup.md`.
+// `Dashboard*`, `FileResponse`, `FilesListing`) are kept as aliases over
+// the generated server-side names so consumers don't have to be touched
+// here. Collapsing the aliases is tracked as Tier 5 cosmetic in
+// `docs/specs/code-debt-cleanup.md`.
 
 import type {
   ActiveSessionResponse,
   CampaignSummary,
   DatasetItem as GeneratedDatasetItem,
   DatasetPreviewResponse,
+  FileContentResponse,
+  FilesResponse,
   MeasurementDot as GeneratedMeasurementDot,
   MeasurementSeriesResponse as GeneratedMeasurementSeriesResponse,
   OriginSummary,
@@ -41,6 +42,7 @@ export type {
   DeleteCycleResponse,
   DiagnosticRunListResponse,
   DiagnosticRunRecord,
+  FileEntry,
   InFlightCall,
   LeverageResponse,
   LiveDashboardState,
@@ -63,6 +65,8 @@ export type MeasurementSeriesResponse = GeneratedMeasurementSeriesResponse;
 export type DashboardOrigin = OriginSummary;
 export type DashboardRoundCandidate = RoundSummaryCandidate;
 export type DashboardRoundSummary = RoundSummary;
+export type FileResponse = FileContentResponse;
+export type FilesListing = FilesResponse;
 
 // Literal-type unions — not derivable from Pydantic; hand-maintained.
 // Three named data scopes — same vocabulary as the heatmap artifacts and
@@ -81,32 +85,6 @@ export type SiblingKind = "root" | "fork" | "diag" | "sweep";
 // (HITL fork, diagnostic, sweep); `l3_fork` = reserved for L3
 // auto-forking (not emitted yet).
 export type UnitKind = "session" | "divergent_resume" | "user_fork" | "l3_fork";
-
-// Hand-maintained — campaign-files router not yet wired into the generator.
-
-export interface FileEntry {
-  scope: string;
-  path: string;
-  size?: number;
-  mtime?: string;
-}
-
-export interface FileResponse {
-  campaign_id: string;
-  cycle_id: string;
-  path: string;
-  scope: string;
-  content: string | null;
-  content_type?: string;
-  size?: number;
-  mtime?: string;
-}
-
-export interface FilesListing {
-  campaign_id: string;
-  cycle_id: string;
-  entries: FileEntry[];
-}
 
 // Cycle detail — feeds the compare-campaigns view, read from index.json
 // (not a router response, so not in the generator scope).

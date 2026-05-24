@@ -1,6 +1,8 @@
 # M11 — Spend tracking
 
-**Status:** Spec stub 2026-05-08. The webapp's spend chips and the
+> **Status:** Forward direction — spec stub only, no shipped code yet.
+
+Spec stub 2026-05-08. The webapp's spend chips and the
 publication's cost/efficiency plot both need this. Listed as "Cost
 tracking" in [`m12-plus-backlog.md`](m12-plus-backlog.md); pull forward
 when prioritized.

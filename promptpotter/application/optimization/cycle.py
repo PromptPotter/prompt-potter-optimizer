@@ -126,7 +126,6 @@ class Cycle:
     state_version: int = 1
     last_rasch_posterior: Any = None
     archive_observations: list[Observation] = field(default_factory=list)
-    ignore_render_errors: bool = False
 
     @classmethod
     def start(

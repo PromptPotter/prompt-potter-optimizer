@@ -244,7 +244,6 @@ async def _drive_optimization(
         diag=getattr(args, "diag", False),
         halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
         max_spend_usd=getattr(args, "max_spend_usd", None),
-        ignore_render_errors=getattr(args, "ignore_render_errors", False),
     )
     return cycle_result
 
@@ -335,7 +334,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     """Resume the active campaign. Flags drive rewind / divergence / diag modes."""
     from promptpotter.shared.spend import refresh_rates
 
-    refresh_rates(force=bool(getattr(args, "refresh_rates", False)))
+    refresh_rates()
 
     ctx = load_session(args)
     if not ctx.cycle_id:
@@ -349,7 +348,13 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     if status.get("status") == "unreachable":
         return CommandResult(
             data={"error": "backend_unreachable", "backend_url": ctx.backend_url},
-            human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
+            human=(
+                f"Backend unreachable at {ctx.backend_url}.\n\n"
+                "The TermNorm backend ships in a sibling repo. Clone it next to "
+                "PromptPotter, then start it:\n"
+                "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
+                "Install guide: docs/manual/02-install.md"
+            ),
         )
 
     train_data = session.samples or []
@@ -374,7 +379,6 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             diag=False,
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
             max_spend_usd=getattr(args, "max_spend_usd", None),
-            refresh_rates=False,
             tenant=getattr(args, "tenant", "default"),
             verbose=getattr(args, "verbose", False),
             session=getattr(args, "session", None),

@@ -1,5 +1,7 @@
 # State Record
 
+> **Audience:** Developer reference. Operators see [`../manual/`](../manual/) for usage docs.
+
 Every round carries one record forward — the *individual* (`OptSearchPoint`, often *OSP*). It holds the prompt, the strategic context, the operational memory, and L2's mutations to L1's surface. Implementation: `promptpotter/domain/opt_search_point.py`. Domain contract: [`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md).
 
 Two parameter namespaces co-exist on the record: **prompt fields** (persona / task intent / problem description / instruction / thinking style / answer format / few-shot examples / plan) and **pipeline parameters** (thresholds / model / temperature / retrieval budgets — anything the pipeline's nodes expose). Names can overlap; the namespaces are independent. L1 mutates both in one proposal; routing happens at individual-creation time.

@@ -40,7 +40,7 @@ class StopReason(enum.StrEnum):
       under changed policy; one-flag rerun.
     - ``RENDER_ERROR`` — an injection renderer raised (usually code drift on
       a renamed field). Failing injection + traceback in ``index.json::final``.
-      Recover with ``resume`` or ``resume --ignore-render-errors``.
+      Fix the renderer and ``resume``.
     - ``PROMPT_BUDGET`` — composed prompt still over
       ``OPTIMIZER_PROMPT_CHAR_BUDGET`` after shedding every OPTIONAL + CORE
       injection. Compact parent prompt / trim meta-prompt, then ``resume``.
