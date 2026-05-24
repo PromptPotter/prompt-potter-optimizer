@@ -50,11 +50,10 @@ const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
 // Stable identity — passing a fresh array each render churns the chart.
 const CHART_PLUGINS = [sampleCountPlugin];
 
-// Always lay out at least this many columns. A 1–2 candidate round would
-// otherwise stretch each bar across the whole frame; padding to a fixed
-// floor keeps bars a consistent narrow width and left-aligned, with the
-// surplus slots rendered as empty columns on the right.
-const MIN_SLOTS = 8;
+// Above this real-bar count, x-axis labels rotate 60° so they stop
+// overlapping their neighbours. Picked empirically against the 240px
+// fitness-card height (rotated labels eat ~30px of plot height).
+const ROTATE_THRESHOLD = 8;
 
 // Pre-projected bar slot. Origin, historical rounds, and the in-flight
 // current round all collapse to the same shape — FitnessPanel handles the
@@ -103,13 +102,11 @@ export function FitnessChart({
   selectedKey,
   onSelect,
 }: Props) {
-  // Padded to MIN_SLOTS — surplus slots carry an empty label and render
-  // as blank columns; the real candidates fill from the left.
-  const labels = useMemo(() => {
-    const ls = bars.map((b) => b.label);
-    while (ls.length < MIN_SLOTS) ls.push("");
-    return ls;
-  }, [bars]);
+  // One x-axis label per real bar. No empty-slot padding: chart.js spaces
+  // categories evenly across the frame, and the `maxBarThickness` cap below
+  // keeps individual bars narrow even at very low counts (a 2-bar round
+  // shows two 28px bars centered, not two stretched-to-fill bars).
+  const labels = useMemo(() => bars.map((b) => b.label), [bars]);
 
   // Two parallel arrays per series: *Raw drives the tooltip; *Plot pushes
   // null → 0 only for bars whose scoring has begun (so `minBarLength`
@@ -246,7 +243,7 @@ export function FitnessChart({
     return `${label}: ${v == null ? "—" : v.toFixed(3)}`;
   };
 
-  const rotate = labels.length > 14;
+  const rotate = labels.length > ROTATE_THRESHOLD;
   const options = useMemo<ChartOptions<"bar">>(() => ({
     responsive: true,
     maintainAspectRatio: false,

@@ -5,7 +5,7 @@
 "use client";
 import { useEffect, useMemo, useRef } from "react";
 import { TERMS } from "@/lib/terms";
-import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
+import { type DashboardSnapshot } from "@/lib/poll";
 import { cycleStatusLabel } from "@/lib/cycle-status";
 import { fmtSecs } from "@/lib/format";
 
@@ -62,13 +62,12 @@ function estimateQps(state: QpsState, dash: DashboardSnapshot | null): number | 
 }
 
 export function TopStrip({ dash, dashRound }: Props) {
-  // Sparkline: running-best composite over rounds. Lifted from HeroSummary.
-  const { rounds: docs } = useCycleStream();
+  // Sparkline: running-best composite over rounds, read from the
+  // dashboard's per-round summary block.
   const spark = useMemo(() => {
     const pts: { round: number; composite: number }[] = [];
-    for (const d of docs) {
-      if (typeof d.round !== "number") continue;
-      pts.push({ round: d.round, composite: (d.composite_fitness ?? d.accuracy ?? 0) as number });
+    for (const r of dash?.rounds ?? []) {
+      pts.push({ round: r.round, composite: r.composite_fitness || r.accuracy });
     }
     pts.sort((a, b) => a.round - b.round);
     if (pts.length < 2) return null;
@@ -85,7 +84,7 @@ export function TopStrip({ dash, dashRound }: Props) {
     const path = xs.map((x, i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${toY(ys[i]).toFixed(1)}`).join("");
     const area = `${path} L${xs[xs.length - 1].toFixed(1)},${H} L0,${H} Z`;
     return { path, area, W, H };
-  }, [docs]);
+  }, [dash?.rounds]);
 
   // Rolling qps — ref pattern lifted from ProgressCard. EMA across
   // dashboard ticks; reading qpsRef.current.qps during render is intended.

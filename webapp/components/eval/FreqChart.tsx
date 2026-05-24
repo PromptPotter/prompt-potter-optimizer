@@ -1,11 +1,13 @@
 "use client";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered } from "@/lib/chart-config";
 import { getCss } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
 import { parseSampleLine } from "@/lib/sample-line";
-import { liveL1Candidates, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
+import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
+import { useWorkspace } from "@/lib/workspace";
+import { useRoundFile } from "@/lib/useRoundFile";
 import { CardFrame } from "@/components/ui/card";
 
 ensureChartRegistered();
@@ -56,16 +58,16 @@ function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
 
 export function FreqChart({ dash, themeKey }: Props) {
   const chartRef = useRef(null);
+  const { campaignId, cycleId } = useWorkspace();
 
-  // Reuse the shared round-history stream — the latest entry is the freshest
-  // round_NNNN.json on disk. No second round-file fetch path: every consumer
-  // (TopStrip, TrendChart, LineageTree, FitnessPanel, HardSamples*, here)
-  // reads from the same `useCycleStream().rounds` array.
-  const { rounds: historyDocs } = useCycleStream();
-  const latestResults = useMemo<ResultRow[]>(() => {
-    const latest = historyDocs[historyDocs.length - 1];
-    return (latest?.results as ResultRow[] | undefined) ?? [];
-  }, [historyDocs]);
+  // Latest completed round from the dashboard summary. `dash.rounds` is sorted
+  // ascending — the last entry is the most recent. Null until the first round
+  // closes; the lazy fetch returns EMPTY in that window and the live bucket
+  // path below carries the chart.
+  const rounds = dash?.rounds ?? [];
+  const latestRound = rounds.length > 0 ? rounds[rounds.length - 1].round : null;
+  const { doc: latestRoundDoc } = useRoundFile(campaignId, cycleId, latestRound);
+  const latestResults = (latestRoundDoc?.results as ResultRow[] | undefined) ?? [];
 
   const live = liveResultsFrom(dash);
   const useLive = live.length > 0;

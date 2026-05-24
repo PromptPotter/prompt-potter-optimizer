@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { Line } from "react-chartjs-2";
 import { ensureChartRegistered, lineChartDefaults } from "@/lib/chart-config";
 import { cssRgba, getCss } from "@/lib/theme";
-import { useCycleStream } from "@/lib/poll";
+import type { DashboardSnapshot } from "@/lib/poll";
 import { CardFrame } from "@/components/ui/card";
 
 ensureChartRegistered();
@@ -14,20 +14,19 @@ interface Point {
 }
 
 interface Props {
+  dash: DashboardSnapshot | null;
   themeKey: string;
 }
 
-export function TrendChart({ themeKey }: Props) {
-  const { rounds: docs } = useCycleStream();
+export function TrendChart({ dash, themeKey }: Props) {
   const points: Point[] = useMemo(() => {
     const out: Point[] = [];
-    for (const d of docs) {
-      if (typeof d.round !== "number") continue;
-      out.push({ round: d.round, composite: (d.composite_fitness ?? d.accuracy ?? 0) as number });
+    for (const r of dash?.rounds ?? []) {
+      out.push({ round: r.round, composite: r.composite_fitness || r.accuracy });
     }
     out.sort((a, b) => a.round - b.round);
     return out;
-  }, [docs]);
+  }, [dash?.rounds]);
 
   let runningBest = 0;
   const bestData = points.map((p) => {

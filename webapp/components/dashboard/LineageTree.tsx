@@ -3,7 +3,6 @@ import { useMemo } from "react";
 import {
   liveL1Candidates,
   roundOf,
-  useCycleStream,
   type DashboardSnapshot,
 } from "@/lib/poll";
 import { rootCycleId, shortFamilyTail } from "@/lib/ids";
@@ -22,7 +21,6 @@ interface Candidate {
 
 interface RoundView {
   round: number;
-  origin_accuracy?: number;
   scoreboard?: Candidate[];
 }
 
@@ -64,20 +62,22 @@ interface ChildPos {
 
 export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props) {
   const { selected, setSelected } = useSelection();
-  const { rounds: docs } = useCycleStream();
-  // Same merge logic FitnessPanel uses: historical rounds from disk +
-  // a partial "live" round when the dash carries L1 candidates that
-  // haven't been written to round_NNNN.json yet. Without this the
-  // lineage lags the fitness panel by a whole round (the operator sees
+  // Source of truth: `dash.rounds[]` for completed rounds, plus a
+  // partial live round when the dash carries in-flight L1 candidates
+  // that `round:display` hasn't summarized yet. Without the in-flight
+  // tail, the tree would lag the chart by one round (operator sees
   // C4.x bars in the chart but no R4 column in the tree).
   const rounds: RoundView[] = useMemo(() => {
     const out: RoundView[] = [];
-    for (const d of docs) {
-      if (typeof d.round !== "number") continue;
+    for (const r of dash?.rounds ?? []) {
       out.push({
-        round: d.round,
-        origin_accuracy: d.origin_accuracy,
-        scoreboard: d.scoreboard as Candidate[] | undefined,
+        round: r.round,
+        scoreboard: r.candidates.map((c) => ({
+          candidate_id: c.candidate_id,
+          label: c.label,
+          accuracy: c.accuracy,
+          is_winner: c.is_winner,
+        })),
       });
     }
     const inflight = liveL1Candidates(dash);
@@ -99,7 +99,7 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
       out.push({ round: currentRound, scoreboard });
     }
     return out;
-  }, [docs, dash]);
+  }, [dash]);
 
   // Walk rounds in order. Each round's children sit at column N (1-indexed),
   // vertically centered on the parent of round N (origin or prior winner).
@@ -155,8 +155,8 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
     };
   }, [rounds]);
 
-  // Live origin if available — surfaces before the first round file lands.
-  const originAcc = dash?.origin_accuracy ?? rounds[0]?.origin_accuracy ?? null;
+  // Live origin if available — surfaces before the first round closes.
+  const originAcc = dash?.origin?.accuracy ?? null;
 
   if (rounds.length === 0) {
     // Inherited fork: dashboard.json is shared at the family root, so

@@ -98,7 +98,7 @@ export function StatusBar({
       )
     : null;
   const best = typeof dash?.best === "number" ? dash.best : null;
-  const origin = typeof dash?.origin_accuracy === "number" ? dash.origin_accuracy : null;
+  const origin = typeof dash?.origin?.accuracy === "number" ? dash.origin.accuracy : null;
   const delta = best != null && origin != null ? best - origin : null;
   const deltaSign = delta == null ? "" : delta > 0 ? "+" : "";
   const deltaCls = delta == null ? "" : delta > 0 ? "up" : delta < 0 ? "down" : "flat";

@@ -16,11 +16,14 @@ __all__ = [
     "CandidateScore",
     "CycleResult",
     "DiagnosticRunRecord",
+    "OriginSummary",
     "PayloadOutcome",
     "RoundMetadata",
     "RoundOrigin",
     "RoundPayload",
     "RoundResult",
+    "RoundSummary",
+    "RoundSummaryCandidate",
     "SweepBatchResult",
     "candidate_label",
 ]
@@ -317,6 +320,64 @@ class DiagnosticRunRecord(BaseModel):
     source_campaign_accuracy: float
     source_campaign_composite: float
     source_campaign_n: int
+
+
+class RoundSummaryCandidate(BaseModel):
+    """One candidate's display-summary row for ``dashboard.json::rounds[].candidates``.
+
+    Strict subset of :class:`CandidateScore` — only the fields the webapp's
+    bar chart, lineage tree, and trend sparkline actually render. Deep
+    audit (per-sample rows, full evaluator output, prompt content) stays
+    in ``.runtime/cache/rounds/round_NNNN.json``; this shape exists so
+    every chart consumer reads one stream (``dashboard.json``) instead of
+    stitching live + historical sources.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    candidate_id: str
+    label: str
+    accuracy: float
+    composite_fitness: float
+    scored_samples: int
+    expected_samples: int
+    is_winner: bool
+    evaluators: dict[str, float] = Field(default_factory=dict)
+    changes_description: str = ""
+
+
+class RoundSummary(BaseModel):
+    """One round's display-summary row for ``dashboard.json::rounds[]``.
+
+    Accumulates as round-close events fire. Webapp reads this list as the
+    sole source of truth for completed-round bars; the in-flight round
+    rides ``current_round`` separately.
+
+    ``accuracy`` / ``composite_fitness`` are the round-winner's scalars
+    (same as :class:`RoundMetadata`), surfaced top-level so the trend
+    chart and sparkline don't have to scan ``candidates`` to find the
+    winner.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    round: int
+    accuracy: float
+    composite_fitness: float
+    candidates: list[RoundSummaryCandidate] = Field(default_factory=list)
+
+
+class OriginSummary(BaseModel):
+    """Origin row for ``dashboard.json::origin``.
+
+    Origin isn't a round (no candidates, no fitness), so it lives in its
+    own block rather than as ``rounds[0]``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    accuracy: float
+    samples: int
 
 
 class PayloadOutcome(BaseModel):

@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { postCreateFork, postStopCycle } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
-import { useCycleStream } from "@/lib/poll";
+import { useRoundFile } from "@/lib/useRoundFile";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
 import { fmtPct1 } from "@/lib/format";
 import type { SelectedCandidate } from "./SelectionContext";
@@ -27,11 +27,6 @@ interface ScoreboardEntry {
   [k: string]: unknown;
 }
 
-interface RoundDoc {
-  round?: number;
-  scoreboard?: ScoreboardEntry[];
-}
-
 export function ScoringInspector({
   campaignId,
   cycleId,
@@ -39,18 +34,21 @@ export function ScoringInspector({
   isLive,
   onClose,
 }: Props) {
-  const { rounds } = useCycleStream();
-  const docs = rounds as RoundDoc[];
+  // Lazy-fetch the selected candidate's round file. The summary surface
+  // (dash.rounds[]) carries accuracy + is_winner per candidate but not the
+  // composite/hits/per_sample[] block — those are deep-audit fields, so the
+  // inspector reaches for the round file only when the operator opens it.
+  const { doc } = useRoundFile(campaignId, cycleId, selected?.round ?? null);
   const [forkPending, setForkPending] = useState(false);
   const [forkResult, setForkResult] = useState<{ id: string; cli: string } | null>(null);
   const [forkErr, setForkErr] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
   const entry = useMemo<ScoreboardEntry | null>(() => {
-    if (!selected) return null;
-    const r = docs.find((d) => d.round === selected.round);
-    return r?.scoreboard?.find((c) => (c.candidate_id ?? "") === selected.candidate_id) ?? null;
-  }, [docs, selected]);
+    if (!selected || !doc) return null;
+    const scoreboard = doc.scoreboard as ScoreboardEntry[] | undefined;
+    return scoreboard?.find((c) => (c.candidate_id ?? "") === selected.candidate_id) ?? null;
+  }, [doc, selected]);
 
   if (!selected) return null;
   const data = entry;

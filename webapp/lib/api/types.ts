@@ -197,6 +197,36 @@ export interface CampaignLineageResponse {
   cycles: CampaignLineageCycle[];
 }
 
+// Live-dashboard display payloads — mirrors `promptpotter/domain/results.py`
+// (`RoundSummary`, `RoundSummaryCandidate`, `OriginSummary`). Carried on
+// `dashboard.json::rounds[]` and `dashboard.json::origin`; the chart,
+// trend sparkline, and lineage tree read this as the sole source of truth
+// for completed-round display data.
+
+export interface DashboardRoundCandidate {
+  candidate_id: string;
+  label: string;
+  accuracy: number;
+  composite_fitness: number;
+  scored_samples: number;
+  expected_samples: number;
+  is_winner: boolean;
+  evaluators: Record<string, number>;
+  changes_description: string;
+}
+
+export interface DashboardRoundSummary {
+  round: number;
+  accuracy: number;
+  composite_fitness: number;
+  candidates: DashboardRoundCandidate[];
+}
+
+export interface DashboardOrigin {
+  accuracy: number;
+  samples: number;
+}
+
 // Mutating-endpoint responses. The mutations ride existing I/O kinds
 // (Persistence's `inherit_from`, Control-local's `stop_check` flag-poll);
 // they introduce no new I/O kind. See promptpotter/presentation/CLAUDE.md.

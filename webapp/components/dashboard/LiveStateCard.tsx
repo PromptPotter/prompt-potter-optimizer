@@ -18,10 +18,16 @@ const SHOWN_ELSEWHERE = new Set([
   "current_query_payload",
   "state", "round", "candidate", "query",
   "patience",
+  // ``origin`` rides as a nested object; surfaced as a derived KV row
+  // below rather than dumped as a JSON blob through the generic loop.
+  "origin",
+  // ``rounds[]`` is the per-round summary array used by the chart /
+  // lineage tree — not a scalar field for this KV dump.
+  "rounds",
 ]);
 
 const KNOWN_ORDER = [
-  "origin_accuracy", "current_acc", "n_variants", "sp_budget_ttest",
+  "origin_acc", "current_acc", "n_variants", "sp_budget_ttest",
   "total_backend_calls", "error_count", "degraded_count", "backend_retry_count",
   "state_since", "stop_reason",
 ];
@@ -41,7 +47,7 @@ interface BackendWarning {
 }
 
 const FORMATTERS: Record<string, (v: unknown) => string> = {
-  origin_accuracy: (v) => fmtNum(v),
+  origin_acc: (v) => fmtNum(v),
   current_acc: (v) => fmtNum(v),
   state_since: fmtClock,
 };
@@ -49,13 +55,24 @@ const FORMATTERS: Record<string, (v: unknown) => string> = {
 export function LiveStateCard({ dash }: Props) {
   const formula = (dash as { composite_fitness_formula?: string } | null)?.composite_fitness_formula || "—";
 
-  // Build the KV grid: known-order fields first (when present), then any
-  // remaining scalar fields in the dashboard.json snapshot.
+  // Build the KV grid: derived origin row first (flattened from the
+  // nested ``origin`` block), then known-order fields, then any remaining
+  // scalar fields in the dashboard.json snapshot.
   const items: [string, unknown][] = [];
   const seen = new Set(SHOWN_ELSEWHERE);
   if (dash) {
+    const originAcc = dash.origin?.accuracy;
+    if (typeof originAcc === "number") {
+      items.push(["origin_acc", originAcc]);
+      seen.add("origin_acc");
+    }
+    const originSamples = dash.origin?.samples;
+    if (typeof originSamples === "number") {
+      items.push(["origin_samples", originSamples]);
+      seen.add("origin_samples");
+    }
     for (const k of KNOWN_ORDER) {
-      if (!(k in dash)) continue;
+      if (!(k in dash) || seen.has(k)) continue;
       seen.add(k);
       items.push([k, (dash as Record<string, unknown>)[k]]);
     }

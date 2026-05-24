@@ -43,6 +43,7 @@
 | [State-Sync Cleanup](state-sync-cleanup.md) | pre-whitelabel foundation, 4 phases — `promptpotter/infrastructure/store/`, `promptpotter/infrastructure/projections/live_dashboard/`, `promptpotter/presentation/api/routers/active.py`, `webapp/` |
 | [Security audit](security-audit.md) | first hardening pass complete 2026-05-05 — `promptpotter/application/scoring/formula/`, `promptpotter/config/log_redaction.py`, `promptpotter/application/optimization/dispatch/hub/` |
 | [Code-Debt Cleanup](code-debt-cleanup.md) | tech-debt backlog, unscheduled — 5 tiers; `promptpotter/application/optimization/l1/score.py`, `dispatch/hub/injections.py`, `dispatch/llm_call.py` |
+| Webapp Display-Source Unification | archived → [`archive/webapp-display-source-unification.md`](archive/webapp-display-source-unification.md) — shipped 2026-05-23, all 10 phases; `dash.rounds[]` is the sole chart source, deep audit fetched lazily |
 | M10 cleanup | archived → [`archive/m10-cleanup.md`](archive/m10-cleanup.md) + sub-audits |
 
 Cross-repo: Proper Step Loop → backend repo `docs/spec/proper-step-loop.md`.

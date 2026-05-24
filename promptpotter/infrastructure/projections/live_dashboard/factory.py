@@ -54,7 +54,11 @@ def resolve_resume_state(
     except (json.JSONDecodeError, OSError):
         return None
 
-    resume_from["origin_accuracy"] = origin_accuracy
+    origin_block = dict(resume_from.get("origin") or {})
+    origin_block["accuracy"] = origin_accuracy
+    # samples stays whatever the prior dashboard recorded; INIT:exit will
+    # refresh both fields once the new run hits origin scoring.
+    resume_from["origin"] = origin_block
     disk_round = _max_round_on_disk(active_cycle_dir / "rounds")
     if disk_round > int(resume_from.get("round") or 0):
         resume_from["round"] = disk_round

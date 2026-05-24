@@ -79,7 +79,7 @@ export function ChatPane({
   const best = typeof dash?.best === "number" ? dash.best : null;
   const accPct = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}% acc` : "— acc";
   const bestPctOnly = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}%` : "—";
-  const origin = typeof dash?.origin_accuracy === "number" ? dash.origin_accuracy : null;
+  const origin = typeof dash?.origin?.accuracy === "number" ? dash.origin.accuracy : null;
   const originPct =
     origin != null && Number.isFinite(origin) ? `${(origin * 100).toFixed(0)}%` : null;
 

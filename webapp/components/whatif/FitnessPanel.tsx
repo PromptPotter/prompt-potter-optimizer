@@ -8,16 +8,12 @@ import { CardFrame } from "@/components/ui/card";
 import { candidateLabel } from "@/lib/candidate-label";
 import {
   liveL1Candidates,
-  useCycleStream,
   type DashboardSnapshot,
   type LiveCandidate,
 } from "@/lib/poll";
+import type { DashboardRoundSummary } from "@/lib/api/types";
 import { useSelection } from "@/components/dashboard/SelectionContext";
-import {
-  correctedFromEvaluators,
-  type HistoricalCandidate,
-  type HistoricalRound,
-} from "./fitness-bars";
+import { correctedFromEvaluators } from "./fitness-bars";
 import { WhatIfGrid } from "./WhatIfGrid";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useFetch } from "@/lib/useFetch";
@@ -61,24 +57,14 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
   const inflightCandidates: LiveCandidate[] = liveL1Candidates(dash);
   const currentRound = dashRound ?? 0;
 
-  // ── 2. Historical rounds — round_NNNN.json files on disk. The
-  // CycleStreamProvider owns the cache; the dashboard makes one set of
-  // network calls per round change and every consumer (TopStrip,
-  // TrendChart, LineageTree, FreqChart, HardSamples*, here) reads the
-  // same array.
-  const { rounds: historyDocs } = useCycleStream();
-  const history: HistoricalRound[] = useMemo(() => {
-    const out: HistoricalRound[] = [];
-    for (const d of historyDocs) {
-      if (typeof d.round !== "number") continue;
-      out.push({
-        round: d.round,
-        candidate_scores: d.candidate_scores as HistoricalCandidate[] | undefined,
-        origin_accuracy: d.origin_accuracy,
-      });
-    }
-    return out;
-  }, [historyDocs]);
+  // ── 2. Completed-round summaries from `dash.rounds[]` — sole source
+  // of truth for historical bars. The projection accumulates these at
+  // `round:display` so the chart never has to stitch live + finalized
+  // round-file fetches.
+  const history: DashboardRoundSummary[] = useMemo(
+    () => (dash?.rounds ?? []).slice().sort((a, b) => a.round - b.round),
+    [dash?.rounds],
+  );
 
   // ── 2b. Diagnostic-run records — one per `python -m promptpotter verify`
   // invocation, persisted at archive/diagnostic_runs/*.json. Fetched per
@@ -105,15 +91,15 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
 
   // ── 3. The applicable evaluator set unions every candidate we plot. The
   // origin row has no evaluators; in-flight stats and historical
-  // candidate_scores both carry the full dict.
+  // round-summary candidates both carry the full dict.
   const realApplicable = useMemo(() => {
     const set = new Set<string>();
     for (const c of inflightCandidates) {
       for (const k of Object.keys(c.stats?.evaluators ?? {})) set.add(k);
     }
     for (const h of history) {
-      for (const c of h.candidate_scores ?? []) {
-        for (const k of Object.keys(c.evaluators ?? {})) set.add(k);
+      for (const c of h.candidates) {
+        for (const k of Object.keys(c.evaluators)) set.add(k);
       }
     }
     return set;
@@ -225,34 +211,12 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
     // When selected matches the formula's evaluators, reuse the backend's composite byte-for-byte — recomputing as a mean drifts by float ε and can't represent non-mean formulas.
     const useComposite = setsEqual(selected, inActive);
 
-    // Origin — ``dash.origin_accuracy`` is the live value; fall back to any
-    // round file (they all carry it). No evaluator breakdown for origin.
-    // The ``> 0`` guard skips a not-yet-scored 0.0.
-    let originAccuracy: number | null = null;
-    if (typeof dash?.origin_accuracy === "number" && dash.origin_accuracy > 0) {
-      originAccuracy = dash.origin_accuracy;
-    } else {
-      const firstWithOrigin = history.find(
-        (h) => typeof h.origin_accuracy === "number" && (h.origin_accuracy ?? 0) > 0,
-      );
-      if (firstWithOrigin) originAccuracy = firstWithOrigin.origin_accuracy ?? null;
-    }
-    // Origin scores the full set every time. Prefer the live dashboard's
-    // `origin_samples` (written at INIT:exit, before round 1's file lands so
-    // C0 carries a count during the very first round); fall back to a later
-    // candidate's `expected_samples` once history is on disk.
-    let originSamples: number | null = null;
-    const dashOriginSamples = (dash as { origin_samples?: number } | null)?.origin_samples;
-    if (typeof dashOriginSamples === "number" && dashOriginSamples > 0) {
-      originSamples = dashOriginSamples;
-    } else {
-      for (const h of history) {
-        for (const c of h.candidate_scores ?? []) {
-          if (typeof c.expected_samples === "number") { originSamples = c.expected_samples; break; }
-        }
-        if (originSamples != null) break;
-      }
-    }
+    // Origin — single source on `dash.origin`. The `> 0` guard skips a
+    // not-yet-scored bootstrap value.
+    const originAccuracy =
+      dash?.origin && dash.origin.accuracy > 0 ? dash.origin.accuracy : null;
+    const originSamples =
+      dash?.origin && dash.origin.samples > 0 ? dash.origin.samples : null;
     if (originAccuracy != null || history.length > 0 || inflightCandidates.length > 0) {
       out.push({
         key: "C0",
@@ -268,27 +232,23 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
 
     const historicalRoundsSeen = new Set<number>();
     for (const h of history) {
-      const roundNum = Number(h.round ?? 0);
+      const roundNum = h.round;
       historicalRoundsSeen.add(roundNum);
-      const cands = h.candidate_scores ?? [];
-      cands.forEach((c, i) => {
-        const ev = c.evaluators ?? {};
-        const acc = typeof c.accuracy === "number" ? c.accuracy : null;
-        const comp = typeof c.composite_fitness === "number" ? c.composite_fitness : null;
+      h.candidates.forEach((c, i) => {
         const label = c.label || candidateLabel(roundNum, i);
         const diag = diagByLabel.get(label);
         out.push({
           key: `R${roundNum}.${i}`,
           label,
-          accuracy: acc,
-          composite: comp,
-          whatif: useComposite && comp != null ? comp : correctedFromEvaluators(ev, selected, rows),
-          started: acc != null || comp != null || Object.keys(ev).length > 0,
-          nSamples: typeof c.scored_samples === "number" ? c.scored_samples : null,
-          nExpected: typeof c.expected_samples === "number" ? c.expected_samples : null,
-          candidateId: c.candidate_id ?? `r${roundNum}_${i}`,
+          accuracy: c.accuracy,
+          composite: c.composite_fitness,
+          whatif: useComposite ? c.composite_fitness : correctedFromEvaluators(c.evaluators, selected, rows),
+          started: true,
+          nSamples: c.scored_samples,
+          nExpected: c.expected_samples,
+          candidateId: c.candidate_id || `r${roundNum}_${i}`,
           round: roundNum,
-          isWinner: !!c.is_winner,
+          isWinner: c.is_winner,
           diag: diag
             ? {
                 accuracy: diag.workspace_accuracy,
@@ -300,7 +260,8 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
       });
     }
 
-    // In-flight: only if the current round hasn't yet been written to disk.
+    // In-flight: only if the current round hasn't yet been summarized
+    // into `dash.rounds[]` (i.e. `round:display` hasn't fired yet).
     if (
       inflightCandidates.length > 0 &&
       !historicalRoundsSeen.has(currentRound)

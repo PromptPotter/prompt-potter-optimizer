@@ -28,7 +28,28 @@ Canonical sites: `lib/poll.tsx` (`unitKeyRef`, the `useRef` variant),
 
 A hook that owns a single state object may instead derive freshness purely —
 stamp the loaded data with the key it was fetched for and return `EMPTY` until
-the key matches (`lib/useDatasetPreview.ts`). This is also stale-frame-free.
+the key matches (`lib/useDatasetPreview.ts`, `lib/useRoundFile.ts`). This is
+also stale-frame-free.
+
+## Display-data sources
+
+Two on-disk surfaces back the dashboard. Read from the right one:
+
+- **`dashboard.json`** (polled every 2 s by `lib/poll.tsx` → `useCycleStream()`)
+  — origin, in-flight `current_round`, and the `rounds[]` array of completed-
+  round summaries. **Sole source** for the FitnessChart, TrendChart, TopStrip
+  sparkline, LineageTree. Don't stitch in `round_NNNN.json` for chart data.
+- **`round_NNNN.json`** (lazy, fetched via `lib/useRoundFile.ts`) — deep
+  audit per round: full LLM I/O, per-sample results, scoreboard with
+  `per_sample`. Reach for it only when the operator drills into a specific
+  round (FreqChart distribution, ScoringInspector composite/hits,
+  OptimizerNodeDetail node-by-node inspection).
+
+If you find yourself adding a "merge in-flight with historical" or "fall
+back to round-file when dashboard hasn't written X yet" branch, you're
+re-introducing the stitch pattern the unification spec
+(`docs/specs/webapp-display-source-unification.md`) collapsed. Pick one
+source per data class.
 
 ## Testing posture
 

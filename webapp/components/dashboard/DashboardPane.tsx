@@ -11,7 +11,6 @@ import {
   roundOf,
   useCycleStream,
   type DashboardSnapshot,
-  type RoundFileDoc,
 } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/useDatasetPreview";
@@ -131,11 +130,9 @@ function DashboardPaneInner() {
   const dashState = useCycleStream();
   const dash: DashboardSnapshot | null = dashState.dash;
   // Canonical round number — derived once, threaded down to children that
-  // need it (LiveSamplesCard, FitnessPanel, HardSamples*). The
-  // CycleStreamProvider above owns the round-files cache: every consumer
-  // that previously called `useRoundHistory(cycleId, refreshKey)` now reads
-  // `useCycleStream().rounds`, so the dashboard makes one set of round-
-  // file network calls per round change instead of one per panel.
+  // need it (LiveSamplesCard, FitnessPanel, HardSamples*). Completed-round
+  // summaries ride `dash.rounds[]` directly; deep-audit round files are
+  // lazy-fetched via `useRoundFile` at the use site.
   const dashRound = roundOf(dash);
   // Liveness — the single gate for mid-run guards (fork modal, Live badge,
   // Stop button) and every transient indicator (blinking rows, pulsing
@@ -325,7 +322,6 @@ function DashboardPaneInner() {
                   campaignId={campaignId}
                   cycleId={cycleId}
                   themeKey={themeKey}
-                  rounds={dashState.rounds}
                   onSelectCycle={selectCycle}
                   isLive={isLive}
                 />
@@ -343,7 +339,7 @@ function DashboardPaneInner() {
               <NarrowSpine>
                 <div className="dash-charts">
                   <FreqChart dash={dash} themeKey={themeKey} />
-                  <TrendChart themeKey={themeKey} />
+                  <TrendChart dash={dash} themeKey={themeKey} />
                 </div>
               </NarrowSpine>
             </Lane>
@@ -389,7 +385,6 @@ function NowRow({
   campaignId,
   cycleId,
   themeKey,
-  rounds,
   onSelectCycle,
   isLive,
 }: {
@@ -399,7 +394,6 @@ function NowRow({
   campaignId: string | null;
   cycleId: string | null;
   themeKey: string;
-  rounds: RoundFileDoc[];
   onSelectCycle: (campaignId: string, cycleId: string) => void;
   isLive: boolean;
 }) {
@@ -427,7 +421,8 @@ function NowRow({
           pipeline={pipeline}
           dash={dash}
           isLive={isLive}
-          rounds={rounds}
+          campaignId={campaignId}
+          cycleId={cycleId}
           onClose={() => setNode(null)}
         />
       )}

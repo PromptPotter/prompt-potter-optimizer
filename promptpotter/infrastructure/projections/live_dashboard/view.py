@@ -19,11 +19,22 @@ per-cycle ``CycleEventLog``. The runner emits typed ``PhaseRecord`` /
 one flat router that mutates the ``state`` scalars + the ``_round``
 candidate dict in place, then merges both into one ``dashboard.json``
 write through ``_persist``.
+
+Two display surfaces on ``dashboard.json``:
+
+* ``rounds[]`` — completed-round summaries (one entry per closed round,
+  appended at ``round:display``). Sole source for the FitnessChart,
+  TrendChart, TopStrip sparkline, LineageTree. The webapp never stitches
+  ``round_NNNN.json`` files for these.
+* ``current_round`` — the in-flight round's deep node block (L1 generate
+  / critique / score in progress, plus PoBB telemetry). Wiped at
+  ``L1_GENERATE:enter`` so a fresh round starts with an empty in-flight
+  buffer. Past rounds' deep audit lives in ``round_NNNN.json``, lazy-fetched
+  by the webapp via ``useRoundFile`` when an operator drills in.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,6 +55,7 @@ from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_dashboard import candidate_block
 from promptpotter.infrastructure.projections.live_dashboard.factory import resolve_resume_state
 from promptpotter.infrastructure.projections.live_dashboard.pobb import build_pobb_block
+from promptpotter.infrastructure.projections.live_dashboard.round_summary import build_round_summary
 from promptpotter.infrastructure.projections.live_dashboard.score import build_l1_score_block
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
@@ -57,6 +69,7 @@ from promptpotter.infrastructure.store import (
     cycle_dir_for,
     root_cycle_id,
     session_dir_for,
+    write_json,
 )
 from promptpotter.shared.errors import is_degraded
 
@@ -137,8 +150,14 @@ class LiveDashboardView(DerivedView):
             "candidate": "",
             "query": "",
             "patience": f"0/{l1_patience}",
-            "origin_accuracy": r.get("origin_accuracy") or 0.0,
-            "origin_samples": r.get("origin_samples", 0),
+            # Origin row — accuracy + sample count behind C0. Single source
+            # for the webapp's origin bar; populated at INIT:exit.
+            "origin": dict(r.get("origin") or {"accuracy": 0.0, "samples": 0}),
+            # Per-round display summaries; the chart, lineage tree, and
+            # trend sparkline read this as the sole source of truth for
+            # completed-round bars. Resume carries forward any prior
+            # snapshot; rewinds clamp it at L1_GENERATE:enter.
+            "rounds": list(r.get("rounds") or []),
             "best": r.get("best", 0.0),
             "current_acc": 0.0,
             "composite_fitness_formula": r.get("composite_fitness_formula"),
@@ -188,7 +207,7 @@ class LiveDashboardView(DerivedView):
         # holds the same shape so both subscribers share one accumulator.
         self._core = LiveStateCore(
             round_num=int(self.state.get("round") or 0),
-            origin_acc=float(self.state.get("origin_accuracy") or 0.0),
+            origin_acc=float((self.state.get("origin") or {}).get("accuracy") or 0.0),
             best_acc=float(self.state.get("best") or 0.0),
         )
 
@@ -325,10 +344,14 @@ class LiveDashboardView(DerivedView):
                             self.state, self._round, self.short_formula_template, round_result
                         )
                     )
-                # current_round.round = the just-completed round (= the
-                # round_NNNN.json file the webapp should fetch). Webapp reads
-                # this value directly with no arithmetic.
-                self._round = {"round": round_result.round, "candidates": {}}
+                # Append the round's display summary. Re-firing the same
+                # round number (sweep re-emit, replay) replaces in place.
+                summary_dict = build_round_summary(round_result).model_dump()
+                rounds_list: list[dict[str, Any]] = list(self.state.get("rounds") or [])
+                rounds_list = [r for r in rounds_list if r.get("round") != round_result.round]
+                rounds_list.append(summary_dict)
+                rounds_list.sort(key=lambda r: int(r.get("round") or 0))
+                self.state["rounds"] = rounds_list
                 self._persist()
             return
 
@@ -355,8 +378,10 @@ class LiveDashboardView(DerivedView):
             data=data,
         )
         self._apply_phase(event, view)
-        # L1_GENERATE/enter resets the in-flight round block in lockstep
-        # with the degraded_count clear in _apply_phase.
+        # L1_GENERATE/enter wipes the in-flight candidate buffer so the new
+        # round starts fresh. Completed rounds live on ``rounds[]`` already;
+        # the wipe only clears the live ``current_round.nodes.l1_score``
+        # block, not any historical data.
         if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             self._round = {"round": self.state["round"], "candidates": {}}
         self._persist()
@@ -453,10 +478,10 @@ class LiveDashboardView(DerivedView):
             # The (campaign_id, cycle_id, session_id) identity stamp is set
             # once at construction; no phase event mutates it.
             del loop_env
-            s["origin_accuracy"] = cycle.tracking.current_accuracy
-            # Sample count behind the origin score — the webapp prints it
-            # above the C0 bar before round 1's file exists on disk.
-            s["origin_samples"] = len(cycle.tracking.origin_per_sample_results)
+            s["origin"] = {
+                "accuracy": float(cycle.tracking.current_accuracy),
+                "samples": len(cycle.tracking.origin_per_sample_results),
+            }
             self.patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self.patience_max}"
             if view is not None:
@@ -470,8 +495,14 @@ class LiveDashboardView(DerivedView):
                 s["composite_fitness_formula"] = new_formula
                 self.short_formula_template = None
         elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
-            s["round"] = data.get("round", s["round"])
+            new_round = int(data.get("round", s["round"]) or 0)
+            s["round"] = new_round
             s["degraded_count"] = 0
+            # Rewind / fork-in-place: discard any round entries this run
+            # is about to overwrite. Sole writer of the clamp; the appender
+            # at round:display is the sole growth site.
+            prior = list(s.get("rounds") or [])
+            s["rounds"] = [r for r in prior if int(r.get("round") or 0) < new_round]
 
         # Mirror origin/best/round into the shared core for LiveDisplay parity.
         apply_phase(self._core, event, view)
@@ -573,10 +604,13 @@ class LiveDashboardView(DerivedView):
     # -- Internal --------------------------------------------------------------
 
     def _persist(self) -> None:
-        # Direct write — dashboard.json is display-only; readers tolerate
-        # partial reads and the file is rewritten on the next callback.
+        # Atomic tmp+rename via write_json — a polling webapp reader can
+        # never catch this mid-write. Load-bearing because ``rounds[]``
+        # appends grow the payload past trivial-write size.
 
-        # Mirror per-round node I/O live, same shape as round_NNNN.json::nodes.
+        # In-flight node block — same shape as round_NNNN.json::nodes, but
+        # only for the CURRENT round. Completed rounds live on ``rounds[]``;
+        # past rounds' deep audit lives in ``round_NNNN.json``.
         nodes: dict[str, Any] = {}
         if self._recorder is not None:
             nodes.update(self._recorder.snapshot_nodes())
@@ -596,10 +630,7 @@ class LiveDashboardView(DerivedView):
         }
 
         s["wallclock_serialized_at"] = datetime.now(UTC).isoformat()
-        self.state_path.write_text(
-            json.dumps(s, indent=2, ensure_ascii=False, default=str),
-            encoding="utf-8",
-        )
+        write_json(self.state_path, s, default=str)
 
 
 __all__ = ["LiveDashboardView"]

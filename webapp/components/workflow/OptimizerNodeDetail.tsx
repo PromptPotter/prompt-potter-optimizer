@@ -1,7 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
 import type { PipelineDoc } from "./types";
-import { type DashboardSnapshot, roundOf, type RoundFileDoc } from "@/lib/poll";
+import { type DashboardSnapshot, roundOf } from "@/lib/poll";
+import { useRoundFile } from "@/lib/useRoundFile";
 import { phaseToNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
 
@@ -30,7 +31,10 @@ interface Props {
   // Freshness gate — a frozen cycle keeps `dash.state` at its last phase;
   // without this the detail panel would claim the node is "live" forever.
   isLive: boolean;
-  rounds: RoundFileDoc[];
+  // Needed for the lazy per-round fetch when the operator picks a
+  // historical round from the dropdown.
+  campaignId: string | null;
+  cycleId: string | null;
   onClose: () => void;
 }
 
@@ -57,55 +61,29 @@ function fmtInline(v: unknown): string {
   }
 }
 
-interface RoundOption {
-  round: number;
-  block: NodeBlock;
-  live: boolean;
-}
-
-function collectRounds(
-  id: string,
+// Resolve a node block for a given round:
+// - live round: read inline from `dash.current_round.nodes[id]`
+// - historical: read from the lazily-fetched round file's `nodes[id]`
+// `null` when the node did not fire in that round (or the file hasn't
+// landed yet).
+function liveNodeBlock(
   dash: DashboardSnapshot | null,
-  rounds: RoundFileDoc[],
-): RoundOption[] {
-  const out: RoundOption[] = [];
-  const seen = new Set<number>();
-  const liveRound = roundOf(dash);
-  const liveNodes = dash?.current_round?.nodes as
-    | Record<string, NodeBlock>
-    | undefined;
-  const liveBlock = liveNodes?.[id];
-  if (liveRound != null && liveBlock && typeof liveBlock === "object") {
-    out.push({ round: liveRound, block: liveBlock, live: true });
-    seen.add(liveRound);
-  }
-  for (const r of rounds) {
-    const rn = typeof r.round === "number" ? r.round : null;
-    if (rn == null || seen.has(rn)) continue;
-    const nodes = r.nodes as Record<string, NodeBlock> | undefined;
-    const block = nodes?.[id];
-    if (block && typeof block === "object") {
-      out.push({ round: rn, block, live: false });
-      seen.add(rn);
-    }
-  }
-  return out.sort((a, b) => b.round - a.round);
+  id: string,
+): NodeBlock | null {
+  const liveNodes = dash?.current_round?.nodes as Record<string, NodeBlock> | undefined;
+  const block = liveNodes?.[id];
+  return block && typeof block === "object" ? block : null;
 }
 
-// One-line "chip" inside the meta strip: small label + value, separated by a
-// thin divider. Skipped entirely when the value is empty so the strip stays
-// dense.
-function Chip({ label, value }: { label: string; value: string }) {
-  if (!value || value === "—") return null;
-  return (
-    <span className="opt-detail-chip">
-      <span className="opt-detail-chip-label">{label}</span>
-      <span className="opt-detail-chip-value">{value}</span>
-    </span>
-  );
-}
-
-export function OptimizerNodeDetail({ id, pipeline, dash, isLive, rounds, onClose }: Props) {
+export function OptimizerNodeDetail({
+  id,
+  pipeline,
+  dash,
+  isLive,
+  campaignId,
+  cycleId,
+  onClose,
+}: Props) {
   const view = pipeline?.view;
   const meta = view?.nodes.find((n) => n.id === id);
   const label = meta?.label ?? id;
@@ -114,12 +92,46 @@ export function OptimizerNodeDetail({ id, pipeline, dash, isLive, rounds, onClos
   const cfg = pipeline?.nodes?.[id];
   const cfgInner = (cfg?.config ?? {}) as Record<string, unknown>;
 
-  const options = useMemo(() => collectRounds(id, dash, rounds), [id, dash, rounds]);
-  const [pickedRound, setPickedRound] = useState<number | null>(null);
-  const active =
-    options.find((o) => o.round === pickedRound) ?? options[0] ?? null;
+  // Available rounds in the picker, newest first. The live round (if any)
+  // sits at the top with a "(live)" label. Completed rounds come from
+  // `dash.rounds[]` — the summary surface owns "which rounds exist on disk."
+  const liveRound = roundOf(dash);
+  const completedRounds = useMemo(() => {
+    const out = (dash?.rounds ?? []).map((r) => r.round);
+    return out.sort((a, b) => b - a);
+  }, [dash?.rounds]);
+  const pickerOptions = useMemo(() => {
+    const seen = new Set<number>();
+    const out: { round: number; live: boolean }[] = [];
+    if (liveRound != null) {
+      out.push({ round: liveRound, live: true });
+      seen.add(liveRound);
+    }
+    for (const r of completedRounds) {
+      if (seen.has(r)) continue;
+      out.push({ round: r, live: false });
+      seen.add(r);
+    }
+    return out;
+  }, [liveRound, completedRounds]);
 
-  const block = active?.block ?? null;
+  const [pickedRound, setPickedRound] = useState<number | null>(null);
+  const activeRound =
+    pickedRound != null ? pickedRound : (pickerOptions[0]?.round ?? null);
+  const activeIsLive = activeRound != null && activeRound === liveRound;
+
+  // Live round: read inline (no fetch). Historical round: lazy-fetch the
+  // round file; `block` is null until it lands.
+  const liveBlock = liveNodeBlock(dash, id);
+  const historicalRound = activeIsLive ? null : activeRound;
+  const { doc: historicalDoc } = useRoundFile(campaignId, cycleId, historicalRound);
+  const block: NodeBlock | null = useMemo(() => {
+    if (activeRound == null) return null;
+    if (activeIsLive) return liveBlock;
+    const nodes = historicalDoc?.nodes as Record<string, NodeBlock> | undefined;
+    const b = nodes?.[id];
+    return b && typeof b === "object" ? b : null;
+  }, [activeRound, activeIsLive, liveBlock, historicalDoc, id]);
   const templateFields = block?.input?.template_fields as
     | Record<string, unknown>
     | undefined;
@@ -137,9 +149,9 @@ export function OptimizerNodeDetail({ id, pipeline, dash, isLive, rounds, onClos
 
   const livePhaseNode = phaseToNodeId(dash?.state ?? null);
   const isLiveNow = isLive && livePhaseNode === id;
-  const lastFiredRound = options[0]?.round ?? null;
+  const lastFiredRound = pickerOptions.find((o) => !o.live)?.round ?? null;
   const statusLine = isLiveNow
-    ? `live · round ${roundOf(dash) ?? "—"}`
+    ? `live · round ${liveRound ?? "—"}`
     : lastFiredRound != null
       ? `last fired round ${lastFiredRound}`
       : kind === "llm"
@@ -168,15 +180,15 @@ export function OptimizerNodeDetail({ id, pipeline, dash, isLive, rounds, onClos
           </span>
         </div>
         <div className="opt-detail-head-actions">
-          {options.length > 1 && (
+          {pickerOptions.length > 1 && (
             <label className="opt-detail-round-pick">
               round
               <select
-                value={active?.round ?? ""}
+                value={activeRound ?? ""}
                 onChange={(e) => setPickedRound(Number(e.target.value))}
                 aria-label="Choose round"
               >
-                {options.map((o) => (
+                {pickerOptions.map((o) => (
                   <option key={o.round} value={o.round}>
                     {o.round}
                     {o.live ? " (live)" : ""}
@@ -290,5 +302,18 @@ export function OptimizerNodeDetail({ id, pipeline, dash, isLive, rounds, onClos
         )}
       </footer>
     </div>
+  );
+}
+
+// One-line "chip" inside the meta strip: small label + value, separated by a
+// thin divider. Skipped entirely when the value is empty so the strip stays
+// dense.
+function Chip({ label, value }: { label: string; value: string }) {
+  if (!value || value === "—") return null;
+  return (
+    <span className="opt-detail-chip">
+      <span className="opt-detail-chip-label">{label}</span>
+      <span className="opt-detail-chip-value">{value}</span>
+    </span>
   );
 }
