@@ -62,9 +62,9 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **What you see:** Many candidates receive synthetic score zero. Logs mention "validation failure" or "invalid proposal."
 
-**Why:** L1 proposed a parameter value outside the allowed set for a pipeline node. PromptPotter catches this before any backend call (the *schema-compliance check*; Wound 1 in [self-healing](../concepts/self-healing.md)).
+**Why:** L1 proposed a parameter value outside the allowed set for a pipeline node. PromptPotter catches this before any backend call (the *schema-compliance check*; Wound 1 in [self-healing](../developer/self-healing-internals.md)).
 
-**What to try:** Self-healing usually clears this within 1–2 rounds — the next outer layer (L2) sees the failure and rewrites L1's next prompt to name the forbidden value. If it persists, check `param_allowed_values` in your pipeline schema — the allowed set may be misconfigured backend-side. (Self-healing in one line: when the loop hits a recoverable failure, an outer layer rewrites the next prompt — see [self-healing.md](../concepts/self-healing.md).)
+**What to try:** Self-healing usually clears this within 1–2 rounds — the next outer layer (L2) sees the failure and rewrites L1's next prompt to name the forbidden value. If it persists, check `param_allowed_values` in your pipeline schema — the allowed set may be misconfigured backend-side. (Self-healing in one line: when the loop hits a recoverable failure, an outer layer rewrites the next prompt — see [self-healing-internals.md](../developer/self-healing-internals.md).)
 
 ---
 

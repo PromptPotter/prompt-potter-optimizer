@@ -7,12 +7,12 @@ You've run a campaign. Pointers below for the next layer.
 | Page | Covers |
 |------|--------|
 | [Three-layer loop](../concepts/the-loop.md) | Why L1/L2/L3 exist and when each fires |
-| [Self-healing](../concepts/self-healing.md) | Recovery from bad proposals + degraded runs |
+| [Self-healing](../developer/self-healing-internals.md) | Recovery from bad proposals + degraded runs |
 | [Scoring and memory](../concepts/scoring-and-memory.md) | Traces are facts, scores are policy + the cross-campaign archive |
 | [State record](../concepts/state-record.md) | The candidate's state record (`OptSearchPoint` in code) — carries task context, plan, prompt fields, L2 overrides |
 | [Campaign tree](../concepts/campaign-tree.md) | Cycles, forks, and the sweep primitive |
 | [Nodes and pipelines](../concepts/nodes-and-pipelines.md) | Pipeline node anatomy |
-| [Glossary](../concepts/glossary.md) | Terms used across the docs |
+| [Glossary](../glossary.md) | Terms used across the docs |
 
 ## Operations
 

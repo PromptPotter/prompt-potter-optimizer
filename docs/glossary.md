@@ -79,10 +79,9 @@ The persisted world is a four-entity containment hierarchy
   session — the `new` invocation that minted it. `resume` extends that
   session. Identity is the `session_id` (`s_xxxx`). Each session is a
   tree: a root cycle (bare `cycle_<target_hash>`) plus its fork
-  descendants. `application/bootstrap/session.py`. Pre-existing
-  campaigns minted under the previous content-addressed scheme may
-  carry multiple session roots (`cycle_<hash>`, `_s2`, `_s3`, …);
-  the readers still parse them.
+  descendants. `application/bootstrap/session.py`. Legacy on-disk shape
+  (multi-session forest with `_s{N}` suffixes): see
+  `promptpotter/infrastructure/store/paths.py`.
 - **Unit** — one continuous-parameter run inside a session. A session
   starts with one unit; `resume` extends the current unit; each fork
   (human / L3 / divergence) branches a new unit. The operator-facing
@@ -92,8 +91,7 @@ The persisted world is a four-entity containment hierarchy
   Unit. `cycle_{content_hash[:12]}` from the origin JSP content hash
   (+ `_fork_`/`_diag_`/`_sweep_` for branches). `cycle_id` is
   campaign-scoped — path resolution is `(campaign_id, cycle_id)`.
-  `application/optimization/cycle.py`. Pre-existing campaigns may also
-  carry `_s{N}` session-root suffixes; the readers still parse them.
+  `application/optimization/cycle.py`.
 - **unit_kind** — operator-facing label on the webapp sidebar, computed
   server-side from `(sibling_kind, fork_trigger)`: `session` (a session
   root run; `resume` extends it), `divergent_resume` (a `resume

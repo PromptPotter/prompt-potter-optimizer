@@ -118,7 +118,7 @@ NEXT:     {continue L1 / escalate to L2 / etc.}
 
 **Incremental persistence.** Every query lands in `archive/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 
-Escalation model: `reference/optimization-layers.md`, `docs/concepts/the-loop.md`, `docs/concepts/self-healing.md`.
+Escalation model: `reference/optimization-layers.md`, `docs/concepts/the-loop.md`, `docs/developer/self-healing-internals.md`.
 
 ## Phase 5: Results
 
@@ -143,4 +143,4 @@ Open `campaigns/<campaign_id>/log.md` (campaign digest — status, every cycle +
 - `reference/benchmark-datasets.md` — readiness + cost model
 - `reference/optimization-layers.md` — L1/L2/L3 escalation
 - `reference/troubleshooting.md` — stop-reason recovery
-- `docs/concepts/the-loop.md`, `docs/concepts/self-healing.md`, `docs/operations/cli-reference.md`
+- `docs/concepts/the-loop.md`, `docs/developer/self-healing-internals.md`, `docs/operations/cli-reference.md`

@@ -22,10 +22,9 @@ an unchanged declaration share their root cycle id
 * ``optimizer_prompt_hash`` — the optimizer meta-prompt set's hash;
   resume recomputes it to detect optimizer-prompt drift.
 
-Pre-existing campaigns minted under the previous content-addressed
-scheme (``{dataset}__{declaration_hash}``) with N session roots
-``cycle_<hash>``, ``_s2``, ``_s3``, … remain readable; the picker still
-enumerates and orders those roots.
+Legacy on-disk shape (multi-session forest with ``_s{N}`` suffixes
+under one ``campaign_id``) — see
+:mod:`promptpotter.infrastructure.store.paths`.
 """
 
 from __future__ import annotations

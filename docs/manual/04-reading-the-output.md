@@ -24,7 +24,7 @@ Each round runs four steps in sequence:
 | 📝 **Critique** | The optimizer reads the raw results and writes a structured analysis: where it failed, what to try next. |
 | 🏆 **Winner** | Round's best beats the current best by ≥ improvement threshold → new best. Otherwise patience ticks up. |
 
-When patience runs out, an **outer loop** steps in to redirect (see [chapter 1 — When the optimizer gets stuck](01-what-is-promptpotter.md#when-the-optimizer-gets-stuck)). Self-healing also fires whenever a candidate produces invalid or broken output — full mechanics in [`../concepts/self-healing.md`](../concepts/self-healing.md).
+When patience runs out, an **outer loop** steps in to redirect (see [chapter 1 — When the optimizer gets stuck](01-what-is-promptpotter.md#when-the-optimizer-gets-stuck)). Self-healing also fires whenever a candidate produces invalid or broken output — full mechanics in [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
 ## Per-sample lines
 
@@ -81,7 +81,7 @@ When the optimizer finds something notable, it surfaces a two-line annotation:
   ↳ L2 will steer next round away from this region
 ```
 
-The optimizer has already handled it — these exist for audit, not to ask for input. A bare `⚠` without `↳` is a bug; report it. Full mechanics behind these annotations: [`../concepts/self-healing.md`](../concepts/self-healing.md).
+The optimizer has already handled it — these exist for audit, not to ask for input. A bare `⚠` without `↳` is a bug; report it. Full mechanics behind these annotations: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
 ## Live state ([forks and the family root](../concepts/campaign-tree.md))
 

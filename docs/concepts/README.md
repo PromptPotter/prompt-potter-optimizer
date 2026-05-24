@@ -21,14 +21,14 @@ CONTEXT and PLAN live on disk inside each round file — the loop's actual confi
 
 | Page | Covers |
 |------|--------|
-| [The three-layer loop](the-loop.md) | L1 / L2 / L3 layers, how they communicate, and L2 in detail |
-| [Self-healing](self-healing.md) | Four LLM-to-LLM wounds (producer → detector → nurse) |
+| [The three-layer loop](the-loop.md) | L1 / L2 / L3 layers, how they communicate |
+| [Self-healing](../developer/self-healing-internals.md) | Four LLM-to-LLM wounds (producer → detector → nurse) |
 | [State record](state-record.md) | The OSP carrying CONTEXT, PLAN, prompt fields, and L2 overrides |
 | [Scoring and memory](scoring-and-memory.md) | Traces are facts; scores are policy; the measurement archive |
 | [Campaign tree](campaign-tree.md) | Cycles, forks, and the sweep primitive |
 | [Nodes and pipelines](nodes-and-pipelines.md) | Backend pipeline node anatomy |
 | [Optimizer of the optimizer](optimizer-of-the-optimizer.md) | PromptPotter optimizing its own meta-prompts (M12) |
-| [Glossary](glossary.md) | Terms used across the docs |
+| [Glossary](../glossary.md) | Domain vocabulary |
 | [Mid-round elimination (PoBB)](../methods/candidate-elimination.md) | "Search-only-with-evidence" in detail |
 | [Paired-sample PoBB](paired-sample-pobb.md) | How sample-keyed priors + leader backfill restore PoBB's iid premise under hard-sample-first ordering |
 | [Hard-sample leaderboard](../methods/exploration-exploitation.md) | Sample selection in detail |

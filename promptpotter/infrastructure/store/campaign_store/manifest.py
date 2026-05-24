@@ -6,11 +6,9 @@ per-call random (``{dataset}__{rand6_hex}``) so each ``new`` mints a
 distinct campaign; the declaration is recorded as properties on
 ``campaign.json`` for drift detection on resume.
 
-Pre-existing on-disk campaigns minted under the previous "forest of N
-sessions" scheme (``cycle_<hash>_s2``, ``_s3``, …) still enumerate
-correctly — :meth:`list_sessions` walks every session-root cycle in the
-``cycles/`` tree, ordered by the ``_s{N}`` suffix parsed via
-:func:`session_index`.
+:meth:`list_sessions` walks every session-root cycle in the ``cycles/``
+tree, ordered by the ``_s{N}`` suffix where present (legacy on-disk
+shape — see :mod:`promptpotter.infrastructure.store.paths`).
 """
 
 from __future__ import annotations
@@ -75,10 +73,8 @@ class CampaignManifestMixin(CampaignStoreKernel):
 
         A session root is a cycle that is its own family root — no
         ``_fork_``/``_diag_``/``_sweep_`` separator. New campaigns hold a
-        single session root (bare ``cycle_<target_hash>``); pre-existing
-        campaigns minted under the old "forest of N sessions" scheme also
-        carry ``cycle_<hash>_s2``, ``_s3``, … roots, which :func:`session_index`
-        still parses for ordering.
+        single session root (bare ``cycle_<target_hash>``); legacy
+        multi-session forests are ordered via :func:`session_index`.
         """
         cycles_dir = self.campaign_root_dir(campaign_id) / "cycles"
         if not cycles_dir.exists():

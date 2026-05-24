@@ -34,7 +34,7 @@ class CampaignListResponse(BaseModel):
 class SessionSummary(BaseModel):
     """One session in a campaign's forest — a root cycle + its forks."""
 
-    root_cycle_id: str = Field(description="The session's root cycle id (cycle_{hash}[_s{N}])")
+    root_cycle_id: str = Field(description="The session's root cycle id")
     session_index: int = Field(description="1-based session ordinal within the campaign")
     status: str = Field(default="", description="Session root cycle status")
     n_rounds: int = Field(default=0, description="Rounds completed on the session root cycle")

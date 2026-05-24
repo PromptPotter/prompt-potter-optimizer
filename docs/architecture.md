@@ -171,9 +171,9 @@ world is a strict containment hierarchy:
   for branches) — the *target* content hash, content-addressed. It keeps
   two jobs: archive cache-reuse keying and target-drift detection.
   `cycle_id` is campaign-scoped — all path resolution is
-  `(campaign_id, cycle_id)`. Pre-existing campaigns minted under the
-  previous content-addressed `campaign_id` scheme may also carry
-  `_s{N}` session-root suffixes; the readers still parse them.
+  `(campaign_id, cycle_id)`. Legacy on-disk shape (multi-session forest
+  with `_s{N}` suffixes under one `campaign_id`): see
+  `promptpotter/infrastructure/store/paths.py`.
 
 The **Session** is a unit of a campaign (its identity is the
 `session_id`). `active_session.json` is the operator's *pointer/lens*

@@ -6,14 +6,24 @@ without instantiating a store. Pure functions — no I/O, no parent walk.
 
 On-disk shape: ``campaigns/{campaign_id}/`` holds the campaign manifest
 (``campaign.json``), the campaign digest (``log.md``), and
-``cycles/{cycle_id}/`` — every cycle flat under one ``cycles/`` dir. A
-campaign is a **forest**: it holds N *session* roots (one per ``new`` on
-the same origin declaration) plus their fork descendants. Session roots
-are ``cycle_{hash}`` (session 1) and ``cycle_{hash}_s{N}`` (session N);
-the ``_s{N}`` suffix only disambiguates the dir — it is not a sibling
-separator. Per-session telemetry (``dashboard.json``) binds at each
-session-family root cycle dir. The cycle's sibling kind + sweep batch id
-live in ``cycles/{cycle_id}/index.json`` metadata, not the path.
+``cycles/{cycle_id}/`` — every cycle flat under one ``cycles/`` dir. New
+campaigns mint a fresh ``campaign_id = {dataset}__{rand6_hex}`` per
+``new`` invocation; their root cycle is the bare
+``cycle_{target_hash[:12]}``. Per-session telemetry (``dashboard.json``)
+binds at each session-family root cycle dir. The cycle's sibling kind +
+sweep batch id live in ``cycles/{cycle_id}/index.json`` metadata, not
+the path.
+
+**Legacy on-disk shape (readers parse, writers don't emit).** Pre-existing
+campaigns minted under the previous content-addressed
+``{dataset}__{declaration_hash}`` scheme carry a forest of N session roots
+under one ``campaign_id`` — ``cycle_{hash}`` for session 1 plus
+``cycle_{hash}_s2`` / ``_s3`` / … for sessions 2 onwards (where N counts
+``new`` invocations on the unchanged declaration). The ``_s{N}`` suffix
+only disambiguates the session root dir; it is not a sibling separator.
+:func:`session_index` parses the ordinal; :func:`root_cycle_id` and
+:func:`sibling_kind` ignore it. Readers stay because pre-rewrite campaigns
+still live on disk; new campaigns never emit ``_s{N}``.
 """
 
 from __future__ import annotations

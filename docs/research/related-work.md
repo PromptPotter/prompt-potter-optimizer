@@ -33,7 +33,7 @@ The capabilities that differentiate PromptPotter most sharply, with one column e
 
 | Capability | PP | AE | po | pf | How in PromptPotter |
 |------------|:--:|:--:|:--:|:--:|---------------------|
-| **Self-healing optimization** | 🟢 | 🟢 | 🔴 | 🔴 | L1-proposed values outside the declared allowed set are caught at parse time, scored 0 with no backend call, and fed to L2 as a self-healing signal. AlphaEvolve has the structural analogue (failed-eval signals re-enter the LLM mutation loop); PromptPotter is the only one in the prompt-tooling row that does this. See [../concepts/self-healing.md](../concepts/self-healing.md). |
+| **Self-healing optimization** | 🟢 | 🟢 | 🔴 | 🔴 | L1-proposed values outside the declared allowed set are caught at parse time, scored 0 with no backend call, and fed to L2 as a self-healing signal. AlphaEvolve has the structural analogue (failed-eval signals re-enter the LLM mutation loop); PromptPotter is the only one in the prompt-tooling row that does this. See [../developer/self-healing-internals.md](../developer/self-healing-internals.md). |
 | **Auto-injected scoring** | 🟢 | 🟢 | 🔴 | 🔴 | Per-dataset scoring formula from `campaign.json`, compiled once, injected into all eval paths. AlphaEvolve has the same property — code-execution evaluators are first-class. |
 | **IDE-native operation** | 🟢 | 🔴 | 🔴 | 🔴 | `/potter-run` Claude Code skill — full campaign lifecycle from the terminal. AlphaEvolve is not publicised |
 | **Prompt + pipeline optimization** | 🟢 | 🟢 | 🔴 | 🔴 | 8-field prompt decomposition + per-node `pipeline_params` — optimizes prompts AND pipeline config jointly. AlphaEvolve does the equivalent at the code level: it jointly mutates the algorithm and any tunable parameters embedded in it. |

@@ -43,7 +43,7 @@ class StopReason(enum.StrEnum):
     rerun, not a debug session, so no traceback is stashed.
 
     The two dispatch-hub halts are the prompt-budget self-healing unit's
-    last resort (see ``docs/specs/dispatch-prompt-budget.md``).
+    last resort (see ``docs/specs/archive/dispatch-prompt-budget.md``).
     ``RENDER_ERROR`` — an injection renderer raised, almost always code
     drift (a renamed data-model field); split from ``CRASHED`` so the
     operator sees "a renderer broke" at a glance, with the failing

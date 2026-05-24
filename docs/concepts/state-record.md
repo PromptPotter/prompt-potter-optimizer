@@ -1,81 +1,20 @@
 # State Record
 
-Every round, the optimizer carries one record forward — the *individual* (in code: `OptSearchPoint`, often shortened to *OSP*). It holds everything the optimizer knows about the current best-so-far: the prompt, the strategic context, the operational memory, and L2's mutations to L1's surface.
+Every round carries one record forward — the *individual* (`OptSearchPoint`, often *OSP*). It holds the prompt, the strategic context, the operational memory, and L2's mutations to L1's surface. Implementation: `promptpotter/domain/opt_search_point.py`. Domain contract: [`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md).
 
-For the implementation, see `OptSearchPoint` in `promptpotter/domain/opt_search_point.py`.
+Two parameter namespaces co-exist on the record: **prompt fields** (persona / task intent / problem description / instruction / thinking style / answer format / few-shot examples / plan) and **pipeline parameters** (thresholds / model / temperature / retrieval budgets — anything the pipeline's nodes expose). Names can overlap; the namespaces are independent. L1 mutates both in one proposal; routing happens at individual-creation time.
 
----
+L1 writes prompt fields + operational memory each round. L2 (when it fires) writes any subset of: `brief`, `task_context`, `l1_overrides` (optimizer params), `scheme_overrides` / `text_overrides` / `template_override` (L1 surface levers), `action` (`normal_round` / `probe_round`). L3 writes `plan`. Lineage is set at creation; never mutated.
 
-## What lives on the record
+The record is the optimizer's working memory for two independent reasons:
 
-Loosely grouped:
-
-| Group | Holds | Who writes |
-|-------|-------|------------|
-| **Prompt fields** | persona, task intent, problem description, instruction, thinking style, answer format, few-shot examples, plan. | L1 (each round) and L3 (plan field, on stall). |
-| **Lineage** | id, parent id, change description, timestamp. | Set on creation; never mutated. |
-| **Optimizer params** | creativity, candidate budget, variant strategy. | L2 when it fires. |
-| **Task context** | structured domain understanding (domain, pipeline purpose, data characteristics, optimization goals, key challenges). | One-time decomposition at init; refined by L2. |
-| **Operational memory** | latest critique, escalation journal, warning inventory, L2 brief, validation failures, runtime failures, failure analysis, round history. | L1 (each round); preserved across L2/L3 transitions. |
-| **L1-generate surface overrides** | section visibility toggles, section text overrides, whole-body override. | L2 (via `mutate_scheme` and `rewrite_full`). |
-
-## Two parameter namespaces
-
-An individual is more than a prompt. It also carries pipeline parameters — thresholds, model names, temperature, retrieval budgets — anything the pipeline's nodes expose. These live in a separate namespace from prompt fields. Names can overlap (*thinking style* may be both a prompt field and a node parameter); they remain independent axes regardless.
-
-L1 mutates both namespaces in the same proposal — "change the persona and bump the web search budget" — with routing handled at individual-creation time.
-
-## Why decomposition matters
-
-PromptPotter doesn't treat a prompt as one opaque string. It decomposes every prompt into independently mutable fields — six prompt-string fields rendered in order, plus two appended sections (few-shot examples, plan).
-
-- **Measurable axes.** Search memory tracks effect size per axis. After enough campaigns, *thinking style* may routinely move fitness by several points on this kind of problem while *persona* barely matters; future rounds spend mutation budget where it pays off.
-- **Targeted mutation.** L1 mutates one field, holds the rest, scores the delta. The genotype is high-dimensional but each per-round move is one-dimensional, so the signal is clean.
-- **Recursion.** The optimizer's own meta-prompts (L1, L2, L3, critique) use the same scheme, so the same evolution machinery applies recursively when an outer loop optimises the optimiser.
-
-For the per-layer prompt structure (8 fields, layer-specific surfaces, render chain) see [`../developer/README.md § Prompt structure`](../developer/README.md).
-
-## The record is the optimizer's working memory
-
-Two independent reasons the record matters:
-
-- **Persistence.** Every round's record is serialized to `rounds/round_NNNN.json` in the campaign directory. Resume reads from the latest trial. State that's not on the record does not survive interruption.
-- **Steering.** Every layer reads from the record to know what to do. L1 reads the prompt fields and the brief. L2 reads the operational memory and the surface overrides. L3 reads the plan and the runtime failures.
-
-When L2 mutates the surface (toggles a section off, replaces section text, rewrites the body), it is writing onto this record. The next round's L1 reads from the same record — that's the bridge.
-
-## What a round looks like for the record
-
-```
-Round N starts:
-  L1 reads the record's prompt fields + brief + surface overrides
-       ↓
-  L1 produces candidates → measures fitness → selects winner
-       ↓
-  L1 writes operational memory back onto the record
-       (critique, runtime failures, warning inventory, etc.)
-       ↓
-  L2 reads the operational memory + surface state
-       ↓
-  L2 (when it fires) writes any subset of fields onto the record
-       (brief, optimizer params, task context, surface overrides, action)
-       ↓
-  Round N's record is checkpointed to rounds/round_NNNN.json
-       ↓
-Round N+1 starts: L1 reads the same record again
-```
-
-Every change L2 makes is on this record. Nothing is lost between rounds because nothing lives anywhere else.
+- **Persistence.** Every round's record is serialized to `campaigns/{cycle_id}/rounds/round_NNNN.json`. Resume reads from the latest trial. State that's not on the record does not survive interruption.
+- **Steering.** Every layer reads from the record to know what to do — L1 reads prompt fields + brief + surface overrides; L2 reads operational memory + surface state; L3 reads plan + runtime failures.
 
 ## What the record is NOT
 
-- It is not the trace archive. Per-sample results live in `archive/measurements/` and are referenced by ID.
-- It is not the pipeline configuration. The frozen target pipeline shape lives in `JobSearchPoint`, projected from this record on demand.
-- It is not the campaign config. Operator knobs (max rounds, patience, n_variants ceiling) live on `CampaignConfig` and never mutate.
+- Not the trace archive — per-sample results live in `archive/measurements/` and are referenced by ID. See [`scoring-and-memory.md`](scoring-and-memory.md).
+- Not the pipeline configuration — frozen target shape lives in `JobSearchPoint`.
+- Not the campaign config — operator knobs (max rounds, patience, n_variants ceiling) live on `CampaignConfig` and never mutate.
 
-## See also
-
-- [`the-loop.md`](the-loop.md) — L2 is the main writer of the record's strategy fields.
-- [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md) — the surface fields on the record.
-- [`scoring-and-memory.md`](scoring-and-memory.md) — how the record interacts with the scoring archive.
-- `promptpotter/domain/opt_search_point.py` — the `OptSearchPoint` class definition and field list.
+For the per-layer prompt structure (8 fields, layer-specific surfaces, render chain) see [`../developer/README.md`](../developer/README.md) + [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md).

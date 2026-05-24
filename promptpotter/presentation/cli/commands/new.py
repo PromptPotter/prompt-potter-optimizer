@@ -1,13 +1,12 @@
-"""``cmd_new`` — start (or join) a campaign + run the loop from round 0.
+"""``cmd_new`` — mint a fresh campaign + run the loop from round 0.
 
-``new`` is **find-or-create**: ``campaign_id`` is ``{dataset}__{hash}``,
-derived from the origin declaration's content hash. A *new* declaration
-mints a fresh :class:`Campaign`; re-running ``new`` on an *unchanged*
-declaration resolves to the existing campaign and adds a **session** to
-it — a fresh ``session_id`` plus a ``cycle_{hash}_s{N}`` root cycle. The
-campaign dir (``campaigns/{campaign_id}/``) holds ``campaign.json`` +
-``log.md``; per-session telemetry (``dashboard.json``) and round detail
-live one level down under ``cycles/{cycle_id}/``.
+Each ``new`` invocation mints a distinct campaign:
+``campaign_id = {dataset}__{rand6_hex}``. The campaign dir
+(``campaigns/{campaign_id}/``) holds ``campaign.json`` + ``log.md``;
+per-cycle telemetry and round detail live one level down under
+``cycles/{cycle_id}/``. The declaration (target hash + optimizer-prompt
+hash) is recorded as properties on ``campaign.json`` for drift detection
+on resume, not used to derive the id.
 """
 
 from __future__ import annotations

@@ -88,7 +88,7 @@ Append one `review` entry per cycle to `log.jsonl` (schema below). Then act on t
 The skill reads `forbidden_axis_attempts` + `forbidden_axis_healed` from the L1Stats header in `review.md`. Two outcomes:
 
 - **Healed** (`forbidden_axis_attempts > 0 AND forbidden_axis_healed == true`): not an issue. The chain worked as designed. Cycle flows through Screen/Promote normally. Record on the `review` event but do NOT halt. The behavior-check row shows ✗ with the trailer `→ healed by validator + L2 (N attempts across cycle)`.
-- **Persistent** (`forbidden_axis_attempts > 0 AND forbidden_axis_healed == false`): the heal chain didn't converge — top-issue, halt, propose. The fix is **never** "re-add an enumerated clause to L1's prompt." That option is closed by design (`docs/concepts/self-healing.md` Wound 1).
+- **Persistent** (`forbidden_axis_attempts > 0 AND forbidden_axis_healed == false`): the heal chain didn't converge — top-issue, halt, propose. The fix is **never** "re-add an enumerated clause to L1's prompt." That option is closed by design (`docs/developer/self-healing-internals.md` Wound 1).
 
 **Top-issue rank** (first match wins). The verdict is conformance-pure, so a
 non-healthy cycle always carries ≥ 1 conformance ✗ — the top issue is always

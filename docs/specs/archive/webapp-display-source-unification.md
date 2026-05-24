@@ -8,7 +8,7 @@ with timing-fragile gates; every gap and "wait for the next round to
 see the previous one" symptom in `webapp/lib/poll.tsx` is a direct
 consequence.
 
-Sibling cleanup to [`state-sync-cleanup.md`](state-sync-cleanup.md)
+Sibling cleanup to [`state-sync-cleanup.md`](../state-sync-cleanup.md)
 (five-surface state drift). That spec collapses *state* surfaces;
 this one collapses *display-data* surfaces.
 

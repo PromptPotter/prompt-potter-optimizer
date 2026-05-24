@@ -1,8 +1,24 @@
 # Self-Healing Internals
 
-Implementation of the four wounds. Concept overview: [`../concepts/self-healing.md`](../concepts/self-healing.md). This page is the wiring map.
-
 Failures attach to the **candidate that produced them** (direct fields on `OptSearchPoint`), never to the round, so a losing candidate's problem never disrupts the round winner. New mechanisms must land as one of the four wounds below — no sidecars, no silent drops. The one sanctioned non-wound healing class is the prompt-budget unit (see [Beyond the wounds](#beyond-the-wounds--the-prompt-budget-unit-tier-2)); it still rides the dispatch-hub registry, not a sidecar.
+
+## Producer / detector / nurse
+
+Each wound has three roles:
+
+- **Producer** — the LLM that left the wound (L1 or L2).
+- **Detector** — the deterministic check that caught it (validator, mid-eval check, patience timer).
+- **Nurse** — the LLM that tends it next round (L2 or L3).
+
+**Healing is gradual.** A nurse firing once produces *one* nudge, not a guaranteed fix. The producer's distribution shifts; whether the next proposal lands depends on how clear the evidence was and how strongly the nurse encoded it. Hard one-shot briefs ("do NOT propose X") aren't required — softer pointers toward the right region are enough, because the nurse is built to retry. If the wound recurs:
+
+- Wounds 1 and 4 retrigger same/next round with the new evidence.
+- Wound 2's failure trail accumulates across rounds; L2 sees NEW vs ACCUMULATED and must change angle if the latter survives.
+- Wound 3 fires only on stall, but each L3 plan shapes both subsequent L1 and L2.
+
+**User-visible surface:** per-sample `⚠ … ↳` annotations on round reports. Audit trail, not alerts.
+
+**Round-over-round feedback (separate).** `l1_critique → l1_generate` fires every round, regardless of failure. Performance-driven feedback, not failure-driven healing.
 
 ## The four wounds at a glance
 
@@ -25,7 +41,7 @@ producer→nurse channel — one detector, one failure record, one nurse
 layer, one prompt slot. Uniform by design.
 
 The **prompt-budget unit** (full spec:
-[`../specs/dispatch-prompt-budget.md`](../specs/dispatch-prompt-budget.md))
+[`../specs/archive/dispatch-prompt-budget.md`](../specs/archive/dispatch-prompt-budget.md))
 is a different kind of mechanism — the project's most sophisticated
 healing unit. It guards one concern, the size of a composed optimizer
 meta-prompt, with **four healing modes stacked on one another**:
