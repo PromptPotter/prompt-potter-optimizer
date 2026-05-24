@@ -1,9 +1,7 @@
-"""Composite ``Stores`` bundle — frozen dataclass + builder.
+"""Composite ``Stores`` bundle + content-addressed ``OptimizerCallCache``.
 
-Also owns :class:`OptimizerCallCache` and :func:`hash_call` — content-addressed
-cache for optimizer LLM responses, keyed by SHA-256 of byte-identical inputs.
-Cross-cycle / cross-fork by construction; mirrors :class:`MeasurementArchive`'s
-file-per-record pattern at ``<base_dir>/archive/optimizer_calls/{hash}.json``.
+Cache is SHA-256-keyed, cross-cycle/cross-fork; file-per-record at
+``<base_dir>/archive/optimizer_calls/{hash}.json`` (mirror of MeasurementArchive).
 """
 
 from __future__ import annotations
@@ -45,12 +43,10 @@ def hash_call(
     json_schema: dict[str, Any] | None,
     response_model: str | None = None,
 ) -> str:
-    """SHA-256 (truncated to 24 hex) of the byte-identical LLM-call inputs.
+    """SHA-256 (24 hex) of byte-identical LLM-call inputs.
 
-    ``response_model`` is the Pydantic model's ``__name__`` when the call
-    used typed output (see ``OPTIMIZER_RESPONSE_MODELS``) — keeping it in
-    the key lets a cached typed response and a cached dict response live
-    side-by-side without colliding.
+    ``response_model`` (Pydantic ``__name__``) in the key lets typed + dict
+    responses cohabit without colliding.
     """
     blob = json.dumps(
         {
@@ -67,12 +63,7 @@ def hash_call(
 
 
 class OptimizerCallCache:
-    """File-backed cache for optimizer LLM responses keyed by input hash.
-
-    Consumed by :func:`promptpotter.application.optimization.dispatch.llm_call.llm_call`
-    — if a hash hits, the stored ``LLMResponse.model_dump()`` is replayed and
-    the real LLM call is skipped.
-    """
+    """File-backed optimizer-LLM cache; ``llm_call`` replays the stored ``LLMResponse.model_dump()`` on hash hit."""
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
@@ -95,12 +86,10 @@ class OptimizerCallCache:
 
 @dataclass(frozen=True)
 class Stores:
-    """Composite bundle of focused stores rooted at a per-tenant ``base_dir``.
+    """Composite of focused stores rooted at the tenant ``base_dir``.
 
-    Construct via :func:`build_stores`. ``base_dir`` is the tenant root
-    (``{projects_root}/{tenant_id}/``). Sessions and campaigns are peer
-    trees under the tenant; a campaign records its parent session via
-    ``index.json::parent_session_id``.
+    Sessions + campaigns are peer trees under the tenant; campaign records its
+    parent session via ``index.json::parent_session_id``. Construct via :func:`build_stores`.
     """
 
     base_dir: Path
@@ -119,13 +108,11 @@ def build_stores(
     tenant_id: str = DEFAULT_TENANT_ID,
     datasets_root: Path | str | None = None,
 ) -> Stores:
-    """Assemble a :class:`Stores` bundle rooted under a tenant.
+    """Assemble a tenant-rooted :class:`Stores` bundle.
 
-    ``projects_root`` defaults to ``<repo_root>/.promptpotter/projects``.
-    ``tenant_id`` defaults to ``"default"`` — the single-user CLI tenant.
-    ``datasets_root`` defaults to ``<repo_root>/datasets`` — named dataset
-    caches live there to survive ``.promptpotter/`` resets. Tests pass
-    ``tmp_path`` to isolate from the real repo tree.
+    Defaults: ``projects_root=<repo>/.promptpotter/projects``,
+    ``tenant_id='default'`` (single-user CLI), ``datasets_root=<repo>/datasets``
+    (survives ``.promptpotter/`` resets). Tests pass ``tmp_path``.
     """
     validate_path_component(tenant_id)
     root = Path(projects_root) if projects_root else DEFAULT_PROJECTS_ROOT

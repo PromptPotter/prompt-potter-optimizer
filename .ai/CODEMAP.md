@@ -32,36 +32,36 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 ### Domain
 | Symbol | File:line |
 |---|---|
-| `SearchPoint` (abstract) | `promptpotter/domain/search_point.py:46` |
-| `JobSearchPoint` (frozen target spec) | `promptpotter/domain/search_point.py:58` |
-| `PromptTemplate` (8-field scheme) | `promptpotter/domain/opt_search_point.py:44` |
-| `OptSearchPoint` (optimizer working state) | `promptpotter/domain/opt_search_point.py:275` |
-| `PipelineSchema` | `promptpotter/domain/pipeline_schema.py:145` |
-| `ResumeCheckpointKind` (exhaustive enum) | `promptpotter/domain/run_records.py:39` |
+| `SearchPoint` (abstract) | `promptpotter/domain/search_point.py:27` |
+| `JobSearchPoint` (frozen target spec) | `promptpotter/domain/search_point.py:34` |
+| `PromptTemplate` (8-field scheme) | `promptpotter/domain/opt_search_point.py:31` |
+| `OptSearchPoint` (optimizer working state) | `promptpotter/domain/opt_search_point.py:168` |
+| `PipelineSchema` | `promptpotter/domain/pipeline_schema.py:120` |
+| `ResumeCheckpointKind` (exhaustive enum) | `promptpotter/domain/run_records.py:32` |
 | `SessionFamilyDir` / `CycleDir` (path newtypes) | `promptpotter/domain/cycle_paths.py:32` / `:33` |
 
 ### Application — optimization
 | Symbol | File:line |
 |---|---|
-| `l1_generate` | `promptpotter/application/optimization/l1/generate.py:87` |
-| `l1_score` | `promptpotter/application/optimization/l1/score/winner.py:82` |
+| `l1_generate` | `promptpotter/application/optimization/l1/generate.py:76` |
+| `l1_score` | `promptpotter/application/optimization/l1/score/winner.py:60` |
 | `execute_round` (round loop) | `promptpotter/application/optimization/l1/execute.py:50` |
 | `run_l1_critique` | `promptpotter/application/optimization/l1/critique.py:29` |
 | `TransitionResult` (L2/L3 transition result) | `promptpotter/application/optimization/transitions.py:42` |
-| `LayerStrategy` | `promptpotter/application/optimization/transitions.py:87` |
-| `escalate_l2` (L2/L3 dispatch + cascade) | `promptpotter/application/optimization/escalation/firing/executor.py:188` |
-| `EscalationState` | `promptpotter/application/optimization/escalation/state.py:84` |
+| `LayerStrategy` | `promptpotter/application/optimization/transitions.py:74` |
+| `escalate_l2` (L2/L3 dispatch + cascade) | `promptpotter/application/optimization/escalation/firing/executor.py:172` |
+| `EscalationState` | `promptpotter/application/optimization/escalation/state.py:57` |
 | `EscalationRule` | `promptpotter/application/optimization/escalation/rules.py:29` |
 | `DEFAULT_ESCALATION_RULES` | `promptpotter/application/optimization/escalation/rules.py:54` |
-| `EscalationInputs` | `promptpotter/application/optimization/escalation/decide.py:36` |
-| `decide_escalation` | `promptpotter/application/optimization/escalation/decide.py:62` |
-| `DispatchHub` | `promptpotter/application/optimization/dispatch/hub/facade.py:154` |
+| `EscalationInputs` | `promptpotter/application/optimization/escalation/decide.py:24` |
+| `decide_escalation` | `promptpotter/application/optimization/escalation/decide.py:37` |
+| `DispatchHub` | `promptpotter/application/optimization/dispatch/hub/facade.py:117` |
 | `DispatchHub.fill_l1` / `.fill_fixed` | `dispatch/hub/facade.py:207` / `:240` |
 | `build_bundle` | `promptpotter/application/optimization/dispatch/hub/builder.py:27` |
-| `INJECTIONS` (slot registry) | `promptpotter/application/optimization/dispatch/hub/injections/registry.py:118` |
-| `validate_template` | `promptpotter/application/optimization/dispatch/hub/facade.py:67` |
+| `INJECTIONS` (slot registry) | `promptpotter/application/optimization/dispatch/hub/injections/registry.py:97` |
+| `validate_template` | `promptpotter/application/optimization/dispatch/hub/facade.py:50` |
 | `load_optimizer_prompt` | `promptpotter/application/optimization/dispatch/llm_call/prompts.py:161` |
-| `RunCallbacks` (typed event constructor) | `promptpotter/application/run_observers.py:49` |
+| `RunCallbacks` (typed event constructor) | `promptpotter/application/run_observers.py:43` |
 | `RESUME_CHECKPOINT_GATING` | `promptpotter/application/optimization/resume_and_fork/decisions.py:53` |
 
 ### Application — scoring / bootstrap
@@ -71,7 +71,7 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 | `measure_sample` | `promptpotter/application/scoring/sample_measurement.py:263` |
 | `compile_scorer` | `promptpotter/application/scoring/formula/compiler.py:131` |
 | `compute_composite_fitness` | `promptpotter/application/scoring/metrics.py:207` |
-| `Session` | `promptpotter/application/bootstrap/session.py:87` |
+| `Session` | `promptpotter/application/bootstrap/session.py:75` |
 | `ScoringContext` | `promptpotter/application/bootstrap/session.py:48` |
 
 ### Infrastructure
@@ -79,12 +79,12 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 |---|---|
 | `CycleEventLog` (sole ledger ingress) | `promptpotter/infrastructure/ledger.py:41` |
 | `DerivedView` (projection base) | `promptpotter/infrastructure/projections/base.py:29` |
-| `LiveDashboardView` (root-only) | `promptpotter/infrastructure/projections/live_dashboard/view.py:82` |
-| `AuditTrailView` (per-cycle) | `promptpotter/infrastructure/projections/audit_trail.py:105` |
+| `LiveDashboardView` (root-only) | `promptpotter/infrastructure/projections/live_dashboard/view.py:60` |
+| `AuditTrailView` (per-cycle) | `promptpotter/infrastructure/projections/audit_trail.py:90` |
 | `PoBBStreamView` | `promptpotter/infrastructure/projections/pobb_stream.py:32` |
-| `Stores` (frozen composite) | `promptpotter/infrastructure/store/stores.py:96` |
-| `build_stores` | `promptpotter/infrastructure/store/stores.py:115` |
-| `BackendClient` | `promptpotter/infrastructure/backend.py:71` |
+| `Stores` (frozen composite) | `promptpotter/infrastructure/store/stores.py:88` |
+| `build_stores` | `promptpotter/infrastructure/store/stores.py:106` |
+| `BackendClient` | `promptpotter/infrastructure/backend.py:64` |
 | `OpenAICompatibleClient` | `promptpotter/infrastructure/llm/openai_compat.py:33` |
 | `AnthropicClient` | `promptpotter/infrastructure/llm/anthropic.py:22` |
 
@@ -106,7 +106,7 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 | `--from` flag | `promptpotter/presentation/cli/parsers.py:147` |
 | `--fork-on-divergence` flag | `promptpotter/presentation/cli/parsers.py:162` |
 | `--sweep-batch` flag | `promptpotter/presentation/cli/parsers.py:121` |
-| `LiveDisplay` | `promptpotter/presentation/views/live/display.py:65` |
+| `LiveDisplay` | `promptpotter/presentation/views/live/display.py:59` |
 
 ### Config
 | Symbol | File:line |

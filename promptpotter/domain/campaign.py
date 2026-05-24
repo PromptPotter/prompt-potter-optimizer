@@ -1,30 +1,13 @@
-"""``Campaign`` — the first-class optimization-effort entity.
+"""``Campaign`` — first-class optimization-effort entity (``campaign.json``).
 
-A campaign is one declared optimization effort: a dataset + pipeline
-origin + context text + the optimizer meta-prompts it runs under. It
-holds one session root (``cycle_<target_hash>``) plus any fork/diag/sweep
-descendants, all flat under ``cycles/``. The campaign is the single
-owner of the frozen ``CampaignConfig`` snapshot. ``campaign.json`` at
-``campaigns/{campaign_id}/`` is this model's dump.
+One declared effort: dataset + origin + context + optimizer meta-prompts. Holds
+one session root (``cycle_<target_hash>``) plus fork/diag/sweep descendants, flat
+under ``cycles/``. Single owner of the frozen ``CampaignConfig`` snapshot.
 
-``campaign_id`` is ``{dataset}__{rand6_hex}`` — minted once per ``new``
-invocation by :func:`promptpotter.application.runner.identity.mint_campaign_id`.
-Each ``new`` produces a distinct campaign, regardless of whether the
-declaration matches an existing campaign on disk. Two ``new`` calls on
-an unchanged declaration share their root cycle id
-(``cycle_<target_hash>`` is content-addressed) and their origin score
-(the dataset-scoped archive cache-hits every sample), but differ in
-``campaign_id`` and diverge from round 1 onward.
-
-* ``root_content_hash`` — the target content hash; the campaign's root
-  cycle dir is ``cycle_<root_content_hash>``. Resume recomputes it to
-  detect target drift.
-* ``optimizer_prompt_hash`` — the optimizer meta-prompt set's hash;
-  resume recomputes it to detect optimizer-prompt drift.
-
-Legacy on-disk shape (multi-session forest with ``_s{N}`` suffixes
-under one ``campaign_id``) — see
-:mod:`promptpotter.infrastructure.store.paths`.
+``campaign_id = {dataset}__{rand6_hex}`` — minted per ``new`` invocation. Two
+``new`` calls on an unchanged declaration share the content-addressed root cycle
+id + origin score but diverge from round 1 onward. ``root_content_hash`` +
+``optimizer_prompt_hash`` let resume detect target / optimizer-prompt drift.
 """
 
 from __future__ import annotations

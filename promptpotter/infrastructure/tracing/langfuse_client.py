@@ -20,11 +20,8 @@ from promptpotter.shared.errors import graceful
 
 logger = logging.getLogger(__name__)
 
-# Upper bound on Langfuse flush during teardown. The SDK's flush blocks on
-# an internal queue.join() that drains over HTTPS; on Ctrl+C the first
-# signal lands inside ``waiter.acquire()`` (uninterruptible until a second
-# SIGINT). Bounding the flush in a daemon thread keeps the shutdown path
-# responsive — drop spans on the floor before deadlocking the operator.
+# SDK flush blocks on an internal queue.join() that's uninterruptible until
+# a second SIGINT. Bounded daemon flush — drop spans before deadlocking Ctrl+C.
 FLUSH_TIMEOUT_SEC: float = 5.0
 
 
@@ -63,8 +60,7 @@ class LangfuseLogger:
                 self.enabled = False
 
     def create_trace_id(self) -> str | None:
-        """Bare trace ID without a root observation — keeps pipeline traces
-        from collapsing into a root chain in the Langfuse graph view."""
+        """Bare trace ID, no root observation — prevents root-chain collapse in the Langfuse graph view."""
         if not self.enabled or not self.client:
             return None
         try:
@@ -83,8 +79,7 @@ class LangfuseLogger:
         session_id: str | None = None,
         tags: list[str] | None = None,
     ) -> str | None:
-        """Create trace with a root span; pushes metadata via ``update_trace``
-        so the cloud UI shows full info instead of an auto-stub."""
+        """Create trace with a root span; ``update_trace`` pushes metadata so the cloud UI isn't an auto-stub."""
         if not self.enabled or not self.client:
             return None
 
@@ -366,11 +361,10 @@ class LangfuseLogger:
         *,
         max_retries: int = 3,
     ) -> bool:
-        """Link trace/observation to a dataset item via REST (the SDK only
-        exposes a context-manager approach unsuitable for backfill).
+        """Link trace/observation to a dataset item via REST (SDK only exposes a context manager).
 
-        429 with Retry-After > 300s sets ``rate_limited`` and returns False
-        so callers can stop early instead of retrying for hours.
+        429 with Retry-After > 300s sets ``rate_limited`` + returns False so
+        callers can stop early instead of retrying for hours.
         """
         if not self.enabled or not self.client:
             return False
@@ -432,11 +426,8 @@ class LangfuseLogger:
     def flush(self) -> None:
         if not (self.enabled and self.client):
             return
-        # Daemon thread so a still-running flush can't keep the
-        # interpreter alive past the operator's Ctrl+C, and so the
-        # bounded ``Event.wait`` below can't be defeated by an implicit
-        # ``ThreadPoolExecutor.__exit__`` wait. Pending spans are the
-        # acceptable loss when the SDK's queue won't drain in time.
+        # Daemon thread so flush can't keep the interpreter alive past Ctrl+C
+        # nor be re-blocked by an implicit ``ThreadPoolExecutor.__exit__`` wait.
         done = threading.Event()
         client = self.client  # narrow Any|None for the closure capture
 

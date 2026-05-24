@@ -1,24 +1,14 @@
-"""LLM-output validators and mid-round stop rules.
+"""LLM-output validators + mid-round stop rules — two distinct contracts.
 
-Two contracts live here, named to keep callers from mixing them up:
+**LLMOutputValidator** — deterministic check on a parsed LLM-node output;
+emits :class:`ValidatorOutcome` whose ``nurse_target`` names which LLM heals
+the producer (L1 output → L2 heals; L2 output → L3 heals). ``score`` mirrors
+``Evaluator.compute`` (1.0 clean, 0.0 fail) so composite_fitness can ingest it.
 
-**LLM-output validator** — :class:`LLMOutputValidator`. Deterministic check on
-an LLM node's parsed output dict; emits a :class:`ValidatorOutcome` whose
-``nurse_target`` names which other LLM heals the producer. Drives self-healing.
-
-    L1's output --[L1 validator]--> ValidatorOutcome (nurse_target="l2") --> L2 heals L1
-    L2's output --[L2 validator]--> ValidatorOutcome (nurse_target="l3") --> L3 heals L2
-
-The ``score`` field mirrors ``Evaluator.compute``'s return shape (1.0 = clean,
-0.0 = full failure) so composite_fitness can read validator outcomes through
-the same channel as evaluators.
-
-**Stop rule** — :class:`StopRule`. Mid-round check on the running result stream
-of a candidate-under-evaluation; emits an :class:`EscalationSignal` carrying
-an :class:`EscalationTarget` that stops measuring the current candidate
-(``ELIMINATE_CANDIDATE`` / ``LEADER_LOCKED``) or routes to the optimizer
-(``L2`` / ``L3`` / ``ABORT_CAMPAIGN``). Concrete stop rules: ``DegradationCheck``,
-``PoBBCheck`` in ``application/optimization/pobb/elimination/checks.py``.
+**StopRule** — mid-round check on the running results stream; emits
+:class:`EscalationSignal` to stop the candidate (ELIMINATE / LEADER_LOCKED) or
+route to the optimizer (L2 / L3 / ABORT). Concretes in
+``application/optimization/pobb/elimination/checks.py``.
 """
 
 from __future__ import annotations
@@ -36,12 +26,7 @@ NurseTarget = Literal["l2", "l3"]
 
 @dataclass(frozen=True)
 class ValidatorOutcome:
-    """Result of running one validator against one LLM-node output.
-
-    Empty/clean outputs produce no outcome (the validator's ``check`` returns
-    ``None``). A non-None outcome represents one or more issues found in the
-    same output dict, bundled together for atomic recording.
-    """
+    """Issues found in one LLM-node output; clean outputs return ``None`` instead."""
 
     validator_id: str
     passed: bool
@@ -70,11 +55,9 @@ class LLMOutputValidator:
 class StopRule(Protocol):
     """Mid-round stop rule on a running candidate's results stream.
 
-    Implementations may carry additional state and methods — e.g. ``PoBBCheck``
-    tracks priors, snapshot callbacks, and lock-in thresholds — but only
-    ``name`` and ``check`` are part of the Protocol contract. The registry
-    consumed by ``score_population`` is ``list[StopRule]``: first non-None
-    signal wins.
+    Implementations may carry extra state (PoBBCheck tracks priors/snapshots/lock-in);
+    only ``name`` + ``check`` are contract. ``score_population`` consumes a list;
+    first non-None signal wins.
     """
 
     name: str

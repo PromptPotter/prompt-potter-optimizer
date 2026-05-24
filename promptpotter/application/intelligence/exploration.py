@@ -30,23 +30,19 @@ class Observation(NamedTuple):
     hit: bool
 
 
-# EB starting points (broad priors → first inner MAP fit is barely regularized).
+# Broad EB starting priors — first inner MAP fit is barely regularized.
 _INIT_SIGMA_THETA = 1.5
 _INIT_SIGMA_DELTA = 2.0
 
-# Weak inverse-gamma hyperprior on each variance component — stops the marginal
-# likelihood collapsing σ → 0 under sparse data; washes out against real n.
+# Weak inverse-gamma hyperprior on each variance — stops σ → 0 collapse under
+# sparse data; washes out against real n.
 _EB_NU0 = 1.0
 _EB_S0_SQ = 1.0
 
 
 @dataclass
 class RaschPosterior:
-    """MAP estimates + Laplace SEs for a fitted hierarchical Rasch model.
-
-    ``mean(theta) == 0`` anchored. Hyperparameters ``sigma_theta`` / ``sigma_delta``
-    / ``mu_delta`` are EB-estimated; downstream consumers read shrinkage from them.
-    """
+    """MAP + Laplace-SE for a hierarchical Rasch fit. ``mean(theta) == 0``; ``sigma_*`` / ``mu_delta`` are EB-estimated."""
 
     theta: dict[str, float]
     theta_se: dict[str, float]
@@ -73,11 +69,7 @@ def _map_fit(
     max_iter: int,
     tol: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, bool]:
-    """Alternating-Newton MAP fit at fixed hyperparameters.
-
-    Priors ``theta ~ N(0, σ_θ²)``, ``delta ~ N(μ_δ, σ_δ²)``. Returns
-    ``(theta, delta, se_theta, se_delta, n_iterations, converged)``.
-    """
+    """Alternating-Newton MAP at fixed hyperparameters. Priors ``θ ~ N(0, σ_θ²)``, ``δ ~ N(μ_δ, σ_δ²)``."""
     theta = np.zeros(n_c)
     delta = np.full(n_s, mu_delta)
 
@@ -142,11 +134,7 @@ def fit_rasch(
     eb_max_iter: int = 20,
     eb_tol: float = 1e-3,
 ) -> RaschPosterior:
-    """Hierarchical 1PL Rasch by empirical Bayes (Laplace-EM, Type-II MLE).
-
-    Likelihood σ(θ_c − δ_s); priors θ_c ~ N(0, σ_θ²), δ_s ~ N(μ_δ, σ_δ²).
-    Hyperparameters η = (σ_θ, σ_δ, μ_δ) estimated, not configured.
-    """
+    """Hierarchical 1PL Rasch by EB (Laplace-EM, Type-II MLE). Hyperparameters estimated, not configured."""
     if not observations:
         return RaschPosterior(theta={}, theta_se={}, delta={}, delta_se={})
 
@@ -191,7 +179,7 @@ def fit_rasch(
         if change < eb_tol:
             break
 
-    # Final inner fit at converged hyperparameters (the loop's last fit used the prior pass's).
+    # Final inner fit at converged hyperparameters.
     theta, delta, se_theta, se_delta, iteration, converged = _map_fit(
         rows, cols, hits, n_c, n_s, sigma_theta, sigma_delta, mu_delta, max_iter, tol
     )
@@ -240,8 +228,8 @@ def select_round_subset(
 ) -> list[Sample]:
     """Pick ``budget`` most-informative samples via the CAT picker.
 
-    Mutation ability prior ``N(θ_leader, σ_θ²)``; score peaks on the contested
-    band (samples whose δ ≈ leader θ). Cold start → bank-order prefix.
+    Prior ``N(θ_leader, σ_θ²)``; peaks on the contested band (δ ≈ leader θ).
+    Cold start → bank-order prefix.
     """
     if budget <= 0 or not bank:
         return []

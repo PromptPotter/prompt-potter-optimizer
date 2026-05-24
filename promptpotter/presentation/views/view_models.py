@@ -1,17 +1,13 @@
-"""Frozen view-model dataclasses — the unified type set for all render targets.
+"""Frozen view-model dataclasses — unified type set across render targets.
 
-Two builders produce these: ``views.view_ingress`` for live ``PhaseEvent``
-payloads (``from_phase_event``) and ``presentation.writers`` for post-hoc
-round_data / index artifacts (``from_disk_round`` / ``from_disk_log``). Two
-render targets consume them via ``render.py`` (``to_text`` / ``to_markdown``);
-the notebook builds its final-winner HTML inline. Views are pure data: no
-methods that emit text, no I/O.
+Producers: ``views.view_ingress`` (live PhaseEvents) + ``presentation.writers``
+(post-hoc disk round_data). Consumers: ``render.py`` (``to_text``/``to_markdown``).
+Pure data — no I/O, no methods that emit text.
 
-The named correctness invariant — exercised in ``tests/test_presentation``
-— is ``from_phase_event(e) == from_disk_round(write_then_load(e))`` on
-``RoundCompleteView``, the one phase event that survives to disk in
-round_data JSON. Live-only events (refine, probe, plan, escalation) have
-only the phase-event factory and no disk counterpart.
+Round-trip invariant (``tests/test_presentation``):
+``from_phase_event(e) == from_disk_round(write_then_load(e))`` on
+``RoundCompleteView`` — the one event that lands on disk. Live-only events
+(refine/probe/plan/escalation) have no disk counterpart.
 """
 
 from __future__ import annotations
@@ -58,11 +54,9 @@ class WarningEntry:
 class InitEnterView:
     """Pre-origin init banner — only warnings render to text.
 
-    ``composite_fitness_formula`` (and the short form) are propagated here so
-    ``LiveDashboardView`` can stamp them onto ``dashboard.json`` before
-    origin scoring begins. Without this, the formula would only land at
-    ``INIT.exit`` (after origin), leaving the live preview's What-If panel
-    without a formula reference for the entire origin phase.
+    ``composite_fitness_formula`` propagated here so ``LiveDashboardView``
+    stamps it on ``dashboard.json`` before origin scoring; otherwise the
+    What-If panel has no formula reference during origin.
     """
 
     warnings: tuple[WarningEntry, ...] = ()
@@ -81,12 +75,9 @@ class InitEnterView:
 class InitExitView:
     """Post-origin init exit — origin accuracy + cycle identity.
 
-    ``resumed_from_round`` is the next L1 round number to run (1 on a truly
-    fresh cycle, N+1 when N rounds were replayed from disk).
-    ``cached_rounds_count`` is the literal count of round artifacts found on
-    disk at bootstrap time. The two used to share one variable, which made
-    the display "Resumed from round 1 (1 rounds cached)" on every cycle —
-    they're now independent so the renderer can tell the operator the truth.
+    ``resumed_from_round`` = next L1 round (1 fresh, N+1 after replaying N).
+    ``cached_rounds_count`` = literal count of round artifacts on disk;
+    kept independent so the renderer can show "Resumed from N (M cached)" truthfully.
     """
 
     origin_acc: float
@@ -155,25 +146,18 @@ class ScoreEntry:
     ci_lo: float
     ci_hi: float
     escalation_aborted: bool = False
-    # First-validation-failure reason for synthetic-zeroed variants
-    # (e.g. ``"no_op_variant"``, ``"duplicate_variant"``). Used by the
-    # scoreboard to suppress rows that didn't burn an LLM call so the
-    # ranking reflects mutated candidates only.
+    # First-validation-failure reason for synthetic-zeroed variants (e.g. ``no_op_variant``);
+    # scoreboard suppresses these rows so ranking reflects mutated candidates only.
     invalid_reason: str | None = None
-    # Per-row matched-pair origin baseline — origin's accuracy and composite
-    # restricted to this candidate's measured samples. Equals the full-set
-    # origin numbers when the candidate ran every sample; differs when PoBB
-    # leader-locked the candidate early. Drives the scoreboard Delta column
-    # so a row's Δ is computed against the same samples the row was measured on.
+    # Origin restricted to this row's measured samples — apples-to-apples Δ
+    # when PoBB leader-locked early; equals full-set origin when fully scored.
     matched_origin_accuracy: float = 0.0
     matched_origin_composite: float | None = None
 
 
 @dataclass(frozen=True)
 class RoundCompleteView:
-    """L1 score exit — full round summary; the ``from_disk`` mirror reads
-    the same shape from ``trial_NNNN.json``. The named round-trip invariant
-    target."""
+    """L1 score exit — round summary. Round-trip invariant target."""
 
     round: int
     origin_acc: float
@@ -193,12 +177,8 @@ class RoundCompleteView:
     composite_fitness_formula: str | None
     composite_fitness_formula_short: str | None
     origin_composite_fitness: float | None
-    # Winner's matched-pair origin baseline — origin restricted to the
-    # samples the winner actually measured. Equals ``origin_acc`` /
-    # ``origin_composite_fitness`` when the winner ran the full set; differs
-    # when PoBB leader-locked the winner at q<N>. The verdict line + delta
-    # display read these so the operator-facing "Δ vs origin" matches the
-    # gate logic in ``l1_score``.
+    # Origin restricted to the winner's measured samples; verdict line + Δ
+    # read these so operator-facing "Δ vs origin" matches the ``l1_score`` gate.
     matched_origin_accuracy: float = 0.0
     matched_origin_hits: int = 0
     matched_origin_composite: float | None = None
@@ -281,10 +261,8 @@ class DigestStatusView:
     rounds_completed: int
     started_at: str | None
     finished_at: str | None
-    # Trials marked ``status: "generation_only"`` (diag mode's preview
-    # round, sweep mode's no-score follow-up). Counted into
-    # ``rounds_completed`` on disk but rendered separately so the operator
-    # sees how many of the rounds were actually scored.
+    # ``generation_only`` rounds (diag preview / sweep no-score follow-up) —
+    # counted into ``rounds_completed`` but rendered separately.
     gen_only_rounds: int = 0
 
 
@@ -306,10 +284,8 @@ class RoundDigestView:
     l1_n_duplicate: int
     candidates_scored: int
     evaluators: dict[str, float]
-    # Optional: per-candidate P(best) trajectory for this round, parsed
-    # from ``.runtime/streams/round_NNNN_p_best.jsonl``. Outer dict is candidate_id;
-    # inner list is the sequence of P(best) values across queries. Empty
-    # when the stream isn't available (resumed cycles, pre-PoBB rounds).
+    # Per-candidate P(best) trajectory from ``.runtime/streams/round_NNNN_p_best.jsonl``;
+    # empty for resumed / pre-PoBB rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)
     p_best_stopped: dict[str, int] = field(default_factory=dict)
 
@@ -332,10 +308,7 @@ class FinalWinnerView:
 
 @dataclass(frozen=True)
 class ForkSummaryView:
-    """One row of the family-root log.md's ``## Forks`` section.
-
-    Built from each fork's ``index.json``; the family root is the only
-    cycle that renders these (forks themselves get an empty tuple)."""
+    """One row of the family-root log.md ``## Forks`` section; forks themselves render an empty tuple."""
 
     cycle_id: str
     mode: str

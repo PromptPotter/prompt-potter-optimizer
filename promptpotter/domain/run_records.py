@@ -30,9 +30,7 @@ __all__ = [
 
 
 class ResumeCheckpointKind(enum.StrEnum):
-    """Ledger-decision kinds. Adding a member: also extend `RESUME_CHECKPOINT_GATING` in
-    `resume_and_fork.decisions` or the import-time exhaustiveness check fails.
-    """
+    """Ledger-decision kinds; adding a member also requires extending `RESUME_CHECKPOINT_GATING` (import-time exhaustiveness check)."""
 
     ROUND_WINNER = "round_winner"
     ELIMINATION_CUT = "elimination_cut"
@@ -84,9 +82,7 @@ class PhaseRecord(BaseModel):
 
 
 class SnapshotRecord(BaseModel):
-    """In-flight live-state snapshot — `event` discriminates (sample_started/scored,
-    candidate_started/scored); `payload` carries the full data the consumer needs.
-    """
+    """In-flight live-state snapshot; `event` discriminates (sample/candidate started/scored)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -104,9 +100,9 @@ class SnapshotRecord(BaseModel):
 class TokenUsageRecord(BaseModel):
     """LLM token + cost telemetry → `dashboard.json::spend`.
 
-    `kind` splits into `backend` (pipeline) vs `loop` (optimizer) so the dashboard shows
-    `Backend $X • Loop $Y`. `cost_usd` comes from the provider wire (OpenRouter `usage.cost`);
-    otherwise resolved via `shared/spend.py`'s rate table — token counts always present for fallback.
+    `kind` splits `backend` (pipeline) vs `loop` (optimizer) for the
+    "Backend $X • Loop $Y" line. `cost_usd` from provider wire (OpenRouter
+    `usage.cost`) or `shared/spend.py` rate table; tokens always present for fallback.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -124,8 +120,9 @@ class TokenUsageRecord(BaseModel):
 
 
 class LLMCallStartRecord(BaseModel):
-    """In-flight marker appended BEFORE the SDK call — drives `dashboard.json::in_flight` so a
-    multi-minute optimizer call isn't a frozen UI. Pairs with `LLMCallRecord` via `call_id` (hex).
+    """In-flight marker appended BEFORE the SDK call → `dashboard.json::in_flight`.
+
+    Pairs with `LLMCallRecord` via `call_id` (hex). Keeps a multi-minute call from looking frozen.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -137,16 +134,13 @@ class LLMCallStartRecord(BaseModel):
     candidate_idx: int | None = None
     model: str | None = None
     started_at_ms: int
-    # Total prompt chars — sets the operator's latency expectation on the in-flight line
-    # (12k-char l1_generate vs 800-char l3_plan look very different).
+    # Sets the operator's latency expectation on the in-flight line.
     prompt_chars: int = 0
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
 class LLMCallProgressRecord(BaseModel):
-    """Heartbeat appended every `HEARTBEAT_INTERVAL_S` while the SDK call is blocked, so the CLI +
-    `in_flight.elapsed_s` show a live counter. Cache replays short-circuit before the heartbeat starts.
-    """
+    """Heartbeat every `HEARTBEAT_INTERVAL_S` while the SDK call is blocked → `in_flight.elapsed_s`. Cache replays skip it."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -159,9 +153,9 @@ class LLMCallProgressRecord(BaseModel):
 
 
 class LLMCallRecord(BaseModel):
-    """Full I/O of one optimizer LLM call — ledger-resident so `round_NNNN.json::nodes` is derived,
-    not sidecar persisted. `payload_kind` distinguishes a real call from a synthesized one (replay,
-    where messages/response/usage are absent and only input/output are populated).
+    """Full I/O of one optimizer LLM call; ledger-resident so `round_NNNN.json::nodes` is derived.
+
+    `payload_kind='synthesized'` ⇒ replay where messages/response/usage are absent.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -172,13 +166,12 @@ class LLMCallRecord(BaseModel):
     candidate_idx: int | None = None
     payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
     call_id: str = ""
-    # Opaque action-dict shape consumed by AuditTrailView — new fields don't churn the schema.
+    # Opaque action-dict consumed by AuditTrailView — new fields don't churn the schema.
     payload: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
-# Discriminated union by `record_type`. Keep the order alphabetical — hash-keyed test snapshots
-# go stale otherwise.
+# Discriminated union by `record_type`; keep order alphabetical — hash-keyed snapshots go stale otherwise.
 CycleRecord = Annotated[
     ResumeCheckpointRecord
     | LLMCallProgressRecord
@@ -203,9 +196,7 @@ class ForkTrigger(enum.StrEnum):
 
 
 class ForkPayload(BaseModel):
-    """Why + what-changed at a fork cut → `FORK_CUT.data.fork`. Optional delta fields
-    (today: `l1_layout`) populated only by triggers that carry that change.
-    """
+    """Why + what-changed at a fork cut → `FORK_CUT.data.fork`; optional deltas (today `l1_layout`) only when the trigger carries them."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -216,8 +207,7 @@ class ForkPayload(BaseModel):
 
 
 class OperatorSweepFile(BaseModel):
-    """Operator JSON shape under ``datasets/{name}/sweep/``. The dispatcher
-    widens this into a ``ForkPayload(trigger=OPERATOR_SWEEP, ...)``."""
+    """Operator JSON under ``datasets/{name}/sweep/``; dispatcher widens to ``ForkPayload(OPERATOR_SWEEP)``."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

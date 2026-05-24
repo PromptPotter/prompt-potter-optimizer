@@ -24,15 +24,12 @@ def validate_path_component(name: str) -> str:
 
 
 def _long_path(p: str | Path) -> str:
-    r"""Return *p* with the Windows ``\\?\`` long-path prefix applied.
+    r"""Apply the Windows ``\\?\`` long-path prefix.
 
-    Windows ``MAX_PATH`` is 260 chars. Sweep-fork audit dirs nest deep
-    (``campaigns/{root}/sweeps/{batch}/forks/{cycle}_sweep_{batch}_{hash}/langfuse/traces/{32hex}.json``)
-    and the trailing 32-hex filename routinely pushes the full path past
-    260, which makes ``CreateFileW`` / ``CreateDirectoryW`` / ``MoveFileExW``
-    fail with ``ERROR_PATH_NOT_FOUND`` (WinError 3) unless ``LongPathsEnabled``
-    is set in the registry. Prefixing an absolute path with ``\\?\`` bypasses
-    the limit without touching the registry. No-op on POSIX.
+    Sweep-fork audit dirs nest past Windows ``MAX_PATH=260``, breaking
+    ``CreateFileW``/``CreateDirectoryW``/``MoveFileExW`` with WinError 3
+    unless ``LongPathsEnabled`` is set in the registry. The ``\\?\`` prefix
+    bypasses the limit without the registry change. No-op on POSIX.
     """
     s = str(p)
     if os.name != "nt":
@@ -48,14 +45,11 @@ def ensure_parent_dir(path: Path) -> None:
 
 
 def _atomic_replace(tmp: str, path: Path) -> None:
-    """Atomically swap temp file *tmp* onto *path*, long-path safe.
+    """Atomically swap *tmp* onto *path*, long-path safe.
 
-    Both args are routed through :func:`_long_path` so destinations past
-    Windows ``MAX_PATH=260`` succeed. On Windows, ``os.replace()`` can also
-    fail with ``PermissionError`` (WinError 5) when the destination is
-    briefly held by another process — OneDrive sync, antivirus, a stale
-    reader. Retry twice with 100 ms back-off; POSIX never hits the retry
-    branch.
+    On Windows ``os.replace`` can fail with WinError 5 when the destination is
+    held briefly (OneDrive / antivirus / stale reader); retry twice with 100ms
+    back-off. POSIX never hits the retry branch.
     """
     last_exc: OSError | None = None
     for attempt in range(3):
@@ -76,14 +70,9 @@ def write_json(
     *,
     default: Callable[[Any], Any] | None = None,
 ) -> None:
-    """Write *data* as pretty-printed JSON atomically.
+    """Write *data* as pretty JSON atomically via temp-file + :func:`_atomic_replace`.
 
-    Writes to a temp file in the same directory, then uses
-    :func:`_atomic_replace` to swap it into place — a crash mid-write can
-    never leave a partial/corrupt file.
-
-    ``default`` is forwarded to ``json.dump`` for non-native types (e.g.
-    pass ``str`` to coerce enums / datetimes to their ``str`` form).
+    ``default`` forwards to ``json.dump`` for non-native types (e.g. ``str`` to coerce enums/datetimes).
     """
     ensure_parent_dir(path)
     fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
@@ -98,11 +87,7 @@ def write_json(
 
 
 def write_text(path: Path, content: str) -> None:
-    """Write *content* to *path* atomically, creating parent dirs if needed.
-
-    Same temp-file + :func:`_atomic_replace` swap as :func:`write_json`,
-    so a crash mid-write can never leave a truncated file.
-    """
+    """Write *content* atomically via temp-file + :func:`_atomic_replace`; creates parent dirs."""
     ensure_parent_dir(path)
     fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
     try:

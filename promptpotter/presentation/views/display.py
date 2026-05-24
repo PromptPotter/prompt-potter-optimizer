@@ -1,10 +1,8 @@
 """Live display primitives — pure formatting, zero business logic.
 
-ANSI color codes, box-drawing helpers, scoreboard, interrupt banner,
-display-tag module state, and small numeric helpers (``_pp_val``,
-``_fmt_delta``). Higher-level renderers consuming these primitives live
-in ``views/round_render.py`` (per-sample / per-candidate / per-round
-output). The tqdm bar tracker lives inline in ``live.py``.
+ANSI colors + box-drawing + scoreboard + interrupt banner + display-tag
+state + small numeric helpers. Higher-level renderers consume these in
+``views/round_render.py``; tqdm tracker lives inline in ``live.py``.
 """
 
 from __future__ import annotations

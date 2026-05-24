@@ -1,9 +1,4 @@
-"""CLI session state plumbing — load and type-access session state.
-
-``SessionCtx`` wraps the raw state dict that ``Stores.sessions`` reads
-from disk, exposing typed accessors so command bodies don't have to
-string-index every field.
-"""
+"""CLI session-state plumbing — ``SessionCtx`` wraps the raw state dict with typed accessors."""
 
 from __future__ import annotations
 
@@ -42,14 +37,7 @@ class SessionCtx:
 
     @property
     def campaign_config(self) -> CampaignConfig:
-        """Campaign config for the run.
-
-        Sourced from the live ``datasets/{name}/campaign.json`` (so config
-        edits are picked up + drift-detected), with the campaign's own
-        frozen ``campaign.json::config`` snapshot as the fallback. The
-        session-state copy is never consulted — it can carry fields from a
-        since-renamed config schema.
-        """
+        """Live ``datasets/{name}/campaign.json`` (edits picked up + drift-detected); frozen ``campaign.json::config`` fallback. Session-state copy never consulted (may carry stale schema fields)."""
         from promptpotter.application.config import (
             load_campaign_config as validate_campaign_config,
         )

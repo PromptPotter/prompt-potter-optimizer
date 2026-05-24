@@ -1,20 +1,12 @@
 """Event schema for the observability bridge.
 
-Single source of truth for every observable thing the optimizer or the
-backfill replayer can emit. Every public tracing method maps to exactly
-one event dataclass; the bridge fans events out to sinks (file, Langfuse,
-MLflow) and each sink handles them by type. No implicit "active trace"
-state lives on the producer side — every event is self-contained and
-carries the keys the sink needs to look up its own id mappings.
-
 Two families:
+- :class:`OptimizationEvent` — Topology A: one Langfuse trace per campaign,
+  rounds + nodes nest underneath. Emitted inline by the loop.
+- :class:`MeasurementEvent` — Topology B: one trace per query, linked to
+  dataset items. Emitted by the backfill replayer over ``archive/measurements/``.
 
-- :class:`OptimizationEvent` — Topology A (live campaign trace). One
-  Langfuse trace per campaign; rounds and nodes nest underneath. Emitted
-  inline from the optimization loop.
-- :class:`MeasurementEvent` — Topology B (per-sample dataset trace). One
-  Langfuse trace per query, linked to dataset items. Emitted by the
-  backfill replayer reading ``archive/measurements/`` from disk.
+Each event is self-contained; sinks own the id mappings.
 """
 
 from __future__ import annotations
@@ -39,10 +31,7 @@ def utcnow_iso() -> str:
 class DatasetRegistered:
     """Dataset items registered in file store and (optionally) Langfuse.
 
-    Used by both topologies — the cloud-side ``query → item_id`` mapping
-    produced here is shared between the live forward path (which links
-    DatasetRun spans) and the backfill replayer (which links per-sample
-    traces).
+    The cloud-side ``query → item_id`` mapping is shared between both topologies.
     """
 
     dataset_name: str
@@ -71,9 +60,7 @@ class RoundStart:
 class NodeStart:
     """Open a node observation under the active round.
 
-    The sink looks up the campaign's trace id by ``campaign_id`` and the
-    round's parent observation id by ``(campaign_id, round_num)``. Producers
-    do not pass either directly — they pass identity, sinks own state.
+    Producers pass identity; sinks resolve trace + parent observation by id.
     """
 
     campaign_id: str
@@ -96,11 +83,8 @@ class NodeEnd:
 
 
 # --- Mid-round write-point events ---
-#
-# Observability markers for durable mid-round transitions. events.jsonl is
-# a pure observability mirror: nothing reads these events back for state
-# reconstruction. Resume and fork are driven by
-# ``campaigns/{cycle_id}/rounds/round_NNNN.json`` via ``CampaignStore``.
+# events.jsonl is an observability mirror; resume + fork read
+# ``campaigns/{cycle_id}/rounds/round_NNNN.json`` via ``CampaignStore``, not this.
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,12 +151,10 @@ class PromptVersion:
 
 @dataclass(frozen=True, slots=True)
 class DatasetRun:
-    """Target-layer scoring report for a single SearchPoint, nested under the active round.
+    """Target-layer scoring report (one SearchPoint), nested under the optimizer round span.
 
-    This event sits at the layer boundary: the data is target-layer
-    (``JobSearchPoint`` scoring) but the Langfuse parent is the
-    optimizer-layer round span. Topology A intentionally entangles them so
-    a campaign trace shows which scoring run each round depended on.
+    Layer-boundary event: target data, optimizer-layer parent — Topology A
+    entangles them so the campaign trace shows which scoring run each round used.
     """
 
     campaign_id: str
@@ -234,11 +216,9 @@ OptimizationEvent = Union[
 
 @dataclass(frozen=True, slots=True)
 class QueryNodeSpan:
-    """One pipeline node's input/output captured during a target-layer measurement.
+    """One pipeline node's I/O during a measurement; child of a ``QueryScore*`` pair.
 
-    Emitted as a child of a ``QueryScoreStart``/``QueryScoreEnd`` pair. The
-    node's Langfuse ``as_type`` (generation/span/tool/...) is taken from
-    the pipeline schema's ``langfuse_type`` for that node.
+    ``as_type`` is the pipeline schema's ``langfuse_type`` for the node.
     """
 
     run_id: str

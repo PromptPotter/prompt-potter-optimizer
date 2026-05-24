@@ -33,33 +33,21 @@ class CampaignPhase(enum.StrEnum):
 class StopReason(enum.StrEnum):
     """Feedback cycle termination reasons.
 
-    ``INTERRUPTED`` is reserved for KeyboardInterrupt + asyncio.CancelledError
-    (user-initiated or programmatic cancellation). ``CRASHED`` is the
-    catch-all for any other unhandled exception inside the round loop —
-    distinguished so the operator can tell "I hit Ctrl+C" from "the run
-    died and the traceback was swallowed." ``DIVERGED`` is the clean
-    operator-recoverable case where resume detected a recorded-vs-current
-    decision mismatch under a changed policy — the fix is a one-flag
-    rerun, not a debug session, so no traceback is stashed.
+    Operator-recoverable halts (no traceback, plain ``resume`` fixes):
+    - ``INTERRUPTED`` — Ctrl+C / asyncio.CancelledError. Split from CRASHED
+      so the operator can tell "I hit Ctrl+C" from "swallowed traceback".
+    - ``DIVERGED`` — resume detected recorded-vs-current decision mismatch
+      under changed policy; one-flag rerun.
+    - ``RENDER_ERROR`` — an injection renderer raised (usually code drift on
+      a renamed field). Failing injection + traceback in ``index.json::final``.
+      Recover with ``resume`` or ``resume --ignore-render-errors``.
+    - ``PROMPT_BUDGET`` — composed prompt still over
+      ``OPTIMIZER_PROMPT_CHAR_BUDGET`` after shedding every OPTIONAL + CORE
+      injection. Compact parent prompt / trim meta-prompt, then ``resume``.
+    - ``OPTIMIZER_TIMEOUT`` — optimizer LLM blew its wall-clock twice (provider
+      stalled mid-stream, see ``llm_call._chat_under_deadline``); plain ``resume``.
 
-    The two dispatch-hub halts are the prompt-budget self-healing unit's
-    last resort (see ``docs/specs/archive/dispatch-prompt-budget.md``).
-    ``RENDER_ERROR`` — an injection renderer raised, almost always code
-    drift (a renamed data-model field); split from ``CRASHED`` so the
-    operator sees "a renderer broke" at a glance, with the failing
-    injection name + traceback on ``index.json::final``. Recover with
-    ``resume`` (renderer fixed) or ``resume --ignore-render-errors``.
-    ``PROMPT_BUDGET`` — a composed optimizer prompt is still over
-    ``OPTIMIZER_PROMPT_CHAR_BUDGET`` after the allocator shed every
-    OPTIONAL + CORE injection: the residual is content L2 cannot heal,
-    so the loop stops for operator review (compact the parent prompt or
-    trim the meta-prompt template, then ``resume``).
-
-    ``OPTIMIZER_TIMEOUT`` is the third operator-recoverable halt: an
-    optimizer LLM call blew its total wall-clock deadline twice (the
-    provider stalled mid-stream — see ``llm_call._chat_under_deadline``).
-    Not a crash, not a renderer bug; no traceback. The fix is a plain
-    ``resume`` — the call re-fires from the same round.
+    ``CRASHED`` is the catch-all for unhandled exceptions in the round loop.
     """
 
     PERFECT = "perfect_score"

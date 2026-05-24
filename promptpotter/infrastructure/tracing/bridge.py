@@ -51,8 +51,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["NodeTrace", "ObservabilityBridge", "observed_node"]
 
 
-# Event-type → sink-method dispatch. Sinks lacking a method are silently
-# skipped. The 4 mid-round write-points share ``on_write_point`` (file sink).
+# Event → sink method. Sinks without the method are silently skipped.
 _DISPATCH: dict[type[Event], str] = {
     DatasetRegistered: "on_dataset_registered",
     CampaignStart: "on_campaign_start",
@@ -156,7 +155,6 @@ class ObservabilityBridge:
         round_num: int,
         **extra: Any,
     ) -> None:
-        # events.jsonl is a pure mirror; resume uses rounds/round_NNNN.json.
         if not self._enabled:
             return
         with graceful(f"{event_cls.__name__} emit failed"):

@@ -1,19 +1,13 @@
-"""Sample — the canonical per-sample domain object, plus ``Measurement`` archive row.
+"""``Sample`` — canonical per-sample domain object + ``Measurement`` archive row.
 
-Sample is the data-side peer to SearchPoint. It owns a stable cross-campaign
-``id``, the input strings (``query``, ``ground_truth``), and accumulating
-cross-campaign metadata (``escalation_count``, ``run_ids``). Measurement
-values (predicted/hit/fitness/pipeline_data) live in ``archive/measurements/``
-and the per-sample aggregate stats live in ``SampleIndex`` — accessed via
-the methods below, never duplicated as fields on the Sample itself.
+``Sample`` is data-side peer to SearchPoint: cross-campaign ``id``, inputs, and
+accumulating metadata (``escalation_count``, ``run_ids``). Per-sample aggregate
+stats live in ``SampleIndex``, measurements in ``archive/measurements/`` —
+accessed via the methods below, never duplicated on the model. Mutable because
+``run_ids`` accumulates over the campaign lifecycle.
 
-Mutable (unlike frozen ``JobSearchPoint``) because ``escalation_count`` and
-``run_ids`` accumulate over the campaign lifecycle.
-
-``Measurement`` is the canonical archive row — one ``(sample × config →
-outcome)`` row, denormalized for direct inspection, returned by both
-retrieval views (``measurements_for_sample`` / ``measurements_for_config``).
-Frozen + slots — read-only projection over archive batches.
+``Measurement`` is the denormalized read-only archive row returned by both
+``measurements_for_sample`` / ``measurements_for_config`` views.
 """
 
 from __future__ import annotations
@@ -52,13 +46,8 @@ class Sample(BaseModel):
             data = {**data, "id": fallback_id}
         return cls(**data)
 
-    # --- Cross-campaign signal accessors (resolve through SampleIndex) ---
-    #
-    # Retrieve-from-archive accessors (``latest_measurement`` /
-    # ``all_measurements`` / ``pipeline_data_for``) live on the archive
-    # reader, not here — they need store access which SampleIndex itself
-    # does not hold. Use ``MeasurementArchive`` directly when trace content
-    # is required.
+    # --- Cross-campaign signal accessors (resolve via SampleIndex) ---
+    # Trace-content retrieval lives on ``MeasurementArchive`` directly — SampleIndex has no store access.
 
     def hits(self, index: SampleIndex) -> list[bool]:
         """Hit/miss history across all measurements touching this sample."""

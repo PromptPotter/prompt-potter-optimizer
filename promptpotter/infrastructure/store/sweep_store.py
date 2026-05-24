@@ -1,8 +1,8 @@
-"""Per-batch sweep artifacts under ``campaigns/{campaign_id}/sweeps/{batch_id}/``.
+"""Per-batch sweep artifacts at ``campaigns/{campaign_id}/sweeps/{batch_id}/``.
 
-Sweeps are batch-level, not cycle-level: one ``index.json`` + ``summary.md``
-spans many sweep-fork cycles (which live flat under the campaign's
-``cycles/``). Keyed by ``(campaign_id, batch_id)`` — not an ``EntityStore``.
+Batch-level (not cycle-level): one ``index.json`` + ``summary.md`` spans many
+sweep-fork cycles (which live flat under ``cycles/``). Keyed by
+``(campaign_id, batch_id)`` — not an ``EntityStore``.
 """
 
 from __future__ import annotations
@@ -26,8 +26,7 @@ class SweepStore:
     """File I/O for sweep-batch artifacts (``index.json`` + ``summary.md``)."""
 
     def __init__(self, base_dir: Path) -> None:
-        # base_dir is tenant root; sweeps nest under campaigns/{campaign_id}/sweeps/{batch_id}/.
-        self._base_dir = base_dir
+        self._base_dir = base_dir  # tenant root
 
     def batch_dir(self, campaign_id: str, batch_id: str) -> Path:
         return sweep_batch_dir_for(self._base_dir, campaign_id, batch_id)

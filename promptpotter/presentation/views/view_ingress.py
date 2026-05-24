@@ -1,21 +1,13 @@
-"""Live PhaseEvent ingress — ``PhaseEvent + ctx → typed View → wire dict``.
-
-Each per-phase builder constructs a typed view directly and applies its
-``ctx`` side effects (round-num tracking, origin rolling, p-value,
-prompt-flat memo) in one pass.
+"""Live ``PhaseEvent → typed View → wire dict`` ingress.
 
 Two entry points:
+- ``from_phase_event`` (RunCallbacks): build view + apply ctx side effects
+  (round-num tracking, origin rolling, prompt-flat memo) in one pass;
+  serialized via ``view_to_wire_dict`` onto the ledger.
+- ``view_from_record``: identity-style reconstruction read by ledger subscribers.
 
-- ``from_phase_event(event, ctx)`` — used by ``RunCallbacks``; the typed
-  view is the single source of truth, and the runner serialises it via
-  ``view_to_wire_dict`` before placing it on the ledger payload.
-- ``view_from_record(record_dict)`` — used by ledger subscribers reading
-  the wire-format dict back. Identity-style projection that mirrors the
-  builder shapes.
-
-The shared score-entry helpers (``pick_round_winner``,
-``score_entry_from_dict``) are also consumed by ``presentation/writers.py``
-when reconstructing typed views from disk for ``log.md`` rendering.
+Score-entry helpers (``pick_round_winner``, ``score_entry_from_dict``) are also
+consumed by ``presentation/writers.py`` for disk-derived ``log.md`` rendering.
 """
 
 from __future__ import annotations
@@ -175,12 +167,8 @@ def _init_exit(d: dict[str, Any], ctx: dict[str, Any]) -> InitExitView:
 
 
 def _l1_generate_enter(d: dict[str, Any], ctx: dict[str, Any]) -> RoundStartView:
-    # The header is rendered at L1_GENERATE.enter — BEFORE L1 produces
-    # candidates. It describes the parent SP this round is mutating from;
-    # it cannot honestly describe the round's mutation mode (params-only
-    # vs prompt+params), because the candidate set doesn't exist yet. The
-    # per-candidate sp_diff table on the next render emits the actual
-    # mutation surface.
+    # Header renders before candidates exist — describes parent SP, not the
+    # round's mutation mode (sp_diff table emits that next render).
     preview = (d.get("prompt_preview") or "").replace("\n", " ").strip()
     preview = "(empty)" if not preview else _truncate(preview, 50)
 
@@ -265,18 +253,15 @@ def _l1_score_exit(d: dict[str, Any], ctx: dict[str, Any]) -> RoundCompleteView:
     w_acc = float(d.get("winner_accuracy", 0.0))
     improved = bool(d.get("improved", False))
     origin_acc = ctx.get("origin_accuracy", 0.0)
-    # Winner's matched-pair origin baseline (origin restricted to the
-    # winner's measured samples). Falls back to ``origin_acc`` for round 0
-    # / events emitted before the gate landed. Drives ``delta`` so the
-    # operator-visible Δ matches the ``improved`` gate, not the full-set
-    # comparison that systematically punishes PoBB-locked winners.
+    # Matched-pair origin (winner-measured samples); fallback ``origin_acc``
+    # for round 0 / pre-gate events. Δ uses this so operator-visible Δ
+    # matches the ``improved`` gate, not the full-set comparison that
+    # punishes PoBB-locked winners.
     matched_origin_acc = float(d.get("winner_matched_origin_accuracy", origin_acc))
     matched_origin_hits = int(d.get("winner_matched_origin_hits", 0))
     matched_origin_composite = d.get("winner_matched_origin_composite")
     delta = w_acc - matched_origin_acc
-    # ``p_value`` is computed at gate time by l1_score and emitted directly
-    # — the view trusts the emitter rather than recomputing here.
-    p_value: float | None = d.get("p_value")
+    p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
     if improved:
         ctx["origin_accuracy"] = w_acc
 
@@ -429,11 +414,7 @@ def _sp_diff_from_dict(d: dict[str, Any] | None) -> SpDiffView:
 
 
 def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
-    """Round winner = max non-aborted ``ScoreEntry`` ranked by ``round_winner_key``.
-
-    Shares the key with ``l1_score``'s round-time selection so the SCOREBOARD
-    ``*`` marker and the IMPROVED-line winner are always the same candidate.
-    """
+    """Round winner = max non-aborted ``ScoreEntry`` by ``round_winner_key`` — shared with ``l1_score`` so SCOREBOARD ``*`` matches IMPROVED line."""
     non_aborted = [s for s in score_entries if not s.escalation_aborted]
     if not non_aborted:
         return None
@@ -441,22 +422,16 @@ def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
 
 
 def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
-    """Project a candidate-score wire dict (``CandidateScore.to_dict()`` shape)
-    into a ``ScoreEntry``. ``label`` is read from the dict (set canonically by
-    ``build_score_report``); ``ci_lo``/``ci_hi`` are recomputed from hits/total
-    when the dict pre-dates Wilson-CI persistence.
-    """
+    """``CandidateScore.to_dict()`` / ``asdict(ScoreEntry)`` → ``ScoreEntry``; Wilson CI recomputed when missing."""
     hits = int(s.get("hits", 0))
     total = int(s.get("total", 0))
     if "ci_lo" in s and "ci_hi" in s:
         ci_lo, ci_hi = float(s["ci_lo"]), float(s["ci_hi"])
     else:
         ci_lo, ci_hi = wilson_ci(hits, total)
-    # Two source shapes feed this:
-    #  - ``CandidateScore.to_dict()`` (event.data["candidate_scores"]) — has
-    #    ``invalid`` + ``validation_failures``; derive the reason.
-    #  - ``asdict(ScoreEntry)`` (wire round-trip via view_to_wire_dict) — already
-    #    carries ``invalid_reason`` as a top-level field.
+    # Two sources: CandidateScore.to_dict() carries ``invalid`` +
+    # ``validation_failures`` (derive reason); asdict(ScoreEntry) carries
+    # ``invalid_reason`` top-level.
     invalid_reason: str | None = s.get("invalid_reason")
     if invalid_reason is None and s.get("invalid"):
         vfs = s.get("validation_failures") or []

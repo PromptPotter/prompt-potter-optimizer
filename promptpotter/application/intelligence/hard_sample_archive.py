@@ -1,14 +1,8 @@
-"""Cross-cycle hard-sample artifact — tenant-wide aggregator over the archive.
+"""Cross-cycle hard-sample artifact — archive-sourced peer of :mod:`hard_sample_sorter`.
 
-Peer of :mod:`hard_sample_sorter`. Same artifact shape, same Rasch fit;
-the only difference is the observation source: the
-:class:`~promptpotter.infrastructure.store.measurement_archive.MeasurementArchive`
-instead of a single cycle's ``rounds``. Candidate IDs are
-``content_hash[:12]`` (cross-cycle stable) instead of round-local
-``cand_NNN``.
-
-Pure read-only — every archive access goes through
-:mod:`promptpotter.infrastructure.store.archive_views`.
+Same artifact shape + Rasch fit; observations come from
+:class:`MeasurementArchive` (via :mod:`archive_views`) instead of one cycle's
+``rounds``, with candidate IDs ``content_hash[:12]`` for cross-cycle stability.
 """
 
 from __future__ import annotations
@@ -39,16 +33,11 @@ def build_archive_observations(
     dataset_name: str | None,
     include_unknown: bool = False,
 ) -> list[Observation]:
-    """Walk every measurement detail in the archive, project triples.
+    """Walk every archive measurement → ``Observation(content_hash[:12], sample_id, hit)`` triples.
 
-    Returns one ``Observation(candidate_id=content_hash[:12], sample_id, hit)``
-    per measured row. Skips items without ``sample_id``, items flagged as
-    errors, and entries lacking a ``content_hash``.
-
-    ``dataset_name`` scopes the walk to one dataset's archive slice
-    (required keyword, ``None`` permitted only for admin/forensic use).
-    Cross-dataset pollution on integer ``sample_id`` is the bug this
-    arg exists to prevent.
+    Skips entries missing ``sample_id`` / ``content_hash`` or flagged as errors.
+    ``dataset_name=None`` is admin/forensic only — the keyword exists to
+    prevent integer-``sample_id`` cross-dataset pollution.
     """
     obs: list[Observation] = []
     for entry in archive_views.list_runs(
@@ -89,12 +78,10 @@ def build_archive_hard_samples_artifact(
     top_k_samples: int | None = 40,
     include_unknown: bool = False,
 ) -> dict[str, Any]:
-    """Per-dataset hard-samples artifact, fit on every archive measurement for that dataset.
+    """Per-dataset hard-samples artifact fit on every archive measurement.
 
-    Same shape as :func:`hard_sample_sorter.build_hard_samples_artifact`.
-    ``cycle_id`` is always ``None`` since the artifact spans all cycles
-    *for the requested dataset*. Pass ``top_k_*=None`` for the full
-    matrix.
+    Same shape as :func:`hard_sample_sorter.build_hard_samples_artifact`;
+    ``cycle_id`` is always ``None`` (spans all cycles). ``top_k_*=None`` ⇒ full matrix.
     """
     return build_hard_samples_artifact_from_observations(
         build_archive_observations(

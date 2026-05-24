@@ -65,11 +65,10 @@ class ValidationFailure:
 
 @dataclass
 class RuntimeFailure:
-    """Post-eval degradation evidence, attached per-candidate.
+    """Post-eval degradation evidence, per-candidate.
 
-    Stored on ``OptSearchPoint.wounds.runtime_failures``; surfaced in the
-    candidate's score report; ingested by L2 next round. Does NOT drive
-    synthetic-0 — the candidate's real score stands.
+    On ``OptSearchPoint.wounds.runtime_failures``; surfaced in the score report
+    + ingested by L2 next round. Does NOT drive synthetic-0 — real score stands.
     """
 
     source: str

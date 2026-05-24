@@ -41,10 +41,9 @@ logger = logging.getLogger(__name__)
 
 
 POBB_LOCK_IN: float = 0.95
-"""Round-winner lock-in threshold for posterior P(best). 1.0 disables it."""
+"""P(best) threshold for round-winner lock-in; 1.0 disables."""
 POBB_LOCK_IN_N_MIN: int = 8
-"""Minimum samples before lock-in can fire (higher than the elimination floor —
-locker-in commits the round-winner)."""
+"""Samples-floor for lock-in; higher than the elimination floor (lock-in commits the round)."""
 
 
 async def execute_round(
@@ -56,15 +55,12 @@ async def execute_round(
     *,
     skip_critique: bool = False,
 ) -> RoundResult:
-    """Execute one L1 round: generate → score+select → critique. Returns
-    the ``RoundResult`` with ``.critique`` set when L1_CRITIQUE fired; the
-    runner calls ``cycle.absorb_round`` to fold it into Cycle state at the
-    boundary. l1.py never mutates Cycle directly.
+    """Execute one L1 round: generate → score+select → critique. Returns a
+    ``RoundResult`` (`.critique` set when L1_CRITIQUE fired); runner folds it
+    into Cycle state via ``absorb_round`` — l1.py never mutates Cycle directly.
 
-    ``skip_critique=True`` skips the round-end ``run_l1_critique`` LLM call.
-    Sweep mode passes this so the cheap-round_data fork stays one full live LLM
-    call (round 2 generate-only); the round-1 critique would otherwise dwarf
-    that call and is the same across all forks since round 1 is identical.
+    ``skip_critique=True`` (sweep mode) drops the round-end critique so the
+    cheap-fork stays one LLM call; round 1 is identical across all forks.
     """
     session = cycle.session
     config = cycle.config
@@ -74,17 +70,14 @@ async def execute_round(
         with graceful("RoundStart emit failed"):
             obs.emit(RoundStart(campaign_id=session.state.tracing_campaign_id, round_num=round_num))
 
-    # Per-round scoring subset. On non-probe rounds the runner hands us the
-    # full bank (the train split); the CAT picker narrows it to
-    # ``sp_budget_ttest`` samples whose outcome is least certain for the
-    # leading prompt — the contested band. Origin re-score and every
-    # candidate share this one subset, so PoBB compares like-for-like.
-    # Probe rounds carry their own warned-query set and pass through as-is.
+    # Probe rounds use their warned-query set as-is; non-probe rounds narrow
+    # the train-split bank to ``sp_budget_ttest`` contested samples via the
+    # CAT picker. Origin + every candidate share this subset so PoBB compares
+    # like-for-like.
     if cycle.probe_next_round:
         scoring_set = scoring_pool
     else:
-        # Archive observations are dataset-scoped and abort-residue-free, so
-        # the round-subset Rasch fit always carries cross-cycle evidence.
+        # Archive obs are dataset-scoped + abort-residue-free → cross-cycle evidence.
         observations = [*cycle.archive_observations, *build_observations(cycle.rounds)]
         scoring_set = select_round_subset(
             scoring_pool,
@@ -166,12 +159,9 @@ async def execute_round(
         winner_matched_origin_composite=round_result.matched_origin_composite,
     )
 
-    # Compute deterministic post-scoring stats once and attach to the round
-    # result. The dispatch hub's ``diagnostics`` signal reads this; rendering
-    # is layer-agnostic so the same payload feeds L1_CRITIQUE / L2 / L3.
-    # ``cycle.probe_next_round`` is still True at this point — runner only
-    # resets it after ``absorb_round`` lands. Reading ``best_accuracy`` here
-    # is the pre-probe full-set best (probe didn't fold yet).
+    # Round diagnostics feed dispatch's ``diagnostics`` signal (L1_CRITIQUE/L2/L3).
+    # ``probe_next_round`` is still True here — runner resets it after
+    # ``absorb_round``, so ``best_accuracy`` is the pre-probe full-set best.
     rounds_history = [*cycle.rounds, round_result]
     prior_full_accuracy = cycle.tracking.best_accuracy if cycle.probe_next_round else 0.0
     round_result.diagnostics = compute_round_diagnostics(
@@ -186,8 +176,7 @@ async def execute_round(
     critique_text = ""
     if round_result.results and not skip_critique:
         crit_llm = _llm_client.get_llm_client(config.optimizer_llm.provider)
-        # Critique is round-over-round feedback; survive a malformed LLM
-        # response rather than crash the campaign.
+        # Critique is round-over-round feedback — survive a malformed response.
         with graceful("L1 critique failed; continuing without round-over-round feedback"):
             async with observed_node(
                 f"l1_critique_r{round_num}",

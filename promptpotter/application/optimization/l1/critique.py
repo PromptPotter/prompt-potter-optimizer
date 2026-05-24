@@ -36,19 +36,11 @@ async def run_l1_critique(
     model: str | None = None,
     ledger: CycleEventLog | None = None,
 ) -> dict[str, Any]:
-    """Build critique from pipeline stats + LLM analysis. Returns dict form for storage.
+    """Build critique from pipeline stats + LLM analysis; returns dict for storage.
 
-    L1-critique has no per-section override channel: the template body
-    embeds ``{{plan}}``, ``{{task_context}}``, ``{{diagnostics}}``,
-    ``{{validation_failures}}`` and ``{{runtime_failures}}`` placeholders
-    that the dispatch hub resolves to layer-agnostic signal renderers.
-    ``RoundDiagnostics`` is read off the freshly-completed round, so the
-    rank/health/evolution context is one bundle hop away.
-
-    The LLM returns an :class:`L1CritiqueOutput` (server- and Pydantic-
-    validated); we materialize it to dict so :class:`RoundResult.critique`
-    can be persisted via the audit-trail projection without dragging a
-    Pydantic dep into the domain serialization path.
+    Template embeds ``{{plan|task_context|diagnostics|validation_failures|runtime_failures}}``
+    placeholders resolved by the dispatch hub. ``L1CritiqueOutput`` materialized to
+    dict so persistence doesn't drag Pydantic into the domain serialization path.
     """
     bundle = build_bundle(cycle, latest_round=round_result)
     from promptpotter.application.optimization.dispatch.llm_call import load_optimizer_prompt

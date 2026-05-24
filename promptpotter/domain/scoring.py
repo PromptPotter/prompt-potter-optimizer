@@ -1,26 +1,16 @@
-"""Scoring domain types — query-result shapes, runner protocol, scorer aliases.
+"""Scoring domain types — pure data; compiler + ``rescore_results`` in ``application.scoring.formula``.
 
-Pure data layer: no behavior, no I/O. The formula compiler, match/display
-primitives, and ``rescore_results`` mutator live in
-``promptpotter.application.scoring.formula``.
+Datasets declare a formula in ``campaign.json::scoring``:
+- string shorthand ⇒ ``per_sample`` (``per_round`` uses registry default);
+- twin form ``{"per_sample", "per_round"}``.
 
-Each dataset declares a scoring formula in ``campaign.json`` under ``"scoring"``.
-Accepted shapes:
-
-- **String shorthand** — interpreted as ``per_sample``; ``per_round`` uses the evaluator-registry default.
-- **Twin form** — ``{"per_sample": "...", "per_round": "..."}``; omitted keys fall back to defaults.
-
-A missing ``scoring`` key raises in ``compile_scorer`` — there is no implicit default.
+Missing ``scoring`` raises in ``compile_scorer`` — no implicit default.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any, NamedTuple, NotRequired, TypedDict
-
-# ---------------------------------------------------------------------------
-# Per-sample result types
-# ---------------------------------------------------------------------------
 
 
 class PipelineData(TypedDict, total=False):
@@ -30,9 +20,8 @@ class PipelineData(TypedDict, total=False):
     total_time: float
     terminated_at: str
     step_timings: dict[str, Any]
-    # Per-LLM-node token counts: {node_name: {"input": N, "output": M, "estimated": bool}}.
-    # ``estimated`` is True when counts came from a chars/4 fallback rather than
-    # the provider's usage object via the backend.
+    # Per-LLM-node tokens: ``{node: {input, output, estimated}}``;
+    # ``estimated=True`` ⇒ counts came from chars/4 fallback, not provider usage.
     step_tokens: dict[str, dict[str, int | bool]]
     llm_provider: str
     pipeline_params: dict[str, Any]
@@ -40,19 +29,15 @@ class PipelineData(TypedDict, total=False):
 
 
 class QueryMeasurement(TypedDict):
-    """Core per-sample measurement result.
+    """Per-sample measurement.
 
-    Raw trace fields (``query``, ``ground_truth``, ``predicted``, ``error``,
-    ``pipeline_data``) are populated at measurement time. ``hit`` and ``fitness``
-    are the *active-scorer projection* — written exclusively by
-    ``rescore_results`` (in ``application.scoring.formula``), which also
-    populates the authoritative ``scored`` audit map (``{scorer_id: {fitness,
-    hit, formula}}`` — one entry per scorer the trace has been scored
-    under). They are ``NotRequired`` because a freshly measured trace has not
-    yet been scored.
+    Raw trace fields (query/ground_truth/predicted/error/pipeline_data) populated
+    at measurement time. ``hit``/``fitness`` are the active-scorer projection,
+    written exclusively by ``rescore_results`` (which also populates the
+    ``scored`` audit map: ``{scorer_id: {fitness, hit, formula}}``). ``NotRequired``
+    because a freshly measured trace hasn't been scored yet.
 
-    ``sample_id`` is the foreign key back to ``Sample.id`` — canonical,
-    assigned at dataset creation, stable across campaigns.
+    ``sample_id`` = foreign key to ``Sample.id``, stable across campaigns.
     """
 
     sample_id: int
@@ -65,20 +50,11 @@ class QueryMeasurement(TypedDict):
     pipeline_data: PipelineData | None
 
 
-# ---------------------------------------------------------------------------
-# Scorer type aliases + sentinel ids
-# ---------------------------------------------------------------------------
-
 Scorer = Callable[[dict[str, Any]], float]
 RoundScorer = Callable[[dict[str, float]], float]
 
 DEFAULT_SCORER_ID = "default_hit"
 EMPTY_SCORER_ID = "none"
-
-
-# ---------------------------------------------------------------------------
-# Twin-form scoring block — parsed shape
-# ---------------------------------------------------------------------------
 
 
 class ScoringSpec(NamedTuple):

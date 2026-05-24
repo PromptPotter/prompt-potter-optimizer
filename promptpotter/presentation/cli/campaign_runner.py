@@ -1,24 +1,8 @@
-"""CLI entry-point facade — COMMANDS dispatch table + ``main()``.
+"""CLI entry-point facade — COMMANDS dispatch + ``main()``. Per-command bodies in ``commands/``.
 
-The per-command bodies live in ``commands/``:
-
-* ``commands/new.py`` — ``cmd_new`` (mint a fresh campaign)
-* ``commands/resume.py`` — ``cmd_resume`` (continue active campaign)
-* ``commands/sweep.py`` — ``cmd_sweep`` (sweep toolkit verbs)
-* ``commands/compare.py`` — ``cmd_compare`` (PoBB cross-cycle comparison)
-* ``commands/reset.py`` — ``cmd_reset`` (escape hatch)
-* ``commands/_shared.py`` — ``CommandResult``, ``set_verbose``,
-  ``init_services_cli``, ``log_startup_summary``, the shared
-  cycle-preparation helpers, and the divergence hint text.
-
-Two write verbs: ``new [DATASET]`` mints a fresh campaign (always);
-``resume`` continues the active session. Reads happen by opening the
-on-disk artifact tree (``sessions/{id}/``, ``campaigns/{campaign_id}/``) —
-``dashboard.json`` for live state, ``log.md`` for the digest,
-``cycles/{cycle_id}/index.json`` for the final summary including
-``stop_reason``. Stop with Ctrl+C — there is no mid-run pause/resume.
-
-``session.py`` carries ``SessionCtx``/``load_session``/``load_campaign_config``.
+Two write verbs: ``new [DATASET]`` mints a fresh campaign; ``resume`` continues
+the active session. Reads = open the on-disk artifact tree
+(``dashboard.json`` / ``log.md`` / ``cycles/{cycle_id}/index.json``). Ctrl+C stops; no mid-run pause.
 """
 
 from __future__ import annotations
@@ -63,10 +47,8 @@ def main() -> None:
     args = parser.parse_args()
     set_verbose(bool(getattr(args, "verbose", False)))
 
-    # Bare invocation defaults to `resume`. Re-parse with the verb injected
-    # so `resume`'s own defaults populate (--from, --fork-on-divergence,
-    # halt/spend, etc.) — otherwise the namespace is missing those attrs
-    # and cmd_resume's getattr-with-default catches it but loses CLI parity.
+    # Bare invocation defaults to `resume`. Re-parse with the verb injected so
+    # `resume`'s own defaults populate (--from, --fork-on-divergence, halt/spend, etc.).
     if args.command is None:
         args = parser.parse_args(["resume"])
 

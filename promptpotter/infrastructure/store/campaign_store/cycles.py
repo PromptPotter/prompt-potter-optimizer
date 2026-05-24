@@ -30,11 +30,8 @@ logger = logging.getLogger(__name__)
 
 
 def _rmtree_robust(path: Path) -> None:
-    """``shutil.rmtree`` that survives Windows-isms.
-
-    Three failure modes handled: long paths (>260 chars) via the ``\\\\?\\``
-    prefix, read-only files (chmod + retry), and transient handles
-    (backoff + retry). Linux/macOS take the same path; the prefix is a no-op.
+    """``shutil.rmtree`` surviving Windows-isms: ``\\\\?\\`` long-path prefix,
+    chmod-on-PermissionError, transient-handle backoff. Prefix is a no-op on POSIX.
     """
     target_str = str(path.resolve())
     if os.name == "nt" and not target_str.startswith("\\\\?\\"):
@@ -62,19 +59,12 @@ def _rmtree_robust(path: Path) -> None:
 
 
 def _unit_kind(sibling_kind: str, fork_trigger: str | None) -> str:
-    """Operator-facing unit kind — the time-horizon taxonomy for the sidebar.
+    """Operator-facing unit kind for the sidebar — four kinds folded from on-disk state:
 
-    Folds the on-disk ``(sibling_kind, fork trigger)`` into four kinds that
-    align with how an operator remembers their work over time:
-
-    - ``session`` — the root run; ``resume`` (incl. Ctrl+C → resume)
-      extends it, never branches.
-    - ``divergent_resume`` — a ``resume --fork-on-divergence`` branch.
-    - ``user_fork`` — any operator-initiated branch: a HITL fork, a
-      diagnostic-BFS sibling, or a sweep-batch fork.
-    - ``l3_fork`` — reserved for L3 auto-forking. No on-disk trigger emits
-      it yet (L3 fork-proposals are observation-only today), so it never
-      appears until that ships.
+    - ``session`` — root run; ``resume`` extends it, never branches.
+    - ``divergent_resume`` — ``resume --fork-on-divergence`` branch.
+    - ``user_fork`` — operator-initiated branch (HITL / diag-BFS / sweep).
+    - ``l3_fork`` — reserved for L3 auto-fork; unused today (L3 fork-proposals are observation-only).
     """
     if sibling_kind == "root":
         return "session"
@@ -102,11 +92,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         cycle_id: str,
         metadata: dict[str, Any],
     ) -> Path:
-        """Create/augment a cycle's ``index.json``.
-
-        Fresh write fills defaults; replay merges new keys without
-        clobbering ``rounds``/``best_*`` accumulators.
-        """
+        """Create/augment cycle ``index.json``; replay merges keys without clobbering ``rounds``/``best_*``."""
         path = self._index_path(campaign_id, cycle_id)
         existing = read_json_optional(path) or {}
         existing.pop("cycle_id", None)
@@ -154,11 +140,8 @@ class CycleIndexMixin(CampaignStoreKernel):
         cycle_id: str,
         after_round: int,
     ) -> None:
-        """Archive round_data/candidate files for rounds > ``after_round``.
-
-        Moves ``rounds/round_{M:04d}.json`` and the matching candidate files
-        for M > after_round into ``.runtime/archived/resumed_at_<ts>/``, then
-        rebuilds the cycle's round index. Admissibility consults the ledger.
+        """Archive ``round_NNNN.json`` + matching candidate files for rounds > ``after_round``
+        into ``.runtime/archived/resumed_at_<ts>/``; rebuild the round index. Ledger-admissibility-gated.
         """
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
         rounds_dir = self._rounds_dir(campaign_id, cycle_id)
@@ -262,22 +245,17 @@ class CycleIndexMixin(CampaignStoreKernel):
         crash_traceback: str | None = None,
         final: dict[str, Any] | None = None,
     ) -> None:
-        """Write the terminal status/stop_reason + outcome summary to the cycle index.
+        """Write terminal status/stop_reason + outcome summary to the cycle index.
 
-        ``final`` is the terminal-summary namespace (``index.json::final``):
-        the frozen verdict the ``potter-l1-meta-campaign`` skill, ``review.md``
-        and the leaderboard read after a cycle ends. The caller assembles it
-        (it needs the optimizer prompt hashes, an application-layer fact);
-        this method only persists it.
+        ``final`` = the frozen verdict (``index.json::final``) read by the meta-campaign
+        skill / ``review.md`` / leaderboard; caller assembles, this just persists.
         """
         from promptpotter.shared.errors import graceful
 
-        # Round count is monotonic. A degenerate finalize — a resume that
-        # diverged or crashed during init, before a Cycle was built — carries
-        # n_rounds=0 / best_accuracy=0.0; it must not regress a cycle that
-        # already completed real rounds. On no-advance, only status /
-        # stop_reason / finished_at reflect this run; the outcome summary and
-        # the frozen `final` block are kept from disk.
+        # Monotonic round count: a degenerate finalize (diverged/crashed during
+        # init, no Cycle built) carries n_rounds=0 and must not regress a cycle
+        # with real rounds. On no-advance, only status/stop_reason/finished_at
+        # reflect this run.
         existing = read_json_optional(self._index_path(campaign_id, cycle_id)) or {}
         no_advance = n_rounds < int(existing.get("n_rounds") or 0)
 
@@ -330,11 +308,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         return results
 
     def enumerate_cycles(self) -> list[dict[str, Any]]:
-        """Every cycle on disk, with the richer shape the webapp picker needs.
-
-        Tolerant of corrupt ``index.json``: a cycle with an unreadable index
-        contributes a stub entry with ``status="unreadable"``.
-        """
+        """Every cycle on disk in the webapp-picker shape; unreadable indexes contribute ``status='unreadable'`` stubs."""
         results: list[dict[str, Any]] = []
         for index_path in self._index_files():
             campaign_id, cycle_id = self._ids_from_index_path(index_path)
@@ -396,11 +370,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         return results
 
     def try_delete_stub_cycle(self, campaign_id: str, cycle_id: str) -> tuple[bool, str]:
-        """Delete a stub cycle dir; return ``(deleted, reason)``.
-
-        Guards: dir exists, ``n_rounds == 0``, cycle is not a family root,
-        and no other cycle in the campaign names it as ``parent_cycle_id``.
-        """
+        """Delete a stub cycle dir → ``(deleted, reason)``. Guards: dir exists, ``n_rounds == 0``, not a family root, no children."""
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
         index_path = cycle_dir / "index.json"
         if not index_path.is_file():

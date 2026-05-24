@@ -20,12 +20,10 @@ if TYPE_CHECKING:
 
 
 class BackendStore:
-    """File I/O for backend registration and synced API responses.
+    """Backend registration + synced API responses + dataset cache.
 
-    Backends live under ``archive/backends/{backend_id}/`` —
-    machine state the runtime needs (registration record, sync responses,
-    connector profile). Named datasets live outside the tenant tree at
-    ``{datasets_root}/{name}/cache.json`` so they survive
+    Backends: ``archive/backends/{backend_id}/``. Named datasets sit outside
+    the tenant tree at ``{datasets_root}/{name}/cache.json`` so they survive
     ``.promptpotter/`` resets.
     """
 
@@ -96,10 +94,7 @@ class BackendStore:
             return []
         return [read_json(p) for p in sorted(exp_dir.glob("*.json"))]
 
-    # -- datasets (repo-adjacent, gitignored) ----------------------------------
-    # Datasets are identified by name alone, not by backend. Caches live at
-    # ``{datasets_root}/{name}/cache.json`` next to each dataset's
-    # pipeline.json / campaign.json, and survive ``.promptpotter/`` resets.
+    # -- datasets (repo-adjacent, gitignored, name-keyed) ----------------------
 
     def _dataset_cache_path(self, name: str) -> Path:
         validate_path_component(name)
@@ -112,11 +107,7 @@ class BackendStore:
         *,
         source_file: str = "",
     ) -> Path:
-        """Write a named dataset to disk.
-
-        ``items`` may be ``list[Sample]`` or ``list[dict]``; Samples are
-        serialized via ``model_dump()``.
-        """
+        """Write a named dataset to disk; ``Sample`` items serialized via ``model_dump()``."""
         from promptpotter.domain.sample import Sample
 
         serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
@@ -140,15 +131,11 @@ class BackendStore:
         name: str,
         exclusions: list[dict[str, Any]],
     ) -> int:
-        """Atomically move items from ``items`` into the ``excluded`` sidelist.
+        """Atomically move ``items`` → ``excluded`` sidelist. Idempotent: unknown queries skipped.
 
-        Each entry in ``exclusions`` must have a ``query`` key matching the
-        ``query`` field of an active item, plus arbitrary metadata
-        (``reason``, ``hit_rate``, ``observations``, ``campaign_id``, …) that
-        will be persisted alongside the original item.
-
-        Returns the number of items actually moved. Items whose query is not
-        in the active list are silently skipped (idempotent).
+        Each ``exclusions`` entry: ``query`` matching an active item + metadata
+        (``reason``, ``hit_rate``, ``observations``, ``campaign_id``) persisted alongside.
+        Returns the move count.
         """
         data = self.load_dataset(name)
         if data is None:
@@ -193,11 +180,7 @@ class BackendStore:
         name: str,
         queries: list[str] | None = None,
     ) -> int:
-        """Move items from ``excluded`` back into ``items``.
-
-        If ``queries`` is None, restores everything. Returns the number of
-        items actually restored.
-        """
+        """Move items from ``excluded`` back into ``items``; ``queries=None`` ⇒ restore all. Returns count."""
         data = self.load_dataset(name)
         if data is None:
             return 0

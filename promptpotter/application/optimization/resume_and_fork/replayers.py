@@ -1,14 +1,9 @@
 """Decision replayers — re-derive each ``REPLAYED`` decision under the active scorer.
 
-``replay_decisions`` walks ``round_data['decisions']`` in order and
-returns the first :class:`Divergence` (recorded outcome != current
-outcome). Replayers are pure functions over a :class:`ReplayContext`
-snapshot — they MUST NOT touch the live ``Cycle`` or write to the
-ledger; resume policy lives in :func:`resume_with_divergence_check`.
-
-``REPLAYERS`` is the single registry; ``RESUME_CHECKPOINT_GATING`` (in
-:mod:`.decisions`) declares which kinds are ``REPLAYED`` and an
-import-time check fails if any ``REPLAYED`` kind has no replayer here.
+``replay_decisions`` walks ``round_data['decisions']`` and returns the
+first :class:`Divergence`. Replayers are pure over :class:`ReplayContext`;
+MUST NOT touch the live ``Cycle`` or ledger. Import-time check below
+catches any ``REPLAYED`` kind without a registered replayer.
 """
 
 from __future__ import annotations
@@ -79,8 +74,7 @@ def replay_decisions(
         try:
             current = fn(ctx, rec.get("inputs_ref") or {}, rec.get("data") or {})
         except Exception:
-            # Replayer failure shouldn't poison resume — treat as non-divergence,
-            # but surface it: a silently-skipped replayer hides real scorer drift.
+            # Non-divergence on replayer crash, but surface — silent skip hides scorer drift.
             logger.warning(
                 "replayer for decision kind %r crashed during resume divergence "
                 "check; treating as non-divergence",
@@ -130,14 +124,10 @@ def _pobb_replay_snapshot(
 ) -> tuple[str, dict[str, float]] | None:
     """Build (candidate_id, posterior snapshot) for paired PoBB replay.
 
-    Paired comparison: candidate vector is the rescored per-sample fitness on
-    ``data.candidate_sample_ids`` (lookup into the round's ``all_candidate_results``);
-    each prior vector is ``data.prior_histories[cid]`` mapped over the same sample
-    IDs. Both arms are over identical sample sets, so the seeded MC matches the
-    record-time draws bit-for-bit when no scorer change occurred.
-
-    Returns None when the record predates paired snapshots or the candidate's
-    rescored measurements aren't available.
+    Both arms map ``data.candidate_sample_ids`` to per-sample fitness; identical
+    sample sets + seeded MC ⇒ bit-for-bit match with record-time when no scorer
+    change occurred. ``None`` ⇒ record predates paired snapshots or rescored
+    measurements aren't available.
     """
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     candidate_sample_ids = [str(s) for s in (data.get("candidate_sample_ids") or [])]
@@ -166,9 +156,8 @@ def _pobb_replay_snapshot(
     round_num = int(inputs_ref.get("round_num", ctx.round_data.get("round", 0)))
     rng = pobb_rng(round_num, candidate_id, list(paired_priors.keys()), len(current))
     p_better = paired_better_probabilities(current, paired_priors, rng=rng)
-    # Snapshot mirrors PoBBCheck.check's shape: per-prior P(cand > prior)
-    # plus ``candidate_id → min(values())`` summary entry so replayers
-    # read ``snapshot[candidate_id]`` exactly like the live path.
+    # Mirror PoBBCheck.check shape: per-prior P(cand > prior) + ``cid → min``
+    # so replayers read ``snapshot[candidate_id]`` exactly like the live path.
     snapshot: dict[str, float] = {**p_better, candidate_id: min(p_better.values())}
     return candidate_id, snapshot
 
@@ -205,8 +194,7 @@ def _replay_leader_lock_in(
     if snap is None:
         return False
     candidate_id, snapshot = snap
-    # Under paired PoBB, ``candidate_id → min(per-prior P(cand > prior))``
-    # is already the lock-in metric; no separate ``leader == cid`` guard.
+    # Paired PoBB: ``cid → min`` is the lock-in metric; no separate leader guard.
     fresh = float(snapshot.get(candidate_id, 0.0))
     threshold = float(inputs_ref.get("lock_in", 0.95))
     recorded = inputs_ref.get("recorded_p_best")
@@ -265,10 +253,8 @@ _replay_l2_trigger = _replay_layer_trigger("l2_patience")
 _replay_l3_trigger = _replay_layer_trigger("l3_patience")
 
 
-# Explicit decision-replayer registry. ``RESUME_CHECKPOINT_GATING`` is the source of
-# truth for which kinds exist; the assertion below enforces that every
-# REPLAYED kind has a replayer here, so resume can never silently treat an
-# unhandled kind as non-divergence.
+# ``RESUME_CHECKPOINT_GATING`` enumerates the kinds; the assertion below
+# fails import if any REPLAYED kind has no replayer here.
 REPLAYERS: dict[ResumeCheckpointKind, Replayer] = {
     ResumeCheckpointKind.ROUND_WINNER: _replay_round_winner,
     ResumeCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,

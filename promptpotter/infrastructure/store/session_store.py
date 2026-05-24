@@ -15,12 +15,7 @@ from promptpotter.infrastructure.store.paths import session_dir_for
 
 
 class SessionStore:
-    """File I/O for per-session artifacts.
-
-    Sessions are tenant-scoped (no ``backend_id`` axis). The store is
-    rooted at the tenant directory; per-session content nests under
-    ``sessions/{session_id}/``.
-    """
+    """Tenant-scoped per-session artifacts at ``sessions/{session_id}/`` (no ``backend_id`` axis)."""
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
@@ -37,11 +32,7 @@ class SessionStore:
     # -- Session CRUD ---------------------------------------------------------
 
     def create(self, session_id: str, state: dict[str, Any]) -> Path:
-        """Write ``session.json`` with timestamps.
-
-        Idempotent: a re-create preserves the existing ``created_at`` and
-        merges new keys over old. ``updated_at`` is always now.
-        """
+        """Idempotent ``session.json`` write — preserves ``created_at``, merges over old, refreshes ``updated_at``."""
         path = self._state_path(session_id)
         existing = read_json_optional(path) or {}
         now = datetime.now(UTC).isoformat()

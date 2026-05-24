@@ -1,14 +1,8 @@
-"""Run observers + callbacks — single ingress for CLI, notebook, future webapp.
+"""Run observers + callbacks — single ingress for CLI/notebook/webapp.
 
-Two halves of one lifecycle live here:
-
-* ``RunCallbacks`` — typed event constructor over ``CycleEventLog.append``;
-  the writer-side API the optimization loop calls into. Subscribers consume
-  via ``on_record`` on the bound ledger.
-* ``build_run_observers`` — wires every projection (audit trail, live
-  dashboard, PoBB stream) plus an optional ``LiveDisplay`` to one ledger,
-  auto-minting session+cycle if needed and re-anchoring on a fork. Returns
-  a frozen ``RunObservers`` whose callbacks already hold the bound ledger.
+- ``RunCallbacks`` — typed-event constructor over ``CycleEventLog.append`` (writer API).
+- ``build_run_observers`` — wires audit + live dashboard + PoBB stream +
+  optional ``LiveDisplay`` to one ledger, auto-mints session+cycle, re-anchors on fork.
 """
 
 from __future__ import annotations
@@ -49,10 +43,9 @@ __all__ = ["ForkInfo", "RunCallbacks", "RunObservers", "build_run_observers"]
 class RunCallbacks:
     """Single ingress: callbacks → typed CycleRecord → ``CycleEventLog.append``.
 
-    Subscribers consume via ``on_record`` on the bound ledger. PhaseRecord-view
-    ctx is owned here (``from_phase_event`` is stateful) and serialised onto
-    ``PhaseRecord.payload['view']``. Ledger is required at construction — no
-    deferred binding, no buffer.
+    Ledger required at construction (no deferred binding). PhaseRecord-view ctx
+    is owned here (``from_phase_event`` is stateful) and serialised onto
+    ``PhaseRecord.payload['view']``.
     """
 
     ledger: CycleEventLog
@@ -75,9 +68,7 @@ class RunCallbacks:
         )
 
     def on_round_complete(self, round_result: Any, l1_stall_count: int) -> None:
-        # Display-only emit: distinct ``event="display"`` so the audit emit
-        # (``event="complete"``, lean scalars) is the sole input to
-        # ``EscalationState.fold``. No payload-shape demultiplex.
+        # ``event="display"`` keeps ``EscalationState.fold`` reading only the lean ``event="complete"`` audit emit.
         self._phase_ctx["l1_stall_count"] = l1_stall_count
         self._emit(
             PhaseRecord(
@@ -177,21 +168,10 @@ class RunCallbacks:
         n_priors: int,
         sample_order: list[int],
     ) -> None:
-        """Adaptive picker preview — top-3 expected next samples by
-        expected information gain under the prior posterior (1PL Rasch
-        CAT), plus the full expected order so the webapp dataset table
-        can re-sort live to mirror what the picker would pick if outcomes
-        follow the prior.
-
-        Fired at the start of each candidate before scoring begins.
-        Live execution re-picks per step via the online posterior fold;
-        this snapshot is the "what the picker thinks before any outcome"
-        view, useful for the operator's running mental model of which
-        samples are in scope. ``sample_order`` is the full dataset
-        ranked by expected information gain under the prior; the
-        artifact's hardest-first ``sample_order`` (heatmap x-axis) is
-        distinct — that ranking is absolute difficulty, this one is
-        "expected information value at the candidate's prior ability."
+        """Adaptive-picker preview at candidate start — top-3 next samples + full
+        expected-info-gain order under the prior (1PL Rasch CAT) so the webapp
+        table can re-sort live. Distinct from the heatmap's hardest-first
+        ``sample_order`` (absolute difficulty vs expected info value here).
         """
         self._snapshot(
             "sample_order_preview",
@@ -213,13 +193,7 @@ class RunCallbacks:
         sample_id: int,
         prior_ids: list[str],
     ) -> None:
-        """Paired-PoBB priors caught up on the just-measured sample.
-
-        Fired by the candidate loop's per-sample backfill closure when at
-        least one prior gained a measurement on ``sample_id``. Sample-hits
-        where every prior was already cached are NOT emitted — absence
-        means the cache covered it.
-        """
+        """Paired-PoBB priors caught up on the just-measured sample; absence ⇒ cache covered it."""
         if not prior_ids:
             return
         self._snapshot(
@@ -234,13 +208,7 @@ class RunCallbacks:
         self._current_round = round_num
 
     def on_token_usage(self, usage: TokenUsage) -> None:
-        """Forward an ``emit_token_usage`` event into the ledger.
-
-        Installed as ``infrastructure.llm.set_token_usage_sink`` by the
-        runner, so every optimizer LLM call's token + cost lands as a
-        ``TokenUsageRecord``. The dashboard projection sums the records
-        into ``dashboard.json::spend.loop``.
-        """
+        """Forward ``emit_token_usage`` → ``TokenUsageRecord``; dashboard sums into ``spend.loop``. Installed via ``set_token_usage_sink`` by the runner."""
         self._emit(
             TokenUsageRecord(
                 kind=usage.kind,
@@ -266,14 +234,7 @@ class RunObservers:
     display: LiveDisplay | None
 
     def drain_all(self) -> None:
-        """Call ``drain()`` on every projection in the bundle.
-
-        The runner invokes this in ``_finalize_run`` regardless of stop
-        reason so the audit cache reflects whatever the ledger has, even
-        when an interrupt prevented the round's ``round:complete`` event.
-        Incremental projections (``LiveDashboardView``, ``PoBBStreamView``)
-        inherit the no-op default.
-        """
+        """``drain()`` every projection; called by ``_finalize_run`` so the audit cache reflects the ledger even on interrupt."""
         self.audit.drain()
         self.dashboard.drain()
         self.pobb.drain()
@@ -331,13 +292,10 @@ def build_run_observers(
 ) -> RunObservers:
     """Mint session if needed; open ledger; build + bind every observer.
 
-    Pass ``fork=None`` for a fresh cycle (mints a new dashboard anchored at
-    the family root). Pass ``fork=ForkInfo(...)`` when a fork-on-divergence
-    has just minted a sibling cycle — the parent's dashboard is reattached
-    to the fork's audit projection and the ledger inherits from the parent
-    at its current offset. ``origin_accuracy`` is a seed for
-    ``dashboard.json``; the real value lands on the next ``INIT/exit``
-    phase event after origin runs.
+    ``fork=None`` ⇒ fresh cycle (new dashboard anchored at family root).
+    ``fork=ForkInfo(...)`` ⇒ reattach parent's dashboard, inherit ledger from
+    parent's current offset. ``origin_accuracy`` is a seed; real value lands
+    on the next ``INIT/exit`` event.
     """
     if fork is None:
         _ensure_session_minted(
@@ -390,10 +348,7 @@ def build_run_observers(
     session.state.ledger = ledger
 
     callbacks = RunCallbacks(ledger=ledger)
-    # Route every optimizer ``emit_token_usage`` call into the cycle
-    # ledger via on_token_usage → TokenUsageRecord; the dashboard
-    # projection sums these into spend.loop. The sink is process-global,
-    # so a subsequent build_run_observers call cleanly replaces it.
+    # Sink is process-global; a subsequent build_run_observers call replaces it cleanly.
     from promptpotter.infrastructure.llm import set_token_usage_sink
 
     set_token_usage_sink(callbacks.on_token_usage)

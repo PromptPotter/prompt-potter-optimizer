@@ -106,25 +106,19 @@ class OpenAICompatibleClient(LLMClientBase):
 
         request_params.update(kwargs)
 
-        # Proactive tier check + throttle. If the configured TPM cap can never
-        # fit this request, fail fast before any network call. Otherwise block
-        # until sending it stays within the rolling-window budget.
+        # Fail-fast on un-fittable TPM; otherwise block until inside the rolling window.
         reservation = await acquire_reservation(
             self._rate_limiter, messages, max_tokens, self._provider_name
         )
 
         result = await self._one_attempt(client, request_params, response_model, response_schema)
         if isinstance(result, LLMResponse):
-            # Groq json_validate_failed salvage — already parsed + typed.
-            return result
+            return result  # Groq json_validate_failed salvage — already typed.
         response, content, validation_err = result
         schema_repair_attempts = 0
         if validation_err is not None:
-            # First attempt failed Pydantic validation; retry once with the
-            # bad output + a repair hint appended to the message list. Keeps
-            # the original system/user context intact. The retry is a full
-            # second LLM round-trip — surface that to the operator so the
-            # extra wall-clock + spend isn't silent.
+            # Repair retry: full second round-trip with the bad output + hint
+            # appended. Logged so the ~2× cost + latency isn't silent.
             schema_name = response_model.__name__ if response_model else "<schema>"
             content_len = len(content.strip())
             cause = (
@@ -210,22 +204,15 @@ class OpenAICompatibleClient(LLMClientBase):
         response_model: type[BaseModel] | None,
         response_schema: dict[str, Any] | None,
     ) -> LLMResponse | tuple[Any, str, ValidationError | None]:
-        """One round-trip to the provider plus a parse pre-flight.
+        """One provider round-trip + parse pre-flight.
 
-        Returns either:
-          * an :class:`LLMResponse` when the Groq ``json_validate_failed``
-            salvage path fired (the salvaged content was already Pydantic-
-            validated inside :func:`try_groq_json_validate_repair`); the
-            caller returns it verbatim.
-          * a ``(response, content, validation_err)`` tuple otherwise. When
-            ``validation_err`` is ``None`` the content passed validation and
-            the caller continues to the final ``LLMResponse`` assembly;
-            otherwise the caller decides retry vs raise.
+        Returns either an :class:`LLMResponse` (Groq ``json_validate_failed``
+        salvage — already validated) or ``(response, content, validation_err)``
+        — caller decides retry vs raise on non-None ``validation_err``.
 
-        SDK ``max_retries`` handles 408/409/429/5xx + Retry-After. We only
-        intercept terminal request-too-large, 404 model-not-found, and Groq's
-        400 ``json_validate_failed`` quirk. ``with_raw_response`` exposes
-        ``x-ratelimit-limit-*`` headers so the limiter can self-tune.
+        SDK ``max_retries`` covers 408/409/429/5xx + Retry-After; this layer
+        only intercepts request-too-large, 404 model-not-found, and Groq's 400
+        quirk. ``with_raw_response`` exposes ``x-ratelimit-limit-*`` for the limiter.
         """
         try:
             raw = await client.chat.completions.with_raw_response.create(**request_params)
@@ -261,9 +248,7 @@ class OpenAICompatibleClient(LLMClientBase):
         request_params: dict[str, Any],
         response_model: type[BaseModel] | None,
     ) -> LLMResponse | None:
-        """Translate known errors: too-large raises, 404 raises a clearer
-        ValueError, Groq json_validate_failed salvages. Returns ``None`` to
-        re-raise the original exception."""
+        """Known-error translation: too-large + 404 raise clearer, Groq json_validate_failed salvages, else ``None`` ⇒ re-raise."""
         raise_if_request_too_large(exc, self._provider_name)
         if getattr(exc, "status_code", None) == 404:
             model_name = request_params.get("model", "unknown")

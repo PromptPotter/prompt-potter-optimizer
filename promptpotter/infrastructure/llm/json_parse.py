@@ -1,11 +1,9 @@
 """JSON parsing, repair, and post-response validation for LLM outputs.
 
-``json_repair.repair_json`` is the single repair surface for everything
-the hand-rolled regex repair this replaced couldn't handle (invalid
-``\\X`` escapes, trailing commas, unquoted keys, brace truncation).
-``_try_groq_json_validate_repair`` salvages Groq's 400
-``json_validate_failed`` quirk where the original (parseable) JSON sits
-inside the error body's ``failed_generation`` field.
+``json_repair.repair_json`` handles invalid ``\\X`` escapes, trailing commas,
+unquoted keys, brace truncation. ``try_groq_json_validate_repair`` salvages
+Groq's 400 ``json_validate_failed`` where the original JSON sits in
+``failed_generation``.
 """
 
 from __future__ import annotations
@@ -22,12 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 class MetaPromptParseError(RuntimeError):
-    """LLM returned content that failed Pydantic validation against a response_model.
+    """LLM returned content that failed Pydantic validation after one repair-hint retry.
 
-    Raised by :func:`OpenAICompatibleClient.chat` after one repair-hint
-    retry. Carries the raw content + the last validation error so the
-    L1-layer can record a ``ValidationFailure`` wound and L2 can heal the
-    meta-prompt on the next round.
+    Carries raw + last ValidationError → L1 records Wound 1, L2 heals next round.
     """
 
     def __init__(self, raw: str, error: ValidationError, *, attempts: int = 2):
@@ -43,12 +38,8 @@ class MetaPromptParseError(RuntimeError):
 def try_parse_json(content: str, provider: str) -> Any | None:
     """Parse JSON from response content; return None on failure.
 
-    Strips markdown code fences (Groq/Kimi emit ```json ... ``` even with
-    ``response_format=json``), then delegates to ``json_repair.repair_json``
-    for everything else (invalid ``\\X`` escapes, trailing commas, unquoted
-    keys, brace truncation). One library, one repair surface — the
-    hand-rolled regex repair this replaced couldn't handle invalid escape
-    sequences (the failure mode that produced the audit).
+    Strips ```json ... ``` fences (Groq/Kimi emit them even with
+    ``response_format=json``), then delegates to ``json_repair.repair_json``.
     """
     text = content.strip()
     if text.startswith("```"):
@@ -66,10 +57,8 @@ def try_parse_json(content: str, provider: str) -> Any | None:
 
 
 def _unwrap_single_element_list(parsed: Any) -> Any:
-    # Groq/openai-oss occasionally wraps the top-level structured-output
-    # object in a single-element list — strip parallel to the code-fence
-    # strip in try_parse_json. Every optimizer response_model is a
-    # root-object Pydantic model, so this is unambiguous.
+    # Groq/openai-oss occasionally wraps the structured-output object in a
+    # single-element list; every optimizer response_model is a root-object.
     if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
         return parsed[0]
     return parsed
@@ -78,15 +67,9 @@ def _unwrap_single_element_list(parsed: Any) -> Any:
 def extract_parsed_json(response: Any) -> Any:
     """Return the parsed JSON object from an ``LLMResponse``.
 
-    ``OpenAICompatibleClient.chat()`` and ``AnthropicClient.chat()`` already
-    populate ``response.parsed`` via :func:`try_parse_json` for every
-    ``json``/``json_schema`` call. This function exists for the rare
-    ``output_format='text'`` caller that happens to want JSON back; in that
-    path ``response.parsed`` is ``None`` and we attempt the same repair
-    pipeline. If even repair fails, raise a ``ValueError`` carrying a
-    diagnostic snippet — the prior raw ``json.loads`` fallback was dead
-    code (re-ran ``json.loads`` on content ``try_parse_json`` had already
-    given up on) and is gone.
+    JSON-mode calls populate ``response.parsed`` upstream; this is the
+    ``output_format='text'`` fallback that re-attempts the repair pipeline,
+    raising ``ValueError`` with a snippet if even repair fails.
     """
     if response.parsed is not None:
         return response.parsed
@@ -104,28 +87,16 @@ def parse_response_content(
     response_schema: dict[str, Any] | None,
     provider_name: str,
 ) -> Any | None:
-    """Decode + (optionally) validate provider-returned content.
+    """Decode + (optionally) validate provider-returned content. Mirrors ``chat()``'s contract:
 
-    Three modes (mirrors ``chat()``'s contract):
-      - ``response_model is None and response_schema is None``: text mode,
-        return ``None``.
-      - ``response_model is None and response_schema is not None``:
-        JSON-mode dict — parse via ``try_parse_json``, return dict (or
-        ``None`` if even repair fails).
-      - ``response_model is not None``: parse via ``try_parse_json`` then
-        ``response_model.model_validate(...)`` for type-level guarantee.
-        Raises ``ValueError`` on unparseable content and ``ValidationError``
-        on empty content (a structured call that came back empty is a
-        provider failure, not a valid ``None``).
+    - both ``None``: text mode → ``None``.
+    - only ``response_schema``: JSON-mode dict (``None`` on repair fail).
+    - ``response_model`` set: parse + ``model_validate``; ``ValueError`` on
+      unparseable, ``ValidationError`` on empty (reasoning models can burn
+      their full budget on reasoning and emit empty ``content`` — must not
+      leak past the schema guard as ``parsed=None``).
     """
     if not content or not content.strip():
-        # Empty content. For a typed structured call this is a provider
-        # failure, not a valid ``None``: a reasoning model can spend its
-        # whole token budget on reasoning and emit empty ``content``.
-        # ``model_validate(None)`` raises a ``ValidationError`` that
-        # ``_one_attempt`` catches, so the repair retry — and then
-        # ``MetaPromptParseError`` — fires, instead of the empty leaking
-        # downstream as ``parsed=None`` → ``""`` past the schema guard.
         if response_model is not None:
             response_model.model_validate(None)
         return None
@@ -166,13 +137,7 @@ def try_groq_json_validate_repair(
     provider_name: str,
     response_model: type[BaseModel] | None,
 ) -> LLMResponse | None:
-    """Groq-specific: turn a 400 ``json_validate_failed`` into a salvaged response.
-
-    Returns ``None`` for any error that isn't this exact quirk so the caller
-    re-raises. No-op for non-Groq providers — they don't surface this status.
-    When ``response_model`` is supplied, the salvaged dict is validated and
-    the typed instance lands on ``LLMResponse.parsed``.
-    """
+    """Groq 400 ``json_validate_failed`` → salvaged ``LLMResponse``; ``None`` otherwise (caller re-raises)."""
     if getattr(exc, "status_code", None) != 400 or "json_validate_failed" not in str(exc):
         return None
     repaired = _repair_json_validate_failure(str(exc))

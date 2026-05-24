@@ -59,8 +59,8 @@ class CandidateScore:
     runtime_failures: list[dict[str, Any]] = field(default_factory=list)
     elimination_context: dict[str, Any] = field(default_factory=dict)
     degradation_context: dict[str, Any] = field(default_factory=dict)
-    # Origin stats restricted to this candidate's measured samples — apples-to-apples for
-    # PoBB-locked candidates that stopped mid-budget. Equals full-set origin when fully scored.
+    # Origin restricted to this candidate's measured samples — apples-to-apples
+    # when PoBB locks mid-budget; equals full-set origin when fully scored.
     matched_origin_accuracy: float = 0.0
     matched_origin_hits: int = 0
     matched_origin_composite: float = 0.0
@@ -99,9 +99,7 @@ class CandidateScore:
 
 
 class CandidateProposal(BaseModel):
-    """LLM-proposed candidate — OSP + nested pipeline-params override, persisted across generate→score
-    so resume can replay without re-querying the LLM. Override deep-merges onto base at score time.
-    """
+    """LLM-proposed candidate — OSP + nested pipeline-params override, persisted across generate→score for resume replay."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -109,9 +107,7 @@ class CandidateProposal(BaseModel):
     pipeline_params_override: dict[str, dict[str, Any]] = Field(default_factory=dict)
     evidence_grounding: EvidenceGrounding | None = Field(
         default=None,
-        description="L1-declared panel evidence for this proposal. Mirrors "
-        "``osp.lineage.evidence_grounding`` — duplicated on the proposal so "
-        "audit / display sites can read it before the OSP is constructed.",
+        description="Mirrors osp.lineage.evidence_grounding — duplicated so audit / display sites can read it before OSP construction.",
     )
 
 
@@ -129,9 +125,7 @@ class RoundOrigin(BaseModel):
 
 
 class RoundMetadata(BaseModel):
-    """Checkpoint-critical scalars (no raw payloads) — what a termination/escalation/dashboard
-    reader needs. `RoundResult` inherits these flat for wire-format compatibility.
-    """
+    """Checkpoint-critical scalars (no raw payloads); `RoundResult` inherits flat for wire-format compat."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -142,58 +136,51 @@ class RoundMetadata(BaseModel):
     hits: int
     total: int
     improved: bool
-    # One-sided two-proportion p-value vs origin; consumed by the IMPROVED gate (not just display).
-    # None means no test could run.
+    # One-sided two-proportion p-value vs origin; drives the IMPROVED gate. None ⇒ no test ran.
     p_value: float | None = None
-    # When `improved=False` despite Δ>0: names which of {delta_threshold, significance, min_samples}
-    # blocked promotion. Persisted so log.md/dashboard render the verdict reason without re-deriving.
+    # When `improved=False` despite Δ>0: which of {delta_threshold, significance, min_samples} blocked promotion.
     improved_reason: str | None = None
     degraded_samples: int = 0
     # Fatal-warning samples discarded from hits/total/accuracy on the winner's run.
     deprecated: int = 0
     escalation_signal: EscalationSignal | None = None
-    # Origin stats restricted to the winner's measured samples — keeps the comparison fair when
-    # PoBB leader-locks at q8/20 while origin has 20. Drives `improved`, p_value, and verdict Δ.
+    # Origin restricted to the winner's measured samples — apples-to-apples when PoBB locks
+    # at q8/20 while origin has 20. Drives `improved`, p_value, verdict Δ.
     matched_origin_accuracy: float = 0.0
     matched_origin_hits: int = 0
     matched_origin_composite: float = 0.0
-    # Per-sample best-so-far across all rounds, snapshotted after absorbing this round —
-    # so dashboard/log.md render "current best on N measured" without walking priors.
+    # Per-sample best-so-far across rounds; dashboard renders "current best on N measured" without walking priors.
     cumulative_total: int = 0
     cumulative_accuracy: float = 0.0
 
 
 class RoundPayload(BaseModel):
-    """Raw round payload — per-candidate detail for replay (resume rescoring), audit, full rendering."""
+    """Raw round payload — per-candidate detail for replay, audit, full rendering."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     prompt_fields: dict[str, Any]
     pipeline_params: dict[str, Any] | None = None
-    # Comparison anchor: prior round's accuracy (or campaign origin for round 0).
+    # Prior round's accuracy (or campaign origin for round 0).
     origin_accuracy: float = 0.0
     results: list[dict[str, Any]] = Field(default_factory=list)
-    # Per-candidate scored results, keyed by candidate id — so resume can rescore under a changed
-    # scorer and replay decisions without re-running the pipeline.
+    # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     candidates_scored: int
     candidate_scores: list[dict[str, Any]] = Field(default_factory=list)
-    # ResumeCheckpoint records produced this round (round_winner, elimination_cut, …) —
-    # consumed by the divergence replay walker in `optimization/cycle.py`.
+    # ResumeCheckpoint records consumed by the divergence-replay walker.
     decisions: list[dict[str, Any]] = Field(default_factory=list)
     evaluators: dict[str, float] = Field(default_factory=dict)
-    # L1 generation quality — yield fraction + per-class failure counts. Defaults assume "all valid"
-    # for replay paths that bypass the detector. Surfaced as the `l1_diversity` evaluator.
+    # L1 yield + failure counts; defaults assume "all valid" for replay paths bypassing the detector.
     l1_yield: float = 1.0
     l1_n_no_op: int = 0
     l1_n_duplicate: int = 0
 
 
 class RoundResult(RoundMetadata, RoundPayload):
-    """Round outcome — flat conjunction of `RoundMetadata` + `RoundPayload`, wire-compatible with `index.json`.
+    """Flat conjunction of `RoundMetadata` + `RoundPayload`, wire-compatible with `index.json`.
 
-    `diagnostics` (rank dist / trajectory / near-misses) + `critique` are computed post-scoring and
-    read by the dispatch hub's `diagnostics` / `critique` signals.
+    `diagnostics` + `critique` computed post-scoring; read by dispatch's `diagnostics`/`critique` signals.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -222,9 +209,10 @@ class CycleResult(BaseModel):
 
 
 class DiagnosticRunRecord(BaseModel):
-    """One on-demand verification of a campaign candidate vs more samples — written by `cmd_verify`,
-    consumed by the webapp's Verify tab. Per-sample data lands in `archive/measurements/`; this
-    record carries the workspace-scope verdict (did the source-campaign composite hold).
+    """One on-demand candidate verification → webapp Verify tab.
+
+    Per-sample data lands in `archive/measurements/`; this record carries the
+    workspace-scope verdict (did the source-campaign composite hold).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -247,9 +235,7 @@ class DiagnosticRunRecord(BaseModel):
 
 
 class RoundSummaryCandidate(BaseModel):
-    """Display-summary row for `dashboard.json::rounds[].candidates` — strict subset of `CandidateScore`,
-    only what the chart/lineage/sparkline render. Deep audit stays in `round_NNNN.json`.
-    """
+    """Display-summary row for `dashboard.json::rounds[].candidates` — chart/lineage/sparkline subset of `CandidateScore`."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -265,9 +251,10 @@ class RoundSummaryCandidate(BaseModel):
 
 
 class RoundSummary(BaseModel):
-    """Display row for `dashboard.json::rounds[]` — webapp's sole source for completed-round bars
-    (in-flight round rides `current_round`). Top-level `accuracy`/`composite_fitness` mirror the
-    winner so trend/sparkline don't have to scan `candidates`.
+    """Display row for `dashboard.json::rounds[]` — webapp's completed-round source.
+
+    Top-level `accuracy`/`composite_fitness` mirror the winner so trend/sparkline
+    don't scan `candidates`. In-flight round rides `current_round`.
     """
 
     model_config = ConfigDict(frozen=True)

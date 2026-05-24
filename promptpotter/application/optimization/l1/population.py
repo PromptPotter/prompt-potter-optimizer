@@ -1,18 +1,6 @@
-"""L1 population shaping: project proposals → OSP, build score reports.
+"""L1 population shaping: project proposals → OSP + build score reports.
 
-These helpers run between L1's two phases — generation (``l1_generate``)
-produces ``CandidateProposal``s, scoring (``score_population`` /
-``l1_score``) consumes ``OptSearchPoint``s and emits ``CandidateScore``s.
-This module owns:
-
-- ``parse_population`` — proposals → OSPs + merged pipeline_params,
-  attaching schema-compliance failures.
-- ``_merge_pipeline_params`` — deep-merge LLM overrides into the active
-  ``pipeline_params``, dropping overrides for excluded nodes.
-- ``_build_score_report`` — typed ``CandidateScore`` factory with stable
-  defaults across the four exit paths in ``score_population``.
-- ``_pobb_decision_data`` — shared archival blob for elimination + lock-in
-  decisions.
+Sits between L1 generation (``CandidateProposal``) and L1 scoring (``CandidateScore``).
 """
 
 from __future__ import annotations
@@ -74,11 +62,10 @@ def parse_population(
     *,
     forbidden_axes_strict: bool = True,
 ) -> tuple[list[OptSearchPoint], list[dict[str, Any] | None]]:
-    """Project proposals → OptSearchPoints + merged pp; attaches validation failures.
+    """Project proposals → OptSearchPoints + merged pp; attach validation failures.
 
-    ``forbidden_axes_strict`` (default on) gates the strict-mode rejection
-    of ``model``/``provider`` mutations — see
-    ``OptimizationConfig.forbidden_axes_strict``.
+    ``forbidden_axes_strict`` (default on) gates strict-mode rejection of
+    ``model``/``provider`` mutations (see ``OptimizationConfig.forbidden_axes_strict``).
     """
     osp_list: list[OptSearchPoint] = []
     merged: list[dict[str, Any] | None] = []
@@ -94,10 +81,8 @@ def parse_population(
             failures: list[ValidationFailure] = []
             if outcome is not None:
                 failures.extend(outcome.evidence["failures"])
-            # Re-propose check: rejects (param, value) tuples already in
-            # opt_sp.wounds.runtime_failures (intra-cycle or inherited from
-            # sibling forks via Cycle.start). Runs even when schema-compliance
-            # passes — different rejection class.
+            # Re-propose check: rejects (param, value) already in
+            # opt_sp.wounds.runtime_failures; runs even when schema-compliance passes.
             rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
                 pipeline_params_override,
                 opt_sp=osp,
@@ -137,16 +122,11 @@ def build_score_report(
     new_runtime_failure: RuntimeFailure | None = None,
     l1_diversity: float = 1.0,
 ) -> CandidateScore:
-    """Build the typed candidate score report — stable shape, defaults always present.
+    """Typed candidate score report — stable shape, defaults always present.
 
-    ``label`` is the persisted display identity (``"C0"`` for origin,
-    ``"CN.M"`` for L1 candidates). See ``domain.results.candidate_label``.
-
-    ``elimination_context`` is populated for PoBB-driven cuts (Bayesian
-    posterior comparison vs prior candidates); ``degradation_context`` is
-    populated for DegradationCheck-driven aborts (fatal classification or
-    threshold-rate degradation). The two are mutually exclusive at the
-    decode site — the renderer branches on which one is non-empty.
+    ``label`` is the persisted display identity (``C0`` origin / ``CN.M`` L1).
+    ``elimination_context`` (PoBB cut) and ``degradation_context``
+    (DegradationCheck abort) are mutually exclusive — renderer branches on which is non-empty.
     """
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
     return CandidateScore(
@@ -178,19 +158,12 @@ def pobb_decision_data(
     candidate_sample_ids: list[str] | None = None,
     prior_histories: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, Any]:
-    """Shared archival data for PoBB elimination + leader-lock decisions.
+    """Archival data for PoBB elimination + leader-lock decisions.
 
-    ``candidate_sample_ids`` + ``prior_histories`` are the paired-PoBB
-    snapshot at decision time: the ordered sample IDs the candidate had
-    measured, and each prior's fitness map restricted to those samples.
-    Replay reconstructs the paired vectors directly from these without
-    needing to crawl prior rounds or backfill the archive.
-
-    ``paired_breakdown`` (per-prior mean_d, se_d, n_paired, p_better) is
-    pulled through from ``check_result`` so the round audit + the live
-    PoBB stream both carry the per-prior comparison the operator reads
-    to triangulate whether a stall is candidate-wide or driven by one
-    sticky prior.
+    ``candidate_sample_ids`` + ``prior_histories`` = paired-PoBB snapshot
+    at decision time; replay reconstructs paired vectors without crawling
+    prior rounds. ``paired_breakdown`` per-prior comparison feeds round
+    audit + live PoBB stream so the operator can spot one sticky prior.
     """
     return {
         "p_best": float(candidate_score.get("p_best", 0.0)),
