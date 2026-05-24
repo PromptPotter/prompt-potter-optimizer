@@ -1,9 +1,4 @@
-"""Per-population scoring loop — :func:`score_population`.
-
-Owns the per-candidate loop, the shared accumulators, the online Rasch CAT
-picker plumbing, and the ESCALATED break condition. The per-candidate body
-lives in :func:`score_one_candidate`.
-"""
+"""Per-population scoring loop. Owns the candidate loop, accumulators, online Rasch CAT picker, and ESCALATED break."""
 
 from __future__ import annotations
 
@@ -55,11 +50,7 @@ async def score_population(
     decisions: list[ResumeCheckpointRecord] | None = None,
     l1_diversity: float = 1.0,
 ) -> tuple[dict[str, list[QueryMeasurement]], list[CandidateScore], EscalationSignal | None]:
-    """Score each individual; dispatch over three exit paths (validation/cache/scored).
-
-    Per-candidate body lives in ``score_one_candidate``; this function owns
-    the loop, the shared accumulators (``candidate_scores``, ``decisions``,
-    ``all_candidate_results``), and the ESCALATED break condition."""
+    """Score each individual; per-candidate body in `score_one_candidate`. Owns the ESCALATED break."""
     session = cycle.session
     obs = session.state.obs
     n = len(population)
@@ -69,18 +60,9 @@ async def score_population(
     escalation_signal: EscalationSignal | None = None
 
     async def _pobb_backfill(sp: JobSearchPoint, samples: list[Sample]) -> list[QueryMeasurement]:
-        """Score *sp* on *samples* and return the measurements.
-
-        Used by PoBBCheck to fill in missing (prior, sample) pairs so paired
-        comparison can run on identical sample sets. ``degradation_checks=None``
-        so the backfill cannot recursively trip PoBB on its own measurements.
-
-        Per-sample callbacks ride the same callback objects the main loop
-        uses, with ``candidate_idx=-1`` as the "this is a backfill row"
-        sentinel so the display layer can prefix the row distinctively and
-        skip the main-loop counter. Without this the operator sees only the
-        opaque "deprecated retry: resuming" stderr lines while the backfill
-        burns LLM credits in silence.
+        """Score *sp* on *samples* for PoBB paired-comparison fill-in. `candidate_idx=-1` is the
+        backfill sentinel — the display layer prefixes the row so the operator sees the LLM spend.
+        `degradation_checks=None` blocks recursive PoBB on backfill measurements.
         """
         bf_results, _bf_scores, _was_cached, _signal = await score_search_point(
             sp,
@@ -104,14 +86,9 @@ async def score_population(
         backfill_fn=_pobb_backfill,
     )
 
-    # Seed PoBB priors so candidate #1 of every round has a comparator
-    # to lose against. Without this, ``PoBBCheck.check()`` short-circuits
-    # on empty priors and the mechanism never fires until candidate #2
-    # — round 1 candidate #1 was un-eliminable. ``current_results`` is
-    # the round's "best-so-far" per-sample fitness history (campaign
-    # origin in round 1, prior round winner in round 2+). The seed SP
-    # is ``tracking.current_sp`` so the leader is backfill-able on the
-    # candidate's hard samples when needed.
+    # Seed PoBB priors so candidate #1 has a comparator — without it, PoBB short-circuits on empty
+    # priors and round-1 cand-1 was un-eliminable. `current_results` = best-so-far per-sample
+    # history; `current_sp` is the leader, backfill-able on the candidate's hard samples.
     seed_results = cycle.tracking.current_results
     seed_sp = cycle.tracking.current_sp
     if seed_results and seed_sp is not None:
@@ -120,14 +97,9 @@ async def score_population(
             cast("list[QueryMeasurement]", seed_results), candidate_id=seed_id, sp=seed_sp
         )
 
-    # Hoisted picker plumbing — shared across the per-candidate loop.
-    #
-    # Fix B — undermeasured filter: candidates with fewer than
-    # n_samples // 2 measurements (i.e. ones the prior PoBB iteration
-    # aborted early) contribute observations only on the picker's
-    # discriminating samples. Including them biases the Rasch fit on
-    # those samples — the seed prior (registered separately) is full,
-    # so dropping early-abort residue from ``sorter_obs`` is safe.
+    # Picker plumbing. Undermeasured filter: PoBB-aborted candidates (<n/2 measurements) only sit
+    # on the picker's discriminating samples and would bias the Rasch fit — drop them. The seed
+    # prior is registered separately and full.
     pop_min_obs = max(1, len(dataset) // 2)
 
     def _filtered_obs(
@@ -151,9 +123,7 @@ async def score_population(
     prior_round_obs: list[Observation] = []
     for rr in cycle.rounds:
         prior_round_obs.extend(_filtered_obs(rr.all_candidate_results))
-    # Archive observations come from completed scored runs (no mid-run abort
-    # residue) and are dataset-scoped, so the picker's δ posterior carries
-    # every cross-cycle measurement, not just this cycle's rounds.
+    # Archive observations are completed + dataset-scoped — δ posterior covers all cross-cycle data.
     round_boundary_obs: list[Observation] = list(cycle.archive_observations) + prior_round_obs
 
     dataset_sample_ids = [int(s.id) for s in dataset]
@@ -161,11 +131,8 @@ async def score_population(
     def _picker_maps(
         posterior: RaschPosterior,
     ) -> tuple[dict[int, float], dict[int, float]]:
-        """Complete (δ̂_s, se_δ_s) maps over every dataset sample.
-
-        Measured samples carry their fitted posterior; unmeasured ones the
-        estimated population prior (μ_δ, σ_δ) — so an as-yet-unseen sample
-        reads as maximally informative rather than as δ = 0 / se = 0.
+        """Full (δ̂_s, se_δ_s) maps. Unmeasured samples fall back to (μ_δ, σ_δ) — maximally
+        informative rather than artificially zero.
         """
         delta_map = {
             sid: posterior.delta.get(sid, posterior.mu_delta) for sid in dataset_sample_ids
@@ -178,12 +145,8 @@ async def score_population(
     def _seed_posterior(
         d_map: dict[int, float], d_se_map: dict[int, float], p_var: float
     ) -> tuple[float, float]:
-        """Fold the seed's per-sample outcomes into a θ_s posterior (μ_s, var_s).
-
-        The picker's decision term scores each sample's information gain
-        against the keep/abort verdict ``θ_c > θ_s`` — this is that seed.
-        Returns the centred prior ``(0, σ_θ²)`` when the seed has no
-        measurements.
+        """Fold seed outcomes into a θ_s posterior — anchors the picker's decision IG
+        against `θ_c > θ_s`. Returns centred prior `(0, σ_θ²)` when seed is unmeasured.
         """
         if not seed_results:
             return 0.0, p_var
@@ -198,22 +161,15 @@ async def score_population(
         ]
         return posterior_from_outcomes(0.0, p_var, outcomes)
 
-    # Live picker observations. The Rasch δ leaderboard is re-fit on EVERY
-    # measurement over the archive + prior rounds + this round's completed
-    # candidates (``round_live_obs``) + the in-flight candidate's outcomes,
-    # so the picker and the webapp hard-samples table track every score in
-    # real time instead of freezing at the round boundary.
+    # Live picker observations — δ leaderboard re-fits on EVERY measurement (archive + priors +
+    # this round's completed + in-flight outcomes) so picker + webapp track in real time.
     round_live_obs: list[Observation] = []
 
     def _fit_picker(
         extra_obs: list[Observation],
     ) -> tuple[dict[int, float], dict[int, float], float, float, float]:
-        """Re-fit the Rasch picker over every observation gathered so far.
-
-        Returns ``(delta_map, delta_se_map, prior_var, seed_mu, seed_var)``.
-        ``extra_obs`` is the in-flight candidate's outcomes — not yet folded
-        into ``round_live_obs``. ``fit_rasch`` is pure numpy over a
-        dataset-scoped observation set, cheap enough to run per measurement.
+        """Re-fit Rasch over all observations so far. *extra_obs* is the in-flight outcomes,
+        not yet folded into `round_live_obs`. Returns (delta_map, delta_se_map, prior_var, seed_mu, seed_var).
         """
         posterior = fit_rasch(round_boundary_obs + round_live_obs + extra_obs)
         d_map, d_se_map = _picker_maps(posterior)
@@ -226,20 +182,15 @@ async def score_population(
         callbacks.on_candidate_started(
             idx, n, osp_c.lineage.changes_description or "", pipeline_params_override
         )
-        # Bind the PoBBCheck to this candidate so its per-sample snapshot
-        # lands on the live telemetry stream tagged with the right id.
+        # Bind PoBBCheck so this candidate's per-sample snapshot rides the telemetry stream tagged.
         elim_check.set_current(
             osp_c.lineage.id,
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
 
-        # Online 1PL Rasch CAT picker — re-fits the δ leaderboard on every
-        # measurement (``_fit_picker``), folds the candidate's outcomes into
-        # a running θ̂_c posterior, and picks argmax of the blended objective
-        # (decision-information-gain against the seed + the small explore
-        # term). Re-emits ``hard_sample_order`` each call so the webapp
-        # hard-samples table reorders on every score. Callers don't persist
-        # (μ_c, var_c) across calls — the fold is from scratch each step.
+        # Online 1PL Rasch CAT picker — re-fits δ on every measurement, folds outcomes into a
+        # running θ̂_c, picks argmax of decision-IG. Fold is from-scratch each step (no (μ_c, var_c)
+        # persistence). Re-emits `hard_sample_order` so the webapp reorders on every score.
         def _next_sample(
             scored_outcomes: dict[int, bool],
             _cid: str = osp_c.lineage.id,
@@ -250,12 +201,9 @@ async def score_population(
                 for sid, hit in scored_outcomes.items()
             ]
             d_map, d_se_map, p_var, s_mu, s_var = _fit_picker(extra)
-            # A fresh mutation is a small edit of its parent — its ability
-            # prior is the seed's ability θ_s, not the population-mean anchor
-            # 0. Fold the candidate's outcomes from there so the decision
-            # term has real signal from the first pick: a centred-at-0 prior
-            # makes decision-IG flat and lets the explore term walk fresh
-            # unmeasured blocks in sample-id order.
+            # Fresh-mutation prior is seed θ_s, not 0. A centred-at-0 prior flattens decision-IG
+            # and lets the explore term walk unmeasured blocks in sample-id order — folding from
+            # θ_s gives the decision term real signal from pick 1.
             mu_c, var_c = posterior_from_outcomes(
                 s_mu,
                 p_var,
@@ -264,9 +212,7 @@ async def score_population(
                     for sid, hit in scored_outcomes.items()
                 ),
             )
-            # Re-emit the live leaderboard at the candidate's *current*
-            # posterior so the webapp hard-samples table reorders on every
-            # score and the console preview matches the pick actually made.
+            # Emit at the candidate's current posterior so webapp reorder + console preview match the actual pick.
             order = expected_order(mu_c, var_c, s_mu, s_var, d_map, d_se_map, dataset_sample_ids)
             preview = [
                 (
@@ -287,10 +233,8 @@ async def score_population(
             remaining = set(dataset_sample_ids) - scored_outcomes.keys()
             return next_sample(mu_c, var_c, s_mu, s_var, d_map, d_se_map, remaining)
 
-        # Bind the candidate's sample budget so PoBB's dominance gate
-        # can compute ``cand_max_hits = cand_hits + remaining`` against
-        # the seed prior's total hits. Online picking means the candidate
-        # consumes the full dataset; the universe is unordered.
+        # Universe for PoBB's dominance gate `cand_max_hits = cand_hits + remaining`. Online picking
+        # consumes the full dataset; universe is unordered.
         elim_check.set_sample_universe(dataset_sample_ids)
 
         cr_result = await score_one_candidate(
@@ -311,8 +255,7 @@ async def score_population(
             next_sample=_next_sample,
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
-        # Fold this candidate's outcomes into the live picker observations so
-        # the next candidate's picker — and the leaderboard — see them.
+        # Fold outcomes into live obs so next candidate's picker + leaderboard see them.
         round_live_obs.extend(_filtered_obs({osp_c.lineage.id: cr_result.results}))
         if cr_result.runtime_failure is not None:
             osp_c.wounds.runtime_failures = [

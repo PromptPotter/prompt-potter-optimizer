@@ -1,20 +1,11 @@
-"""Layer-escalation executor — the shared L2/L3 transition runner +
-``escalate_l2`` cascade.
+"""L2/L3 transition runner + `escalate_l2` cascade.
 
 V1 contract:
-* L2 writes ``task_context`` + ``action`` + optional ``axis_targeted`` /
-  ``l1_layout`` / ``l1_overrides``. No L1-surface scheme/text/template
-  overrides.
-* L3 writes ``plan`` (required) + optional ``note`` (sticky L3→L2 pointer;
-  survives L2 fires, replaced wholesale on each L3 fire). No
-  ``pipeline_params`` deltas.
+* L2 writes `task_context` + `action` + optional `axis_targeted` / `l1_layout` / `l1_overrides`.
+* L3 writes `plan` (required) + optional `note` (sticky L3→L2; wholesale-replaced on each L3 fire).
 
-One-way arrow: this module imports from ``cycle.py``; the reverse is
-forbidden by ``tests/test_invariants.py::test_no_unexpected_runtime_layer_violations``.
-The ``LayerStrategy`` spec + ``TransitionResult`` live in
-``optimization/transitions.py``; the per-layer ``L2`` / ``L3`` instances and
-their parse/apply/enter/exit callables live in :mod:`.l2_driver` and
-:mod:`.l3_driver`.
+`LayerStrategy` spec lives in `optimization/transitions.py`; L2/L3 instances + their
+parse/apply/enter/exit in `.l2_driver` / `.l3_driver`.
 """
 
 from __future__ import annotations
@@ -61,13 +52,8 @@ logger = logging.getLogger(__name__)
 
 
 def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkPayload) -> None:
-    """Stamp a fork payload's L1-surface deltas on the OSP — same shape L2 writes.
-
-    Called by the runner when a fork carries OSP deltas (today:
-    ``OPERATOR_SWEEP``). Triggers without OSP deltas (e.g.
-    ``SCORING_DIVERGENCE``) are filtered out at the call site by guarding
-    on ``payload.l1_layout is not None`` — this function assumes the
-    layout is set.
+    """Stamp a fork payload's L1-surface deltas on the OSP — same shape L2 writes. Assumes
+    `payload.l1_layout is not None` (callers without deltas guard at the call site).
     """
     if payload.l1_layout is not None:
         layout = coerce_l1_layout(payload.l1_layout)
@@ -100,10 +86,8 @@ async def _run_transition(
     obs: ObservabilityBridge | None,
     tracing_campaign_id: str,
 ) -> None:
-    """enter → LLM call → parse → adopt → LayerApplied → side-effects → exit.
-
-    The layer-agnostic mechanics; everything layer-specific is read off
-    ``transition`` (the ``L2`` / ``L3`` :class:`LayerStrategy` spec).
+    """enter → LLM → parse → adopt → LayerApplied → side-effects → exit.
+    Layer-agnostic — everything layer-specific reads off the `LayerStrategy` spec.
     """
     assert cycle.tracking.current_sp is not None
     client = _llm_client.get_llm_client(config.optimizer_llm.provider)
@@ -194,14 +178,8 @@ async def escalate_l2(
     obs: ObservabilityBridge | None = None,
     tracing_campaign_id: str = "",
 ) -> StopReason | None:
-    """Drive an L2 (or cascading L3) escalation: observe state, fire layer,
-    record divergence-gated decisions, return a stop reason or None.
-
-    Called from the round-loop's ``FIRE_L2`` dispatch and from the mid-round
-    DegradationCheck path. The decision to escalate already happened
-    upstream; this driver runs the L2/L3 patience cascade (via
-    ``EscalationState.observe_l2_escalation``) and the L3 force-trigger heal
-    on L2 validator failures.
+    """Run the L2/L3 patience cascade + L3 force-trigger heal on L2 validator failures.
+    Called from `FIRE_L2` dispatch and the mid-round DegradationCheck path.
     """
     opt = config.optimization
     esc = cycle.escalation
@@ -236,19 +214,12 @@ async def escalate_l2(
             obs=obs,
             tracing_campaign_id=tracing_campaign_id,
         )
-        # Wound 4: post-L2 validator failure force-triggers L3 to heal L2's
-        # output. Trigger is deterministic from L2's output (rides on round_data
-        # JSON), so resume reproduces it without a separate decision record.
-        #
-        # Exception: a *sole* "soft-reject" breach (the proposed task_context
-        # was a paraphrase or verbatim repeat — already discarded by the
-        # validator) doesn't need an L3 replan. L2 produced nothing usable
-        # this fire, the prior task_context stays in place, and L1 generates
-        # next round against that. Firing L3 on a single paraphrase reject
-        # caused the cascade we saw in fork_f13331ff: L3 produced a too-short
-        # plan, which failed l3_plan_length_floor, which seeded L1 with a
-        # malformed plan, which led to an empty L1 response. The skip lets
-        # the loop self-correct instead of layering escalations.
+        # Wound 4: post-L2 validator failure → L3 force-trigger. Deterministic from L2 output,
+        # so resume reproduces without a separate decision record.
+        # Exception: a SOLE soft-reject (paraphrase/verbatim repeat — already discarded by the
+        # validator) skips L3. The fork_f13331ff cascade — L3 short plan → L1 malformed plan →
+        # empty L1 — showed firing L3 on a single soft-reject layers escalations instead of
+        # letting the loop self-correct.
         breaches = cycle.opt_sp.wounds.l2_guard_breaches
         SOFT_REJECT_IDS = {
             "l2_task_context_verbatim_repeat",

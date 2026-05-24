@@ -1,11 +1,8 @@
-"""Wound-channel injection renderers — the self-healing evidence surfaces.
+"""Wound-channel renderers — self-healing evidence into optimizer prompts.
 
-Each renderer carries one wound channel's evidence into the optimizer
-prompts: Wound 1 (L1 parse-time validation failures), Wound 2
-(``DegradationCheck`` runtime failures), Wound 4 (L2/L3 post-parse guard
-breaches). All share the uniform ``(InjectionBundle) -> str`` renderer
-signature and are fenced where they echo untrusted LLM-proposed values
-or pipeline warning strings.
+Wound 1 (L1 parse-time validation), Wound 2 (DegradationCheck runtime), Wound 4 (L2/L3
+post-parse guard breaches). Uniform `(InjectionBundle) -> str`. Fenced where untrusted content
+(LLM-proposed values, pipeline warnings) is echoed.
 """
 
 from __future__ import annotations
@@ -26,18 +23,9 @@ from promptpotter.domain.validators import ValidatorOutcome
 def _rf_matches_current_config(
     rf: RuntimeFailure, pipeline_params: dict[str, dict[str, Any]]
 ) -> bool:
-    """Filter ACCUMULATED runtime failures to the current backend config.
-
-    A RuntimeFailure carries an ``observed_config`` snapshot of the
-    offending node's pipeline_params at the time it fired. When a
-    cycle's overlay changes (e.g. provider/model swap mid-experiment),
-    accumulated failures from the prior overlay become stale evidence
-    — keeping them in L2's prompt mis-steers the framing refinement.
-
-    The comparison is on operator-locked keys
-    (``PARAM_FORBIDDEN_KEYS``: provider, model). The node is parsed
-    from ``rf.dominant_warning`` (``"<node>:<warning>"``); if the node
-    isn't in the current pipeline_params, the failure is dropped.
+    """Filter ACCUMULATED failures by current backend config — a failure observed under a
+    superseded overlay (e.g. yesterday's provider/model) becomes stale evidence that mis-steers
+    L2's framing. Compares on PARAM_FORBIDDEN_KEYS (provider, model).
     """
     node = (rf.dominant_warning or "").split(":", 1)[0]
     if not node:
@@ -50,11 +38,7 @@ def _rf_matches_current_config(
 
 
 def _r_validation_failures(b: InjectionBundle) -> str:
-    """Wound 1 — L1 parse-time deterministic validator.
-
-    Fenced because it echoes LLM-proposed values (``vf.value``), which
-    the LLM could have written as anything.
-    """
+    """Wound 1 — L1 parse-time validator. Fenced (echoes LLM-proposed values)."""
     failures = b.opt_sp.wounds.validation_failures
     if not failures:
         return ""
@@ -69,17 +53,9 @@ def _r_validation_failures(b: InjectionBundle) -> str:
 
 
 def _r_runtime_failures(b: InjectionBundle) -> str:
-    """Wound 2 — DegradationCheck mid-eval evidence (per-candidate runtime
-    failures from ``DegradationCheck``). Fenced because it echoes pipeline
-    warning strings.
-
-    ACCUMULATED entries are filtered against the current
-    ``pipeline_params[node].{provider, model}``: a runtime failure
-    observed under a now-superseded backend config (e.g. yesterday's
-    openrouter/gpt-oss-20b carried forward into today's
-    groq/gpt-oss-120b cycle) is dropped before injection. NEW entries
-    (first-seen this round) always pass — they describe the failure
-    being heard right now.
+    """Wound 2 — DegradationCheck mid-eval evidence. Fenced (echoes pipeline warnings).
+    ACCUMULATED entries filter through `_rf_matches_current_config`; NEW (first-seen this round)
+    always pass — they describe the failure being heard right now.
     """
     runtime_failures = b.opt_sp.wounds.runtime_failures
     if not runtime_failures:
@@ -110,12 +86,8 @@ def _r_runtime_failures(b: InjectionBundle) -> str:
 
 
 def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
-    """Post-parse guard-breach list for one layer.
-
-    "Guard breach" — programmatic guards on a layer's LLM output, distinct
-    from ``validation_failures`` / ``runtime_failures`` (pipeline evidence
-    from L1 candidate runs). Plain: only ``validator_id`` (controlled
-    registry) + ``score`` float, no untrusted content.
+    """Post-parse guard-breach list — programmatic guards on a layer's LLM output, distinct from
+    `validation_failures` / `runtime_failures` (pipeline evidence). No untrusted content.
     """
     if not outcomes:
         return ""
@@ -135,11 +107,7 @@ def _r_l3_guard_breaches(b: InjectionBundle) -> str:
 
 
 def _format_runtime_failure_lines(rf: Any) -> list[str]:
-    """Two-line render of one RuntimeFailure.
-
-    Used for single-entry groups; multi-entry groups collapse via
-    :func:`_format_runtime_failure_group` to keep small-model prompts lean.
-    """
+    """Two-line render of one RuntimeFailure — for single-entry groups (multi-entry compresses)."""
     rate_pct = round(float(rf.degraded_rate) * 100)
     cfg_parts = [f"{k}={v}" for k, v in (rf.observed_config or {}).items() if k != "prompt"]
     cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
@@ -153,16 +121,9 @@ def _format_runtime_failure_lines(rf: Any) -> list[str]:
 
 
 def _format_runtime_failure_group(rfs: list[Any]) -> list[str]:
-    """Cluster RFs by (dominant_warning, provider, model); compact-render clusters of 2+.
-
-    Each accumulated failure carries the same warning + same provider/model on
-    different param-axis values is one discovery, not five. Rendering each as
-    its own two-line entry wastes ~70% of the runtime_failures block on small
-    models. We group, keep one representative label, and list the varying
-    params with their distinct values.
-
-    Single-entry groups fall through to :func:`_format_runtime_failure_lines`
-    unchanged.
+    """Cluster by (warning, provider, model). N failures with same backend on varying param-axis
+    is ONE discovery, not N — collapse to a single line with the varying params enumerated.
+    Single-entry groups passthrough.
     """
     clusters: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for rf in rfs:

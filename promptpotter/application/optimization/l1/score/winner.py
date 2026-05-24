@@ -1,8 +1,5 @@
-"""Round-winner selection — :func:`l1_score` + :func:`round_winner_key`.
-
-``l1_score`` scores the population (via :func:`score_population`), backfills
-the opt_sp-aware composite, elects the winner by ``round_winner_key``, and
-produces the round's :class:`RoundResult`.
+"""Round-winner selection. `l1_score` scores via `score_population`, backfills opt_sp-aware
+composite, elects by `round_winner_key`, produces `RoundResult`.
 """
 
 from __future__ import annotations
@@ -43,37 +40,17 @@ if TYPE_CHECKING:
 
 
 def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
-    """Tiebreak key for round-winner selection: composite-first, accuracy-tiebreak.
-
-    Shared by ``l1_score`` (round-time selection over scored candidates) and
-    ``pick_round_winner`` (post-hoc selection over ``ScoreEntry``s for the
-    SCOREBOARD ``*`` marker). Centralised so the two surfaces cannot drift
-    apart — a single PR that changes this rule moves both readers together.
-
-    ``composite_fitness`` falls back to ``accuracy`` when ``None`` so the key
-    is well-defined for ``CandidateScore`` rows minted before backfill (path-1
-    validation-skip variants carry ``composite_fitness=0.0``, not ``None``,
-    but the fallback keeps the helper total over the type signature).
+    """Composite-first, accuracy-tiebreak. Shared between live `l1_score` + post-hoc
+    `pick_round_winner` so the SCOREBOARD `*` and the in-round winner never drift apart.
     """
     return (composite_fitness if composite_fitness is not None else accuracy, accuracy)
 
 
 def is_leader_eligible(cs: CandidateScore) -> bool:
-    """Whether *cs* may be elected the round leader.
-
-    Two disjoint disqualifications:
-
-    (a) Escalation-aborted without a PoBB stop — a true mid-run failure
-        outside the measured-comparison surface.
-    (b) Any candidate whose run halted on a degradation or
-        ``scoring_error_abort`` check (``degradation_context`` is
-        populated only by those two check names). Their accuracy is
-        computed over a partial valid subset and can inflate above
-        origin on a 6/20 run — paired PoBB doesn't help because the
-        candidate never produced comparable measurements.
-
-    PoBB-elimination is NOT a disqualification — those candidates went
-    through fair paired comparison on real samples and stay in the pool.
+    """Eligibility for round-leader election. Disqualifies (a) escalation-aborted-without-PoBB
+    (mid-run failure outside measured-comparison) and (b) degradation/scoring_error_abort
+    (partial subset accuracy can fake-inflate above origin). PoBB-eliminated candidates stay
+    in the pool — they went through fair paired comparison.
     """
     if cs.escalation_aborted and not cs.elimination_stopped:
         return False
@@ -95,11 +72,8 @@ async def l1_score(
     round_num: int = 0,
     yield_stats: L1YieldStats,
 ) -> tuple[RoundResult, OptSearchPoint]:
-    """Score candidates and select the round winner (compares fitness, not composite_fitness).
-
-    Returns ``(round_result, winner_osp)``. ``RoundResult`` is the
-    persistence shape (dict-typed lists for serialization); ``winner_osp``
-    rides alongside for the ``PromptVersion`` tracing emit in the caller.
+    """Score + select winner. Returns `(RoundResult, winner_osp)` — RoundResult is persistence
+    shape, winner_osp rides alongside for the caller's `PromptVersion` tracing emit.
     """
     session = cycle.session
     schema = session.pipeline_schema
@@ -132,9 +106,7 @@ async def l1_score(
         for ind in osp_population
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
     ]
-    # Origin's full-set stats — the no-candidate-wins fallback for the
-    # ``matched_origin`` quad below (every candidate ran every sample ⇒ matched
-    # collapses to full).
+    # Full-set origin stats — fallback for `matched_origin` when every candidate ran every sample.
     origin_base = _compute_accuracy(cast("list[QueryMeasurement]", origin.results))
     best_acc = origin.accuracy
     best_comp = origin.composite_fitness
@@ -147,14 +119,9 @@ async def l1_score(
     best_matched_origin_composite = origin.composite_fitness
     best_key = round_winner_key(origin.composite_fitness, origin.accuracy)
     winner_idx: int | None = None
-    # ``score_population`` populated each ``CandidateScore`` with the
-    # ``opt_sp=None`` composite (per-sample scoring path is target-layer; it
-    # doesn't see ``OptSearchPoint``). That makes opt_sp-aware evaluators
-    # (currently ``prompt_compactness``) collapse to their vacuous fallback,
-    # inflating the per-candidate composite shown inline during scoring
-    # relative to the post-backfill value that lands on the SCOREBOARD.
-    # Index by candidate id so we can back-fill the opt_sp-aware composite +
-    # evaluators in one pass before selecting the winner.
+    # `score_population` runs per-sample with `opt_sp=None` (target layer can't see OSP), so
+    # opt_sp-aware evaluators (prompt_compactness) collapse to vacuous fallback. Backfill the
+    # opt_sp-aware composite + evaluators here before selecting the winner.
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(candidate_scores)}
     for idx, ind in enumerate(scored):
         cand_results = all_candidate_results[ind.lineage.id]
@@ -165,11 +132,8 @@ async def l1_score(
             round_scorer=session.scoring.round_scorer,
             l1_diversity=yield_stats.l1_yield,
         )
-        # Matched-pair origin: PoBB-locked candidates may have only run the
-        # hardest q8/20; comparing their 8-sample accuracy to origin's full-set
-        # 20-sample accuracy systematically punishes the early-stop optimization.
-        # Restricting origin to the candidate's measured samples is the same
-        # comparison PoBB's posterior used to declare the lock.
+        # PoBB-locked candidates may have only run q8/20 — comparing their 8-sample accuracy to
+        # origin's full-set rate punishes early-stop. Restrict origin to the candidate's measured set.
         matched = matched_origin_stats(
             cast("list[QueryMeasurement]", origin.results),
             cand_results,
@@ -187,11 +151,8 @@ async def l1_score(
                 matched_origin_hits=matched["hits"],
                 matched_origin_composite=matched["composite_fitness"],
             )
-        # Winner = running max by (composite_fitness, accuracy). Same key as
-        # ``round_winner_key`` (used by the SCOREBOARD's ``pick_round_winner``)
-        # so the two surfaces report the same winner. The matched-origin gate
-        # is applied after selection via ``delta_ok`` below — it decides
-        # whether the round is ``improved``, not who won.
+        # Running max via shared `round_winner_key` so live + SCOREBOARD agree. Matched-origin
+        # `delta_ok` below decides `improved`, not who won.
         cand_key = round_winner_key(s["composite_fitness"], s["accuracy"])
         if cand_key > best_key:
             best_key = cand_key
@@ -222,11 +183,8 @@ async def l1_score(
     base = _compute_accuracy(best_results)
     p_value: float | None = None
     if base["total"] > 0:
-        # Real matched-pair hits from the same sample subset the candidate ran.
-        # The prior ``round(origin.accuracy * base["total"])`` faked this by
-        # extrapolating origin's full-set rate onto the candidate's subset —
-        # exactly wrong for hard-first sampling where origin underperforms
-        # its full-set rate on the early samples.
+        # Real matched-pair hits from the same subset — extrapolating origin's full-set rate
+        # would mis-rate hard-first sampling, where origin underperforms on the early samples.
         p_value = proportion_test(
             base["hits"], base["total"], best_matched_origin_hits, base["total"]
         )

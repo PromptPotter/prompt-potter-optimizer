@@ -1,23 +1,10 @@
-"""Escalation FSM — cause-driven L1/L2/L3 stall counters + observation methods.
+"""Escalation FSM — L1/L2/L3 stall counters, observation methods, fold-over-ledger reducer.
 
-This file participates in **escalation** as the decision-state
-authority. Counters are private; the only mutation surface is the
-observation methods (:meth:`EscalationState.observe_round`,
-:meth:`EscalationState.observe_l2_escalation`) and the post-fire
-bookkeepers (:meth:`EscalationState.record_l2_fired`,
-:meth:`EscalationState.record_l3_fired`). Read access is via flat
-``l{1,2,3}_*`` properties — there is no public setter for any counter,
-so the "signals from measurement, not the calendar" rule (per
-``promptpotter/CLAUDE.md``) is structural: there is no field to assign
-a ``round_num >= N`` literal to.
+Counters are private; only the observation methods + post-fire bookkeepers mutate. Read access is
+property-only — there's no field to assign a `round >= N` literal to, so the "signals from
+measurement, not calendar" rule is structural.
 
-State is a fold over ``CycleEventLog`` records; :meth:`EscalationState.fold`
-advances one step, :meth:`EscalationState.from_ledger` rebuilds on resume.
-
-Out-of-bounds: this file MUST NOT mutate ``OptSearchPoint`` fields
-outside the documented escalation surface; MUST NOT decide
-post-round routing (that's :func:`.decide.decide_escalation`); MUST
-NOT fire LLM calls (that's :func:`.firing.escalate_l2`).
+Out of scope: post-round routing (`.decide`), LLM calls (`.firing`), OSP mutations.
 """
 
 from __future__ import annotations
@@ -34,12 +21,7 @@ if TYPE_CHECKING:
 
 
 class NextAction(enum.StrEnum):
-    """What the round loop does after an escalation observation.
-
-    Computed inside :class:`EscalationState` from stall depth + layer history.
-    Stop variants carry the matching :class:`StopReason` via
-    :attr:`EscalationEvent.stop_reason`; ``CONTINUE`` / ``FIRE_*`` carry None.
-    """
+    """Round-loop's next action. STOP variants carry a `StopReason` via `EscalationEvent.stop_reason`."""
 
     CONTINUE = "continue"
     FIRE_L2 = "fire_l2"
@@ -56,18 +38,9 @@ _NEXT_ACTION_TO_STOP: dict[NextAction, StopReason] = {
 
 @dataclass(frozen=True)
 class EscalationEvent:
-    """Outcome of one escalation observation — what the loop does next.
-
-    ``stall_depth`` is the layer-relevant counter at decision time (L1 stall
-    for ``observe_round``; L2 or L3 stall for ``observe_l2_escalation``).
-    ``reason`` is human-readable for telemetry; consumers branch on
-    ``next_action`` and read ``stop_reason`` for the StopLoop projection.
-
-    ``rule_name`` / ``rule_priority`` are populated by
-    :func:`escalation.decide.decide_escalation` (post-round path goes
-    through the rule engine). The L2/L3 cascade in
-    :meth:`EscalationState.observe_l2_escalation` is still imperative —
-    those paths leave both fields ``None``.
+    """Escalation-observation outcome. `stall_depth` is the layer-relevant counter at decision time.
+    `rule_name`/`priority` populated by the post-round rule engine; left None on the imperative
+    L2/L3 cascade path.
     """
 
     next_action: NextAction
@@ -82,9 +55,7 @@ class EscalationEvent:
 
 
 class EscalationState:
-    """Cause-driven L1/L2/L3 escalation. Counters are private; the only
-    mutation surface is the observation methods + post-fire bookkeepers.
-    """
+    """Cause-driven L1/L2/L3 counters; mutation surface = observations + post-fire bookkeepers."""
 
     __slots__ = (
         "_l1_stall_count",
@@ -157,18 +128,7 @@ class EscalationState:
         l1_patience: int,
         axes_with_positive_yield: int | None = None,
     ) -> EscalationEvent:
-        """L1 round outcome. Bumps the stall counter; returns CONTINUE /
-        FIRE_L2 / STOP_PERFECT.
-
-        Counter mutation stays here (state ownership). The decision
-        lifts into :func:`escalation.decide.decide_escalation` — this
-        method delegates with a :class:`EscalationInputs` snapshot.
-        ``axes_with_positive_yield`` populates the yield-driven rule
-        when the cycle has AxisIndex evidence.
-
-        L2/L3 stall observation lives in :meth:`observe_l2_escalation` so
-        the mid-round signal path (DegradationCheck) shares the same cascade.
-        """
+        """L1 round outcome — bumps stall, delegates the routing to `decide_escalation`."""
         from promptpotter.application.optimization.escalation.decide import (
             EscalationInputs,
             decide_escalation,
@@ -192,13 +152,8 @@ class EscalationState:
         l2_patience: int | None,
         l3_patience: int | None,
     ) -> EscalationEvent:
-        """L2 escalation requested (L1 patience or mid-round signal). Updates
-        the L2 stall counter (and L3's when cascading); returns FIRE_L2 /
-        FIRE_L3 / STOP_L3_PATIENCE.
-
-        First-invocation grace: ``stall_count`` only advances after a layer
-        has fired at least once (``round > 0``) — the prior best composite_fitness
-        captured at entry is the comparator.
+        """L2 escalation requested. First-invocation grace: stall only advances after a layer has
+        fired at least once (entry composite is the comparator).
         """
         if self._l2_round > 0:
             l2_improved = current_composite_fitness > self._l2_best_composite_fitness_at_entry
@@ -238,9 +193,7 @@ class EscalationState:
         self._l2_best_composite_fitness_at_entry = best_composite_fitness
 
     def record_l3_fired(self, *, best_accuracy: float, best_composite_fitness: float) -> None:
-        """L3 LLM completed. Bumps L3 round, captures entry; resets L1 stall and
-        the L2 counter — under a new plan, L2's prior progress is invalidated.
-        """
+        """L3 fired. Bump L3, reset L1 stall + the L2 counter (new plan invalidates L2's progress)."""
         self._l1_stall_count = 0
         self._l3_round += 1
         self._l3_best_accuracy_at_entry = best_accuracy
@@ -250,22 +203,16 @@ class EscalationState:
         self._l2_best_accuracy_at_entry = best_accuracy
         self._l2_best_composite_fitness_at_entry = best_composite_fitness
 
-    # ---- Reducer over the ledger ----
-    #
-    # State is the fold of three PhaseRecord signals: round-complete (improved →
-    # L1 stall), l2_context exit (L2 fired → l2 state), l3_plan exit (L3
-    # fired → l3 state, l2 reset). The live mutators above are the in-memory
-    # cache of this fold; ``from_ledger`` rebuilds the same value on resume.
+    # Reducer: round-complete → L1 stall; l2_context.exit → l2 state; l3_plan.exit → l3 state + l2 reset.
+    # Live mutators above are the in-memory cache; from_ledger rebuilds on resume.
 
     def fold(self, record: CycleRecord) -> None:
         """Advance state from one ledger record. No-op for unrelated records."""
         if not isinstance(record, PhaseRecord):
             return
         if record.phase == "round" and record.event == "complete":
-            # Audit emit only: display fires under event="display" and is
-            # never folded. The lean scalar payload is the SoT for resume.
-            # ``is_probe`` rounds emit ``complete`` so display + audit see
-            # them, but they are not L1 progress evidence — skip.
+            # Audit emit only; display fires under "display" and is never folded. Probe rounds
+            # emit "complete" so display + audit see them, but they aren't L1 progress evidence.
             if record.payload.get("is_probe"):
                 return
             self._l1_stall_count = (
@@ -289,7 +236,7 @@ class EscalationState:
             self._l3_stall_count = int(escalation_state["l3_stall_count"])
             self._l3_best_accuracy_at_entry = best_acc
             self._l3_best_composite_fitness_at_entry = best_comp
-            # record_l3_fired wipes L2 — under a new plan, prior L2 stall is gone.
+            # New plan invalidates L2's progress — wipe.
             self._l2_round = 0
             self._l2_stall_count = 0
             self._l2_best_accuracy_at_entry = best_acc

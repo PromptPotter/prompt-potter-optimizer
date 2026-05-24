@@ -1,19 +1,7 @@
-"""Post-round escalation router — single entry point for "what next?".
-
-:func:`decide_escalation` is the sort-by-priority, first-match-wins
-router over :data:`DEFAULT_ESCALATION_RULES`. Synchronous, no side
-effects, no LLM calls. Reads a frozen :class:`EscalationInputs`
-snapshot and returns the :class:`EscalationEvent` the round loop
-already understands.
-
-The runner dispatches the result: ``FIRE_L2`` lands on
-:func:`.firing.escalate_l2` (which performs the LLM call + L2/L3
-cascade), ``STOP_*`` lands on :class:`StopLoop`, ``CONTINUE``
-proceeds to the next L1 round.
-
-State mutation (bumping the L1 stall counter) lives at the per-round
-fold seam in :meth:`EscalationState.observe_round`; this function
-takes the post-fold snapshot.
+"""Post-round escalation router. `decide_escalation` is priority-sort, first-match over
+`DEFAULT_ESCALATION_RULES`. Pure: no LLM, no side effects. Returns the EscalationEvent the
+round loop dispatches (`FIRE_L2` → `.firing.escalate_l2`, `STOP_*` → StopLoop, `CONTINUE` → next round).
+State mutation (stall counter bump) lives in `EscalationState.observe_round`; this is post-fold.
 """
 
 from __future__ import annotations
@@ -34,28 +22,15 @@ __all__ = ["EscalationEvent", "EscalationInputs", "NextAction", "decide_escalati
 
 @dataclass(frozen=True)
 class EscalationInputs:
-    """All escalation-rule predicate inputs, in one frozen snapshot.
-
-    Built by :class:`EscalationState` at observation time. Predicates
-    read fields directly. Optional fields (``axes_with_positive_yield``,
-    etc.) are populated only when the cycle has the corresponding
-    derived state available (e.g. AxisIndex initialised); rules
-    consulting them must handle the ``None`` case explicitly.
+    """Frozen snapshot of all escalation-rule predicate inputs. Optional fields are populated only
+    when the corresponding derived state exists (e.g. AxisIndex initialised); rules must handle None.
     """
 
-    # Round outcome
     improved: bool
     current_accuracy: float
-
-    # Stall counters (mirror EscalationState properties post-mutation)
     l1_stall_count: int
-
-    # Patience config
     l1_patience: int
-
-    # Derived-memory input — None when AxisIndex not initialised (rules must
-    # handle). Populated by the runner from cycle.axes.with_positive_yield()
-    # after each round.
+    # None until AxisIndex is initialised; runner populates from `cycle.axes.with_positive_yield()`.
     axes_with_positive_yield: int | None = None
 
 
@@ -63,12 +38,7 @@ def decide_escalation(
     inputs: EscalationInputs,
     rules: list[EscalationRule] | None = None,
 ) -> EscalationEvent:
-    """Resolve the post-round routing decision over *inputs*.
-
-    Sort rules by priority (higher first), return the first whose
-    predicate matches. Default rule set reproduces
-    :meth:`EscalationState.observe_round` exactly.
-    """
+    """Sort by priority (desc), return the first matching rule's event."""
     from promptpotter.application.optimization.escalation.rules import (
         DEFAULT_ESCALATION_RULES,
     )

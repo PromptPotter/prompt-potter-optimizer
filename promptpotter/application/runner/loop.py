@@ -1,9 +1,5 @@
-"""Round loop — generate → score → escalate → stop.
-
-The single async loop ``run_round_loop`` is the heart of every cycle.
-Sweep / diag mode short-circuits after one scored round; ``halt_at_accuracy``
-and ``max_spend_usd`` are sweep-toolkit halts checked after every clean
-round.
+"""Round loop — generate → score → escalate → stop. Sweep/diag short-circuit after one round;
+`halt_at_accuracy` + `max_spend_usd` are sweep-toolkit halts checked after every clean round.
 """
 
 from __future__ import annotations
@@ -38,8 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 HARD_CAP: int = 100
-"""Absolute upper bound on round_num — guards against runaway loops if
-``max_rounds`` is None and L2/L3 keep firing without convergence."""
+"""Runaway-loop guard for `max_rounds=None` + non-converging L2/L3."""
 
 
 async def _force_l2(
@@ -66,18 +61,12 @@ async def run_round_loop(
     max_spend_usd: float | None = None,
     spend_probe: Callable[[], float] | None = None,
 ) -> StopReason:
-    """Round loop: generate → score → escalate → stop. sweep/diag halt after round 2.
-
-    ``halt_at_accuracy`` / ``max_spend_usd`` are sweep-toolkit halts
-    checked after every clean round: best_accuracy ≥ target halts with
-    ``TARGET_HIT``; cumulative cycle spend ≥ ceiling halts with
-    ``MAX_SPEND``. ``spend_probe`` returns the current cycle USD spend
-    (typically bound to the LiveDashboardView's in-memory state); when
-    omitted, ``max_spend_usd`` has no effect.
+    """Round loop. sweep/diag halt after round 2. `halt_at_accuracy` → TARGET_HIT;
+    `max_spend_usd` + `spend_probe` → MAX_SPEND (spend_probe omitted ⇒ no spend halt).
     """
     opt = config.optimization
-    # ``resumed_from_round`` is next-L1-round-to-run (fresh = 1). ``clean_rounds``
-    # tracks lifetime L1 rounds completed; origin (round 0) is not counted.
+    # `resumed_from_round` = next L1 round (fresh=1). `clean_rounds` = lifetime L1 completed
+    # (origin is round 0, not counted).
     round_num = session.state.resumed_from_round
     clean_rounds = max(session.state.resumed_from_round - 1, 0)
     max_rounds = opt.max_rounds or 999
@@ -89,8 +78,7 @@ async def run_round_loop(
                 round_scoring_data = [s for s in dataset if s.query in cycle.warned_queries]
                 round_checks = None
             else:
-                # The full bank — execute_round's CAT picker narrows it to
-                # the per-round sp_budget_ttest scoring subset.
+                # Full bank — execute_round's CAT picker narrows it to sp_budget_ttest per round.
                 round_scoring_data = session.scoring.scoring_set
                 round_checks = session.scoring.degradation_checks
 
@@ -180,8 +168,7 @@ async def run_round_loop(
                 return StopReason.SWEEP_COMPLETE
 
             if diag and clean_rounds >= 1:
-                # Force L2 on round-1 evidence (bypass stall), then peek round 2
-                # with L2 overrides. round_num was incremented after post_round.
+                # Force L2 on R1 evidence (bypass stall), then peek R2 with L2 overrides.
                 await _force_l2(cycle, config, session, round_num - 1, cb)
                 await run_sweep_generation_only(
                     cycle, session, cb, round_num, label="diag_gen_only"
@@ -193,10 +180,8 @@ async def run_round_loop(
     except StopLoop as sl:
         return sl.reason
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
-        # Distinguish user-initiated Ctrl+C from a programmatic cancellation
-        # (e.g. a backend timeout wrapped as CancelledError further down the
-        # await chain). Both end the same way, but the operator wants to
-        # know which one fired before they trust the next run.
+        # Distinguish Ctrl+C from programmatic cancellation (e.g. wrapped backend timeout) —
+        # same outcome, operator wants to know which fired before trusting the next run.
         cause = (
             "user-initiated"
             if isinstance(exc, KeyboardInterrupt)
@@ -205,12 +190,8 @@ async def run_round_loop(
         logger.warning("Optimization interrupted at round %d (%s).", round_num, cause)
         return StopReason.INTERRUPTED
     except InjectionRenderError:
-        # An injection renderer raised — code drift (a renamed data-model
-        # field, usually), not an LLM mistake. Stash the traceback like a
-        # crash so the failing injection + cause land on
-        # index.json::final.crash_traceback, but return a distinct reason:
-        # the operator fixes a renderer (or reruns with
-        # --ignore-render-errors), they don't debug a generic crash.
+        # Renderer raised (code drift, usually a renamed field). Distinct reason from CRASHED so
+        # the operator fixes a renderer / uses `--ignore-render-errors` instead of debugging.
         session.state.crash_traceback = traceback.format_exc()
         logger.exception(
             "Optimization halted at round %d — an injection renderer failed. "
@@ -219,12 +200,8 @@ async def run_round_loop(
         )
         return StopReason.RENDER_ERROR
     except TimeoutError:
-        # An optimizer LLM call blew its total wall-clock deadline twice
-        # (see llm_call._chat_under_deadline). Not a crash, not a renderer
-        # bug — the provider stalled mid-stream. Graceful, operator-
-        # recoverable halt: a plain `resume` re-fires the call from the
-        # same round. No traceback stashed — the cause is the deadline,
-        # already in the warn-level log.
+        # Optimizer LLM blew its deadline twice — provider stalled mid-stream. Graceful halt;
+        # plain `resume` re-fires. No traceback (cause is in the warn-level log).
         logger.warning(
             "Optimization halted at round %d — an optimizer LLM call exceeded "
             "its deadline twice. Resume to retry.",
@@ -232,13 +209,9 @@ async def run_round_loop(
         )
         return StopReason.OPTIMIZER_TIMEOUT
     except Exception:
-        # Per application/CLAUDE.md ("escalation flows via return value, not
-        # exception"), the loop must NOT re-raise — return a typed stop
-        # reason. logger.exception emits the full traceback to stderr so
-        # the operator sees the cause; we also stash the formatted
-        # traceback on session.state so _finalize_run can stamp it onto
-        # ``index.json::final.crash_traceback`` (sys.exc_info is cleared
-        # by the time _finalize_run runs).
+        # Escalation flows via return value, not exception (per application/CLAUDE.md). Stash
+        # traceback for `_finalize_run` to stamp on `index.json::final.crash_traceback` (sys.exc_info
+        # is gone by then).
         session.state.crash_traceback = traceback.format_exc()
         logger.exception("Optimization crashed at round %d.", round_num)
         return StopReason.CRASHED

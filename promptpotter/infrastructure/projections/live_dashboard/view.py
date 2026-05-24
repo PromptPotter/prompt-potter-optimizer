@@ -159,9 +159,7 @@ class LiveDashboardView(DerivedView):
         return cls(
             family_dir,
             session_dir,
-            # ``cycle_id`` stamps the session-family ROOT (not the raw cycle
-            # arg) — dashboard.json is per-family, shared by forks, so a fork
-            # view fetching this file must still match the stamp.
+            # `cycle_id` stamps the family ROOT; forks share this file and must match the stamp.
             campaign_id=campaign_id,
             cycle_id=session_root,
             session_id=session_id,
@@ -180,43 +178,23 @@ class LiveDashboardView(DerivedView):
         self.state["state_since"] = datetime.now(UTC).isoformat()
 
     def mark_stopped(self, reason: str) -> None:
-        """Cycle finalize hook — terminal state + reason for ``dashboard.json`` readers.
-
-        Called from ``runner._finalize_run`` so an operator tailing
-        ``dashboard.json`` after Ctrl+C or natural halt can read the stop
-        reason without opening ``index.json``.
-        """
+        """Finalize hook — writes terminal state + reason so dashboard tail-readers see it without index.json."""
         self.state["stop_reason"] = reason
         self._set_state("stopped")
         self._persist()
 
     def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:
-        """No-op since active-cycle identity moved entirely to ``active_session.json``.
-
-        Kept as a hook for the runner's fork bootstrap call site
-        (``application/run_observers.py``) so the call doesn't have to
-        change. The structured FORK_CUT decision is still appended to
-        the ledger by the runner; the active pointer is retargeted by
-        ``_fork_sibling_setup`` via ``save_active_pointer``. The webapp
-        reads ``/api/v1/active`` for the live cycle id and walks
-        lineage server-side via ``walk_cycle_lineage`` when it needs
-        the branch tree.
+        """No-op hook — active-cycle identity now lives in `active_session.json`; kept so the
+        runner's `_fork_sibling_setup` call site doesn't have to change.
         """
         del old_cycle_id, new_cycle_id, from_round
 
     # -- Ledger subscription (sole ingress) -----------------------------------
-    #
-    # ResumeCheckpointRecord records are persisted to ``ledger.jsonl`` by the
-    # runner; this projection only mirrors the live state to
-    # ``dashboard.json``. Phases drive scalar updates; snapshots drive
-    # per-round candidate structures. Both fan-outs are explicit here —
-    # no second dispatch path elsewhere.
+    # Phases → scalars; snapshots → per-round candidate structures. No second dispatch.
 
     def _handle_phase(self, record: PhaseRecord) -> None:
         if record.phase == "backend" and record.event == "warning":
-            # Surface backend transport / 429 / 5xx retries as they fire.
-            # The retry behaviour is unchanged (still bounded, still honoring
-            # Retry-After); this projection only makes them visible.
+            # Surface backend retries (429 / 5xx / transport) — retry behaviour itself is unchanged.
             payload = dict(record.payload or {})
             self.state["backend_retry_count"] = int(self.state.get("backend_retry_count") or 0) + 1
             warning = {
@@ -248,8 +226,7 @@ class LiveDashboardView(DerivedView):
                             self.state, self._round, self.short_formula_template, round_result
                         )
                     )
-                # Append the round's display summary. Re-firing the same
-                # round number (sweep re-emit, replay) replaces in place.
+                # Append round summary; re-firing the same round (replay / sweep) replaces in place.
                 summary_dict = build_round_summary(round_result).model_dump()
                 rounds_list: list[dict[str, Any]] = list(self.state.get("rounds") or [])
                 rounds_list = [r for r in rounds_list if r.get("round") != round_result.round]
@@ -259,9 +236,8 @@ class LiveDashboardView(DerivedView):
                 self._persist()
             return
 
-        # Origin completion → push live l1_score block to the audit recorder
-        # so ``round_0000.json`` carries origin's candidate snapshot when
-        # audit_trail flushes (subscriber order: dashboard → audit).
+        # Origin exit: push the live l1_score block to the recorder so `round_0000.json`
+        # carries the origin candidate snapshot when audit_trail flushes (dashboard → audit order).
         if (
             record.phase == "origin"
             and record.event == "exit"
@@ -282,10 +258,8 @@ class LiveDashboardView(DerivedView):
             data=data,
         )
         self._apply_phase(event, view)
-        # L1_GENERATE/enter wipes the in-flight candidate buffer so the new
-        # round starts fresh. Completed rounds live on ``rounds[]`` already;
-        # the wipe only clears the live ``current_round.nodes.l1_score``
-        # block, not any historical data.
+        # L1_GENERATE:enter wipes the live candidate buffer (current_round.nodes.l1_score) —
+        # historical `rounds[]` is untouched.
         if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             self._round = {"round": self.state["round"], "candidates": {}}
         self._persist()
@@ -357,8 +331,7 @@ class LiveDashboardView(DerivedView):
         s = self.state
         if event.round is not None:
             s["round"] = event.round
-        # L1_SCORE has no _PHASE_TO_STATE entry — sample_started/scored own
-        # its transitions; on L1_SCORE:enter the prior state stays.
+        # L1_SCORE has no _PHASE_TO_STATE entry — sample_started/scored own its transitions.
         if event.event == "enter" and s.get("state") != "stopped":
             mapped = _PHASE_TO_STATE.get(event.phase)
             if mapped is not None:
@@ -366,8 +339,7 @@ class LiveDashboardView(DerivedView):
 
         phase, data = event.phase, event.data
         if phase == CampaignPhase.INIT and event.event == "enter":
-            # Stamp the formula early so What-If has a reference during
-            # origin scoring (which runs before INIT:exit).
+            # Stamp the formula early — origin scoring runs before INIT:exit; What-If needs a ref.
             if view is not None:
                 formula = view.get("composite_fitness_formula")
                 if formula is not None:
@@ -379,8 +351,7 @@ class LiveDashboardView(DerivedView):
             cycle = data["state"]
             loop_env = data["env"]
             config = data["config"]
-            # The (campaign_id, cycle_id, session_id) identity stamp is set
-            # once at construction; no phase event mutates it.
+            # Identity stamp (campaign/cycle/session) is set once at construction.
             del loop_env
             s["origin"] = {
                 "accuracy": float(cycle.tracking.current_accuracy),
@@ -392,8 +363,7 @@ class LiveDashboardView(DerivedView):
                 s["composite_fitness_formula"] = view.get("composite_fitness_formula")
                 self.short_formula_template = view.get("composite_fitness_formula_short")
         elif phase == "scoring_steer" and event.event == "applied":
-            # Operator-driven hot-swap; custom formulas render verbatim
-            # (no short form / value inlining).
+            # Operator hot-swap — custom formulas render verbatim (no short form).
             new_formula = data.get("formula")
             if new_formula:
                 s["composite_fitness_formula"] = new_formula
@@ -402,9 +372,8 @@ class LiveDashboardView(DerivedView):
             new_round = int(data.get("round", s["round"]) or 0)
             s["round"] = new_round
             s["degraded_count"] = 0
-            # Rewind / fork-in-place: discard any round entries this run
-            # is about to overwrite. Sole writer of the clamp; the appender
-            # at round:display is the sole growth site.
+            # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp writer;
+            # `round:display` is the sole growth site.
             prior = list(s.get("rounds") or [])
             s["rounds"] = [r for r in prior if int(r.get("round") or 0) < new_round]
 
@@ -446,14 +415,9 @@ class LiveDashboardView(DerivedView):
         self._persist()
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
-        """Publish an in-flight slot on ``dashboard.json::in_flight``.
-
-        Lets the operator (and any AI reading the file) see *which*
-        optimizer LLM call is currently in progress and *when* it
-        started — addresses the multi-minute blind spot where a
-        reasoning-heavy critique call would leave the dashboard frozen.
-        Cleared when the paired :class:`LLMCallRecord` arrives via
-        :meth:`_handle_llm_call`.
+        """Publish the in-flight optimizer LLM call to `dashboard.json::in_flight` —
+        kills the multi-minute blind spot during reasoning-heavy critique calls.
+        Cleared by the paired `LLMCallRecord` in `_handle_llm_call`.
         """
         self.state["in_flight"] = {
             "call_id": record.call_id,
@@ -466,13 +430,7 @@ class LiveDashboardView(DerivedView):
         self._persist()
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
-        """Clear the in-flight slot when the paired completion record lands.
-
-        Match by ``call_id`` so out-of-order delivery (rare; same ledger,
-        same writer) can't clear the wrong call. The actual audit-trail
-        write happens in :class:`AuditTrailView`; this projection only
-        manages the live ``in_flight`` field.
-        """
+        """Clear the in-flight slot; matches by `call_id` so out-of-order delivery can't clear the wrong call."""
         in_flight = self.state.get("in_flight")
         if (
             isinstance(in_flight, dict)
@@ -483,15 +441,8 @@ class LiveDashboardView(DerivedView):
             self._persist()
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
-        """Re-persist on each in-flight heartbeat to keep the freshness signal live.
-
-        A long optimizer LLM phase (l1_generate, l1_critique, …) fires no
-        ``PhaseRecord``/``SnapshotRecord`` for 30-90 s, so ``dashboard.json`` is
-        not rewritten and ``wallclock_serialized_at`` ages — the webapp would
-        false-positive "stale" on a healthy process. The heartbeat record
-        (every ``HEARTBEAT_INTERVAL_S``) is the liveness proof; this hook turns
-        it into a dashboard rewrite. No ``state`` mutation — a heartbeat means
-        "still alive in the current phase", only the timestamp moves.
+        """Heartbeat → re-persist so `wallclock_serialized_at` stays fresh during 30-90s
+        optimizer LLM phases that fire no other records. No state mutation, only the timestamp moves.
         """
         del record
         self._persist()
@@ -508,13 +459,8 @@ class LiveDashboardView(DerivedView):
     # -- Internal --------------------------------------------------------------
 
     def _persist(self) -> None:
-        # Atomic tmp+rename via write_json — a polling webapp reader can
-        # never catch this mid-write. Load-bearing because ``rounds[]``
-        # appends grow the payload past trivial-write size.
-
-        # In-flight node block — same shape as round_NNNN.json::nodes, but
-        # only for the CURRENT round. Completed rounds live on ``rounds[]``;
-        # past rounds' deep audit lives in ``round_NNNN.json``.
+        # Atomic tmp+rename via write_json — polling readers never see a torn payload.
+        # `nodes` mirrors round_NNNN.json::nodes but only for the current round.
         nodes: dict[str, Any] = {}
         if self._recorder is not None:
             nodes.update(self._recorder.snapshot_nodes())

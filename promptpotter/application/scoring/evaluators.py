@@ -1,12 +1,4 @@
-"""Evaluator registry, materializers, and the pure compute functions they bind.
-
-The registry (``_REGISTRY``) is the single source of truth for which round-
-and query-level evaluators exist; each entry's ``compute`` callable is defined
-in this same module just below. Per-round evaluators receive the round's
-result list (and optionally an ``OptSearchPoint`` for memory-derived signals);
-per-sample evaluators receive a single result. Every compute fn returns a
-float in [0, 1].
-"""
+"""Evaluator registry + materializers; per-round/per-sample compute fns return float in [0, 1]."""
 
 from __future__ import annotations
 
@@ -27,14 +19,8 @@ Scope = Literal["per_sample", "per_round"]
 DataType = Literal["NUMERIC", "BOOLEAN"]
 
 
-# Latency budget for ``latency_norm``: ≥ budget → 0.0, ≤ 0 → 1.0.
-LATENCY_BUDGET_MS = 10_000.0
-
-# Prompt-length budget for ``prompt_compactness``: ≥ budget → 0.0, ≤ 0 → 1.0.
-# 4 000 chars ≈ 1 000 tokens — a comfortable ceiling for a well-decomposed
-# 8-field prompt. Operators who want a different ceiling override the
-# weight or the formula in ``campaign.json::scoring``.
-PROMPT_BUDGET_CHARS = 4_000
+LATENCY_BUDGET_MS = 10_000.0  # ≥ budget → 0.0, 0 → 1.0
+PROMPT_BUDGET_CHARS = 4_000  # ≈ 1000 tokens; soft linear ceiling
 
 
 __all__ = [
@@ -52,24 +38,9 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Compute functions — keyword-only, referenced by ``_REGISTRY`` below.
-# ---------------------------------------------------------------------------
-
-
 def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float:
-    """Mean per-sample score across **non-deprecated** samples.
-
-    Aligns with ``_compute_accuracy`` (metrics.py): deprecated samples
-    (``is_deprecated`` — fatal or infra classifications) are excluded from
-    both numerator and denominator. They are infrastructure failures, not
-    signal about prompt quality, and they are already penalized via the
-    ``runtime_failure_rate`` self-heal evaluator. Counting them in
-    accuracy's denominator would double-penalize and break the
-    ``accuracy == hits/total`` invariant downstream readers depend on.
-    """
-    # Lazy import to dodge the application/scoring → application/optimization
-    # circular (matches the pattern in _compute_accuracy at metrics.py).
+    """Mean fitness over non-deprecated samples (deprecated already penalized by runtime_failure_rate)."""
+    # Lazy import: scoring → optimization circular.
     from promptpotter.application.optimization.pobb.elimination import is_deprecated
 
     valid = [r for r in results if not is_deprecated(r)]
@@ -92,17 +63,6 @@ def compute_degraded_rate(*, results: list[QueryMeasurement], **_: Any) -> float
 
 @dataclass(frozen=True)
 class SelfHealerSpec:
-    """One self-healing channel: the OptSearchPoint attribute that lists its
-    events, the evaluator id used in formula strings, and a short description.
-
-    Each healer fires when a layer below patches a wound: L2 heals L1 on
-    ``validation_failures`` / ``runtime_failures``; L3 heals L2 on
-    ``l2_guard_breaches``; L3 self-heals on ``l3_guard_breaches``. Every
-    event implies budget was spent recovering from a candidate that should
-    have produced clean output the first time — composite_fitness penalizes
-    candidates whose round triggers any of them.
-    """
-
     name: str
     attr: str
     description: str
@@ -133,8 +93,6 @@ SELF_HEALERS: tuple[SelfHealerSpec, ...] = (
 
 
 def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
-    """One parametric Evaluator per self-healing channel: events / sample-count, clipped."""
-
     def compute(*, results: list[QueryMeasurement], opt_sp: Any = None, **_: Any) -> float:
         if not results or opt_sp is None:
             return 0.0
@@ -174,9 +132,7 @@ def _compute_recall(
     candidate_key: str,
     **_: Any,
 ) -> float:
-    """Fraction of non-error queries (for which *node* ran) where GT is in the
-    node's output candidate list. Shared between source_recall and
-    candidate_recall."""
+    """Fraction of non-error queries (where *node* ran) with GT in *candidate_key*'s list."""
 
     def _step_ran(r: QueryMeasurement) -> bool:
         pd = r.get("pipeline_data") or {}
@@ -218,9 +174,6 @@ _LIMIT_KEY_SUFFIXES = ("max_sites", "num_results", "max_token_candidates", "max_
 
 
 def _limit_nodes(schema: PipelineSchema) -> list[tuple[PipelineNode, str, int]]:
-    """Return ``(node, limit_key, target)`` for each node whose current_config
-    carries a numeric ``max_*``/``num_*`` key — the target size of its output list.
-    """
     out: list[tuple[PipelineNode, str, int]] = []
     for node in schema.nodes:
         cfg = node.current_config or {}
@@ -242,11 +195,7 @@ def has_limit_node(schema: PipelineSchema) -> bool:
 def _retrieval_shortfall_for_result(
     result: QueryMeasurement, schema: PipelineSchema
 ) -> float | None:
-    """Per-sample min(observed / target, 1.0) across all limit-bearing nodes.
-
-    Returns None when no limit-bearing node has a list-valued output on this
-    result; lets the per-round aggregator skip queries with nothing to measure.
-    """
+    """Per-sample mean of min(observed/target, 1.0) over limit-bearing nodes; None when none apply."""
     pd = result.get("pipeline_data") or {}
     ratios: list[float] = []
     for node, _key, target in _limit_nodes(schema):
@@ -283,7 +232,6 @@ def compute_mean_retrieval_shortfall(
 
 
 def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
-    """Smaller pipelines score higher; single-node = 1.0, worst-case anchored at 12 nodes."""
     n = len(schema.active_steps)
     if n <= 1:
         return 1.0
@@ -292,30 +240,13 @@ def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
 
 
 def compute_prompt_compactness(*, opt_sp: Any = None, **_: Any) -> float:
-    """Shorter rendered prompts score higher; ``len(opt_sp.render()) >= budget`` → 0.0.
-
-    Reads the candidate's full rendered prompt (the same string that goes
-    onto ``pipeline_params[prompt_node]["prompt"]``). Returns 1.0 when the
-    candidate is missing or the prompt is empty so this evaluator never
-    masks a real signal — operators see "1.0 (vacuous)" rather than a
-    spurious penalty.
-
-    The 4 000-char budget is a soft ceiling; the curve is linear so the
-    composite_fitness term degrades gracefully rather than cliff-edging at the
-    threshold. To mark prompts above a hard threshold, build a per-round
-    formula like ``... + 0.10 * (1 if prompt_compactness > 0.5 else 0)``.
-    """
+    """``1 - len(render)/budget``; returns 1.0 on missing/empty so a vacuous prompt doesn't fake a penalty."""
     if opt_sp is None or not hasattr(opt_sp, "render"):
         return 1.0
     rendered = opt_sp.render() or ""
     if not rendered:
         return 1.0
     return max(0.0, 1.0 - len(rendered) / PROMPT_BUDGET_CHARS)
-
-
-# ---------------------------------------------------------------------------
-# Registry + materializers.
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -325,13 +256,7 @@ class Evaluator:
     scope: Scope
     compute: Callable[..., float]
     data_type: DataType = "NUMERIC"
-    # ``high`` = larger raw value is better (accuracy, recall, latency_norm,
-    # …); ``low`` = larger raw value is worse (error_rate, degraded_rate,
-    # runtime_failure_rate). Read by the webapp's What-If panel to
-    # direction-correct values when recomputing under alternative
-    # evaluator subsets. The active composite_fitness formula already
-    # bakes direction in (e.g. ``1 - error_rate``); this field is the
-    # raw-axis semantic.
+    # `high` = larger raw is better; `low` = larger is worse. Webapp What-If panel uses this to direction-correct.
     direction: Literal["high", "low"] = "high"
     node_type: str | None = None
     applies: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
@@ -440,14 +365,7 @@ def all_evaluators() -> list[Evaluator]:
 
 
 def evaluators_meta() -> list[dict[str, Any]]:
-    """Registry projection for the read-only webapp's What-If panel.
-
-    Drops the ``compute`` callable and ``applies`` predicate (neither is
-    JSON-serializable) and emits the static descriptive fields. The
-    panel determines per-pipeline applicability from whichever names
-    actually show up in a candidate's ``evaluators`` dict — the registry
-    only needs to publish names, descriptions, and direction.
-    """
+    """JSON-serializable registry projection for the webapp What-If panel — drops `compute`/`applies`."""
     return [
         {
             "name": ev.name,
@@ -514,20 +432,10 @@ def materialize_sample_values(
 
 
 def default_per_round_formula(schema: PipelineSchema) -> str:
-    """Default per-round formula: ``0.55*accuracy + 0.30*self_heal + 0.05*latency
-    + 0.05*recall + 0.05*prompt_compactness``.
+    """``0.55*accuracy + 0.30*self_heal + 0.05*latency + 0.05*recall + 0.05*prompt_compactness``.
 
-    Self-healing carries combined 0.30 — second only to accuracy. Each wound
-    channel rides its own ``(1 - <healer>_rate)`` term so the four healers
-    surface independently in the dashboard (a candidate that triggers L3
-    healing is penalized harder than one that only tripped validation). The
-    weights split inside the self-heal budget by severity: L1/L2 wounds at
-    0.10 each (these fire frequently and are the primary signal), L2/L3
-    guard breaches at 0.05 each (rarer but indicate a deeper failure).
-
-    The ``prompt_compactness`` term keeps a small verbosity penalty. Operators
-    who want a stronger penalty (or a different split between healers)
-    override the formula via ``campaign.json::scoring``.
+    Self-heal split: L1/L2 wounds 0.10 each (frequent, primary signal); L2/L3 guard
+    breaches 0.05 each (rare, deeper failures). Override via `campaign.json::scoring`.
     """
     recall_names: list[str] = []
     for display_name, ev, _node in _concrete_round_entries(schema):
@@ -559,18 +467,7 @@ def default_per_round_formula(schema: PipelineSchema) -> str:
 
 
 def default_per_round_formula_short(schema: PipelineSchema) -> str:
-    """One-line abbreviation of the default per-round formula.
-
-    Sub-expressions collapsed to single letters (``H`` for health, ``R``
-    for recall) so the round-level live render fits in a 70-char node
-    frame at full evaluator names. The legend is rendered alongside the
-    block when needed.
-
-    Returns the same string shape as ``default_per_round_formula`` only
-    when *schema* would otherwise produce the standard 5-term default.
-    Custom formulas (``campaign.json::scoring``) bypass this helper —
-    operators see their literal formula, wrapped if too long.
-    """
+    """Single-letter abbreviation of the default formula — fits the 70-char live-render frame."""
     has_recall = any(
         ev.node_type in ("candidate_source", "ranker", "cache")
         for _name, ev, _node in _concrete_round_entries(schema)

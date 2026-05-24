@@ -1,11 +1,7 @@
-"""Rolling-window RPM + TPM rate limiter + 429 ``Retry-After`` handling.
+"""Rolling-window RPM/TPM throttle + 429 `Retry-After` handling (RFC 7231 §7.1.3).
 
-Proactive throttle to match provider tier caps (e.g. Groq free tier
-5 req/min + 8000 tokens/min). Prevents 429 bursts by blocking *before*
-sending when either cap would be exceeded. Token estimation uses a rough
-``chars // 4`` approximation; ``record_actual()`` corrects the reservation
-from server-reported usage. Also hosts the shared 429 ``Retry-After``
-parser + visible countdown (RFC 7231 §7.1.3).
+Blocks before sending when caps would be exceeded. Token estimate is `chars//4`; `record_actual()`
+reconciles from server-reported usage.
 """
 
 from __future__ import annotations
@@ -25,9 +21,7 @@ from promptpotter.shared.errors import RequestTooLargeError
 logger = logging.getLogger(__name__)
 
 MAX_429_ATTEMPTS: int = 5
-# Brief visible cooldown between displaying a deprecated cache row and firing
-# the fresh remeasurement. Not a throttle — a signal so the operator sees the
-# retry happening instead of a 0.0s row jumping to a 20s call.
+# Visible cooldown between deprecated-cache row and fresh remeasurement — UX signal, not a throttle.
 DEPR_RETRY_COOLDOWN_SEC: float = 1.0
 _YELLOW = "\033[93m"
 _RESET = "\033[0m"
@@ -55,9 +49,8 @@ def parse_retry_after(headers: object | None) -> float | None:
     return None
 
 
-# Groq/OpenAI 429 body scopes — order matters: check the longest window
-# first (e.g. "per day" before "per minute") so a body that mentions
-# multiple windows classifies as the bucket the server actually blocked on.
+# 429 body scopes — check longest window first ("per day" before "per minute") so a multi-window
+# body classifies as the bucket actually blocked on.
 _SCOPE_BODY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("TPD", re.compile(r"tokens?\s*per\s*day|TPD\b", re.IGNORECASE)),
     ("RPD", re.compile(r"requests?\s*per\s*day|RPD\b", re.IGNORECASE)),
@@ -65,8 +58,7 @@ _SCOPE_BODY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("RPH", re.compile(r"requests?\s*per\s*hour|RPH\b", re.IGNORECASE)),
     ("TPM", re.compile(r"tokens?\s*per\s*minute|TPM\b", re.IGNORECASE)),
     ("RPM", re.compile(r"requests?\s*per\s*minute|RPM\b", re.IGNORECASE)),
-    # Generic fallbacks — body says "per day/hour/minute" without
-    # specifying tokens vs requests.
+    # Generic fallbacks — body specifies window but not tokens/requests.
     ("daily", re.compile(r"per\s*day|daily\s*(?:limit|quota)", re.IGNORECASE)),
     ("hourly", re.compile(r"per\s*hour|hourly\s*(?:limit|quota)", re.IGNORECASE)),
     ("per-minute", re.compile(r"per\s*minute", re.IGNORECASE)),
@@ -96,15 +88,8 @@ def _parse_duration_seconds(s: str) -> float | None:
 
 
 def diagnose_rate_limit_scope(headers: Any, body: str | None) -> str:
-    """Classify a 429 by which limit window was hit (TPD/RPD/TPH/RPH/TPM/RPM/…).
-
-    Looks at the error body first (Groq/OpenAI both name the bucket
-    explicitly — ``"Rate limit reached … on tokens per day (TPD)"``), then
-    falls back to the ``x-ratelimit-reset-*`` header magnitude (seconds →
-    per-minute, minutes → per-hour, hours+ → per-day). Returns ``"429"``
-    when no signal identifies the scope. Pure diagnostic — informs the
-    operator which limit they hit so they can judge whether to keep
-    waiting or Ctrl+C.
+    """Classify the 429 window (TPD/RPD/TPH/RPH/TPM/RPM/…). Reads body first (Groq/OpenAI name
+    the bucket), then `x-ratelimit-reset-*` magnitude. Returns `"429"` on no signal.
     """
     if body:
         for label, pat in _SCOPE_BODY_PATTERNS:
@@ -148,11 +133,8 @@ async def wait_with_countdown(total_sec: float, label: str) -> None:
 
 
 def estimate_tokens(messages: list[dict[str, str]], max_output: int | None) -> int:
-    """Rough prompt + output token estimate (~4 chars/token).
-
-    When ``max_output`` is ``None`` (no caller-side cap), only the input
-    side is counted. The TPM pre-check loses its output reservation, but
-    the provider's own 429 still surfaces if the actual response overshoots.
+    """Rough prompt+output estimate (~4 chars/token). `max_output=None` skips the output reservation
+    (TPM precheck loses it; provider's own 429 still surfaces on overshoot).
     """
     char_count = sum(len(m.get("content", "")) for m in messages)
     return char_count // 4 + (max_output or 0)
@@ -228,15 +210,8 @@ def apply_discovered_caps(
 
 @dataclass
 class RateLimiter:
-    """Rolling-window request/token limiter.
-
-    Attributes:
-        rpm: Requests per window. ``None`` disables the request cap.
-        tpm: Tokens per window. ``None`` disables the token cap.
-        window_s: Window length in seconds (default 60).
-        rpm_pinned: When True, ``apply_discovered()`` won't override ``rpm``
-            (caller explicitly configured it via settings).
-        tpm_pinned: Same for ``tpm``.
+    """Rolling-window request/token limiter. `*_pinned` slots are caller-configured and never
+    overwritten by `apply_discovered()`. `None` cap disables that axis.
     """
 
     rpm: int | None = None
@@ -250,24 +225,14 @@ class RateLimiter:
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def apply_discovered(self, rpm: int | None, tpm: int | None) -> None:
-        """Populate caps from server-reported rate-limit headers.
-
-        Pinned slots (explicit user config) are never overwritten. Unpinned
-        slots latch to the first non-``None`` value we see and update if the
-        server later reports a different cap (tier change mid-run).
-        """
+        """Populate unpinned caps from server-reported headers; tier changes mid-run take effect."""
         if rpm is not None and not self.rpm_pinned:
             self.rpm = rpm
         if tpm is not None and not self.tpm_pinned:
             self.tpm = tpm
 
     async def acquire(self, estimated_tokens: int) -> None:
-        """Block until sending ``estimated_tokens`` fits within RPM + TPM caps.
-
-        Reserves an RPM slot and a TPM allocation on return. Callers should
-        follow up with :meth:`record_actual` once the server reports actual
-        usage so the reservation reflects reality.
-        """
+        """Block until the request fits RPM+TPM; reserves both. Follow with `record_actual()`."""
         async with self._lock:
             while True:
                 now = time.monotonic()
@@ -292,13 +257,8 @@ class RateLimiter:
         *,
         provider_name: str,
     ) -> RateLimitReservation:
-        """Estimate, fail-fast on over-cap, throttle, and return a closeable reservation.
-
-        Bundles the three-step dance every LLM call needs: estimate prompt
-        size, raise ``RequestTooLargeError`` if the configured TPM cap can
-        never fit it, and block until the rolling window has room. The
-        returned reservation must be ``close()``-d with the server's actual
-        token count after the response so the rolling window stays accurate.
+        """Estimate → fail-fast on over-cap → throttle → return reservation. Must `close()` with
+        the server's actual token count.
         """
         estimated = estimate_tokens(messages, max_output)
         if self.tpm is not None and estimated > self.tpm:

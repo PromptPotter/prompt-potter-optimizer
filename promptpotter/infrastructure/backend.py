@@ -1,12 +1,5 @@
-"""HTTP client for backend APIs — wire payloads + session lifecycle.
-
-Fetches experiments, syncs data into the project store, and replays
-pipeline queries. All API responses stored verbatim.
-
-Connector-specific assumptions (wire payload shape, session lifecycle,
-experiment-data extraction) live in :mod:`promptpotter.connectors`.
-``BackendClient`` is connector-agnostic — callers look up a
-``Connector`` and pass its ``wire_adapter`` + ``session_factory()`` in.
+"""HTTP client for backend APIs — wire payloads + session lifecycle. Connector-agnostic;
+per-connector adapters in `promptpotter.connectors`. API responses stored verbatim.
 """
 
 from __future__ import annotations
@@ -69,12 +62,7 @@ def _is_session_error(resp: httpx.Response) -> bool:
 
 
 class BackendClient:
-    """Async HTTP client for a single backend instance.
-
-    Connector-agnostic: ``wire_adapter`` (outbound payload shape) and
-    ``session`` (lifecycle) are required at construction, looked up by
-    callers via :mod:`promptpotter.connectors`.
-    """
+    """Async HTTP client. `wire_adapter` + `session` are connector-specific and required at construction."""
 
     def __init__(
         self,
@@ -119,13 +107,7 @@ class BackendClient:
     # -- status check -------------------------------------------------------
 
     async def check_status(self) -> dict[str, Any]:
-        """GET /status — returns backend health/state info.
-
-        Returns parsed JSON on success, or a dict with:
-        - ``"error"`` + ``"status"`` on failure
-        - ``"status": "not_implemented"`` for 404 (endpoint missing)
-        - ``"status": "unreachable"`` for connection errors
-        """
+        """GET /status. Failure returns `{status: not_implemented|unreachable|error, error: ...}` dict."""
         try:
             resp = await self._get_http().get(f"{self.base_url}/status")
             resp.raise_for_status()
@@ -175,12 +157,7 @@ class BackendClient:
     # -- replay operations ------------------------------------------------
 
     async def init_session(self, terms: list[str]) -> dict[str, Any]:
-        """POST /sessions with terms array.
-
-        Thin pass-through to the session guard — idempotent for identical
-        terms, stores terms internally so ``run_query()`` can auto-recover
-        if the backend restarts mid-campaign.
-        """
+        """POST /sessions. Idempotent; guard stashes terms so `run_query` auto-recovers on restart."""
         return await self._guard.set_terms(self._get_http(), self.base_url, terms)
 
     async def run_query(
@@ -190,17 +167,8 @@ class BackendClient:
         *,
         on_warning: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        """POST /matches — payload shape is owned by ``self._wire_adapter``.
-
-        HTTP 400 with "session" in the detail triggers a one-shot session
-        recovery via the session protocol, then retries once.
-
-        ``on_warning`` is invoked on every retry fire (transport error, 429,
-        5xx) so the caller can emit a typed event to the ledger / dashboard.
-        Payload keys: ``kind`` (transport_error|rate_limit|server_error),
-        ``error_class`` (or status code), ``attempt``, ``max_attempts``,
-        ``wait_s``. The retry behaviour itself is unchanged — this is a
-        visibility hook over the existing loop.
+        """POST /matches. 400+session-in-detail → one-shot session recover + retry. *on_warning*
+        fires on each retry (transport/429/5xx) for ledger telemetry — retry behaviour itself unchanged.
         """
         payload = self._wire_adapter(query, pipeline_params)
 
@@ -224,9 +192,7 @@ class BackendClient:
             except Exception:
                 logger.exception("on_warning callback failed; continuing retry loop")
 
-        # Bounded retry with visible countdown. 429 honors RFC 7231 Retry-After;
-        # 5xx and transport errors fall back to exponential backoff (1, 2, 4, 8s).
-        # Other statuses (incl. 2xx and 4xx-non-429) exit the loop immediately.
+        # 429 → Retry-After (RFC 7231); 5xx + transport → exp backoff (1, 2, 4, 8s); others exit.
         resp: httpx.Response | None = None
         for attempt in range(MAX_429_ATTEMPTS):
             try:

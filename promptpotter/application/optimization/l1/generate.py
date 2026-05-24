@@ -35,14 +35,9 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceGrounding | None:
-    """Build an ``EvidenceGrounding`` from one Pydantic-typed variant entry.
-
-    The parse boundary is permissive — ``field`` is a plain ``str`` (providers
-    that ignore the JSON-Schema ``enum`` hint would otherwise crash the round),
-    and ``raw`` itself is allowed to be ``None`` for variants the LLM emitted
-    without the required panel citation. Missing/invalid groundings surface as
-    per-round behavior-check failures downstream — ``evidence_grounding_present``
-    flags them in ``review.md`` and ``round_NNNN.json``.
+    """Permissive parse — `field` is plain `str` (provider may ignore the JSON-Schema enum) and
+    `raw` may be None (missing citation). Missing groundings surface downstream as
+    `evidence_grounding_present` behavior-check failures.
     """
     if raw is None:
         logger.warning(
@@ -54,12 +49,7 @@ def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceG
 
 
 def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict[str, Any]]:
-    """Build compact per-candidate summary dicts for phase event data.
-
-    Each summary carries ``label`` (canonical ``CN.M``), set once here so the
-    audit trail's ``l1_score.input.candidates`` and every downstream reader
-    share one identity — no display-side ``idx + 1`` arithmetic.
-    """
+    """Per-candidate summary dicts for phase events. `label` set once here — no display-side `idx+1`."""
     summaries = []
     for i, cp in enumerate(proposals):
         prompt_fields = cp.osp.prompt_fields()
@@ -72,9 +62,8 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
             summary["pipeline_params_override"] = cp.pipeline_params_override
         if prompt_fields:
             summary["prompt_fields"] = prompt_fields
-        # task_context is the third L1 mutation slot. Surface it so the
-        # SP-diff table can render task_context-only candidates as a
-        # mutation rather than a bare [clone].
+        # Third L1 mutation slot — lets SP-diff render task_context-only candidates as a mutation,
+        # not a bare [clone].
         summary["task_context"] = cp.osp.task_context.to_dict()
         summaries.append(summary)
     return summaries
@@ -104,10 +93,8 @@ async def l1_generate(
 
     bundle = build_bundle(cycle)
     template = DispatchHub.fill_l1(load_optimizer_prompt("l1_generate"), opt_sp.l1_layout, bundle)
-    # L1's instruction slot carries {{l1_supplemental_rules}} +
-    # {{l1_situational_examples}} placeholders (registered injections, but
-    # filled here because fill_l1 only walks L1_LAYOUT_SLOTS and instruction
-    # isn't one). compile_prompt substitutes via kwargs.
+    # `instruction` slot isn't in L1_LAYOUT_SLOTS so fill_l1 skips it — we substitute its two
+    # injection placeholders via compile_prompt kwargs here.
     prompt_vars: dict[str, str] = {
         "n_variants": str(n_variants),
         "l1_supplemental_rules": DispatchHub.render("l1_supplemental_rules", bundle),
@@ -129,12 +116,8 @@ async def l1_generate(
             optimizer_call_cache=cycle.session.store.optimizer_calls,
         )
     except MetaPromptParseError as parse_err:
-        # The meta-prompt LLM returned content that didn't validate against
-        # L1GenerateOutput even after one repair-hint retry. Distinguish
-        # truly-empty (provider degraded) from schema-noncompliant (prompt
-        # structurally wrong) so L2 sees the right signal — both feed the
-        # validation_failures wound channel but the reason field steers the
-        # heal direction.
+        # Schema-noncompliant after one repair retry. Split provider-degraded (empty) vs
+        # structurally wrong — both wound the same channel but `reason` steers L2's heal direction.
         raw = (parse_err.raw or "").strip()
         is_empty = len(raw) < 20
         reason = "l1_provider_empty_response" if is_empty else "meta_prompt_parse_failure"
@@ -170,13 +153,9 @@ async def l1_generate(
         " | ".join(f"{n}={s}" for n, s in slot_sizes),
     )
 
-    # Defensive type guard — ``extract_parsed_json`` returns ``response.parsed``
-    # unconditionally, and the schema-repair retry path can leak a raw
-    # ``str`` (or dict, or list) past validation when the second attempt's
-    # content parses to JSON but doesn't bind to ``L1GenerateOutput``. Route
-    # unexpected types into the same wound channel as a true parse failure
-    # so the round completes cleanly (zero candidates, L2 sees the failure
-    # next round and heals) instead of crashing on ``.variants``.
+    # The repair-retry path can leak a raw str/dict/list past validation when JSON parses but
+    # doesn't bind. Route unexpected types to the wound channel so the round completes cleanly
+    # (zero candidates → L2 heals next round) instead of crashing on `.variants`.
     if not isinstance(generated, L1GenerateOutput):
         logger.error(
             "L1 R%d: l1_generate response decoded as %s instead of L1GenerateOutput — "
@@ -198,10 +177,8 @@ async def l1_generate(
 
     population: list[CandidateProposal] = []
     for v in variants_list[:n_variants]:
-        # Three slots, three readers. The schema split (B1) guarantees the
-        # LLM cannot conflate them — the runtime filter only drops node
-        # names not in the active schema (belt-and-braces; the JSON schema
-        # already enumerates them, but provider strict mode is off).
+        # Three slots, three readers — schema split (B1) prevents conflation. Runtime filter is
+        # belt-and-braces: drops node names absent from the active schema if provider strict is off.
         prompt_changes = dict(v.prompt_fields_override or {})
         tc_changes = dict(v.task_context_override or {})
         pipeline_params_override = filter_pipeline_params_override(

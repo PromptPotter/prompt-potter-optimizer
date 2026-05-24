@@ -1,10 +1,6 @@
-"""The :data:`INJECTIONS` registry — lookup by name from layouts / templates.
-
-Holds the one dict every prompt site resolves against, plus
-``_r_prompt_budget_status`` — the single registry-aware renderer, kept
-here so it can read :data:`INJECTIONS` without a circular import. An
-import-time integrity check fails fast if any L1-mandatory placeholder
-is mis-tiered.
+"""`INJECTIONS` registry — the one dict every prompt site resolves against.
+`_r_prompt_budget_status` lives here because it reads INJECTIONS (avoids a circular import).
+Import-time check fails fast if any L1-mandatory placeholder is mis-tiered.
 """
 
 from __future__ import annotations
@@ -47,11 +43,8 @@ from promptpotter.application.optimization.dispatch.hub.injections.wounds import
 )
 from promptpotter.domain.l1_layout import L1_MANDATORY
 
-# Author of each char_cap-bearing injection — drives the prompt-budget-status
-# split: blocks L2 authors are L2's to heal, the rest are flagged but
-# structural. task_context is L2-authored too but per-field capped
-# (char_cap=None), so the renderer measures its fields directly rather than
-# through this map.
+# Author of each char_cap-bearing injection — drives prompt-budget-status split (L2 heals YOURS).
+# `task_context` is per-field capped, not whole-block; the renderer measures its fields directly.
 _INJECTION_AUTHOR: dict[str, str] = {
     "l1_supplemental_rules": "L2",
     "l1_situational_examples": "L2",
@@ -63,19 +56,9 @@ _INJECTION_AUTHOR: dict[str, str] = {
 
 
 def _r_prompt_budget_status(b: InjectionBundle) -> str:
-    """L2's self-heal surface — every length cap + live overruns.
-
-    L2 authors ``task_context``, supplemental rules and situational
-    examples — all length-capped, all riding a budget-limited downstream
-    prompt. This block shows L2 every per-injection char cap and, for any
-    block currently over, the actual char count — split by author so L2
-    trims what it owns. Overruns in another layer's output and the
-    aggregate are handled by the deterministic allocator
-    (:func:`facade._apply_budget`); a prompt that still won't fit halts the
-    loop with ``StopReason.PROMPT_BUDGET``. Mounted only in the
-    ``l2_context`` template — L1/L3/critique get a one-line writer note
-    instead. Sizes are raw renders (pre-truncation), so an OVER value is
-    what the authoring LLM actually emitted.
+    """L2's self-heal surface — per-injection cap + actual size, split by author so L2 trims
+    YOURS. Aggregate overrun is handled by `_apply_budget`. Mounted only in l2_context.
+    Sizes are pre-truncation — OVER = what the LLM actually emitted.
     """
 
     def _cap_line(label: str, actual: int, cap: int) -> str:
@@ -109,12 +92,8 @@ def _r_prompt_budget_status(b: InjectionBundle) -> str:
     )
 
 
-# char_cap is the per-injection self-healing budget. LLM-authored text
-# (parent prompt, L2/L3 framing, critique) carries an int cap — the hub
-# truncates + warns on overrun. Derived / measurement injections are
-# already bounded by their *_RENDER_CAP row limits and pass None.
-# task_context passes None: _r_task_context caps each field at
-# TASK_CONTEXT_VALUE_CAP, which is finer-grained than a whole-block cap.
+# `char_cap`: int for LLM-authored text (truncate + warn on overrun); None for derived/measurement
+# (already bounded by *_RENDER_CAP) and `task_context` (per-field cap is finer).
 INJECTIONS: dict[str, _Injection] = {
     "plan": _Injection(
         "plan",
@@ -297,9 +276,8 @@ INJECTIONS: dict[str, _Injection] = {
 }
 
 
-# Fail-fast on a coding mistake: every L1-mandatory placeholder MUST be tier
-# MANDATORY, or the budget allocator could shed a signal L1 cannot run without
-# (no parent prompt, no plan, no framing, no mutation surface, no critique).
+# Every L1-mandatory placeholder MUST be tier MANDATORY — otherwise the budget allocator could
+# shed a signal L1 can't run without (parent prompt, plan, framing, mutation surface, critique).
 _mistiered_mandatory = sorted(
     name for name in L1_MANDATORY if INJECTIONS[name].tier is not InjectionTier.MANDATORY
 )

@@ -1,10 +1,7 @@
-"""``run_optimization`` — the optimize-loop entry point + final teardown.
-
-Wires origin → init_optimization_loop → run_round_loop → finalize_run.
-Operator-issued forks (sweep, rebase) stamp their L1-surface deltas onto
-the fresh OSP; fork-on-divergence rebuilds observers around the new
-fork's ledger and re-seeds ``phase_ctx`` so RoundStartView keeps reading
-the parent campaign's max_rounds + patience scalars.
+"""`run_optimization` — optimize-loop entry + teardown. Wires origin → `init_optimization_loop` →
+`run_round_loop` → `_finalize_run`. Operator-issued forks stamp L1-surface deltas on the fresh OSP;
+fork-on-divergence rebuilds observers + re-seeds `phase_ctx` so RoundStartView keeps reading the
+parent's max_rounds + patience scalars.
 """
 
 from __future__ import annotations
@@ -65,12 +62,8 @@ async def run_optimization(
     max_spend_usd: float | None = None,
     ignore_render_errors: bool = False,
 ) -> CycleResult:
-    """Run optimization end-to-end. ``observers`` MUST be pre-built via
-    ``build_run_observers`` so the ledger is bound before origin ticks.
-
-    ``origin`` is optional: when omitted, the runner scores origin as
-    phase 0 (CLI path); when provided, it's reused as-is (notebook path,
-    where origin ran in an earlier cell against the same observers).
+    """End-to-end optimization. *observers* MUST be pre-built (ledger bound before origin).
+    *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused as-is (notebook path).
     """
     started_at = datetime.now(UTC).isoformat()
     cb = observers.callbacks
@@ -100,13 +93,8 @@ async def run_optimization(
 
     pre_loop_cycle_id = session.state.cycle_id
 
-    # `init_optimization_loop` + `run_round_loop` are wrapped in one
-    # try/except so init-phase crashes (e.g. stale on-disk OSP shape
-    # rejected by `extra="forbid"` during resume replay) land in
-    # ``StopReason.CRASHED`` with a stashed traceback the same way a
-    # mid-round crash does. The inner ``run_round_loop`` keeps its own
-    # except clause for the richer round-context log; this outer net is
-    # for everything that runs above it inside this orchestration call.
+    # Outer try/except catches init-phase crashes (stale on-disk OSP rejected by extra="forbid",
+    # etc.) so they land in CRASHED with a stashed traceback like mid-round crashes do.
     cycle: Cycle | None = None
     try:
         cycle = await init_optimization_loop(
@@ -128,15 +116,10 @@ async def run_optimization(
             started_at=started_at,
         )
 
-        # Operator escape hatch — `resume --ignore-render-errors`. Stamped on
-        # the cycle so every `build_bundle` copies it onto the InjectionBundle
-        # and `DispatchHub.render` downgrades a raising renderer to "".
+        # `resume --ignore-render-errors` escape hatch — propagates to every InjectionBundle.
         cycle.ignore_render_errors = ignore_render_errors
 
-        # Operator-issued forks (sweep, future rebase): stamp the payload's
-        # L1-surface deltas onto the fresh OSP. Triggers without OSP deltas
-        # (SCORING_DIVERGENCE always; SCORING-bookkeeping for future triggers)
-        # have no l1_layout to apply — skip.
+        # Operator forks (sweep, rebase) stamp L1-surface deltas; triggers without deltas skip.
         if fork_payload is not None and fork_payload.l1_layout is not None:
             apply_fork_payload_to_osp(cycle.opt_sp, fork_payload)
 
@@ -147,11 +130,9 @@ async def run_optimization(
             and pre_loop_cycle_id != session.state.cycle_id
         )
         if forked and pre_loop_cycle_id:
-            # Persist phase_ctx across the rebuild: INIT.enter fired on the
-            # parent callbacks (max_rounds, patience, original_sp_flat,
-            # composite formulas) and won't re-fire on the new ledger.
-            # Without this copy, RoundStartView reads zeros — the operator
-            # sees "ROUND N/999" and "patience N/0" on every forked round.
+            # Carry phase_ctx across the rebuild — INIT.enter (max_rounds, patience, formulas)
+            # fired on the parent callbacks and won't re-fire on the new ledger. Without this,
+            # RoundStartView reads zeros ("ROUND N/999", "patience N/0") on every forked round.
             parent_phase_ctx = dict(observers.callbacks._phase_ctx)
             observers = build_run_observers(
                 session=session,
@@ -193,10 +174,7 @@ async def run_optimization(
         logger.warning("Optimization interrupted before round loop entered (%s).", cause)
         stop_reason = StopReason.INTERRUPTED
     except ResumeDivergenceError as exc:
-        # Operator-recoverable: the saved decision trail doesn't match
-        # what the current scorer/picker/etc. would produce. Print the
-        # formatted message + fork hint, no traceback — the fix is a
-        # one-flag rerun (``optimize --fork-on-divergence``).
+        # Operator-recoverable: print message + fork hint, no traceback (fix is `--fork-on-divergence`).
         logger.warning("Resume halted on divergence:\n%s", exc)
         stop_reason = StopReason.DIVERGED
     except Exception:
@@ -205,11 +183,8 @@ async def run_optimization(
         stop_reason = StopReason.CRASHED
 
     finished_at = datetime.now(UTC).isoformat()
-    # Degenerate-cycle case: init crashed before a Cycle was built, so
-    # tracking/round/best_sp fields fall back to neutral values. The
-    # cycle_id is still present (it was minted before run_optimization),
-    # so mark_finished can still stamp index.json::final with the
-    # crashed/interrupted status and the traceback.
+    # Degenerate case: init crashed before Cycle existed — fall back to neutral values. cycle_id
+    # was minted upstream, so mark_finished can still stamp index.json::final with the traceback.
     if cycle is not None:
         best_sp = cycle.tracking.best_sp
         cycle_result = CycleResult(
@@ -245,12 +220,8 @@ async def run_optimization(
         )
     _finalize_run(session, observers, cycle_result, sweep=sweep)
 
-    # Stub-fork cleanup. If this run forked during init (divergence
-    # detection on resume) and the fork never completed a round, the
-    # mint left an empty dir on disk — delete it now so an interrupt
-    # between fork-mint and round-1-commit doesn't accumulate stubs
-    # over time. The HITL fork path goes through the API endpoint and
-    # never reaches this funnel; the operator owns those.
+    # Stub-fork cleanup: if this run forked during init but never completed a round, delete the
+    # empty dir so interrupts between fork-mint and round-1 don't accumulate stubs.
     forked_in_this_run = (
         pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
     )
@@ -280,10 +251,8 @@ def _finalize_run(
     is_render_error = stop_reason == StopReason.RENDER_ERROR
     is_prompt_budget = stop_reason == StopReason.PROMPT_BUDGET
     is_optimizer_timeout = stop_reason == StopReason.OPTIMIZER_TIMEOUT
-    # All five teardown reasons leave the active round partial. Render-error
-    # also stashes a traceback (the failing renderer) the same way a crash
-    # does; the prompt-budget and optimizer-timeout halts are graceful —
-    # their cause is in the log, no traceback needed.
+    # All five reasons leave the round partial. Render-error stashes a traceback like crash does;
+    # prompt-budget + optimizer-timeout are graceful (cause is in the log).
     halted_mid_round = (
         is_interrupted or is_crashed or is_render_error or is_prompt_budget or is_optimizer_timeout
     )
@@ -298,24 +267,16 @@ def _finalize_run(
             str(StopReason.PROMPT_BUDGET): "prompt_budget",
             str(StopReason.OPTIMIZER_TIMEOUT): "optimizer_timeout",
         }
-        # The active round number when the loop tore down lives on the
-        # callbacks (set by ``cb.set_round`` at each iteration). Surfacing
-        # it on ``index.json::interrupted_round`` lets the operator see
-        # which round is partial without diffing the on-disk tree — same
-        # field works for crash, the traceback is the discriminator.
+        # Active round at teardown — surfaces on `interrupted_round` so the operator sees which
+        # round is partial without diffing the on-disk tree (works for crash too; traceback is the
+        # discriminator).
         interrupted_round = int(observers.callbacks._current_round) if halted_mid_round else None
-        # The active exception is gone from sys.exc_info() by the time
-        # ``_finalize_run`` runs — ``run_round_loop`` returned normally with
-        # the stop reason. The except clause stashed the formatted traceback
-        # on session.state.crash_traceback before returning (crash and
-        # render-error both do), so the disk copy matches what stderr saw.
+        # Active exception is gone from sys.exc_info() by now — the except clause stashed the
+        # formatted traceback on session.state.crash_traceback before returning.
         crash_traceback = session.state.crash_traceback if has_traceback else None
         cycle_status = status_map.get(stop_reason, "completed")
-        # index.json::final — the terminal-summary namespace the
-        # potter-l1-meta-campaign skill gates on (final.stop_reason), and that
-        # review.md + the variant leaderboard read for the frozen verdict.
-        # Assembled here because prompt_hashes is an application-layer fact;
-        # the store only persists the dict.
+        # index.json::final — terminal-summary namespace the `potter-l1-meta-campaign` skill gates
+        # on; review.md + variant leaderboard read it for the frozen verdict.
         from promptpotter.application.optimization.dispatch.llm_call import (
             compute_optimizer_prompt_hashes,
         )
@@ -349,12 +310,9 @@ def _finalize_run(
                 status=cycle_status,
                 finished_at=cycle_result.finished_at,
             )
-    # Drain projections AFTER mark_stopped so dashboard.json's stopped-state
-    # is in place before the audit cache settles. ``_cycle_was_interrupted``
-    # threads ``"interrupted": true`` into any partial round_NNNN.json the
-    # audit projection writes on its way out — true for both Ctrl+C and
-    # uncaught-exception teardowns (the round didn't reach
-    # ``round:complete`` either way).
+    # Drain AFTER mark_stopped so dashboard.json's stopped state is in place before audit settles.
+    # `_cycle_was_interrupted` threads `"interrupted": true` into partial round_NNNN.json — true
+    # for both Ctrl+C and uncaught-exception teardowns.
     if emitter is not None:
         emitter.mark_stopped(str(stop_reason or ""))
     observers.audit._cycle_was_interrupted = halted_mid_round

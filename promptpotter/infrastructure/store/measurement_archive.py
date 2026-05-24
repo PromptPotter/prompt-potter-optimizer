@@ -1,16 +1,8 @@
-"""Measurement archive — the database core, cross-cycle measurement storage.
+"""Measurement archive — DB core. Append-only, content-addressed, cross-cycle/session/tenant.
 
-The archive is the canonical store of every ``(sample × config → outcome)`` row
-ever recorded. Append-only, content-addressed, cross-cycle, cross-session,
-cross-tenant within a tenant root. Two natural views: by training example
-(``measurements_for_sample``) and by searchpoint / config
-(``measurements_for_config``). Cache reuse uses positional prefix-exact match;
-discovery retrieval uses ``_matches_subset``. See
-``docs/concepts/scoring-and-memory.md``.
-
-The archive is the single source of truth for measurements — derived
-per-cycle views (e.g. AxisIndex, ConfigIndex) refresh from ``list_all``
-rather than tailing a parallel stream.
+Two views: by sample (`measurements_for_sample`) and by config (`measurements_for_config`).
+Cache reuse → positional prefix-exact; discovery → `_matches_subset`. Sole source of truth —
+derived views (AxisIndex, ConfigIndex) refresh from `list_all`, not a parallel stream.
 """
 
 from __future__ import annotations
@@ -43,12 +35,8 @@ def _matches_subset(
     run_node_configs: list[Any],
     predicate: dict[str, dict[str, Any]],
 ) -> bool:
-    """Subset match — every node in ``predicate`` must appear in the
-    stored chain with at least the required key/value pairs.
-
-    Empty subdict tests node presence only. Empty predicate returns
-    ``False`` (discovery contract: no constraints, no rows). Used by
-    ``measurements_for_config``.
+    """Every node in *predicate* must appear in the stored chain with at least the required pairs.
+    Empty subdict tests presence; empty predicate returns False (no constraints → no rows).
     """
     if not predicate:
         return False
@@ -80,13 +68,8 @@ def _entry_matches_dataset(
     *,
     include_unknown: bool,
 ) -> bool:
-    """Filter rule for dataset-scoped reads.
-
-    - ``dataset_name=None`` returns every entry (no filter; forensic /
-      admin use only).
-    - ``dataset_name="X"`` matches entries stamped ``X``. Entries written
-      under v1 schema lack the field and only pass when
-      ``include_unknown=True``.
+    """`None` ⇒ everything (forensic/admin). Concrete name ⇒ stamped match; v1-unstamped entries
+    pass only with `include_unknown=True`.
     """
     if dataset_name is None:
         return True
@@ -97,16 +80,9 @@ def _entry_matches_dataset(
 
 
 class MeasurementArchive:
-    """File I/O for the measurement archive — the database core.
-
-    Tenant-global: every measurement batch lives under
-    ``archive/measurements/`` regardless of ``backend_id``.
-    Content-addressed identity comes from ``PipelineSchema.node_configs()`` —
-    no cross-backend collision risk since each config blob carries the
-    backend's pipeline shape.
-
-    The ``backend_id`` parameter is preserved on public methods for
-    call-site stability but is ignored for path construction.
+    """File I/O for the archive. Tenant-global (`archive/measurements/` regardless of backend_id —
+    content-addressed via `PipelineSchema.node_configs()` avoids cross-backend collisions).
+    `backend_id` is preserved on public methods for call-site stability but ignored for paths.
     """
 
     def __init__(self, base_dir: Path):
@@ -128,16 +104,8 @@ class MeasurementArchive:
         run_id: str,
         data: dict[str, Any],
     ) -> Path:
-        """Write detail file and upsert the index.
-
-        ``data`` must include at least ``run_id``, ``content_hash``, and
-        ``scores``.
-
-        The detail file is written atomically (via ``write_json``). The
-        index update is protected by ``filelock`` to prevent concurrent
-        writers from losing entries. The archive itself is the source of
-        truth — derived per-cycle views (e.g. AxisIndex) refresh from
-        ``list_all`` rather than tailing a parallel stream.
+        """Write detail + upsert index. *data* needs `run_id`, `content_hash`, `scores`.
+        Detail = atomic write; index = `filelock`-protected against concurrent writers.
         """
         detail_path = self._runs_dir(backend_id) / f"{run_id}.json"
         write_json(detail_path, data)
@@ -204,13 +172,8 @@ class MeasurementArchive:
         dataset_name: str | None = None,
         include_unknown: bool = False,
     ) -> list[dict[str, Any]]:
-        """Return the index entries (summaries without full items).
-
-        ``dataset_name`` filters to one dataset's archive slice. ``None``
-        returns every entry — forensic / admin use only; production
-        callers pass a concrete dataset. v1 entries (written before the
-        schema bump to v2) lack the field and only appear when
-        ``include_unknown=True``.
+        """Index entries (summaries). *dataset_name* scopes to one dataset (None = forensic/admin);
+        v1-unstamped entries appear only with `include_unknown=True`.
         """
         index = read_json_optional(self._index_path(backend_id)) or {
             "measurements": [],
@@ -234,11 +197,8 @@ class MeasurementArchive:
         dataset_name: str | None = None,
         include_unknown: bool = False,
     ) -> Iterator[tuple[str, dict[str, Any]]]:
-        """Yield ``(run_id, detail)`` for runs whose ``run_id`` is not in ``seen_ids``.
-
-        Skips runs whose detail file is missing. Encapsulates the index-scan +
-        per-run load that derived views (e.g. AxisIndex) used to do by hand.
-        Filtered by ``dataset_name`` per :meth:`list_all`.
+        """`(run_id, detail)` for runs not in *seen_ids*. Index scan + per-run load encapsulated
+        so derived views (AxisIndex) don't reinvent it. Dataset-filtered per `list_all`.
         """
         for entry in self.list_all(
             backend_id, dataset_name=dataset_name, include_unknown=include_unknown
@@ -259,12 +219,8 @@ class MeasurementArchive:
         dataset_name: str | None = None,
         include_unknown: bool = False,
     ) -> list[tuple[dict[str, Any], int]]:
-        """Return index entries sharing a node-config prefix, best match first.
-
-        Position-by-position prefix match with full dict equality. Returns
-        ``(entry, match_length)`` tuples sorted by match_length desc,
-        then item_count desc. Filtered by ``dataset_name`` per
-        :meth:`list_all`.
+        """Position-by-position prefix-equal match. `(entry, match_length)` sorted by match_length
+        desc then item_count desc.
         """
         if not node_configs:
             return []
@@ -301,17 +257,9 @@ class MeasurementArchive:
         dataset_name: str | None = None,
         include_unknown: bool = False,
     ) -> list[Measurement]:
-        """Every measurement of one training example, across all configs.
-
-        When ``run_ids`` is provided (typically from
-        ``Sample.run_ids``), skips the index scan and loads only those
-        files. When ``None``, walks every batch in the archive.
-
-        ``dataset_name`` filters to one dataset's archive slice when the
-        index scan is taken; when ``run_ids`` is supplied, the caller is
-        responsible for ensuring those ids belong to the requested
-        dataset (typically true because ``Sample.run_ids`` is itself
-        populated from the dataset-scoped index path).
+        """Every measurement of one sample, across all configs. *run_ids* hint (from `Sample.run_ids`)
+        skips the index scan; without it, walks every batch. Caller-supplied ids must already be
+        dataset-scoped (true when sourced from `Sample.run_ids`).
         """
         if run_ids is not None:
             sources: Iterator[tuple[str, dict[str, Any]]] = (
@@ -344,21 +292,9 @@ class MeasurementArchive:
         dataset_name: str | None = None,
         include_unknown: bool = False,
     ) -> list[Measurement]:
-        """Every measurement under configs matching *predicate*, across all samples.
-
-        ``predicate`` is ``{node_name: required_subdict}`` — see
-        :func:`_matches_subset` for subset semantics. Empty predicate
-        returns ``[]``.
-
-        When ``run_ids`` is provided (typically from
-        ``ConfigIndex.run_ids_matching(predicate)``), skips the index
-        scan and loads only those run files. Loaders that hold a
-        :class:`~promptpotter.application.intelligence.indexes.ConfigIndex`
-        should always pass the hint — for an archive of N runs across K
-        unique configs, this turns an O(N) scan into an O(K + matches)
-        walk that's primarily index lookups. The hint must already be
-        dataset-scoped at the source (the per-dataset
-        :class:`ConfigIndex` honours this).
+        """Every measurement under configs matching *predicate*, across samples. Empty predicate → [].
+        *run_ids* hint (from `ConfigIndex.run_ids_matching`) turns O(N) into O(K + matches); must
+        be dataset-scoped at source.
         """
         if not predicate:
             return []
@@ -399,13 +335,10 @@ class MeasurementArchive:
         dataset_name: str | None = None,
         include_unknown: bool = False,
     ) -> dict[str, dict[str, Any]]:
-        """Build per-sample cache from prior runs sharing *node_configs* (exact: reuse all non-error; partial: prefix-trusted only). ``is_fatal`` ensures a saved valid retry isn't shadowed by an older deprecated archive.
-
-        ``dataset_name`` scopes cache reuse to one dataset's archive. A
-        cached AIME hit on ``(node_config_prefix, sample_id=14)`` must
-        not satisfy a JustLogic lookup on the same key — different
-        problem, same integer. Production callers always pass the
-        current cycle's ``session.dataset_name``.
+        """Per-sample cache from prior runs sharing *node_configs*. Exact match → reuse all
+        non-error; partial → prefix-trusted nodes only. `is_fatal` prevents a deprecated archive
+        row shadowing a saved valid retry. *dataset_name* scopes reuse (same sample_id across
+        datasets is a different problem).
         """
         if not node_configs:
             return {}
@@ -450,10 +383,8 @@ class MeasurementArchive:
         return self._base_dir / "archive" / "prompt_aliases.json"
 
     def register_alias(self, backend_id: str, *hashes: str) -> None:
-        """Link rendered_prompt_hashes as semantically equivalent.
-
-        Merges into existing groups: if any hash is already grouped,
-        the new hashes join that group.
+        """Link rendered_prompt_hashes as semantically equivalent; new hashes merge into any group
+        that overlaps theirs.
         """
         hashes_set = {h for h in hashes if h}
         if len(hashes_set) < 2:
@@ -463,7 +394,6 @@ class MeasurementArchive:
         data = read_json_optional(path) or {"groups": []}
         groups: list[list[str]] = data["groups"]
 
-        # Find all existing groups that overlap with the new hashes
         merged: set[str] = set(hashes_set)
         remaining: list[list[str]] = []
         for group in groups:
@@ -483,11 +413,7 @@ class MeasurementArchive:
         raw_text: str,
         canonical_text: str,
     ) -> None:
-        """Alias a raw prompt string to its restructured/canonical form.
-
-        Hashes both sides and calls :meth:`register_alias`.  No-ops when
-        either side is empty or both hash to the same value.
-        """
+        """Hash both sides → `register_alias`. No-op when either side is empty or hashes match."""
         if not (raw_text and canonical_text):
             return
         raw_hash = hashlib.sha256(raw_text.encode()).hexdigest()[:HASH_TRUNCATE]

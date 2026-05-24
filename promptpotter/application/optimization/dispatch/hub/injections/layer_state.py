@@ -1,10 +1,6 @@
-"""Layer narrative-state + supplemental-rule injection renderers.
-
-Carries the persistent narrative state authored by prior LLM calls —
-L3's plan, L2's task-context framing and L3→L2 note, the current best
-prompt, the L1 critique — plus the auto-triggered + L2-authored
-situational rules and worked examples appended to L1's instruction.
-All share the uniform ``(InjectionBundle) -> str`` renderer signature.
+"""Narrative-state + supplemental-rule renderers — persistent state from prior LLM calls
+(L3 plan, L2 task_context + L3→L2 note, current prompt, L1 critique) plus auto-triggered +
+L2-authored rules/examples appended to L1's instruction.
 """
 
 from __future__ import annotations
@@ -26,9 +22,8 @@ from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 logger = logging.getLogger(__name__)
 
-# LaTeX corruption markers — match 'oxed{' NOT preceded by '\b' (legitimate
-# `\boxed{` is preceded by '\b' so the lookbehind skips it) OR 'athematical'
-# at a word boundary NOT preceded by 'm' (so 'mathematical' is skipped).
+# LaTeX corruption — match `oxed{` not preceded by `\b` (skips legit `\boxed{`) OR `athematical`
+# at a word boundary not preceded by `m` (skips `mathematical`).
 _LATEX_CORRUPTION_RE = re.compile(r"(?<!\\b)oxed\{|(?<![a-zA-Z])athematical")
 
 
@@ -37,8 +32,7 @@ def _r_plan(b: InjectionBundle) -> str:
 
 
 def _r_l3_to_l2_note(b: InjectionBundle) -> str:
-    """Sticky L3→L2 pointer. Mounted only in L2's template; absent from
-    ``L1_POSSIBLE`` so L1 never sees it."""
+    """Sticky L3→L2 pointer; absent from L1_POSSIBLE so L1 never sees it."""
     note = b.opt_sp.wounds.l3_note
     return f"L3 NOTE TO L2:\n{note}" if note else ""
 
@@ -59,8 +53,7 @@ def _r_task_context(b: InjectionBundle) -> str:
     lines: list[str] = []
     for k, v in pairs:
         if len(v) > TASK_CONTEXT_VALUE_CAP:
-            # L2 authors task_context; an over-cap value is an LLM mistake —
-            # truncate (heal) + warn rather than let it bloat every prompt.
+            # L2-authored overrun — truncate (heal) + warn, don't bloat every prompt.
             logger.warning(
                 "task_context.%s is %d chars (cap %d) — L2 overran its output budget; truncating",
                 k,
@@ -73,12 +66,8 @@ def _r_task_context(b: InjectionBundle) -> str:
 
 
 def _valid_axis_set(schema: Any) -> set[str]:
-    """Axes the schema legitimately exposes: prompt fields + node names + param keys.
-
-    L2's free-form ``suggested_axes`` may hallucinate names that aren't in
-    the pipeline (e.g. ``prompt_size``); rendering those into the next
-    round's prompt seeds the cycle with a non-existent mutation target.
-    Match the union the operator can actually act on.
+    """Schema-legitimate axes (prompt fields + node names + param keys) — used to filter L2's
+    hallucinated `suggested_axes` (e.g. `prompt_size`) before they seed the next round.
     """
     from promptpotter.config.settings import PROMPT_STRING_FIELDS
 
@@ -97,17 +86,8 @@ def _valid_axis_set(schema: Any) -> set[str]:
 
 
 def format_l1_critique_for_prompt(critique: dict[str, Any], pipeline_schema: Any = None) -> str:
-    """L1 critique dict → compact text for L1_GENERATE + L2_CONTEXT consumption.
-
-    Three load-bearing fields only: ``priority_fix`` (axis+change+quoted
-    failure), ``suggested_axes`` (schema-filtered), ``failure_highlights``
-    (per-sample evidence). Prose summary / positive_critique /
-    negative_critique were dropped from the schema — see L1CritiqueOutput.
-
-    When ``pipeline_schema`` is provided, ``suggested_axes`` is filtered
-    against the schema's known axis names so a hallucinated axis (e.g.
-    ``prompt_size``) doesn't get re-rendered into the next round's L2
-    brief.
+    """L1 critique → compact text for L1_GENERATE + L2_CONTEXT. Three load-bearing fields:
+    `priority_fix`, schema-filtered `suggested_axes`, `failure_highlights`.
     """
     if not critique:
         return ""
@@ -140,12 +120,7 @@ def _r_l1_overrides(b: InjectionBundle) -> str:
 
 
 def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
-    """Walk the deterministic auto-trigger conditions in fixed order.
-
-    The order is the order the rules render in L1's prompt. Each clause
-    is a cheap read off the bundle — no allocation beyond the small
-    intermediate strings.
-    """
+    """Walk auto-trigger conditions in fixed order — also the render order in L1's prompt."""
     triggers: list[str] = []
     if b.axes is not None and b.axes.peaked_axes():
         triggers.append("peaked_axis")
@@ -167,15 +142,7 @@ def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
 
 
 def _r_l1_supplemental_rules(b: InjectionBundle) -> str:
-    """Auto-triggered situational rules + L2-authored rules.
-
-    Renders each active auto-trigger's canonical rule body (from
-    :data:`AUTO_RULES`) followed by every L2-authored
-    :class:`L1SupplementalRule` on ``opt_sp.l1_supplemental_rules`` with
-    its citation in brackets. Returns empty when neither source has
-    anything to say — variable absent ⇒ L1's instruction omits the
-    block entirely.
-    """
+    """Auto-triggered rules (from `AUTO_RULES`) + L2-authored ones (cited). Empty → L1 omits the block."""
     rendered: list[tuple[str, str]] = []
     for trigger_id in _detect_auto_triggers(b):
         body = AUTO_RULES.get(trigger_id)
@@ -193,16 +160,8 @@ def _r_l1_supplemental_rules(b: InjectionBundle) -> str:
 
 
 def _r_l1_situational_examples(b: InjectionBundle) -> str:
-    """Built-in + L2-authored worked examples for currently-active triggers.
-
-    L2-authored examples whose ``trigger_id`` matches neither an
-    auto-trigger that fired this round nor a currently-authored
-    supplemental rule are silently filtered — the example would land in
-    L1's prompt without the rule it illustrates, which is worse than
-    omitting it.
-
-    When the same ``trigger_id`` exists in both built-ins and L2-authored
-    entries, L2's entry wins (overrides the built-in).
+    """Worked examples for currently-active triggers. L2-authored examples without a matching
+    active trigger filter out (would orphan from the rule). L2 entry overrides matching built-in.
     """
     auto_triggers = _detect_auto_triggers(b)
     l2_rule_ids = {r.rule_id for r in b.opt_sp.l1_supplemental_rules}
@@ -226,11 +185,8 @@ def _r_l1_situational_examples(b: InjectionBundle) -> str:
 
 
 def _format_example(trigger_id: str, ex: dict[str, Any]) -> str:
-    """Compact worked-example block — trigger header + ✗/✓/→ lines.
-
-    Parent excerpt is dropped: it almost always duplicates the rule body
-    rendered immediately above in SITUATIONAL RULES. The ✗/✓/→ symbols
-    replace verbose REJECTED/ACCEPTED/Why labels for small-model legibility.
+    """Worked-example block: trigger header + ✗/✓/→ lines. Parent excerpt dropped (duplicates the
+    rule body rendered just above); ✗/✓/→ symbols replace verbose labels for small-model legibility.
     """
     lines = [f"  [{trigger_id}]"]
     if rej := (ex.get("rejected") or "").strip():

@@ -1,15 +1,8 @@
-"""Typed records for the run ledger — facts about a campaign cycle.
+"""Typed records for the run ledger. Frozen Pydantic, `record_type` discriminator for JSON round-trip.
 
-The ledger spine in ``infrastructure/ledger.py`` accepts a ``CycleRecord``
-union and fans out to projection writers. Each record subtype is a frozen
-Pydantic model with a ``record_type`` discriminator so JSON round-trips
-through the spine without ambiguity.
-
-Resume-checkpoint policy (``RESUME_CHECKPOINT_GATING``, ``GatingMode``,
-``record_decision`` helper, the import-time exhaustiveness check) lives
-in :mod:`promptpotter.application.optimization.resume_and_fork.decisions`
-— the data shape (``ResumeCheckpointKind`` + ``ResumeCheckpointRecord``) stays here so
-the ``CycleRecord`` discriminated union owns it.
+The `CycleRecord` discriminated union lives here so the data shape stays with the domain;
+resume-checkpoint policy (gating, helpers, exhaustiveness check) lives in
+`application/optimization/resume_and_fork/decisions.py`.
 """
 
 from __future__ import annotations
@@ -37,11 +30,8 @@ __all__ = [
 
 
 class ResumeCheckpointKind(enum.StrEnum):
-    """Kinds of decisions written to the ledger.
-
-    Adding a member: append here AND extend ``RESUME_CHECKPOINT_GATING`` in
-    ``resume_and_fork.decisions`` in the same commit. The registry test
-    fails otherwise.
+    """Ledger-decision kinds. Adding a member: also extend `RESUME_CHECKPOINT_GATING` in
+    `resume_and_fork.decisions` or the import-time exhaustiveness check fails.
     """
 
     ROUND_WINNER = "round_winner"
@@ -94,13 +84,8 @@ class PhaseRecord(BaseModel):
 
 
 class SnapshotRecord(BaseModel):
-    """An in-flight live-state snapshot — per-sample / per-candidate / per-round.
-
-    Snapshots are display state for the live dashboard and per-sample log.
-    The ``event`` discriminator says what the snapshot represents
-    (``sample_started``, ``sample_scored``, ``candidate_started``,
-    ``candidate_scored``); ``payload`` carries the full data the consumer
-    needs (full result dict, full score report, query text, etc.).
+    """In-flight live-state snapshot — `event` discriminates (sample_started/scored,
+    candidate_started/scored); `payload` carries the full data the consumer needs.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -117,18 +102,11 @@ class SnapshotRecord(BaseModel):
 
 
 class TokenUsageRecord(BaseModel):
-    """One LLM call's token + cost telemetry — fans into ``dashboard.json::spend``.
+    """LLM token + cost telemetry → `dashboard.json::spend`.
 
-    ``kind`` splits the spend rollup into ``backend`` (in-pipeline LLM
-    nodes) and ``loop`` (optimizer meta-prompts: l1/l2/l3/critique). The
-    dashboard projection sums each bucket independently so the operator
-    sees ``Backend $X • Loop $Y`` rather than a fused total.
-
-    ``cost_usd`` is set when the provider returned USD on the wire
-    (OpenRouter's ``usage.cost``); otherwise the projection resolves it
-    via ``shared/spend.py``'s rate table. Token counts are always
-    populated so the chip can fall back to a token-count display when
-    no rate is on file for the model.
+    `kind` splits into `backend` (pipeline) vs `loop` (optimizer) so the dashboard shows
+    `Backend $X • Loop $Y`. `cost_usd` comes from the provider wire (OpenRouter `usage.cost`);
+    otherwise resolved via `shared/spend.py`'s rate table — token counts always present for fallback.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -146,19 +124,8 @@ class TokenUsageRecord(BaseModel):
 
 
 class LLMCallStartRecord(BaseModel):
-    """One optimizer LLM call's IN-FLIGHT marker — appended BEFORE the SDK call.
-
-    Lets the live dashboard project an ``in_flight`` field on
-    ``dashboard.json`` while a multi-minute optimizer call is still
-    running, so the operator (and any AI reading the file) can see
-    *which* call is in progress and *for how long*, instead of staring
-    at a frozen UI for nine minutes.
-
-    Pairs with :class:`LLMCallRecord` via ``call_id``; the live
-    dashboard clears the in-flight slot when the paired completion
-    record arrives. ``call_id`` is a hex string (caller-provided,
-    typically a ``uuid4().hex``) so the ledger stays JSON-serializable
-    without a custom encoder.
+    """In-flight marker appended BEFORE the SDK call — drives `dashboard.json::in_flight` so a
+    multi-minute optimizer call isn't a frozen UI. Pairs with `LLMCallRecord` via `call_id` (hex).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -170,26 +137,15 @@ class LLMCallStartRecord(BaseModel):
     candidate_idx: int | None = None
     model: str | None = None
     started_at_ms: int
-    # Total characters across all message contents — surfaces the
-    # input-size mental model on the in-flight start line so the
-    # operator knows what they're waiting on (a 12k-char l1_generate
-    # vs a 800-char l3_plan have very different latency expectations).
-    # 0 only on records minted before this field existed.
+    # Total prompt chars — sets the operator's latency expectation on the in-flight line
+    # (12k-char l1_generate vs 800-char l3_plan look very different).
     prompt_chars: int = 0
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
 class LLMCallProgressRecord(BaseModel):
-    """Periodic heartbeat appended while an LLM call is in flight.
-
-    Emitted by ``llm_call`` every ``HEARTBEAT_INTERVAL_S`` seconds while
-    the SDK call is blocked, so the CLI display and the dashboard's
-    ``in_flight.elapsed_s`` slot can show a live elapsed counter instead
-    of leaving the operator staring at the static start line for two
-    minutes. Pairs with :class:`LLMCallStartRecord` and
-    :class:`LLMCallRecord` via ``call_id``. Cached LLM responses
-    short-circuit before the heartbeat starts, so cache replays never
-    emit progress records.
+    """Heartbeat appended every `HEARTBEAT_INTERVAL_S` while the SDK call is blocked, so the CLI +
+    `in_flight.elapsed_s` show a live counter. Cache replays short-circuit before the heartbeat starts.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -203,24 +159,9 @@ class LLMCallProgressRecord(BaseModel):
 
 
 class LLMCallRecord(BaseModel):
-    """One optimizer LLM call's full I/O — rendered prompt + parsed output.
-
-    Persists every ``l1_generate`` / ``l1_critique`` / ``l2_context`` /
-    ``l3_plan`` LLM call into the ledger so the round audit trail
-    (``.runtime/cache/rounds/round_NNNN.json::nodes.<node>``) is a
-    derived view, not a sidecar persistence channel. Call shape mirrors
-    today's audit-trail action dict so :class:`AuditTrailView`
-    can shape it into the ``nodes`` block without semantic loss.
-
-    ``payload_kind`` distinguishes a real LLM call (carries
-    ``messages``/``response``/``usage``) from a synthesized event (e.g.
-    persisted-candidate replay where llm_call did not fire — carries
-    only ``input``/``output`` fields).
-
-    ``call_id`` pairs the record with a prior :class:`LLMCallStartRecord`
-    so the live dashboard's in-flight projection can clear the slot.
-    Empty string when no start record was emitted (synthesized or
-    replayed calls).
+    """Full I/O of one optimizer LLM call — ledger-resident so `round_NNNN.json::nodes` is derived,
+    not sidecar persisted. `payload_kind` distinguishes a real call from a synthesized one (replay,
+    where messages/response/usage are absent and only input/output are populated).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -231,19 +172,13 @@ class LLMCallRecord(BaseModel):
     candidate_idx: int | None = None
     payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
     call_id: str = ""
-    # The action-dict shape that AuditTrailView currently consumes;
-    # carries every field _action_to_node_block reads (template_fields,
-    # variables, template_name, messages, response, usage, model, config,
-    # duration_s, cached, …). Stored as an opaque mapping so adding a
-    # field doesn't churn the record schema.
+    # Opaque action-dict shape consumed by AuditTrailView — new fields don't churn the schema.
     payload: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
-# Discriminated union — Pydantic uses ``record_type`` to pick the right model
-# when parsing a dict back into a CycleRecord (e.g. when iterating a ledger
-# from disk). Keep the order alphabetical so hash-keyed test snapshots are
-# stable across additions.
+# Discriminated union by `record_type`. Keep the order alphabetical — hash-keyed test snapshots
+# go stale otherwise.
 CycleRecord = Annotated[
     ResumeCheckpointRecord
     | LLMCallProgressRecord
@@ -268,10 +203,8 @@ class ForkTrigger(enum.StrEnum):
 
 
 class ForkPayload(BaseModel):
-    """Why + what-changed at a fork cut. Lands on ``FORK_CUT.data.fork``.
-
-    Optional delta fields (today: ``l1_layout``) are populated only by
-    triggers that carry that kind of change.
+    """Why + what-changed at a fork cut → `FORK_CUT.data.fork`. Optional delta fields
+    (today: `l1_layout`) populated only by triggers that carry that change.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

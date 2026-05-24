@@ -1,19 +1,11 @@
-"""AuditTrailView — per-cycle round-recorder, flushes to ``.runtime/cache/rounds/round_NNNN.json``.
+"""AuditTrailView — per-cycle round recorder, flushes to `.runtime/cache/rounds/round_NNNN.json`.
 
-Per-cycle scope: a fork's recorder MUST point at the fork's own
-``.runtime/cache/rounds/`` directory, never at the parent's. The constructor
-takes ``CycleDir`` (not a raw ``Path``) so the routing is explicit at every
-construction site, and ``from_cycle_dir`` derives the standard subpath.
-A runtime assertion in ``__init__`` rejects any path that doesn't end in
-``/.runtime/cache/rounds`` to catch ad-hoc constructions.
+Per-cycle scope: a fork's recorder MUST point at the fork's own rounds dir. `__init__` rejects
+paths not ending in `.runtime/cache/rounds` to catch ad-hoc constructions; use `from_cycle_dir`.
 
-Pure derived view of the ledger: round boundaries arrive via
-``PhaseRecord("round","enter"|"complete")``; per-node LLM I/O arrives
-via ``LLMCallRecord`` (single-writer invariant — the four optimizer
-LLM calls go through ``llm_call.py::run_optimizer_node`` which
-appends one record per call). The only direct in-process method is
-``set_l1_score`` from the live dashboard, which composes scoring
-phase data this projection wouldn't otherwise see.
+Pure ledger projection: boundaries from `PhaseRecord("round", "enter"|"complete")`, per-node I/O
+from `LLMCallRecord` (single-writer via `run_optimizer_node`). `set_l1_score` is the one direct
+in-process method — the live dashboard composes scoring data this projection wouldn't otherwise see.
 """
 
 from __future__ import annotations
@@ -43,12 +35,7 @@ def audit_rounds_dir(cycle_dir: Path) -> Path:
 
 
 def load_round_audits(cycle_dir: Path, rounds: list[dict[str, Any]]) -> list[dict[str, Any] | None]:
-    """Load ``round_NNNN.json`` for each round; ``None`` on missing/corrupt.
-
-    Output is parallel to *rounds* — slot ``N`` is the audit dict (or ``None``)
-    for ``rounds[N]``. Corrupt JSON or absent file is non-fatal: the matching
-    slot is ``None`` and the operator-facing render degrades gracefully.
-    """
+    """Load round_NNNN.json parallel to *rounds*; missing/corrupt → None (render degrades gracefully)."""
     rd = audit_rounds_dir(cycle_dir)
     out: list[dict[str, Any] | None] = []
     for round_data in rounds:
@@ -93,9 +80,7 @@ def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
         block["duration_s"] = action["duration_s"]
     if "timestamp" in action:
         block["timestamp"] = action["timestamp"]
-    # Schema-repair retry count: only surface when non-zero so the audit
-    # stays terse for the common (clean parse) case but the signal is
-    # immediately visible when the L1 prompt produced bad JSON.
+    # Schema-repair count surfaces only when non-zero — keeps the common (clean parse) audit terse.
     repairs = action.get("schema_repair_attempts")
     if repairs:
         block["schema_repair_attempts"] = repairs
@@ -103,14 +88,9 @@ def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
 
 
 class AuditTrailView(DerivedView):
-    """Accumulates node I/O within a round, writes ``round_NNNN.json`` on flush.
-
-    Construct via :meth:`from_cycle_dir` so the ``rounds_dir`` is derived
-    from the cycle dir's ``.runtime/cache/rounds`` subpath in one place. The
-    direct ``__init__`` is supported for tests that already hold a
-    rounds-dir path; both code paths assert the path lives under
-    ``.runtime/cache/rounds`` so a fork can never accidentally point at the
-    parent's tree.
+    """Accumulates node I/O within a round, writes `round_NNNN.json` on flush. Construct via
+    `from_cycle_dir`; direct `__init__` is supported for tests. Both assert `.runtime/cache/rounds`
+    so a fork can never point at the parent tree.
     """
 
     def __init__(self, rounds_dir: Path) -> None:
@@ -122,20 +102,15 @@ class AuditTrailView(DerivedView):
         self.rounds_dir = rounds_dir
         self._current_round: int = 0
         self._nodes: dict[str, dict[str, Any]] = {}
-        # Sticky mirror for the dashboard: each phase-keyed slot keeps its
-        # most-recent fire across round boundaries. Per-key overwrite only;
-        # never wiped by begin_round / flush. Each block carries a
-        # ``"round"`` tag so the reader can tell which round produced it.
+        # Sticky dashboard mirror: most-recent fire per phase-keyed slot, never wiped by begin/flush.
+        # Each block carries a `"round"` tag so the reader knows which round produced it.
         self._sticky_nodes: dict[str, dict[str, Any]] = {}
         self._l1_score: dict[str, Any] | None = None
-        # Round-boundary timestamps sourced from PhaseRecord.timestamp on
-        # the round-enter / round-complete events — pure derived view, no
-        # wall-clock observation in this projection.
+        # Boundary timestamps from `PhaseRecord.timestamp` — no wall-clock observation here.
         self._started_at: str = ""
         self._finished_at: str = ""
-        # Set by the runner before ``drain()`` when the cycle is being torn
-        # down on Ctrl+C; threads ``"interrupted": True`` onto the payload of
-        # the round that never received a ``round:complete``.
+        # Set by the runner pre-`drain()` on teardown; threads `"interrupted": True` onto rounds
+        # that never received a `round:complete`.
         self._cycle_was_interrupted: bool = False
 
     @classmethod
@@ -144,19 +119,8 @@ class AuditTrailView(DerivedView):
         return cls(Path(cycle_dir).joinpath(*_ROUNDS_SUBPATH))
 
     def begin_round(self, round_num: int, started_at: str = "") -> None:
-        """Start recording a new round. Flushes any pending state from
-        the previous round before resetting.
-
-        L2 / L3 LLM calls that arrive AFTER ``round:complete`` and BEFORE
-        the next ``round:enter`` land in the previous round's ``_nodes``
-        buffer (the projection has no boundary to attach them to except
-        the active round). Flushing here means those records merge into
-        the just-closed round's ``round_NNNN.json`` rather than being
-        discarded.
-
-        ``started_at`` should be the ``PhaseRecord.timestamp`` of the
-        round-enter event. The headless fallback (no ledger) leaves
-        the field empty; downstream readers tolerate that.
+        """Start a new round; flush pending state first so L2/L3 calls that arrived between
+        `round:complete` and `round:enter` merge into the just-closed round's file (not discarded).
         """
         if self._nodes or self._l1_score:
             self.flush()
@@ -167,7 +131,9 @@ class AuditTrailView(DerivedView):
         self._finished_at = ""
 
     def rehydrate_sticky(self) -> None:
-        """Pre-populate ``_sticky_nodes`` from the highest existing round file so resumed-cycle dashboards show prior history before the first new write."""
+        """Pre-populate `_sticky_nodes` from the highest existing round file — resumed-cycle
+        dashboards show prior history before the first new write.
+        """
         if self._sticky_nodes:
             return
         if not self.rounds_dir.is_dir():
@@ -189,9 +155,7 @@ class AuditTrailView(DerivedView):
         nodes = payload.get("nodes") or {}
         for key, block in nodes.items():
             if key == "l1_score":
-                # l1_score is composed by the live dashboard from per-round
-                # candidates; not a sticky-node slot.
-                continue
+                continue  # composed by the live dashboard, not a sticky slot.
             if isinstance(block, dict):
                 self._sticky_nodes[key] = {**block, "round": round_num}
 
@@ -205,18 +169,15 @@ class AuditTrailView(DerivedView):
         self._sticky_nodes[node_type] = {**block, "round": self._current_round}
 
     def snapshot_nodes(self) -> dict[str, dict[str, Any]]:
-        """PhaseRecord-keyed sticky snapshot for ``dashboard.json::current_round`` — slots overwritten only when the same phase re-fires (excludes ``l1_score``, composed by the live dashboard)."""
+        """Phase-keyed sticky snapshot for `dashboard.json::current_round`. Slots overwrite on
+        same-phase re-fire; excludes `l1_score` (composed by the live dashboard).
+        """
         return dict(self._sticky_nodes)
 
     # -- Ledger subscription (PhaseRecord 3) ----------------------------------------
 
-    # Round boundaries arrive as ``PhaseRecord("round", "enter"|"complete")``;
-    # origin emits ``PhaseRecord("origin", "enter"|"exit", round=0)`` which is
-    # handled by the same boundary logic — origin IS round 0 on disk, flushed
-    # to ``round_0000.json`` alongside the L1 rounds ``round_0001.json``+.
-    # ResumeCheckpointRecord and SnapshotRecord records bypass this projection
-    # — decisions are archived in round_data JSON and snapshots are display-only.
-
+    # Origin emits `PhaseRecord("origin", "enter"|"exit", round=0)` — same boundary logic;
+    # origin IS round 0 on disk (`round_0000.json`).
     def _handle_phase(self, record: PhaseRecord) -> None:
         if record.phase in ("round", "origin"):
             if record.event == "enter" and record.round is not None:
@@ -226,15 +187,8 @@ class AuditTrailView(DerivedView):
                 self.flush()
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
-        """Project an :class:`LLMCallRecord` payload into the current round's nodes block.
-
-        Sole ingress for ``nodes.l1_generate`` / ``.l1_critique`` /
-        ``.l2_context`` / ``.l3_plan`` (and any synthesized
-        load-from-disk variants). For ``payload_kind == "llm_call"`` the
-        payload mirrors today's action-dict shape, so the projection
-        logic stays ``_action_to_node_block``. For
-        ``payload_kind == "synthesized"`` the payload already carries
-        ``input`` / ``output`` keys directly — pass through.
+        """Sole ingress for `nodes.l1_generate/l1_critique/l2_context/l3_plan`.
+        `synthesized` payloads carry input/output directly; `llm_call` uses `_action_to_node_block`.
         """
         if record.payload_kind == "synthesized":
             block: dict[str, Any] = {
@@ -249,12 +203,8 @@ class AuditTrailView(DerivedView):
         self._record_node(record.node, block)
 
     def flush(self) -> Path | None:
-        """Write ``round_NNNN.json`` and reset. Returns the written path.
-
-        Idempotent: a second flush on the same round (e.g. L2 LLM-call
-        records that arrived between ``round:complete`` and the next
-        ``round:enter``) merges new nodes into the existing file's
-        ``nodes`` block rather than overwriting it.
+        """Write `round_NNNN.json` and reset. Idempotent — second flush merges new nodes into the
+        existing file rather than overwriting (so late L2/L3 records aren't lost).
         """
         if not self._nodes and self._l1_score is None:
             return None
@@ -273,8 +223,7 @@ class AuditTrailView(DerivedView):
                 pass
 
         nodes_ordered: dict[str, Any] = {}
-        # Prefer a predictable reading order: L1 generate/critique first,
-        # then scoring, then any escalation layers.
+        # Reading order: L1 generate/critique → scoring → escalation layers.
         for preferred in ("l1_generate", "l1_critique"):
             if preferred in existing_nodes:
                 nodes_ordered[preferred] = existing_nodes[preferred]
@@ -311,14 +260,8 @@ class AuditTrailView(DerivedView):
         return path
 
     def drain(self) -> None:
-        """Flush any buffered round state to disk on cycle teardown.
-
-        The normal flush path fires on ``PhaseRecord("round", "complete"|"exit")``;
-        a mid-candidate interrupt never emits ``complete``, so the buffered
-        nodes would otherwise be lost on the runner returning. ``drain`` is
-        the runner's seam for "the cycle is over — settle to disk now."
-        When ``_cycle_was_interrupted`` is true (set externally), the partial
-        ``round_NNNN.json`` carries ``"interrupted": true`` at top level.
+        """Runner's teardown seam — flush buffered state since a mid-candidate interrupt never
+        emits `round:complete`. `_cycle_was_interrupted` threads `"interrupted": true` on the partial.
         """
         if self._nodes or self._l1_score is not None:
             self.flush()

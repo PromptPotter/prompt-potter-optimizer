@@ -1,13 +1,9 @@
 """Sweep-toolkit — result JSON, L1 swap, slicing, rank table.
 
-The toolkit verbs (`time-to`, `round1`, `round2`) each persist one result
-JSON under ``{tenant_root}/archive/sweeps/{l1_meta_prompt_hash}/{dataset}/``.
-The path scheme groups every sweep against the L1 meta-prompt revision
-that produced it, so an operator (or `potter-l1-meta-campaign`) can read
-the directory directly to see "what does this L1 edit measure to?"
-without grepping campaign artifacts.
-
-Single result shape across verbs; only some fields populated per verb.
+Verbs (`time-to`, `round1`, `round2`) persist one result JSON under
+``archive/sweeps/{l1_meta_prompt_hash}/{dataset}/`` so the directory groups
+every sweep against the L1 meta-prompt revision that produced it. Single
+result shape; unpopulated fields land as ``None``.
 """
 
 from __future__ import annotations
@@ -48,8 +44,6 @@ __all__ = [
 ]
 
 
-# Single shape, all verbs. Unpopulated fields land as ``None`` so disk
-# readers can sort/filter without per-verb schema knowledge.
 SWEEP_RESULT_FIELDS: tuple[str, ...] = (
     "sweep_id",
     "verb",
@@ -94,9 +88,7 @@ def sweep_archive_dir(
     l1_meta_prompt_hash: str,
     dataset: str,
 ) -> Path:
-    """``{tenant_root}/archive/sweeps/{hash}/{dataset}/`` — one dir per
-    (L1 meta-prompt revision, dataset) pair. ``rank`` reads recursively
-    under ``archive/sweeps/`` to compare across hashes."""
+    """One dir per (L1 meta-prompt revision, dataset); `rank` recurses across hashes."""
     return tenant_root / "archive" / "sweeps" / l1_meta_prompt_hash / dataset
 
 
@@ -111,10 +103,7 @@ def build_sweep_result(
     slice_name: str = "all",
     **fields: Any,
 ) -> dict[str, Any]:
-    """Build a sweep-result dict in the unified shape — every field
-    present, unpopulated ones as ``None``. ``fields`` overrides any
-    populated entries; unknown keys raise so a typo in a verb's call
-    site fails loudly rather than landing as silent ``null``."""
+    """Build a sweep-result dict in unified shape. Unknown keys in ``fields`` raise (typo guard)."""
     unknown = set(fields) - set(SWEEP_RESULT_FIELDS)
     if unknown:
         raise ValueError(f"unknown sweep-result fields: {sorted(unknown)}")
@@ -138,13 +127,7 @@ def write_sweep_result(
     *,
     target: int | None = None,
 ) -> Path:
-    """Persist ``result`` under ``archive/sweeps/{hash}/{dataset}/``.
-
-    Filename: ``{verb}_{target?}_{slice?}_{timestamp}.json``. ``target``
-    is the integer threshold N for ``time-to N`` (omitted otherwise).
-    ``_slice_{name}`` suffix when ``slice`` is non-default. The shape is
-    stable across verbs so ``rank`` can scan one dir.
-    """
+    """Persist under `archive/sweeps/{hash}/{dataset}/{verb}_{target?}_{slice?}_{ts}.json`."""
     verb = result["verb"]
     dataset = result["dataset"]
     h = result["l1_meta_prompt_hash"]
@@ -164,10 +147,7 @@ def write_sweep_result(
 
 
 def current_optimizer_prompt_hash(node: str = "l1_generate") -> str:
-    """The meta-prompt hash for optimizer ``node`` in the current pipeline
-    snapshot. Same value that lands on ``index.json::final.prompt_hashes.
-    {node}``. The ``l1_generate`` hash is the sweep-archive directory key,
-    so every sweep result groups under the L1 revision that produced it."""
+    """Meta-prompt hash for *node* in the current snapshot; `l1_generate` is the archive dir key."""
     return compute_optimizer_prompt_hashes().get(node, "unknown")
 
 
@@ -177,28 +157,14 @@ def current_optimizer_prompt_hash(node: str = "l1_generate") -> str:
 
 
 def load_prompt_template_from_path(path: Path) -> PromptTemplate:
-    """Load a ``PromptTemplate`` from a JSON file on disk.
-
-    Accepts the 8-field shape stored at ``datasets/{name}/prompts/{node}.json``
-    and at ``optimizer_pipeline.json::resolved_prompts['{node}/1']`` — used
-    to swap in an ``l1_generate`` or ``l2_context`` variant for a sweep.
-    """
+    """Load an 8-field `PromptTemplate` JSON — sweep variant of `l1_generate`/`l2_context`."""
     body = json.loads(path.read_text(encoding="utf-8"))
     return PromptTemplate(**body)
 
 
 @contextlib.contextmanager
 def optimizer_prompt_override(node_name: str, template: PromptTemplate | None) -> Iterator[None]:
-    """Temporarily redirect ``load_optimizer_prompt(node_name)`` to
-    ``template``. Pass ``template=None`` to leave the loader untouched
-    (no-op).
-
-    Used by ``round1``/``round2`` to A/B a candidate optimizer meta-prompt
-    in one invocation — ``node_name`` is ``l1_generate`` or ``l2_context``.
-    Restores the cached loader on exit; the LRU cache is cleared so
-    subsequent loads see the canonical registry again. Only ``node_name``
-    is overridden; the other optimizer prompts pass through.
-    """
+    """A/B-swap `load_optimizer_prompt(node_name)` → *template* (None = no-op); other prompts pass through."""
     if template is None:
         yield
         return
@@ -215,8 +181,7 @@ def optimizer_prompt_override(node_name: str, template: PromptTemplate | None) -
         yield
     finally:
         _opt_prompts._load_local = original
-        # Drop the lru_cache so the canonical loader's first call re-reads
-        # from disk rather than returning a stale override.
+        # Clear the lru_cache so the canonical loader re-reads from disk, not a stale override.
         with contextlib.suppress(AttributeError):
             original.cache_clear()
 
@@ -236,10 +201,7 @@ def _archive_hit_rates(
     *,
     dataset_name: str | None,
 ) -> dict[int, tuple[float, int]]:
-    """``{sample_id: (hit_rate, n_measurements)}`` from the cross-cycle
-    archive (routed through ``archive_views`` facade). Missing samples
-    (never measured) are omitted. Scoped to ``dataset_name`` so an AIME
-    sample_id=14 hit rate doesn't bleed into a JustLogic slice decision."""
+    """`{sample_id: (hit_rate, n)}` from the archive; scoped to *dataset_name* (no cross-dataset bleed)."""
     from promptpotter.infrastructure.store import archive_views
 
     out: dict[int, tuple[float, int]] = {}
@@ -266,19 +228,14 @@ def slice_samples(
     backend_id: str | None = None,
     dataset_name: str | None = None,
 ) -> tuple[list[Sample], str]:
-    """Filter ``samples`` per ``slice_spec`` (one of ``SLICE_NAMES`` or
-    ``samples=ID1,ID2,...``). Returns ``(filtered, resolved_name)``.
+    """Filter by *slice_spec* ∈ SLICE_NAMES or ``samples=ID1,ID2,...``.
 
-    ``easy``/``hard`` need archive measurements to classify by hit rate;
-    when the archive is empty (fresh dataset, no prior cycle) the slice
-    silently falls back to ``all`` so a first-run sweep still works.
-    Archive access routes through ``archive_views`` per §3.7, scoped to
-    ``dataset_name`` so cross-dataset hit rates don't drive the cut.
+    `easy`/`hard` quartile-cut the archive's hit-rate distribution; empty archive
+    falls back to ``all`` so a first-run sweep still works.
     """
     if slice_spec.startswith("samples="):
         wanted = {sid.strip() for sid in slice_spec[len("samples=") :].split(",") if sid.strip()}
-        # Match against int id and string id form so the operator can pass
-        # either without surprises.
+        # Match int- and string-id forms so the operator can pass either.
         filtered = [s for s in samples if str(s.id) in wanted or s.query in wanted]
         return filtered, slice_spec
 
@@ -330,16 +287,8 @@ def compute_panel_stats(
     candidate_accuracies: list[float],
     candidate_pipeline_params: list[dict[str, Any]],
 ) -> dict[str, float]:
-    """Per-round panel summary: accuracy mean/max, parse-fail, entropy.
-
-    - ``round1_accuracy`` — mean of the per-candidate accuracies.
-    - ``round1_best`` — max accuracy in the panel.
-    - ``parse_fail_rate`` — ``(planned − received) / planned``; counts
-      candidates that L1 failed to produce (JSON parse failures, empty
-      responses, validation rejects).
-    - ``pipeline_params_entropy`` — unique pipeline_params JSON / received.
-      1.0 ⇒ every candidate is a distinct mutation; 0.0 ⇒ all identical.
-    """
+    """Per-round panel summary: mean/max accuracy, `parse_fail_rate = (planned−received)/planned`,
+    `pipeline_params_entropy = unique_param_jsons / received` (1.0 = all distinct mutations)."""
     received = len(candidate_accuracies)
     planned = max(received, candidates_planned)
     parse_fail = max(0.0, (planned - received) / planned) if planned else 0.0
@@ -371,12 +320,7 @@ def find_sweep_results(
     sweep_id: str | None = None,
     verb: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Walk ``archive/sweeps/**/*.json`` and load matching results.
-
-    Filters narrow the walk *after* JSON parse — file count under the
-    archive is tiny enough that a load-then-filter scan stays cheap.
-    Returned newest-first by ``timestamp``.
-    """
+    """Walk `archive/sweeps/**/*.json` (load-then-filter — small N); newest-first by timestamp."""
     root = tenant_root / "archive" / "sweeps"
     if not root.is_dir():
         return []
@@ -401,14 +345,7 @@ _DERIVED_COLUMNS: tuple[str, ...] = ("cost_per_lift",)
 
 
 def _derive_cost_per_lift(row: dict[str, Any]) -> float | None:
-    """Lift per $ spent.
-
-    Uses ``final_accuracy`` as the lift signal — the archive doesn't
-    track a per-sweep origin directly, so ``cost_per_lift`` is
-    interpretable as "accuracy gained per $" with origin assumed 0.
-    Returns ``None`` when cost is missing/zero so unsortable rows sink
-    to the bottom of a ``rank --by cost_per_lift`` view.
-    """
+    """Accuracy per $ (origin assumed 0 — archive has no per-sweep origin); None sorts last."""
     cost = row.get("cost_usd") or 0.0
     acc = row.get("final_accuracy") or row.get("round1_accuracy") or 0.0
     if not cost:
@@ -429,12 +366,7 @@ def rank_sweep_results(
     last: int | None = None,
     ascending: bool = False,
 ) -> str:
-    """Render ``results`` as a left-aligned ASCII table sorted by ``by``.
-
-    Recognized derived columns: ``cost_per_lift``. All raw fields in
-    ``SWEEP_RESULT_FIELDS`` are sortable. ``None`` values sort last
-    regardless of direction.
-    """
+    """Left-aligned ASCII table sorted by *by* (raw fields + derived `cost_per_lift`); None sorts last."""
     valid_columns = set(SWEEP_RESULT_FIELDS) | set(_DERIVED_COLUMNS)
     if by not in valid_columns:
         raise ValueError(f"--by must be one of {sorted(valid_columns)}, got {by!r}")

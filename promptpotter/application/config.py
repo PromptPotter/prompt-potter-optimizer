@@ -39,18 +39,13 @@ __all__ = [
 
 
 class DiffScope(StrEnum):
-    """How a CampaignConfig diff should be handled on resume.
+    """Resume-time diff classification.
 
-    - ``NONE``: no differences.
-    - ``POLICY_ONLY``: only decision-policy knobs differ (PoBB ε / boost / δ
-      / n_min, patience, thresholds, n_variants). Past per-sample
-      measurements and L1 candidates are still valid; past decision records
-      stay as the audit of what the policy decided at the time. New policy
-      governs unevaluated rounds. Safe to resume in-place — no fork.
-    - ``DATA_AFFECTING``: at least one field that influences the data trace
-      differs (JobSearchPoint inputs, scoring formula, optimizer LLM). Cached
-      measurements may not apply; resume must run divergence detection (and
-      fork if the operator opted into ``--fork-on-divergence``).
+    - ``NONE``: identical configs.
+    - ``POLICY_ONLY``: decision knobs differ (PoBB ε/n_min, patience, thresholds, n_variants).
+      Past measurements + candidates still valid; new policy governs unevaluated rounds.
+    - ``DATA_AFFECTING``: a field that shapes the data trace differs (JobSearchPoint inputs,
+      scoring, optimizer LLM). Cached measurements may not apply — resume runs divergence detection.
     """
 
     NONE = "none"
@@ -58,10 +53,7 @@ class DiffScope(StrEnum):
     DATA_AFFECTING = "data_affecting"
 
 
-# Classification of every CampaignConfig leaf path. Subtree entries (e.g.
-# ``("optimization", "exploration")``) apply to all descendants and stop the
-# diff walk at that depth. Unknown paths default to DATA_AFFECTING with a
-# warning — a newly-added knob is treated as data-affecting until classified.
+# Subtree entries stop the diff walk at that depth. Unknown paths fall back to DATA_AFFECTING (safe).
 _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     # Top-level
     ("dataset_name",): "data",
@@ -84,9 +76,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "zero_signal_filter_enabled"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
-    # OptimizerLLMConfig — changing the optimizer LLM provider or model would
-    # produce different L1/L2/L3 candidates for future rounds; treat as
-    # data-affecting so the operator gets a fork on lineage.
+    # OptimizerLLMConfig — provider/model swap changes the L1/L2/L3 candidate distribution → data.
     ("optimizer_llm", "provider"): "data",
     ("optimizer_llm", "model"): "data",
 }
@@ -97,14 +87,7 @@ def _diff_paths(
     frozen: Any,
     prefix: tuple[str, ...] = (),
 ) -> list[tuple[str, ...]]:
-    """Walk active vs frozen and return paths where they differ.
-
-    Stops descending at any path registered in :data:`_FIELD_SCOPES` so that
-    subtree entries classify the whole subtree as one unit. ``None`` on
-    either side is treated as ``{}`` when the other side is a dict — a new
-    config section added since the frozen snapshot was taken should diff at
-    the leaf level (where the classifications live), not at the parent.
-    """
+    """Diff paths between *active* and *frozen*; stops at any `_FIELD_SCOPES` entry (subtree-as-unit)."""
     if prefix in _FIELD_SCOPES:
         return [prefix] if active != frozen else []
     if isinstance(active, dict) or isinstance(frozen, dict):
@@ -118,10 +101,7 @@ def _diff_paths(
 
 
 class ExplorationConfig(BaseModel):
-    """Round-level Rasch IRT — fits one posterior per round, used for both
-    the per-round eval-subset picker (``select_round_subset``) and the
-    round-end hard-sample heatmap rendered into ``log.md``.
-    """
+    """Round-level Rasch IRT — one posterior fit per round drives `select_round_subset` + the heatmap."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -147,14 +127,7 @@ class ExplorationConfig(BaseModel):
 
 
 class OptimizationConfig(BaseModel):
-    """Optimization-loop knobs.
-
-    Required per-dataset fields (no default — Pydantic raises if missing): every
-    ``datasets/*/campaign.json`` must declare ``improvement_threshold`` and
-    ``degradation_threshold``.
-
-    Guard test: ``tests/test_campaign_config_validation.py::test_required_optimization_fields_must_be_explicit``.
-    """
+    """Optimization-loop knobs. `improvement_threshold` + `degradation_threshold` are required (no default)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -218,13 +191,7 @@ class OptimizerLLMConfig(BaseModel):
 
 
 class DatasetSplit(BaseModel):
-    """Declared train / test fold sizes for the dataset — display metadata.
-
-    ``train`` is the bank materialized in ``cache.json`` and scored against
-    each round; ``test`` is the held-out fold, recomputed on demand by the
-    dataset loader and never written to the bank. Surfaced in the dashboard
-    footer so the operator sees the full split without opening ``dataset.md``.
-    """
+    """Train/test fold sizes — display metadata. `train` is the bank; `test` stays off-bank, on-demand."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -258,13 +225,7 @@ class CampaignConfig(BaseModel):
     optimizer_llm: OptimizerLLMConfig = Field(default_factory=OptimizerLLMConfig)
 
     def classify_diff_against(self, frozen: dict[str, Any]) -> tuple[DiffScope, list[str]]:
-        """Classify the diff between this active config and a frozen snapshot.
-
-        Returns ``(scope, diffed_paths)`` where ``diffed_paths`` are
-        dot-strings suitable for logging. See :class:`DiffScope` for
-        semantics. Unknown leaf paths trigger a warning and classify as
-        DATA_AFFECTING (safe default).
-        """
+        """Classify diff vs *frozen*; returns `(scope, dotted_paths)`. Unknown paths warn + classify DATA."""
         active = self.model_dump(mode="json")
         diffs = _diff_paths(active, frozen)
         if not diffs:
@@ -367,9 +328,8 @@ def configure_and_apply_pipeline(
     valid_overrides: dict[str, dict[str, Any]] = {}
     dataset_name = campaign_config.dataset_name or (session.dataset_name or "")
 
-    # Per-dataset operator overlay from ``datasets/{name}/pipeline.json::
-    # nodes.{name}.config`` — sparse overrides on top of backend defaults
-    # (e.g. AIME runs through OpenRouter on Mistral instead of Groq+gpt-oss).
+    # Per-dataset overlay from `datasets/{name}/pipeline.json::nodes.{name}.config` — sparse
+    # overrides on backend defaults (e.g. AIME → OpenRouter+Mistral).
     if dataset_name:
         for node, cfg in load_dataset_node_overlay(dataset_name).items():
             if node in active:
@@ -389,8 +349,7 @@ def configure_and_apply_pipeline(
                     value,
                 )
 
-    # Starting-point prompts from ``datasets/{name}/prompts/[<node>|default].json``
-    # injected per prompt-bearing node.
+    # Starting prompts from `datasets/{name}/prompts/[<node>|default].json`, per prompt-bearing node.
     if dataset_name and filtered and has_dataset_prompts(dataset_name):
         prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
         for pnode in prompt_nodes:
@@ -401,9 +360,7 @@ def configure_and_apply_pipeline(
     pipeline_params: dict[str, Any] = (
         filtered.to_pipeline_params() if filtered else {"steps": active}
     )
-    # Operator's ``pipeline_overrides`` + the resolved starting prompt land
-    # directly on the sparse wire payload — never into ``current_config``,
-    # which stays the backend's source of truth.
+    # Overrides + starting prompt land on the sparse wire payload, never on `current_config`.
     for node, cfg in valid_overrides.items():
         pipeline_params.setdefault(node, {}).update(cfg)
 

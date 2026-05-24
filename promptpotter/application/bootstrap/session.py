@@ -1,11 +1,6 @@
-"""Session/Cycle identity + ``active_session.json`` claim.
-
-Owns ``Session``, the per-cycle bundles it carries (``CycleState``,
-``ScoringContext``), the tenant context, and the identity helpers used to
-mint a session, claim the active pointer, and open per-cycle ledgers.
-Wiring of stores/clients/datasets lives next door in :mod:`wiring`; the
-scoring-context builder + cycle bootstrapper live in
-:mod:`scoring_context`.
+"""Session/Cycle identity + `active_session.json` claim. Owns `Session`, its per-cycle bundles
+(`CycleState`, `ScoringContext`), the tenant context, and the mint/claim helpers.
+Store/client/dataset wiring lives in `wiring`; the scoring-context builder in `scoring_context`.
 """
 
 from __future__ import annotations
@@ -62,24 +57,17 @@ class ScoringContext:
 
 @dataclass
 class CycleState:
-    """Per-cycle mutable bundle — flips on fork; ledger is the sole event ingress.
-
-    Bundle of objects (ledger, projection writer, observability bridge), not a
-    state machine. ``EscalationState`` is the FSM; this is plumbing.
-    """
+    """Per-cycle plumbing bundle — flips on fork. Ledger is sole ingress; `EscalationState` is the FSM."""
 
     cycle_id: str = ""
     tracing_campaign_id: str = ""
-    # Next L1 round_num to execute. Origin = round 0 (always already done by
-    # the time the round loop starts); first L1 round is 1. Fresh ⇒ 1,
-    # resumed ⇒ ``len(prior_l1_rounds) + 1``.
+    # Next L1 round to execute. Origin = round 0; fresh ⇒ 1, resumed ⇒ len(prior_l1_rounds) + 1.
     resumed_from_round: int = 1
     obs: ObservabilityBridge | None = None
     audit_projection: AuditTrailView | None = None
     ledger: CycleEventLog | None = None
-    # Set by ``run_round_loop`` when the loop ends with StopReason.CRASHED.
-    # _finalize_run reads it and stamps it onto ``index.json::final.crash_traceback``
-    # so the cause of the crash survives past terminal scrollback.
+    # Set on StopReason.CRASHED; `_finalize_run` stamps it onto `index.json::final.crash_traceback`
+    # so the cause survives past terminal scrollback.
     crash_traceback: str | None = None
 
 
@@ -104,8 +92,7 @@ class Session:
 
     # -- Identity --------------------------------------------------------
     session_id: str = ""
-    # The campaign this session is working — stable across forks within
-    # the campaign (only ``state.cycle_id`` flips when a fork is minted).
+    # Stable across forks within the campaign — only `state.cycle_id` flips on a fork.
     campaign_id: str = ""
 
     # -- Per-cycle bundles ----------------------------------------------
@@ -172,24 +159,14 @@ def auto_mint_session(
     active_steps: list[str] | None = None,
     label: str = "",
 ) -> tuple[str, str, str]:
-    """Mint a fresh campaign + session + root cycle, claim the pointer.
+    """Mint fresh campaign + session + root cycle; claim the active pointer.
 
-    Each ``new`` invocation mints a distinct campaign with a random id
-    (``{dataset}__{rand6_hex}`` via :func:`mint_campaign_id`), regardless of
-    whether a campaign with the same declaration already exists on disk.
-    The declaration (target content hash + optimizer-prompt hash) is
-    recorded as *properties* on ``campaign.json`` and used by resume to
-    warn on drift, not to derive the id.
+    Each `new` mints a distinct campaign (`{dataset}__{rand6_hex}`) regardless of declaration
+    overlap on disk. Target + optimizer-prompt hashes ride as properties on `campaign.json` for
+    resume-time drift warnings, not as the id. Two `new` calls on the same declaration share a
+    content-addressed root cycle id + byte-identical origin scores but diverge from round 1.
 
-    Two ``new`` calls on the same declaration produce campaigns with the
-    same root cycle id (``cycle_<target_hash>`` is content-addressed) and
-    byte-identical origin scores (the dataset-scoped archive cache-hits
-    every sample), but different ``campaign_id``s and independent
-    optimization trajectories from there.
-
-    Mutates *session* in place (``session_id``, ``campaign_id``,
-    ``state.cycle_id``) and claims the 4-key active pointer. Returns
-    ``(session_id, campaign_id, root_cycle_id)``.
+    Mutates *session* (`session_id`, `campaign_id`, `state.cycle_id`); claims the 4-key pointer.
     """
     from datetime import UTC, datetime
 
@@ -257,12 +234,8 @@ def auto_mint_session(
 
     save_active_pointer(session.store.tenant_id, session_id, campaign_id, root_cycle)
 
-    # Pre-seed dashboard.json so the webapp has a valid, identity-stamped
-    # file the instant ``new`` returns — closing the mint→loop-start window
-    # where a poll for the freshly minted cycle would 404. Built via the
-    # shared factory (the single dashboard.json writer); the view is
-    # constructed for its ``_persist`` side-effect and discarded — the
-    # optimization loop builds its own emitter.
+    # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window. Built for
+    # `_persist` side-effect; the optimization loop builds its own emitter.
     from promptpotter.application.origin import build_campaign_emitter
     from promptpotter.shared.errors import graceful
 

@@ -22,11 +22,8 @@ _datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
 _DATASET_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
-# Three named data scopes — same vocabulary as the heatmap artifacts and the
-# webapp toggle. ``cycle`` = one cycle's own Rasch fit; ``campaign`` = the
-# campaign's pooled fit; ``dataset`` = the cross-campaign archive snapshot.
-# A workspace-scope heatmap is meaningless (samples differ per dataset), so
-# the heatmap tier stops at ``dataset``.
+# `cycle` (one cycle's Rasch fit) / `campaign` (pooled) / `dataset` (cross-campaign archive).
+# Workspace scope would be meaningless (samples differ per dataset), so the tier stops at dataset.
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
 
 
@@ -39,23 +36,13 @@ def _resolve_scope_artifact(
     campaign_id: str | None,
     cycle_id: str | None,
 ) -> dict[str, Any]:
-    """Resolve the hard-samples artifact for the requested data scope.
-
-    - ``cycle``: ``campaigns/{campaign_id}/cycles/{cycle_id}/hard_samples.json``
-      — needs both ids.
-    - ``campaign``: ``campaigns/{campaign_id}/hard_samples.json`` — campaign-
-      pooled fit over all the campaign's cycles.
-    - ``dataset``: the cross-campaign archive snapshot for ``name``.
+    """Resolve the hard-samples artifact for *scope*. Missing `hard_samples.json` returns `{}`
+    (heatmap renders empty); missing campaign/cycle DIR is a real 404.
     """
     from promptpotter.application.intelligence.hard_sample_archive import (
         build_archive_hard_samples_artifact,
     )
 
-    # A missing ``hard_samples.json`` is a normal empty state — a campaign /
-    # cycle that hasn't produced a heatmap yet (no rounds, or migrated from
-    # an older layout). Return an empty artifact so the heatmap renders a
-    # clean "no data" panel; a 404 here would surface as a console error and
-    # read as breakage. A genuinely-absent dir is still a real 404.
     if scope == "cycle":
         if not campaign_id or not cycle_id:
             raise HTTPException(400, "scope=cycle requires campaign_id and cycle_id")
@@ -78,8 +65,7 @@ def _resolve_scope_artifact(
             return {}
         campaign_artifact: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         return campaign_artifact
-    # scope == "dataset" — cross-campaign archive snapshot. Cross-dataset
-    # pooling would be meaningless, so this is always per-dataset.
+    # `dataset` — always per-dataset (cross-dataset pooling is meaningless).
     return build_archive_hard_samples_artifact(
         store,
         backend_id,
@@ -93,12 +79,8 @@ def _trim_unmeasured(
     measured: set[int],
     cap: int | None,
 ) -> list[int]:
-    """Walk *order*, keep every measured sample, keep at most *cap* unmeasured.
-
-    Preserves the sort position of the unmeasured samples that survive — the
-    cap drops the tail of the contiguous unmeasured block, not a random
-    slice. *cap* = 0 drops every unmeasured row; *cap* = None (default) is
-    a no-op.
+    """Keep all measured + at most *cap* unmeasured (drops the tail of the unmeasured block, not
+    a random slice). `cap=0` ⇒ measured only; `cap=None` ⇒ no-op.
     """
     if cap is None:
         return list(order)
@@ -122,39 +104,25 @@ class DatasetItem(BaseModel):
     pick_score: float | None = Field(
         default=None,
         description=(
-            "The sample picker's blended objective for measuring this sample "
-            "on a brand-new candidate (ability prior N(0, sigma_theta^2)) "
-            "against the best fitted candidate: decision-information-gain "
-            "plus a small explore term. The live picker (``adaptive_picker``) "
-            "re-evaluates it per step against the candidate's running θ̂_c "
-            "posterior. None when the sample has no measurement yet."
+            "Picker's blended objective on this sample for a brand-new candidate (prior "
+            "N(0, sigma_theta**2)) vs the best fitted candidate. Live picker re-evaluates "
+            "per step. None when unmeasured."
         ),
     )
     delta: float | None = Field(
         default=None,
-        description=(
-            "Rasch difficulty δ_s — higher means harder for an average "
-            "candidate. None when the sample has no measurement yet."
-        ),
+        description="Rasch difficulty delta_s (higher = harder). None when unmeasured.",
     )
     delta_se: float | None = Field(
         default=None,
-        description=(
-            "Standard error of the Rasch difficulty δ_s — how well "
-            "characterized the sample is; large means barely measured. "
-            "None when the sample has no measurement yet."
-        ),
+        description="SE of delta_s (large = barely measured). None when unmeasured.",
     )
     p_hat: float | None = Field(
         default=None,
         description=(
-            "Marginal hit probability the seed-centred decision-IG reads on "
-            "this sample: ``sigmoid((theta_seed - delta_s) / "
-            "sqrt(1 + pi * (sigma_theta**2 + se_delta_s**2) / 8))``. Close to "
-            "0.5 = contested at the seed's ability; close to 0 or 1 = "
-            "predictable. Explains why a low-hit-rate sample can still rank "
-            "high on Info gain (tight ``se_delta_s`` from EB on a boundary "
-            "sample). None when the sample has no measurement yet."
+            "Marginal hit prob the seed-centred decision-IG reads: "
+            "sigmoid((theta_seed - delta_s) / sqrt(1 + pi*(sigma_theta**2 + se_delta**2)/8)). "
+            "Near 0.5 = contested at seed; near 0/1 = predictable. None when unmeasured."
         ),
     )
 
@@ -164,14 +132,11 @@ class DatasetPreviewResponse(BaseModel):
     row_count: int
     split_train: int | None = Field(
         default=None,
-        description="Declared training-bank fold size from campaign.json "
-        "(datasets/{name}/campaign.json::campaign_config.dataset_split). "
-        "None when the dataset declares no split.",
+        description="Declared training-bank fold size from `campaign.json::dataset_split`.",
     )
     split_test: int | None = Field(
         default=None,
-        description="Declared held-out test fold size — not in the bank or "
-        "the preview's items. None when the dataset declares no split.",
+        description="Declared held-out test fold size (not materialized).",
     )
     items: list[DatasetItem]
 
@@ -186,21 +151,11 @@ async def get_dataset_preview(
         default=None,
         ge=0,
         le=1000,
-        description=(
-            "Optional cap on unmeasured samples (no Rasch δ_s yet) retained "
-            "in the Rasch-sorted output. None (default) = no trim — every "
-            "dataset-cache row is eligible, bounded only by ``limit``. Set a "
-            "positive cap to truncate the unmeasured tail past that count."
-        ),
+        description="Cap on unmeasured rows kept in Rasch-sorted output; None = no trim.",
     ),
     scope: Literal["cycle", "campaign", "dataset"] = Query(
         default="dataset",
-        description=(
-            "dataset = cross-campaign Rasch over the whole MeasurementArchive "
-            "for this dataset. campaign = the campaign's pooled fit (requires "
-            "campaign_id). cycle = one cycle's own fit (requires campaign_id "
-            "and cycle_id)."
-        ),
+        description="dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
     ),
     campaign_id: str | None = Query(
         default=None,
@@ -211,24 +166,11 @@ async def get_dataset_preview(
         description="Required when scope=cycle; ignored otherwise.",
     ),
 ) -> DatasetPreviewResponse:
-    """Hard-sample leaderboard for ``{name}`` — every dataset row in Rasch
-    difficulty order (hardest first), with unmeasured samples appended at the
-    bottom in ``sample_id`` order.
+    """Hard-sample leaderboard — hardest-first by δ_s, unmeasured trail by sample_id.
 
-    Three data scopes:
-
-    - ``dataset`` (default): cross-campaign Rasch fit over the whole
-      ``MeasurementArchive`` for ``backend_id``.
-    - ``campaign``: the campaign's pooled fit, from
-      ``campaigns/{campaign_id}/hard_samples.json``.
-    - ``cycle``: one cycle's own fit, from
-      ``campaigns/{campaign_id}/cycles/{cycle_id}/hard_samples.json``.
-
-    Clients derive measured/unmeasured counts from the companion
-    ``/measurement-series`` response — counting samples whose series carries
-    at least one dot. That is the only honest definition of "measured" in
-    the selected scope: Rasch δ entries persist across rounds and inherit
-    from parent fits, so they overcount.
+    Counts of measured/unmeasured come from the companion `/measurement-series` (a sample's
+    series carrying ≥1 dot = measured). Rasch δ persists across rounds + inherits from parent
+    fits, so it overcounts on its own.
     """
     if not _DATASET_NAME_RE.match(name):
         raise HTTPException(400, "Invalid dataset name")
@@ -240,8 +182,7 @@ async def get_dataset_preview(
         raise HTTPException(404, f"Dataset '{name}' not found")
     raw = json.loads(cache_path.read_text(encoding="utf-8"))
 
-    # Sample-id keying varies on disk: canonical datasets use ``id``; BBEH's
-    # HF processor emits ``sample_id``. Normalise to int at the read boundary.
+    # Sample-id key varies on disk (`id` canonical, BBEH HF emits `sample_id`) — normalise to int here.
     sample_lookup: dict[int, dict[str, Any]] = {}
     for item in raw["items"]:
         sid = int(item["sample_id"] if "sample_id" in item else item["id"])
@@ -263,18 +204,12 @@ async def get_dataset_preview(
     n_obs_map: dict[int, int] = {
         int(k): int(v) for k, v in rasch.get("n_obs_per_sample", {}).items()
     }
-    # Pick-score is the picker's blended objective for measuring each sample
-    # on a brand-new candidate — populated for both the per-cycle and the
-    # cross-cycle archive artifact.
+    # Picker's blended objective for a brand-new candidate — populated in both per-cycle + archive artifacts.
     pick_score_block = artifact.get("pick_score", {}).get("per_sample", {})
     pick_score_map: dict[int, float] = {int(k): float(v) for k, v in pick_score_block.items()}
 
-    # Marginal hit probability ``p_hat`` per sample — what the seed-centred
-    # decision-IG actually reads. ``σ((θ_seed − δ_s) / scale)`` where
-    # ``scale = √(1 + π·(σ_θ² + se_δ_s²) / 8)``. Mirrors the math in
-    # ``application/intelligence/adaptive_picker._sigmoid`` /
-    # ``decision_information_gain`` so the column is the same number the
-    # picker sees. None when the sample's δ_s is undefined.
+    # `p_hat = σ((θ_seed − δ_s) / √(1 + π·(σ_θ² + se_δ²) / 8))` — mirrors `adaptive_picker._sigmoid`
+    # so this column matches what the picker actually reads.
     sigma_theta = float(rasch.get("sigma_theta", 0.0))
     theta_map: dict[str, float] = {str(k): float(v) for k, v in rasch.get("theta", {}).items()}
     candidate_order_raw = artifact.get("candidate_order") or []
@@ -294,7 +229,7 @@ async def get_dataset_preview(
         v = var_c + se_delta_s * se_delta_s
         scale = math.sqrt(1.0 + probit_scale * v)
         x = (seed_theta - delta_s) / scale
-        # Numerically stable sigmoid; mirrors ``_sigmoid`` in adaptive_picker.
+        # Numerically stable sigmoid — mirrors `adaptive_picker._sigmoid`.
         if x >= 0:
             return 1.0 / (1.0 + math.exp(-x))
         ex = math.exp(x)
@@ -302,9 +237,7 @@ async def get_dataset_preview(
 
     measured = {sid for sid in delta_map if sid in sample_lookup}
 
-    # Hardest first — desc δ_s, ascending sample_id as tiebreak. Unmeasured
-    # samples fall at δ=0 (the population-mean prior) and trail the measured
-    # tail via ``_trim_unmeasured``.
+    # Hardest first — desc δ_s, asc sample_id tiebreak; unmeasured fall at δ=0 and trail.
     full_order = sorted(sample_lookup.keys(), key=lambda s: (-delta_map.get(s, 0.0), s))
     trimmed_order = _trim_unmeasured(full_order, measured, max_unmeasured)
 
@@ -323,8 +256,7 @@ async def get_dataset_preview(
         for sid in trimmed_order[:limit]
     ]
 
-    # Declared train/test split from the dataset's campaign config — a
-    # display-only fact; the held-out test fold is never materialized.
+    # Train/test split from campaign config — display-only; held-out test never materialized.
     split_train: int | None = None
     split_test: int | None = None
     campaign_path = (datasets_root / name / "campaign.json").resolve()
@@ -346,12 +278,7 @@ async def get_dataset_preview(
 
 class MeasurementDot(BaseModel):
     ord: str = Field(
-        description=(
-            "Stable composite ordinal — opaque string the client only uses "
-            "for lexicographic sort + uniqueness. Dataset scope encodes "
-            "created_at + run_id + index; cycle/campaign scope encodes "
-            "round + scoreboard idx."
-        ),
+        description="Opaque ordinal for lex sort + uniqueness (encodes ts/run/idx or round/cand).",
     )
     hit: bool
     label: str = Field(description="Short human label, e.g. 'R3 cand 2'.")
@@ -371,16 +298,8 @@ class MeasurementSeriesResponse(BaseModel):
 def _cycle_series(
     store: Any, campaign_id: str, cycle_id: str, sample_ids: set[int]
 ) -> dict[int, list[dict[str, Any]]]:
-    """Walk one cycle's ``rounds/round_*.json``, returning per-sample series.
-
-    Ord = ``{round:04d}/{cand_idx:02d}`` so series sort chronologically by
-    round then by scoreboard position within the round. Candidates not
-    appearing in the round's scoreboard sink to slot 99.
-
-    Errored items (``error`` truthy or ``predicted == "ERROR"``) are dropped
-    so the empirical hit-rate column and the Rasch fit see the same
-    observation set — same filter as :func:`build_observations` in
-    ``application/intelligence/exploration.py``.
+    """Per-sample series from one cycle's `round_*.json`. Ord = `{round:04d}/{cand:02d}`;
+    off-scoreboard candidates → slot 99. Errored items dropped (matches `build_observations` filter).
     """
     cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     rounds_dir = cycle_dir / "rounds"
@@ -433,10 +352,8 @@ def _cycle_series(
 def _campaign_series(
     store: Any, campaign_id: str, sample_ids: set[int]
 ) -> dict[int, list[dict[str, Any]]]:
-    """Pool every cycle's round-file series across one campaign.
-
-    Ord is prefixed with the cycle id so series from different cycles in
-    the campaign stay distinct under lexicographic sort.
+    """Pool round-file series across all the campaign's cycles. Ord prefixed with cycle_id so
+    cross-cycle entries stay distinct under lex sort.
     """
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
     for entry in store.campaigns.enumerate_cycles():
@@ -465,19 +382,11 @@ async def get_dataset_measurement_series(
         default=None,
         ge=0,
         le=1000,
-        description=(
-            "Mirrors ``/preview``: optional cap on unmeasured rows. None "
-            "(default) = no trim. Must match the value the caller passed to "
-            "``/preview`` so the two responses stay aligned by index."
-        ),
+        description="Must match `/preview`'s value so the two responses align by index.",
     ),
     scope: Literal["cycle", "campaign", "dataset"] = Query(
         default="dataset",
-        description=(
-            "dataset = cross-campaign MeasurementArchive series per sample. "
-            "campaign = pool every cycle's round files in the campaign. "
-            "cycle = walk one cycle's round files."
-        ),
+        description="Same scopes as `/preview` (dataset/campaign/cycle).",
     ),
     campaign_id: str | None = Query(
         default=None,
@@ -488,13 +397,8 @@ async def get_dataset_measurement_series(
         description="Required when scope=cycle; ignored otherwise.",
     ),
 ) -> MeasurementSeriesResponse:
-    """Per-sample chronological measurement series feeding the hard-sample
-    leaderboard's Meas heat-map column.
-
-    Returns measurements for the same top-``limit`` samples (in the same
-    Rasch-difficulty order) as ``/preview`` — clients can zip the two
-    responses by ``sample_id`` without re-sorting. ``ord`` is opaque and
-    only used for the roster's left-to-right alignment across rows.
+    """Chronological per-sample series for the Meas heat-map column. Aligned to `/preview` order
+    + limit so clients can zip by sample_id. `ord` is opaque (only used for row alignment).
     """
     if not _DATASET_NAME_RE.match(name):
         raise HTTPException(400, "Invalid dataset name")
@@ -522,8 +426,7 @@ async def get_dataset_measurement_series(
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
 
-    # Same sort key as ``/preview``: hardest first by δ_s, unmeasured samples
-    # fall at δ=0 and trail the measured tail.
+    # Same sort key as `/preview`.
     full_order = sorted(sample_lookup.keys(), key=lambda s: (-delta_map.get(s, 0.0), s))
     measured = {sid for sid in delta_map if sid in sample_lookup}
     trimmed_order = _trim_unmeasured(full_order, measured, max_unmeasured)
@@ -538,8 +441,7 @@ async def get_dataset_measurement_series(
         series = _campaign_series(store, campaign_id, selected_set)
     else:
         raw_series = measurement_series_for_samples(store, backend_id, selected)
-        # Dataset-scope ord already carries timestamp + run_id + idx; label
-        # is a short "run abbrev" — first 8 chars of run_id for tooltips.
+        # Dataset-scope ord carries ts/run/idx; label = first 8 chars of run_id for tooltips.
         series = {
             sid: [
                 {
@@ -563,17 +465,9 @@ async def get_dataset_measurement_series(
 
 
 class DatasetPipelineResponse(BaseModel):
-    """Target pipeline view for a dataset overlay.
-
-    The dataset's ``pipeline.json`` is the source of truth for which nodes
-    actually run for a campaign — different datasets sharing one backend
-    (e.g. JustLogic ⇒ ``llm_only`` only, lca-termnorm ⇒ the full 6-node
-    chain, both via the ``termnorm`` backend) carry distinct
-    ``pipelines.default`` lists. The webapp consumes ``view`` to render the
-    chat-pane hero; ``pipeline`` carries the full parsed schema for
-    consumers that need per-node config (kind, model, params).
-    ``connector`` is the original-cased connector name from the overlay
-    (e.g. "TermNorm Local") for elegant chip labelling.
+    """Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;
+    `pipeline` is the full parsed schema for consumers needing per-node config; `connector` is
+    the original-cased name for chip labelling.
     """
 
     name: str
@@ -583,14 +477,8 @@ class DatasetPipelineResponse(BaseModel):
 
 
 def _strip_lone_surrogates(obj: Any) -> Any:
-    """Recursively replace unpaired surrogate codepoints with ``?``.
-
-    Some dataset overlays (notably ``lca-termnorm/pipeline.json``) carry
-    description strings whose JSON escape sequences point at lone low
-    surrogates (e.g. ``\\udc9d``). Those codepoints are valid Python strings
-    but cannot encode to UTF-8 when FastAPI serializes the response — they
-    raise ``UnicodeEncodeError`` at the wire. Strip them at the boundary
-    so the rest of the (well-formed) payload still gets out the door.
+    """Replace unpaired surrogate codepoints with `?` — some overlays carry escapes pointing at
+    lone low surrogates (e.g. `\\udc9d`) that crash FastAPI's UTF-8 wire encoding.
     """
     if isinstance(obj, str):
         return obj.encode("utf-8", errors="replace").decode("utf-8")

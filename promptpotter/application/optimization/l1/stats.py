@@ -1,13 +1,7 @@
-"""L1Stats — per-cycle L1 fitness statistics for the review surface.
+"""L1Stats — per-cycle L1 fitness statistics. Pure aggregation over round_data + behaviour checks.
 
-Pure aggregation over a list of round_data dicts (loaded from
-``campaigns/{cycle_id}/rounds/trial_NNNN.json``) plus the per-round
-behaviour-check results from ``l1_behavior_checks.run_all_checks``.
-
-Headline metric is ``rounds_to_95`` — first round where best accuracy
-≥ 0.95. The diagnostics flank it: yield, lift, behaviour pass rate,
-stagnation streak, L2 fire count. ``round_1_verdict`` is the gate signal
-the ``potter-l1-meta-campaign`` skill keys off after the round-1 halt.
+Headline `rounds_to_95` (first round ≥ 0.95). `round_1_verdict` is the gate the
+`potter-l1-meta-campaign` skill reads after the round-1 halt.
 """
 
 from __future__ import annotations
@@ -36,17 +30,11 @@ class L1Stats:
     behavior_pass_rate: float
     stagnation_max: int
     l2_fires: int
-    # Conformance of the ``l2_context`` meta-prompt — passing l2-check cells
-    # / total over the rounds where L2 fired. Dataset-independent: it scores
-    # the meta-prompt's contract, not task accuracy. 1.0 (vacuous) when
-    # ``l2_fires == 0`` — read alongside ``l2_fires`` to tell "perfect" from
-    # "never measured".
+    # `l2_context` meta-prompt conformance — vacuous 1.0 when `l2_fires == 0` (read both).
     l2_behavior_pass_rate: float
     round_1_verdict: str  # "healthy" | "degraded" | "broken" | "unknown"
-    # Wound 1 / forbidden-axes heal trail. The validator (`forbidden_axes_strict`)
-    # rejects model/provider mutations pre-population; this counts attempts so
-    # the meta-campaign skill can distinguish a healed cycle from a persistent
-    # violation without re-parsing OSP snapshots.
+    # Wound-1 heal trail. Validator rejects model/provider mutations pre-population; counting
+    # attempts distinguishes a healed cycle from a persistent violation without OSP re-parse.
     forbidden_axis_attempts: int
     forbidden_axis_healed: bool
 
@@ -59,14 +47,8 @@ def compute_l1_stats(
     l2_behavior_results: list[list[CheckResult]] | None = None,
     audits: list[dict[str, Any] | None] | None = None,
 ) -> L1Stats:
-    """Aggregate per-round round_data dicts + behaviour check results into L1Stats.
-
-    ``rounds`` is the list of round_data dicts in round order (round 0 first).
-    ``behavior_results[i]`` is the list of CheckResults for ``rounds[i]``;
-    empty when no checks ran for that round. ``audits[i]`` is the per-round
-    L1 I/O audit dict and is read to count forbidden-axes attempts (validator
-    rejects them, but the attempt remains in the audit — that's what proves
-    the heal chain is exercised).
+    """Aggregate round_data + behaviour checks → L1Stats. *audits[i]* is read to count
+    forbidden-axis attempts (validator rejects them, but the attempted intent proves the heal chain ran).
     """
     rounds_to_95 = _first_round_at_threshold(rounds, HEADLINE_ACC)
     yield_rate = _mean_yield_rate(rounds)
@@ -106,22 +88,13 @@ def compute_round_1_verdict(
     forbidden_axis_healed: bool = True,
     forbidden_axis_attempts: int = 0,
 ) -> str:
-    """Conformance-anchored round-1 verdict.
+    """Conformance-only round-1 verdict (yield/lift/regression are dataset-headroom-confounded).
 
-    The classification keys off behaviour-check conformance **only**. Yield,
-    lift, and origin-regression are confounded by dataset headroom — a
-    capacity-bound dataset cannot register a gain — so they ride ``L1Stats``
-    as diagnostics but never gate the verdict. Accuracy validity is checked
-    periodically (``conformance_lift_corr`` on a movable dataset), not per
-    cycle.
-
-    - ``healthy`` — zero conformance ✗ (a healed ``forbidden_axes_honored``
-      ✗ doesn't count: the validator caught it, no spend was wasted).
-    - ``degraded`` — exactly one conformance ✗ (not absorbed by the heal).
-    - ``broken`` — ≥ 2 conformance ✗ (after discounting a healed
-      forbidden-axes ✗), OR a persistent forbidden-axes violation
-      (attempts > 0 AND heal did not converge).
-    - ``unknown`` — no round 1 yet.
+    - `healthy` — zero conformance ✗ (a healed forbidden_axes_honored ✗ doesn't count).
+    - `degraded` — exactly one ✗ (not absorbed by heal).
+    - `broken` — ≥ 2 ✗ (after discounting a healed forbidden-axes ✗) OR persistent forbidden-axes
+      violation (attempts > 0 AND heal didn't converge).
+    - `unknown` — no round 1 yet.
     """
     if not rounds:
         return "unknown"
@@ -130,8 +103,7 @@ def compute_round_1_verdict(
     forbidden_failed_r1 = any(
         not c.passed and c.check_id == "forbidden_axes_honored" for c in round_1_behavior
     )
-    # A healed forbidden-axes ✗ doesn't count toward the verdict — the
-    # validator caught it, no spend was wasted, the chain absorbed it.
+    # Healed forbidden-axes ✗ doesn't count — validator caught it, no spend wasted.
     failed_for_verdict = failed_total
     if forbidden_failed_r1 and forbidden_axis_healed:
         failed_for_verdict -= 1
@@ -206,12 +178,9 @@ def _round_source(round_dict: dict[str, Any]) -> str:
 
 
 def _forbidden_axis_attempts_per_round(audits: list[dict[str, Any] | None]) -> list[int]:
-    """Count L1 variants that proposed a ``PARAM_FORBIDDEN_KEYS`` override per round.
-
-    Each entry is the attempt count for that round's audit (or 0 when no audit).
-    The validator rejects these pre-population, but the attempt still rides
-    the audit dict — that's exactly the signal that proves the heal chain is
-    being exercised end-to-end.
+    """Count L1 variants proposing a `PARAM_FORBIDDEN_KEYS` override per round.
+    Validator rejects them pre-population but the attempt rides the audit — that's the
+    heal-chain-exercised signal.
     """
     counts: list[int] = []
     for audit in audits:
@@ -237,13 +206,8 @@ def _has_forbidden_keys(override: Any) -> bool:
 
 
 def _forbidden_axis_healed(per_round_attempts: list[int]) -> bool:
-    """Heal verdict — the last round that produced attempts must have a
-    successor round with zero attempts (1-round look-ahead).
-
-    No attempts anywhere ⇒ vacuously healed (True).
-    Attempts only in non-final rounds ⇒ healed if the very next round dropped to 0.
-    Attempts in the final round ⇒ not healed (chain didn't demonstrate
-    recovery within this cycle).
+    """Heal verdict — last round with attempts must have a zero-attempt successor (1-round look-ahead).
+    No attempts anywhere ⇒ vacuously True. Attempts in the final round ⇒ not healed.
     """
     last_with_attempts = -1
     for i, n in enumerate(per_round_attempts):

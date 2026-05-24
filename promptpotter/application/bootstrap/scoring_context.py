@@ -1,21 +1,10 @@
 """ScoringContext build + cycle bootstrap.
 
-Three concerns live here:
-
-* ``populate_session_scoring`` — builds the ``ScoringContext`` block on a
-  freshly-wired ``Session``: scorer + per-round scorer, observability
-  bridge, error-tolerance dials.
-* ``bootstrap_cycle`` — resume an existing cycle or create one. Snapshot
-  maintenance (refresh on policy-only diff, leave alone on data-affecting
-  fork) lives in ``resume_with_divergence_check`` —
-  :meth:`CampaignConfig.classify_diff_against` is the single source of
-  truth for which fields are policy vs data.
-* ``init_optimization_loop`` — the optimization-loop entry point used by
-  :mod:`runner`: preflight, origin OSP build, ``Cycle.start``, fork on
-  divergence, observability + scoring + axes, ``INIT.exit`` emit.
-
-``Session`` itself, ``ScoringContext`` (the dataclass), and the per-cycle
-identity helpers live in :mod:`session`.
+* `populate_session_scoring` — attach scorer + per-round scorer + obs to a wired Session.
+* `bootstrap_cycle` — resume an existing cycle or create one. Divergence handling lives in
+  `resume_with_divergence_check` via `CampaignConfig.classify_diff_against`.
+* `init_optimization_loop` — runner entry: preflight, origin OSP, Cycle.start, fork-on-divergence,
+  obs + scoring + axes, INIT.exit emit.
 """
 
 from __future__ import annotations
@@ -50,17 +39,9 @@ def bootstrap_cycle(
     *,
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
-    """Resolve the cycle to run — step 3 of the bootstrap chain.
-    Returns ``(cycle_id, resumed_from_round)``.
-
-    The campaign + root-cycle ``index.json`` are minted up-front by
-    :func:`auto_mint_session`; this step opens the cycle, optionally
-    rewinds it, and reports the next L1 round. The frozen ``CampaignConfig``
-    snapshot lives in ``campaign.json`` — ``resume_with_divergence_check``
-    owns drift handling.
-
-    ``resumed_from_round`` is the next L1 round_num to execute. Origin is
-    round 0; the first L1 round is round 1.
+    """Resolve the cycle to run (step 3 of bootstrap). Returns `(cycle_id, resumed_from_round)`.
+    Opens the cycle, optionally rewinds it, reports the next L1 round. Drift handling lives in
+    `resume_with_divergence_check`; campaign + root index.json were minted by `auto_mint_session`.
     """
     from promptpotter.application.runner import cycle_config_identity
 
@@ -74,8 +55,7 @@ def bootstrap_cycle(
             store.rewind_to_round(campaign_id, resolved, resume_from_round_override)
         existing = store.load(campaign_id, resolved)
         if existing is not None:
-            # Diag forks inherit parent's origin_accuracy but re-measure
-            # against their own JSP — refresh top-level field if drift.
+            # Diag forks re-measure against their own JSP — refresh if drift from inherited value.
             if existing.get("origin_accuracy") != origin_accuracy:
                 store.update(campaign_id, resolved, {"origin_accuracy": origin_accuracy})
             return resolved, len(existing.get("rounds", [])) + 1
@@ -96,21 +76,9 @@ def populate_session_scoring(
     cycle_id: str | None = None,
     source: str = "optimization_loop",
 ) -> None:
-    """Attach the scoring block onto ``session`` (mutates in place) — step 2
-    of the bootstrap chain.
-
-    **Preconditions:**
-    - :func:`init_services` already ran (session has ``store``,
-      ``backend_id``, ``pipeline_schema``).
-    - ``scoring_formula`` already resolved from
-      ``campaign.json::scoring`` by the caller.
-
-    **Postconditions:**
-    - ``session.scoring`` populated: ``scorer`` (compiled callable),
-      ``scorer_id`` (auto-derived if not given), ``scorer_formula``,
-      ``round_scorer`` (when ``scoring_round_formula`` is non-empty).
-    - ``session.state.obs`` set (may be ``None`` if obs disabled).
-    - ``session.experiment_id`` derived from cycle_id when not explicit.
+    """Attach scoring + obs to *session* in place (step 2 of bootstrap).
+    Requires `init_services` already ran (store/backend_id/pipeline_schema) and *scoring_formula*
+    resolved from `campaign.json::scoring` by the caller.
     """
     from promptpotter.application.scoring.formula import (
         auto_scorer_id,
@@ -190,9 +158,8 @@ def _build_cycle_and_bootstrap(
         config=config,
     )
 
-    # session.pipeline_params carries the dataset overlay (provider/model/etc.)
-    # merged by configure_and_apply_pipeline. Use it so the origin JSP — and the
-    # cycle-id derived from its content_hash — is sensitive to overlay edits.
+    # Use session.pipeline_params (overlay-merged) so the origin JSP + derived cycle-id are
+    # sensitive to overlay edits.
     base_pp = session.pipeline_params or (
         session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
     )
@@ -267,8 +234,7 @@ def _apply_resume_fork(
         resume_with_divergence_check,
     )
 
-    # resumed_from_round=1 is fresh (only origin done, no L1 round to replay).
-    # Real resumes are >=2 (at least one L1 round on disk to walk).
+    # =1 is fresh (origin only); real resumes are >=2 (≥1 L1 round on disk).
     if resumed_from_round > 1 and resolved_cycle_id:
         fork_result = resume_with_divergence_check(
             session.store.campaigns,
@@ -322,8 +288,7 @@ def _finalize_loop_state(
         if session.state.ledger is None:
             session.state.ledger = _open_cycle_ledger(session, resolved_cycle_id)
     session.state.tracing_campaign_id = tracing_campaign_id
-    # The full train split is the bank; the per-round CAT picker in
-    # execute_round narrows it to sp_budget_ttest samples each round.
+    # Full train split is the bank; per-round CAT picker narrows to `sp_budget_ttest` per round.
     session.scoring.scoring_set = list(dataset)
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round

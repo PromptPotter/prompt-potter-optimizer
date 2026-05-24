@@ -1,10 +1,8 @@
 """Diagnostic + cross-cycle memory injection renderers.
 
-Two themes: the per-round readout (``_r_diagnostics`` — STATUS header +
-``RoundDiagnostics`` body) and the cross-cycle archive memory derived
-from the ``MeasurementArchive`` via ``AxisIndex`` (axis rankings,
-historical best runs, rare-hit samples, intractable-sample clusters).
-All share the uniform ``(InjectionBundle) -> str`` renderer signature.
+Per-round readout (`_r_diagnostics`: STATUS + RoundDiagnostics body) and archive memory derived
+via `AxisIndex` (rankings, top runs, rare hits, intractable clusters). Uniform
+`(InjectionBundle) -> str` signature.
 """
 
 from __future__ import annotations
@@ -21,15 +19,8 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 
 
 def _r_diagnostics(b: InjectionBundle) -> str:
-    """Layer-agnostic round readout: STATUS header (cycle counters, plain) +
-    fenced body (RoundDiagnostics dataset content).
-
-    STATUS lists round, parent fitness, best fitness, and per-layer stall +
-    fire counters. It renders even before the first round closes (when
-    ``digest.diagnostics`` is None), since cycle counters are always
-    populated. The fenced body follows only when ``RoundDiagnostics`` is
-    available — wrapped in ``<UNTRUSTED_DATASET_CONTENT>`` because it
-    echoes raw queries / GTs / pipeline warnings.
+    """Round readout: plain STATUS (cycle counters, renders even pre-R1) + fenced RoundDiagnostics
+    body (wrapped because it echoes raw queries/GTs/warnings).
     """
     sections: list[str] = []
     cs = b.cycle_slice
@@ -50,10 +41,7 @@ def _r_diagnostics(b: InjectionBundle) -> str:
         return "\n\n".join(sections)
     parts: list[str] = []
 
-    # TRAJECTORY line: skip when only 1 evolution row — the "Too few rounds
-    # to classify" trajectory_description carries no signal and the EVOLUTION
-    # table also requires len>1 to render anything useful, so the whole block
-    # is dead weight on R1.
+    # Skip TRAJECTORY + EVOLUTION at R1 — "too few rounds to classify" is dead weight.
     if len(d.evolution_rows) > 1:
         line = f"TRAJECTORY: {d.trajectory}"
         if d.trajectory_description:
@@ -71,12 +59,8 @@ def _r_diagnostics(b: InjectionBundle) -> str:
 
     if d.n_valid:
         rb = d.rank_buckets
-        # Suppress the rank block when every query is ``not_found`` —
-        # the pipeline has no ranker / candidate_source node so ``rank``
-        # is structurally undefined for this schema. Reporting
-        # ``top-1: 0% top-3: 0% ... not_found: 20`` only steers L2
-        # toward hallucinated "fix the ranker" advice. The block is
-        # only meaningful when at least one query landed at a real rank.
+        # Suppress RANK block when every query is `not_found` — schema has no ranker, so reporting
+        # 0%-all only steers L2 toward hallucinated "fix the ranker" advice.
         all_not_found = rb.get("not_found", 0) == d.n_valid
         if not all_not_found:
             rank_line = (
@@ -91,11 +75,7 @@ def _r_diagnostics(b: InjectionBundle) -> str:
                 )
             parts.append(rank_line)
 
-    # PIPELINE HEALTH: skip when nothing's wrong AND only one terminator —
-    # a single-node pipeline with 0% errors / 0% warnings is the default
-    # success state, no signal to surface. Re-emit when error_rate or
-    # warning_rate is non-zero OR multiple termination steps appear (pipeline
-    # is branching across nodes, useful telemetry).
+    # PIPELINE HEALTH: skip when single-terminator + 0% errors + 0% warnings (default success).
     if d.termination_dist and (
         d.error_rate > 0 or d.warning_rate > 0 or len(d.termination_dist) > 1
     ):
@@ -158,11 +138,8 @@ def _r_diagnostics(b: InjectionBundle) -> str:
     return "\n\n".join(sections)
 
 
-# Order in which AxisIndex.digest() keys are surfaced to the optimizer LLM.
-# Effect-driven items first (rankings, top values, exhausted axes) so
-# attention lands on what to mutate; sample-side findings second
-# (persistent failures, clusters, bottleneck); narrative tail last
-# (improvement attribution). Keys absent from the digest are skipped.
+# Order keys surface to the LLM — effect-driven items first (rankings, top values, exhausted) so
+# attention lands on what to mutate; sample-side findings second; narrative tail last.
 _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
     "axis_rankings",
     "top_values",
@@ -173,14 +150,8 @@ _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
 
 
 def _critique_is_all_prompt_field(critique: dict[str, Any] | None) -> bool:
-    """True when every entry in ``critique.suggested_axes`` is a prompt-field axis.
-
-    Drives the axis-memory filter: when the last L1_CRITIQUE flagged
-    only semantic failures (and therefore only prompt-field axes to
-    mutate), param-axis rankings in the cross-cycle digest are noise
-    that pulls L2 toward param mutations the critique already vetoed.
-    Empty / missing ``suggested_axes`` returns False — without an
-    explicit critique steer we keep all rows visible.
+    """All `critique.suggested_axes` are prompt-field axes? Drives axis-memory filter — when L1_CRITIQUE
+    flagged only semantic failures, param-axis rankings are noise the critique already vetoed.
     """
     from promptpotter.config.settings import PROMPT_STRING_FIELDS
 
@@ -192,17 +163,8 @@ def _critique_is_all_prompt_field(critique: dict[str, Any] | None) -> bool:
 
 
 def _filter_axis_rankings_to_prompt(value: str) -> str:
-    """Keep only axis-rankings entries whose axis name maps to a prompt-field.
-
-    The digest's ``axis_rankings`` value is a semicolon-separated string
-    like ``"llm_only.prompt (effect=0.208, ...); llm_only.max_tokens
-    (PEAKED ...); steps (effect=0.000, dead)"``. We split on ``"; "``,
-    take the axis-name prefix before ``" ("``, and keep entries whose
-    last dotted component is ``"prompt"`` (the catch-all axis that
-    rolls up prompt-field mutations on single-node pipelines). All
-    scalar-param entries (``max_tokens``, ``temperature``,
-    ``reasoning_effort``, etc.) drop out. Returns empty string when no
-    entries survive — caller handles the empty case.
+    """Keep only `axis_rankings` entries whose last dotted component is `prompt` — drops
+    scalar-param entries (max_tokens, temperature, reasoning_effort, …). Returns "" on no survivors.
     """
     if not value:
         return value
@@ -216,25 +178,11 @@ def _filter_axis_rankings_to_prompt(value: str) -> str:
 
 
 def _r_axis_memory(b: InjectionBundle) -> str:
-    """Cross-cycle axis & sample memory derived from the MeasurementArchive.
+    """Cross-cycle axis/sample memory from the MeasurementArchive via `AxisIndex.digest`.
 
-    Wraps :meth:`AxisIndex.digest` — the axis-keyed view that aggregates
-    effect sizes, persistent failures, failure clusters, value trends,
-    and exhausted axes across this dataset's prior cycles. Empty when
-    ``cycle.axes`` isn't initialised (pre-first-round) or the digest
-    yields nothing. The formatters this signal aggregates already exist
-    in ``intelligence/indexes/format.py``; the wiring here is the only
-    new code — no new computation, no new query path.
-
-    Critique-aware filter: when the latest L1_CRITIQUE flagged only
-    semantic failures (suggested_axes all in PROMPT_STRING_FIELDS),
-    param-axis rankings in the digest are noise — they pull L2 toward
-    param mutations the critique already vetoed. We strip
-    ``axis_rankings`` to prompt-axis entries and suppress
-    ``top_values`` in that case, replacing the section header with a
-    note explaining the redaction. Sample-side rows
-    (persistent_failures, failure_clusters, etc.) stay visible — they
-    don't suggest axis mutations.
+    Critique-aware filter: when L1_CRITIQUE flagged only semantic failures, strip `axis_rankings`
+    to prompt axes + suppress `top_values` (param rankings are noise the critique already vetoed).
+    Sample-side rows stay visible — they don't suggest axis mutations.
     """
     if b.axes is None:
         return ""
@@ -271,13 +219,8 @@ def _query_stem(row: dict[str, Any], n: int = 70) -> str:
 
 
 def _r_origin_strengths(b: InjectionBundle) -> str:
-    """Origin-hit count — one-line summary.
-
-    The hit count is the actionable signal ("don't strip scaffolding
-    earning these N"). Enumerated samples added bytes without adding
-    decision input — L1 doesn't pick which origin-hit to preserve, it
-    preserves all of them. Cited from
-    ``cycle.tracking.origin_per_sample_results``.
+    """One-line hit count — actionable signal ("don't strip scaffolding"). Enumerating samples
+    added bytes without adding input: L1 preserves all origin hits, doesn't pick.
     """
     rows = b.origin_per_sample
     if not rows:
@@ -292,14 +235,8 @@ def _r_origin_strengths(b: InjectionBundle) -> str:
 
 
 def _r_intractable_samples(b: InjectionBundle) -> str:
-    """Samples the cumulative best trajectory still misses.
-
-    Sourced from ``cycle.tracking.current_results`` (live, cycle-wide
-    cumulative per-sample state) filtered to ``hit=False`` — the set
-    of samples no candidate in any prior round has converted. L1 should
-    treat these as the next cluster to attack; mutations that don't
-    address any of them are unlikely to break the plateau. Empty when
-    every sample has been hit at least once. Fenced (echoes queries).
+    """Cumulative-best misses from `current_results` — the cluster L1 must attack next.
+    Mutations that don't address any of them are unlikely to break the plateau. Fenced.
     """
     rows = b.trajectory_misses
     if not rows:
@@ -321,12 +258,8 @@ def _r_intractable_samples(b: InjectionBundle) -> str:
 
 
 def _r_archive_top_runs(b: InjectionBundle) -> str:
-    """Top historical runs across the dataset's archive — anchor against the best.
-
-    Surfaces the highest-composite runs ever scored on this dataset so the
-    optimizer reasons "beat run X (acc=Y%, comp=Z)" instead of re-discovering
-    a peak that's already on disk. Empty until ``AxisIndex.refresh`` has
-    folded at least one run.
+    """Top historical runs — anchor "beat run X (acc=Y%, comp=Z)" instead of re-discovering a
+    peak already on disk. Empty until `AxisIndex.refresh` has folded at least one run.
     """
     if b.axes is None:
         return ""
@@ -343,12 +276,8 @@ def _r_archive_top_runs(b: InjectionBundle) -> str:
 
 
 def _r_rare_hit_samples(b: InjectionBundle) -> str:
-    """Samples cracked by ≤3 of ≥10 attempts — the unlock-pattern pointers.
-
-    Each rare hit names the run(s) that cracked the sample. Samples with
-    zero hits surface as ``capacity-bound`` (the optimizer should stop
-    engineering for them). Empty until the archive has accumulated at
-    least 10 measurements per sample.
+    """Samples cracked by ≤3 of ≥10 attempts — unlock-pattern pointers. Zero-hit samples surface
+    as `capacity-bound` (stop engineering for them).
     """
     if b.axes is None:
         return ""

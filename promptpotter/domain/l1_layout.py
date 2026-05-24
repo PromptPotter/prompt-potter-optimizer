@@ -1,21 +1,9 @@
-"""L1 layout — L2's mutation surface for L1_GENERATE.
+"""L1 layout — L2's mutation surface for L1_GENERATE. Per-slot lists of placeholder names that
+the dispatch hub resolves when filling L1's PromptTemplate. `answer_format` is template-fixed.
 
-A layout is a per-prompt-slot list of placeholder names. The dispatch hub
-resolves each placeholder to a registered signal renderer when it fills
-L1's PromptTemplate. ``answer_format`` is template-fixed (output schema
-is a code contract, not L2's call) and absent from the layout.
-
-Lives on ``OptSearchPoint.l1_layout``. L2 mutates it every fire to tune
-what L1 sees. Most fires won't touch the layout — L2 only refines
-``task_context`` and the layout stays at its prior valid value.
-
-Layout validation is split into HARD and SOFT outcomes
-(:func:`validate_l1_layout`):
-
-* HARD — mandatory missing / unknown placeholder / dups within slot →
-  rollback to prior layout, append ``ValidatorOutcome`` to
-  ``opt_sp.wounds.l2_guard_breaches`` for self-healing next L2 fire.
-* SOFT — layout unchanged from prior → apply with warning logged.
+Validation (`validate_l1_layout`):
+* HARD (missing mandatory / unknown name / dups within slot) → rollback + wound for L2 next fire.
+* SOFT (unchanged from prior) → apply with warning.
 """
 
 from __future__ import annotations
@@ -26,23 +14,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.domain.validators import ValidatorOutcome
 
-# Names every valid L1 layout MUST reference somewhere across its slots.
-# These are the cross-layer protocol fields plus the parent prompt,
-# mutation surface, and last-round critique — without them L1 can't
-# operate. ``task_context`` is the broadcast L2-channel (persistent task
-# framing, refined each L2 fire). ``critique`` is the last L1_CRITIQUE
-# output: the round-local evidence digest L1 grounds its next variants
-# in. Dropping critique from the layout fires
-# ``l1_layout_missing_mandatory`` with ``nurse_target='l3'`` — L3
-# replans rather than letting L2 starve L1 of failure context.
+# Cross-layer protocol fields L1 cannot operate without. Dropping any (esp. critique) fires
+# `l1_layout_missing_mandatory` with `nurse_target='l3'` — L3 replans rather than letting L2
+# starve L1 of failure context.
 L1_MANDATORY: frozenset[str] = frozenset(
     {"plan", "task_context", "rendered_prompt", "pipeline_param_catalogue", "critique"}
 )
 
-# Names L2 may pick from when authoring an L1 layout. Subset of the
-# global signal registry — L2-internal signals (e.g. ``l1_overrides``,
-# ``l1_signal_catalogue``) are deliberately excluded so L1 can't see
-# L2's own state.
+# Names L2 may pick from. Subset of the global registry; L2-internal signals are excluded so
+# L1 can't see L2's own state.
 L1_POSSIBLE: frozenset[str] = frozenset(
     {
         "plan",
@@ -101,15 +81,9 @@ class L1Layout(BaseModel):
 
 
 def default_l1_layout() -> L1Layout:
-    """Return the origin L1 layout used before any L2 fire mutates it.
-
-    Mandatory placeholders are spread across ``task_intent`` (the
-    persistent task framing L2 refines — front of mind for the LLM) and
-    ``problem_description`` (parent prompt + mutation surface + plan +
-    post-scoring evidence). ``origin_strengths`` + ``intractable_samples``
-    are the trajectory-memory pair — origin's preserved hits next to the
-    cumulative miss cluster L1 must attack, both in
-    ``problem_description`` where the failure evidence already lives.
+    """Origin layout — `task_context` in `task_intent` (LLM front-of-mind), parent prompt + plan +
+    evidence in `problem_description`. `origin_strengths` + `intractable_samples` are the
+    trajectory-memory pair (kept hits next to the miss cluster).
     """
     return L1Layout(
         task_intent=["task_context"],
@@ -130,15 +104,9 @@ def default_l1_layout() -> L1Layout:
 
 
 def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
-    """Best-effort coerce ``{slot: [placeholder, …]}`` → :class:`L1Layout`.
-
-    Returns ``None`` when the input is empty (``{}``) or shaped wrong.
-    An empty dict is the **sanctioned omit-sentinel** for L2 LLM
-    output (L2's prompt accepts both omit and ``{}`` as "keep current
-    layout") — the L2 driver treats ``None`` as "no layout proposed"
-    and skips validation. Non-empty but malformed input also returns
-    ``None`` so the validator surfaces mandatory-presence /
-    unknown-name failures uniformly rather than crashing here.
+    """Coerce `{slot: [name…]}` → L1Layout. `{}` is the sanctioned omit-sentinel ("keep current
+    layout") — driver treats None as "no layout proposed". Malformed non-empty input also returns
+    None so the validator (not this coercer) surfaces failures.
     """
     if not isinstance(raw_layout, dict) or not raw_layout:
         return None
@@ -156,11 +124,8 @@ def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
 
 
 class LayoutValidationResult:
-    """Bundle of outcomes from validating an L2-proposed L1 layout.
-
-    ``is_valid`` False ⇒ at least one HARD failure fired; the caller
-    must rollback to the prior valid layout. Outcomes are recorded
-    regardless and surface to L2's next fire as self-healing evidence.
+    """L1-layout validation result. `is_valid=False` ⇒ HARD failure → rollback to prior; outcomes
+    surface to L2's next fire either way as self-healing evidence.
     """
 
     __slots__ = ("is_valid", "outcomes")
@@ -209,8 +174,7 @@ def validate_l1_layout(
         )
         is_valid = False
 
-    # HARD: no slot may list the same placeholder twice (the renderer
-    # would emit it twice — wasted tokens).
+    # HARD: no slot may list the same placeholder twice (renderer would emit it twice).
     for slot_name in L1_LAYOUT_SLOTS:
         slot_vals = getattr(layout, slot_name)
         if len(slot_vals) != len(set(slot_vals)):
@@ -226,8 +190,7 @@ def validate_l1_layout(
             )
             is_valid = False
 
-    # SOFT: layout proposed but unchanged from prior. L2 spent a fire
-    # without changing anything — flag, don't block.
+    # SOFT: unchanged from prior — L2 spent a fire on nothing. Flag, don't block.
     if prior_layout is not None and layout == prior_layout:
         outcomes.append(
             ValidatorOutcome(

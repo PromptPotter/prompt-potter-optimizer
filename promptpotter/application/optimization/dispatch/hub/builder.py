@@ -1,8 +1,5 @@
-"""``build_bundle`` — wires live Cycle state into a frozen ``InjectionBundle``.
-
-Renderers never see ``Cycle`` directly; they read the snapshot this
-builder produces. The split keeps the bundle dataclasses free of any
-Cycle dependency (which would create an import cycle).
+"""`build_bundle` — snapshot live Cycle state into a frozen InjectionBundle.
+The split keeps `bundle.py` Cycle-free (would create an import cycle).
 """
 
 from __future__ import annotations
@@ -29,16 +26,9 @@ def build_bundle(
     *,
     latest_round: RoundResult | None = None,
 ) -> InjectionBundle:
-    """Snapshot live cycle state into a InjectionBundle for one optimizer LLM call.
-
-    Reads the most recent round (if any) for diagnostics + critique, and
-    the escalation/tracking counters for the ``diagnostics`` STATUS prefix.
-    Renderers don't see ``cycle`` directly — they see the snapshot.
-
-    Pass *latest_round* explicitly for L1_CRITIQUE: the just-completed round
-    has not yet been folded into ``cycle.rounds`` (that happens in
-    ``Cycle.absorb_round`` after critique fires). L2/L3 callers can omit
-    it — we fall back to ``cycle.rounds[-1]`` (post-fold).
+    """Snapshot cycle state for one optimizer LLM call. Pass *latest_round* explicitly for
+    L1_CRITIQUE — the just-completed round isn't folded into `cycle.rounds` until critique fires.
+    L2/L3 omit it (fall back to `cycle.rounds[-1]`).
     """
     if latest_round is None and cycle.rounds:
         latest_round = cycle.rounds[-1]
@@ -61,11 +51,8 @@ def build_bundle(
         pipeline_params=dict(current_pp) if current_pp else {},
     )
 
-    # Trajectory-memory panels: origin's per-sample hits (frozen at start;
-    # tells L1 which samples the parent scaffolding already converts) +
-    # cumulative trajectory misses (live cycle-wide miss set from
-    # ``current_results``; tells L1 which samples nothing has solved yet
-    # this cycle). Both consumed by the two new L1 injections.
+    # Trajectory-memory pair: origin hits (frozen, "parent already converts these") +
+    # cumulative misses (live, "the cluster nothing has solved").
     origin_per_sample = list(cycle.tracking.origin_per_sample_results)
     trajectory_misses = [r for r in cycle.tracking.current_results if not r.get("hit")]
 

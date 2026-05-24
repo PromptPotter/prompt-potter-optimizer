@@ -30,14 +30,7 @@ __all__ = [
 
 
 def candidate_label(round_num: int, idx: int) -> str:
-    """Canonical candidate display identity. Sole writer for ``CN.M`` labels.
-
-    Round 0 is origin — collapses to ``"C0"`` (single candidate). L1 round
-    N produces candidates ``"CN.1"``..``"CN.{idx+1}"``. Every display site
-    (CLI, dashboard, webapp) reads the persisted ``CandidateScore.label`` /
-    candidate-dict ``label`` field; this helper is the one place it gets
-    composed.
-    """
+    """Canonical candidate label — `C0` for origin, `C{N}.{idx+1}` otherwise. Sole writer."""
     if round_num == 0:
         return "C0"
     return f"C{round_num}.{idx + 1}"
@@ -45,16 +38,7 @@ def candidate_label(round_num: int, idx: int) -> str:
 
 @dataclass(frozen=True)
 class CandidateScore:
-    """One candidate's score report from L1 scoring.
-
-    Stable shape, defaults always present. Built typed in ``score_population``
-    and serialized to flat dicts via :meth:`to_dict` for ``RoundResult``,
-    phase events, and archive persistence.
-
-    ``label`` is the persisted display identity: ``"C0"`` for origin,
-    ``f"C{round}.{n}"`` (n=1..N) for L1 candidates. Single source of truth
-    at every render site — no display-side arithmetic.
-    """
+    """One candidate's L1 score report. Typed in `score_population`, flattened via `to_dict`."""
 
     candidate_id: str
     label: str
@@ -75,11 +59,8 @@ class CandidateScore:
     runtime_failures: list[dict[str, Any]] = field(default_factory=list)
     elimination_context: dict[str, Any] = field(default_factory=dict)
     degradation_context: dict[str, Any] = field(default_factory=dict)
-    # Origin's stats restricted to *this* candidate's measured samples — the
-    # apples-to-apples comparison surface for PoBB-locked candidates that
-    # only ran the hardest q8/20 before the lock fired. Equals the full-set
-    # origin numbers when the candidate scored every sample. Populated by
-    # ``l1_score`` after backfilling composite via ``matched_origin_stats``.
+    # Origin stats restricted to this candidate's measured samples — apples-to-apples for
+    # PoBB-locked candidates that stopped mid-budget. Equals full-set origin when fully scored.
     matched_origin_accuracy: float = 0.0
     matched_origin_hits: int = 0
     matched_origin_composite: float = 0.0
@@ -118,13 +99,8 @@ class CandidateScore:
 
 
 class CandidateProposal(BaseModel):
-    """One LLM-proposed candidate: an OptSearchPoint plus its pipeline-params override.
-
-    Persisted between generate and score so resume can replay a round without
-    re-querying the LLM. The ``osp`` carries the prompt-field mutations and
-    lineage (including ``evidence_grounding``); ``pipeline_params_override``
-    is the nested LLM-proposed override (deep-merged into the base
-    ``pipeline_params`` at score time).
+    """LLM-proposed candidate — OSP + nested pipeline-params override, persisted across generate→score
+    so resume can replay without re-querying the LLM. Override deep-merges onto base at score time.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -140,12 +116,7 @@ class CandidateProposal(BaseModel):
 
 
 class RoundOrigin(BaseModel):
-    """The challenger candidates compete against — built once per round.
-
-    Carries the OSP directly (no dict→OSP roundtrip). On probe rounds the
-    accuracy/composite_fitness/results reflect the origin's score *over the probe
-    subset*, not the full prior dataset.
-    """
+    """The round's challenger anchor. On probe rounds, scalars reflect the probe subset, not the full set."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
@@ -158,12 +129,8 @@ class RoundOrigin(BaseModel):
 
 
 class RoundMetadata(BaseModel):
-    """Checkpoint-critical scalars describing a round's outcome.
-
-    These are the fields a termination/escalation/dashboard reader needs:
-    what round, how good, did it improve, did it escalate. No raw payloads.
-    `RoundResult` inherits these flat for wire-format compatibility; functions
-    that only need the outcome can be typed against `RoundMetadata` directly.
+    """Checkpoint-critical scalars (no raw payloads) — what a termination/escalation/dashboard
+    reader needs. `RoundResult` inherits these flat for wire-format compatibility.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -175,100 +142,63 @@ class RoundMetadata(BaseModel):
     hits: int
     total: int
     improved: bool
-    # One-sided two-proportion p-value vs the round's origin. Now computed
-    # unconditionally (whenever ``total > 0``) so the IMPROVED gate can
-    # consult it — not just for display. ``None`` means no test could be
-    # run (zero samples scored).
+    # One-sided two-proportion p-value vs origin; consumed by the IMPROVED gate (not just display).
+    # None means no test could run.
     p_value: float | None = None
-    # Diagnostic string set when ``improved=False`` and the challenger had
-    # a positive Δ vs origin — names which of {delta_threshold, significance,
-    # min_samples} blocked promotion. ``None`` when the round was promoted
-    # or had no positive Δ to begin with. Persisted so log.md / dashboard
-    # can render the verdict's reason without re-deriving it.
+    # When `improved=False` despite Δ>0: names which of {delta_threshold, significance, min_samples}
+    # blocked promotion. Persisted so log.md/dashboard render the verdict reason without re-deriving.
     improved_reason: str | None = None
     degraded_samples: int = 0
-    # Count of samples discarded as deprecated (fatal warnings) on the
-    # round-winner's scoring run; excluded from hits/total/accuracy and
-    # surfaced in round summary for operator transparency.
+    # Fatal-warning samples discarded from hits/total/accuracy on the winner's run.
     deprecated: int = 0
     escalation_signal: EscalationSignal | None = None
-    # Round-winner's apples-to-apples comparison anchor: origin's stats
-    # restricted to the winner's measured samples. Drives the ``improved``
-    # gate, the p-value, and the verdict-line delta — keeps the comparison
-    # fair when PoBB leader-locks at q8/20 while origin has all 20. Equals
-    # ``origin_accuracy`` / origin's full hits / ``origin_composite_fitness``
-    # when the winner scored every sample.
+    # Origin stats restricted to the winner's measured samples — keeps the comparison fair when
+    # PoBB leader-locks at q8/20 while origin has 20. Drives `improved`, p_value, and verdict Δ.
     matched_origin_accuracy: float = 0.0
     matched_origin_hits: int = 0
     matched_origin_composite: float = 0.0
-    # Cumulative pool snapshot after this round absorbed: per-sample best-so-
-    # far across every round to date. Surfaces what ``tr.current_*`` now
-    # tracks so dashboard / log.md don't have to re-walk priors to render
-    # "Current best on N measured samples." Equals the round's own accuracy
-    # / total when the round measured every sample; richer otherwise.
+    # Per-sample best-so-far across all rounds, snapshotted after absorbing this round —
+    # so dashboard/log.md render "current best on N measured" without walking priors.
     cumulative_total: int = 0
     cumulative_accuracy: float = 0.0
 
 
 class RoundPayload(BaseModel):
-    """Raw round payload — what was tested and the per-candidate detail.
-
-    These fields exist for replay (resume rescoring), audit (decisions log),
-    and full-fidelity rendering. Persistence and the divergence replay walker
-    consume them; lean readers do not.
-    """
+    """Raw round payload — per-candidate detail for replay (resume rescoring), audit, full rendering."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     prompt_fields: dict[str, Any]
     pipeline_params: dict[str, Any] | None = None
-    # Comparison anchor for this round: prior round's accuracy (or campaign
-    # origin for round 0). Persisted so the scoreboard can render
-    # delta-vs-origin without resolving the prior round_data.
+    # Comparison anchor: prior round's accuracy (or campaign origin for round 0).
     origin_accuracy: float = 0.0
     results: list[dict[str, Any]] = Field(default_factory=list)
-    # Per-candidate scored results — persisted so resume can rescore
-    # them under a changed scorer and replay decisions without needing
-    # to re-run the pipeline. Keyed by candidate id.
+    # Per-candidate scored results, keyed by candidate id — so resume can rescore under a changed
+    # scorer and replay decisions without re-running the pipeline.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     candidates_scored: int
     candidate_scores: list[dict[str, Any]] = Field(default_factory=list)
-    # ResumeCheckpointRecord records produced this round (round_winner, elimination_cut,
-    # escalate_l2, …). Consumed by the divergence replay walker in
-    # ``application/optimization/cycle.py``.
+    # ResumeCheckpoint records produced this round (round_winner, elimination_cut, …) —
+    # consumed by the divergence replay walker in `optimization/cycle.py`.
     decisions: list[dict[str, Any]] = Field(default_factory=list)
     evaluators: dict[str, float] = Field(default_factory=dict)
-    # L1 generation quality — fraction of variants that proposed a non-empty
-    # unique mutation, plus the per-failure-class counts. Defaults preserve
-    # the "all valid" state for rounds where the detector is bypassed
-    # (resume / cache replay). Surfaced as the ``l1_diversity`` evaluator
-    # on each candidate so ``compile_scorer(formula)`` can weight it.
+    # L1 generation quality — yield fraction + per-class failure counts. Defaults assume "all valid"
+    # for replay paths that bypass the detector. Surfaced as the `l1_diversity` evaluator.
     l1_yield: float = 1.0
     l1_n_no_op: int = 0
     l1_n_duplicate: int = 0
 
 
 class RoundResult(RoundMetadata, RoundPayload):
-    """Result of a single feedback cycle round.
+    """Round outcome — flat conjunction of `RoundMetadata` + `RoundPayload`, wire-compatible with `index.json`.
 
-    Conjunction of `RoundMetadata` + `RoundPayload`. Fields are flat at
-    the access level (`result.accuracy`, `result.results`) and serialize to a
-    flat dict for wire-format compatibility with `index.json` / `trial_NNNN.json`.
-
-    The post-scoring deterministics (rank distribution, trajectory, near
-    misses, sample diagnostics) live on the optional ``diagnostics`` field
-    as :class:`promptpotter.domain.round_diagnostics.RoundDiagnostics` —
-    computed once after scoring + critique, read everywhere via the
-    dispatch hub's ``diagnostics`` signal.
+    `diagnostics` (rank dist / trajectory / near-misses) + `critique` are computed post-scoring and
+    read by the dispatch hub's `diagnostics` / `critique` signals.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    # Filled in by ``execute_round`` after ``l1_score``; read by the
-    # dispatch hub's ``diagnostics`` signal renderer (layer-agnostic).
     diagnostics: RoundDiagnostics | None = None
-    # Filled in by ``execute_round`` after ``run_l1_critique`` returns;
-    # read by the dispatch hub's ``critique`` signal renderer.
     critique: dict[str, Any] | None = None
 
 
@@ -292,15 +222,9 @@ class CycleResult(BaseModel):
 
 
 class DiagnosticRunRecord(BaseModel):
-    """One on-demand verification of a campaign candidate against more samples.
-
-    Written by ``cmd_verify`` after a successful ``score_search_point`` pass:
-    the per-sample measurements land in the cross-cycle ``archive/measurements/``
-    (the existing scoring gateway handles that), and this record captures the
-    workspace-scope verdict — what was verified, on how many samples, and
-    whether the source-campaign composite holds when the same config is scored
-    against everything the archive knows about. The webapp's Verify tab is the
-    sole consumer.
+    """One on-demand verification of a campaign candidate vs more samples — written by `cmd_verify`,
+    consumed by the webapp's Verify tab. Per-sample data lands in `archive/measurements/`; this
+    record carries the workspace-scope verdict (did the source-campaign composite hold).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -323,14 +247,8 @@ class DiagnosticRunRecord(BaseModel):
 
 
 class RoundSummaryCandidate(BaseModel):
-    """One candidate's display-summary row for ``dashboard.json::rounds[].candidates``.
-
-    Strict subset of :class:`CandidateScore` — only the fields the webapp's
-    bar chart, lineage tree, and trend sparkline actually render. Deep
-    audit (per-sample rows, full evaluator output, prompt content) stays
-    in ``.runtime/cache/rounds/round_NNNN.json``; this shape exists so
-    every chart consumer reads one stream (``dashboard.json``) instead of
-    stitching live + historical sources.
+    """Display-summary row for `dashboard.json::rounds[].candidates` — strict subset of `CandidateScore`,
+    only what the chart/lineage/sparkline render. Deep audit stays in `round_NNNN.json`.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -347,16 +265,9 @@ class RoundSummaryCandidate(BaseModel):
 
 
 class RoundSummary(BaseModel):
-    """One round's display-summary row for ``dashboard.json::rounds[]``.
-
-    Accumulates as round-close events fire. Webapp reads this list as the
-    sole source of truth for completed-round bars; the in-flight round
-    rides ``current_round`` separately.
-
-    ``accuracy`` / ``composite_fitness`` are the round-winner's scalars
-    (same as :class:`RoundMetadata`), surfaced top-level so the trend
-    chart and sparkline don't have to scan ``candidates`` to find the
-    winner.
+    """Display row for `dashboard.json::rounds[]` — webapp's sole source for completed-round bars
+    (in-flight round rides `current_round`). Top-level `accuracy`/`composite_fitness` mirror the
+    winner so trend/sparkline don't have to scan `candidates`.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -368,11 +279,7 @@ class RoundSummary(BaseModel):
 
 
 class OriginSummary(BaseModel):
-    """Origin row for ``dashboard.json::origin``.
-
-    Origin isn't a round (no candidates, no fitness), so it lives in its
-    own block rather than as ``rounds[0]``.
-    """
+    """Origin row for `dashboard.json::origin` — separate from `rounds[]` since origin has no candidates/fitness."""
 
     model_config = ConfigDict(frozen=True)
 

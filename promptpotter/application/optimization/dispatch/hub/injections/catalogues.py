@@ -1,10 +1,5 @@
-"""Discoverability-catalogue injection renderers.
-
-Two menus the optimizer LLM picks from: the pipeline-param search-space
-menu L1 reads when proposing ``pipeline_params_override``, and the L1
-signal menu L2 reads when authoring ``l1_layout``. Both are §0.5
-load-bearing discoverability scaffolding — see ``docs/architecture.md``
-§0.5.
+"""Discoverability menus — pipeline-param search-space (L1 reads when proposing override) and
+L1 signal menu (L2 reads when authoring l1_layout). Load-bearing per architecture.md §0.5.
 """
 
 from __future__ import annotations
@@ -16,23 +11,15 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 )
 from promptpotter.domain.l1_layout import L1_POSSIBLE
 
-# Single-entry cache keyed on (pipeline_schema identity, forbidden_axes_strict).
-# The schema is session-immutable, so the rendered string is byte-identical
-# across every round of a session under the same lock state. Skipping the
-# recompute saves CPU and — more importantly for small models — guarantees
-# the same text appears verbatim in every prompt, which trains attention to
-# skip past the static block cheaply. id() is sufficient: a session-long
-# schema can't be GC'd-and-reused mid-run. The lock flag is part of the key
-# because it gates whether MODELS appears.
+# Single-entry cache keyed on (schema id, lock flag). Schema is session-immutable, so the rendered
+# string is byte-identical every round — also lets small models skip past the static block cheaply.
+# id() is safe (no GC-and-reuse mid-run); lock gates MODELS visibility.
 _pipeline_param_catalogue_last: tuple[int, bool, str] | None = None
 
 
 def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
-    """Pipeline-param search-space menu — name + ≤4-value enum hint, no full dump.
-
-    Carries the *available* options (allowed enums + models) the LLM picks
-    from when proposing ``pipeline_params_override`` — symmetric with
-    ``l1_signal_catalogue`` (the menu L2 picks from for L1's layout).
+    """Pipeline-param menu (name + ≤4-value enum hint) — what L1 picks from for `pipeline_params_override`.
+    Symmetric with `l1_signal_catalogue` (the menu L2 picks from for L1's layout).
     """
     global _pipeline_param_catalogue_last
     schema = b.pipeline_schema
@@ -70,9 +57,8 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
             else:
                 bits.append(p)
         lines.append(f"  {node_name}: {', '.join(bits)}")
-    # Suppress MODELS catalogue when model is operator-locked
-    # (forbidden_axes_strict). Advertising a list that the validator will
-    # immediately reject just costs L1 a candidate slot per round to Wound 1.
+    # Suppress MODELS when operator-locked — advertising a list the validator will reject just
+    # costs L1 a candidate slot per round to Wound 1.
     if schema.available_models and not b.forbidden_axes_strict:
         lines.append("MODELS:")
         lines.append(
