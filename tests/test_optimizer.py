@@ -1,39 +1,8 @@
-"""Optimizer loop invariants — L1 detector, L2/L3 output validators, PoBB
-elimination, layout validators, sweep payload round-trip.
+"""Optimizer loop invariants — L1 detector, L2/L3 output validators, PoBB, layout, sweep round-trip.
 
-Seven named invariants:
-  1. L1 ``detect_invariants``: a candidate is a non-empty unique mutation
-     of the parent OSP, else a ValidationFailure attaches → synth-0
-     downstream. Idempotent under repeat calls; pipeline_params_override
-     counts as mutation.
-  2. L2 output validator ``L2_TASK_CONTEXT_VERBATIM_REPEAT`` fires when a
-     non-empty proposed task_context refinement merges to a no-op
-     against the prior OSP framing; ``run_l2_output_validators``
-     aggregates.
-  3. L3 output validators (``L3_PLAN_LENGTH_FLOOR``,
-     ``L3_PLAN_VERBATIM_REPEAT``) flag the plan-side V1 failures.
-  4. ``validate_l1_layout`` flips ``is_valid`` only on hard failures
-     (mandatory missing / unknown name / dup within slot); the
-     ``layout_unchanged_from_prior`` soft check fires without flipping
-     ``is_valid``.
-  5. Bayesian PoBB: ``posterior_best_probabilities`` sums to 1.0; clear
-     leaders collapse to ~1.0; uniform regimes diffuse to ~1/K. ``PoBBCheck``
-     fires elimination on a strong-prior / weak-current matchup; respects
-     the ``lock_in_n_min`` floor on the leader-lock branch. **The headline
-     case** — ``test_paired_pobb_breaks_lucky_prefix_leader_trap`` — locks
-     the paired-sample invariant: a leader scored on an easy-prefix subset
-     cannot trap candidates measured on a disjoint hard-sample set; backfill
-     restores fair comparison. This case represents nearly every PoBB
-     failure mode the operator has hit; anything that overlaps with it is
-     redundant and should be pruned.
-  6. ``SweepPayload`` round-trips through ``OptSearchPoint``: ``l1_layout``
-     dict survives ``model_dump`` → reload; mandatory layout placeholders
-     enforced; extra keys rejected at parse.
-  7. L2 ``action`` channel: ``probe_round`` round-trips through
-     ``_parse_l2``; invalid values are rejected at the Pydantic boundary
-     (:class:`L2ContextOutput.action` is ``Literal["normal_round",
-     "probe_round"]``); ``_apply_l2`` sets ``cycle.probe_next_round`` +
-     records a ``PROBE_ROUND_COMMITMENT`` decision keyed on the action.
+Seven named invariants: L1 detect_invariants, L2 verbatim/duplicate/paraphrase,
+L3 plan validators, l1_layout HARD/SOFT, PoBB (incl. paired lucky-prefix),
+SweepPayload round-trip, L2 action=probe_round.
 """
 
 from __future__ import annotations
@@ -82,10 +51,6 @@ from promptpotter.application.optimization.pobb.elimination import (  # noqa: E4
 from promptpotter.domain.escalation_signals import EscalationTarget  # noqa: E402
 from promptpotter.shared.statistics import posterior_best_probabilities  # noqa: E402
 
-# ===========================================================================
-# L1 detect_invariants
-# ===========================================================================
-
 
 def _parent() -> OptSearchPoint:
     return OptSearchPoint(persona="Expert", instruction="Rank items.")
@@ -129,14 +94,8 @@ def test_duplicate_signature_attaches_validation_failure():
 
 
 def test_parse_population_attaches_forbidden_axis_failure_to_osp():
-    """Wound 1 integration: a ``model`` override flows through
-    ``parse_population`` (with default ``forbidden_axes_strict=True``) and
-    lands as ``ValidationFailure(reason='forbidden_axis')`` on the OSP — the
-    middle hop of the validator → OSP → dispatch-hub heal chain that
-    replaces an enumerated prompt-clause prohibition. (Validator unit test
-    at ``tests/test_pipeline_config.py::test_validate_overrides_rejects_model_as_forbidden_axis_by_default``;
-    dispatch-hub render path at ``tests/test_invariants.py`` ``validation_failures`` rendering.)
-    """
+    """A ``model`` override under default ``forbidden_axes_strict=True`` lands as
+    ``ValidationFailure(reason='forbidden_axis')`` on the OSP."""
     from promptpotter.application.optimization.l1.population import parse_population
     from promptpotter.domain.pipeline_schema import (
         NodePromptMeta,
@@ -161,11 +120,6 @@ def test_parse_population_attaches_forbidden_axis_failure_to_osp():
     assert len(failures) == 1
     assert failures[0].reason == "forbidden_axis"
     assert failures[0].axis == "llm_only.model"
-
-
-# ===========================================================================
-# L2 output validators (V1)
-# ===========================================================================
 
 
 def _osp(**kwargs) -> OptSearchPoint:
@@ -245,10 +199,10 @@ def test_duplicate_insert_quiet_below_threshold():
 def test_paraphrase_repeat_fires_on_word_set_overlap_above_threshold():
     """Paraphrase that shares ≥50% of words with prior framing ⇒ fire.
 
-    Catches the operator-observed case (cycle fork_80d0254d, L2 fire 1):
-    proposed key_challenges was a paraphrase of the prior — different
-    wording, same instruction, same target axis. Verbatim-repeat detector
-    (no-op merge) missed it; duplicate-insert (≥3 line overlap) missed it.
+    Verbatim-repeat (no-op merge) and duplicate-insert (≥3 line overlap)
+    both miss a paraphrase that uses different wording but carries the
+    same instruction on the same target axis. This validator catches
+    that gap.
     """
     prior = (
         "Problem misreading (2/N): targeting L1 axis 'instruction' to add "
@@ -357,11 +311,6 @@ def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
     assert out is None
 
 
-# ===========================================================================
-# L3 output validators (V1)
-# ===========================================================================
-
-
 def test_plan_length_floor_fires_on_short_plan():
     out = L3_PLAN_LENGTH_FLOOR.run({"plan": "do better"}, opt_sp=_osp())
     assert out is not None
@@ -384,11 +333,6 @@ def test_run_l3_output_validators_aggregates():
     ids = {o.validator_id for o in outcomes}
     assert "l3_plan_length_floor" in ids
     assert "l3_plan_verbatim_repeat" in ids
-
-
-# ===========================================================================
-# L1 layout validators
-# ===========================================================================
 
 
 def test_layout_missing_mandatory_placeholder_is_hard_failure():
@@ -422,11 +366,6 @@ def test_layout_duplicate_within_slot_is_hard_failure():
     assert result.is_valid is False
     ids = {o.validator_id for o in result.outcomes}
     assert "l1_layout_dups_within_slot" in ids
-
-
-# ===========================================================================
-# Bayesian Posterior-of-Being-Best (PoBB)
-# ===========================================================================
 
 
 def test_posterior_best_probabilities_sums_to_one():
@@ -477,11 +416,10 @@ def test_pobb_check_gates_elimination_on_posterior_and_separability():
     Bayesian gate is the deciding signal.
 
     Part 2 — separability floor blocks elimination on small-n noise.
-    Pins the AIME `cycle_926e2029d11a_r2/round_0002` failure: leader
-    has 11/20 hits with 2/4 on samples 0-3, candidate runs samples 0-3
-    at 0/4. Posterior P(cand>leader) ≈ 0.05–0.10 < ε=0.20 so the
-    Bayesian gate WOULD fire — but Wilson CIs ([0.00,0.49] vs [0.15,
-    0.85]) overlap, so the apparent gap is noise. Floor must refuse.
+    Leader has 11/20 hits with 2/4 on samples 0-3, candidate runs
+    samples 0-3 at 0/4. Posterior P(cand>leader) ≈ 0.05–0.10 < ε=0.20
+    so the Bayesian gate WOULD fire — but Wilson CIs ([0.00,0.49] vs
+    [0.15, 0.85]) overlap, so the apparent gap is noise. Floor must refuse.
     """
     # Part 1 — separated arms, posterior gate fires
     check_sep = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
@@ -585,13 +523,13 @@ def test_pobb_locks_in_dominant_leader():
 async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
     """Lucky-prefix 100% leader must NOT auto-eliminate a candidate measured on hard samples.
 
-    The AIME cycle_926e2029d11a pathology in 20 lines: round 1 leader-locked
-    at 8/8 on samples {0..7} (lucky easy prefix from the hard-sample sorter).
-    Round 2 candidate sees the sorter's HARD subset {9, 12, 13, 14, 8} —
-    samples the leader was never scored on. Under the OLD unpaired PoBB,
-    the leader's full [1,1,1,1,1,1,1,1] vector flattens the candidate's
-    [0,0,0,0,0] to p_best ≈ 0 and the candidate is unfairly eliminated —
-    the optimizer can never escape the false-100% floor.
+    Lucky-prefix pathology in 20 lines: round 1 leader-locked at 8/8 on
+    samples {0..7} (easy prefix from the hard-sample sorter). Round 2
+    candidate sees the sorter's HARD subset {9, 12, 13, 14, 8} — samples
+    the leader was never scored on. Under unpaired PoBB the leader's
+    [1]*8 vector would flatten the candidate's [0]*5 to p_best ≈ 0 and
+    the candidate would be unfairly eliminated — the optimizer can
+    never escape the false-100% floor.
 
     Paired PoBB fixes this by (a) excluding priors that don't cover the
     candidate's sample set when no backfill is wired, and (b) backfilling
@@ -729,11 +667,6 @@ def test_leader_eligibility_excludes_fatal_degradation_and_keeps_pobb_eliminated
     assert is_leader_eligible(clean_loser), "fully-scored low-accuracy candidate is eligible"
 
 
-# ===========================================================================
-# ForkPayload → OSP round-trip
-# ===========================================================================
-
-
 def _full_layout_dict() -> dict[str, list[str]]:
     """Layout with all mandatory placeholders — passes hard validators."""
     return default_l1_layout().model_dump()
@@ -774,11 +707,6 @@ def test_fork_payload_rejects_layout_missing_mandatory_placeholder() -> None:
     osp = OptSearchPoint.from_prompt_fields({"persona": "p"})
     with pytest.raises(ValueError, match="hard validators"):
         apply_fork_payload_to_osp(osp, payload)
-
-
-# ===========================================================================
-# L2 action channel — probe-round wire field + commitment decision
-# ===========================================================================
 
 
 def _l2_cycle_stub() -> types.SimpleNamespace:
@@ -829,11 +757,6 @@ def test_apply_l2_normal_action_records_commitment_without_probe_state():
     assert last.outcome is False
     assert last.data["action"] == "normal_round"
     assert last.data["task_context_changed"] is False
-
-
-# ===========================================================================
-# l3_to_l2_note — sticky L3→L2 channel, invisible to L1
-# ===========================================================================
 
 
 def test_l3_to_l2_note_is_in_signals_but_not_l1_possible():
@@ -891,15 +814,8 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
     assert result2.l3_note == ""
 
 
-# ===========================================================================
-# Typed INJECTIONS + load-time template validation
-# ===========================================================================
-#
-# Closes the silent-drop bug: ``DispatchHub.fill_fixed`` skips template names
-# not in ``INJECTIONS``, so a typo would render to empty and never surface.
-# ``validate_template`` raises at load time. Two tiny invariants:
-#   1. every shipping optimizer prompt loads without raising (positive case);
-#   2. a deliberate unknown slot raises ``KeyError`` (validator actually works).
+# Typed INJECTIONS + load-time template validation: every prompt loads;
+# unknown slot raises KeyError.
 
 
 def test_optimizer_prompts_load_with_no_unresolvable_slots():
@@ -925,13 +841,7 @@ def test_validate_template_raises_on_unknown_slot():
         validate_template("l1_critique", bad)
 
 
-# ===========================================================================
-# Phase 1 — axis_memory signal wires AxisIndex.digest() into prompts
-# ===========================================================================
-#
-# Closes flaw 5: MeasurementArchive is rich, dispatch_hub.INJECTIONS doesn't
-# surface it. The format helpers already exist in
-# intelligence/indexes/format.py; this signal is wiring, not new computation.
+# axis_memory signal: AxisIndex.digest() wired into prompts via dispatch_hub.INJECTIONS.
 
 
 def _empty_cycle_slice():
@@ -1010,14 +920,7 @@ def test_axis_memory_listed_in_l1_possible_and_default_layout():
     assert "axis_memory" in default_l1_layout().problem_description
 
 
-# ===========================================================================
-# Dispatch prompt-budget allocator — deterministic injection shedding
-# ===========================================================================
-#
-# docs/specs/dispatch-prompt-budget.md. The allocator holds every optimizer
-# meta-prompt under OPTIMIZER_PROMPT_CHAR_BUDGET by dropping whole injections
-# lowest-tier-first. The invariant that must never regress: MANDATORY-tier
-# injections (parent prompt, contract, framing) are never shed.
+# Dispatch prompt-budget allocator: sheds lowest-tier-first; MANDATORY tier never shed.
 
 
 def test_dispatch_budget_caps_injections_and_sheds_by_tier(monkeypatch):
@@ -1155,14 +1058,7 @@ async def test_optimizer_call_deadline_retries_once_then_raises(monkeypatch):
     assert never.calls == 2
 
 
-# ===========================================================================
-# Escalation rules engine reproduces prior observe_round FSM
-# ===========================================================================
-#
-# Closes flaw 3 (calendar-driven escalation) by lifting observe_round's FSM
-# into a typed, declarative rule evaluator. Phase 2a is behaviour-preserving:
-# the default rule set must reproduce the prior FSM exactly. One test, four
-# assertions — one per branch of the original if/elif chain.
+# Escalation rules engine: default rule set reproduces observe_round's FSM branches.
 
 
 def test_default_round_rules_reproduce_observe_round_fsm():

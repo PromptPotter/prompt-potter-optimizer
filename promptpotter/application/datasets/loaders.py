@@ -124,7 +124,6 @@ def split_train_test(
     full input list (post-sort, pre-shuffle) so a sample keeps the same
     id regardless of which split it lands in.
     """
-    # Assign ids across the full input list so splits share a stable id space.
     enumerated = [{**row, "id": i} for i, row in enumerate(data)]
 
     rng = random.Random(seed)

@@ -1,8 +1,4 @@
-"""SearchPoint hierarchy (abstract → JobSearchPoint + PromptTemplate → OptSearchPoint).
-
-Formula: ``f(JobSearchPoint, PipelineSchema, dataset) → scores``. ``TaskDecomposition``
-carries LLM-decomposed structured domain context.
-"""
+"""SearchPoint hierarchy + ``TaskDecomposition``."""
 
 from __future__ import annotations
 
@@ -19,50 +15,24 @@ if TYPE_CHECKING:
 
 
 PARAM_FORBIDDEN_KEYS: frozenset[str] = frozenset({"model", "provider"})
-"""``pipeline_params[node]`` keys the optimizer must never mutate.
-
-Operator-fixed at the dataset overlay
-(``datasets/{name}/pipeline.json::nodes.{name}.config``). The L1 strict
-validator rejects any candidate whose ``pipeline_params_override`` carries
-one of these keys; downstream signal renderers (axis digests, runtime-
-failure injections) likewise scrub them so L2/L3 prompts don't surface
-them as candidate axes.
-"""
+"""Optimizer-forbidden ``pipeline_params[node]`` keys (operator-fixed via dataset overlay)."""
 
 
 PARAM_SCOPE_KEYS: frozenset[str] = frozenset(
     {"temperature", "max_tokens", "reasoning_effort", "top_p"}
 )
-"""Per-node LLM-call params that are NOT prompt fields — the non-prompt
-tunable axes.
-
-Two consumers: the L1 param-scope-discipline check (a round touching
-these before prompt fields are explored violates the rule), and the
-dispatch-hub ``continuous_envelope`` auto-trigger (renders the ±50%
-envelope rule when ``L1_CRITIQUE.suggested_axes`` names one of these).
-"""
+"""Per-node LLM-call tunable axes (non-prompt). Drives param-scope discipline + continuous_envelope."""
 
 
 class SearchPoint(BaseModel):
-    """A point in any pipeline's search space.
-
-    Subclassed by JobSearchPoint (target layer, frozen) and
-    OptSearchPoint (optimizer layer, mutable).
-    """
+    """Abstract — subclassed by frozen ``JobSearchPoint`` and mutable ``OptSearchPoint``."""
 
     def render(self) -> str:
-        """Render the key output of this search point (e.g., the prompt string)."""
         raise NotImplementedError
 
 
 class JobSearchPoint(SearchPoint):
-    """Frozen point in the target scoring space: pipeline_params + optional prompt_fields.
-
-    Rendered prompt is injected into ``pipeline_params`` as a node config value — the
-    prompt is just another tunable pipeline parameter. Use ``derive()`` for variants;
-    when ``prompt_fields`` is set, ``derive()`` can vary prompt fields without an
-    ``OptSearchPoint``.
-    """
+    """Frozen target-layer point: ``pipeline_params`` + optional ``prompt_fields``."""
 
     model_config = {"frozen": True}
 
@@ -72,15 +42,7 @@ class JobSearchPoint(SearchPoint):
     @field_validator("pipeline_params")
     @classmethod
     def _params_nested_by_node(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
-        """Reject a flat param map — ``pipeline_params`` is nested-by-node only.
-
-        The shape is ``{node_name: {param: value}, "steps": [...]}``: a node
-        key carries a config dict, a reserved key (``steps``) carries a
-        list. A bare scalar at the top level is the pre-nested flat
-        ``{param: value}`` format that no longer exists anywhere in the
-        codebase; rejecting it at construction stops a new caller
-        reintroducing it.
-        """
+        """Reject flat ``{param: value}`` — shape is ``{node: {param: value}, "steps": [...]}``."""
         if v is None:
             return v
         flat = sorted(k for k, val in v.items() if isinstance(val, (str, int, float)))
@@ -92,25 +54,14 @@ class JobSearchPoint(SearchPoint):
         return v
 
     def render(self) -> str:
-        """Read the cached rendered prompt out of ``pipeline_params``.
-
-        ``to_job_search_point`` and ``derive`` are the only constructors
-        that set ``prompt_fields``, and both also inject the rendered
-        string into ``pipeline_params[prompt_node]["prompt"]``, so the
-        cached copy is the single source.
-        """
+        """Read the cached rendered prompt out of ``pipeline_params``."""
         for node_config in (self.pipeline_params or {}).values():
             if isinstance(node_config, dict) and "prompt" in node_config:
                 return str(node_config["prompt"])
         return ""
 
     def sp_hash(self, pipeline_schema: PipelineSchema | None = None) -> str:
-        """SearchPoint identity hash.
-
-        With a schema, delegates to ``pipeline_schema.sp_hash``.
-        Without one (display comparisons, tests), falls back to a flat
-        hash of ``pipeline_params``.
-        """
+        """SearchPoint identity hash; falls back to flat ``pipeline_params`` hash without schema."""
         if pipeline_schema is not None:
             return pipeline_schema.sp_hash(self.pipeline_params or {})
         from promptpotter.domain.pipeline_schema import stable_hash
@@ -126,12 +77,7 @@ class JobSearchPoint(SearchPoint):
         )
 
     def derive(self, **changes: Any) -> JobSearchPoint:
-        """Create a new JobSearchPoint with modifications.
-
-        Accepts ``prompt_fields`` as a partial dict of field overrides.
-        When prompt_fields are changed, the rendered prompt is re-assembled
-        and injected into pipeline_params to keep sp_hash consistent.
-        """
+        """New JobSearchPoint with modifications. Re-renders prompt on prompt_fields change."""
         new_pp = changes.get("pipeline_params", self.pipeline_params)
         new_pf = self.prompt_fields
 
@@ -178,7 +124,6 @@ class TaskDecomposition:
     downstream_context: str = ""
     raw_description: str = ""
 
-    # Display / iteration fields (excludes upstream/downstream/raw_description).
     FIELDS: ClassVar[tuple[str, ...]] = (
         "domain",
         "pipeline_purpose",
@@ -189,23 +134,12 @@ class TaskDecomposition:
         "downstream_context",
     )
 
-    # ── Serialization ────────────────────────────────────────────────
-
     def to_dict(self) -> dict[str, str]:
-        """Serialize to plain dict (JSON-safe)."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict[str, Any] | None) -> TaskDecomposition:
-        """Construct from dict, ignoring unknown keys.
-
-        Coerces list values to comma-joined strings. L2's response schema
-        types ``task_context`` as ``dict[str, Any]`` (permissive at the wire),
-        and LLMs frequently return enumeration-style fields like
-        ``key_challenges`` as a JSON list. The TaskDecomposition fields are
-        typed ``str`` for stable display + serialization, so list payloads
-        get joined here at the ingest boundary.
-        """
+        """Construct from dict; coerces list values to comma-joined strings."""
         if not d:
             return cls()
         known = {f.name for f in fields(cls)}
@@ -221,26 +155,18 @@ class TaskDecomposition:
                 coerced[k] = str(v)
         return cls(**coerced)
 
-    # ── Merge / copy ────────────────────────────────────────────────
-
     def merge(self, overrides: dict[str, Any]) -> TaskDecomposition:
-        """Return a new TaskDecomposition with *overrides* applied on top."""
         base = self.to_dict()
         base.update(overrides)
         return self.from_dict(base)
 
-    # ── Iteration helpers (support existing dict-like access patterns) ──
-
     def items(self) -> list[tuple[str, str]]:
-        """Return (field, value) pairs — mirrors ``dict.items()``."""
         return [(f.name, getattr(self, f.name)) for f in fields(self)]
 
     def __len__(self) -> int:
-        """Number of populated (non-empty) fields."""
         return sum(1 for f in fields(self) if getattr(self, f.name))
 
     def __bool__(self) -> bool:
-        """True if any field is non-empty."""
         return any(getattr(self, f.name) for f in fields(self))
 
 

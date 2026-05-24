@@ -200,7 +200,6 @@ def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
             logger.warning("Failed to push %s to Langfuse", name, exc_info=True)
             results[name] = False
 
-    # Clear local cache so next load picks up Langfuse versions
     _load_local.cache_clear()
     return results
 

@@ -36,10 +36,6 @@ from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import build_stores
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 
-# ===========================================================================
-# MeasurementArchive retrieval
-# ===========================================================================
-
 
 def _seed_archive_run(
     archive: MeasurementArchive,
@@ -164,11 +160,6 @@ def test_find_by_node_configs_prefix_exact(archive: MeasurementArchive) -> None:
     assert archive.find_by_node_configs("any-backend", []) == []
 
 
-# ===========================================================================
-# AxisIndex / ConfigIndex
-# ===========================================================================
-
-
 def _seed_indexed_run(
     archive: MeasurementArchive,
     run_id: str,
@@ -285,11 +276,6 @@ def test_config_index_run_ids_match_archive_full_scan(indexed_stores: Any) -> No
         assert {m.run_id for m in indexed_load} == full_scan_run_ids
 
 
-# ===========================================================================
-# Cross-cycle aggregators
-# ===========================================================================
-
-
 def _seed_cross_cycle(
     archive: MeasurementArchive,
     *,
@@ -369,11 +355,6 @@ def test_archive_observations_use_content_hash_prefix(
     assert {o.sample_id for o in obs} == {1, 2}
 
 
-# ===========================================================================
-# Zero-signal sample filter
-# ===========================================================================
-
-
 def _seed_axes(hits: dict[str, list[bool]]) -> AxisIndex:
     """Seed an AxisIndex (via SampleIndex) with synthetic hit histories."""
     idx = SampleIndex()
@@ -432,11 +413,6 @@ def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
     assert data["excluded"] == []
 
 
-# ===========================================================================
-# Adaptive picker — 1PL Rasch CAT with one blended decision-led objective
-# ===========================================================================
-
-
 def test_update_theta_posterior_hits_raise_mean_misses_lower_it() -> None:
     """One observation moves μ correctly — HIT → up, MISS → down — and a
     poorly-characterized sample (large se_δ) moves it less.
@@ -484,11 +460,6 @@ def test_decision_information_gain_peaks_at_candidate_ability() -> None:
     far_hard = decision_information_gain(0.0, 1.0, mu_s=1.0, var_s=1.0, delta_s=4.0, se_delta_s=0.1)
     assert near > far_easy, "a sample at the candidate's ability beats a too-easy one"
     assert near > far_hard, "a sample at the candidate's ability beats a too-hard one"
-
-
-# ===========================================================================
-# Hard-sample sorter — pick_score artifact
-# ===========================================================================
 
 
 def test_pick_score_artifact_ranks_contested_above_settled() -> None:

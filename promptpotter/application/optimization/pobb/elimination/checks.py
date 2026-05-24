@@ -1,11 +1,4 @@
-"""Mid-round elimination checks — DegradationCheck + PoBBCheck.
-
-``DegradationCheck`` is the per-candidate technical-failure threshold:
-fatal-classification fast-path (one sighting ends a candidate) plus a
-rate-based check. ``PoBBCheck`` is the Bayesian Posterior-of-Being-Best
-stop rule (Russo 2016): joint Normal-CLT posterior, MC argmax, stop when
-the candidate's P(best) < ε — the actual abort-and-continue mechanism.
-"""
+"""Mid-round elimination — DegradationCheck (fatal/rate) + PoBBCheck (Russo 2016 stop rule)."""
 
 from __future__ import annotations
 
@@ -55,8 +48,7 @@ def _eliminate(
 def _leader_locked(
     name: str, check_result: dict[str, Any], candidate_idx: int, n_total_candidates: int
 ) -> EscalationSignal:
-    """Stop measuring this candidate — its posterior clears ``lock_in`` against
-    every prior."""
+    """Stop measuring — posterior clears ``lock_in`` against every prior."""
     return EscalationSignal(
         check_name=name,
         target=EscalationTarget.LEADER_LOCKED,
@@ -126,15 +118,7 @@ class DegradationCheck:
 
 @dataclass(frozen=True)
 class PoBBSnapshot:
-    """Per-sample PoBB snapshot for telemetry.
-
-    ``p_best`` carries the per-prior ``P(cand > prior)`` map plus a
-    ``current_id → min(values())`` summary entry — the operator reads
-    the per-prior breakdown to see which prior is gating the abort.
-    ``paired_breakdown`` adds the underlying ``(mean_d, se_d, n_paired)``
-    per prior so the live stream shows the diff posterior the candidate
-    is sitting on.
-    """
+    """Per-sample PoBB snapshot. ``p_best[current_id] = min(per-prior values)``."""
 
     p_best: dict[str, float]
     current_id: str
@@ -153,22 +137,9 @@ class PoBBConfig:
 
 
 class PoBBCheck:
-    """Bayesian Posterior-of-Being-Best stop rule (Russo 2016) — paired-sample.
-
-    Priors are stored sample-keyed (``priors_by_sample[cid][sample_id] →
-    fitness``) so that comparison against any candidate is always on the
-    same sample set. The hard-sample sorter intentionally violates iid
-    by reordering samples per candidate (hardest first for cheap
-    elimination of losers); paired comparison restores PoBB's statistical
-    validity by re-deriving the leader's posterior on whatever sample set
-    the candidate-under-test actually saw.
-
-    When the candidate has measured samples the leader has not, the
-    operator-injected ``backfill_fn`` scores the leader on those missing
-    samples (cache-first via the per-sample archive; fresh LLM call on
-    miss). The result is appended to the leader's sample-keyed history
-    before ``check()`` runs, so every PoBB comparison is over identical
-    sample IDs. See ``docs/concepts/paired-sample-pobb.md``.
+    """Paired-sample PoBB stop rule. ``backfill_fn`` aligns leader's history to
+    candidate's sample set so comparison is always on identical sample IDs.
+    See ``docs/concepts/paired-sample-pobb.md``.
     """
 
     name = "elimination"
@@ -187,21 +158,13 @@ class PoBBCheck:
         self.lock_in_n_min = config.lock_in_n_min
         self.n_samples = n_samples
         self.round_num = int(round_num)
-        # Sample-keyed prior fitness — cid → sample_id (str) → fitness.
         self.priors_by_sample: dict[str, dict[str, float]] = {}
-        # Prior SearchPoints, used to backfill missing (prior, sample) pairs.
         self.prior_sps: dict[str, JobSearchPoint] = {}
         self.prior_ids: list[str] = []
         self._current_id: str = ""
         self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
         self._backfill_fn = backfill_fn
-        # The candidate's sample budget — the set of sample IDs the
-        # candidate is scheduled to run on if PoBB does not stop it
-        # early. Set per candidate via ``set_sample_universe``; the
-        # online picker consumes the dataset as a set rather
-        # than an ordered list, so order is no longer part of the
-        # contract. ``check()``'s dominance gate reads ``len()`` for the
-        # budget and ``in`` for seed coverage.
+        # Candidate's sample budget; set per candidate via ``set_sample_universe``.
         self._sample_universe: frozenset[str] = frozenset()
 
     def set_current(
@@ -303,21 +266,12 @@ class PoBBCheck:
         candidate_samples = [str(r.get("sample_id", "")) for r in results]
         scores = [float(r.get("fitness", 0.0)) for r in results]
 
-        # Deterministic dominance check — no statistics, pure arithmetic.
-        # If even hitting every remaining sample can't match the SEED
-        # prior's already-known total hits across the candidate's intended
-        # sample budget, abort immediately. Fires before the Bayesian
-        # posterior because it's a stronger statement: "mathematically
-        # cannot catch up" trumps "probably won't catch up."
+        # Deterministic dominance: abort if cand_max_final_hits < seed_total_hits.
         dominance_signal = self._dominance_check(scores, candidate_idx, n_total_candidates)
         if dominance_signal is not None:
             return dominance_signal
 
-        # Paired vectors — a prior is included only when it covers every
-        # sample the candidate has measured. ``backfill_for_sample`` runs
-        # per-sample ahead of ``check()`` to close gaps as they appear; an
-        # incomplete prior here means the backfill hook was wired off (no
-        # backfill_fn) or its score failed — exclude rather than 0-fill.
+        # Exclude priors with sample-set gaps rather than 0-fill.
         paired_priors: dict[str, list[float]] = {}
         for cid in self.prior_ids:
             prior_map = self.priors_by_sample[cid]
@@ -332,16 +286,10 @@ class PoBBCheck:
             paired_priors,
             rng=pobb_rng(self.round_num, cid, list(paired_priors.keys()), n),
         )
-        # Candidate's P(best) is bounded above by min over priors of
-        # P(cand > prior_i) — beating ALL priors cannot be more probable
-        # than beating the single hardest one.
+        # P(best) bounded above by min over priors of P(cand > prior_i).
         p_best_current = min(p_better.values())
         hardest_prior_id = min(p_better, key=lambda k: p_better[k])
 
-        # Per-prior paired-diff posterior for the audit + stream telemetry.
-        # The operator triangulates "did the abort threshold fire because
-        # the candidate genuinely lost, or because a single prior moved?"
-        # by reading the per-prior (mean_d, se_d, n_paired) breakdown.
         paired_breakdown: dict[str, dict[str, float]] = {}
         for pid, prior_scores in paired_priors.items():
             mean_d, se_d, n_paired = paired_diff_posterior(scores, prior_scores)
@@ -352,9 +300,6 @@ class PoBBCheck:
                 "p_better": float(p_better[pid]),
             }
 
-        # PoBBSnapshot.p_best carries per-prior P(cand > prior) plus a
-        # ``cid → p_best_current`` summary entry; the stream's delta math
-        # tracks each prior independently across queries.
         snapshot_dict: dict[str, float] = {**p_better, cid: float(p_best_current)}
         snap = PoBBSnapshot(
             p_best=snapshot_dict,
@@ -365,12 +310,7 @@ class PoBBCheck:
         if self._on_snapshot is not None:
             self._on_snapshot(snap)
 
-        # Leader lock-in (preempts loser elimination): when the candidate
-        # beats every prior with probability ≥ lock_in, stop measuring
-        # this candidate. Paired ``p_best_current ≥ 0.5`` already implies
-        # candidate is the leader against every prior, so the
-        # ``leader_id == cid`` guard collapses into the threshold check.
-        # Disabled when lock_in ≥ 1.0.
+        # Leader lock-in: stop measuring when P(cand > every prior) ≥ lock_in.
         if self.lock_in < 1.0 and n >= self.lock_in_n_min and p_best_current >= self.lock_in:
             return _leader_locked(
                 self.name,
@@ -392,14 +332,7 @@ class PoBBCheck:
         if not pobb_should_stop(p_best_current, self.epsilon):
             return None
 
-        # Separability floor — don't eliminate while the paired-difference
-        # CI against the hardest prior still crosses zero. At the picker's
-        # preferred samples (high expected information gain at the
-        # candidate's running θ̂_c posterior), binomial noise alone can
-        # push one-sided posterior tails past ε before the two-sided CI
-        # separates. Paired analogue of ``wilson_overlap``; preserves the
-        # AIME-binomial-noise protection from 2026-05-18 (memory:
-        # ``project_pobb_separability_floor``).
+        # Separability floor: block elimination while paired-diff CI vs hardest crosses zero.
         if paired_diff_ci_overlaps_zero(scores, paired_priors[hardest_prior_id], alpha=0.05):
             return None
 
@@ -425,34 +358,16 @@ class PoBBCheck:
         candidate_idx: int,
         n_total_candidates: int,
     ) -> EscalationSignal | None:
-        """Abort when the candidate provably cannot match the seed prior.
+        """Abort when ``cand_max_final_hits < seed_total_hits`` on the candidate's budget.
 
-        Seed = origin (R1) or prior round's winner (R2+) — the first id
-        in :attr:`prior_ids`, registered before any in-round candidate.
-
-        Pure arithmetic over hits: ``cand_max_final_hits = cand_hits +
-        remaining_in_budget``; if this is still less than the seed's
-        known total hits across the same budget, no further scoring can
-        flip the comparison. Fires regardless of the latest sample's
-        hit/miss outcome because the dominance is structural, not
-        evidential. Hits are derived from ``score > 0.5`` (matches the
-        binary ``hit`` convention shared with post-round comparisons).
-
-        Returns ``None`` (no abort) when:
-        - no seed has been registered yet (round 1, candidate 1 before origin),
-        - the seed isn't fully covered on the candidate's sample budget
-          (backfill skipped or partial — can't compute the cap exactly),
-        - or the candidate can still tie/exceed the seed.
+        Seed = first ``prior_ids`` entry (origin R1, prior winner R2+).
+        Hits derived from ``fitness > 0.5``. Requires an explicit
+        ``_sample_universe`` AND full seed coverage on it.
         """
         if not self.prior_ids:
             return None
         seed_id = self.prior_ids[0]
         seed_full = self.priors_by_sample.get(seed_id, {})
-        # Require an explicit sample universe — without it we can't
-        # know the candidate's intended budget, and inferring from the
-        # seed's coverage would compare on samples the candidate isn't
-        # scored against. The score-population loop sets this per
-        # candidate; unit tests that don't would silently skip the gate.
         sample_universe = self._sample_universe
         if not sample_universe:
             return None

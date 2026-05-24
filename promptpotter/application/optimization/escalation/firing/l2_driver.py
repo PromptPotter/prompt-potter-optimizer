@@ -22,7 +22,7 @@ from promptpotter.domain.l1_layout import L1Layout, coerce_l1_layout, validate_l
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.shared.strings import truncate
+from promptpotter.shared import truncate
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle

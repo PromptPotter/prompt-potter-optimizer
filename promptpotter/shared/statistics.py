@@ -98,24 +98,13 @@ def min_detectable_effect(n: int, alpha: float = 0.05, power: float = 0.8) -> fl
     return float(min(mde, 1.0))
 
 
-# ---------------------------------------------------------------------------
-# Bayesian best-arm identification — Posterior-of-Being-Best (PoBB)
-# ---------------------------------------------------------------------------
-#
-# One sentence: stop a candidate when its posterior probability of being the
-# round's best drops below ε. Joint Normal-CLT posterior over per-candidate
-# mean accuracy; argmax-over-population computed by Monte Carlo.
-#
-# References: Russo (2016) "Simple Bayesian Algorithms for Best Arm Identification";
-# OCBA (Chen 2000); Top-Two Thompson Sampling family.
-# ---------------------------------------------------------------------------
+# --- PoBB: Posterior-of-Being-Best (Russo 2016 / Top-Two Thompson family) ---
 
 
 def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     """Normal posterior (mean, se) on the population mean of *scores*.
 
-    SE clipped to ``1/(4n)`` (Beta-Binomial worst-case for bounded [0,1]
-    scores) so we don't over-confidently stop on small-sample binary regimes.
+    SE clipped to ``1/(4n)`` (Beta-Binomial worst case, bounded [0,1]).
     """
     n = len(scores)
     if n == 0:
@@ -123,7 +112,6 @@ def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     arr = np.asarray(scores, dtype=np.float64)
     mean = float(arr.mean())
     if n == 1:
-        # No within-sample variance estimate; use Beta-Binomial worst-case.
         return (mean, 0.5)
     variance = float(arr.var(ddof=1))
     se = math.sqrt(variance / n)
@@ -166,8 +154,6 @@ def posterior_best_probabilities(
         ses[i] = s
 
     gen = rng if rng is not None else np.random.default_rng()
-    # Joint draws: shape (n_samples, n_cands). Per-candidate Normal is
-    # mean[i] + se[i] * standard_normal.
     z = gen.standard_normal((n_samples, len(cand_ids)))
     draws = means[None, :] + ses[None, :] * z
     argmax_idx = draws.argmax(axis=1)
@@ -181,24 +167,13 @@ def pobb_should_stop(p_best: float, epsilon: float) -> bool:
     return p_best < epsilon
 
 
-# ---------------------------------------------------------------------------
-# Paired-difference posterior — for cand-vs-priors comparisons on shared samples
-# ---------------------------------------------------------------------------
-#
-# When a candidate and a prior are evaluated on the *same* sample set, the
-# per-sample paired difference ``d_i = c_i − p_i`` cancels sample-difficulty
-# noise that ``posterior_best_probabilities`` (independent Normals per arm)
-# leaves on the table. PoBBCheck uses this path; ``elevate_to_decisive``
-# does not (its arms grow asymmetric measured-sets via top-up).
-# ---------------------------------------------------------------------------
+# --- Paired-difference posterior — cand-vs-prior on shared sample set ---
 
 
 def _paired_diff_posterior(diffs: list[float]) -> tuple[float, float]:
     """Normal posterior (mean, se) on the mean paired difference.
 
-    SE floored at ``1/(4n)`` for the same reason as ``_normal_posterior``:
-    keeps small-n binary regimes from over-stopping under perfect-agreement
-    (``var = 0``) sequences.
+    SE floored at ``1/(4n)`` — same Beta-Binomial bound as ``_normal_posterior``.
     """
     n = len(diffs)
     if n == 0:
@@ -285,22 +260,11 @@ def paired_diff_ci_overlaps_zero(
     prior_scores: list[float],
     alpha: float = 0.05,
 ) -> bool:
-    """Paired-difference confidence interval analogue of ``wilson_overlap``.
+    """Paired-difference CI analogue of ``wilson_overlap``.
 
-    Computes the ``(1 − alpha)`` two-sided Normal CI for the mean paired
-    difference (using the same SE floor as
-    ``paired_better_probabilities``) and returns ``True`` if the CI
-    contains zero — i.e. the paired arms are not separated at the
-    requested confidence.
-
-    Used by ``PoBBCheck.check`` as the paired analogue of
-    ``wilson_overlap``: block elimination when the paired diff CI still
-    crosses zero, even if the one-sided posterior gate fired. At
-    ``alpha = 0.05`` this is the standard 95% CI; under the SE floor
-    ``1/(4n)``, n=4 perfect wins (mean_d = 1.0, se_d = 0) still cross
-    zero only when mean_d=0, so the AIME-binomial-noise protection from
-    2026-05-18 (memory: ``project_pobb_separability_floor``) is
-    preserved.
+    Two-sided ``(1 − alpha)`` Normal CI on the mean paired difference;
+    True ⇒ CI crosses zero, so the arms are not separated. SE floor
+    ``1/(4n)`` keeps n=4 perfect wins from spuriously separating.
     """
     if not candidate_scores or not prior_scores:
         return True

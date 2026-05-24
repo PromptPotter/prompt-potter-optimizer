@@ -1,24 +1,4 @@
-"""Structural invariants — artifact parity + hexagonal layer-import rules.
-
-Two named invariants:
-  1. ``LiveDashboardView`` lifecycle produces per-session telemetry in
-     ``SESSION_TELEMETRY_ARTIFACTS`` at the session's root cycle dir; the
-     campaign manifest (``CAMPAIGN_DIR_ARTIFACTS``) lands at the campaign
-     dir; the runner mirror produces per-cycle operator artifacts in
-     ``CYCLE_OPERATOR_ARTIFACTS`` at the cycle dir; ``SESSION_ARTIFACTS``
-     land in the session dir. Internals (``.runtime/``) hold the ledger
-     spine; ``ledger.jsonl`` / ``streams/`` / ``.cache/`` MUST NOT exist
-     next to operator files. ``FileSink`` Langfuse shadow uses camelCase
-     fields and nests node spans under round spans via
-     ``parentObservationId``.
-  2. Hexagonal runtime imports: ``domain/`` is a sink (imports nothing),
-     ``application/intelligence/`` MUST NOT import from
-     ``application/optimization/``, and ``infrastructure/`` MUST NOT
-     import application/intelligence/optimization. ``cycle.py`` does NOT
-     import prompt-surface modules at runtime (those modules import cycle;
-     a back-edge re-introduces the cycle). The ``KNOWN_VIOLATIONS``
-     allowlist must stay accurate — stale entries fail too.
-"""
+"""Structural invariants — artifact parity + hexagonal layer-import rules."""
 
 from __future__ import annotations
 
@@ -31,40 +11,11 @@ from typing import Any, cast
 
 import pytest
 
-# ===========================================================================
-# Artifact parity
-# ===========================================================================
-
-# Campaign-dir manifest, at campaigns/{campaign_id}/. A campaign is a
-# forest of N sessions; the manifest is its single identity record.
-CAMPAIGN_DIR_ARTIFACTS = {
-    "campaign.json",
-}
-
-# Per-session live telemetry — dashboard.json, written into the session's
-# root cycle dir (the session root and its forks share one stream).
-SESSION_TELEMETRY_ARTIFACTS = {
-    "dashboard.json",
-}
-
-# Per-cycle operator-facing artifacts (frozen audit the operator reads
-# directly), at campaigns/{campaign_id}/cycles/{cycle_id}/.
-CYCLE_OPERATOR_ARTIFACTS = {
-    "index.json",
-    "log.md",
-    "review.md",
-}
-
-# Per-cycle internal umbrella — opaque to operators. Holds the ledger spine,
-# pobb streams, the round/candidate caches, and rewind sweepup.
+CAMPAIGN_DIR_ARTIFACTS = {"campaign.json"}
+SESSION_TELEMETRY_ARTIFACTS = {"dashboard.json"}
+CYCLE_OPERATOR_ARTIFACTS = {"index.json", "log.md", "review.md"}
 PER_CYCLE_INTERNAL_UMBRELLA = ".runtime"
-
-# Per-session artifacts under ``sessions/{session_id}/``. ``session.json``
-# is owned by SessionStore. ``journal.md`` / ``notes.md`` are NOT in this
-# set — they're a notebook ↔ Claude exchange habit, not a contract.
-SESSION_ARTIFACTS = {
-    "session.json",
-}
+SESSION_ARTIFACTS = {"session.json"}
 
 
 @pytest.fixture
@@ -668,10 +619,6 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
             assert snake not in score, f"snake_case field {snake!r} leaked into score"
 
 
-# ===========================================================================
-# Hexagonal layer-import rule guard
-# ===========================================================================
-
 ROOT = pathlib.Path(__file__).parent.parent / "promptpotter"
 
 
@@ -878,10 +825,7 @@ def test_no_direct_archive_access_outside_facade() -> None:
     )
 
 
-# ===========================================================================
-# Resume-checkpoint kind registry — single seam for divergence gating
-# (merged from test_decision_kinds_registry.py)
-# ===========================================================================
+# Resume-checkpoint kind registry — single seam for divergence gating.
 
 from promptpotter.application.optimization.resume_and_fork import (  # noqa: E402
     REPLAYERS,
@@ -1068,10 +1012,7 @@ def test_divergence_hint_lists_every_decision_kind() -> None:
         )
 
 
-# ===========================================================================
-# Reconstructable state — ledger as the single source of truth
-# (merged from test_reconstructable_state.py — §3.8 invariant)
-# ===========================================================================
+# Reconstructable state — ledger is single SoT (§3.8 invariant).
 
 from promptpotter.application.optimization.escalation.state import EscalationState  # noqa: E402
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailView  # noqa: E402
@@ -1178,10 +1119,7 @@ def test_audit_trail_round_trips_llm_call_records(tmp_path: Path) -> None:
     )
 
 
-# ===========================================================================
-# Security boundaries — log redaction, path traversal, prompt-injection fence
-# (merged from test_security.py)
-# ===========================================================================
+# Security boundaries — log redaction, path traversal, prompt-injection fence.
 
 
 def test_secret_redaction_filter_scrubs_settings_values_and_prefixes(
@@ -1365,16 +1303,8 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     assert "UNTRUSTED" not in tc_text
 
 
-# ===========================================================================
 # Round-event trio — every completed round emits enter + complete + display
-# ===========================================================================
-#
-# §0 of docs/architecture.md pins: "Display — ledger subscribers; ledger is
-# the sole persistence ingress." If a code path inside ``_run_round_loop``
-# bypasses the round-completion seam, the round becomes invisible to all
-# display projections (LiveDisplay, LiveDashboardView) and the audit trail
-# at the same time. The probe-round + escalation-signal branches were the
-# specific bug; the seam ``_close_round`` is the structural fence.
+# via ``_close_round`` (the structural fence for §0 ledger subscription).
 
 
 def test_run_round_loop_continue_paths_route_through_close_round() -> None:
@@ -1433,15 +1363,8 @@ def test_run_round_loop_continue_paths_route_through_close_round() -> None:
     )
 
 
-# ===========================================================================
-# Dispatch + domain-shape guardrails
-# ===========================================================================
-#
-# Three self-enforcing rules the pre-flight gate (CLAUDE.md) names but the
-# rest of the suite did not yet machine-check:
-#   - every INJECTIONS slot resolves to a renderer, and no renderer is orphaned;
-#   - every raw LLM call funnels through the one traced dispatch module (Q8);
-#   - pipeline_params is nested-by-node — a flat param map cannot be built.
+# Dispatch + domain-shape guardrails: INJECTIONS↔renderer parity,
+# all LLM calls funnel through dispatch (Q8), pipeline_params nested-by-node.
 
 
 def test_every_injection_renderer_is_wired() -> None:

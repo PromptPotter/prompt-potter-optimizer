@@ -1,21 +1,10 @@
-"""Escalation signals + self-healing failure types.
-
-Pure data containers for the four channels that drive L2/L3 escalation:
-``EscalationTarget`` (where a check directs the cycle), ``EscalationSignal``
-(per-round mid-eval emission), ``ValidationFailure`` (L1-output parse
-failure → L2 heal), ``RuntimeFailure`` (post-eval degradation evidence →
-L2 heal). No I/O, no service dependencies.
-"""
+"""Escalation signals + self-healing failure types — pure data, no I/O."""
 
 from __future__ import annotations
 
 import enum
 from dataclasses import asdict, dataclass
 from typing import Any
-
-# ---------------------------------------------------------------------------
-# Escalation types
-# ---------------------------------------------------------------------------
 
 
 class EscalationTarget(enum.StrEnum):
@@ -63,18 +52,12 @@ class EscalationSignal:
 
 @dataclass
 class ValidationFailure:
-    """A parse-time invariant violation on an L1-generated candidate.
+    """L1-output parse-time invariant violation. Drives synthetic-0 in ``score_search_point``."""
 
-    Recorded as a property of the OptSearchPoint (in
-    ``OptSearchPoint.validation_failures``). Drives the synthetic-0
-    early exit in ``score_search_point()`` — see
-    ``docs/developer/self-healing-internals.md`` for the rationale.
-    """
-
-    axis: str  # e.g. "llm_only.model"
-    value: str  # the offending value the optimizer proposed
-    allowed: list[str]  # the user-declared allowed set (may be empty)
-    reason: str  # short machine-readable reason code
+    axis: str
+    value: str
+    allowed: list[str]
+    reason: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -82,39 +65,21 @@ class ValidationFailure:
 
 @dataclass
 class RuntimeFailure:
-    """A runtime-observed health failure on a candidate's scoring run.
+    """Post-eval degradation evidence, attached per-candidate.
 
-    Sibling of ``ValidationFailure`` in the self-healing canon, but
-    populated AFTER the candidate ran — from per-sample degradation
-    evidence (e.g. a candidate with ``max_tokens=150`` that classifies
-    as ``reasoning_budget_exhausted`` on 7/7 samples). Attributes
-    the failure to the specific candidate that caused it, not the
-    round, so winners are never penalised for losers' runtime issues.
-
-    Stored on ``OptSearchPoint.runtime_failures``, surfaced in the
-    candidate's score report, and ingested by L2 next round as a
-    self-healing brief signal — mirroring the ValidationFailure
-    pipeline. Does **not** drive synthetic-0: the candidate's real
-    score stands (usually low anyway), the failure is a forensic
-    attachment explaining *why*.
+    Stored on ``OptSearchPoint.wounds.runtime_failures``; surfaced in the
+    candidate's score report; ingested by L2 next round. Does NOT drive
+    synthetic-0 — the candidate's real score stands.
     """
 
-    source: str  # e.g. "degradation_check" | "empty_output_check"
-    dominant_warning: str  # e.g. "llm_only:reasoning_budget_exhausted"
-    warning_types: dict[str, int]  # full histogram of warning types seen
-    degraded_rate: float  # fraction of scored samples that degraded
+    source: str
+    dominant_warning: str
+    warning_types: dict[str, int]
+    degraded_rate: float
     degraded_count: int
     total_scored: int
-    observed_config: dict[str, Any]  # snapshot of the offending node's config
-    # Round in which this failure was first observed. Used by
-    # ``_r_runtime_failures``
-    # (`application/optimization/dispatch/hub/injections/wounds.py`)
-    # to partition NEW (current round) vs ACCUMULATED (surviving earlier
-    # rounds) from a single list.
+    observed_config: dict[str, Any]
     first_seen_round: int = 0
-    # changes_description of the candidate that first produced this failure.
-    # Propagated forward through the outer-memory mirror so ACCUMULATED rows
-    # still identify which prompt variant introduced the pattern.
     candidate_label: str = ""
 
     def to_dict(self) -> dict[str, Any]:

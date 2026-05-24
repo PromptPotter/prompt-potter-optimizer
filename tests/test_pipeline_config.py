@@ -45,11 +45,6 @@ from promptpotter.domain.pipeline_schema import (
 DATASETS_DIR = Path(__file__).resolve().parent.parent / "datasets"
 
 
-# ===========================================================================
-# PipelineSchema model + parse_pipeline_response
-# ===========================================================================
-
-
 def test_derivation_methods():
     schema = PipelineSchema(
         name="test",
@@ -173,11 +168,6 @@ class TestCoordinateLookups:
         assert PipelineSchema(nodes=[]).sp_hash({}) == ""
 
 
-# ===========================================================================
-# Dataset pipeline.json defaults
-# ===========================================================================
-
-
 def test_no_numeric_max_tokens_in_dataset_pipeline_configs() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     pipeline_files = sorted(
@@ -198,11 +188,6 @@ def test_no_numeric_max_tokens_in_dataset_pipeline_configs() -> None:
         + "\n  ".join(offenders)
         + "\nUse `null` or omit the field; operators override per-cycle via campaign.json."
     )
-
-
-# ===========================================================================
-# CampaignConfig validation
-# ===========================================================================
 
 
 def test_all_persisted_campaign_jsons_parse() -> None:

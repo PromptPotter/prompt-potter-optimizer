@@ -1,15 +1,4 @@
-"""Cycle state — round-loop mutable orchestration object.
-
-Resume-checkpoint records, the divergence walker, and the fork-mint
-helpers live in :mod:`promptpotter.application.optimization.resume_and_fork`
-— this file only owns the in-memory ``Cycle`` dataclass + per-round
-mutation. Escalation FSM (``EscalationState``, ``NextAction``,
-``EscalationEvent``) lives in
-:mod:`promptpotter.application.optimization.escalation.state`; the L2/L3
-firing driver lives in :mod:`.escalation.firing`. One-way arrow: this
-module imports from ``escalation.state``; the reverse is forbidden —
-``firing`` imports from cycle.py via ``TYPE_CHECKING`` only.
-"""
+"""Cycle state — round-loop mutable orchestration object."""
 
 from __future__ import annotations
 
@@ -76,11 +65,6 @@ def _build_scoreboard(
     return rows
 
 
-# ---------------------------------------------------------------------------
-# Cycle state — escalation counters + per-round mutation
-# ---------------------------------------------------------------------------
-
-
 def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
     cfg = rf_dict.get("observed_config") or {}
     return (
@@ -93,15 +77,9 @@ def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
 def _merge_into_cumulative(
     prior: list[dict[str, Any]], incoming: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Merge ``incoming`` per-sample measurements into ``prior``, keyed by sample_id.
+    """Sample-keyed merge: incoming overwrites prior; entries without ``sample_id`` dropped.
 
-    Winner overwrites for shared samples (the winner's measurement is the
-    most-recent under the most-relevant searchpoint); prior is preserved
-    for samples the winner didn't touch. Used by ``absorb_round`` and
-    ``replay_priors`` so ``tr.current_results`` is a non-shrinking
-    cumulative origin across rounds — fair to PoBB priors, best-tracking,
-    probe-round filtering, and L2/L3 stall detection. Entries without a
-    ``sample_id`` are dropped (the cumulative pool is sample-keyed).
+    Keeps ``tr.current_results`` a non-shrinking cumulative origin across rounds.
     """
     by_sid: dict[Any, dict[str, Any]] = {
         r.get("sample_id"): r for r in prior if r.get("sample_id") is not None
@@ -115,21 +93,7 @@ def _merge_into_cumulative(
 
 @dataclass
 class TrackingState:
-    """Current/best searchpoint trajectory + frozen origin scores.
-
-    ``origin_*`` fields snapshot the round-0 baseline and are never
-    overwritten — ``current_*`` and ``best_*`` move with the round
-    loop, but the operator-facing "origin=" banner must point back
-    to the actual round-0 measurement even on resume.
-
-    ``origin_per_sample_results`` snapshots the round-0 per-sample
-    measurement dicts (the same shape ``current_results`` carries) and
-    is never mutated after ``Cycle.start``. Feeds the dispatch hub's
-    ``origin_strengths`` injection so L1 can see which samples the
-    origin already converts and preserve the scaffolding that earns
-    them — independent of how ``current_results`` evolves as later
-    rounds fold in.
-    """
+    """Current/best/origin searchpoint trajectory; ``origin_*`` is round-0 frozen."""
 
     current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
@@ -154,37 +118,17 @@ class Cycle:
     rounds: list[RoundResult] = field(default_factory=list)
     tracking: TrackingState = field(default_factory=TrackingState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
-    # Inter-round bridge state: ``probe_next_round`` set by L2 when it picks
-    # ``action="probe_round"``; consumed and reset on the very next round.
-    # ``last_l2_axis`` is the most recent ``axis_targeted`` from L2, read by
-    # ``compute_round_diagnostics`` to label probe outcomes. Neither is folded
-    # from the ledger today: a resume that lands inside the one-round gap
-    # between an L2 fire and the probe round drops the probe (the next round
-    # runs full-set) and renders ``axis_tested=""``. Acceptable trade —
-    # ``PROBE_ROUND_COMMITMENT`` is ARCHIVAL so divergence isn't detected,
-    # and probe outcomes are L2/L3 telemetry rather than control-flow signals.
+    # Inter-round bridge from L2: probe_next_round set when L2 picks action="probe_round",
+    # consumed and reset next round; last_l2_axis labels the probe outcome.
     probe_next_round: bool = False
     last_l2_axis: str = ""
-    # Cumulative set of queries with at least one warning in any prior
-    # round — drives probe-round subset selection. Rebuilt from results
-    # in ``absorb_round``; not persisted to OSP.
     warned_queries: set[str] = field(default_factory=set)
     axes: AxisIndex | None = None
     escalation: EscalationState = field(default_factory=EscalationState)
-    # Flushed into the next round_data's `decisions` before campaign_store.save_round_file.
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     state_version: int = 1
-    # Round-end Rasch posterior; one fit per round, reused by finalize.
     last_rasch_posterior: Any = None
-    # Cross-cycle observations harvested once at Cycle.start. Threaded into
-    # the round-end workspace hard-samples JSON (always written for parity),
-    # plus the per-candidate sorter / initial-scoring-set picker when the
-    # respective `exploration.seed_*_from_archive` flags are on.
     archive_observations: list[Observation] = field(default_factory=list)
-    # Operator escape hatch (`resume --ignore-render-errors`), stamped by
-    # `run_optimization` after bootstrap. Copied onto every `InjectionBundle`
-    # so `DispatchHub.render` downgrades a raising renderer to an empty
-    # render instead of halting with StopReason.RENDER_ERROR.
     ignore_render_errors: bool = False
 
     @classmethod
@@ -216,22 +160,14 @@ class Cycle:
                 "l1_overrides": dict(origin_osp.l1_overrides),
             }
         )
-        # session.pipeline_params already carries the dataset overlay merged in by
-        # configure_and_apply_pipeline (provider/model/temperature/reasoning_effort,
-        # anything in nodes.{name}.config). Use it directly — schema.to_pipeline_params()
-        # is intentionally sparse ({"steps": [...]}) and would strip the operator-fixed
-        # config, causing the cycle's content_hash to ignore overlay edits and the wire
-        # payload to fall back to backend defaults.
+        # Pass session.pipeline_params (carries dataset overlay), NOT schema.to_pipeline_params()
+        # — the latter is sparse and would strip operator-fixed config.
         sp = opt_sp.to_job_search_point(
             base_pipeline_params=session.pipeline_params or None,
             schema=schema,
         )
-        # Invariant: every key the operator set under nodes.{name}.config in
-        # the dataset overlay must survive into sp.pipeline_params, so that
-        # (a) JobSearchPoint.content_hash flips on overlay edits → auto-fork,
-        # and (b) the wire adapter forwards the overlay to the backend instead
-        # of falling back to backend defaults. If this trips, a caller
-        # regressed to schema.to_pipeline_params() (sparse) somewhere.
+        # Invariant: dataset-overlay keys survive into sp.pipeline_params so content_hash
+        # flips on overlay edits and the wire adapter forwards the overlay.
         _sp_pp = sp.pipeline_params or {}
         for _node, _cfg in (session.pipeline_params or {}).items():
             if _node == "steps" or not isinstance(_cfg, dict):
@@ -241,11 +177,6 @@ class Cycle:
                 f"overlay keys stripped from {_node}: {sorted(_missing)} — "
                 "Cycle.start must pass session.pipeline_params, not a sparse schema view"
             )
-        # Always populated — the per-round display projection downstream
-        # writes a workspace hard-samples artifact (cycle obs + archive obs)
-        # regardless of any seed_* flag, so this list must be available.
-        # Disk walk is cheap (same pattern the FastAPI dataset preview uses
-        # on every request).
         from promptpotter.application.intelligence.hard_sample_archive import (
             build_archive_observations,
         )
@@ -260,12 +191,8 @@ class Cycle:
             dataset_name=session.dataset_name,
         )
 
-        # Inherit runtime_failures from sibling forks of this cycle's family
-        # root. A fresh fork otherwise starts with an empty failure list and
-        # L1 has no signal about configs that prior siblings already proved
-        # to fail (e.g. max_tokens=1800 → empty_response). The wire-level
-        # filter in `_r_runtime_failures` still drops entries that don't
-        # match the new pipeline config, so inheriting them is safe.
+        # Inherit sibling runtime_failures so L1 sees configs prior siblings proved to fail.
+        # _r_runtime_failures drops entries that don't match the new pipeline config.
         inherited_failures: list[RuntimeFailure] = []
         if session.state.cycle_id:
             try:
@@ -308,16 +235,7 @@ class Cycle:
     def replay_priors(self, priors: list[dict[str, Any]]) -> None:
         """Reconstruct round-loop state from persisted prior rounds (in-place).
 
-        Rebuilds ``rounds`` (typed :class:`RoundResult`), ``tracking``
-        (current = last round, best = highest-composite across priors),
-        ``opt_sp`` (last round's snapshot), and ``warned_queries``
-        (accumulated across all priors). Callers feed the full ordered
-        prior list — resume passes ``prior``; divergence-fork passes the
-        ``survivors`` slice. Empty ``priors`` is a no-op (fresh cycle).
-
-        ``EscalationState`` is NOT touched — it's a projection of the
-        ledger and the caller rebuilds it via
-        ``EscalationState.from_ledger`` after this returns.
+        ``EscalationState`` is NOT touched — caller rebuilds via ``from_ledger``.
         """
         if not priors:
             return
@@ -341,12 +259,8 @@ class Cycle:
             else tr.current_sp.pipeline_params
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=last_pp, schema=schema)
-        # Walk every prior round, accumulating per-sample measurements +
-        # recomputing cumulative composite — mirrors the per-round folding
-        # ``absorb_round`` does live. ``best_round`` is the cumulative-state
-        # high-water-mark, not whichever round happened to land the hardest
-        # leader-locked subset. Without this, resume/fork after a lock-in
-        # would reseed PoBB priors with whatever subset the last winner saw.
+        # best_round = cumulative-state high-water-mark, mirroring ``absorb_round``;
+        # without this, resume/fork after a lock-in reseeds PoBB priors on the wrong subset.
         acc_cum: list[dict[str, Any]] = []
         for i, rr in enumerate(self.rounds, start=1):
             acc_cum = _merge_into_cumulative(acc_cum, list(rr.results))
@@ -388,19 +302,10 @@ class Cycle:
         rr: RoundResult,
         round_num: int,
     ) -> dict[str, Any]:
-        """Sole sink for a finished L1 round: fold optimizer-memory onto opt_sp,
-        append the round, propagate tracking, project the trial dict.
-
-        l1.py never mutates Cycle — it returns the round result (which
-        already carries ``rr.critique`` from ``run_l1_critique``) and the
-        runner calls this once at the round boundary. The returned dict
-        is the input to ``save_round_file`` on the normal path; probe and
-        escalation paths discard it.
-        """
+        """Sole sink for a finished L1 round; returns the trial dict for ``save_round_file``."""
         schema = self.session.pipeline_schema
         tr = self.tracking
 
-        # 1. opt_sp memory — runtime failures + cumulative warned-query set.
         all_results: list[Any] = [r for rs in rr.all_candidate_results.values() for r in rs]
         for r in all_results:
             if extract_warning_types(r) and (q := r.get("query")):
@@ -414,8 +319,6 @@ class Cycle:
                 existing_keys.add(k)
                 self.opt_sp.wounds.runtime_failures.append(RuntimeFailure(**rf_dict))
 
-        # 2. round + tracking. Per-round trajectory lives on ``self.rounds``
-        # (transient); persistent trajectory derives from ledger events.
         self.rounds.append(rr)
         for f in PROMPT_STRING_FIELDS:
             setattr(self.opt_sp, f, rr.prompt_fields.get(f, ""))
@@ -424,19 +327,10 @@ class Cycle:
             rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
-        # Cumulative origin: merge the winner's per-sample measurements onto
-        # the prior pool, recompute aggregates on the union. Previous code did
-        # ``tr.current_results = list(rr.results)`` which collapsed origin to
-        # the leader-locked subset (q8/20) and shrank for every future round.
-        # Cumulative pool stays fair to PoBB priors, best-tracking, probe-round
-        # filtering, and L2/L3 stall detection — all of which read from here.
         tr.current_results = _merge_into_cumulative(tr.current_results, list(rr.results))
         if schema is not None:
-            # opt_sp=None: cumulative mixes measurements taken under multiple
-            # searchpoints, so opt_sp-aware evaluators (prompt_compactness +
-            # wound rates) take their vacuous fallback — same convention as
-            # ``matched_origin_stats``. Decouples cumulative composite from
-            # any one candidate's lineage.
+            # opt_sp=None: cumulative pool mixes multiple searchpoints, so opt_sp-aware
+            # evaluators take their vacuous fallback (same convention as matched_origin_stats).
             cum = compute_composite_fitness(
                 cast("list[QueryMeasurement]", tr.current_results),
                 schema,
@@ -454,12 +348,9 @@ class Cycle:
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
 
-        # Stamp cumulative-pool size + accuracy on the round so disk readers
-        # don't need to re-walk priors to render "Current best on N samples."
         rr.cumulative_total = len(tr.current_results)
         rr.cumulative_accuracy = tr.current_accuracy
 
-        # 3. trial dict — pure projection of post-mutation state.
         return {
             "round_id": f"round_{round_num}",
             "round": round_num,

@@ -1,17 +1,4 @@
-"""OptSearchPoint — the optimizer's full working state.
-
-Inherits ``PromptTemplate`` (8 prompt fields) and adds lineage, L2/L3 state,
-and optimization memory. ``to_job_search_point()`` projects into a frozen
-``JobSearchPoint`` for scoring by rendering prompt fields into
-``pipeline_params``.
-
-Two-layer tracing:
-  Target layer:    JobSearchPoint  → content_hash → archive/measurements/
-  Optimizer layer: OptSearchPoint  → model_dump() → campaigns/{id}/round_data.json
-
-ADR-8: Mutable (not frozen). Updated in-place during the feedback cycle,
-serialized via ``model_dump()`` at checkpoint time.
-"""
+"""OptSearchPoint — optimizer working state; mutable, serialized via ``model_dump()``."""
 
 from __future__ import annotations
 
@@ -42,18 +29,8 @@ class FewShotExample(BaseModel):
 
 
 class PromptTemplate(SearchPoint):
-    """The 8-field prompt decomposition scheme.
+    """The 8-field prompt decomposition scheme — shared by job + optimizer prompts."""
 
-    Shared by job prompts (the prompt being optimized) and optimizer
-    meta-prompts (L1/L2/L3/Critique templates). Each prompt uses the
-    fields it needs; empty fields are skipped by ``render()``.
-
-    Optimizer templates are loaded via ``load_optimizer_prompt()`` which
-    returns ``PromptTemplate`` — callers use ``compile_prompt()`` to
-    substitute ``{{variable}}`` placeholders, then pass to ``llm_call()``.
-    """
-
-    # -- Prompt decomposition fields ---------------------------------------
     persona: str = ""
     task_intent: str = ""
     problem_description: str = ""
@@ -61,40 +38,22 @@ class PromptTemplate(SearchPoint):
     thinking_style: str = ""
     answer_format: str = ""
     few_shot_examples: list[FewShotExample] = Field(default_factory=list)
-
-    # -- L3 state (rendered at end of prompt) ------------------------------
     plan: str = ""
 
-    # -- SearchPoint interface ---------------------------------------------
-
     def render(self) -> str:
-        """Assemble prompt decomposition fields into a prompt string.
-
-        Skips empty fields. Sections separated by double newlines.
-        Few-shot examples formatted as Input/Output pairs. Subclasses
-        may override ``_field_value()`` to transform specific fields
-        at render time without duplicating this loop.
-        """
+        """Assemble non-empty decomposition fields, double-newline-joined."""
         parts = [v for f in PROMPT_STRING_FIELDS if (v := self._field_value(f))]
         block = self._render_few_shot_block()
         if block:
             parts.append(block)
         return "\n\n".join(parts)
 
-    # -- Rendering helpers -------------------------------------------------
-
     def _field_value(self, name: str) -> str:
-        """Return the value to render for a decomposition field.
-
-        Subclass override point — used by ``OptSearchPoint`` to splice
-        ``task_context.upstream_context`` / ``downstream_context`` around
-        ``problem_description`` without re-implementing the full render loop.
-        """
+        """Subclass override point — see ``OptSearchPoint`` for task-context splicing."""
         value: str = getattr(self, name)
         return value
 
     def _render_few_shot_block(self) -> str:
-        """Format few-shot examples into a text block (empty string if none)."""
         if not self.few_shot_examples:
             return ""
         lines: list[str] = []
@@ -105,11 +64,7 @@ class PromptTemplate(SearchPoint):
         return "\n".join(lines)
 
     def compile_prompt(self, **kwargs: str | int) -> str:
-        """Render and substitute ``{{variable}}`` placeholders.
-
-        Uses Langfuse-compatible double-brace syntax. Raises KeyError if
-        template-defined variables remain unsubstituted.
-        """
+        """Render and substitute ``{{variable}}`` placeholders. Raises on unsubstituted."""
         text = self.render()
         expected = set(re.findall(r"\{\{(\w+)\}\}", text))
         for key, value in kwargs.items():
@@ -119,19 +74,12 @@ class PromptTemplate(SearchPoint):
             raise KeyError(f"Unsubstituted template variables: {sorted(missing)}")
         return text
 
-    # -- Field extraction --------------------------------------------------
-
     def prompt_fields(self) -> dict[str, str]:
-        """Non-empty ``PROMPT_STRING_FIELDS`` as ``{name: value}`` (no few-shot).
-
-        The string-only projection used by L1 candidate summaries + the
-        validator's parent/child diff. Distinct from ``prompt_field_dict()``
-        which adds ``few_shot_examples`` for the L1-generation roundtrip.
-        """
+        """String-only projection (no few-shot) for L1 summaries + validator diffs."""
         return {f: v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))}
 
     def prompt_field_dict(self) -> dict[str, Any]:
-        """Return prompt decomposition fields as a dict (for L1 candidate generation)."""
+        """``prompt_fields()`` plus ``few_shot_examples`` — the L1-roundtrip shape."""
         d: dict[str, Any] = dict(self.prompt_fields())
         if self.few_shot_examples:
             d["few_shot_examples"] = [ex.model_dump() for ex in self.few_shot_examples]
@@ -139,11 +87,6 @@ class PromptTemplate(SearchPoint):
 
     @classmethod
     def from_prompt_fields(cls, fields: dict[str, Any], **kwargs: Any) -> Self:
-        """Create an instance from a dict of prompt fields + optional extra state.
-
-        Return type follows ``cls``. Pydantic auto-coerces a nested
-        ``lineage: {...}`` dict into ``IndividualLineage`` when present.
-        """
         fields = dict(fields)
         fse = fields.pop("few_shot_examples", [])
         if fse and isinstance(fse[0], dict):
@@ -168,14 +111,7 @@ EVIDENCE_GROUNDING_FIELDS: frozenset[str] = frozenset(
 
 
 class EvidenceGrounding(BaseModel):
-    """Panel field cited by L1 to justify a candidate's mutation.
-
-    Per ``promptpotter/CLAUDE.md`` L1 contract: *no data justifying a choice
-    ⇒ do not gamble*. Each L1-emitted variant declares which evidence panel
-    the mutation was anchored on, plus a short citation pointing at the
-    specific entry. ``stall_exploration`` is the escape hatch — only valid
-    when ``escalation_panel.exploration_budget != "tight"``.
-    """
+    """Panel field + citation L1 declares to justify a mutation."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -184,16 +120,7 @@ class EvidenceGrounding(BaseModel):
 
 
 class L1SupplementalRule(BaseModel):
-    """One situational rule appended to L1's instruction next round.
-
-    Authored by L2 when the panels show a recurring L1 failure mode that
-    L1's static instruction does not address and the dispatch hub's
-    auto-trigger registry (`dispatch/hub/auto_rules.py::AUTO_RULES`)
-    does not already cover. Renders inline via the
-    ``l1_supplemental_rules`` dispatch-hub injection — the rule body
-    appears in L1's prompt prefixed with its ``rule_id`` and tagged with
-    the citation L2 used to motivate it.
-    """
+    """L2-authored situational rule rendered inline in L1's instruction."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -203,14 +130,7 @@ class L1SupplementalRule(BaseModel):
 
 
 class L1SituationalExample(BaseModel):
-    """One worked example pinned to an active trigger.
-
-    Renders in L1's prompt only when ``trigger_id`` matches either an
-    auto-trigger that fired this round (PEAKED axis, runtime_failure,
-    chain_bind, continuous_envelope, latex_repair, l2_stall_diversity)
-    or the ``rule_id`` of a currently-authored
-    :class:`L1SupplementalRule`. Empty trigger ⇒ silent.
-    """
+    """Worked example pinned to a ``trigger_id`` (auto-trigger or L2-authored rule)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -222,24 +142,7 @@ class L1SituationalExample(BaseModel):
 
 
 class WoundChannels(BaseModel):
-    """Self-healing surface — the four wound channels plus the sticky L3→L2 note.
-
-    Each list is a stream of failure observations one layer above the
-    failing one reads to decide how to heal. Dispatch-hub injection
-    renderers (``_r_validation_failures``, ``_r_runtime_failures``,
-    ``_r_l2_guard_breaches``, ``_r_l3_guard_breaches``, ``_r_l3_to_l2_note``)
-    consume directly from these fields. Persisted as a memory field across
-    L2/L3 transitions; children spawned by ``mutate()`` start with empty
-    channels.
-
-    | Field | Writer | Reader | Lifetime |
-    |---|---|---|---|
-    | ``validation_failures`` | L1 parse-time validators | L1/L2/L3 prompts | persistent until L2 heals |
-    | ``runtime_failures`` | mid-eval DegradationCheck | L1/L2/L3 prompts | persistent until L2 heals |
-    | ``l2_guard_breaches`` | L2 output validators | L3 prompt (force-trigger via wound 4) | persistent until L3 heals |
-    | ``l3_guard_breaches`` | L3 output validators | next L3 fire | persistent |
-    | ``l3_note`` | L3 | L2 prompt only | persistent until next L3 fire |
-    """
+    """Self-healing surface: four wound streams + sticky L3→L2 note. Consumed by dispatch-hub injection renderers."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -251,56 +154,23 @@ class WoundChannels(BaseModel):
 
 
 class IndividualLineage(BaseModel):
-    """Identity and provenance of a single individual in the population.
-
-    Groups the fields that describe *what this individual is and where it
-    came from*.  Set once at individual creation (``mutate`` and
-    ``OptSearchPoint.__init__``); never mutated after that.
-    """
+    """Identity + provenance — set once at creation, never mutated."""
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     parent_id: str | None = None
     changes_description: str = ""
     source: str = Field(
-        default="",
-        description="Origin of this individual: 'origin' / 'l1_generate' / "
-        "'l2_context' / 'l3_plan'.",
+        default="", description="'origin' / 'l1_generate' / 'l2_context' / 'l3_plan'."
     )
-    evidence_grounding: EvidenceGrounding | None = Field(
-        default=None,
-        description="L1-declared panel evidence for this individual's mutation. "
-        "None for origin / L2 / L3 individuals; populated for L1 children.",
-    )
+    evidence_grounding: EvidenceGrounding | None = None
 
 
 class OptSearchPoint(PromptTemplate):
-    """Optimizer-level search point — the optimizer's full working state.
-
-    Inherits the 8 prompt fields and rendering from ``PromptTemplate``.
-    Adds three top-level groups beyond the prompt fields, plus the
-    flat optimizer-memory fields enumerated in :data:`MEMORY_FIELDS`:
-
-    - ``lineage``        — identity + provenance (id, parent_id, ...)
-    - ``l1_overrides`` — L1 runtime knobs (``n_variants``, ``creativity``)
-      set by L2; ``n_variants`` flows into L1's prompt as the
-      ``{{n_variants}}`` caller extra, ``creativity`` sets L1's LLM-call
-      temperature outside the prompt
-    - ``task_context``  — structured domain understanding (TaskDecomposition)
-    - memory fields     — see :data:`MEMORY_FIELDS` (preserved across L2/L3
-      transitions via :meth:`copy_memory_to`).
-
-    Persisted in round_data checkpoints. Enables L4 to correlate optimizer
-    configuration with target-pipeline scoring outcomes. Per-round
-    trajectory and pipeline-step escalation events live on the ledger
-    (``CycleEventLog``) — projections derive on demand.
-    """
+    """Optimizer working state: prompt fields + lineage + L2/L3 state + memory."""
 
     model_config = ConfigDict(extra="forbid")
 
-    # -- Lineage -------------------------------------------------------------
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
-
-    # -- L2 state ----------------------------------------------------------
     l1_overrides: dict[str, Any] = Field(default_factory=dict)
     task_context: TaskDecomposition = Field(default_factory=TaskDecomposition)
 
@@ -313,37 +183,11 @@ class OptSearchPoint(PromptTemplate):
             return TaskDecomposition.from_dict(v)
         return TaskDecomposition()
 
-    # -- Optimization memory (bundled by MEMORY_FIELDS for copy_memory_to) --
-    # Self-healing surface: four wound streams + sticky L3→L2 note. See
-    # ``WoundChannels`` docstring for the per-field contract.
     wounds: WoundChannels = Field(default_factory=WoundChannels)
-
-    # -- L1-generate surface state (owned by L2 mutations) ----------------
-    # Per-slot list of placeholder names L2 picks from `L1_POSSIBLE`. The
-    # dispatch hub fills L1's PromptTemplate by walking this layout at
-    # render time. Default covers the mandatory placeholders without
-    # forcing L2 to write a layout on every fire.
     l1_layout: L1Layout = Field(default_factory=default_l1_layout)
-
-    # Situational rules L2 appended to L1's instruction. Rendered inline by
-    # the ``l1_supplemental_rules`` dispatch-hub injection. Full-replace each
-    # L2 fire — L2 re-authors the list every fire (empty list = drop all
-    # prior L2-authored rules; auto-triggered rules from auto_rules.py still
-    # render independently when their triggers fire).
     l1_supplemental_rules: list[L1SupplementalRule] = Field(default_factory=list)
-
-    # Worked examples pinned to active triggers. Same full-replace semantics
-    # as ``l1_supplemental_rules``. An entry whose ``trigger_id`` is not
-    # currently active (no auto-trigger AND no L2-authored rule with that ID)
-    # is silently filtered by the renderer.
     l1_situational_examples: list[L1SituationalExample] = Field(default_factory=list)
 
-    # Fields preserved across L2/L3 transitions via copy_memory_to.
-    # L1's layout + L1 runtime overrides MUST be in here so L3-spawned
-    # children inherit in-flight L2 surface edits instead of being
-    # silently merged from a stale OSP. Same for the L2-authored
-    # supplemental-rule / situational-example layers — they're stateful
-    # across L2 fires until L2 replaces them.
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
         "wounds",
         "l1_layout",
@@ -353,14 +197,12 @@ class OptSearchPoint(PromptTemplate):
     )
 
     def copy_memory_to(self, target: OptSearchPoint) -> None:
-        """Deep-copy MEMORY_FIELDS onto *target* (in place) for L2/L3 adopt."""
+        """Deep-copy MEMORY_FIELDS onto *target* for L2/L3 adopt."""
         for f in self.MEMORY_FIELDS:
             setattr(target, f, copy.deepcopy(getattr(self, f)))
 
-    # -- Render seam: splice task context around problem_description ------
-
     def _field_value(self, name: str) -> str:
-        """Wrap ``problem_description`` with ``task_context`` up/downstream context."""
+        """Splice ``task_context`` up/downstream context around ``problem_description``."""
         v: str = getattr(self, name)
         if name != "problem_description" or not v:
             return v
@@ -368,8 +210,6 @@ class OptSearchPoint(PromptTemplate):
         if not (tc.upstream_context or tc.downstream_context):
             return v
         return "\n\n".join(p for p in (tc.upstream_context, v, tc.downstream_context) if p)
-
-    # -- Projection to target layer ----------------------------------------
 
     def to_job_search_point(
         self,
@@ -379,9 +219,8 @@ class OptSearchPoint(PromptTemplate):
     ) -> JobSearchPoint:
         """Render → inject into pipeline_params → return frozen JobSearchPoint.
 
-        Pipeline composition (active_steps, prompt_node) is read from *schema*
-        when provided — it's immutable per campaign and must not be inferred
-        from whatever ``base_pipeline_params`` happens to carry.
+        Pipeline composition reads from *schema* — never inferred from
+        ``base_pipeline_params``.
         """
         from promptpotter.domain.search_point import JobSearchPoint
 
@@ -395,9 +234,7 @@ class OptSearchPoint(PromptTemplate):
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
 
-        # Build prompt_fields for variant derivation in JobSearchPoint.
-        # Only meaningful when a prompt node exists in pipeline_params —
-        # otherwise derive() can't inject rendered prompts.
+        # prompt_fields only meaningful when a prompt node exists.
         pf = None
         if rendered and prompt_node:
             pf = {f: v for f, v in self.prompt_field_dict().items() if f != "few_shot_examples"}
@@ -419,10 +256,8 @@ class OptSearchPoint(PromptTemplate):
         copy_memory_to). Children start with empty memory.
         """
         data: dict[str, Any] = {}
-        # Copy prompt decomposition fields
         for f in PROMPT_STRING_FIELDS:
             data[f] = changes.pop(f, getattr(self, f))
-        # few_shot_examples
         fse = changes.pop("few_shot_examples", None)
         if fse is not None:
             if fse and isinstance(fse[0], dict):
@@ -430,25 +265,20 @@ class OptSearchPoint(PromptTemplate):
             data["few_shot_examples"] = fse
         else:
             data["few_shot_examples"] = [ex.model_copy() for ex in self.few_shot_examples]
-        # L2/L3 state
         data["l1_overrides"] = changes.pop("l1_overrides", dict(self.l1_overrides))
         data["task_context"] = changes.pop("task_context", self.task_context.to_dict())
         data["plan"] = changes.pop("plan", self.plan)
-        # Lineage
         data["lineage"] = IndividualLineage(
             parent_id=self.lineage.id,
             changes_description=changes.pop("changes_description", ""),
             source=changes.pop("source", ""),
             evidence_grounding=changes.pop("evidence_grounding", None),
         )
-        # Any remaining changes
         data.update(changes)
         return OptSearchPoint(**data)
 
 
-# ---------------------------------------------------------------------------
-# Search-point diff helpers — pure shape munging, consumed by the views layer.
-# ---------------------------------------------------------------------------
+# --- Search-point diff helpers (views-layer shape munging) ---
 
 
 def _fmt_pp_val(v: object) -> str:
@@ -458,7 +288,7 @@ def _fmt_pp_val(v: object) -> str:
 
 
 def flatten_sp_summary(pp: dict[str, Any] | None) -> dict[str, str]:
-    """Flatten ``{node: {param: value}}`` pipeline_params into a ``node.param`` display dict."""
+    """``{node: {param: value}}`` → ``{node.param: value}`` display dict."""
     flat: dict[str, str] = {}
     for k, v in (pp or {}).items():
         if k == "steps" or not isinstance(v, dict):
@@ -469,13 +299,8 @@ def flatten_sp_summary(pp: dict[str, Any] | None) -> dict[str, str]:
 
 
 def build_candidate_flat(parent: dict[str, str], candidate_meta: dict[str, Any]) -> dict[str, str]:
-    """Merge candidate overrides onto parent across the three L1 slots.
-
-    pipeline_params, prompt_fields, and task_context layer into disjoint
-    keyspaces (``node.param`` / bare ``persona`` etc. / ``tc.<key>``) so
-    a task_context-only mutation surfaces in the diff table instead of
-    rendering as a bare ``[clone]``.
-    """
+    """Merge candidate overrides onto parent across the three disjoint keyspaces:
+    ``node.param`` (pipeline_params), bare prompt fields, ``tc.<key>`` (task_context)."""
     flat = parent.copy()
     if pp := candidate_meta.get("pipeline_params_override"):
         flat.update(flatten_sp_summary(pp))

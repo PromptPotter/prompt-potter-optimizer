@@ -1,37 +1,4 @@
-"""``LiveDashboardView`` — operator-facing ``dashboard.json`` writer.
-
-Session-family-bound: one ``dashboard.json`` per session, written into
-the session's root cycle dir and shared by that session's forks (a fork's
-family root is the session root). A campaign holds N independent live
-streams — one per session — never one shared stream. The file self-stamps
-its own ``(campaign_id, cycle_id, session_id)`` — the session-family it
-belongs to — so a webapp poll can drop any payload that doesn't match the
-unit it asked for. That stamp is self-identity, not the *active* pointer:
-``active_session.json`` stays the sole source of which cycle the operator
-is currently running (one writer, one source).
-
-The constructor takes :data:`SessionFamilyDir` so a per-cycle audit block
-cannot accidentally land here.
-
-Single ingress: the projection consumes only via ``on_record`` from the
-per-cycle ``CycleEventLog``. The runner emits typed ``PhaseRecord`` /
-``SnapshotRecord`` / ``ResumeCheckpointRecord`` records; this class is
-one flat router that mutates the ``state`` scalars + the ``_round``
-candidate dict in place, then merges both into one ``dashboard.json``
-write through ``_persist``.
-
-Two display surfaces on ``dashboard.json``:
-
-* ``rounds[]`` — completed-round summaries (one entry per closed round,
-  appended at ``round:display``). Sole source for the FitnessChart,
-  TrendChart, TopStrip sparkline, LineageTree. The webapp never stitches
-  ``round_NNNN.json`` files for these.
-* ``current_round`` — the in-flight round's deep node block (L1 generate
-  / critique / score in progress, plus PoBB telemetry). Wiped at
-  ``L1_GENERATE:enter`` so a fresh round starts with an empty in-flight
-  buffer. Past rounds' deep audit lives in ``round_NNNN.json``, lazy-fetched
-  by the webapp via ``useRoundFile`` when an operator drills in.
-"""
+"""``LiveDashboardView`` — session-family ``dashboard.json`` writer."""
 
 from __future__ import annotations
 
@@ -79,9 +46,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Phase enter → ``state`` value. The L1_SCORE phase has no entry in this
-# table because ``sample_started`` / ``sample_scored`` drive its
-# transitions (``scoring`` / ``between_samples`` / ``between_candidates``).
+# L1_SCORE absent: driven by sample_started / sample_scored.
 _PHASE_TO_STATE: dict[str, str] = {
     CampaignPhase.INIT: "init",
     CampaignPhase.ORIGIN: "origin",
@@ -93,11 +58,7 @@ _PHASE_TO_STATE: dict[str, str] = {
 
 
 class LiveDashboardView(DerivedView):
-    """Per-cycle dashboard writer. Routes ledger records to scalar +
-    per-round mutations and persists the merged view to ``dashboard.json``.
-    Not an optimizer checkpoint — resume reads ``rounds/round_NNNN.json``,
-    counters here are display continuity only.
-    """
+    """Per-cycle dashboard writer; not an optimizer checkpoint."""
 
     def __init__(
         self,
@@ -113,14 +74,6 @@ class LiveDashboardView(DerivedView):
         resume_from: dict[str, Any] | None = None,
         recorder: AuditTrailView | None = None,
     ) -> None:
-        # Telemetry binds to the session-family root cycle dir — one
-        # dashboard.json per session, shared by that session's forks. A
-        # campaign holds N such streams (one per session). Per-cycle audit
-        # (index.json, log.md, rounds/, .runtime/) stays in each cycle's
-        # own dir under ``cycles/``, written through dynamic
-        # ``session.state.cycle_id`` paths. Active-cycle identity comes
-        # from ``active_session.json`` (one writer, one source); the file's
-        # data describes whatever the active cycle's loop has produced.
         family_path = Path(family_dir)
         self.family_dir = family_path
         self.state_path = family_path / "dashboard.json"
@@ -129,82 +82,41 @@ class LiveDashboardView(DerivedView):
         self.patience_max = l1_patience
         r = resume_from or {}
         self.state: dict[str, Any] = {
-            # Self-identity stamp — which session-family this dashboard.json
-            # describes. Always from the constructor args, never from
-            # ``resume_from`` or a phase event, so a stale prior file can't
-            # poison it. The webapp drops any polled payload whose stamp
-            # doesn't match the unit it asked for.
+            # Self-identity stamp — never inherited from resume_from / phase event.
             "campaign_id": campaign_id,
             "cycle_id": cycle_id,
             "session_id": session_id,
             "state": r.get("state", "init"),
             "state_since": datetime.now(UTC).isoformat(),
             "stop_reason": r.get("stop_reason"),
-            # Inherit ``round`` from prior dashboard so a re-instantiation
-            # (re-run of ``init`` / ``optimize``) doesn't zero the operator-
-            # visible round pointer before the first phase event lands and
-            # restamps it. Without this, an interrupted cycle that never
-            # resumes is permanently displayed at ``round=0`` and the webapp
-            # polls a ``rounds/round_0000.json`` that may not exist.
+            # Inherit round so re-instantiation doesn't zero the operator-visible pointer.
             "round": int(r.get("round") or 0),
             "candidate": "",
             "query": "",
             "patience": f"0/{l1_patience}",
-            # Origin row — accuracy + sample count behind C0. Single source
-            # for the webapp's origin bar; populated at INIT:exit.
             "origin": dict(r.get("origin") or {"accuracy": 0.0, "samples": 0}),
-            # Per-round display summaries; the chart, lineage tree, and
-            # trend sparkline read this as the sole source of truth for
-            # completed-round bars. Resume carries forward any prior
-            # snapshot; rewinds clamp it at L1_GENERATE:enter.
             "rounds": list(r.get("rounds") or []),
             "best": r.get("best", 0.0),
             "current_acc": 0.0,
             "composite_fitness_formula": r.get("composite_fitness_formula"),
             "degraded_count": 0,
             "error_count": 0,
-            # Backend transport / retry visibility. Bumped by
-            # ``_handle_phase`` on ``phase="backend", event="warning"``
-            # records emitted from ``measure_sample`` whenever
-            # ``BackendClient.run_query`` fires its retry loop. Operator and
-            # webapp see retries land in real time; "silent retry then
-            # forget" is the failure mode this surfaces against.
             "backend_retry_count": 0,
             "recent_backend_warnings": [],
             "total_queries_scored": r.get("total_queries_scored", 0),
             "total_backend_calls": r.get("total_backend_calls", 0),
             "current_query_payload": None,
-            # Sample-id of the row the loop is scoring *right now*; cleared
-            # on ``sample_scored``. Lets the webapp dataset table pulse the
-            # in-flight row in lockstep with the per-sample dashboard rewrites.
             "current_sample_id": None,
-            # Adaptive picker's expected sample order at candidate-start —
-            # descending blended pick-value (decision-information-gain
-            # against the seed plus the small explore term). Refreshed
-            # per-candidate in ``score_population``. The webapp dataset
-            # table sorts on this when the operator's "sync with live
-            # sort" toggle is on. ``None`` until the first picker fit
-            # lands (round 0 / pre-first-candidate fallback). The
-            # hardest-first ordering (δ_s desc) lives on the per-cycle
-            # hard-samples artifact under ``sample_order`` for the heatmap.
             "hard_sample_order": None,
             "last_query_elapsed_s": 0.0,
             "wallclock_serialized_at": None,
             "n_variants": n_variants,
             "sp_budget_ttest": sp_budget_ttest,
             "spend": backfill_spend_rates(r.get("spend") or empty_spend()),
-            # Filled by ``_handle_llm_call_start`` while a meta-prompt LLM
-            # call is in progress; cleared on the paired ``LLMCallRecord``.
-            # Stays ``None`` between calls — explicit so the webapp doesn't
-            # have to guess "missing key vs cleared".
             "in_flight": None,
         }
-        # Per-candidate value-inlined version of the active short formula;
-        # set on INIT:exit, consumed in _build_l1_score_block for each row.
         self.short_formula_template: str | None = None
         self._round: dict[str, Any] = {"round": 0, "candidates": {}}
-        # In-memory mirror of the round/origin/best scalars; LiveDisplay
-        # holds the same shape so both subscribers share one accumulator.
         self._core = LiveStateCore(
             round_num=int(self.state.get("round") or 0),
             origin_acc=float((self.state.get("origin") or {}).get("accuracy") or 0.0),
@@ -228,19 +140,11 @@ class LiveDashboardView(DerivedView):
         resumed_from_round: int | None = None,
         recorder: AuditTrailView | None = None,
     ) -> LiveDashboardView | None:
-        """Build projection, or ``None`` if ids missing. Carries prior UI counters
-        across resumes; optimizer resume is separate (``Cycle.replay_priors``).
-        On ``--from N`` rewind, the ``best`` counter past the surviving rounds
-        is clamped to avoid a phantom value.
-
-        Telemetry binds to the session-family root cycle dir — the session
-        root + its forks share one ``dashboard.json``."""
+        """Build projection, or ``None`` if ids missing."""
         if not (project_root and session_id and campaign_id and cycle_id):
             return None
 
         tenant_root = Path(project_root)
-        # The session-family root: a fork's family root is its session
-        # root, so a fork and its session share one dashboard.json.
         session_root = root_cycle_id(cycle_id)
         family_dir = SessionFamilyDir(cycle_dir_for(tenant_root, campaign_id, session_root))
         session_dir = session_dir_for(tenant_root, session_id)

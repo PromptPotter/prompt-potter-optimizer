@@ -24,12 +24,7 @@ from promptpotter.infrastructure.store import archive_views
 
 
 def _is_forbidden_axis(axis: str) -> bool:
-    """``<node>.<param>`` axes whose ``<param>`` is operator-locked.
-
-    These axes (currently model + provider) carry observations the
-    optimizer cannot act on; surfacing them as "consistently impactful"
-    in the L1/L2/L3 axis digest mis-steers framing refinement.
-    """
+    """True iff ``<param>`` half is in ``PARAM_FORBIDDEN_KEYS`` (operator-locked)."""
     _, _, param = axis.partition(".")
     return param in PARAM_FORBIDDEN_KEYS
 
@@ -83,18 +78,7 @@ def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
 
 
 class AxisIndex:
-    """Derived axis-keyed view over the MeasurementArchive.
-
-    Holds two collaborating pieces:
-
-    * ``sample_index`` — per-sample derived state (no persistence).
-    * ``_axis_values`` — axis → value → list[accuracy], grown
-      incrementally from the archive index by folding only new entries
-      (``_axis_seen_runs`` cursor).
-
-    Failure-group × axis correlations are recomputed on every refresh —
-    cheap at current scale and avoids drift from a throttle.
-    """
+    """Derived axis-keyed view over the MeasurementArchive (axis → value → [accuracy])."""
 
     def __init__(
         self,
@@ -106,9 +90,6 @@ class AxisIndex:
         self._axis_values: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list),
         )
-        # In-process cursor tracking which archive entries have been folded
-        # into ``_axis_values``. Mirrors ``sample_index._seen_runs`` for the
-        # axis side; new processes re-walk the full archive on first refresh.
         self._axis_seen_runs: set[str] = set()
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
         self._cache_axis_impacts: dict[str, AxisImpact | None] = {}
@@ -117,23 +98,13 @@ class AxisIndex:
     # ----- axis analytics -----
 
     def peaked_axes(self) -> frozenset[str]:
-        """Axes whose value trend is ``peaked`` — i.e. the parent's current
-        value IS the measured peak. Mutating these without a sibling-yield
-        rebut or wide-exploration budget is regression by default. Read
-        by the L1-axis-memory rendering (inline tag in axis_rankings) and
-        by the post-round ``evidence_grounding_present`` behaviour check.
-        """
+        """Axes whose value trend is ``peaked`` — parent's value IS the measured peak."""
         return frozenset(
             axis for axis in self._axis_values if self._axis_value_trend(axis) == "peaked"
         )
 
     def axis_rankings(self) -> list[AxisImpact]:
-        """All axes ranked by effect size (descending).
-
-        Operator-locked axes (``PARAM_FORBIDDEN_KEYS``) are dropped —
-        a forbidden axis can never become a candidate mutation, so
-        carrying it in the ranking only mis-steers L1/L2/L3.
-        """
+        """All axes ranked by effect size desc; ``PARAM_FORBIDDEN_KEYS`` dropped."""
         impacts = [
             i
             for axis, vals in self._axis_values.items()
@@ -213,11 +184,6 @@ class AxisIndex:
             if exhausted
             else None
         )
-        # Peaked tags are now inlined into the axis_rankings line itself
-        # (see ``_fmt_axis_rankings``); the separate ``value_trends`` line
-        # used to render alongside and let L1 read "highest effect" and
-        # "peaked" as two independent signals on the same axis. Collapsing
-        # to one annotated line removes the contradiction.
         peaked = self.peaked_axes()
 
         fg_lines: list[str] = []
@@ -272,17 +238,12 @@ class AxisIndex:
     # ----- failure-group correlation -----
 
     def _recompute_failure_group_correlations(self) -> None:
-        """Recompute failure-group × axis deltas from current hits/axis values.
-
-        Always overwrites ``_axis_failure_group_deltas`` (including resetting
-        to ``{}`` when no clusters are present).
-        """
+        """Recompute failure-group × axis deltas; overwrites (resets to {} when no clusters)."""
         clusters = self.sample_index.failure_clusters(5)
         if not clusters:
             self._axis_failure_group_deltas = {}
             return
 
-        # Map each failure mode to the full set of sample_ids whose dominant mode matches.
         groups: dict[str, set[int]] = {}
         for cluster in clusters:
             mode = cluster.failure_mode
@@ -330,29 +291,7 @@ class AxisIndex:
         *,
         dataset_name: str | None,
     ) -> None:
-        """Incrementally update both sides from the archive.
-
-        Sample side: walk ``archive.load_since(_seen_runs)``, rescore
-        items via ``rescore_results``, ingest into ``sample_index``,
-        mark seen.
-
-        Axis side: walk ``archive.list_all()`` and fold only entries
-        whose ``run_id`` is new (cursor: ``_axis_seen_runs``). Index
-        entries already carry ``pipeline_params`` and ``scores.accuracy``,
-        so no detail load is needed. Touched axes have their cached
-        impact invalidated; untouched axes keep theirs. Failure-group
-        correlations are recomputed unconditionally afterwards (they
-        depend on aggregate state).
-
-        Both cursors are in-process only; new processes re-walk the
-        full archive on first refresh.
-
-        ``dataset_name`` is required (keyword-only) — the AxisIndex is
-        a per-dataset derived view. Cross-dataset pollution on
-        ``sample_id`` corrupts the SampleIndex side; cross-dataset
-        pollution on axis values corrupts the axis-rankings ("AIME's
-        temperature effect" steering JustLogic's L1 mutation budget).
-        """
+        """Incremental archive refresh, dataset-scoped (required) to prevent cross-dataset pollution."""
         added = 0
         for run_id, detail in archive_views.runs_since(
             store, backend_id, self.sample_index._seen_runs, dataset_name=dataset_name
@@ -364,9 +303,7 @@ class AxisIndex:
             self.config_index.ingest_run(detail)
             added += 1
 
-        # Axis side: fold only new index entries into the persistent
-        # ``_axis_values``, tracking which axes the delta touched so we
-        # can invalidate exactly those impact-cache slots.
+        # Track touched axes to invalidate exactly those impact-cache slots.
         touched_axes: set[str] = set()
         all_entries: list[dict[str, Any]] = []
         for entry in archive_views.list_runs(store, backend_id, dataset_name=dataset_name):
@@ -389,20 +326,10 @@ class AxisIndex:
             )
 
     def _refresh_top_runs(self, entries: list[dict[str, Any]], k: int = 10) -> None:
-        """Recompute the top-K runs leaderboard from archive index entries.
+        """Top-K leaderboard, sorted by (composite_fitness, accuracy) desc.
 
-        Sorted descending by composite_fitness, then accuracy. Cheap full
-        re-rank — index entries are summary-only (no detail load) and N is
-        the number of archive runs.
-
-        Filter: only runs whose ``total`` equals the modal (most common)
-        sample count survive. Partial-coverage runs — early sweep arms,
-        elimination-aborted candidates, pre-scoring-set-fix entries that
-        scored against an easy-samples slice — would inflate the
-        leaderboard with non-comparable composites (a 100% run on an
-        8-sample slice beats a 60% run on the full 20). The modal filter
-        keeps the leaderboard apples-to-apples without hardcoding a per-
-        dataset N.
+        Filters partial-coverage runs by keeping only modal ``total`` count —
+        non-comparable composites (8/20 vs 20/20) would inflate the leaderboard.
         """
         from collections import Counter
 
@@ -464,12 +391,7 @@ class AxisIndex:
         *,
         dataset_name: str | None,
     ) -> AxisIndex | None:
-        """Build a fresh ``AxisIndex`` and refresh once, scoped to ``dataset_name``.
-
-        Returns ``None`` when ``store`` or ``backend_id`` is missing.
-        Both digest sides are pure derivations over the archive; nothing
-        is read from or written to disk here.
-        """
+        """Fresh ``AxisIndex`` + refresh once. Returns ``None`` when store/backend_id missing."""
         if not (store and backend_id):
             return None
         idx = cls()
@@ -492,12 +414,7 @@ class AxisIndex:
         *,
         touched_axes: set[str] | None = None,
     ) -> None:
-        """Fold one archive index entry's pipeline_params + accuracy into ``axis_values``.
-
-        When ``touched_axes`` is provided, every axis that gets a value
-        appended is added to the set so callers can scope cache
-        invalidation to just the delta.
-        """
+        """Fold one entry into ``axis_values``; ``touched_axes`` records the delta for cache invalidation."""
         accuracy = entry.get("scores", {}).get("accuracy", 0.0)
         for node_name, node_config in (entry.get("pipeline_params") or {}).items():
             if isinstance(node_config, dict):

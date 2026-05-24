@@ -1,17 +1,4 @@
-"""Sweep-batch orchestration.
-
-One fork per ``OperatorSweepFile``. Persistence flows through
-``SweepStore``; fork creation flows through ``CampaignStore`` via the
-unified :func:`_mint_fork` primitive (this module widens each operator
-file into a ``ForkPayload(trigger=OPERATOR_SWEEP, ...)`` before calling
-the primitive). The orchestrator owns batch identity, the per-fork
-session rebuild loop, interrupt handling, and active-pointer
-restoration.
-
-The CLI entry point in ``presentation/cli/campaign_runner.py`` is a thin
-shim: build an observer factory bound to its own ``args``, call
-:func:`run_sweep_batch`, wrap the result in ``CommandResult``.
-"""
+"""Sweep-batch orchestration — one fork per ``OperatorSweepFile`` via ``_mint_fork``."""
 
 from __future__ import annotations
 
@@ -58,13 +45,7 @@ def resolve_sweep_dir(dataset_name: str | None) -> Path | None:
 
 
 def load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, OperatorSweepFile]]:
-    """Parse every ``*.json`` under ``sweep_dir`` into ``(path, OperatorSweepFile)``.
-
-    Pydantic ``extra='forbid'`` raises ``ValidationError`` on unknown keys,
-    so operator typos halt the batch before any fork mints. The
-    orchestrator widens each :class:`OperatorSweepFile` into a
-    :class:`ForkPayload` before calling :func:`_mint_fork`.
-    """
+    """Parse every ``*.json`` under ``sweep_dir``; ``extra='forbid'`` halts on typos."""
     files = sorted(sweep_dir.glob("*.json"))
     return [
         (p, OperatorSweepFile.model_validate_json(p.read_text(encoding="utf-8"))) for p in files
@@ -74,19 +55,9 @@ def load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, OperatorSweepFile]]
 def existing_fork_source_files(
     store: Any, campaign_id: str, parent_cycle_id: str
 ) -> dict[str, str]:
-    """Read the batch parent's ledger; return ``{source_file: fork_cycle_id}`` for prior FORK_CUTs.
+    """``{source_file: fork_cycle_id}`` for prior FORK_CUTs under this parent.
 
-    Lets the batch dispatcher skip payloads that already minted a fork
-    from this exact parent on a previous run, so re-invoking
-    ``new --sweep-batch`` after an interrupt at the same active pointer
-    picks up where it stopped. Scoped to the active pointer's current
-    cycle — sweep can branch from a root, a fork, a fork-of-fork, or
-    any deeper node; the branch point is whatever ``cycle_id`` the
-    active pointer (or direct ``--cycle`` arg, when added) names.
-
-    A FORK_CUT pointing at a fork dir that no longer exists is ignored:
-    the ledger is append-only, so an operator who deleted a bogus fork
-    would otherwise be permanently blocked from re-running that payload.
+    Dropped fork dirs are ignored so a deleted-fork operator isn't blocked from re-running.
     """
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
@@ -119,20 +90,7 @@ async def run_sweep_batch(
     observer_factory: Callable[..., Any],
     verbose: bool,
 ) -> SweepBatchResult:
-    """Mint one fork per ``OperatorSweepFile`` and run sweep mode on each.
-
-    Forks branch off ``root_ctx.cycle_id`` — whatever the active
-    pointer names. The first fork's origin run populates the
-    ``archive/`` cache; subsequent forks cache-hit on identical
-    origin ``JobSearchPoint`` measurements. Active pointer is
-    restored to the branch point at the end. Re-invocation from the
-    same branch point dedupes via ``data.source_file`` in the parent's
-    FORK_CUT records.
-
-    ``observer_factory`` is bound by the CLI shim to its own ``args``
-    + ``campaign_config`` so this orchestrator does not import from
-    ``presentation/cli/``. Signature: ``(session, origin_acc) -> RunObservers``.
-    """
+    """Mint one fork per ``OperatorSweepFile`` off ``root_ctx.cycle_id``; restore active pointer on exit."""
     from promptpotter.application.bootstrap import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.runner import (
@@ -147,8 +105,7 @@ async def run_sweep_batch(
     existing = existing_fork_source_files(store, campaign_id, parent_cycle_id)
 
     started_at = datetime.now(UTC).isoformat()
-    # Format: utc-ts + 4 random hex chars (no underscores — sweep_batch_id is
-    # forbidden from carrying underscores so the cycle-id regex extracts cleanly).
+    # No underscores in batch_id — the cycle-id regex requires it.
     batch_id = datetime.now(UTC).strftime("b%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(2)
     family_root = root_cycle_id(parent_cycle_id)
 
@@ -186,10 +143,8 @@ async def run_sweep_batch(
             issued_by=tenant_id,
             l1_layout=payload.l1_layout,
         )
-        # _mint_fork creates dir + index.json + ledger inheritance +
-        # active-pointer retarget up-front. The try/finally below
-        # guards against the dir surviving as a stub if the operator
-        # interrupts before _orch_run_optimization commits round 1.
+        # try/finally below guards against a stub dir if the operator interrupts
+        # before _orch_run_optimization commits round 1.
         new_cycle_id = _mint_fork(
             store.campaigns,
             campaign_id,
@@ -203,8 +158,7 @@ async def run_sweep_batch(
         )
         fork_result = None
         try:
-            # _mint_fork retargeted the active pointer to new_cycle_id.
-            # Re-load context for this fork and build a fresh session bound to it.
+            # Active pointer already retargeted; reload + bind a fresh session.
             fork_ctx = load_session(args)
             fork_session = await init_services(
                 **fork_ctx.init_params,
@@ -214,10 +168,7 @@ async def run_sweep_batch(
             fork_session.session_id = fork_ctx.session_id
             fork_session.campaign_id = fork_ctx.campaign_id
             fork_session.state.cycle_id = fork_ctx.cycle_id
-            # init_services builds the pipeline_schema but leaves
-            # session.pipeline_params empty until configure_and_apply_pipeline
-            # runs. Without this, the backend receives no per-node model
-            # override and falls back to its llm_defaults.
+            # init_services leaves session.pipeline_params empty until this fires.
             configure_and_apply_pipeline(
                 fork_session,
                 campaign_config,
@@ -242,12 +193,7 @@ async def run_sweep_batch(
                 fork_payload=fork_payload,
             )
         finally:
-            # Drop the fork dir if the run never produced its own
-            # round — catches Ctrl+C between mint and round-1-commit,
-            # mid-init crashes, and the operator changing their mind
-            # before round 1. ``run_optimization`` already finalised
-            # index.json before we get here so the n_rounds check reads
-            # the authoritative on-disk value.
+            # Drop the fork dir if the run never produced a round.
             n_rounds = fork_result.n_rounds if fork_result is not None else 0
             if n_rounds == 0:
                 cleanup_stub_fork_if_empty(
@@ -259,13 +205,6 @@ async def run_sweep_batch(
                     parent_cycle_id=parent_cycle_id,
                 )
 
-        # Three outcomes:
-        #   crashed-in-init: fork_result is None (exception propagated
-        #     through finally; fork already cleaned up). Halt the batch.
-        #   cleaned:         fork_result.n_rounds == 0 (fork minted but
-        #     never produced a round; cleaned up in finally). Don't add
-        #     to new_cycle_ids — the dir is gone. Halt iff INTERRUPTED.
-        #   lived:           fork_result.n_rounds > 0. Record + continue.
         if fork_result is None:
             status_by_source[path.name] = "crashed"
             logger.warning(
@@ -291,10 +230,7 @@ async def run_sweep_batch(
 
         new_cycle_ids.append(new_cycle_id)
         if fork_result.stop_reason == StopReason.INTERRUPTED:
-            # Ctrl+C inside _run_round_loop is caught + returned as
-            # INTERRUPTED instead of propagating; without this break the
-            # batch silently rolls into the next fork and the operator
-            # has to Ctrl+C once per remaining payload.
+            # _run_round_loop catches Ctrl+C and returns INTERRUPTED — halt the batch.
             status_by_source[path.name] = "interrupted"
             logger.warning(
                 "Sweep fork %d/%d interrupted: %s (payload=%s) — halting "
@@ -318,9 +254,6 @@ async def run_sweep_batch(
         )
 
     save_active_pointer(tenant_id, root_ctx.session_id, campaign_id, parent_cycle_id)
-    # dashboard.json no longer carries cycle_id (active identity lives
-    # only in active_session.json), so the pointer restore is the
-    # entire sync — no sidecar dashboard rewrite needed.
 
     completed_at = datetime.now(UTC).isoformat()
     cycle_by_source = {

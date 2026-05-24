@@ -16,7 +16,7 @@ from promptpotter.application.optimization.transitions import LayerStrategy, Tra
 from promptpotter.application.optimization.validators.l2_l3 import run_l3_output_validators
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase
-from promptpotter.shared.strings import truncate
+from promptpotter.shared import truncate
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle

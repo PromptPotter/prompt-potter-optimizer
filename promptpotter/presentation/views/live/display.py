@@ -1,10 +1,4 @@
-"""``LiveDisplay`` — RunCallbacks adapter; CLI + notebook share this one class.
-
-Subclasses ``DerivedView`` so the ``isinstance`` dispatch over ledger
-``CycleRecord`` subtypes lives in one place. The ``on_*`` public methods
-stay because pre-cycle paths (``origin.py``) call them directly without
-a ledger.
-"""
+"""``LiveDisplay`` — RunCallbacks adapter; CLI + notebook share this one class."""
 
 from __future__ import annotations
 
@@ -63,14 +57,7 @@ if TYPE_CHECKING:
 
 
 class LiveDisplay(DerivedView):
-    """Live ``RunCallbacks`` adapter — CLI + notebook share this one class.
-
-    Subclasses ``DerivedView`` so the ``isinstance`` dispatch over
-    ledger ``CycleRecord`` subtypes lives in one place; this class only
-    overrides ``_handle_phase`` / ``_handle_snapshot``. The ``on_*``
-    public methods stay because pre-cycle paths (``origin.py``) call
-    them directly without a ledger.
-    """
+    """Live ``RunCallbacks`` adapter — CLI + notebook share this one class."""
 
     def __init__(
         self,
@@ -81,9 +68,6 @@ class LiveDisplay(DerivedView):
         scoring_formula: str | None = None,
         campaign_rounds: list[dict[str, Any]] | None = None,
     ) -> None:
-        # Per-cycle scalars live on a shared ``LiveStateCore`` (round number,
-        # origin + best anchors, P(best) round snapshot) so the dashboard
-        # projection and this terminal renderer maintain one shape, not two.
         self._core = LiveStateCore(origin_acc=origin_acc)
         self.l1_patience = l1_patience
         self.pipeline_schema = pipeline_schema
@@ -91,38 +75,12 @@ class LiveDisplay(DerivedView):
         self.campaign_rounds = campaign_rounds if campaign_rounds is not None else []
         self.initial_len = len(self.campaign_rounds)
         self.sample_counter = 0
-        # Composite-render context — read by ``on_candidate_scored`` for
-        # the per-candidate origin anchor and by ``on_round_complete``
-        # for the 3-line composite_fitness block. Populated from
-        # L1_SCORE:exit views and mutated on ``scoring_steer:applied``.
-        # ``RunCallbacks`` wires its shared ctx onto ``self._phase_ctx``
-        # after construction so the display sees the same dict the
-        # phase-view builder writes to.
+        # Wired by ``RunCallbacks`` after construction so display + phase-view share one dict.
         self._phase_ctx: dict[str, Any] = {}
-        # Mid-round running leader — updated after each
-        # ``on_candidate_scored`` so the operator sees a one-line
-        # scoreboard between candidates instead of waiting for the
-        # round-summary box past 100+ query lines. Reset on
-        # ``L1_GENERATE:enter``.
         self._round_best_acc: float | None = None
         self._round_best_label: str | None = None
-        # Wall-clock anchor — set on ``L1_GENERATE:enter`` so the
-        # round-summary block can report elapsed seconds. ``None`` means
-        # "no measurement yet" (resume points, pre-origin) — render
-        # falls back to omitting the elapsed field.
         self._round_started_at: float | None = None
-        # PoBB first-fire-per-candidate guard — tracks the candidate_id
-        # most recently surfaced in a ``pobb:`` snapshot line so each
-        # candidate prints exactly one (the first time `check()` produces
-        # a posterior with non-empty priors). Resets implicitly when a
-        # new candidate_id appears on the stream.
         self._pobb_printed_for: str = ""
-        # Pending-call register — ``call_id → started_at_ms`` for any
-        # optimizer LLM call whose start marker has printed but whose
-        # completion has not yet landed. Indexed so the completion
-        # handler can compute wall-clock duration and pair the line
-        # with the start. Same record types the dashboard's
-        # ``in_flight`` slot consumes; no new ledger writes.
         self._pending_calls: dict[str, int] = {}
 
     def _write(self, line: str) -> None:
@@ -134,13 +92,7 @@ class LiveDisplay(DerivedView):
         return self._core.origin_acc
 
     def set_origin(self, fresh: float) -> None:
-        """Post-origin rewire — replace pre-origin placeholder.
-
-        Also seeds ``campaign_rounds`` with an origin row at index 0 so
-        the round-summary trend table reads as ``Origin → 1 → 2 → …``
-        instead of treating the first L1 round as round 0 and dropping
-        the origin.
-        """
+        """Post-origin rewire; seeds the round-0 ``origin`` row in ``campaign_rounds``."""
         self._core.origin_acc = fresh
         if fresh > self._core.best_acc:
             self._core.best_acc = fresh
@@ -163,9 +115,7 @@ class LiveDisplay(DerivedView):
         if record.phase == "round" and record.event == "display":
             round_result = payload.get("round_result")
             if round_result is not None:
-                # Re-sync phase ctx from listener-side snapshot so the
-                # composite_fitness block reads the same origin anchors
-                # the listener saw at emit time.
+                # Re-sync phase ctx so composite_fitness reads listener-side anchors.
                 ctx = payload.get("phase_ctx")
                 if isinstance(ctx, dict):
                     self._phase_ctx.update(ctx)
@@ -182,25 +132,7 @@ class LiveDisplay(DerivedView):
         )
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
-        """Surface an in-flight optimizer LLM call as a one-line CLI marker.
-
-        Closes the multi-minute blind spot between phase-boundary boxes
-        — after SCOREBOARD an L1_CRITIQUE call fires for 30-60s with no
-        terminal output today (the dashboard's ``in_flight`` slot
-        already carries this signal; the CLI just wasn't reading it).
-        Same record the dashboard projection consumes — no new ledger
-        writes. ``_pending_calls`` indexes the call so the paired
-        completion handler can compute and report wall-clock duration.
-
-        ``record.prompt_chars`` is on the line so the operator sees the
-        input size upfront — a 12k-char l1_generate vs an 800-char l3_plan
-        have very different latency expectations. Char count is shown
-        verbatim (not converted to tokens) because the tokenizer isn't
-        on this path; total tokens land on the completion line. A prompt
-        over ``OPTIMIZER_PROMPT_WARN_CHARS`` flips the line from dim grey
-        to yellow with a ``⚠`` so an oversized meta-prompt is visible at
-        a glance — a cue to distil the node template or trim its caps.
-        """
+        """In-flight optimizer LLM call as a one-line marker; oversized prompts flip to yellow ⚠."""
         self._pending_calls[record.call_id] = record.started_at_ms
         model = record.model or "(default)"
         round_tag = f"r{record.round}" if record.round is not None else ""
@@ -214,37 +146,14 @@ class LiveDisplay(DerivedView):
         self._write(f"  {color}{' · '.join(bits)}{RESET}")
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
-        """Render an elapsed-time heartbeat while an LLM call is in flight.
-
-        Fires every ``HEARTBEAT_INTERVAL_S`` (15s) for the duration of
-        the call, so the operator sees a live counter — `... 15s`, `...
-        30s`, `... 45s` — instead of staring at the static start line.
-        Cached replays short-circuit before the heartbeat coroutine
-        starts (in ``llm_call``), so this only fires for real network
-        round-trips. The pairing call_id isn't shown to keep the line
-        terse; node + round are enough for the operator to map the tick
-        back to the start line two lines above.
-        """
+        """Heartbeat tick (``HEARTBEAT_INTERVAL_S``); cached replays skip this path."""
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
         self._write(f"  {DIM}  · {node_label} still waiting · {record.elapsed_s:.0f}s{RESET}")
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
-        """Surface optimizer LLM completion as a paired one-line CLI marker.
-
-        Pairs with :meth:`_handle_llm_call_start` via ``call_id`` so
-        duration is the operator-visible wall-clock between start and
-        completion. ``payload.duration_s`` is preferred (set by
-        ``llm_call``) — falls back to the start-to-now delta if the
-        payload omits it. ``payload.usage.total_tokens`` lands on the
-        line so the cost mental model is on the headline alongside
-        the time. Cached calls are tagged so a quiet cache replay isn't
-        confused with a real round-trip.
-        """
+        """Paired LLM-completion marker; reports duration + tokens; tags cached."""
         payload = record.payload or {}
-        # Cached replays usually carry no start marker (call short-circuits
-        # before LLMCallStartRecord) — render a one-line cache hit instead
-        # of pairing.
         cached = bool(payload.get("cached"))
         started = self._pending_calls.pop(record.call_id, None) if record.call_id else None
         duration_s = payload.get("duration_s")
@@ -299,12 +208,7 @@ class LiveDisplay(DerivedView):
                 [str(p) for p in (payload.get("prior_ids") or [])],
             )
 
-    # --- Public callback API ------------------------------------------
-    #
-    # These methods are the direct entry point for callers that don't
-    # route through a ledger (notably ``origin.py``, which fires before
-    # the per-cycle ledger exists). The ``on_record`` dispatcher above
-    # forwards ledger-driven events into the same handlers.
+    # --- Public callback API (pre-ledger paths like origin.py call these directly) ---
 
     def on_phase(self, event: PhaseEvent, view: dict[str, Any] | None = None) -> None:
         if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
@@ -321,19 +225,12 @@ class LiveDisplay(DerivedView):
             typed = view_from_record(record)
             if typed is not None and (rendered := to_text(typed)):
                 self._write(rendered)
-        # Round number + origin/best anchors flow through the shared core
-        # (INIT:exit carries the post-origin accuracy; L1_SCORE:exit on
-        # ``improved`` promotes the new winner). ``view=None`` still tracks
-        # the round number.
         apply_phase(self._core, event, view)
         if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             self._round_best_acc = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
-        # INIT:exit carries origin_composite_fitness in its view payload.
-        # Patch the origin row's composite once it's available so the
-        # trend table's Composite column reads against the real composite
-        # instead of the accuracy fallback.
+        # Patch the origin row's composite once INIT:exit surfaces it.
         if event.phase == CampaignPhase.INIT and event.event == "exit" and view is not None:
             origin_comp = view.get("origin_composite_fitness")
             if origin_comp is not None:
@@ -365,8 +262,6 @@ class LiveDisplay(DerivedView):
                         "candidate_scores": list(rr.candidate_scores),
                     }
                 )
-        # Mirror an interactive-steer formula swap onto the shared phase
-        # ctx so the next round's renderers print the new formula.
         if event.phase == "scoring_steer" and event.event == "applied":
             new_formula = event.data.get("formula")
             if new_formula:
@@ -375,13 +270,7 @@ class LiveDisplay(DerivedView):
     def on_sample_scored(
         self, cand_idx: int, n_cands: int, result: dict[str, Any], sample_idx: int, n_samples: int
     ) -> None:
-        # ``cand_idx < 0`` is the paired-PoBB backfill sentinel — these
-        # measurements are on the leader, not the current candidate, so
-        # they ride a distinct prefix and don't advance the main-loop
-        # counter. Without this branch the only signal an operator gets
-        # during a 14-sample backfill was the opaque "deprecated retry:
-        # resuming" stderr line; here each backfill measurement lands
-        # as its own row so the LLM spend is visible.
+        # cand_idx < 0 = paired-PoBB backfill sentinel; distinct prefix, no counter bump.
         if cand_idx < 0:
             prefix = "  ↻ bf "
         else:
@@ -397,22 +286,9 @@ class LiveDisplay(DerivedView):
         )
 
     def on_p_best_update(self, current_id: str, n_samples: int, p_best: dict[str, float]) -> None:
-        """Stash latest Posterior-of-Being-Best snapshot for the round-end roll-up.
-
-        Per-sample mid-round detail lives in ``dashboard.json``; the
-        terminal sees one consolidated p_best line in the round-summary
-        box (rendered by ``_render_p_best_line``). First fire for each
-        candidate also prints a one-line "the check is alive" snapshot —
-        the operator's evidence that PoBB sees non-empty priors and is
-        actively comparing this candidate against them.
-        """
+        """Stash PoBB snapshot; print one-line summary on first fire per candidate at q≥8."""
         apply_p_best_update(self._core, current_id, n_samples, p_best)
-        # Suppress the per-candidate snapshot below the lock-in floor.
-        # PoBB at q<8 with hard-sample-sorted draws is too noisy to act
-        # on — a candidate read P(best)=73.6% at q6 then finished
-        # ±0.0% vs origin at q20 in the cycle that motivated this gate.
-        # Matches ``lock_in_n_min`` in ``pobb/elimination/checks.py`` so display
-        # tracks the same authoritative-read threshold the optimizer uses.
+        # Matches ``lock_in_n_min`` in ``pobb/elimination/checks.py``.
         POBB_DISPLAY_MIN_SAMPLES = 8
         if (
             current_id
@@ -421,9 +297,7 @@ class LiveDisplay(DerivedView):
         ):
             self._pobb_printed_for = current_id
             current_p = p_best.get(current_id, 0.0)
-            # Paired PoBB: priors are the per-prior P(cand > prior) entries;
-            # the hardest is the one with smallest P. The candidate's
-            # summary entry under ``current_id`` is the min over priors.
+            # Paired PoBB: hardest prior = min P(cand > prior).
             prior_entries = {pid: pv for pid, pv in p_best.items() if pid != current_id}
             if prior_entries:
                 hardest_id, hardest_p = min(prior_entries.items(), key=lambda kv: kv[1])
@@ -439,17 +313,7 @@ class LiveDisplay(DerivedView):
             )
 
     def on_sample_order_preview(self, preview: list[tuple[int, float]], n_priors: int) -> None:
-        """Print the adaptive picker's expected next samples under the
-        prior posterior (1PL Rasch CAT, expected-information-gain objective).
-
-        Fires after ``on_candidate_started`` and before any sample
-        scoring. The values are the expected information gain of measuring
-        each sample on a brand-new candidate — peaks where one measurement
-        most sharpens the model. Live execution re-picks per step; this
-        preview is the "what's expected to be informative" snapshot, not a
-        commitment to the order. Empty ``preview`` (cold start with no Rasch
-        fit) suppresses the line.
-        """
+        """Adaptive picker's expected-information-gain preview (1PL Rasch CAT)."""
         if not preview:
             return
         prior_s = "" if n_priors == 1 else "s"
@@ -457,25 +321,14 @@ class LiveDisplay(DerivedView):
         self._write(f"  {DIM}next samples:{RESET} {picks}  ({n_priors} candidate prior{prior_s})")
 
     def on_pobb_backfill(self, sample_id: int, prior_ids: list[str]) -> None:
-        """Print which priors got caught up on the just-measured sample.
-
-        Fires per sample, only when at least one prior gained a
-        measurement (cache-covered priors are filtered upstream by
-        ``RunCallbacks.on_pobb_backfill``). A quiet line for a sample
-        means every prior was already cached for it.
-        """
+        """Priors backfilled on this sample. Cache-covered priors filtered upstream."""
         if not prior_ids:
             return
         tags = [cid if cid == "origin" or cid.endswith("_winner") else cid[:6] for cid in prior_ids]
         self._write(f"  {DIM}↻ pobb backfill #{sample_id}:{RESET} " + ", ".join(tags))
 
     def _render_p_best_line(self) -> str | None:
-        """Top-5 P(best) snapshot with cross-round arrow glyphs (▲/▼).
-
-        Returns ``None`` when no p_best has been seen this round (e.g.
-        single-candidate rounds skip the t-test). Arrows compare against
-        the prior round's final snapshot.
-        """
+        """Top-5 P(best) with ▲/▼ arrows vs prior round's final; ``None`` when no PoBB this round."""
         if not self._core.current_p_best:
             return None
         last = self._core.last_p_best
@@ -520,28 +373,14 @@ class LiveDisplay(DerivedView):
         else:
             self._write(f"  {_box_bottom(width=w)}")
 
-        # Mid-round leader scoreboard — one tight line so the operator can read
-        # "is anything beating origin yet" without scrolling through 100+
-        # query lines to find the round-summary box. Skip invalid candidates
-        # and any candidate whose run halted on a degradation/scoring-error
-        # check — partial-measurement accuracy on the valid subset can inflate
-        # above origin on a 6/20 abort. Mirrors the leader-pick exclusion in
-        # ``l1/score.py`` so the live ★ leader pointer can't crown a
-        # candidate the round-summary would never elect.
+        # Skip invalid + degradation-aborted candidates — partial accuracy can inflate above origin.
         if summary.status != "invalid" and not scores.get("degradation_context"):
             acc = scores.get("accuracy")
             if isinstance(acc, int | float):
                 self._write(self._fmt_round_leader(label, float(acc), origin_acc))
 
     def _fmt_round_leader(self, label: str, acc: float, origin_acc: float) -> str:
-        """One-liner scoreboard.
-
-        ``★ leader`` is reserved for a new round-best that strictly beats
-        origin — the only candidate that actually leads. A new round-best
-        that ties or trails origin shows as ``→ round-best`` (still tracks
-        the prior pointer so later candidates can report ``from {prior}``),
-        and non-max candidates fall through to ``→ {label} … from {prior}``.
-        """
+        """One-liner scoreboard; ``★ leader`` only for a round-best that strictly beats origin."""
         delta_origin = acc - origin_acc
         new_round_max = self._round_best_acc is None or acc > self._round_best_acc
         if new_round_max:
@@ -592,15 +431,7 @@ class LiveDisplay(DerivedView):
             self._write(line)
         if (p_best_line := self._render_p_best_line()) is not None:
             self._write(_node_line(p_best_line))
-        # Roll p_best snapshot into the cross-round origin so next
-        # round's arrows compare against this round's final.
         roll_p_best_at_round_complete(self._core)
-        # Composite block — full mode only. 3-line render: composite_fitness +
-        # origin anchor (line 1), abbreviated formula (line 2), short-
-        # name evaluator values (line 3). Anchored to the campaign
-        # origin so operators see how far the run came from origin.
-        # Short formula is None for custom user formulas — fall back to
-        # full text and accept the wrap.
         formula_short = self._phase_ctx.get("composite_fitness_formula_short")
         formula_full = self._phase_ctx.get("composite_fitness_formula")
         if formula_short or formula_full:

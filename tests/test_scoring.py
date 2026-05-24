@@ -1,23 +1,4 @@
-"""Per-dataset scorer formulas, evaluator registry, composite_fitness render,
-round-subset selection, and interactive steering.
-
-Five named invariants:
-  1. Dataset-specific scorers (AIME / GSM8K / exact_match) recover wrong-reveal
-     cases via ``compile_scorer`` + ``extract_display_answer``.
-  2. ``materialize_round_values`` only emits recall/cache evaluators when the
-     pipeline schema has typed nodes; ``compute_composite_fitness`` matches the
-     default formula and zeroes on validation failure; ``compute_prompt_compactness``
-     penalises verbose prompts and stays vacuous when no opt_sp is passed.
-  3. ``render_composite_fitness_block`` / ``render_composite_fitness_oneliner`` /
-     ``inline_short_formula_values`` produce formula text + named evaluator pairs
-     within their three-line frame budget, dropping evaluators not in formula.
-  4. ``fit_rasch`` recovers known θ/δ on synthetic Bernoulli data and is sparse-safe;
-     ``select_round_subset`` picks the budget-N most-informative samples from the bank
-     and falls back to the bank-order prefix at cold start.
-  5. ``apply_steer_file`` hot-swaps ``session.scoring.round_scorer`` on a valid
-     ``scoring_steer.json`` (archives the file) and leaves state untouched on
-     a broken formula (file stays in place for the operator).
-"""
+"""Scorer formulas, evaluator registry, composite_fitness render, Rasch + subset, interactive steer."""
 
 from __future__ import annotations
 
@@ -56,10 +37,6 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
 )
 from promptpotter.domain.sample import Sample
-
-# ===========================================================================
-# Per-dataset scorer formulas
-# ===========================================================================
 
 
 @pytest.mark.parametrize(
@@ -167,11 +144,6 @@ def test_compile_scorer_accepts_known_formulas() -> None:
 )
 def test_extract_display_answer(predicted, formula, expected):
     assert extract_display_answer(predicted, formula) == expected
-
-
-# ===========================================================================
-# Evaluator registry + materialization + composite_fitness scoring
-# ===========================================================================
 
 
 def _eval_result(
@@ -367,11 +339,6 @@ def test_prompt_compactness_penalizes_verbose_prompt():
     assert compute_prompt_compactness(opt_sp=None) == 1.0
 
 
-# ===========================================================================
-# Rasch fit + scoring-set evolution
-# ===========================================================================
-
-
 def _synth_observations(
     theta_true: dict[str, float],
     delta_true: dict[int, float],
@@ -460,11 +427,6 @@ def test_select_round_subset_cold_starts_to_prefix_and_warms_to_informative() ->
     assert picked_ids == {0, 1, 2}
 
 
-# ===========================================================================
-# Stale-data protocol — config-fundamental short-circuit
-# ===========================================================================
-
-
 def test_rerun_short_circuits_when_max_tokens_le_cached_completion() -> None:
     """When the cached failure is a token-budget exhaustion AND the rerun's
     ``max_tokens`` would be no larger than the cached run's actual output,
@@ -503,11 +465,6 @@ def test_rerun_short_circuits_when_max_tokens_le_cached_completion() -> None:
     )
 
 
-# ===========================================================================
-# Failure-mode classification — model refusals
-# ===========================================================================
-
-
 def test_classify_result_routes_refusal_to_infra() -> None:
     """LLM refusal patterns (``I'm sorry, but I cannot...``) must surface as a
     distinct ``llm_only:model_refusal`` advisory in ``infra_codes`` so L2 sees
@@ -544,6 +501,4 @@ def test_classify_result_routes_refusal_to_infra() -> None:
     assert "llm_only:model_refusal" not in cls.infra_codes
 
 
-# ===========================================================================
-# Interactive scoring-steer
-# ===========================================================================
+# Interactive scoring-steer.

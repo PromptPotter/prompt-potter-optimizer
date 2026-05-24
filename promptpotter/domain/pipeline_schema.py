@@ -1,8 +1,4 @@
-"""PipelineSchema — backend-agnostic description of an LLM pipeline.
-
-Describes nodes, parameters, observation mappings, and metadata so
-PromptPotter services can stay generic instead of hardcoding backend-specific constants.
-"""
+"""PipelineSchema — backend-agnostic LLM-pipeline description."""
 
 import enum
 import hashlib
@@ -39,7 +35,7 @@ class ObservationMapping(BaseModel):
 
 
 class NodeOutputSchema(BaseModel):
-    """Resolved output schema for a pipeline node (field names + descriptions from the backend's registry)."""
+    """Resolved output schema for a pipeline node."""
 
     model_config = {"frozen": True}
 
@@ -49,11 +45,7 @@ class NodeOutputSchema(BaseModel):
 
 
 class NodePromptMeta(BaseModel):
-    """Resolved prompt metadata for a pipeline node.
-
-    Carries template variable names, a human description, and the full
-    prompt template text from the backend's prompt registry.
-    """
+    """Resolved prompt metadata for a pipeline node."""
 
     model_config = {"frozen": True}
 
@@ -63,7 +55,7 @@ class NodePromptMeta(BaseModel):
 
 
 class PipelineViewNode(BaseModel):
-    """One node in the webapp's pipeline-graph view (dots + labels)."""
+    """Webapp pipeline-graph node."""
 
     model_config = {"frozen": True}
 
@@ -73,7 +65,7 @@ class PipelineViewNode(BaseModel):
 
 
 class PipelineViewEdge(BaseModel):
-    """One edge in the webapp's pipeline-graph view."""
+    """Webapp pipeline-graph edge."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
@@ -84,14 +76,7 @@ class PipelineViewEdge(BaseModel):
 
 
 class PipelineView(BaseModel):
-    """Webapp-facing graph projection of a pipeline (nodes + edges).
-
-    Consumed by ``webapp/components/workflow`` to render the dot-and-edge
-    graph in the chat-pane hero and the optimizer canvas. The shape mirrors
-    the explicit ``view`` block in ``datasets/_optimizer/pipeline.json`` and
-    the value derived by ``derive_pipeline_view`` for dataset overlays
-    without an explicit view.
-    """
+    """Webapp-facing graph projection — ``datasets/_optimizer/pipeline.json::view`` or derived."""
 
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
@@ -105,24 +90,14 @@ class PipelineNode(BaseModel):
     model_config = {"frozen": True}
 
     name: str
-    wire_type: str = ""  # Raw type from connector (e.g., "generation", "retriever")
+    wire_type: str = ""
     short_circuit: bool = False
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
     param_descriptions: dict[str, str] = Field(default_factory=dict)
-    # Enum constraints per param, sourced from the backend's /pipeline response.
-    # Drives both L1 prompt guidance and the JSON-schema enum constraint
-    # on structured-output generation, plus post-hoc ValidationFailure
-    # attachment in ``validate_overrides`` (same path as ``model``).
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
-    # JSON-schema type per param ("number" | "integer" | "boolean" | "string").
-    # Drives the JSON-schema ``type`` constraint on L1-generate structured
-    # output AND post-hoc ``validate_overrides`` type checks. Without this,
-    # the L1 LLM is free to emit stringified numbers (``"0.2"`` for
-    # ``temperature``) which break downstream wire payloads. Enum-constrained
-    # params (in ``param_allowed_values``) override this — their type is
-    # always "string". A param missing from both maps gets an unconstrained
-    # schema slot, but that should be treated as a dataset-config gap.
+    # JSON-schema type per param — drives structured-output constraint + validate_overrides
+    # checks; without it, L1 may emit stringified numbers that break wire payloads.
     param_types: dict[str, str] = Field(default_factory=dict)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
@@ -143,20 +118,7 @@ class PipelineNode(BaseModel):
 
 
 class PipelineSchema(BaseModel):
-    """Full description of a backend pipeline.
-
-    Carries enough information for all PromptPotter services to operate
-    generically: scoring, sensitivity scan, observability, and Langfuse push.
-
-    After ``configure_pipeline()`` filters and applies overrides, the schema
-    is the single source of truth for pipeline identity at campaign start:
-    active nodes (via ``nodes``), prompt node (derivable), and initial
-    per-node config (baked into ``PipelineNode.current_config``).
-
-    Nodes form the coordinate system for each dataset.  Indexed lookups
-    (``get_node``, ``node_for_param``) are O(1).
-    ``exclude()`` / ``filter_to_steps()`` slice valid sub-pipelines.
-    """
+    """Frozen, backend-agnostic pipeline description; SoT for identity at campaign start."""
 
     model_config = {"frozen": True}
 
@@ -165,16 +127,8 @@ class PipelineSchema(BaseModel):
     description: str = ""
     nodes: list[PipelineNode] = Field(default_factory=list)
     available_models: list[str] = Field(default_factory=list)
-    # Webapp-facing graph projection. Set by ``parse_pipeline_response`` —
-    # either passed through from an explicit ``view`` block in the source
-    # JSON (the optimizer pipeline ships one) or synthesized by
-    # ``derive_pipeline_view`` from ``pipelines.default`` so every dataset
-    # overlay can render without authoring view bookkeeping by hand.
     view: PipelineView | None = None
 
-    # Identity indexes built once in ``model_post_init`` — the schema is
-    # frozen, so these never go stale. Private attrs (not fields): mutable
-    # even on a frozen model and excluded from serialization + hashing.
     _node_map: dict[str, int] = PrivateAttr(default_factory=dict)
     _observation_keys: frozenset[str] = PrivateAttr(default_factory=frozenset)
 
@@ -187,62 +141,34 @@ class PipelineSchema(BaseModel):
             for m in n.observation_mappings
         )
 
-    # -------------------------------------------------------------------
-    # Pipeline identity — derived from nodes
-    # -------------------------------------------------------------------
-
     @property
     def active_steps(self) -> tuple[str, ...]:
-        """Node names in pipeline order (schema is pre-filtered to active nodes)."""
+        """Node names in pipeline order."""
         return tuple(n.name for n in self.nodes)
 
     @property
     def observation_keys(self) -> frozenset[str]:
-        """Pipeline_data keys written by every node's observation mappings.
-
-        Derived once in ``model_post_init`` — schemas are frozen.  Consumed
-        by ``sample_measurement`` when projecting wire-response fields into
-        a ``QueryMeasurement``'s ``pipeline_data`` dict.
-        """
+        """``pipeline_data`` keys written by all nodes' observation mappings."""
         return self._observation_keys
 
     def to_pipeline_params(self) -> dict[str, Any]:
-        """Build the empty wire-format scaffold from this schema.
-
-        Returns ``{"steps": [...]}`` only — no per-node config seeded.
-        ``pipeline_params`` is a *sparse override map*: the optimizer adds
-        only the fields it wants to mutate (prompt, plus any L1/L2/L3
-        candidate-driven overrides). The backend merges these on top of its
-        own ``pipeline.json::nodes.{name}.config`` defaults.
-
-        Backend-owned introspection (current model, default temperature) is
-        still available via ``PipelineNode.current_config`` for L1's
-        evidence panels — it just doesn't flow onto the wire.
-        """
+        """``{"steps": [...]}`` sparse scaffold — backend merges per-node config defaults."""
         return {"steps": list(self.active_steps)}
 
-    # -------------------------------------------------------------------
-    # Lookup helpers
-    # -------------------------------------------------------------------
-
     def has_node(self, name: str) -> bool:
-        """Whether *name* is a node in this schema (O(1))."""
         return name in self._node_map
 
     def get_node(self, name: str) -> PipelineNode | None:
-        """Find a node by name (O(1)), or None if not found."""
         idx = self._node_map.get(name)
         return self.nodes[idx] if idx is not None else None
 
     def filter_to_steps(self, steps: list[str]) -> "PipelineSchema":
-        """Return a copy with only nodes present in *steps*, preserving schema order."""
         active = set(steps)
         return self.model_copy(
             update={"nodes": [n for n in self.nodes if n.name in active]},
         )
 
     def exclude(self, names: set[str] | None) -> "PipelineSchema":
-        """Return a copy without the named nodes.  ``None`` / empty → self."""
         if not names:
             return self
         return self.model_copy(
@@ -250,12 +176,7 @@ class PipelineSchema(BaseModel):
         )
 
     def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-        """Ordered ``[(node_name, node_config), ...]`` for this schema.
-
-        The canonical SearchPoint identity at the archive layer: hashed
-        by ``sp_hash`` and compared element-wise by
-        ``MeasurementArchive.find_by_node_configs``.
-        """
+        """Canonical SearchPoint identity: ordered ``[(node, config), ...]`` for hashing."""
         result: list[tuple[str, dict[str, Any]]] = []
         for node in self.nodes:
             cfg = pipeline_params.get(node.name, {})
@@ -265,23 +186,13 @@ class PipelineSchema(BaseModel):
         return result
 
     def sp_hash(self, pipeline_params: dict[str, Any]) -> str:
-        """SearchPoint identity hash.  Empty string for empty schemas."""
         configs = self.node_configs(pipeline_params)
         return stable_hash(configs) if configs else ""
 
-    # -------------------------------------------------------------------
-    # Derivation methods
-    # -------------------------------------------------------------------
-
     def node_param_keys(self) -> dict[str, set[str]]:
-        """Map step name → parameter keys."""
         return {step.name: step.param_keys for step in self.nodes if step.param_keys}
 
     def obs_extraction_map(self) -> dict[str, list[ObservationMapping]]:
-        """Map observation name → extraction rules.
-
-        Used by ``_extract_dataset_from_traces()`` in ``context.py``.
-        """
         return {
             step.observation_name: step.observation_mappings
             for step in self.nodes
@@ -289,12 +200,7 @@ class PipelineSchema(BaseModel):
         }
 
     def prompt_node_names(self) -> list[str]:
-        """Node names whose output is affected by the prompt text.
-
-        A node is prompt-bearing if it has ``prompt_meta`` set.
-        Returns empty list when no nodes match — callers must handle this
-        (empty means prompt doesn't affect pipeline output).
-        """
+        """Node names whose output is affected by the prompt — ``prompt_meta`` set."""
         return [node.name for node in self.nodes if node.prompt_meta is not None]
 
 
