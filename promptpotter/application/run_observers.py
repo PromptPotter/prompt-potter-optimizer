@@ -313,7 +313,6 @@ def build_run_observers(
         session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
     )
     audit = AuditTrailView.from_cycle_dir(cycle_dir)
-    audit.rehydrate_sticky()
     session.state.audit_projection = audit
     pobb = PoBBStreamView.from_cycle_dir(cycle_dir)
 

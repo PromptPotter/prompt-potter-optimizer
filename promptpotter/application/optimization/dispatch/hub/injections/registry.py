@@ -12,6 +12,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     InjectionKind,
     InjectionTier,
     _Injection,
+    accessor_renderer,
 )
 from promptpotter.application.optimization.dispatch.hub.injections.catalogues import (
     _r_l1_signal_catalogue,
@@ -19,12 +20,8 @@ from promptpotter.application.optimization.dispatch.hub.injections.catalogues im
 )
 from promptpotter.application.optimization.dispatch.hub.injections.layer_state import (
     _r_critique,
-    _r_l1_overrides,
     _r_l1_situational_examples,
     _r_l1_supplemental_rules,
-    _r_l3_to_l2_note,
-    _r_plan,
-    _r_rendered_prompt,
     _r_task_context,
 )
 from promptpotter.application.optimization.dispatch.hub.injections.panels import (
@@ -98,7 +95,7 @@ INJECTIONS: dict[str, _Injection] = {
     "plan": _Injection(
         "plan",
         InjectionKind.TRACE,
-        _r_plan,
+        accessor_renderer(lambda b: b.opt_sp.plan, "PLAN:\n{value}"),
         "L3's strategic plan text. Persistent until next L3 fire.",
         tier=InjectionTier.MANDATORY,
         char_cap=800,
@@ -106,7 +103,7 @@ INJECTIONS: dict[str, _Injection] = {
     "l3_to_l2_note": _Injection(
         "l3_to_l2_note",
         InjectionKind.DIRECTIVE,
-        _r_l3_to_l2_note,
+        accessor_renderer(lambda b: b.opt_sp.wounds.l3_note, "L3 NOTE TO L2:\n{value}"),
         "Sticky L3→L2 pointer. Mounted only in L2's template; absent from L1.",
         tier=InjectionTier.OPTIONAL,
         char_cap=400,
@@ -114,7 +111,7 @@ INJECTIONS: dict[str, _Injection] = {
     "rendered_prompt": _Injection(
         "rendered_prompt",
         InjectionKind.TRACE,
-        _r_rendered_prompt,
+        accessor_renderer(lambda b: b.opt_sp.render(), "CURRENT PROMPT:\n---\n{value}\n---"),
         "Current best searchpoint's compiled prompt body.",
         tier=InjectionTier.MANDATORY,
         char_cap=2500,
@@ -186,7 +183,9 @@ INJECTIONS: dict[str, _Injection] = {
     "l1_overrides": _Injection(
         "l1_overrides",
         InjectionKind.TRACE,
-        _r_l1_overrides,
+        accessor_renderer(
+            lambda b: b.opt_sp.l1_overrides, "CURRENT L1 CONFIG: {value}", json_value=True
+        ),
         "Current L1 runtime knobs (creativity, n_variants, etc.) as JSON.",
         tier=InjectionTier.OPTIONAL,
         char_cap=None,

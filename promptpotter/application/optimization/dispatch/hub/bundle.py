@@ -11,6 +11,7 @@ construct bundles directly; the ``Cycle``-snapshot path lives in
 from __future__ import annotations
 
 import enum
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -90,6 +91,30 @@ class _Injection:
     description: str
     tier: InjectionTier
     char_cap: int | None
+
+
+def accessor_renderer(
+    accessor: Callable[[InjectionBundle], object],
+    template: str,
+    *,
+    json_value: bool = False,
+) -> Callable[[InjectionBundle], str]:
+    """Build a renderer for a one-shot field accessor + fixed template.
+
+    ``accessor(b)`` returns the raw value; falsy → empty string (renderer
+    skips its INJECTIONS slot entirely). Otherwise the value fills the
+    ``{value}`` placeholder in ``template``. Set ``json_value=True`` to
+    JSON-encode the value first (for dict/list payloads).
+    """
+
+    def render(b: InjectionBundle) -> str:
+        v = accessor(b)
+        if not v:
+            return ""
+        rendered = json.dumps(v) if json_value else v
+        return template.format(value=rendered)
+
+    return render
 
 
 @dataclass(frozen=True)

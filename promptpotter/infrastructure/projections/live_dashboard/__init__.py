@@ -1,20 +1,19 @@
 """LiveDashboardView — operator-facing ``dashboard.json`` writer.
 
 Family-root-bound: one ``dashboard.json`` per cycle family, shared across
-all forks. The package splits the writer into the routing class plus the
-mutation/builder modules it fans out to:
+all forks. The package keeps the writer thin: the class owns its own
+round-state mutations and block builders inside :mod:`view`; the two
+remaining submodules carve off concerns that don't belong inside the
+ledger-subscriber loop:
 
-* :mod:`view` — :class:`LiveDashboardView` (the ledger subscriber + state
-  scalars + persist loop).
-* :mod:`candidate_block` — free functions for the ``SnapshotRecord``
-  mutations: the per-round candidate dict + the backfill log.
+* :mod:`view` — :class:`LiveDashboardView` (the ledger subscriber, the
+  per-round candidate dict, the in-flight + flush block builders, the
+  persist loop).
 * :mod:`factory` — :func:`resolve_resume_state`, the disk-reconciliation
   helper behind ``LiveDashboardView.for_session``.
-* :mod:`score` — :func:`build_l1_score_block` for
-  ``current_round.nodes.l1_score``.
-* :mod:`pobb` — :func:`build_pobb_block` for ``current_round.pobb``.
-* :mod:`sample` — :func:`fmt_sample_line` (compact one-liner used by
-  the score builder when live).
+* :mod:`round_summary` — :func:`build_round_summary` for
+  ``dash.rounds[]`` (the read-side shape consumed by the webapp's
+  FitnessChart / TrendChart).
 """
 
 from __future__ import annotations

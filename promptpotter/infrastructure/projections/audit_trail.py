@@ -23,7 +23,13 @@ from promptpotter.infrastructure.store.base import write_json
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["AuditTrailView", "audit_rounds_dir", "load_round_audits"]
+__all__ = [
+    "AuditTrailView",
+    "audit_rounds_dir",
+    "build_node_block",
+    "load_round_audits",
+    "read_most_recent_round_nodes",
+]
 
 
 _ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
@@ -48,6 +54,56 @@ def load_round_audits(cycle_dir: Path, rounds: list[dict[str, Any]]) -> list[dic
             except (OSError, json.JSONDecodeError) as exc:
                 logger.debug("audit load failed: %s — %s", path.name, exc)
         out.append(None)
+    return out
+
+
+def build_node_block(record: LLMCallRecord) -> dict[str, Any]:
+    """Project an :class:`LLMCallRecord` into the canonical ``nodes[*]`` block shape.
+
+    ``synthesized`` payloads carry input/output directly (used by L1 generate to record
+    its parser output without a live LLM call); other payloads route through
+    :func:`_action_to_node_block` for the per-field projection. Used by both
+    :class:`AuditTrailView` (flushes to ``round_NNNN.json``) and the live dashboard
+    projection (mirrors into ``current_round.nodes``).
+    """
+    if record.payload_kind == "synthesized":
+        return {
+            "input": dict(record.payload.get("input") or {}),
+            "output": dict(record.payload.get("response") or record.payload.get("output") or {}),
+            "timestamp": record.timestamp,
+        }
+    return _action_to_node_block({**record.payload, "timestamp": record.timestamp})
+
+
+def read_most_recent_round_nodes(rounds_dir: Path) -> dict[str, dict[str, Any]]:
+    """Read the latest ``round_NNNN.json``'s ``nodes`` block — used by the live dashboard
+    on resume to seed its sticky LLM-call mirror without re-issuing the calls.
+
+    Each returned block carries a ``round`` tag so a reader can tell which round
+    produced it. ``l1_score`` is skipped — the dashboard composes it live.
+    """
+    if not rounds_dir.is_dir():
+        return {}
+    round_re = re.compile(r"^round_(\d+)\.json$")
+    candidates: list[tuple[int, Path]] = []
+    for path in rounds_dir.iterdir():
+        m = round_re.match(path.name)
+        if m:
+            candidates.append((int(m.group(1)), path))
+    if not candidates:
+        return {}
+    round_num, path = max(candidates, key=lambda c: c[0])
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("read_most_recent_round_nodes: failed to read %s: %s", path.name, exc)
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for key, block in (payload.get("nodes") or {}).items():
+        if key == "l1_score":
+            continue
+        if isinstance(block, dict):
+            out[key] = {**block, "round": round_num}
     return out
 
 
@@ -102,9 +158,6 @@ class AuditTrailView(DerivedView):
         self.rounds_dir = rounds_dir
         self._current_round: int = 0
         self._nodes: dict[str, dict[str, Any]] = {}
-        # Sticky dashboard mirror: most-recent fire per phase-keyed slot, never wiped by begin/flush.
-        # Each block carries a `"round"` tag so the reader knows which round produced it.
-        self._sticky_nodes: dict[str, dict[str, Any]] = {}
         self._l1_score: dict[str, Any] | None = None
         # Boundary timestamps from `PhaseRecord.timestamp` — no wall-clock observation here.
         self._started_at: str = ""
@@ -130,49 +183,9 @@ class AuditTrailView(DerivedView):
         self._started_at = started_at
         self._finished_at = ""
 
-    def rehydrate_sticky(self) -> None:
-        """Pre-populate `_sticky_nodes` from the highest existing round file — resumed-cycle
-        dashboards show prior history before the first new write.
-        """
-        if self._sticky_nodes:
-            return
-        if not self.rounds_dir.is_dir():
-            return
-        round_re = re.compile(r"^round_(\d+)\.json$")
-        candidates = []
-        for path in self.rounds_dir.iterdir():
-            m = round_re.match(path.name)
-            if m:
-                candidates.append((int(m.group(1)), path))
-        if not candidates:
-            return
-        round_num, path = max(candidates, key=lambda c: c[0])
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("AuditTrailView: failed to rehydrate from %s: %s", path.name, exc)
-            return
-        nodes = payload.get("nodes") or {}
-        for key, block in nodes.items():
-            if key == "l1_score":
-                continue  # composed by the live dashboard, not a sticky slot.
-            if isinstance(block, dict):
-                self._sticky_nodes[key] = {**block, "round": round_num}
-
     def set_l1_score(self, block: dict[str, Any]) -> None:
         """Deposit the scoring-phase block built by the live dashboard projection."""
         self._l1_score = block
-
-    def _record_node(self, node_type: str, block: dict[str, Any]) -> None:
-        """Internal — store a node block keyed by phase, mirror to sticky cache."""
-        self._nodes[node_type] = block
-        self._sticky_nodes[node_type] = {**block, "round": self._current_round}
-
-    def snapshot_nodes(self) -> dict[str, dict[str, Any]]:
-        """Phase-keyed sticky snapshot for `dashboard.json::current_round`. Slots overwrite on
-        same-phase re-fire; excludes `l1_score` (composed by the live dashboard).
-        """
-        return dict(self._sticky_nodes)
 
     # -- Ledger subscription (PhaseRecord 3) ----------------------------------------
 
@@ -188,19 +201,10 @@ class AuditTrailView(DerivedView):
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
         """Sole ingress for `nodes.l1_generate/l1_critique/l2_context/l3_plan`.
-        `synthesized` payloads carry input/output directly; `llm_call` uses `_action_to_node_block`.
+        Projects via :func:`build_node_block`; the live dashboard subscribes the same
+        record kind and mirrors into ``current_round.nodes`` independently.
         """
-        if record.payload_kind == "synthesized":
-            block: dict[str, Any] = {
-                "input": dict(record.payload.get("input") or {}),
-                "output": dict(
-                    record.payload.get("response") or record.payload.get("output") or {}
-                ),
-                "timestamp": record.timestamp,
-            }
-        else:
-            block = _action_to_node_block({**record.payload, "timestamp": record.timestamp})
-        self._record_node(record.node, block)
+        self._nodes[record.node] = build_node_block(record)
 
     def flush(self) -> Path | None:
         """Write `round_NNNN.json` and reset. Idempotent — second flush merges new nodes into the

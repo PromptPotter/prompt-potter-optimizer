@@ -5,7 +5,6 @@ L2-authored rules/examples appended to L1's instruction.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
@@ -25,21 +24,6 @@ logger = logging.getLogger(__name__)
 # LaTeX corruption — match `oxed{` not preceded by `\b` (skips legit `\boxed{`) OR `athematical`
 # at a word boundary not preceded by `m` (skips `mathematical`).
 _LATEX_CORRUPTION_RE = re.compile(r"(?<!\\b)oxed\{|(?<![a-zA-Z])athematical")
-
-
-def _r_plan(b: InjectionBundle) -> str:
-    return f"PLAN:\n{b.opt_sp.plan}" if b.opt_sp.plan else ""
-
-
-def _r_l3_to_l2_note(b: InjectionBundle) -> str:
-    """Sticky L3→L2 pointer; absent from L1_POSSIBLE so L1 never sees it."""
-    note = b.opt_sp.wounds.l3_note
-    return f"L3 NOTE TO L2:\n{note}" if note else ""
-
-
-def _r_rendered_prompt(b: InjectionBundle) -> str:
-    rendered = b.opt_sp.render()
-    return f"CURRENT PROMPT:\n---\n{rendered}\n---" if rendered else ""
 
 
 def _r_task_context(b: InjectionBundle) -> str:
@@ -111,12 +95,6 @@ def format_l1_critique_for_prompt(critique: dict[str, Any], pipeline_schema: Any
 def _r_critique(b: InjectionBundle) -> str:
     """Compact view of the most recent L1_CRITIQUE output dict."""
     return format_l1_critique_for_prompt(b.digest.critique or {}, b.pipeline_schema)
-
-
-def _r_l1_overrides(b: InjectionBundle) -> str:
-    if not b.opt_sp.l1_overrides:
-        return ""
-    return f"CURRENT L1 CONFIG: {json.dumps(b.opt_sp.l1_overrides)}"
 
 
 def _detect_auto_triggers(b: InjectionBundle) -> list[str]:

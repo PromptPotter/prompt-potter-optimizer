@@ -11,28 +11,14 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 )
 from promptpotter.domain.l1_layout import L1_POSSIBLE
 
-# Single-entry cache keyed on (schema id, lock flag). Schema is session-immutable, so the rendered
-# string is byte-identical every round — also lets small models skip past the static block cheaply.
-# id() is safe (no GC-and-reuse mid-run); lock gates MODELS visibility.
-_pipeline_param_catalogue_last: tuple[int, bool, str] | None = None
-
 
 def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
     """Pipeline-param menu (name + ≤4-value enum hint) — what L1 picks from for `pipeline_params_override`.
     Symmetric with `l1_signal_catalogue` (the menu L2 picks from for L1's layout).
     """
-    global _pipeline_param_catalogue_last
     schema = b.pipeline_schema
     if schema is None:
         return ""
-    schema_id = id(schema)
-    lock = b.forbidden_axes_strict
-    if (
-        _pipeline_param_catalogue_last is not None
-        and _pipeline_param_catalogue_last[0] == schema_id
-        and _pipeline_param_catalogue_last[1] == lock
-    ):
-        return _pipeline_param_catalogue_last[2]
     npk = schema.node_param_keys()
     if not npk:
         return ""
@@ -64,9 +50,7 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
         lines.append(
             "  " + ", ".join(list(schema.available_models)[:PIPELINE_PARAM_CATALOGUE_MODEL_CAP])
         )
-    result = "\n".join(lines)
-    _pipeline_param_catalogue_last = (schema_id, lock, result)
-    return result
+    return "\n".join(lines)
 
 
 def _r_l1_signal_catalogue(b: InjectionBundle) -> str:
