@@ -22,7 +22,7 @@ from promptpotter.application.scoring.evaluators import (
 from promptpotter.application.scoring.formula import compile_round_scorer, extract_item_label
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import RoundScorer
-from promptpotter.shared.errors import is_degraded, is_error_result
+from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import (
@@ -39,7 +39,7 @@ __all__ = [
     "count_degraded_samples",
     "extract_sample_diagnostics",
     "find_rank",
-    "is_degraded",
+    "has_pipeline_warnings",
     "matched_origin_stats",
 ]
 
@@ -84,7 +84,7 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
 
 def count_degraded_samples(results: Sequence[Mapping[str, Any]]) -> int:
     """Count samples that have pipeline degradation warnings."""
-    return sum(1 for r in results if is_degraded(r))
+    return sum(1 for r in results if has_pipeline_warnings(r))
 
 
 # ---------------------------------------------------------------------------

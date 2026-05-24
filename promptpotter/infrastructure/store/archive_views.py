@@ -32,6 +32,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.shared.errors import is_error_result
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -122,7 +124,7 @@ def measurement_series_for_samples(
             sid = item.get("sample_id")
             if not isinstance(sid, int) or sid not in wanted:
                 continue
-            if item.get("error") or item.get("predicted") == "ERROR":
+            if is_error_result(item):
                 continue
             out[sid].append(
                 {

@@ -16,6 +16,7 @@ from collections.abc import Iterable
 __all__ = [
     "decision_information_gain",
     "expected_order",
+    "marginal_hit_probability",
     "next_sample",
     "pick_value",
     "posterior_from_outcomes",
@@ -44,6 +45,25 @@ def _binary_entropy(p: float) -> float:
     if p <= 0.0 or p >= 1.0:
         return 0.0
     return -p * math.log(p) - (1.0 - p) * math.log(1.0 - p)
+
+
+def marginal_hit_probability(
+    *,
+    mu_c: float,
+    var_c: float,
+    delta_s: float,
+    se_delta_s: float,
+) -> float:
+    """Probit-marginalized hit probability ``E[σ(θ_c − δ_s)]``.
+
+    ``σ((μ_c − δ_s) / √(1 + π·(var_c + se_δ_s²)/8))`` — the value the
+    seed-centred decision-IG reads on each sample. Same math the candidate-
+    posterior update uses internally; exposed as its own helper so the API
+    layer's ``p_hat`` column reads from one source rather than reimplementing
+    the formula.
+    """
+    v = var_c + se_delta_s * se_delta_s
+    return _sigmoid((mu_c - delta_s) / math.sqrt(1.0 + _PROBIT_SCALE * v))
 
 
 def update_theta_posterior(

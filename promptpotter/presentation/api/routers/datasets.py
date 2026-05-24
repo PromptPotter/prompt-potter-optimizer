@@ -3,28 +3,62 @@
 from __future__ import annotations
 
 import json
-import math
-import re
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from promptpotter.application.intelligence.adaptive_picker import marginal_hit_probability
+from promptpotter.application.intelligence.measurement_series import (
+    campaign_measurement_series,
+    cycle_measurement_series,
+)
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.infrastructure.store import campaign_root_dir_for, cycle_dir_for
 from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
-from promptpotter.infrastructure.store.paths import DEFAULT_DATASETS_ROOT
+from promptpotter.infrastructure.store.paths import (
+    DEFAULT_DATASETS_ROOT,
+    validate_dataset_name,
+)
 from promptpotter.presentation.api.deps import StoreDep
 
 _datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
-_DATASET_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
-
 # `cycle` (one cycle's Rasch fit) / `campaign` (pooled) / `dataset` (cross-campaign archive).
 # Workspace scope would be meaningless (samples differ per dataset), so the tier stops at dataset.
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
+
+
+def _check_dataset_name(name: str) -> None:
+    """Translate ``validate_dataset_name``'s ``ValueError`` to ``HTTPException(400)``."""
+    try:
+        validate_dataset_name(name)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+def _load_dataset_cache(name: str) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
+    """Validate name, load ``cache.json``, normalise sample-id keys to int.
+
+    Sample-id key varies on disk (``id`` canonical, BBEH HF emits
+    ``sample_id``) — normalise at the read boundary. Raises
+    ``HTTPException`` on invalid name / missing file.
+    """
+    _check_dataset_name(name)
+    datasets_root = DEFAULT_DATASETS_ROOT.resolve()
+    cache_path = (datasets_root / name / "cache.json").resolve()
+    if not cache_path.is_relative_to(datasets_root):
+        raise HTTPException(400, "Invalid dataset name")
+    if not cache_path.is_file():
+        raise HTTPException(404, f"Dataset '{name}' not found")
+    raw = json.loads(cache_path.read_text(encoding="utf-8"))
+    sample_lookup: dict[int, dict[str, Any]] = {}
+    for item in raw["items"]:
+        sid = int(item["sample_id"] if "sample_id" in item else item["id"])
+        sample_lookup[sid] = item
+    return raw, sample_lookup
 
 
 def _resolve_scope_artifact(
@@ -120,9 +154,9 @@ class DatasetItem(BaseModel):
     p_hat: float | None = Field(
         default=None,
         description=(
-            "Marginal hit prob the seed-centred decision-IG reads: "
-            "sigmoid((theta_seed - delta_s) / sqrt(1 + pi*(sigma_theta**2 + se_delta**2)/8)). "
-            "Near 0.5 = contested at seed; near 0/1 = predictable. None when unmeasured."
+            "Marginal hit prob the seed-centred decision-IG reads — see "
+            "``adaptive_picker.marginal_hit_probability``. Near 0.5 = contested at seed; "
+            "near 0/1 = predictable. None when unmeasured."
         ),
     )
 
@@ -172,21 +206,7 @@ async def get_dataset_preview(
     series carrying ≥1 dot = measured). Rasch δ persists across rounds + inherits from parent
     fits, so it overcounts on its own.
     """
-    if not _DATASET_NAME_RE.match(name):
-        raise HTTPException(400, "Invalid dataset name")
-    datasets_root = DEFAULT_DATASETS_ROOT.resolve()
-    cache_path = (datasets_root / name / "cache.json").resolve()
-    if not cache_path.is_relative_to(datasets_root):
-        raise HTTPException(400, "Invalid dataset name")
-    if not cache_path.is_file():
-        raise HTTPException(404, f"Dataset '{name}' not found")
-    raw = json.loads(cache_path.read_text(encoding="utf-8"))
-
-    # Sample-id key varies on disk (`id` canonical, BBEH HF emits `sample_id`) — normalise to int here.
-    sample_lookup: dict[int, dict[str, Any]] = {}
-    for item in raw["items"]:
-        sid = int(item["sample_id"] if "sample_id" in item else item["id"])
-        sample_lookup[sid] = item
+    raw, sample_lookup = _load_dataset_cache(name)
 
     artifact = _resolve_scope_artifact(
         store,
@@ -208,8 +228,7 @@ async def get_dataset_preview(
     pick_score_block = artifact.get("pick_score", {}).get("per_sample", {})
     pick_score_map: dict[int, float] = {int(k): float(v) for k, v in pick_score_block.items()}
 
-    # `p_hat = σ((θ_seed − δ_s) / √(1 + π·(σ_θ² + se_δ²) / 8))` — mirrors `adaptive_picker._sigmoid`
-    # so this column matches what the picker actually reads.
+    # Seed-centred marginal hit prob — see `adaptive_picker.marginal_hit_probability`.
     sigma_theta = float(rasch.get("sigma_theta", 0.0))
     theta_map: dict[str, float] = {str(k): float(v) for k, v in rasch.get("theta", {}).items()}
     candidate_order_raw = artifact.get("candidate_order") or []
@@ -218,22 +237,17 @@ async def get_dataset_preview(
         if candidate_order_raw and theta_map
         else 0.0
     )
-    probit_scale = math.pi / 8.0
     var_c = sigma_theta**2  # brand-new candidate's ability prior variance
 
     def _p_hat(sid: int) -> float | None:
         if sid not in delta_map:
             return None
-        delta_s = delta_map[sid]
-        se_delta_s = delta_se_map.get(sid, 0.0)
-        v = var_c + se_delta_s * se_delta_s
-        scale = math.sqrt(1.0 + probit_scale * v)
-        x = (seed_theta - delta_s) / scale
-        # Numerically stable sigmoid — mirrors `adaptive_picker._sigmoid`.
-        if x >= 0:
-            return 1.0 / (1.0 + math.exp(-x))
-        ex = math.exp(x)
-        return ex / (1.0 + ex)
+        return marginal_hit_probability(
+            mu_c=seed_theta,
+            var_c=var_c,
+            delta_s=delta_map[sid],
+            se_delta_s=delta_se_map.get(sid, 0.0),
+        )
 
     measured = {sid for sid in delta_map if sid in sample_lookup}
 
@@ -259,6 +273,7 @@ async def get_dataset_preview(
     # Train/test split from campaign config — display-only; held-out test never materialized.
     split_train: int | None = None
     split_test: int | None = None
+    datasets_root = DEFAULT_DATASETS_ROOT.resolve()
     campaign_path = (datasets_root / name / "campaign.json").resolve()
     if campaign_path.is_relative_to(datasets_root) and campaign_path.is_file():
         cc = json.loads(campaign_path.read_text(encoding="utf-8"))
@@ -295,80 +310,6 @@ class MeasurementSeriesResponse(BaseModel):
     items: list[SampleSeries]
 
 
-def _cycle_series(
-    store: Any, campaign_id: str, cycle_id: str, sample_ids: set[int]
-) -> dict[int, list[dict[str, Any]]]:
-    """Per-sample series from one cycle's `round_*.json`. Ord = `{round:04d}/{cand:02d}`;
-    off-scoreboard candidates → slot 99. Errored items dropped (matches `build_observations` filter).
-    """
-    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
-    rounds_dir = cycle_dir / "rounds"
-    out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
-    if not rounds_dir.is_dir():
-        return out
-    for round_path in sorted(rounds_dir.glob("round_*.json")):
-        try:
-            doc = json.loads(round_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        round_no = doc.get("round")
-        if not isinstance(round_no, int):
-            continue
-        idx_of: dict[str, int] = {}
-        for i, c in enumerate(doc.get("scoreboard") or []):
-            cid = c.get("candidate_id") if isinstance(c, dict) else None
-            if isinstance(cid, str):
-                idx_of[cid] = i
-        acr = doc.get("all_candidate_results") or {}
-        if not isinstance(acr, dict):
-            continue
-        for cand_id, results in acr.items():
-            ci = idx_of.get(cand_id, 99)
-            if not isinstance(results, list):
-                continue
-            for item in results:
-                if not isinstance(item, dict):
-                    continue
-                sid = item.get("sample_id")
-                hit = item.get("hit")
-                if not isinstance(sid, int) or not isinstance(hit, bool):
-                    continue
-                if sid not in sample_ids:
-                    continue
-                if item.get("error") or item.get("predicted") == "ERROR":
-                    continue
-                out[sid].append(
-                    {
-                        "ord": f"{round_no:04d}/{ci:02d}",
-                        "hit": hit,
-                        "label": f"R{round_no} cand {ci}",
-                    }
-                )
-    for bucket in out.values():
-        bucket.sort(key=lambda m: m["ord"])
-    return out
-
-
-def _campaign_series(
-    store: Any, campaign_id: str, sample_ids: set[int]
-) -> dict[int, list[dict[str, Any]]]:
-    """Pool round-file series across all the campaign's cycles. Ord prefixed with cycle_id so
-    cross-cycle entries stay distinct under lex sort.
-    """
-    out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
-    for entry in store.campaigns.enumerate_cycles():
-        if entry["campaign_id"] != campaign_id:
-            continue
-        cid = entry["cycle_id"]
-        per_cycle = _cycle_series(store, campaign_id, cid, sample_ids)
-        for sid, dots in per_cycle.items():
-            for d in dots:
-                out[sid].append({"ord": f"{cid}/{d['ord']}", "hit": d["hit"], "label": d["label"]})
-    for bucket in out.values():
-        bucket.sort(key=lambda m: m["ord"])
-    return out
-
-
 @_datasets_router.get(
     "/{name}/measurement-series",
     response_model=MeasurementSeriesResponse,
@@ -400,20 +341,7 @@ async def get_dataset_measurement_series(
     """Chronological per-sample series for the Meas heat-map column. Aligned to `/preview` order
     + limit so clients can zip by sample_id. `ord` is opaque (only used for row alignment).
     """
-    if not _DATASET_NAME_RE.match(name):
-        raise HTTPException(400, "Invalid dataset name")
-    datasets_root = DEFAULT_DATASETS_ROOT.resolve()
-    cache_path = (datasets_root / name / "cache.json").resolve()
-    if not cache_path.is_relative_to(datasets_root):
-        raise HTTPException(400, "Invalid dataset name")
-    if not cache_path.is_file():
-        raise HTTPException(404, f"Dataset '{name}' not found")
-    raw = json.loads(cache_path.read_text(encoding="utf-8"))
-
-    sample_lookup: dict[int, dict[str, Any]] = {}
-    for item in raw["items"]:
-        sid = int(item["sample_id"] if "sample_id" in item else item["id"])
-        sample_lookup[sid] = item
+    raw, sample_lookup = _load_dataset_cache(name)
 
     artifact = _resolve_scope_artifact(
         store,
@@ -435,10 +363,10 @@ async def get_dataset_measurement_series(
 
     if scope == "cycle":
         assert campaign_id is not None and cycle_id is not None  # checked in resolver
-        series = _cycle_series(store, campaign_id, cycle_id, selected_set)
+        series = cycle_measurement_series(store, campaign_id, cycle_id, selected_set)
     elif scope == "campaign":
         assert campaign_id is not None  # checked in resolver
-        series = _campaign_series(store, campaign_id, selected_set)
+        series = campaign_measurement_series(store, campaign_id, selected_set)
     else:
         raw_series = measurement_series_for_samples(store, backend_id, selected)
         # Dataset-scope ord carries ts/run/idx; label = first 8 chars of run_id for tooltips.
@@ -476,24 +404,10 @@ class DatasetPipelineResponse(BaseModel):
     view: dict[str, Any] | None
 
 
-def _strip_lone_surrogates(obj: Any) -> Any:
-    """Replace unpaired surrogate codepoints with `?` — some overlays carry escapes pointing at
-    lone low surrogates (e.g. `\\udc9d`) that crash FastAPI's UTF-8 wire encoding.
-    """
-    if isinstance(obj, str):
-        return obj.encode("utf-8", errors="replace").decode("utf-8")
-    if isinstance(obj, dict):
-        return {k: _strip_lone_surrogates(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_strip_lone_surrogates(v) for v in obj]
-    return obj
-
-
 @_datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
 async def get_dataset_pipeline(name: str) -> DatasetPipelineResponse:
     """Return the dataset overlay's parsed pipeline schema and graph view."""
-    if not _DATASET_NAME_RE.match(name):
-        raise HTTPException(400, "Invalid dataset name")
+    _check_dataset_name(name)
     datasets_root = DEFAULT_DATASETS_ROOT.resolve()
     pipeline_path = (datasets_root / name / "pipeline.json").resolve()
     if not pipeline_path.is_relative_to(datasets_root):
@@ -501,19 +415,16 @@ async def get_dataset_pipeline(name: str) -> DatasetPipelineResponse:
     if not pipeline_path.is_file():
         raise HTTPException(404, f"Dataset '{name}' has no pipeline.json")
     raw = json.loads(pipeline_path.read_text(encoding="utf-8"))
+    # `parse_pipeline_response` strips lone surrogates at parse time so the
+    # rendered model is already wire-safe (some overlays carry escape
+    # sequences pointing at lone low surrogates that crash UTF-8 encode).
     schema = parse_pipeline_response(raw)
-    pipeline_dump = _strip_lone_surrogates(schema.model_dump(by_alias=True))
-    view_dump = (
-        _strip_lone_surrogates(schema.view.model_dump(by_alias=True))
-        if schema.view is not None
-        else None
-    )
     connector = (raw.get("backend_name") or raw.get("name") or name).strip()
     return DatasetPipelineResponse(
         name=name,
         connector=connector,
-        pipeline=pipeline_dump,
-        view=view_dump,
+        pipeline=schema.model_dump(by_alias=True),
+        view=schema.view.model_dump(by_alias=True) if schema.view is not None else None,
     )
 
 

@@ -27,7 +27,32 @@ from promptpotter.domain.pipeline_schema import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["derive_pipeline_view", "parse_pipeline_response", "parse_resolved_schema"]
+__all__ = [
+    "derive_pipeline_view",
+    "parse_pipeline_response",
+    "parse_resolved_schema",
+    "strip_lone_surrogates",
+]
+
+
+def strip_lone_surrogates(obj: Any) -> Any:
+    """Recursively replace unpaired surrogate codepoints with ``?``.
+
+    Some dataset overlays (notably ``lca-termnorm/pipeline.json``) carry
+    description strings whose JSON escape sequences point at lone low
+    surrogates (e.g. ``\\udc9d``). Those codepoints are valid Python strings
+    but cannot encode to UTF-8 when a downstream serializer (FastAPI,
+    ``json.dumps`` without ``ensure_ascii``) tries to send them — they
+    raise ``UnicodeEncodeError`` at the wire. Scrubbing at parse time so
+    the resulting :class:`PipelineSchema` is already wire-safe.
+    """
+    if isinstance(obj, str):
+        return obj.encode("utf-8", errors="replace").decode("utf-8")
+    if isinstance(obj, dict):
+        return {k: strip_lone_surrogates(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [strip_lone_surrogates(v) for v in obj]
+    return obj
 
 
 def _derive_node_kind(node: PipelineNode | None) -> str:
@@ -198,6 +223,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         logger.warning("Empty pipeline response; returning empty schema")
         return PipelineSchema()
 
+    data = strip_lone_surrogates(data)
     config = data.get("data", data)
     config = config.get("config", config)
 

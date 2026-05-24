@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
 
 from promptpotter.application.intelligence.adaptive_picker import expected_order
+from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
@@ -213,7 +214,7 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
         for cid, results in rr.all_candidate_results.items():
             for r in results:
                 sid = r.get("sample_id")
-                if sid is None or r.get("error"):
+                if sid is None or is_error_result(r):
                     continue
                 obs.append(
                     Observation(candidate_id=cid, sample_id=int(sid), hit=bool(r.get("hit")))

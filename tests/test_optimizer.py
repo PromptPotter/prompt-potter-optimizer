@@ -24,13 +24,15 @@ from promptpotter.application.optimization.escalation.firing import (
     _parse_l3,
 )
 from promptpotter.application.optimization.validators.l1_strict import detect_invariants
-from promptpotter.application.optimization.validators.l2_l3 import (
+from promptpotter.application.optimization.validators.l2_output import (
     L2_DUPLICATE_INSERT,
     L2_TASK_CONTEXT_PARAPHRASE_REPEAT,
     L2_TASK_CONTEXT_VERBATIM_REPEAT,
+    run_l2_output_validators,
+)
+from promptpotter.application.optimization.validators.l3_output import (
     L3_PLAN_LENGTH_FLOOR,
     L3_PLAN_VERBATIM_REPEAT,
-    run_l2_output_validators,
     run_l3_output_validators,
 )
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout

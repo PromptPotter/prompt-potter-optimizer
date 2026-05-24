@@ -134,8 +134,13 @@ def is_error_result(result: Mapping[str, Any]) -> bool:
     return bool(result.get("error")) or result.get("predicted") == "ERROR"
 
 
-def is_degraded(result: Mapping[str, Any]) -> bool:
-    """A sample is degraded iff its pipeline_data.diagnostics.warnings list is non-empty."""
+def has_pipeline_warnings(result: Mapping[str, Any]) -> bool:
+    """A sample carries pipeline warnings iff ``pipeline_data.diagnostics.warnings`` is non-empty.
+
+    Sibling of :func:`is_error_result` (backend failed outright). Renamed
+    from ``is_degraded`` so the name describes what it actually checks —
+    "degraded" was confusable with the backend-error sentinel.
+    """
     return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
 
 
@@ -179,6 +184,6 @@ __all__ = [
     "ResumeDivergenceError",
     "error_category",
     "graceful",
-    "is_degraded",
+    "has_pipeline_warnings",
     "is_error_result",
 ]

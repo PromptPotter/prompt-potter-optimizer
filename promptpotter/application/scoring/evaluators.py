@@ -8,7 +8,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.scoring.formula import extract_item_label
-from promptpotter.shared.errors import is_degraded, is_error_result
+from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
@@ -58,7 +58,7 @@ def compute_error_rate(*, results: list[QueryMeasurement], **_: Any) -> float:
 def compute_degraded_rate(*, results: list[QueryMeasurement], **_: Any) -> float:
     if not results:
         return 0.0
-    return sum(1 for r in results if is_degraded(r)) / len(results)
+    return sum(1 for r in results if has_pipeline_warnings(r)) / len(results)
 
 
 @dataclass(frozen=True)

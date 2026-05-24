@@ -1,18 +1,88 @@
 // Shapes of the FastAPI surface — request results and the domain objects
-// they carry. Mirrors the server's pydantic models. No runtime code.
+// they carry. Mirrors the server's Pydantic models.
 //
-// A campaign is a forest: `campaign_id` identifies one optimization effort
-// (a dataset + pipeline origin + context), holding N sessions (re-runs of
-// the same declaration) plus their fork descendants — every cycle flat
-// under `campaigns/{campaign_id}/cycles/`. A `cycle_id` is unique only
-// within its campaign, so every per-cycle call carries both ids.
+// Most shapes come from `types.generated.ts`, which `scripts/build_ts_types.py`
+// keeps in sync with the Pydantic source of truth. Edits to those shapes go
+// in the Python model + regenerate; hand-editing the generated file is
+// forbidden. A few shapes are still hand-maintained — the campaign-files
+// router + cycle-detail compare view (read straight from `index.json`)
+// haven't been wired into the generator yet.
+//
+// Old webapp-side names (`Campaign`, `ActiveSession`, `DatasetPreview`,
+// `Dashboard*`) are kept as aliases over the generated server-side names
+// so consumers don't have to be touched in this commit. Collapsing the
+// aliases is tracked as Tier 5 cosmetic in `docs/specs/code-debt-cleanup.md`.
 
-export interface ActiveSession {
-  tenant_id: string;
-  session_id: string;
-  campaign_id: string;
-  cycle_id: string;
-}
+import type {
+  ActiveSessionResponse,
+  CampaignSummary,
+  DatasetItem as GeneratedDatasetItem,
+  DatasetPreviewResponse,
+  MeasurementDot as GeneratedMeasurementDot,
+  MeasurementSeriesResponse as GeneratedMeasurementSeriesResponse,
+  OriginSummary,
+  RoundSummary,
+  RoundSummaryCandidate,
+} from "./types.generated";
+
+export type {
+  BackendWarning,
+  CampaignLineageCandidate,
+  CampaignLineageCycle,
+  CampaignLineageResponse,
+  CampaignLineageRound,
+  CampaignListResponse,
+  CleanupEmptyResponse,
+  CreateForkRequest,
+  CreateForkResponse,
+  CycleListEntry,
+  CyclesResponse,
+  DatasetPipelineResponse,
+  DeleteCycleResponse,
+  DiagnosticRunListResponse,
+  DiagnosticRunRecord,
+  InFlightCall,
+  LeverageResponse,
+  LiveDashboardState,
+  PerQueryRow,
+  SampleSeries,
+  SessionSummary,
+  SpendBucket,
+  SpendRollup,
+  StopCycleResponse,
+} from "./types.generated";
+
+// Old-name aliases — webapp consumers still use the prefix-free names.
+// Collapse target: Tier 5 cosmetic in docs/specs/code-debt-cleanup.md.
+export type ActiveSession = ActiveSessionResponse;
+export type Campaign = CampaignSummary;
+export type DatasetItem = GeneratedDatasetItem;
+export type DatasetPreview = DatasetPreviewResponse;
+export type MeasurementDot = GeneratedMeasurementDot;
+export type MeasurementSeriesResponse = GeneratedMeasurementSeriesResponse;
+export type DashboardOrigin = OriginSummary;
+export type DashboardRoundCandidate = RoundSummaryCandidate;
+export type DashboardRoundSummary = RoundSummary;
+
+// Literal-type unions — not derivable from Pydantic; hand-maintained.
+// Three named data scopes — same vocabulary as the heatmap artifacts and
+// the API's `scope` query param. `cycle` = one cycle's own Rasch fit;
+// `campaign` = the campaign's pooled fit; `dataset` = the cross-campaign
+// archive snapshot. A workspace-scope heatmap is meaningless (samples
+// differ per dataset), so the heatmap tier stops at `dataset`.
+export type HardSamplesScope = "cycle" | "campaign" | "dataset";
+
+export type SiblingKind = "root" | "fork" | "diag" | "sweep";
+
+// Operator-facing unit kind — the time-horizon taxonomy the sidebar
+// badges by, derived server-side from (sibling_kind, fork trigger).
+// `session` = the root run (resume extends it); `divergent_resume` = a
+// fork-on-divergence branch; `user_fork` = any operator-initiated branch
+// (HITL fork, diagnostic, sweep); `l3_fork` = reserved for L3
+// auto-forking (not emitted yet).
+export type UnitKind = "session" | "divergent_resume" | "user_fork" | "l3_fork";
+
+// Hand-maintained — campaign-files router not yet wired into the generator.
 
 export interface FileEntry {
   scope: string;
@@ -38,266 +108,8 @@ export interface FilesListing {
   entries: FileEntry[];
 }
 
-export interface DatasetItem {
-  sample_id: number;
-  query: string;
-  ground_truth: string;
-  task?: string | null;
-  n_obs: number;
-  // Expected information gain of measuring this sample on a brand-new
-  // candidate (ability prior N(0, σ_θ²)). Reads the Rasch δ_s standard
-  // error, so a barely-measured sample scores high. The live picker
-  // recomputes per step against the candidate's running θ̂_c posterior,
-  // so this is a descriptive snapshot — not the iteration order.
-  // null when the sample has no measurement yet.
-  pick_score: number | null;
-  // Rasch difficulty δ_s and its standard error — fed to the Info gain
-  // column's debug tooltip and the δ / se(δ) diagnostic columns. null when
-  // the sample has no measurement yet.
-  delta: number | null;
-  delta_se: number | null;
-  // Marginal hit probability ``σ((θ_seed − δ_s) / scale)`` — what the
-  // seed-centred decision-IG actually reads. 0.5 = contested at the seed's
-  // ability; 0 or 1 = predictable. Explains why a low-hit-rate row can rank
-  // high on Info gain (tight ``se_δ_s`` from EB shrinkage on boundary data).
-  // null when the sample has no measurement yet.
-  p_hat: number | null;
-}
-
-export interface DatasetPreview {
-  name: string;
-  row_count: number;
-  // Declared train/test fold sizes from datasets/{name}/campaign.json.
-  // null when the dataset declares no split. Scope-independent.
-  split_train: number | null;
-  split_test: number | null;
-  items: DatasetItem[];
-}
-
-// Three named data scopes — same vocabulary as the heatmap artifacts and
-// the API's `scope` query param. `cycle` = one cycle's own Rasch fit;
-// `campaign` = the campaign's pooled fit; `dataset` = the cross-campaign
-// archive snapshot. A workspace-scope heatmap is meaningless (samples
-// differ per dataset), so the heatmap tier stops at `dataset`.
-export type HardSamplesScope = "cycle" | "campaign" | "dataset";
-
-export interface MeasurementDot {
-  ord: string;
-  hit: boolean;
-  label: string;
-}
-
-export interface SampleSeries {
-  sample_id: number;
-  measurements: MeasurementDot[];
-}
-
-export interface MeasurementSeriesResponse {
-  name: string;
-  scope: HardSamplesScope;
-  items: SampleSeries[];
-}
-
-export type SiblingKind = "root" | "fork" | "diag" | "sweep";
-
-// Operator-facing unit kind — the time-horizon taxonomy the sidebar
-// badges by, derived server-side from (sibling_kind, fork trigger).
-// `session` = the root run (resume extends it); `divergent_resume` = a
-// fork-on-divergence branch; `user_fork` = any operator-initiated branch
-// (HITL fork, diagnostic, sweep); `l3_fork` = reserved for L3
-// auto-forking (not emitted yet).
-export type UnitKind = "session" | "divergent_resume" | "user_fork" | "l3_fork";
-
-// One campaign — a declared optimization effort (dataset + pipeline origin
-// + context). `campaign_id` is `{dataset}__{origin hash}` — stable, so a
-// re-run of `new` on an unchanged declaration joins the same campaign as a
-// new session. `session_count` is how many sessions the campaign holds.
-export interface Campaign {
-  campaign_id: string;
-  dataset_name: string;
-  label: string;
-  status: string;
-  created_at: string;
-  root_cycle_id: string;
-  backend_id: string;
-  session_count: number;
-}
-
-export interface CampaignListResponse {
-  campaigns: Campaign[];
-  total: number;
-}
-
-export interface CycleListEntry {
-  campaign_id: string;
-  cycle_id: string;
-  parent_session_id: string;
-  // Immediate parent cycle id for siblings (forks/sweeps/diag); null for
-  // roots. The sidebar uses this to nest sibling rows under their parent
-  // within the campaign.
-  parent_cycle_id: string | null;
-  dataset_name: string;
-  backend_id: string;
-  sibling_kind: SiblingKind;
-  unit_kind: UnitKind;
-  is_root: boolean;
-  status: string;
-  best_accuracy: number | null;
-  n_rounds: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CyclesResponse {
-  tenant_id: string;
-  active_campaign_id: string | null;
-  active_cycle_id: string | null;
-  cycles: CycleListEntry[];
-}
-
-// Campaign lineage — every cycle in one campaign + each cycle's per-round
-// candidates + the parent-round each fork was cut at. One request returns
-// the whole lineage tree. Mirrors the server's CampaignLineageResponse.
-
-export interface CampaignLineageCandidate {
-  candidate_id: string;
-  label: string;
-  accuracy: number | null;
-  rank: number | null;
-  is_winner: boolean;
-}
-
-export interface CampaignLineageRound {
-  round: number;
-  label: string;
-  accuracy: number | null;
-  candidates: CampaignLineageCandidate[];
-}
-
-export interface CampaignLineageCycle {
-  cycle_id: string;
-  sibling_kind: SiblingKind;
-  immediate_parent_cycle_id: string | null;
-  fork_from_round: number | null;
-  fork_from_candidate_id: string | null;
-  // Fork creation trigger — drives the round-numbering convention.
-  trigger: string;
-  // Add this to each round's `round` number to get its absolute column
-  // in the campaign cladogram. The server computes per-trigger so the
-  // client doesn't need to know HITL-vs-divergence semantics itself.
-  round_column_offset: number;
-  status: string;
-  dataset_name: string;
-  best_accuracy: number | null;
-  rounds: CampaignLineageRound[];
-}
-
-export interface CampaignLineageResponse {
-  campaign_id: string;
-  cycles: CampaignLineageCycle[];
-}
-
-// Live-dashboard display payloads — mirrors `promptpotter/domain/results.py`
-// (`RoundSummary`, `RoundSummaryCandidate`, `OriginSummary`). Carried on
-// `dashboard.json::rounds[]` and `dashboard.json::origin`; the chart,
-// trend sparkline, and lineage tree read this as the sole source of truth
-// for completed-round display data.
-
-export interface DashboardRoundCandidate {
-  candidate_id: string;
-  label: string;
-  accuracy: number;
-  composite_fitness: number;
-  scored_samples: number;
-  expected_samples: number;
-  is_winner: boolean;
-  evaluators: Record<string, number>;
-  changes_description: string;
-}
-
-export interface DashboardRoundSummary {
-  round: number;
-  accuracy: number;
-  composite_fitness: number;
-  candidates: DashboardRoundCandidate[];
-}
-
-export interface DashboardOrigin {
-  accuracy: number;
-  samples: number;
-}
-
-// Mutating-endpoint responses. The mutations ride existing I/O kinds
-// (Persistence's `inherit_from`, Control-local's `stop_check` flag-poll);
-// they introduce no new I/O kind. See promptpotter/presentation/CLAUDE.md.
-
-export interface CreateForkResponse {
-  campaign_id: string;
-  fork_cycle_id: string;
-  cli_command: string;
-  active_pointer_retargeted: boolean;
-}
-
-export interface StopCycleResponse {
-  campaign_id: string;
-  cycle_id: string;
-  flag_written: boolean;
-}
-
-export interface CleanupEmptyResponse {
-  campaign_id: string;
-  root_cycle_id: string;
-  deleted_cycle_ids: string[];
-  skipped: { cycle_id: string; reason: string }[];
-}
-
-// Cross-campaign measurement leverage — read-only aggregation over the
-// tenant's archive ("your data accumulates").
-
-export interface PerQueryRow {
-  query: string;
-  sample_id: number;
-  n_measurements: number;
-  n_unique_configs: number;
-  mean_fitness: number | null;
-  hit_rate: number;
-  last_seen: string;
-}
-
-export interface LeverageResponse {
-  n_runs: number;
-  n_measurements: number;
-  n_unique_queries: number;
-  per_query: PerQueryRow[];
-}
-
-// Workspace-scope diagnostic-run records — one row per `verify` CLI invocation.
-// Sidecar JSON lives at archive/diagnostic_runs/; feeds the Verify tab.
-
-export interface DiagnosticRunRecord {
-  ts: string;
-  dataset: string;
-  source_campaign: string;
-  source_cycle: string;
-  source_label: string;
-  source_candidate_id: string;
-  config_hash: string;
-  samples_requested: number;
-  samples_added: number;
-  workspace_n: number;
-  workspace_accuracy: number;
-  workspace_composite: number;
-  source_campaign_accuracy: number;
-  source_campaign_composite: number;
-  source_campaign_n: number;
-}
-
-export interface DiagnosticRunListResponse {
-  n: number;
-  runs: DiagnosticRunRecord[];
-}
-
-// Cycle detail — feeds the compare-campaigns view, read from index.json.
+// Cycle detail — feeds the compare-campaigns view, read from index.json
+// (not a router response, so not in the generator scope).
 
 export interface CampaignRoundSummary {
   round: number;

@@ -179,6 +179,13 @@ class LiveDisplay(DerivedView):
         qi = int(record.sample_idx or 0)
         qt = int(record.sample_total or 0)
         ev = record.event
+        # ``sample_started`` is consumed by ``LiveDashboardView`` (it pulses
+        # the dataset table's in-flight row) but the CLI has no equivalent
+        # marker — ``sample_scored`` carries everything the terminal needs
+        # and prints one line per sample. The branch is explicit so a future
+        # reader sees the asymmetry is intentional, not an oversight.
+        if ev == "sample_started":
+            return
         if ev == "sample_scored":
             self.on_sample_scored(ci, ct, payload.get("result") or {}, qi, qt)
         elif ev == "candidate_started":

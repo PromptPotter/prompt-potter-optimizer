@@ -14,7 +14,7 @@ from promptpotter.application.scoring.metrics import find_rank
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement
-from promptpotter.shared.errors import ErrorCategory, is_degraded
+from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -512,7 +512,7 @@ async def execute_stale_data_protocol(
             result = dict(await measure_sample(sample, session, pipeline_params=pipeline_params))
             result["retry_of_degraded"] = True
             result["rerun_comparison"] = compare_rerun(cached_result, result)
-            if not is_degraded(result):
+            if not has_pipeline_warnings(result):
                 return result, "rerun"
 
         elif step == "samplescan":
@@ -527,7 +527,7 @@ async def execute_stale_data_protocol(
                 "n_candidates": SAMPLESCAN_CANDIDATES,
                 "resolved_threshold": SAMPLESCAN_THRESHOLD,
             }
-            if not is_degraded(result):
+            if not has_pipeline_warnings(result):
                 return result, "samplescan"
 
         elif step == "sampleswitch":

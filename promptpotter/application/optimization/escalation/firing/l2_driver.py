@@ -17,7 +17,7 @@ from promptpotter.application.optimization.resume_and_fork import (
     record_decision,
 )
 from promptpotter.application.optimization.transitions import LayerStrategy, TransitionResult
-from promptpotter.application.optimization.validators.l2_l3 import run_l2_output_validators
+from promptpotter.application.optimization.validators.l2_output import run_l2_output_validators
 from promptpotter.domain.l1_layout import L1Layout, coerce_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase

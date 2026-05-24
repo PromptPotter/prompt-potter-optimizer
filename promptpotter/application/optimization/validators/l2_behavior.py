@@ -42,7 +42,7 @@ __all__ = [
 
 
 # An L2 rationale below this is a stub, not a diagnosis — mirrors the
-# l3_plan length floor in `l2_l3.py`.
+# l3_plan length floor in `l3_output.py`.
 L2_RATIONALE_FLOOR_CHARS = 40
 
 # A digit or a `#N` sample reference — the cheap evidence-anchor signal.

@@ -33,7 +33,7 @@ from promptpotter.shared.errors import (
     is_error_result,
 )
 from promptpotter.shared.errors import (
-    is_degraded as _is_degraded,
+    has_pipeline_warnings as _has_pipeline_warnings,
 )
 
 if TYPE_CHECKING:
@@ -144,7 +144,7 @@ async def _maybe_recover_degraded(
     """Run the stale-data protocol if the result is degraded."""
     from promptpotter.application.scoring.sample_measurement import STALE_DATA_LOAD_PROTOCOL
 
-    if not _is_degraded(result):
+    if not _has_pipeline_warnings(result):
         return result
     recovered, _step = await _execute_stale_data_protocol(
         list(STALE_DATA_LOAD_PROTOCOL),

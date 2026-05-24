@@ -14,6 +14,7 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
 from promptpotter.infrastructure.store import archive_views
+from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
@@ -57,7 +58,7 @@ def build_archive_observations(
             sid = item.get("sample_id")
             if sid is None:
                 continue
-            if item.get("error") or item.get("predicted") == "ERROR":
+            if is_error_result(item):
                 continue
             obs.append(
                 Observation(

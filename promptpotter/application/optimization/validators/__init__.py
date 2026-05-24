@@ -9,7 +9,10 @@
   ``promptpotter/CLAUDE.md``: ``forbidden_axes_honored``,
   ``evidence_grounding_present``, etc.). Counts attempts for the audit
   trail; surfaces in ``review.md`` and ``round_NNNN.json``.
-* ``l2_l3`` — Output validators for ``l2_context`` and ``l3_plan``
-  (verbatim-repeat detection, plan-length floor). Failures route to the
-  next layer up via escalation rules.
+* ``l2_output`` / ``l3_output`` — Output validators for ``l2_context`` /
+  ``l3_plan`` parsed outputs (verbatim-repeat detection, plan-length
+  floor, rule/example authoring guards). Failures route to the next
+  layer up via escalation rules. Parallel to ``l1_strict`` / ``l1_behavior``
+  in spirit; only the *output* surface is checked here (the *behavioral*
+  conformance surface for L2 lives in ``l2_behavior``).
 """

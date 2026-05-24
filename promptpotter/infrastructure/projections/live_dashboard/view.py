@@ -38,7 +38,7 @@ from promptpotter.infrastructure.store import (
     session_dir_for,
     write_json,
 )
-from promptpotter.shared.errors import is_degraded
+from promptpotter.shared.errors import has_pipeline_warnings
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
@@ -396,7 +396,7 @@ class LiveDashboardView(DerivedView):
 
         if result.get("error") or pd.get("error"):
             s["error_count"] += 1
-        if is_degraded(result):
+        if has_pipeline_warnings(result):
             s["degraded_count"] += 1
 
         s["total_queries_scored"] += 1

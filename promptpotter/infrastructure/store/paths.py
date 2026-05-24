@@ -30,6 +30,20 @@ DEFAULT_DATASETS_ROOT = _REPO_ROOT / "datasets"
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag|sweep)_")
 _SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag|sweep)_(?!.*_(fork|diag|sweep)_)")
 _SESSION_SUFFIX_RE = re.compile(r"_s(\d+)$")
+_DATASET_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def validate_dataset_name(name: str) -> str:
+    """Stricter than :func:`validate_path_component` — dataset names don't carry dots.
+
+    Raises ``ValueError`` on invalid; returns *name* unchanged otherwise.
+    """
+    if not name or not _DATASET_NAME_RE.match(name):
+        raise ValueError(
+            f"Invalid dataset name: {name!r}. "
+            "Only alphanumerics, hyphens, and underscores are allowed."
+        )
+    return name
 
 
 def root_cycle_id(cycle_id: str) -> str:
@@ -90,4 +104,5 @@ __all__ = [
     "session_index",
     "sibling_kind",
     "sweep_batch_dir_for",
+    "validate_dataset_name",
 ]

@@ -1,0 +1,110 @@
+"""Validators on L3-parsed outputs (soft signals; layout HARD validators live in :mod:`domain.l1_layout`).
+
+* :data:`L3_PLAN_LENGTH_FLOOR` — plan is too short to carry signal.
+* :data:`L3_PLAN_VERBATIM_REPEAT` — same plan as the prior plan.
+
+Outcomes append to ``opt_sp.l3_guard_breaches`` and surface to L3's next
+fire as self-healing evidence via the ``l3_guard_breaches`` dispatch-hub
+signal.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
+
+PLAN_LENGTH_FLOOR_CHARS = 60
+
+
+def _check_plan_length_floor(source_output: Mapping[str, Any], **_: Any) -> ValidatorOutcome | None:
+    plan = source_output.get("plan")
+    if not isinstance(plan, str):
+        return None
+    text = plan.strip()
+    if len(text) >= PLAN_LENGTH_FLOOR_CHARS:
+        return None
+    return ValidatorOutcome(
+        validator_id=L3_PLAN_LENGTH_FLOOR.id,
+        passed=False,
+        score=0.5,
+        evidence={"length": len(text), "floor": PLAN_LENGTH_FLOOR_CHARS},
+        nurse_target="l3",
+    )
+
+
+def _check_plan_verbatim_repeat(
+    source_output: Mapping[str, Any],
+    *,
+    opt_sp: OptSearchPoint | None = None,
+    **_: Any,
+) -> ValidatorOutcome | None:
+    if opt_sp is None:
+        return None
+    new_plan = source_output.get("plan")
+    if not isinstance(new_plan, str) or not new_plan.strip():
+        return None
+    prev = (opt_sp.plan or "").strip()
+    if not prev or new_plan.strip() != prev:
+        return None
+    return ValidatorOutcome(
+        validator_id=L3_PLAN_VERBATIM_REPEAT.id,
+        passed=False,
+        score=0.0,
+        evidence={"plan": new_plan},
+        nurse_target="l3",
+    )
+
+
+L3_PLAN_LENGTH_FLOOR: LLMOutputValidator = LLMOutputValidator(
+    id="l3_plan_length_floor",
+    description=(
+        "L3's plan is below the minimum length floor. A terse plan rarely "
+        "carries enough strategic framework to steer L2/L1 — surface as "
+        "evidence so the next L3 fire produces a richer plan."
+    ),
+    nurse_target="l3",
+    check=_check_plan_length_floor,
+)
+
+
+L3_PLAN_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
+    id="l3_plan_verbatim_repeat",
+    description=(
+        "L3's plan this fire equals the prior plan on the OSP. L3 repeated "
+        "itself — no strategic shift. Surface as evidence; if the loop "
+        "retriggers, the next L3 fire has the prior repetition as input."
+    ),
+    nurse_target="l3",
+    check=_check_plan_verbatim_repeat,
+)
+
+
+L3_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (
+    L3_PLAN_LENGTH_FLOOR,
+    L3_PLAN_VERBATIM_REPEAT,
+)
+
+
+def run_l3_output_validators(
+    source_output: Mapping[str, Any],
+    opt_sp: OptSearchPoint,
+) -> list[ValidatorOutcome]:
+    """Run every registered L3-output validator; return non-None outcomes."""
+    outcomes: list[ValidatorOutcome] = []
+    for validator in L3_OUTPUT_VALIDATORS:
+        outcome = validator.run(source_output, opt_sp=opt_sp)
+        if outcome is not None:
+            outcomes.append(outcome)
+    return outcomes
+
+
+__all__ = [
+    "L3_OUTPUT_VALIDATORS",
+    "L3_PLAN_LENGTH_FLOOR",
+    "L3_PLAN_VERBATIM_REPEAT",
+    "PLAN_LENGTH_FLOOR_CHARS",
+    "run_l3_output_validators",
+]
