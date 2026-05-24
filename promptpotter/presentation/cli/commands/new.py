@@ -1,13 +1,8 @@
 """``cmd_new`` — mint a fresh campaign + run the loop from round 0.
 
-Each ``new`` invocation mints a distinct campaign:
-``campaign_id = {dataset}__{rand6_hex}``. The campaign dir
-(``campaigns/{campaign_id}/``) holds ``campaign.json`` + ``log.md``;
-per-cycle telemetry and round detail live one level down under
-``cycles/{cycle_id}/``. The declaration (target hash + optimizer-prompt
-hash) is recorded as properties on ``campaign.json`` for drift detection
-on resume, not used to derive the id.
-"""
+``campaign_id = {dataset}__{rand6_hex}``, fresh per call. Declaration
+(target + optimizer-prompt hash) is recorded as properties on
+``campaign.json`` for resume-time drift detection, not used to derive the id."""
 
 from __future__ import annotations
 
@@ -48,13 +43,9 @@ async def _checkin_task(
     task_file: str | None,
     task_text: str | None,
 ) -> None:
-    """Check in the task description — decompose it once into Layer-1 fields.
-
-    ``datasets/{name}/task_description.md`` is the canonical source;
-    ``--task-file`` and ``--task-text`` override for ad-hoc cases. The
-    decomposition is content-hash cached, so a re-run against an unchanged
-    description is a free cache hit — no LLM call.
-    """
+    """Check in the task description; decomposed once into L1 fields.
+    ``datasets/{name}/task_description.md`` is canonical; ``--task-file``/``--task-text`` override.
+    Content-hash cached — unchanged description is a free hit."""
     from promptpotter.application.config import create_llm_client
     from promptpotter.application.optimization.task_context import decompose_task_context
 
@@ -92,17 +83,8 @@ async def _checkin_task(
 async def _mint_fresh_session(
     args: argparse.Namespace,
 ) -> tuple[Session, CampaignConfig, str, str]:
-    """Find-or-create the campaign + mint a session + root cycle.
-
-    ``campaign_id`` is derived from the origin declaration's content hash,
-    so a re-run on an unchanged declaration joins the existing campaign as
-    session N. ``auto_mint_session`` writes ``campaign.json`` (new campaign
-    only), the session's root cycle index, and the 4-key active pointer.
-
-    No scoring calls here — the origin runs as phase 0 of the optimize
-    loop. Returns ``(session, campaign_config, dataset_name, session_id)``
-    for the caller's pre-flight check-in sequence.
-    """
+    """Find-or-create campaign + mint session + root cycle. No scoring (origin runs as phase 0 of the loop).
+    Returns ``(session, campaign_config, dataset_name, session_id)``."""
     from promptpotter.application.config import load_campaign_config as _load_cfg
     from promptpotter.application.origin import prepare_datasets
     from promptpotter.infrastructure.store import session_index
@@ -121,9 +103,7 @@ async def _mint_fresh_session(
             "that names one.\n\n" + no_dataset_hint()
         )
 
-    # Auto-load the dataset's campaign.json when --config wasn't given. Without this,
-    # the session persists with scoring=null and default optimization knobs — the
-    # dataset's own file is the intended source of truth.
+    # Auto-load dataset's campaign.json when --config wasn't given (else session persists with scoring=null + default knobs).
     if not args.config:
         default_config_path = Path("datasets") / dataset_name / "campaign.json"
         if default_config_path.exists():
@@ -237,12 +217,7 @@ async def _run_sweep_batch(
     train_data: list[Sample],
     sweep_payloads: list[tuple[Path, Any]],
 ) -> CommandResult:
-    """Thin shim — defers to ``application.sweep.run_sweep_batch``.
-
-    Builds an observer factory bound to this CLI's ``args`` +
-    ``campaign_config`` so the orchestrator stays free of presentation
-    imports.
-    """
+    """Thin shim → ``application.sweep.run_sweep_batch``; binds observer factory to CLI args + campaign_config."""
     from promptpotter.application.sweep import run_sweep_batch
 
     def observer_factory(session: Session, origin_acc: float) -> RunObservers:
@@ -272,11 +247,8 @@ async def _maybe_dispatch_sweep_batch(
     campaign_config: CampaignConfig,
     train_data: list[Sample],
 ) -> CommandResult | None:
-    """Multi-fork sweep dispatch: with --sweep-batch AND a non-empty
-    ``datasets/{name}/sweep/*.json`` directory, mint one fork per
-    :class:`OperatorSweepFile` and run sweep mode on each. Returns None
-    to fall through to the normal path (no --sweep-batch flag, no sweep
-    dir, or empty payloads)."""
+    """Multi-fork sweep dispatch: with ``--sweep-batch`` AND ``datasets/{name}/sweep/*.json``,
+    mint one fork per OperatorSweepFile. ``None`` falls through to the normal path."""
     if not getattr(args, "sweep", False):
         return None
     from promptpotter.application.sweep import (
@@ -310,9 +282,7 @@ async def _run_loop(
     observers = _build_observers(args, session, campaign_config, train_data, pre_origin_acc)
     ctx.save_phase("optimizing")
 
-    # Wire the webapp's "Stop run" channel: presence of .runtime/stop.flag
-    # signals the loop to exit at the next stop_check point. See
-    # docs/operations/human-in-the-loop.md.
+    # Webapp "Stop run" channel: .runtime/stop.flag → loop exits at next stop_check.
     cycle_dir = session.store.campaigns.cycle_dir(ctx.campaign_id, ctx.cycle_id)
     session.stop_check = (cycle_dir / ".runtime" / "stop.flag").is_file
 
@@ -357,17 +327,10 @@ def _pipeline_detail(session: Session) -> str:
 
 
 async def cmd_new(args: argparse.Namespace) -> CommandResult:
-    """Start (or join) a campaign and run the loop from round 0.
-
-    Find-or-create on the origin declaration's content hash: a new
-    declaration mints a fresh campaign, a re-run of an unchanged one adds
-    a session to the existing campaign. The startup runs an ordered
-    pre-flight check-in (campaign → backend → dataset → pipeline → task →
-    origin), each step echoed as a ``✓`` line. Live state is
-    ``cycles/{cycle_id}/dashboard.json``; the campaign digest is
-    ``campaigns/{campaign_id}/log.md``; the final summary is
-    ``cycles/{cycle_id}/index.json::final``. Stop with Ctrl+C.
-    """
+    """Mint a fresh campaign and run the loop from round 0.
+    Pre-flight: campaign → backend → dataset → pipeline → task → origin.
+    Live state: ``cycles/{cycle_id}/dashboard.json``; digest: ``campaigns/{campaign_id}/log.md``;
+    final: ``cycles/{cycle_id}/index.json::final``. Stop with Ctrl+C."""
     from promptpotter.shared.spend import refresh_rates
 
     refresh_rates(force=bool(getattr(args, "refresh_rates", False)))

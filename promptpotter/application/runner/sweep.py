@@ -1,9 +1,7 @@
-"""Sweep / diag generation-only round — L1 variants without scoring.
+"""Generation-only round — L1 variants without scoring.
 
-Used by both ``sweep`` (round-1 scored + round-2 generate-only) and
-``diag`` modes. The round_data JSON is minimal: ``status='generation_only'``,
-no scoreboard, no accuracy.
-"""
+Shared by ``sweep`` (round-1 scored + round-2 generate-only) and ``diag``;
+round_data JSON: ``status='generation_only'``, no scoreboard, no accuracy."""
 
 from __future__ import annotations
 

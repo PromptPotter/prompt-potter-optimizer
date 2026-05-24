@@ -1,10 +1,8 @@
 """Bundle types — per-call state container + signal classification.
 
-Every renderer reads an `InjectionBundle`. Built once per transition by
-`builder.build_bundle`, consumed by `DispatchHub`. The four `InjectionKind`
-values split by *origin*: MEASUREMENT (raw evidence), DERIVED (computed),
-TRACE (prior LLM calls), DIRECTIVE (instructions to a downstream layer).
-"""
+Every renderer reads an ``InjectionBundle`` (built once per transition by
+``builder.build_bundle``, consumed by ``DispatchHub``). ``InjectionKind``
+splits by origin: MEASUREMENT / DERIVED / TRACE / DIRECTIVE."""
 
 from __future__ import annotations
 
@@ -76,13 +74,11 @@ class InjectionTier(enum.IntEnum):
 
 @dataclass(frozen=True)
 class _Injection:
-    """One INJECTIONS entry — kind + renderer + tier + per-injection `char_cap`.
+    """One INJECTIONS entry — kind + renderer + tier + per-injection ``char_cap``.
 
-    `tier` + `char_cap` have no defaults: omitting either is a `TypeError` at construction —
-    a coding mistake fails loud, not silently uncapped. `char_cap` is the self-heal budget
-    for LLM-authored text (parent prompt, L2/L3 framing, critique); `None` for
-    *_RENDER_CAP-bounded derived/measurement renderers.
-    """
+    ``tier`` + ``char_cap`` have no defaults (omitting either = TypeError; coding
+    mistakes fail loud, not silently uncapped). ``char_cap`` bounds LLM-authored text;
+    ``None`` for *_RENDER_CAP-bounded derived/measurement renderers."""
 
     name: str
     kind: InjectionKind
@@ -94,11 +90,8 @@ class _Injection:
 
 @dataclass(frozen=True)
 class CycleSlice:
-    """Frozen snapshot of cycle state for renderers — keeps renderers `Cycle`-free + unit-testable.
-
-    `pipeline_params` is the active JobSearchPoint's node-keyed config, snapshotted so wound
-    renderers can filter ACCUMULATED rows by current backend config.
-    """
+    """Frozen cycle-state snapshot for renderers — keeps them ``Cycle``-free + unit-testable.
+    ``pipeline_params`` snapshotted so wound renderers filter ACCUMULATED rows by current backend config."""
 
     round_num: int
     current_accuracy: float
@@ -114,11 +107,8 @@ class CycleSlice:
 
 @dataclass(frozen=True)
 class RoundDigest:
-    """Post-scoring round readouts: `diagnostics` (deterministic) + `critique` (L1_CRITIQUE LLM dict).
-
-    Failure renderers (validation/runtime/l2/l3 guard breaches) are NOT here — failures
-    accumulate across rounds on OptSearchPoint; those renderers read `bundle.opt_sp`.
-    """
+    """Post-scoring readouts: ``diagnostics`` (deterministic) + ``critique`` (L1_CRITIQUE LLM dict).
+    Failure renderers (validation/runtime/l2/l3 breaches) read ``bundle.opt_sp`` instead — failures accumulate across rounds."""
 
     diagnostics: RoundDiagnostics | None
     critique: dict[str, Any] | None
@@ -126,12 +116,9 @@ class RoundDigest:
 
 @dataclass(frozen=True)
 class InjectionBundle:
-    """One state container per optimizer LLM call — every signal renderer reads off this.
-
-    `origin_per_sample` is the round-0 snapshot, frozen post-cycle-start, driving `origin_strengths`
-    (L1 must preserve the hit-scaffolding). `trajectory_misses` is the live cumulative miss set,
-    driving `intractable_samples` (the cluster L1 should attack next).
-    """
+    """State container per optimizer LLM call — every signal renderer reads off this.
+    ``origin_per_sample`` (frozen round-0 snapshot) drives ``origin_strengths`` (preserve hit-scaffolding);
+    ``trajectory_misses`` (live cumulative misses) drives ``intractable_samples``."""
 
     opt_sp: OptSearchPoint
     pipeline_schema: PipelineSchema | None

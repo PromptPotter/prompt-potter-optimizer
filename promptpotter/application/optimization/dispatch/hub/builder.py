@@ -26,10 +26,8 @@ def build_bundle(
     *,
     latest_round: RoundResult | None = None,
 ) -> InjectionBundle:
-    """Snapshot cycle state for one optimizer LLM call. Pass *latest_round* explicitly for
-    L1_CRITIQUE — the just-completed round isn't folded into `cycle.rounds` until critique fires.
-    L2/L3 omit it (fall back to `cycle.rounds[-1]`).
-    """
+    """Snapshot cycle state for one optimizer LLM call. Pass *latest_round* explicitly for L1_CRITIQUE
+    (the just-completed round isn't folded into ``cycle.rounds`` until critique fires); L2/L3 omit it."""
     if latest_round is None and cycle.rounds:
         latest_round = cycle.rounds[-1]
     latest_diag = latest_round.diagnostics if latest_round else None
@@ -51,8 +49,7 @@ def build_bundle(
         pipeline_params=dict(current_pp) if current_pp else {},
     )
 
-    # Trajectory-memory pair: origin hits (frozen, "parent already converts these") +
-    # cumulative misses (live, "the cluster nothing has solved").
+    # Trajectory pair: frozen origin hits + live cumulative misses (the cluster nothing has solved).
     origin_per_sample = list(cycle.tracking.origin_per_sample_results)
     trajectory_misses = [r for r in cycle.tracking.current_results if not r.get("hit")]
 

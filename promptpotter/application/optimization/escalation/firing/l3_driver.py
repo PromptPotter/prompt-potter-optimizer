@@ -1,10 +1,7 @@
-"""L3 driver — parse the LLM output, apply OSP mutations, build enter/exit
-payloads, register the strategy.
+"""L3 driver — parse LLM output, apply OSP mutations, build enter/exit payloads, register the strategy.
 
-L3's job: rewrite ``plan`` (strategic frame inside which L2 refines + L1
-generates). Optional ``note`` is the sticky L3→L2 pointer; survives L2
-fires, replaced wholesale on each L3 fire. No ``pipeline_params`` deltas.
-"""
+L3 rewrites ``plan`` (strategic frame). Optional ``note`` is the sticky L3→L2 pointer
+(survives L2 fires, replaced wholesale on each L3 fire). No ``pipeline_params`` deltas."""
 
 from __future__ import annotations
 
@@ -47,10 +44,8 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> Transit
 
 
 def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-    # Order matters: ``_run_transition`` already ran ``copy_memory_to``
-    # which carried the *prior* l3_note onto the new OSP. We overwrite it
-    # with the L3 fire's output (possibly ``""`` when the LLM omitted
-    # ``note``) — that's the "cleared only when L3 fires again" contract.
+    # Order matters: ``_run_transition``'s ``copy_memory_to`` carried prior l3_note onto the new OSP;
+    # overwrite with L3's output (may be ``""``) — the "cleared only when L3 fires again" contract.
     cycle.opt_sp.wounds.l3_note = result.l3_note
     cycle.opt_sp.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
     cycle.escalation.record_l3_fired(
@@ -68,8 +63,7 @@ def _l3_enter(cycle: Cycle) -> dict[str, Any]:
 
 
 def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-    # ``l3_*_at_entry`` are read by ``EscalationState.fold`` on resume —
-    # ``record_l3_fired`` also resets L2 state to these same origins.
+    # ``l3_*_at_entry`` read by ``EscalationState.fold`` on resume; ``record_l3_fired`` resets L2 state to these.
     payload: dict[str, Any] = {
         "l3_round": cycle.escalation.l3_round,
         "l3_stall_count": cycle.escalation.l3_stall_count,

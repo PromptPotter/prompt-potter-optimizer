@@ -1,10 +1,8 @@
 """Data types crossing the LLM client boundary.
 
-``LLMResponse`` — the standardized response object every client returns.
-``TokenUsage`` — per-call token record + emission registry. The module-level
-sink is installed by the runner so optimizer ``TokenUsage`` events reach
-the cycle ledger via ``RunCallbacks.on_token_usage``.
-"""
+- ``LLMResponse`` — standardized response every client returns.
+- ``TokenUsage`` + emission sink — runner installs a sink so optimizer events reach
+  the ledger via ``RunCallbacks.on_token_usage``."""
 
 from __future__ import annotations
 
@@ -54,23 +52,13 @@ class LLMResponse(BaseModel):
 class TokenUsage:
     """Per-call LLM token record.
 
-    ``model`` is the provider's reported model id (``response.model``)
-    so downstream cost resolution can rate-table it without re-deriving
-    the call site's config. ``cost_usd`` is populated when the provider
-    returned a USD figure on the wire (today only OpenRouter does this);
-    callers leave it ``None`` when the rate-table path should run.
+    ``model`` = provider-reported model id (``response.model``) so cost resolution
+    rate-tables it without re-deriving the call site's config. ``cost_usd``
+    populated when the provider ships USD on the wire (today: OpenRouter);
+    ``None`` ⇒ rate-table path runs.
 
-    Attributes:
-        node: Logical node name (optimizer: ``"l1_generate"``, ``"l1_critique"``,
-            …; backend: ``"entity_profiling"``, ``"llm_ranking"``, …).
-        kind: ``"optimizer"`` for meta-prompt calls, ``"backend"`` for
-            in-pipeline LLM calls. Sinks use this to threshold separately.
-        input_tokens: Prompt (input) tokens reported by the provider.
-        output_tokens: Completion (output) tokens reported by the provider.
-        duration_s: Wall-clock call duration in seconds.
-        model: Provider model id (``None`` if unknown).
-        cost_usd: Provider-reported USD cost (``None`` if not provided).
-    """
+    ``kind="optimizer"`` (meta-prompt) vs ``"backend"`` (in-pipeline) — sinks
+    threshold separately."""
 
     node: str
     kind: Literal["optimizer", "backend"]
@@ -85,20 +73,13 @@ class TokenUsage:
         return self.input_tokens + self.output_tokens
 
 
-# Module-level sink — installed by the runner so optimizer ``TokenUsage``
-# events reach the cycle ledger via ``RunCallbacks.on_token_usage``.
-# Default is a no-op; ``llm_call.py`` imports the function below, not
-# the slot, so re-binding mid-run is safe.
+# Module-level sink installed by the runner; default no-op. ``llm_call.py``
+# imports the function, not the slot, so mid-run re-binding is safe.
 _token_usage_sink: Callable[[TokenUsage], None] | None = None
 
 
 def set_token_usage_sink(sink: Callable[[TokenUsage], None] | None) -> None:
-    """Install (or clear) the cross-cutting sink for ``emit_token_usage``.
-
-    The runner calls this once with ``RunCallbacks.on_token_usage`` and
-    clears to ``None`` on teardown. ``emit_token_usage`` always runs the
-    overflow-warning logic — the sink is additive.
-    """
+    """Install (or clear) the sink for ``emit_token_usage``; additive (overflow-warning always runs)."""
     global _token_usage_sink
     _token_usage_sink = sink
 

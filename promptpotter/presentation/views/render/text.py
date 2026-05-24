@@ -1,9 +1,6 @@
 """Text render target — typed View → ANSI string for live CLI/notebook.
-
-Per-view renderers + the :func:`to_text` dispatch entry point. ANSI
-primitives come from :mod:`promptpotter.presentation.views.display`; the
-per-candidate composite_fitness block from :mod:`promptpotter.shared.composite`.
-"""
+Per-view renderers + ``to_text`` dispatch. ANSI primitives from ``views.display``;
+composite_fitness block from ``shared.composite``."""
 
 from __future__ import annotations
 

@@ -27,9 +27,7 @@ _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 class InjectionRenderError(Exception):
-    """A renderer raised — programmer mistake (not LLM). Round loop halts with `RENDER_ERROR`
-    (distinct from CRASHED) so the operator sees *a renderer broke*. Chains the original via `raise … from`.
-    """
+    """Renderer raised — programmer mistake. Halts with ``RENDER_ERROR`` (distinct from CRASHED); chains the original via ``raise … from``."""
 
     def __init__(self, name: str, cause: BaseException) -> None:
         self.cause = cause
@@ -48,10 +46,7 @@ _TEMPLATE_EXTRAS: dict[str, set[str]] = {
 
 
 def validate_template(name: str, template: PromptTemplate) -> None:
-    """Raise KeyError if any `{{slot}}` isn't a signal or known extra. Called by
-    `load_optimizer_prompt` after every load — closes the silent-drop bug where a typo
-    would render to empty.
-    """
+    """Raise KeyError if any ``{{slot}}`` isn't a signal or known extra (typo → silent empty render)."""
     extras = _TEMPLATE_EXTRAS.get(name, set())
     text = template.render()
     referenced = set(_PLACEHOLDER_RE.findall(text))
@@ -65,10 +60,8 @@ def validate_template(name: str, template: PromptTemplate) -> None:
 
 
 def _apply_budget(static_chars: int, rendered: dict[str, str]) -> dict[str, str]:
-    """Shed injections to fit `OPTIMIZER_PROMPT_CHAR_BUDGET` — lowest tier first
-    (OPTIONAL → CORE), largest within tier. MANDATORY never sheds. Deterministic, resume-stable.
-    Still over budget after every OPTIONAL+CORE gone ⇒ `StopReason.PROMPT_BUDGET` (L2 can't heal it).
-    """
+    """Shed injections to fit ``OPTIMIZER_PROMPT_CHAR_BUDGET`` (OPTIONAL → CORE, largest first; MANDATORY never sheds).
+    Still over after every OPTIONAL+CORE gone ⇒ ``StopReason.PROMPT_BUDGET`` (L2 can't heal it)."""
     total = static_chars + sum(len(v) for v in rendered.values())
     if total <= OPTIMIZER_PROMPT_CHAR_BUDGET:
         return rendered
@@ -119,10 +112,8 @@ class DispatchHub:
 
     @staticmethod
     def render(name: str, bundle: InjectionBundle) -> str:
-        """Render one injection with `char_cap` enforcement.
-        LLM overruns truncate + warn (self-heal); raises become `InjectionRenderError`
-        (downgraded to warn + "" when `bundle.ignore_render_errors`).
-        """
+        """Render one injection with ``char_cap`` enforcement. LLM overruns truncate + warn;
+        raises become ``InjectionRenderError`` (downgraded to warn + "" when ``bundle.ignore_render_errors``)."""
         sig = INJECTIONS.get(name)
         if sig is None:
             raise KeyError(f"Unknown signal: {name}")
@@ -157,10 +148,8 @@ class DispatchHub:
         layout: L1Layout,
         bundle: InjectionBundle,
     ) -> PromptTemplate:
-        """Append layout-driven content to L1's per-slot text. Slots outside L1_LAYOUT_SLOTS
-        (e.g. `answer_format`) pass through. Remaining `{{var}}` placeholders are caller extras.
-        Budget enforcement happens before slot rebuild.
-        """
+        """Append layout-driven content to L1's per-slot text. Slots outside L1_LAYOUT_SLOTS pass through;
+        remaining ``{{var}}`` are caller extras. Budget enforced before slot rebuild."""
         rendered = {name: DispatchHub.render(name, bundle) for name in layout.all_placeholders()}
         static_chars = len(_PLACEHOLDER_RE.sub("", template.render()))
         rendered = _apply_budget(static_chars, rendered)
@@ -178,10 +167,8 @@ class DispatchHub:
 
     @staticmethod
     def fill_fixed(template: PromptTemplate, bundle: InjectionBundle) -> dict[str, str]:
-        """Resolve every `{{name}}` via INJECTIONS → kwargs for `compile_prompt(**hub, **extras)`.
-        Names not in INJECTIONS skipped (caller fills as extras, or compile_prompt raises).
-        Budget enforcement via `_apply_budget`.
-        """
+        """Resolve every ``{{name}}`` via INJECTIONS → kwargs for ``compile_prompt(**hub, **extras)``.
+        Names not in INJECTIONS skipped (caller fills as extras). Budget via ``_apply_budget``."""
         text = template.render()
         expected = set(_PLACEHOLDER_RE.findall(text))
         rendered = {

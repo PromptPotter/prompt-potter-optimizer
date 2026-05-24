@@ -1,8 +1,9 @@
-"""`run_optimization` — optimize-loop entry + teardown. Wires origin → `init_optimization_loop` →
-`run_round_loop` → `_finalize_run`. Operator-issued forks stamp L1-surface deltas on the fresh OSP;
-fork-on-divergence rebuilds observers + re-seeds `phase_ctx` so RoundStartView keeps reading the
-parent's max_rounds + patience scalars.
-"""
+"""``run_optimization`` — optimize-loop entry + teardown.
+
+Wires origin → ``init_optimization_loop`` → ``run_round_loop`` → ``_finalize_run``.
+Operator forks stamp L1-surface deltas on the fresh OSP; fork-on-divergence
+rebuilds observers + re-seeds ``phase_ctx`` so RoundStartView keeps reading
+parent's max_rounds + patience scalars."""
 
 from __future__ import annotations
 
@@ -63,8 +64,7 @@ async def run_optimization(
     ignore_render_errors: bool = False,
 ) -> CycleResult:
     """End-to-end optimization. *observers* MUST be pre-built (ledger bound before origin).
-    *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused as-is (notebook path).
-    """
+    *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
     started_at = datetime.now(UTC).isoformat()
     cb = observers.callbacks
 
@@ -93,8 +93,7 @@ async def run_optimization(
 
     pre_loop_cycle_id = session.state.cycle_id
 
-    # Outer try/except catches init-phase crashes (stale on-disk OSP rejected by extra="forbid",
-    # etc.) so they land in CRASHED with a stashed traceback like mid-round crashes do.
+    # Outer try/except: init-phase crashes (stale OSP rejected by extra="forbid", etc.) land in CRASHED with stashed traceback.
     cycle: Cycle | None = None
     try:
         cycle = await init_optimization_loop(
@@ -116,7 +115,7 @@ async def run_optimization(
             started_at=started_at,
         )
 
-        # `resume --ignore-render-errors` escape hatch — propagates to every InjectionBundle.
+        # ``--ignore-render-errors`` escape hatch — propagates to every InjectionBundle.
         cycle.ignore_render_errors = ignore_render_errors
 
         # Operator forks (sweep, rebase) stamp L1-surface deltas; triggers without deltas skip.
@@ -131,8 +130,7 @@ async def run_optimization(
         )
         if forked and pre_loop_cycle_id:
             # Carry phase_ctx across the rebuild — INIT.enter (max_rounds, patience, formulas)
-            # fired on the parent callbacks and won't re-fire on the new ledger. Without this,
-            # RoundStartView reads zeros ("ROUND N/999", "patience N/0") on every forked round.
+            # fired on the parent callbacks and won't re-fire (else RoundStartView reads zeros on every forked round).
             parent_phase_ctx = dict(observers.callbacks._phase_ctx)
             observers = build_run_observers(
                 session=session,
@@ -174,7 +172,7 @@ async def run_optimization(
         logger.warning("Optimization interrupted before round loop entered (%s).", cause)
         stop_reason = StopReason.INTERRUPTED
     except ResumeDivergenceError as exc:
-        # Operator-recoverable: print message + fork hint, no traceback (fix is `--fork-on-divergence`).
+        # Operator-recoverable; fix is ``--fork-on-divergence``.
         logger.warning("Resume halted on divergence:\n%s", exc)
         stop_reason = StopReason.DIVERGED
     except Exception:
@@ -183,8 +181,7 @@ async def run_optimization(
         stop_reason = StopReason.CRASHED
 
     finished_at = datetime.now(UTC).isoformat()
-    # Degenerate case: init crashed before Cycle existed — fall back to neutral values. cycle_id
-    # was minted upstream, so mark_finished can still stamp index.json::final with the traceback.
+    # Init-crash fallback: cycle_id was minted upstream, so mark_finished can still stamp final with traceback.
     if cycle is not None:
         best_sp = cycle.tracking.best_sp
         cycle_result = CycleResult(

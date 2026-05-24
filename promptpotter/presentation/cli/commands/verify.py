@@ -1,17 +1,11 @@
 """``cmd_verify`` — re-score one campaign candidate on more samples.
 
-The operator names a campaign (short or full id) and a candidate label
-(``C{round}.{idx}`` or ``C0``); the command rebuilds that candidate's
-:class:`JobSearchPoint`, picks ``--samples`` samples the candidate has not
-already been measured on, calls :func:`score_search_point` (which auto-
-archives the new measurements into the cross-cycle archive), then writes
-one :class:`DiagnosticRunRecord` sidecar summarising the workspace-scope
-verdict for the Verify tab to read.
+Operator names campaign + candidate (``C{round}.{idx}`` or ``C0``); rebuilds
+the JobSearchPoint, picks ``--samples`` unmeasured samples, calls
+``score_search_point`` (auto-archives), writes a ``DiagnosticRunRecord``
+sidecar for the Verify tab.
 
-This is *not* a cycle / fork / sweep — no ledger event, no round_id, no
-mutation of any existing cycle's index. The only persistence is into the
-workspace-scoped ``archive/`` tree.
-"""
+Not a cycle/fork/sweep: no ledger event, no round_id; persistence is into the workspace ``archive/`` tree only."""
 
 from __future__ import annotations
 
@@ -38,11 +32,7 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 def _resolve_campaign(stores: Stores, needle: str) -> str:
-    """Resolve *needle* to a campaign id (exact match, then prefix match).
-
-    Accepts the full id (``justlogic__ca6d4d``), the 6-hex suffix
-    (``ca6d4d``), or any unambiguous prefix.
-    """
+    """Resolve *needle* to a campaign id; accepts full id, 6-hex suffix, or unambiguous prefix."""
     ids = stores.campaigns.list_campaign_ids()
     if needle in ids:
         return needle
@@ -61,11 +51,7 @@ def _resolve_campaign(stores: Stores, needle: str) -> str:
 
 
 def _resolve_cycle(stores: Stores, campaign_id: str, hint: str | None) -> str:
-    """Resolve a cycle id within *campaign_id*.
-
-    When ``hint`` is None, auto-picks the sole cycle; raises if the campaign
-    has multiple cycles (operator must disambiguate with ``--cycle``).
-    """
+    """Resolve a cycle id within *campaign_id*; ``hint=None`` auto-picks the sole cycle (raises on ambiguity)."""
     cycles_dir = stores.campaigns.campaign_root_dir(campaign_id) / "cycles"
     if not cycles_dir.exists():
         raise SystemExit(f"ERROR: campaign {campaign_id!r} has no cycles/ directory.")
@@ -91,11 +77,7 @@ def _resolve_cycle(stores: Stores, campaign_id: str, hint: str | None) -> str:
 
 
 def _parse_label(label: str) -> tuple[int, int]:
-    """Parse ``C0`` or ``C{round}.{n}`` → ``(round, idx_in_round)``.
-
-    ``C0`` ⇒ ``(0, 0)`` (origin). ``C4.1`` ⇒ ``(4, 0)`` (round 4, first
-    candidate — labels are 1-indexed; the on-disk position is 0-indexed).
-    """
+    """``C0`` ⇒ ``(0, 0)`` (origin); ``C{round}.{n}`` ⇒ ``(round, n-1)`` (labels 1-indexed, on-disk 0-indexed)."""
     if label == "C0":
         return 0, 0
     if not label.startswith("C") or "." not in label:
@@ -196,8 +178,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     source_campaign_n = int(cand_score.get("scored_samples") or 0)
     source_candidate_id = str(cand_score.get("candidate_id") or "")
 
-    # Wire a read-only session against the campaign's dataset. ``take_over=False``
-    # leaves the operator's active pointer untouched.
+    # Read-only session; ``take_over=False`` leaves the operator's active pointer untouched.
     session = await init_services_cli(
         backend_id=campaign.backend_id or campaign.dataset_name,
         dataset_name=campaign.dataset_name,
@@ -270,8 +251,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         source=f"verify:{campaign_id}:{args.label}",
     )
 
-    # Workspace aggregate — every archive row whose node-configs match this
-    # candidate exactly, deduped to one measurement per sample (latest wins).
+    # Workspace aggregate: archive rows matching this candidate's node-configs, deduped per sample (latest wins).
     workspace_measurements = archive_views.measurements_for_config(
         stores,
         session.backend_id,

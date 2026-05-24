@@ -1,13 +1,5 @@
-"""Regenerate `.ai/SYMBOLS.txt` — a flat `symbol\\tfile:line` index over the
-top-level `class` / `def` declarations in `promptpotter/` and `tests/`.
-
-Run from the repo root:
-
-    python scripts/build_ai_index.py
-
-Idempotent. Re-run after large refactors / renames. Stale rows are low-risk:
-worst case the AI follows a wrong line number and falls back to grep.
-"""
+"""Regenerate ``.ai/SYMBOLS.txt`` — flat ``symbol\\tfile:line`` over top-level
+``class``/``def`` in ``promptpotter/`` + ``tests/``. Idempotent; re-run after large refactors."""
 
 from __future__ import annotations
 

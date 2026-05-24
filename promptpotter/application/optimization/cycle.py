@@ -78,9 +78,7 @@ def _merge_into_cumulative(
     prior: list[dict[str, Any]], incoming: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Sample-keyed merge: incoming overwrites prior; entries without ``sample_id`` dropped.
-
-    Keeps ``tr.current_results`` a non-shrinking cumulative origin across rounds.
-    """
+    Keeps ``tr.current_results`` a non-shrinking cumulative origin across rounds."""
     by_sid: dict[Any, dict[str, Any]] = {
         r.get("sample_id"): r for r in prior if r.get("sample_id") is not None
     }
@@ -118,8 +116,7 @@ class Cycle:
     rounds: list[RoundResult] = field(default_factory=list)
     tracking: TrackingState = field(default_factory=TrackingState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
-    # Inter-round bridge from L2: probe_next_round set when L2 picks action="probe_round",
-    # consumed and reset next round; last_l2_axis labels the probe outcome.
+    # L2 inter-round bridge: probe_next_round set on action="probe_round" (consumed next round); last_l2_axis labels the probe.
     probe_next_round: bool = False
     last_l2_axis: str = ""
     warned_queries: set[str] = field(default_factory=set)
@@ -160,8 +157,7 @@ class Cycle:
                 "l1_overrides": dict(origin_osp.l1_overrides),
             }
         )
-        # Pass session.pipeline_params (carries dataset overlay), NOT schema.to_pipeline_params()
-        # — the latter is sparse and would strip operator-fixed config.
+        # Pass session.pipeline_params (carries dataset overlay) — schema.to_pipeline_params() is sparse and strips operator config.
         sp = opt_sp.to_job_search_point(
             base_pipeline_params=session.pipeline_params or None,
             schema=schema,
@@ -191,8 +187,8 @@ class Cycle:
             dataset_name=session.dataset_name,
         )
 
-        # Inherit sibling runtime_failures so L1 sees configs prior siblings proved to fail.
-        # _r_runtime_failures drops entries that don't match the new pipeline config.
+        # Inherit sibling runtime_failures so L1 sees configs prior siblings already proved to fail
+        # (_r_runtime_failures drops entries that don't match the new pipeline config).
         inherited_failures: list[RuntimeFailure] = []
         if session.state.cycle_id:
             try:
@@ -259,8 +255,8 @@ class Cycle:
             else tr.current_sp.pipeline_params
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=last_pp, schema=schema)
-        # best_round = cumulative-state high-water-mark, mirroring ``absorb_round``;
-        # without this, resume/fork after a lock-in reseeds PoBB priors on the wrong subset.
+        # best_round = cumulative-state high-water-mark (mirrors absorb_round);
+        # without this, resume/fork after lock-in reseeds PoBB priors on the wrong subset.
         acc_cum: list[dict[str, Any]] = []
         for i, rr in enumerate(self.rounds, start=1):
             acc_cum = _merge_into_cumulative(acc_cum, list(rr.results))
@@ -329,8 +325,7 @@ class Cycle:
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
         tr.current_results = _merge_into_cumulative(tr.current_results, list(rr.results))
         if schema is not None:
-            # opt_sp=None: cumulative pool mixes multiple searchpoints, so opt_sp-aware
-            # evaluators take their vacuous fallback (same convention as matched_origin_stats).
+            # opt_sp=None: cumulative pool mixes multiple searchpoints; opt_sp-aware evaluators take their vacuous fallback (per matched_origin_stats convention).
             cum = compute_composite_fitness(
                 cast("list[QueryMeasurement]", tr.current_results),
                 schema,

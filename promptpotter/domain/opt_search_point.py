@@ -142,7 +142,7 @@ class L1SituationalExample(BaseModel):
 
 
 class WoundChannels(BaseModel):
-    """Self-healing surface: four wound streams + sticky L3→L2 note. Consumed by dispatch-hub injection renderers."""
+    """Four wound streams + sticky L3 note; rendered by dispatch-hub injections."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -217,11 +217,8 @@ class OptSearchPoint(PromptTemplate):
         *,
         schema: PipelineSchema | None = None,
     ) -> JobSearchPoint:
-        """Render → inject into pipeline_params → return frozen JobSearchPoint.
-
-        Pipeline composition reads from *schema* — never inferred from
-        ``base_pipeline_params``.
-        """
+        """Render → inject into pipeline_params → frozen JobSearchPoint. Pipeline
+        composition reads *schema*, never inferred from ``base_pipeline_params``."""
         from promptpotter.domain.search_point import JobSearchPoint
 
         pp = copy.deepcopy(base_pipeline_params or {})
@@ -234,7 +231,6 @@ class OptSearchPoint(PromptTemplate):
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
 
-        # prompt_fields only meaningful when a prompt node exists.
         pf = None
         if rendered and prompt_node:
             pf = {f: v for f, v in self.prompt_field_dict().items() if f != "few_shot_examples"}
@@ -247,14 +243,9 @@ class OptSearchPoint(PromptTemplate):
             prompt_fields=pf or None,
         )
 
-    # -- Candidate derivation ------------------------------------------------
-
     def mutate(self, **changes: Any) -> OptSearchPoint:
-        """Child OSP with prompt + L2/L3 state copied; memory NOT copied.
-
-        Memory only flows on L2/L3 adopt (Cycle.apply_transition →
-        copy_memory_to). Children start with empty memory.
-        """
+        """Child OSP: prompt + L2/L3 state copied; memory empty.
+        Memory only flows on L2/L3 adopt via ``copy_memory_to``."""
         data: dict[str, Any] = {}
         for f in PROMPT_STRING_FIELDS:
             data[f] = changes.pop(f, getattr(self, f))
@@ -278,7 +269,7 @@ class OptSearchPoint(PromptTemplate):
         return OptSearchPoint(**data)
 
 
-# --- Search-point diff helpers (views-layer shape munging) ---
+# --- Diff helpers (views) ---
 
 
 def _fmt_pp_val(v: object) -> str:

@@ -1,8 +1,5 @@
 """Hard-sample-sorter heatmap — plain-text grid + hardness leaderboard.
-
-Exposed for the standalone CLI hard-sample run and used inside the
-:func:`to_markdown` flow when ``LogMdView.hard_samples`` is set.
-"""
+Used by the standalone CLI hard-sample run and ``to_markdown`` when ``LogMdView.hard_samples`` is set."""
 
 from __future__ import annotations
 

@@ -1,10 +1,7 @@
-"""L2 driver — parse the LLM output, apply OSP mutations, build enter/exit
-payloads, register the strategy.
+"""L2 driver — parse LLM output, apply OSP mutations, build enter/exit payloads, register the strategy.
 
-L2's job: refine ``task_context`` (broadcast framing) and optionally edit
-``l1_layout`` / ``l1_overrides`` for L1's next round. No
-``pipeline_params`` deltas — those belong to L1's surface.
-"""
+L2 refines ``task_context`` (broadcast framing) + optionally edits ``l1_layout``/``l1_overrides``.
+No ``pipeline_params`` deltas — those belong to L1."""
 
 from __future__ import annotations
 
@@ -52,9 +49,7 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
         if layout_result.is_valid:
             accepted_layout = proposed_layout
 
-    # Supplemental rules + situational examples: full-replace semantics — a
-    # non-empty list ⇒ replace the L2-authored layer; omitted / empty ⇒
-    # keep current (auto-triggered rules still render independently).
+    # Supplemental rules + situational examples: full-replace; non-empty ⇒ replace L2-authored layer; empty ⇒ keep current.
     new_supplemental = list(raw.l1_supplemental_rules) if raw.l1_supplemental_rules else None
     new_examples = list(raw.l1_situational_examples) if raw.l1_situational_examples else None
 
@@ -104,8 +99,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
     )
-    # Don't clobber prior axis when the LLM omits it — a stale axis is more
-    # informative than an empty one for the next probe-outcome render.
+    # Don't clobber prior axis when LLM omits it — stale axis beats empty for the next probe-outcome render.
     if result.axis_targeted:
         cycle.last_l2_axis = result.axis_targeted
 
@@ -138,8 +132,7 @@ def _l2_enter(cycle: Cycle) -> dict[str, Any]:
 
 
 def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-    # ``l2_*_at_entry`` fields are read by ``EscalationState.fold`` on resume —
-    # they're the canonical post-fire L2 state captured by ``record_l2_fired``.
+    # ``l2_*_at_entry`` are read by ``EscalationState.fold`` on resume (canonical post-fire L2 state from ``record_l2_fired``).
     return {
         "l2_round": cycle.escalation.l2_round,
         "l2_stall_count": cycle.escalation.l2_stall_count,

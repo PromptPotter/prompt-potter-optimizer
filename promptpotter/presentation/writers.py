@@ -1,17 +1,12 @@
 """Operator-facing markdown writers — log.md / review.md / hard_samples.json.
 
-Called from runner orchestration milestones, NOT from RunCallbacks (which
-must stay display-only per CLAUDE.md).
+Called from runner milestones (not RunCallbacks — those stay display-only).
+Two log.md tiers: per-cycle (``cycles/{cycle_id}/log.md``) + campaign
+digest (``campaigns/{campaign_id}/log.md``).
 
-Two log.md tiers: ``cycles/{cycle_id}/log.md`` (per-cycle detail) and
-``campaigns/{campaign_id}/log.md`` (the campaign digest — every cycle of
-the lineage + a campaign-scoped heatmap, the folder-UI headline).
-
-Owns the disk-side view reconstruction (``from_disk_round`` /
-``from_disk_log``): persisted ``round_NNNN.json`` + ``index.json`` rebuild
-into the same ``RoundCompleteView`` / ``LogMdView`` shapes the live ingress
-emits, so ``to_markdown`` has one schema to render against.
-"""
+Owns disk-side view reconstruction (``from_disk_round``/``from_disk_log``):
+persisted ``round_NNNN.json`` + ``index.json`` → same ``RoundCompleteView`` /
+``LogMdView`` shapes the live ingress emits, so ``to_markdown`` has one schema."""
 
 from __future__ import annotations
 
@@ -67,10 +62,7 @@ def _filter_artifact_to_live_candidates(
     artifact: dict[str, Any], live_cids: set[str]
 ) -> dict[str, Any]:
     """Restrict candidate_order + cells to ``live_cids`` (Y-axis hygiene).
-
-    The Rasch fit stays joint (archive observations still contribute to
-    ``δ_s``); only the displayed candidate axis is filtered.
-    """
+    Rasch fit stays joint (archive observations still contribute to δ_s); only the displayed axis is filtered."""
     filtered_order = [cid for cid in artifact["candidate_order"] if cid in live_cids]
     filtered_cells = [c for c in artifact["cells"] if c["c"] in live_cids]
     rasch = dict(artifact["rasch"])

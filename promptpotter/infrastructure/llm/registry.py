@@ -1,10 +1,7 @@
 """Provider registry — name → factory.
 
-``get_llm_client(provider)`` returns the configured client for one of the
-known provider names. Provider must be supplied explicitly — typically
-from ``CampaignConfig.optimizer_llm.provider``. There is no
-auto-detection or env-var fallback.
-"""
+Provider must be supplied explicitly (typically ``CampaignConfig.optimizer_llm.provider``);
+no auto-detection or env-var fallback."""
 
 from __future__ import annotations
 
@@ -99,12 +96,7 @@ _PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
 
 
 def get_llm_client(provider: str) -> LLMClientBase:
-    """Construct the LLM client for ``provider``.
-
-    Provider must be supplied explicitly — typically from
-    ``CampaignConfig.optimizer_llm.provider``. There is no auto-detection
-    or env-var fallback.
-    """
+    """Construct the LLM client for ``provider``."""
     factory = _PROVIDER_FACTORIES.get(provider)
     if factory is None:
         valid = ", ".join(sorted(_PROVIDER_FACTORIES))

@@ -1,31 +1,15 @@
 """MeasurementArchive facade — sole gateway to the cross-cycle archive.
 
-This file participates in **archive** as the sole access facade.
-The archive is "the database core" (per ``docs/architecture.md``):
-cross-cycle, cross-session, content-addressed measurements indexed by
-sample and by node-config. Every read or write of the archive lives
-behind this module. Reaching into ``session.store.archive`` (or
-``store.archive``, or ``self.store.archive``) outside this file is
-drift; ``tests/test_invariants.py::test_no_direct_archive_access_outside_facade``
-enforces the invariant via grep.
+The archive is the database core (per ``docs/architecture.md``): cross-cycle,
+content-addressed measurements indexed by sample + node-config. Every archive
+read/write lives behind this module; reaching ``stores.archive`` (or aliasing
+it) outside this file is drift, enforced by
+``test_no_direct_archive_access_outside_facade``.
 
-Aliasing the archive (``archive = session.store.archive``) is also
-drift — the widened grep also catches that.
-
-The facade narrows the surface to the exact reads + writes today's
-callers need. It is *not* a re-shaping of the archive API; pure
-gateway. Adding a new archive read/write means adding a function here
-first, then calling it from the consumer.
-
-Layer placement: facade lives in ``infrastructure/store/`` (next to
-the archive itself) rather than ``application/scoring/`` because
-``infrastructure/tracing/replay.py`` is one of the consumers and
-``infrastructure → application`` is a forbidden hexagonal direction.
-
-Out-of-bounds: no caller may access ``stores.archive`` member methods
-directly outside this module. ``record_measurement_run`` is the sole
-write; any new write means a new function here, not a sidecar.
-"""
+Placement in ``infrastructure/store/`` (not ``application/scoring/``) because
+``tracing/replay.py`` is a consumer and ``infrastructure → application`` is
+forbidden. ``record_measurement_run`` is the sole write — any new write means
+a new function here, not a sidecar."""
 
 from __future__ import annotations
 
@@ -68,11 +52,7 @@ def measurements_for_sample(
     dataset_name: str | None = None,
     include_unknown: bool = False,
 ) -> list[Measurement]:
-    """Every measurement of one training example, across all configs.
-
-    ``dataset_name`` filters cross-cycle reads to one dataset's archive
-    slice — production sites pass ``session.dataset_name``.
-    """
+    """Every measurement of one sample, across configs; *dataset_name* scopes the slice."""
     return stores.archive.measurements_for_sample(
         backend_id,
         sample_id,
@@ -90,26 +70,13 @@ def measurement_series_for_samples(
     dataset_name: str | None = None,
     include_unknown: bool = False,
 ) -> dict[int, list[dict[str, Any]]]:
-    """Per-sample chronological measurement series, one archive walk for the whole set.
+    """Per-sample chronological series, one archive walk for the whole set.
 
-    Returns ``{sample_id: [{ord, hit, run_id, created_at}, ...]}`` with each
-    list sorted ascending by ``ord`` — a stable composite of
-    ``created_at`` + ``run_id`` + per-run item index. Samples in *sample_ids*
-    with no archive measurements come back as empty lists; samples
-    outside *sample_ids* are skipped.
-
-    Errored items (``item["error"]`` truthy or ``predicted == "ERROR"``) are
-    dropped — they are not observations of the sample's difficulty, just
-    pipeline-side failures. This matches the Rasch-fit filter in
-    :func:`promptpotter.application.intelligence.hard_sample_archive.build_archive_observations`
-    so the dashboard's empirical hit-rate column and the Rasch δ_s estimate
-    see the same observation set.
-
-    Powers the read-only ``/datasets/{name}/measurement-series`` endpoint:
-    the hard-sample leaderboard's Meas heat-map column needs the full series
-    per visible sample under the workspace scope, and walking the archive
-    once is O(runs) instead of O(samples × runs).
-    """
+    ``{sample_id: [{ord, hit, run_id, created_at}, ...]}`` sorted ascending by
+    ``ord`` = ``created_at``/``run_id``/item-index. Errored items dropped
+    (matches ``build_archive_observations``'s Rasch-fit filter so the
+    dashboard hit-rate column and δ_s estimate see the same observations).
+    Powers the ``/datasets/{name}/measurement-series`` endpoint."""
     wanted = set(sample_ids)
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in wanted}
     for entry in stores.archive.list_all(
@@ -159,12 +126,9 @@ def measurements_for_config(
 
 
 def load_run(stores: Stores, backend_id: str, run_id: str) -> dict[str, Any] | None:
-    """Load one run's full detail file by ``run_id``; ``None`` if absent.
-
-    Detail load is dataset-agnostic by design — the run_id encodes its
-    dataset via the archive index; callers that need the dataset stamp
-    read ``detail.get("dataset_name")`` themselves.
-    """
+    """Load one run's detail file by ``run_id``; ``None`` if absent.
+    Dataset-agnostic — run_id encodes its dataset via the index;
+    callers needing the stamp read ``detail['dataset_name']`` themselves."""
     return stores.archive.load_by_id(backend_id, run_id)
 
 
@@ -218,11 +182,7 @@ def reusable_results(
     dataset_name: str | None = None,
     include_unknown: bool = False,
 ) -> dict[str, dict[str, Any]]:
-    """Per-sample cache reuse from prior runs sharing *node_configs* (full or prefix-trusted).
-
-    ``dataset_name`` scopes cache reuse to one dataset's archive — see
-    :meth:`MeasurementArchive.load_reusable_results`.
-    """
+    """Per-sample cache reuse from prior runs sharing *node_configs*; *dataset_name* scopes the slice."""
     return stores.archive.load_reusable_results(
         backend_id,
         node_configs,
@@ -244,19 +204,13 @@ def aggregate_per_query(
     dataset_name: str | None = None,
     include_unknown: bool = True,
 ) -> dict[str, Any]:
-    """Roll up every archived measurement into per-query stats — the "your data accumulates" view.
+    """Per-query roll-up across the archive (the "your data accumulates" view).
 
-    Walks the index, loads each detail file, groups items by ``query``,
-    and returns ``{n_runs, n_measurements, n_unique_queries, per_query: [...]}``
-    where each ``per_query`` row carries ``{query, sample_id, n_measurements,
-    n_unique_configs, mean_fitness, hit_rate, last_seen}``. Rows are
-    sorted by ``n_measurements`` desc — most-reused queries first.
-
-    Groups by query text (which is unique per dataset), so cross-dataset
-    pooling is structurally avoided here even though the default takes
-    every entry. Callers may scope to a single ``dataset_name`` for the
-    operator-facing accumulation view.
-    """
+    Returns ``{n_runs, n_measurements, n_unique_queries, per_query: [...]}``
+    where rows carry ``{query, sample_id, n_measurements, n_unique_configs,
+    mean_fitness, hit_rate, last_seen}``, sorted by ``n_measurements`` desc.
+    Groups by query text (unique per dataset), so cross-dataset pooling is
+    structurally avoided even at default scope."""
     by_query: dict[str, dict[str, Any]] = {}
     seen_run_ids: set[str] = set()
     total_measurements = 0

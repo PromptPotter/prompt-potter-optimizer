@@ -1,20 +1,8 @@
 """LiveStateCore + spend bookkeeping — shared accumulators for live subscribers.
 
-Both ``LiveDisplay`` (terminal) and ``LiveDashboardView`` (``dashboard.json``)
-subscribe the same ``CycleEventLog``. They maintain divergent surface-specific
-state (tqdm bars on one side, JSON spend rollup on the other), but a small
-core overlaps:
-
-* the active round number,
-* the running origin + best anchors (updated on ``INIT:exit`` and on an
-  improved ``L1_SCORE:exit``),
-* the round-wide Posterior-of-Being-Best snapshot used to render cross-round
-  ▲/▼ arrows, and
-* the two-bucket (backend / loop) spend rollup populated from per-sample
-  ``pipeline_data.step_tokens`` and per-call ``TokenUsageRecord`` rows.
-
-Surface state stays on each class.
-"""
+``LiveDisplay`` and ``LiveDashboardView`` both subscribe to the same ledger;
+the overlap (round number, origin/best anchors, PoBB snapshot, backend/loop
+spend rollup) lives here. Surface-specific state stays on each class."""
 
 from __future__ import annotations
 
@@ -68,13 +56,9 @@ def add_to_spend_bucket(
     model: str | None,
     wire_cost_usd: float | None,
 ) -> None:
-    """Single mutator for both spend buckets. Recomputes the running total.
-
-    ``wire_cost_usd`` is the provider-reported USD for this call, if any
-    (today only OpenRouter ships it). When provided, it short-circuits the
-    rate lookup; this is the path that matches the operator's invoice.
-    Otherwise the rate table is consulted via ``compute_usd``.
-    """
+    """Single mutator for both buckets; recomputes the running total.
+    ``wire_cost_usd`` is the provider-reported USD (OpenRouter); when present it
+    short-circuits the rate table and matches the operator's invoice."""
     b = spend.setdefault(bucket, empty_bucket())
     b["input_tokens"] += in_tok
     b["output_tokens"] += out_tok
@@ -91,16 +75,10 @@ def add_to_spend_bucket(
 
 
 def accumulate_backend_spend(spend: dict[str, Any], pipeline_data: dict[str, Any]) -> None:
-    """Sum per-sample backend tokens into ``spend["backend"]``.
-
-    Reads ``pipeline_data.step_tokens`` (per-LLM-node ``{input, output,
-    cost_usd?}``) and ``pipeline_data.llm_provider`` (model string). When a
-    step entry carries ``cost_usd`` (set by the backend when the wire LLM is
-    OpenRouter), it short-circuits the rate-table lookup. Otherwise
-    ``shared/spend.py`` resolves USD; unknown models still bump token totals
-    so the chip falls back to a token-count display rather than a fake zero.
-    Cached samples skip this call (no fresh wire cost).
-    """
+    """Sum per-sample backend tokens into ``spend['backend']``.
+    Reads ``step_tokens`` + ``llm_provider``; per-step ``cost_usd`` short-circuits
+    the rate table. Unknown models still bump tokens (chip falls back to a
+    token-count, not a fake zero). Cached samples skip this call."""
     step_tokens = pipeline_data.get("step_tokens") or {}
     if not isinstance(step_tokens, dict):
         return
@@ -122,8 +100,7 @@ def accumulate_backend_spend(spend: dict[str, Any], pipeline_data: dict[str, Any
 
 
 def apply_token_usage(spend: dict[str, Any], record: TokenUsageRecord) -> None:
-    """Route an optimizer LLM call into ``spend["loop"]`` (or ``backend`` for
-    backend-kind events that surface here)."""
+    """Optimizer call → ``spend['loop']``; backend-kind events → ``backend``."""
     bucket = "loop" if record.kind == "optimizer" else "backend"
     add_to_spend_bucket(
         spend,
@@ -136,18 +113,10 @@ def apply_token_usage(spend: dict[str, Any], record: TokenUsageRecord) -> None:
 
 
 def backfill_spend_rates(spend: dict[str, Any]) -> dict[str, Any]:
-    """Recompute ``used_usd`` on buckets whose rate didn't resolve at write
-    time but does resolve now.
-
-    Optimizer cache hits short-circuit ``emit_token_usage`` (see
-    ``llm_call.py``), so a re-run never fires fresh ``TokenUsageRecord``
-    events for the loop bucket. The persisted bucket keeps its old
-    ``rate_known: false`` even after ``shared/spend.py`` learns the model.
-    This pass re-resolves the rate on load — if it now succeeds, ``used_usd``
-    is computed from the accumulated tokens and the bucket flips to
-    ``rate_known: true``. Per-event historical rate drift is accepted as a
-    tolerable approximation (the alternative is replaying the entire ledger).
-    """
+    """Recompute ``used_usd`` on buckets whose rate now resolves.
+    Optimizer cache hits short-circuit ``emit_token_usage`` so a re-run never
+    fires fresh ``TokenUsageRecord`` for the loop bucket; this pass re-resolves
+    the rate on load (per-event historical drift accepted vs replaying the ledger)."""
     for b in spend.values():
         if not isinstance(b, dict):
             continue
@@ -184,14 +153,9 @@ class LiveStateCore:
 
 
 def apply_phase(core: LiveStateCore, event: PhaseEvent, view: dict[str, Any] | None = None) -> None:
-    """Update *core* from a ``PhaseEvent``.
-
-    Round number tracks ``event.round`` directly. Origin is set once on
-    ``INIT:exit`` and never re-anchored — "vs origin" labels are meant
-    to read against the immutable campaign origin, not the running
-    leader. The leader anchor (``best_acc``) advances on an improved
-    ``L1_SCORE:exit``.
-    """
+    """Update *core* from a ``PhaseEvent``. Origin set once on ``INIT:exit`` and
+    never re-anchored (immutable campaign origin). Leader (``best_acc``) advances
+    on improved ``L1_SCORE:exit``."""
     if event.round is not None:
         core.round_num = event.round
     if view is None:

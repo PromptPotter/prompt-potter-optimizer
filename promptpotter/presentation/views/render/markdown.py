@@ -1,10 +1,7 @@
-"""log.md render target — typed ``LogMdView`` → markdown digest.
+"""``log.md`` render target — ``LogMdView`` → markdown digest.
 
-Per-cycle digest the runner writes after each round into
-``campaigns/<cycle_id>/log.md``. Includes the per-round block, P(best)
-trajectory sparklines, hard-sample heatmap (when present), fork siblings,
-and the final-winner JSON dump.
-"""
+Per-cycle digest written to ``campaigns/<cycle_id>/log.md`` after each round:
+per-round block, P(best) sparklines, hard-sample heatmap, fork siblings, final-winner dump."""
 
 from __future__ import annotations
 
@@ -54,11 +51,7 @@ def _spark(values: list[float]) -> str:
 
 
 def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
-    """Render the per-round P(best) trajectory sparkline section.
-
-    Skipped silently when the JSONL stream wasn't available (resumed
-    cycles, pre-PoBB rounds).
-    """
+    """Per-round P(best) sparkline section; silent when JSONL is absent (resumed cycles, pre-PoBB rounds)."""
     if not rd.p_best_trajectory:
         return []
     # Sort by final P(best) desc so the round winner reads first.

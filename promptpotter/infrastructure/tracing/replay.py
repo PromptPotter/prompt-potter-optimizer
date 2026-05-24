@@ -1,14 +1,11 @@
-"""Replay historical ``archive/measurements/`` entries into the Langfuse sink.
+"""Replay ``archive/measurements/`` entries into the Langfuse sink.
 
-Reads JSON from disk and emits :class:`QueryScoreStart` / :class:`QueryNodeSpan`
-/ :class:`QueryScoreEnd` events into an :class:`ObservabilityBridge`. The sink
-owns every Langfuse SDK call — this module is just a disk walker.
+Emits ``QueryScoreStart``/``QueryNodeSpan``/``QueryScoreEnd`` into an
+``ObservabilityBridge``; the sink owns every Langfuse SDK call.
 
-Idempotency tracking (``backfilled_run_ids`` and ``dataset_items`` seed)
-lives in ``obs/langfuse/backfill_state.json``; the sink's own persisted
-id maps in ``campaigns/{cycle_id}/langfuse_state.json`` are the source
-of truth after the first replay.
-"""
+Idempotency: ``obs/langfuse/backfill_state.json`` seeds
+``backfilled_run_ids`` + ``dataset_items``; after the first replay, the
+sink's per-cycle ``langfuse_state.json`` id maps are the source of truth."""
 
 from __future__ import annotations
 
@@ -237,8 +234,7 @@ def sync_langfuse_runs(
         _save_state(store, backend_id, _fresh_state())
         logger.info("Langfuse push state reset — will re-push all runs.")
 
-    # Langfuse backfill walks every historical run regardless of which
-    # dataset is active — observability is cross-dataset on purpose.
+    # Backfill is cross-dataset on purpose (observability spans datasets).
     n_runs = len(archive_views.list_runs(store, backend_id, include_unknown=True))
     if n_runs == 0:
         logger.info("No completed dataset runs — skipping Langfuse backfill.")

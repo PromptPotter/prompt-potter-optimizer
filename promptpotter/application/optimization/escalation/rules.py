@@ -1,17 +1,11 @@
-"""Default escalation rule set — reproduces :meth:`EscalationState.observe_round`.
+"""Default escalation rule set — reproduces ``EscalationState.observe_round``.
 
-Each rule is a frozen :class:`EscalationRule`: predicate over
-:class:`EscalationInputs`, action to fire, integer priority, and a
-reason template the evaluator formats into the returned
-:class:`EscalationEvent.reason`. Higher priority wins; ties resolved by
-list order.
+Each rule = (predicate over ``EscalationInputs``, action, priority, reason
+template). Higher priority wins; ties resolve by list order.
 
-The yield-driven rule (``l2_axis_yield_drought``) is a permanent rule —
-it fires whenever the cycle has AxisIndex evidence and that evidence
-shows zero productive axes. When the signal is unavailable (early
-cycles, no AxisIndex) the rule's predicate is False and other rules
-take over.
-"""
+``l2_axis_yield_drought`` is permanent — fires whenever AxisIndex shows
+zero productive axes; predicate is False when the signal is unavailable
+(early cycles), so other rules take over."""
 
 from __future__ import annotations
 
@@ -27,12 +21,8 @@ ReasonFn = Callable[[EscalationInputs], str]
 
 @dataclass(frozen=True)
 class EscalationRule:
-    """One declarative escalation rule.
-
-    Rules are evaluated in priority order (higher first); first matching
-    rule wins. The fall-through pattern is a low-priority rule with
-    ``when=lambda s: True``.
-    """
+    """Declarative rule; evaluated highest-priority first, first match wins.
+    Fall-through = low-priority + ``when=lambda s: True``."""
 
     name: str
     when: PredicateFn
@@ -46,11 +36,9 @@ class EscalationRule:
         return self.reason or self.name
 
 
-# perfect_accuracy preempts so a perfect-fit round terminates instead of
-# firing one more L2. l2_axis_yield_drought (priority 60) preempts the
-# patience wait when the AxisIndex shows no productive axes. Setting
-# l1_patience=0 unifies the "fire L2 every round" cadence under this
-# primitive: l1_continue never matches, so we fall through to l1_to_l2.
+# perfect_accuracy preempts so a perfect-fit round terminates instead of firing L2;
+# l2_axis_yield_drought preempts patience when AxisIndex shows no productive axes;
+# l1_patience=0 collapses "fire L2 every round" via the l1_to_l2 fall-through.
 DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
     EscalationRule(
         name="perfect_accuracy",

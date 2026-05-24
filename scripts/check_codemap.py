@@ -1,21 +1,9 @@
-"""Fail loudly when a `.ai/CODEMAP.md` `symbol → file:line` citation goes stale.
+"""Fail loudly when a ``.ai/CODEMAP.md`` ``symbol → file:line`` citation goes stale.
 
-`build_ai_index.py` regenerates `.ai/SYMBOLS.txt` but never touches the
-hand-written CODEMAP tables, so a refactor that moves a symbol silently
-re-rots the AI-navigation map. This check parses every full-path
-`symbol → file:line` row from the CODEMAP backbone tables and asserts the
-symbol still resolves at (or near) the cited line.
-
-Run from the repo root:
-
-    python scripts/check_codemap.py
-
-Exit 0 = every checked citation resolves. Exit 1 = at least one is stale.
-Rows with abbreviated paths, dotted/decorated symbols, or multiple
-symbols / citations are skipped — this check trades coverage for zero
-false positives. The backbone symbol-index tables are full-path and
-carry the bulk of the citations an AI agent navigates by.
-"""
+Parses every full-path citation from the CODEMAP backbone tables and asserts the
+symbol still resolves at (or near) the cited line. Exit 0 = clean, 1 = stale.
+Rows with abbreviated paths / dotted symbols / multiple citations are skipped
+(trading coverage for zero false positives)."""
 
 from __future__ import annotations
 
@@ -26,12 +14,10 @@ from pathlib import Path
 
 CODEMAP = Path(".ai") / "CODEMAP.md"
 
-# A symbol may legitimately drift a few lines under an unrelated edit; only
-# a wrong file, an absent symbol, or a gross line jump should fail.
+# Symbols drift a few lines under unrelated edits; wrong file / absent / gross line jump fails.
 LINE_TOLERANCE = 5
 
-# Only full-path citations rooted at a real package dir are resolvable
-# unambiguously; abbreviated paths (`dispatch/hub/facade.py`) are skipped.
+# Full-path citations only (abbreviated like ``dispatch/hub/facade.py`` are skipped).
 _PY_CITATION = re.compile(r"((?:promptpotter|tests)/[\w./]+\.py):(\d+)")
 _BACKTICK = re.compile(r"`([^`]+)`")
 

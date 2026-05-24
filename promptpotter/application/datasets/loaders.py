@@ -1,9 +1,7 @@
-"""Ground-truth loaders + train/test splitter + the dataset registry.
+"""Ground-truth loaders + train/test splitter + dataset registry.
 
-Excel and HuggingFace loaders, each returning ``list[Sample]`` (the
-canonical per-sample domain object), plus the ``DATASET_LOADERS`` registry
-and ``build_dataset_run_data`` — the measurement-batch builder.
-"""
+Excel + HuggingFace loaders return ``list[Sample]``; ``DATASET_LOADERS`` is the
+name → loader map; ``build_dataset_run_data`` builds the measurement-batch dict."""
 
 from __future__ import annotations
 
@@ -24,8 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Column mapping per Excel sheet type.
-# Keys = sheet names, values = {"query": <col>, "gt": <col>}.
+# Excel sheet name → {"query": col, "gt": col}.
 SHEET_COLUMN_MAP: dict[str, dict[str, str]] = {
     "Sheet1": {"query": "Material name in BOM", "gt": "Dataset in SP"},
     "Material": {"query": "Material name in BOM", "gt": "Dataset in SP"},
@@ -35,10 +32,7 @@ SHEET_COLUMN_MAP: dict[str, dict[str, str]] = {
 
 
 def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
-    """Convert a list of dicts (e.g. from on-disk JSON) into Samples.
-
-    Assigns a positional ``id`` to items lacking one. Extra keys are ignored.
-    """
+    """Convert dicts → Samples; assigns positional ``id`` when missing, ignores extras."""
     return [Sample.from_dict(item, fallback_id=i) for i, item in enumerate(items)]
 
 
@@ -46,12 +40,8 @@ def load_excel_ground_truth(
     path: str | Path,
     sheet_column_map: dict[str, dict[str, str]] = SHEET_COLUMN_MAP,
 ) -> list[dict[str, str]]:
-    """Read sheets from an Excel file; returns internal staging dicts.
-
-    Staging format carries ``source_sheet`` for downstream partitioning in
-    ``split_train_test`` and is not Sample-shaped yet — ids are assigned at
-    split time so the global positional index is stable across train/test.
-    """
+    """Read sheets from an Excel file → staging dicts (carry ``source_sheet`` for
+    ``split_train_test`` partitioning; ids assigned at split time for stable global index)."""
     try:
         import openpyxl
     except ModuleNotFoundError:
@@ -119,11 +109,7 @@ def split_train_test(
     seed: int = 42,
 ) -> tuple[list[Sample], dict[str, list[Sample]]]:
     """Split ground-truth dicts into train + per-domain test Samples.
-
-    Stable ``id`` assignment: ids are assigned sequentially across the
-    full input list (post-sort, pre-shuffle) so a sample keeps the same
-    id regardless of which split it lands in.
-    """
+    Stable ``id``: assigned sequentially across the full input (pre-shuffle), so a sample's id is split-invariant."""
     enumerated = [{**row, "id": i} for i, row in enumerate(data)]
 
     rng = random.Random(seed)
@@ -170,11 +156,7 @@ def split_train_test(
 
 
 def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
-    """Top-``sample_size`` slice of scoring samples.
-
-    Datasets are already shuffled at creation (train/test split, HF load),
-    so the loop-time slice is the deterministic prefix — no second RNG.
-    """
+    """Top-``sample_size`` slice; datasets already shuffled at creation (deterministic prefix, no second RNG)."""
     if sample_size <= 0:
         raise ValueError(f"sp_budget_ttest must be > 0, got {sample_size}")
     return dataset[:sample_size]
@@ -244,18 +226,11 @@ def load_aime_2025(
     return samples
 
 
-# ---------------------------------------------------------------------------
-# Dataset loader registry — add new loaders here
-# ---------------------------------------------------------------------------
+# --- Dataset loader registry ---
 
 
 def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[Sample]:
-    """Load BBEH mini (460 examples, 23 tasks) from HuggingFace.
-
-    BBEH ships as 23 task bins with no native per-sample ID; we assign
-    sequential ``Sample.id`` after flattening. The per-task metadata is
-    dropped (no consumers after pass 2).
-    """
+    """Load BBEH mini (460 examples, 23 tasks). No native per-sample id — assigned sequentially after flattening; per-task metadata dropped."""
     try:
         from datasets import load_dataset
     except ModuleNotFoundError:
@@ -375,13 +350,8 @@ DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
     "bbeh": load_bbeh,
     "justlogic": load_justlogic,
 }
-"""Map dataset name → loader function. Register new datasets here.
-
-``load_potter_traces`` is a specialized prior-run replay loader
-whose rows carry extra fields (round_context, score_delta, …) beyond
-Sample's schema. It is available via direct import but not routed
-through the Sample-typed registry.
-"""
+"""Map dataset name → loader. ``load_potter_traces`` (prior-run replay) ships
+extra non-Sample fields and is direct-import only, not registry-routed."""
 
 
 def load_dataset(name: str, **kwargs: Any) -> list[Sample]:
@@ -408,13 +378,8 @@ def build_dataset_run_data(
     experiment_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict[str, Any]:
-    """Build a measurement-batch dict ready for ``Stores.archive.save()``.
-
-    ``dataset_name`` is required (keyword-only, no default) so every write
-    site declares which dataset's archive slice this measurement belongs
-    to. ``None`` is permitted only for forensic / admin writes outside the
-    optimization loop; production callers pass ``session.dataset_name``.
-    """
+    """Measurement-batch dict ready for ``Stores.archive.save()``.
+    ``dataset_name`` is required (keyword-only); ``None`` permitted only for forensic writes."""
     rendered_prompt = search_point.render()
     sp_h = search_point.sp_hash(pipeline_schema)
     data: dict[str, Any] = {

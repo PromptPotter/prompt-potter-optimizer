@@ -1,22 +1,13 @@
-"""CycleEventLog — the single append-only spine for facts about a campaign cycle.
+"""CycleEventLog — append-only spine for facts about a campaign cycle.
 
-Every fact (decision, phase boundary, live snapshot) is appended as a typed
-``CycleRecord`` to one ``events.jsonl`` per cycle. Projections (live dashboard,
-audit trail, measurement archive, langfuse mirror) subscribe to the spine and
-rebuild their views deterministically — they never write to disk on their
-own initiative.
+Every fact is appended as a typed ``CycleRecord`` to one ``events.jsonl``
+per cycle. Projections (live dashboard, audit trail, archive, langfuse)
+subscribe and rebuild views deterministically — they never write on
+their own initiative.
 
-Path-newtype guards (``SessionFamilyDir`` / ``CycleDir``) live in
-:mod:`promptpotter.domain.cycle_paths` so both this module and the
-projection writers in :mod:`promptpotter.infrastructure.projections` can
-import them without crossing hexagonal layers.
-
-Forks are first-class via ``CycleEventLog.inherit_from(parent, offset)``: a
-fork's ``iter()`` walks the parent's records up to ``offset``, then its
-own appends. The parent records the cut as a
-``ResumeCheckpointRecord(kind=FORK_CUT, ...)`` so the divergence walker sees the
-boundary.
-"""
+Forks are first-class via ``inherit_from(parent, offset)``: the fork's
+``iter()`` walks parent records up to ``offset`` then its own appends;
+the parent records the cut as ``ResumeCheckpointRecord(kind=FORK_CUT)``."""
 
 from __future__ import annotations
 
@@ -39,14 +30,11 @@ _RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(CycleRecord)
 
 
 class CycleEventLog:
-    """Append-only ``events.jsonl`` ledger plus an in-memory subscriber list.
+    """Append-only ``events.jsonl`` plus an in-memory subscriber list.
 
-    One ledger per cycle. The on-disk file is the source of truth; the
-    subscriber list is a transient runtime convenience for live projections.
-
-    Forks: ``inherit_from(parent, offset)`` lets a fork's ``iter()`` walk
-    the parent's records up to the cut point before its own.
-    """
+    One ledger per cycle. The on-disk file is the source of truth;
+    subscribers are a runtime convenience for live projections.
+    Forks via ``inherit_from(parent, offset)``."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
@@ -68,12 +56,8 @@ class CycleEventLog:
 
     def append(self, record: CycleRecord) -> int:
         """Write one record, fan out to subscribers, return its offset.
-
-        ``fallback=str`` lets payload dicts carry arbitrary objects (e.g.
-        Pydantic submodels, dataclasses, enums) without each call site
-        having to project to scalars first; non-JSON values are stringified
-        on disk while subscribers receive the original record in memory.
-        """
+        ``fallback=str`` lets payload dicts carry Pydantic submodels / dataclasses / enums;
+        non-JSON values stringify on disk, subscribers see the original record in memory."""
         offset = self._next_offset
         line = _RECORD_ADAPTER.dump_json(record, fallback=str).decode("utf-8")
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,15 +77,9 @@ class CycleEventLog:
 
     def iter(self, since: int = 0) -> Iterator[CycleRecord]:
         """Yield records from disk starting at offset ``since``.
-
-        For an inherited ledger (``inherit_from`` set), walks the parent's
-        records up to the inherit offset first, then this ledger's own
-        records. ``since`` is interpreted against the combined offset
-        space — offset 0 is the parent's first record.
-
-        Walks the file every call — projections that need streaming should
-        ``bind`` instead. Records past the file's end are silently absent.
-        """
+        Inherited ledger: walks parent up to the inherit offset first, then own appends;
+        ``since`` indexes the combined space (offset 0 = parent's first record).
+        Walks the file every call — projections that need streaming should ``bind`` instead."""
         produced = 0
         if self._inherit_parent is not None:
             for rec in self._inherit_parent.iter():
@@ -122,14 +100,9 @@ class CycleEventLog:
                 produced += 1
 
     def inherit_from(self, parent: CycleEventLog, offset: int) -> None:
-        """Mark this ledger as a fork of *parent*, replaying parent records up to *offset*.
-
-        Subsequent ``iter()`` calls walk the parent's first ``offset``
-        records before this ledger's own. Subscribers see only this
-        ledger's appended records (parent records aren't re-broadcast on
-        subscribe — the parent already broadcast them when they happened).
-        Idempotent: calling twice with the same args is a no-op.
-        """
+        """Mark as a fork of *parent*; ``iter()`` walks parent's first ``offset``
+        records before own appends. Subscribers see only own appends (parent
+        already broadcast when those happened). Idempotent with same args."""
         if self._inherit_parent is parent and self._inherit_offset == offset:
             return
         if self._inherit_parent is not None:

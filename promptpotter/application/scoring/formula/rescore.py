@@ -1,8 +1,4 @@
-"""Result-list rescorer.
-
-``rescore_results`` is the sole writer of top-level ``hit``/``fitness``
-on result dicts. Idempotent under the same ``scorer_id``.
-"""
+"""``rescore_results`` — sole writer of top-level ``hit``/``fitness`` on result dicts; idempotent under same ``scorer_id``."""
 
 from __future__ import annotations
 
@@ -17,11 +13,7 @@ def rescore_results(
     scorer_id: str = "none",
     formula: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Apply *scorer* to each result, accumulating a multi-scorer audit map.
-
-    Sole writer of top-level ``hit``/``fitness`` on result dicts. Skips error
-    results. Idempotent under the same ``scorer_id``.
-    """
+    """Apply *scorer* to each result, accumulating the multi-scorer audit map; skips error rows."""
     from promptpotter.shared.errors import is_error_result
 
     for r in results:

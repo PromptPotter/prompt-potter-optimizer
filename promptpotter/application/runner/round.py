@@ -1,10 +1,7 @@
-"""Round-boundary helpers: persist + close + post-round + escalation hook.
+"""Round-boundary helpers — persist, close, post-round, escalation hook.
 
-Every helper here is part of the round-by-round bookkeeping the main
-loop pivots around. Per CLAUDE.md root: the ledger is the sole
-persistence ingress and display projections subscribe to it; bypassing
-this seam collapses display + audit for the round.
-"""
+The ledger is the sole persistence ingress; display projections subscribe to it
+(bypassing this seam collapses display + audit for the round)."""
 
 from __future__ import annotations
 
@@ -60,13 +57,8 @@ def persist_round(
     is_probe: bool = False,
 ) -> None:
     """Flush decisions, mirror to ledger, write round_data + log.md/review.md, flush recorder.
-
-    ``is_probe`` rides the ``round:complete`` payload so the reducer side
-    (``EscalationState.fold``) can ignore probe rounds without the writer
-    omitting the emit. The emit itself is unconditional — every round that
-    runs to completion lands on the ledger, per §0's "ledger is the sole
-    persistence ingress; display subscribes to the ledger".
-    """
+    ``is_probe`` rides the ``round:complete`` payload so ``EscalationState.fold`` can ignore probe
+    rounds; the emit is unconditional (every completed round lands on the ledger)."""
     flushed: list[ResumeCheckpointRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)
@@ -74,11 +66,8 @@ def persist_round(
         round_result.decisions.extend(d.to_dict() for d in flushed)
         trial_dict["decisions"] = list(round_result.decisions)
 
-    # Stash the axis-memory peaked set on the round dict so the post-round
-    # ``evidence_grounding_present`` behaviour check (run from review.py
-    # against on-disk round files) can reject variants citing axis_memory
-    # to justify mutating a peaked axis. AxisIndex isn't reconstructable
-    # from a round_NNNN.json alone, so we persist the derived set here.
+    # Persist axis-memory peaked set on the round dict — review.py's
+    # ``evidence_grounding_present`` check needs it (AxisIndex isn't reconstructable from round_NNNN.json alone).
     if cycle.axes is not None:
         trial_dict["axis_memory_peaked"] = sorted(cycle.axes.peaked_axes())
 
@@ -116,13 +105,7 @@ def persist_round(
 
 
 def count_positive_yield_axes(cycle: Cycle) -> int | None:
-    """Count axes with effect_size above the AxisIndex noise floor.
-
-    Returns ``None`` when AxisIndex isn't initialised (pre-first-round); a
-    rule consulting this signal must treat ``None`` as "no evidence yet."
-    The threshold mirrors :data:`promptpotter.application.intelligence.indexes.axis.NOISE_THRESHOLD`
-    (= 0.02) — same definition the digest formatter uses.
-    """
+    """Axes with effect_size > AxisIndex noise floor (= 0.02); ``None`` pre-first-round (no AxisIndex yet)."""
     if cycle.axes is None:
         return None
     from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
@@ -140,16 +123,9 @@ async def close_round(
     *,
     is_probe: bool = False,
 ) -> None:
-    """Round-completion bookkeeping that EVERY completed round runs.
-
-    Emits the ledger event trio's tail (``round:display`` via
-    ``cb.on_round_complete`` and ``round:complete`` via ``persist_round``),
-    writes ``round_NNNN.json``, refreshes axis memory. Independent of
-    whether the round feeds escalation — that decision is the caller's.
-    Per §0 of ``docs/architecture.md``: the ledger is the sole persistence
-    ingress and display projections subscribe to it; bypassing this seam
-    collapses display + audit for the round.
-    """
+    """Round-completion bookkeeping every completed round runs.
+    Emits ``round:display`` (via ``cb.on_round_complete``) + ``round:complete`` (via ``persist_round``),
+    writes ``round_NNNN.json``, refreshes axis memory. Independent of whether the round feeds escalation."""
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
     persist_round(cycle, round_result, trial_dict, round_num, session, is_probe=is_probe)
     if cycle.axes and session.store and session.backend_id:
@@ -172,13 +148,9 @@ async def post_round(
     session: Session,
     cb: RunCallbacks,
 ) -> None:
-    """Clean-round escalation observation. Raises StopLoop on stop condition.
-
-    The state machine observes the round outcome up front (bumping L1 stall,
-    deciding CONTINUE / FIRE_L2 / STOP_*); the rest of this function closes
-    the round (via ``close_round``) and dispatches the chosen action. Probe
-    rounds bypass observation and call ``close_round`` directly.
-    """
+    """Clean-round escalation observation; raises ``StopLoop`` on stop condition.
+    State machine observes outcome (CONTINUE / FIRE_L2 / STOP_*), then closes the round and dispatches.
+    Probe rounds bypass observation and call ``close_round`` directly."""
     axes_with_positive_yield = count_positive_yield_axes(cycle)
     event = cycle.escalation.observe_round(
         improved=round_result.improved,

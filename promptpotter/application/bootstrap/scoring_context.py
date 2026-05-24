@@ -1,11 +1,9 @@
 """ScoringContext build + cycle bootstrap.
 
-* `populate_session_scoring` — attach scorer + per-round scorer + obs to a wired Session.
-* `bootstrap_cycle` — resume an existing cycle or create one. Divergence handling lives in
-  `resume_with_divergence_check` via `CampaignConfig.classify_diff_against`.
-* `init_optimization_loop` — runner entry: preflight, origin OSP, Cycle.start, fork-on-divergence,
-  obs + scoring + axes, INIT.exit emit.
-"""
+- ``populate_session_scoring`` — attach scorer + per-round scorer + obs to a Session.
+- ``bootstrap_cycle`` — resume existing cycle or create one.
+- ``init_optimization_loop`` — runner entry: preflight, origin OSP, Cycle.start,
+  fork-on-divergence, obs + scoring + axes, INIT.exit."""
 
 from __future__ import annotations
 
@@ -39,10 +37,8 @@ def bootstrap_cycle(
     *,
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
-    """Resolve the cycle to run (step 3 of bootstrap). Returns `(cycle_id, resumed_from_round)`.
-    Opens the cycle, optionally rewinds it, reports the next L1 round. Drift handling lives in
-    `resume_with_divergence_check`; campaign + root index.json were minted by `auto_mint_session`.
-    """
+    """Resolve cycle (step 3 of bootstrap) → ``(cycle_id, resumed_from_round)``.
+    Opens, optionally rewinds, reports next L1 round. Drift handling in ``resume_with_divergence_check``."""
     from promptpotter.application.runner import cycle_config_identity
 
     if not session.backend_id:
@@ -55,7 +51,7 @@ def bootstrap_cycle(
             store.rewind_to_round(campaign_id, resolved, resume_from_round_override)
         existing = store.load(campaign_id, resolved)
         if existing is not None:
-            # Diag forks re-measure against their own JSP — refresh if drift from inherited value.
+            # Diag forks re-measure against their own JSP; refresh on drift from inherited value.
             if existing.get("origin_accuracy") != origin_accuracy:
                 store.update(campaign_id, resolved, {"origin_accuracy": origin_accuracy})
             return resolved, len(existing.get("rounds", [])) + 1
@@ -77,9 +73,7 @@ def populate_session_scoring(
     source: str = "optimization_loop",
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of bootstrap).
-    Requires `init_services` already ran (store/backend_id/pipeline_schema) and *scoring_formula*
-    resolved from `campaign.json::scoring` by the caller.
-    """
+    Requires ``init_services`` already ran; ``scoring_formula`` resolved from ``campaign.json::scoring`` by the caller."""
     from promptpotter.application.scoring.formula import (
         auto_scorer_id,
         compile_round_scorer,
@@ -158,8 +152,7 @@ def _build_cycle_and_bootstrap(
         config=config,
     )
 
-    # Use session.pipeline_params (overlay-merged) so the origin JSP + derived cycle-id are
-    # sensitive to overlay edits.
+    # session.pipeline_params (overlay-merged) makes origin JSP + cycle-id sensitive to overlay edits.
     base_pp = session.pipeline_params or (
         session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
     )
@@ -234,7 +227,7 @@ def _apply_resume_fork(
         resume_with_divergence_check,
     )
 
-    # =1 is fresh (origin only); real resumes are >=2 (≥1 L1 round on disk).
+    # =1 is fresh (origin only); real resumes are >=2 (>=1 L1 round on disk).
     if resumed_from_round > 1 and resolved_cycle_id:
         fork_result = resume_with_divergence_check(
             session.store.campaigns,
@@ -284,11 +277,11 @@ def _finalize_loop_state(
 
     if resolved_cycle_id:
         session.state.cycle_id = resolved_cycle_id
-        # Idempotent: runner.py may have pre-opened the ledger.
+        # Idempotent — runner.py may have pre-opened the ledger.
         if session.state.ledger is None:
             session.state.ledger = _open_cycle_ledger(session, resolved_cycle_id)
     session.state.tracing_campaign_id = tracing_campaign_id
-    # Full train split is the bank; per-round CAT picker narrows to `sp_budget_ttest` per round.
+    # Full train split = bank; per-round CAT picker narrows to ``sp_budget_ttest``.
     session.scoring.scoring_set = list(dataset)
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round

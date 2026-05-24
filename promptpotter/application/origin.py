@@ -42,7 +42,7 @@ def build_campaign_emitter(
     resumed_from_round: int | None = None,
     recorder: Any | None = None,
 ) -> Any:
-    """Build the live dashboard projection from session + config. Single factory shared by CLI and runner."""
+    """Live dashboard projection from session + config (shared by CLI + runner)."""
     from promptpotter.infrastructure.projections import LiveDashboardView
 
     opt = campaign_config.optimization
@@ -70,11 +70,8 @@ class CampaignOrigin(NamedTuple):
 
 
 def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOrigin:
-    """Extract origin prompt state, accuracy, and results from campaign rounds.
-
-    Searches reversed rounds for the last with actual scoring ``results``,
-    then overrides the prompt_fields with the tip (most recent round).
-    """
+    """Origin prompt state, accuracy, results from campaign rounds.
+    Walks reversed rounds for the last with scoring results; prompt_fields override to the tip."""
     if not campaign_rounds:
         return CampaignOrigin(
             origin_ps={},
@@ -85,8 +82,7 @@ def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOr
 
     tip = campaign_rounds[-1]
 
-    # Prefer accuracy from the last round with scoring results; fall back to
-    # the tip's accuracy (e.g. scan winner carries accuracy but no results).
+    # Prefer accuracy from last round with scoring results; fall back to tip (scan winner: acc but no results).
     origin_acc = tip.get("accuracy", 0.0)
     origin_results: list[Any] = []
     for rd in reversed(campaign_rounds):
@@ -226,7 +222,7 @@ async def prepare_scoring_context(
         base_pipeline_params=pipeline_params,
         schema=pipeline_schema,
     )
-    # populate_session_scoring overwrites session.scoring/source; loop repopulates before round 1.
+    # populate_session_scoring overwrites scoring/source; loop repopulates before round 1.
     prior_schema = session.pipeline_schema
     if pipeline_schema is not None:
         session.pipeline_schema = pipeline_schema
@@ -239,7 +235,7 @@ async def prepare_scoring_context(
         source="origin",
     )
 
-    # ci=0/ct=1 makes the dashboard emitter tick per-sample during origin like L1.
+    # ci=0/ct=1 ⇒ dashboard ticks per-sample during origin like L1.
     if listener is not None:
         emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
 
@@ -291,7 +287,7 @@ def prepare_datasets(
     *,
     force: bool = False,
 ) -> DatasetSummary:
-    """Load/create datasets and build session terms (pure orchestration — notebook prints the summary)."""
+    """Load/create datasets + build session terms (pure orchestration)."""
     from promptpotter.application.datasets import (
         SHEET_COLUMN_MAP,
         load_excel_ground_truth,
@@ -311,9 +307,7 @@ def prepare_datasets(
             for name, items in test_sets.items():
                 store.backends.save_dataset(name, items, source_file=excel_path.name)
 
-    # Single pass — build samples, gt set (for /match index), and unique
-    # query set in one disk-load per split. Test sets contribute GTs only;
-    # train carries query→gt mappings used by the optimization loop.
+    # Single pass per split: samples + GT set (/match index) + unique query set. Test contributes GTs only.
     splits: dict[str, list[Sample]] = {}
     gt_set: set[str] = set()
     all_queries: set[str] = set()

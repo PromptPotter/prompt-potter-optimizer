@@ -1,14 +1,9 @@
 """Stores + LLMClient + connector resolution → ``Session``.
 
-``init_services`` is the entry point: opens stores under the tenant root,
-applies the tenant-pointer guard, resolves the connector, builds the
-``BackendClient``, fetches the pipeline schema, registers the backend,
-constructs the ``Session``, and either loads the dataset or auto-syncs an
-experiment extract from the backend.
-
-Identity + scoring lifecycle live next door (:mod:`session`,
-:mod:`scoring_context`).
-"""
+``init_services`` opens stores under the tenant root, applies the tenant-pointer
+guard, resolves the connector, fetches the pipeline schema, registers the
+backend, and either loads the dataset or syncs an experiment from the backend.
+Identity + scoring lifecycle live in ``session`` + ``scoring_context``."""
 
 from __future__ import annotations
 
@@ -64,14 +59,8 @@ def _apply_tenant_guard(tenant_id: str, take_over: bool, status: Callable[[str],
 def _apply_dataset_overlay(
     backend_resp: dict[str, Any], local_raw: dict[str, Any]
 ) -> dict[str, Any]:
-    """Merge dataset pipeline.json overlay onto the backend response.
-
-    Dataset overlay can carry: ``pipelines.default`` (which subset of nodes
-    is active for this dataset), per-node config deltas, and metadata like
-    ``available_models`` / ``prompt_meta`` / ``optimizer.param_keys``. The
-    backend stays SoT for runtime defaults; the overlay layers operator
-    intent on top.
-    """
+    """Merge dataset ``pipeline.json`` overlay onto the backend response.
+    Overlay carries ``pipelines.default`` / per-node config deltas / metadata; backend stays SoT for runtime defaults."""
     out = copy.deepcopy(backend_resp.get("data") or backend_resp)
     if "pipelines" in local_raw:
         out["pipelines"] = local_raw["pipelines"]
@@ -93,14 +82,9 @@ async def _resolve_pipeline_schema(
     dataset_name: str | None,
     status: Callable[[str], None],
 ) -> PipelineSchema | None:
-    """Backend ``GET /pipeline`` is authoritative for runtime defaults.
-
-    Local ``datasets/{name}/pipeline.json`` is the operator overlay:
-    ``pipelines.default`` selects the active node subset, ``nodes.X.config``
-    carries per-key deltas, plus per-dataset metadata. The two are merged
-    here before parsing — backend underneath, dataset on top. Backend
-    unreachable → fall back to the local file alone (offline mode).
-    """
+    """Backend ``GET /pipeline`` is authoritative for runtime defaults; local
+    ``datasets/{name}/pipeline.json`` is the operator overlay. Merged here before
+    parsing — backend underneath, dataset on top. Backend unreachable → local file alone (offline mode)."""
     backend_resp: dict[str, Any] | None = None
     try:
         backend_resp = await client.fetch_pipeline()
@@ -242,22 +226,11 @@ async def init_services(
     take_over: bool = False,
     tenant_id: str = "default",
 ) -> Session:
-    """Init store, client, pipeline schema, scoring data — step 1 of the
-    bootstrap chain. See :doc:`/developer/bootstrap-sequence` for the
-    end-to-end flow.
+    """Init store, client, pipeline schema, scoring data — step 1 of bootstrap.
 
-    **Preconditions:**
-    - Project layout exists (``.promptpotter/`` tree under ``project_root``).
-    - ``datasets/{dataset_name}/pipeline.json`` exists and declares
-      ``backend_type``.
-
-    **Postconditions:**
-    - Returns a fully wired :class:`Session`: ``store``, ``backend_client``,
-      ``pipeline_schema``, ``tenant``, ``langfuse``, ``samples``,
-      ``index_terms`` populated. ``state`` defaults; no scoring yet.
-
-    Refuses tenant drift unless ``take_over=True``.
-    """
+    Preconditions: ``.promptpotter/`` tree + ``datasets/{dataset_name}/pipeline.json``
+    declaring ``backend_type``. Returns a wired ``Session`` (no scoring yet).
+    Refuses tenant drift unless ``take_over=True``."""
 
     def status(msg: str) -> None:
         if on_status:
@@ -266,8 +239,9 @@ async def init_services(
     if not backend_id:
         backend_id = dataset_name or DEFAULT_BACKEND_ID
     if project_root is None:
-        # bootstrap/wiring.py → bootstrap → application → promptpotter → repo_root
-        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        project_root = (
+            Path(__file__).resolve().parent.parent.parent.parent
+        )  # wiring → bootstrap → application → promptpotter → repo_root
 
     store = build_stores(project_root / ".promptpotter" / "projects", tenant_id=tenant_id)
     _apply_tenant_guard(tenant_id, take_over, status)

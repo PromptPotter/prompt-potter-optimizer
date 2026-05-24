@@ -1,11 +1,7 @@
-"""Per-dataset starting-point prompt store.
+"""Per-dataset starting-point prompt store + backend node overlay reader.
 
-Each dataset ships ``datasets/{name}/prompts/`` with PromptTemplate JSON
-files (6-field canonical decomposition). Resolution: per-node
-``{node_name}.json`` first, then dataset-wide ``{variant}.json``, then
-``FileNotFoundError`` citing both expected paths. This is the one true
-source for origin prompts. Also hosts the backend node overlay reader.
-"""
+Each dataset ships ``datasets/{name}/prompts/`` with PromptTemplate JSON.
+Resolution: ``{node_name}.json`` → ``{variant}.json`` → ``FileNotFoundError``."""
 
 from __future__ import annotations
 
@@ -22,15 +18,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def load_dataset_node_overlay(dataset: str) -> dict[str, dict[str, Any]]:
-    """Read per-node config overrides from ``datasets/{name}/pipeline.json``.
-
-    Returns ``{node_name: {key: value}}`` — a sparse overlay layered onto
-    the wire payload at init. Backend's ``GET /pipeline`` is the source of
-    truth for runtime defaults; this overlay encodes per-dataset operator
-    preferences (e.g. AIME runs through OpenRouter on Mistral instead of
-    the backend's Groq default). Empty ``{}`` when the file is absent or
-    has no per-node config.
-    """
+    """Sparse ``{node_name: {key: value}}`` overlay from ``datasets/{name}/pipeline.json``,
+    layered onto the wire payload at init. Backend ``GET /pipeline`` is SoT for runtime
+    defaults; this overlay encodes per-dataset operator preferences (e.g. AIME via OpenRouter/Mistral)."""
     raw = read_json_optional(_REPO_ROOT / "datasets" / dataset / "pipeline.json")
     if not raw:
         return {}
@@ -58,13 +48,7 @@ def load_node_prompt(
     node_name: str,
     variant: str = "default",
 ) -> PromptTemplate:
-    """Load the canonical starting-point ``PromptTemplate`` for a node.
-
-    Resolution:
-      1. ``datasets/{dataset}/prompts/{node_name}.json`` (per-node canonical)
-      2. ``datasets/{dataset}/prompts/{variant}.json`` (dataset-wide fallback)
-      3. ``FileNotFoundError`` citing both expected paths.
-    """
+    """Load canonical ``PromptTemplate``: ``{node_name}.json`` → ``{variant}.json`` → ``FileNotFoundError``."""
     d = dataset_prompt_dir(dataset)
     node_path = d / f"{node_name}.json"
     data = read_json_optional(node_path)
@@ -85,11 +69,7 @@ def load_node_prompt(
 
 @functools.lru_cache(maxsize=64)
 def load_dataset_prompt(dataset: str, name: str = "default") -> PromptTemplate:
-    """Load a dataset-wide named ``PromptTemplate`` (``{name}.json``).
-
-    Thin wrapper over ``load_node_prompt`` for single-node datasets and
-    display code.  Raises ``FileNotFoundError`` when the file is missing.
-    """
+    """Load dataset-wide ``{name}.json`` (thin wrapper over ``load_node_prompt`` for single-node + display)."""
     path = dataset_prompt_dir(dataset) / f"{name}.json"
     if not path.exists():
         raise FileNotFoundError(

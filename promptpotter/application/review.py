@@ -1,27 +1,10 @@
 """``review.md`` per-cycle renderer — prompt-iteration feedback surface.
 
-Pure function over loaded dicts (peer of ``presentation/views/log_md.py``).
-No I/O. Wiring + write site live in ``runner.py`` so the renderer stays
-testable as a transformation.
+Pure function over loaded dicts (peer of presentation log_md). No I/O.
 
-Inputs
-------
-- ``index`` — ``campaigns/{cycle_id}/index.json`` payload (carries
-  origin / best / final block with ``origin_composite_fitness``,
-  ``prompt_hashes``, ``mode``).
-- ``rounds`` — per-round optimizer state from ``rounds/trial_NNNN.json``,
-  in round order. Carries ``opt_search_point`` (lineage, task_context,
-  critique), composite_fitness, accuracy, l1_yield.
-- ``round_audits`` — per-round LLM I/O from ``.runtime/cache/rounds/round_NNNN.json``,
-  same length and order as ``rounds``. Source of L1 variants for the
-  variants table + behaviour checks. ``None`` for rounds with no audit.
-- ``context_object`` — three task-context strings the wiring layer pulls
-  off ``cycle.task_context`` (pipeline_purpose / optimization_goals /
-  key_challenges by default).
-
-Output is a self-contained markdown document the operator and the
-``potter-l1-meta-campaign`` skill consume after each round.
-"""
+Inputs: ``index`` (campaigns/{cycle_id}/index.json), ``rounds`` (per-round
+opt state), ``round_audits`` (per-round LLM I/O, same length), and three
+task-context strings from ``cycle.task_context``."""
 
 from __future__ import annotations
 
@@ -91,13 +74,8 @@ def render_review_md(
 
 
 def _schema_repair_count(audit: dict[str, Any] | None) -> int:
-    """Sum ``schema_repair_attempts`` across every optimizer node in this round's audit.
-
-    Non-zero means an L1/L2/L3 LLM call returned schema-noncompliant JSON
-    on its first attempt and the client paid a second full round-trip to
-    repair. Cycle-wide rate is the cleanest single-number quality signal
-    for an L1 meta-prompt — bad templates produce silent 2x spend.
-    """
+    """Sum ``schema_repair_attempts`` across optimizer nodes; non-zero ⇒ a second round-trip was paid.
+    Cycle-wide rate is the cleanest single-number quality signal for an L1 meta-prompt."""
     if not audit:
         return 0
     nodes = audit.get("nodes") or {}
@@ -129,12 +107,8 @@ def _compute_behavior_per_round(
     context_object: list[str],
     param_unlock_round: int,
 ) -> tuple[list[list[CheckResult]], list[list[CheckResult]]]:
-    """Per-round L1 and L2 behaviour-check results, same length as ``rounds``.
-
-    One context-build loop feeds both registries. The L2 list is ``[]``
-    for any round where L2 did not fire — ``run_all_l2_checks`` returns
-    empty so an absent fire never counts as a conformance failure.
-    """
+    """Per-round L1 + L2 behaviour-check results (same length as ``rounds``).
+    L2 returns ``[]`` for rounds where L2 didn't fire — absent fire ≠ conformance failure."""
     l1_out: list[list[CheckResult]] = []
     l2_out: list[list[CheckResult]] = []
     prior_audits: list[dict[str, Any]] = []
@@ -191,8 +165,7 @@ def _render_stats_block(
     calls_per_round: list[int],
 ) -> list[str]:
     rounds_to_95 = "—" if stats.rounds_to_95 is None else str(stats.rounds_to_95)
-    # L2 conformance is undefined when L2 never fired — render "n/a" rather
-    # than the vacuous 1.0 so the skill can tell "perfect" from "unmeasured".
+    # L2 conformance "n/a" when L2 never fired (distinguishes from a vacuous 1.0).
     l2_conf = "n/a" if stats.l2_fires == 0 else f"{stats.l2_behavior_pass_rate:.2f}"
     lines = [
         "## L1Stats",

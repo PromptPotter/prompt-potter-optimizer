@@ -1,14 +1,9 @@
-"""``reset`` — drop campaigns + sessions; preserve ``archive/`` (measurements).
+"""``reset`` — drop campaigns + sessions; preserve ``archive/`` (measurements + optimizer-call cache).
 
-Operator escape hatch for the "obsoleted by code change" case: per-cycle
-artifacts under ``campaigns/`` and ``sessions/`` are a function of code +
-measurements, so they're cheap to regenerate. The MeasurementArchive
-(``archive/measurements/``) and the optimizer-call cache
-(``archive/optimizer_calls/``) cost real LLM spend to build and survive
-every reset. Anything else at the tenant top level the operator hasn't
-named yet defaults to *preserve* — a reset never reaches a path it can't
-explain.
-"""
+Operator escape hatch for "obsoleted by code change". Per-cycle artifacts are
+cheap to regenerate; the archive cost real LLM spend and survives reset.
+Anything unnamed at the tenant top level defaults to *preserve* — a reset
+never reaches a path it can't explain."""
 
 from __future__ import annotations
 
@@ -27,16 +22,11 @@ logger = logging.getLogger("promptpotter.presentation.cli.reset")
 __all__ = ["cmd_reset"]
 
 
-# Top-level names under a tenant dir that `reset` removes. Everything else
-# (notably `archive/`) is preserved by default — adding a new disposable
-# tree means adding its name here. The global `.promptpotter/active_session.json`
-# pointer is handled separately (cleared iff it points at a tenant we're
-# resetting).
+# Top-level names ``reset`` removes; everything else (notably ``archive/``) is preserved by default.
+# ``.promptpotter/active_session.json`` is handled separately (cleared iff it points at a tenant being reset).
 _DROP_NAMES = ("campaigns", "sessions")
 
-# Top-level names `reset` documents as preserved. Listed separately so the
-# confirm prompt can name what survives. Adding a new durable tree means
-# adding its name here.
+# Preserved names — listed separately so the confirm prompt can name what survives.
 _PRESERVE_NAMES = ("archive",)
 
 

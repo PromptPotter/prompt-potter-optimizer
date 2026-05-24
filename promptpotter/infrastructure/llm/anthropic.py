@@ -35,7 +35,6 @@ class AnthropicClient(LLMClientBase):
         self._client: AsyncAnthropic | None = None
 
     def _ensure_client(self) -> AsyncAnthropic:
-        """Lazy-initialize the async Anthropic client."""
         if self._client is None:
             try:
                 from anthropic import AsyncAnthropic
@@ -57,14 +56,11 @@ class AnthropicClient(LLMClientBase):
         response_schema: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
-        # Anthropic doesn't accept ``response_format`` on the wire — JSON
-        # output is contractual via the prompt body (the optimizer's
-        # ``answer_format`` field already instructs the model to return
-        # JSON). When ``response_model`` / ``response_schema`` is set, we
-        # parse + validate client-side; the schema is unused on the wire.
+        # Anthropic has no wire ``response_format``: JSON is contractual via the prompt;
+        # ``response_model``/``response_schema`` parse + validate client-side, never sent.
         client = self._ensure_client()
 
-        # Separate system message (Anthropic API convention)
+        # Anthropic convention: system message lifts out of the messages array.
         system_message = None
         anthropic_messages = []
         for msg in messages:
@@ -75,11 +71,7 @@ class AnthropicClient(LLMClientBase):
 
         model_name = model or settings.LLM_MODEL
 
-        # Anthropic's API requires max_tokens. When the caller passes None
-        # (project-wide default = uncapped), we still have to send a value.
-        # 8192 is the per-request ceiling on most Claude models — enough
-        # headroom for any realistic optimizer output; boundary-local only,
-        # not a project default.
+        # Anthropic requires max_tokens; 8192 is the per-request ceiling on most Claude models (boundary-local fallback, not a project default).
         anthropic_max_tokens = max_tokens if max_tokens is not None else 8192
 
         request_params: dict[str, Any] = {

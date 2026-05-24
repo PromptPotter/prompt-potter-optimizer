@@ -1,14 +1,8 @@
-"""DerivedView — typed-record routing for ledger subscribers.
+"""DerivedView — typed-record dispatch for ledger subscribers.
 
-Every concrete projection in this package isinstance-dispatches the same
-``CycleRecord`` subtypes (``PhaseRecord`` / ``SnapshotRecord`` /
-``ResumeCheckpointRecord`` / ``TokenUsageRecord`` / ``LLMCallRecord`` /
-``LLMCallStartRecord`` / ``LLMCallProgressRecord``). This base owns that
-dispatch in one place: subclasses override only the hooks they care
-about, and adding a new ``CycleRecord`` subtype touches one file
-instead of N. Default hooks are no-ops so writers that don't care
-about a kind stay silent without boilerplate.
-"""
+Owns ``isinstance(record, …)`` routing in one place; subclasses override
+only the hooks they care about. Adding a new ``CycleRecord`` subtype
+touches one file. Default hooks are no-ops."""
 
 from __future__ import annotations
 
@@ -53,8 +47,6 @@ class DerivedView:
     def _handle_llm_call(self, record: LLMCallRecord) -> None: ...
 
     def drain(self) -> None:
-        """Settle any buffered state to disk. Called by the runner on cycle
-        teardown (interrupted or completed) so the ledger's truth is mirrored
-        on disk even when no ``round:complete`` boundary arrived. Default:
-        no-op for incremental projections that already flush every event.
-        """
+        """Settle buffered state to disk on cycle teardown so the ledger's
+        truth is mirrored even when no ``round:complete`` arrived. Default:
+        no-op for projections that already flush every event."""

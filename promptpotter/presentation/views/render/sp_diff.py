@@ -1,9 +1,5 @@
-"""SearchPoint-diff table renderer — internal helper for ``candidates_generated``.
-
-Two-column-minimum diff over per-candidate flat param dicts: collapse
-unchanged values to ``·``, inline short values, code long values into a
-legend. Used only by :func:`render_candidates_generated`.
-"""
+"""SearchPoint-diff table — helper for ``candidates_generated``.
+Per-candidate flat param diff: unchanged → ``·``, short inline, long → legend code."""
 
 from __future__ import annotations
 

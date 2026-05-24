@@ -1,10 +1,8 @@
 """Per-sample formula compiler + scoring-spec block parser.
 
-AST-restricted ``eval`` over a namespace built from the result dict's
-``pipeline_data`` + scoring-function registry. Restricted-eval is
-bypassable by default — block at the AST allowlist instead (no attribute
-access, no comprehensions, no lambdas, no walrus, no subscript).
-"""
+AST-restricted ``eval`` over a namespace from the result's ``pipeline_data`` +
+scoring-function registry. Restricted-eval alone is bypassable; the AST
+allowlist (no attribute access / comprehensions / lambdas / walrus / subscript) is the boundary."""
 
 from __future__ import annotations
 
@@ -38,13 +36,9 @@ _SAFE_BUILTINS = {
 }
 
 
-# AST allowlist — restricted-eval is bypassable by default
-# (``().__class__.__base__.__subclasses__()`` reaches anything). Block at the
-# AST instead: no Attribute access (kills .__class__), no comprehensions, no
-# lambdas, no walrus, no subscript. Names are unrestricted because the
-# per-sample namespace is shaped by ``pipeline_data`` and varies per dataset;
-# the boundary is "no attribute access, no unknown calls" — every Call must
-# resolve to a name in ``_SAFE_BUILTINS`` ∪ ``SCORING_FUNCTIONS`` ∪ namespace.
+# AST allowlist — no Attribute (kills ``().__class__...``), comprehensions, lambdas, walrus, subscript.
+# Names are unrestricted (per-sample namespace varies per dataset); every Call must resolve to a name
+# in _SAFE_BUILTINS ∪ SCORING_FUNCTIONS ∪ namespace.
 _ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
     {
         ast.Expression,
@@ -58,7 +52,6 @@ _ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
         ast.Call,
         ast.IfExp,
         ast.keyword,
-        # Operators
         ast.Add,
         ast.Sub,
         ast.Mult,
@@ -82,10 +75,7 @@ _ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
 
 
 def validate_ast(tree: ast.AST, *, source: str) -> None:
-    """Walk *tree*; reject anything outside ``_ALLOWED_AST_NODES``.
-
-    Raises ``ValueError`` (callers report).
-    """
+    """Walk *tree*; raise ``ValueError`` on anything outside ``_ALLOWED_AST_NODES``."""
     for node in ast.walk(tree):
         kind = type(node)
         if kind in _ALLOWED_AST_NODES:

@@ -39,8 +39,8 @@ __all__ = [
 
 
 def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float:
-    """Mean fitness over non-deprecated samples (deprecated already penalized by runtime_failure_rate)."""
-    # Lazy import: scoring → optimization circular.
+    """Mean fitness over non-deprecated samples (deprecated already penalized via runtime_failure_rate)."""
+    # Lazy: scoring → optimization circular.
     from promptpotter.application.optimization.pobb.elimination import is_deprecated
 
     valid = [r for r in results if not is_deprecated(r)]
@@ -195,7 +195,7 @@ def has_limit_node(schema: PipelineSchema) -> bool:
 def _retrieval_shortfall_for_result(
     result: QueryMeasurement, schema: PipelineSchema
 ) -> float | None:
-    """Per-sample mean of min(observed/target, 1.0) over limit-bearing nodes; None when none apply."""
+    """Mean of min(observed/target, 1.0) over limit-bearing nodes; None when none apply."""
     pd = result.get("pipeline_data") or {}
     ratios: list[float] = []
     for node, _key, target in _limit_nodes(schema):
@@ -240,7 +240,7 @@ def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
 
 
 def compute_prompt_compactness(*, opt_sp: Any = None, **_: Any) -> float:
-    """``1 - len(render)/budget``; returns 1.0 on missing/empty so a vacuous prompt doesn't fake a penalty."""
+    """``1 - len(render)/budget``; 1.0 on missing/empty (vacuous prompt doesn't fake a penalty)."""
     if opt_sp is None or not hasattr(opt_sp, "render"):
         return 1.0
     rendered = opt_sp.render() or ""
@@ -256,7 +256,7 @@ class Evaluator:
     scope: Scope
     compute: Callable[..., float]
     data_type: DataType = "NUMERIC"
-    # `high` = larger raw is better; `low` = larger is worse. Webapp What-If panel uses this to direction-correct.
+    # `high` = larger is better; `low` = larger is worse (webapp What-If panel direction-corrects).
     direction: Literal["high", "low"] = "high"
     node_type: str | None = None
     applies: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
@@ -283,10 +283,7 @@ _REGISTRY: list[Evaluator] = [
         compute=compute_degraded_rate,
         direction="low",
     ),
-    # Self-healing channels — one Evaluator per SelfHealerSpec. Each penalizes
-    # candidates whose round triggered the corresponding wound + lower-layer
-    # heal. Operators weight them in the composite_fitness formula; the default
-    # formula gives the four combined ~0.30, second only to accuracy.
+    # Self-healers — one Evaluator per SELF_HEALERS spec; combined weight ~0.30 in default formula.
     *(_make_self_healer_evaluator(spec) for spec in SELF_HEALERS),
     Evaluator(
         name="latency_norm",
@@ -382,7 +379,7 @@ def evaluators_meta() -> list[dict[str, Any]]:
 def _concrete_round_entries(
     schema: PipelineSchema,
 ) -> list[tuple[str, Evaluator, PipelineNode | None]]:
-    """Per-round evaluators that apply. Node-type-bound names get namespaced when >1 matching node."""
+    """Applicable per-round evaluators; node-type-bound names get namespaced when >1 matching node."""
     out: list[tuple[str, Evaluator, PipelineNode | None]] = []
     for ev in _REGISTRY:
         if ev.scope != "per_round":
@@ -433,10 +430,7 @@ def materialize_sample_values(
 
 def default_per_round_formula(schema: PipelineSchema) -> str:
     """``0.55*accuracy + 0.30*self_heal + 0.05*latency + 0.05*recall + 0.05*prompt_compactness``.
-
-    Self-heal split: L1/L2 wounds 0.10 each (frequent, primary signal); L2/L3 guard
-    breaches 0.05 each (rare, deeper failures). Override via `campaign.json::scoring`.
-    """
+    Self-heal split: L1/L2 wounds 0.10 each, L2/L3 guard breaches 0.05 each. Override via campaign.json::scoring."""
     recall_names: list[str] = []
     for display_name, ev, _node in _concrete_round_entries(schema):
         if ev.node_type in ("candidate_source", "ranker", "cache"):
@@ -448,8 +442,7 @@ def default_per_round_formula(schema: PipelineSchema) -> str:
     else:
         recall_expr = "accuracy"
 
-    # Per-channel weights inside the 0.30 self-heal budget. Edit one place to
-    # rebalance — name-driven so SELF_HEALERS additions only need a new entry.
+    # Per-channel weights inside the 0.30 self-heal budget; name-driven so SELF_HEALERS additions just need a new entry.
     healer_weights = {
         "validation_failure_rate": 0.10,
         "runtime_failure_rate": 0.10,

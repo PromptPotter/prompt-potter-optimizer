@@ -1,10 +1,8 @@
-"""Sweep-toolkit — result JSON, L1 swap, slicing, rank table.
+"""Sweep toolkit — result JSON, L1 swap, slicing, rank table.
 
-Verbs (`time-to`, `round1`, `round2`) persist one result JSON under
-``archive/sweeps/{l1_meta_prompt_hash}/{dataset}/`` so the directory groups
-every sweep against the L1 meta-prompt revision that produced it. Single
-result shape; unpopulated fields land as ``None``.
-"""
+Verbs (`time-to`/`round1`/`round2`) persist one result JSON under
+``archive/sweeps/{l1_meta_prompt_hash}/{dataset}/`` so the dir groups sweeps
+by the L1 meta-prompt revision that produced them. Single shape; unpopulated fields are ``None``."""
 
 from __future__ import annotations
 
@@ -72,9 +70,7 @@ SWEEP_RESULT_FIELDS: tuple[str, ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Result identity + paths
-# ---------------------------------------------------------------------------
+# --- Result identity + paths ---
 
 
 def mint_sweep_id() -> str:
@@ -151,9 +147,7 @@ def current_optimizer_prompt_hash(node: str = "l1_generate") -> str:
     return compute_optimizer_prompt_hashes().get(node, "unknown")
 
 
-# ---------------------------------------------------------------------------
-# L1 prompt override — file-path-driven variant swap for round1/round2
-# ---------------------------------------------------------------------------
+# --- L1 prompt override (file-path-driven variant swap) ---
 
 
 def load_prompt_template_from_path(path: Path) -> PromptTemplate:
@@ -181,14 +175,12 @@ def optimizer_prompt_override(node_name: str, template: PromptTemplate | None) -
         yield
     finally:
         _opt_prompts._load_local = original
-        # Clear the lru_cache so the canonical loader re-reads from disk, not a stale override.
+        # lru_cache clear: canonical loader re-reads from disk, not a stale override.
         with contextlib.suppress(AttributeError):
             original.cache_clear()
 
 
-# ---------------------------------------------------------------------------
-# Slice modifier — sample-population filter shared across verbs
-# ---------------------------------------------------------------------------
+# --- Slice modifier ---
 
 
 SLICE_NAMES: tuple[str, ...] = ("all", "easy", "hard")
@@ -276,9 +268,7 @@ def slice_samples(
     return filtered, name
 
 
-# ---------------------------------------------------------------------------
-# Panel stats — derived from per-round candidate audit trail
-# ---------------------------------------------------------------------------
+# --- Panel stats (from per-round candidate audit trail) ---
 
 
 def compute_panel_stats(
@@ -308,9 +298,7 @@ def compute_panel_stats(
     }
 
 
-# ---------------------------------------------------------------------------
-# Result discovery + rank table
-# ---------------------------------------------------------------------------
+# --- Result discovery + rank table ---
 
 
 def find_sweep_results(

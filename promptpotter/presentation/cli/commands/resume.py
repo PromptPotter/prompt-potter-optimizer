@@ -1,20 +1,11 @@
 """``cmd_resume`` — continue the active campaign.
 
-Bare ``resume`` picks up from the latest completed round. ``--from N``
-rewinds in place. ``--fork-on-divergence`` mints a sibling cycle when
-the decision-replay walker disagrees with the recorded trail.
-``--no-check`` accepts divergence silently. ``--diag`` runs diagnostic
-mode against the active cycle (branches a counted sibling on top of a
-prior diag cycle).
+Flags: ``--from N`` (rewind), ``--fork-on-divergence`` (sibling on replay
+disagree), ``--no-check`` (silent), ``--diag`` (diag-sibling BFS).
 
-Drift detection is a stored-value comparison: the campaign manifest
-(``campaign.json::root_content_hash``) holds the origin content hash at
-mint time, and ``resume`` recomputes the current config's hash and
-compares. A match resumes in place; a mismatch surfaces a "what changed"
-report and — via :meth:`CampaignConfig.classify_diff_against` — tells the
-operator whether the diff is policy-only (safe, resume proceeds) or
-data-affecting (recommend ``--fork-on-divergence`` or a fresh ``new``).
-"""
+Drift detection compares the stored ``campaign.json::root_content_hash``
+to a freshly computed hash; ``classify_diff_against`` flags the diff as
+policy-only (safe to resume) or data-affecting (recommends fork or fresh ``new``)."""
 
 from __future__ import annotations
 
@@ -62,28 +53,12 @@ def _prepare_cycle_for_resume(
 ) -> dict[Any, Any]:
     """Apply pipeline to session + verify the campaign config still matches.
 
-    Drift is detected by recomputing the current config's content hash and
-    comparing it to the stored ``campaign.json::root_content_hash``:
+    Drift = recomputed hash vs stored ``campaign.json::root_content_hash``:
+    empty stored ⇒ backfill; match ⇒ resume; differ ⇒ classify
+    POLICY_ONLY (safe) vs DATA_AFFECTING (recommend fork or fresh ``new``;
+    TTY pivot offered when ``pivot_prompt=True``, sweep callers pass False).
 
-    * ``root_content_hash == ""`` (migrated campaign with no backfilled
-      hash) — accept the resume and backfill the recomputed hash.
-    * hashes MATCH — resume in place, no fork prompt.
-    * hashes DIFFER — surface a "what changed" report. The diff is also
-      classified via :meth:`CampaignConfig.classify_diff_against`:
-      ``POLICY_ONLY`` is safe (resume proceeds — the divergence walk in
-      ``resume_with_divergence_check`` continues on the parent's data
-      trace); ``DATA_AFFECTING`` recommends ``--fork-on-divergence`` and,
-      with a TTY and ``pivot_prompt=True``, offers a pivot to a fresh
-      ``new`` run. Sweep callers pass ``pivot_prompt=False`` — pivoting
-      would silently turn a sweep into a new-campaign run. Non-TTY ⇒
-      structured error so scripts get a deterministic exit-code path.
-
-    A second, independent check covers **optimizer-prompt drift**: the
-    campaign id folds in the optimizer meta-prompt hash, so editing
-    ``datasets/_optimizer/`` since mint time halts the resume with a
-    pointer to ``new`` (which mints a distinct campaign for the new
-    optimizer set). Empty stored hash means backfill, like the target hash.
-    """
+    Second check: optimizer-prompt drift halts resume with a pointer to ``new``."""
     from promptpotter.application.config import DiffScope
     from promptpotter.application.optimization.dispatch.llm_call import (
         combined_optimizer_prompt_hash,
@@ -93,8 +68,7 @@ def _prepare_cycle_for_resume(
     pipeline_params, _origin, expected_cycle_id = _prepare_cycle(
         session, campaign_config, train_data
     )
-    # build_origin_cycle_id yields ``cycle_<content_hash>`` — the bare hash
-    # is what campaign.json::root_content_hash stores.
+    # build_origin_cycle_id yields ``cycle_<hash>``; campaign.json stores the bare hash.
     current_hash = expected_cycle_id.removeprefix("cycle_")
 
     campaign = session.store.campaigns.load_campaign(ctx.campaign_id)
@@ -105,8 +79,7 @@ def _prepare_cycle_for_resume(
         )
 
     if campaign.root_content_hash == "":
-        # Migrated campaign — no backfilled hash. Accept the resume and
-        # backfill so future resumes have a baseline to diff against.
+        # Migrated campaign — no backfilled hash. Backfill so future resumes have a baseline.
         session.store.campaigns.update_campaign(
             ctx.campaign_id, {"root_content_hash": current_hash}
         )
@@ -129,10 +102,7 @@ def _prepare_cycle_for_resume(
             print(f"  changed:      {', '.join(diffed)}")
         print()
         if scope is DiffScope.POLICY_ONLY:
-            # Policy-only diff: cached measurements + L1 candidates stay
-            # valid, past decisions are still the audit record. Resume
-            # proceeds; the divergence walk short-circuits in
-            # resume_with_divergence_check.
+            # Policy-only: cached measurements + L1 candidates stay valid; divergence walk short-circuits.
             print("Diff is policy-only — safe to resume in place. The new policy")
             print("governs unevaluated rounds; past measurements are reused.")
         else:
@@ -164,11 +134,7 @@ def _prepare_cycle_for_resume(
                 )
             raise _PivotToFreshError(dataset_name)
 
-    # Optimizer-prompt drift — the campaign's identity folds in the optimizer
-    # meta-prompts (datasets/_optimizer/). Editing them is data-affecting:
-    # cached rounds ran the old prompts, unevaluated rounds would run the new
-    # ones. `new` is the fix — it auto-mints a distinct campaign for the new
-    # optimizer set.
+    # Optimizer-prompt drift — campaign identity folds in datasets/_optimizer/; editing them is data-affecting (``new`` is the fix).
     current_optimizer_hash = combined_optimizer_prompt_hash()
     if campaign.optimizer_prompt_hash == "":
         session.store.campaigns.update_campaign(
@@ -211,10 +177,8 @@ def _prepare_cycle_for_resume(
 
 
 def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session: Session) -> None:
-    """Diag-BFS: re-running ``--diag`` against a finalized diag cycle branches
-    off a counted sibling (``{root}_diag_NNN``) instead of overwriting the
-    parent's archive. Each probe is its own cycle with ``parent_cycle_id`` set;
-    origin measurements stay shared via the JSP-keyed archive."""
+    """Diag-BFS: ``--diag`` against a finalized diag cycle branches a counted sibling
+    (``{root}_diag_NNN``); each probe is its own cycle with ``parent_cycle_id`` set."""
     if not (
         getattr(args, "diag", False)
         and ctx.cycle_id
@@ -292,9 +256,7 @@ async def _run_loop(
     session: Session,
     train_data: list[Sample],
 ) -> CommandResult:
-    """Drive the loop. On ``ResumeDivergenceError``, prompt the operator (if
-    TTY) to fork inline; on yes, re-run the loop once with
-    ``fork_on_divergence=True``."""
+    """Drive the loop. ``ResumeDivergenceError`` → prompt operator (TTY) to fork; yes ⇒ re-run with ``fork_on_divergence=True``."""
     from promptpotter.shared.errors import ResumeDivergenceError
 
     fork_on_divergence = bool(getattr(args, "fork_on_divergence", False))
@@ -308,8 +270,7 @@ async def _run_loop(
             fork_on_divergence=fork_on_divergence,
         )
     except ResumeDivergenceError as div:
-        # Already pre-authorized (--fork-on-divergence set, but the trigger
-        # fired before its first checkpoint) — no menu, propagate.
+        # Pre-authorized (--fork-on-divergence set; trigger fired pre-checkpoint) — no menu, propagate.
         if fork_on_divergence:
             return CommandResult(
                 data={
@@ -321,8 +282,7 @@ async def _run_loop(
                 },
                 human=f"{div}\n\n{_DIVERGENCE_HINT}",
             )
-        # Interactive: show context, ask y/N. On non-TTY, fall through to
-        # the structured error so scripts keep their exit-code contract.
+        # Interactive: show context + ask y/N; non-TTY falls through to the structured error (scripts get exit-code).
         print()
         print(str(div))
         print()
@@ -396,10 +356,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     try:
         pipeline_params = _prepare_cycle_for_resume(args, ctx, session, campaign_config, train_data)
     except _PivotToFreshError as pivot:
-        # Operator chose at the drift prompt: pivot to a fresh `new` run.
-        # Synthesize a `new` namespace from the active session's dataset +
-        # the resume args's halt/spend knobs; dispatch directly so we don't
-        # re-init services from scratch.
+        # Operator pivoted: synthesize a ``new`` namespace from the active session's dataset + halt/spend knobs.
         from promptpotter.presentation.cli.commands.new import cmd_new
 
         new_args = argparse.Namespace(

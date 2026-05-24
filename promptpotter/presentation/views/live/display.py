@@ -75,8 +75,7 @@ class LiveDisplay(DerivedView):
         self.campaign_rounds = campaign_rounds if campaign_rounds is not None else []
         self.initial_len = len(self.campaign_rounds)
         self.sample_counter = 0
-        # Wired by ``RunCallbacks`` after construction so display + phase-view share one dict.
-        self._phase_ctx: dict[str, Any] = {}
+        self._phase_ctx: dict[str, Any] = {}  # wired by RunCallbacks; shared with phase-view
         self._round_best_acc: float | None = None
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None
@@ -88,7 +87,6 @@ class LiveDisplay(DerivedView):
 
     @property
     def origin_acc(self) -> float:
-        """Running origin anchor — read-only mirror of the shared core."""
         return self._core.origin_acc
 
     def set_origin(self, fresh: float) -> None:
@@ -179,11 +177,7 @@ class LiveDisplay(DerivedView):
         qi = int(record.sample_idx or 0)
         qt = int(record.sample_total or 0)
         ev = record.event
-        # ``sample_started`` is consumed by ``LiveDashboardView`` (it pulses
-        # the dataset table's in-flight row) but the CLI has no equivalent
-        # marker — ``sample_scored`` carries everything the terminal needs
-        # and prints one line per sample. The branch is explicit so a future
-        # reader sees the asymmetry is intentional, not an oversight.
+        # sample_started: LiveDashboardView pulses the in-flight row; CLI has no equivalent (sample_scored covers it).
         if ev == "sample_started":
             return
         if ev == "sample_scored":
@@ -215,7 +209,7 @@ class LiveDisplay(DerivedView):
                 [str(p) for p in (payload.get("prior_ids") or [])],
             )
 
-    # --- Public callback API (pre-ledger paths like origin.py call these directly) ---
+    # --- Public callback API (pre-ledger paths call these directly) ---
 
     def on_phase(self, event: PhaseEvent, view: dict[str, Any] | None = None) -> None:
         if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
@@ -295,8 +289,7 @@ class LiveDisplay(DerivedView):
     def on_p_best_update(self, current_id: str, n_samples: int, p_best: dict[str, float]) -> None:
         """Stash PoBB snapshot; print one-line summary on first fire per candidate at q≥8."""
         apply_p_best_update(self._core, current_id, n_samples, p_best)
-        # Matches ``lock_in_n_min`` in ``pobb/elimination/checks.py``.
-        POBB_DISPLAY_MIN_SAMPLES = 8
+        POBB_DISPLAY_MIN_SAMPLES = 8  # matches ``lock_in_n_min`` in pobb/elimination/checks.py
         if (
             current_id
             and current_id != self._pobb_printed_for
@@ -335,7 +328,7 @@ class LiveDisplay(DerivedView):
         self._write(f"  {DIM}↻ pobb backfill #{sample_id}:{RESET} " + ", ".join(tags))
 
     def _render_p_best_line(self) -> str | None:
-        """Top-5 P(best) with ▲/▼ arrows vs prior round's final; ``None`` when no PoBB this round."""
+        """Top-5 P(best) with ▲/▼ vs prior round; ``None`` when no PoBB this round."""
         if not self._core.current_p_best:
             return None
         last = self._core.last_p_best
@@ -387,7 +380,7 @@ class LiveDisplay(DerivedView):
                 self._write(self._fmt_round_leader(label, float(acc), origin_acc))
 
     def _fmt_round_leader(self, label: str, acc: float, origin_acc: float) -> str:
-        """One-liner scoreboard; ``★ leader`` only for a round-best that strictly beats origin."""
+        """Scoreboard one-liner; ``★ leader`` only when round-best strictly beats origin."""
         delta_origin = acc - origin_acc
         new_round_max = self._round_best_acc is None or acc > self._round_best_acc
         if new_round_max:
