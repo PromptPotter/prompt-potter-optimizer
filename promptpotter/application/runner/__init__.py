@@ -1,19 +1,4 @@
-"""Optimization loop orchestrator — L1 generate → score → escalate.
-
-The original ``runner.py`` (~736 lines) is split into:
-
-* :mod:`identity` — pure cycle-id helpers (``content_hash_of``,
-  ``cycle_config_identity``, ``build_origin_cycle_id``).
-* :mod:`round` — round-boundary helpers (``persist_round``,
-  ``close_round``, ``post_round``, ``escalate_or_stop``,
-  ``count_positive_yield_axes``).
-* :mod:`sweep` — generation-only round used by sweep + diag modes.
-* :mod:`loop` — the round loop itself (``run_round_loop``).
-* :mod:`entry` — the entry point + final teardown (``run_optimization``,
-  ``_finalize_run``).
-
-The public surface is re-exported here.
-"""
+"""Optimization loop orchestrator — L1 generate → score → escalate."""
 
 from __future__ import annotations
 

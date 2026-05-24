@@ -1,27 +1,7 @@
-"""One-shot migration: back-populate ``dashboard.json::rounds[]`` + origin block.
+"""One-shot migration: back-populate ``dashboard.json::rounds[]`` + ``origin`` block. Idempotent.
 
-The webapp's display-source unification (``docs/specs/webapp-display-source-
-unification.md``) moved the completed-round summary surface onto
-``dashboard.json::rounds[]`` and replaced the top-level scalars
-``origin_accuracy`` + ``origin_samples`` with a nested ``origin: {accuracy,
-samples}`` block. The new projection writes both shapes at round close —
-but dashboards last persisted by the prior projection remain on disk with
-the old shape, so the webapp shows "No rounds on disk yet" for every
-frozen pre-shipment cycle.
-
-This script reads each ``dashboard.json`` on disk and:
-
-* builds ``rounds[]`` from the sibling ``rounds/round_NNNN.json`` files,
-* converts top-level ``origin_accuracy`` / ``origin_samples`` (and the
-  prior scalar ``origin: float``) into the new ``origin: {accuracy,
-  samples}`` block, then strips the obsolete top-level scalars,
-* atomically writes the result back.
-
-Idempotent: re-running on a migrated file is a no-op.
-
-Run from project root::
-
-    python scripts/migrate_dashboard_rounds.py [--dry-run]
+Reads each ``dashboard.json``, rebuilds ``rounds[]`` from sibling ``rounds/round_NNNN.json``,
+converts the old ``origin_accuracy`` / ``origin_samples`` scalars into the nested ``origin`` block.
 """
 
 from __future__ import annotations
@@ -34,16 +14,10 @@ from typing import Any
 
 
 def _build_round_summary_dict(round_file: Path) -> dict[str, Any] | None:
-    """One ``RoundSummary``-shaped dict from a ``round_NNNN.json`` on disk.
+    """One ``RoundSummary``-shaped dict from a ``round_NNNN.json``; ``None`` if unreadable.
 
-    Returns ``None`` if the file is unreadable / malformed. The chart's
-    x-axis label is the compact ``C{round}.{idx}`` form — carried on
-    ``candidate_scores[*].label`` in the on-disk file. The ``scoreboard``
-    is the source for accuracy / composite / winner-flag, but its own
-    ``label`` field stores the long-form description and is NOT the
-    chart label. We join the two by ``candidate_id`` so each emitted
-    summary row carries the compact label + the description that the
-    UI's tooltips expect on ``changes_description``.
+    Joins ``candidate_scores`` (compact ``C{round}.{idx}`` label) with ``scoreboard``
+    (accuracy / composite / winner-flag) by ``candidate_id``.
     """
     try:
         doc = json.loads(round_file.read_text(encoding="utf-8"))
@@ -64,9 +38,6 @@ def _build_round_summary_dict(round_file: Path) -> dict[str, Any] | None:
             continue
         cid = str(row.get("candidate_id") or "")
         score_row = by_cid.get(cid, {})
-        # Compact "C{round}.{idx}" label lives on candidate_scores; the
-        # scoreboard's `label` is the long-form description (the
-        # ``changes_description``) and would otherwise leak onto the x-axis.
         compact_label = str(score_row.get("label") or "")
         changes = str(
             score_row.get("changes_description")
@@ -74,10 +45,7 @@ def _build_round_summary_dict(round_file: Path) -> dict[str, Any] | None:
             or row.get("label")
             or ""
         )
-        # ``scored_samples`` / ``expected_samples`` only exist on freshly-
-        # written rounds. Old rounds carry ``hits``/``total`` — same total,
-        # different field name. Use ``total`` as best-effort fallback for
-        # both since we have no separate "expected" record.
+        # Old rounds carry only ``total`` — use it as fallback for scored/expected.
         scored = row.get("scored_samples")
         if not isinstance(scored, int):
             scored = int(row.get("total") or 0)
@@ -110,13 +78,7 @@ def _build_round_summary_dict(round_file: Path) -> dict[str, Any] | None:
 
 
 def _origin_block(dash: dict[str, Any]) -> dict[str, Any]:
-    """Build the new ``origin: {accuracy, samples}`` block from the old fields.
-
-    Pulls from the prior top-level ``origin_accuracy`` and ``origin_samples``
-    scalars (the old projection's outputs). Falls back to the scalar
-    ``origin: float`` when ``origin_accuracy`` is absent — earlier
-    projection versions stored just that.
-    """
+    """Build the new ``origin: {accuracy, samples}`` block from the old fields."""
     raw_origin = dash.get("origin")
     # Already migrated — preserve it.
     if isinstance(raw_origin, dict):
@@ -134,11 +96,7 @@ def _origin_block(dash: dict[str, Any]) -> dict[str, Any]:
 
 
 def _migrate(dash_path: Path) -> tuple[bool, str]:
-    """Return ``(changed, reason)`` for one ``dashboard.json``.
-
-    The migration is shape-driven: a dashboard with the new origin block
-    AND a populated ``rounds[]`` matching the disk is considered done.
-    """
+    """Return ``(changed, reason)`` for one ``dashboard.json``."""
     try:
         dash = json.loads(dash_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -194,8 +152,6 @@ def main() -> int:
     for dash_path in sorted(root.rglob("dashboard.json")):
         n_total += 1
         if args.dry_run:
-            # Simulate without writing — peek at the file to count round
-            # files that would feed the new ``rounds[]``.
             rounds_dir = dash_path.parent / "rounds"
             n = len(list(rounds_dir.glob("round_*.json"))) if rounds_dir.is_dir() else 0
             print(f"  would-migrate ({n} rounds): {dash_path}")

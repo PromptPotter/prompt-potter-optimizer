@@ -1,15 +1,5 @@
-"""Regenerate ``optimizer_pipeline.json::resolved_schemas`` from the Pydantic
-models in ``promptpotter.application.optimization.dispatch.schemas``.
-
-The Pydantic models are the SoT for what each optimizer LLM call may
-return. The JSON-Schema export in ``optimizer_pipeline.json`` exists for
-non-Python consumers (Langfuse trace metadata, future webapp). Re-run
-this after editing a model:
-
-    python scripts/build_optimizer_schemas.py
-
-Idempotent. Writes a single ``resolved_schemas`` block keyed by
-``"{node}/1"`` — matches the existing manifest convention.
+"""Regenerate ``datasets/_optimizer/pipeline.json::resolved_schemas`` from
+``promptpotter.application.optimization.dispatch.schemas``. Idempotent.
 """
 
 from __future__ import annotations

@@ -1,13 +1,4 @@
-"""Per-candidate header + summary classification.
-
-Pure: no I/O, no mutation. Two flows:
-
-* :func:`fmt_individual_header` — fired pre-scoring from
-  ``LiveDisplay.on_candidate_started`` (the ``ind k/N  <mutation>`` line).
-* :class:`IndividualSummary` + :func:`individual_summary_from_dict` —
-  fired post-scoring from ``LiveDisplay.on_candidate_scored``; also feeds
-  notebook box rendering. Invalid > aborted > eliminated > ok precedence.
-"""
+"""Per-candidate header + summary classification. Pure: no I/O, no mutation."""
 
 from __future__ import annotations
 
@@ -30,11 +21,7 @@ from promptpotter.shared.statistics import wilson_ci
 
 
 def fmt_pp_override(pp: dict[str, Any] | None) -> str:
-    """Flatten a nested pipeline_params override to ``node.key: val  …``.
-
-    Returns ``""`` when the override is empty or None. Callers supply the
-    leading label (e.g. ``cand 2/5  ``) and any ANSI wrapping.
-    """
+    """Flatten a nested pipeline_params override to ``node.key: val  …``; ``""`` when empty."""
     if not pp:
         return ""
     parts: list[str] = []
@@ -53,13 +40,7 @@ def fmt_individual_header(
     changes_description: str,
     pp_override: dict[str, Any] | None,
 ) -> str:
-    """One-line pre-scoring header: ``ind k/N  <mutation>`` or ``ind k/N  parent re-eval``.
-
-    Fired from ``on_candidate_started`` before the backend calls start. The
-    mutation body comes from ``pp_override`` when present (authoritative
-    machine-readable diff), else falls back to the human-written
-    ``changes_description`` from the L1 variant plan, else the parent tag.
-    """
+    """Pre-scoring header: ``ind k/N  <mutation>`` or ``ind k/N  parent re-eval``."""
     label = f"ind {idx + 1}/{total}"
     body = fmt_pp_override(pp_override)
     if not body and changes_description:
@@ -70,20 +51,7 @@ def fmt_individual_header(
 
 @dataclass(frozen=True)
 class IndividualSummary:
-    """Structured candidate render — displays pick plain vs box wrapping.
-
-    Pieces the two displays can compose independently:
-
-    - ``tag`` — compact status slot (``80.0% [77-82%]`` or ``INVALID``);
-      notebook puts it on the top-right of the box, CLI appends it to
-      ``cand k/N``.
-    - ``body_line`` — the mutations + hits + delta line; the notebook
-      renders it as an inner box line, the CLI as an indented second line.
-    - ``detail_lines`` — ordered extras (elimination summary, the 1-line
-      composite_fitness-with-Δ render, degraded-count tag, or validation-failure
-      entries); rendered inline by both displays, with the last entry
-      folded onto the bottom info rule by callers that support it.
-    """
+    """Structured candidate render — ``tag`` + ``body_line`` + ordered ``detail_lines``."""
 
     status: Literal["ok", "invalid", "aborted", "eliminated"]
     tag: str
@@ -99,21 +67,7 @@ def individual_summary_from_dict(
 ) -> IndividualSummary:
     """Classify a candidate score report and pre-format all display pieces.
 
-    Single source of truth for what the CLI and notebook show per candidate.
-    Invalid > aborted > eliminated > ok precedence matches the report's
-    exclusive flag semantics (invalid never runs the backend; aborted and
-    eliminated are mutually exclusive by construction in
-    ``_handle_scored_candidate``).
-
-    Per-candidate composite_fitness render is intentionally 1 line —
-    ``composite_fitness=0.6042  (Δ+0.103 vs origin 0.5012)`` — so 5 candidates
-    don't dump 60 lines of identical formula text into the terminal. The
-    formula + per-evaluator breakdown lands once per round in the round
-    summary block.
-
-    *origin_composite_fitness* anchors the Δ against the campaign's first-round
-    composite_fitness — even at deep rounds the operator sees how far the run
-    has come from origin. ``None`` collapses to the no-Δ form.
+    Precedence: invalid > aborted > eliminated > ok.
     """
     mutations = fmt_pp_override(scores.get("pipeline_params_override"))
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
@@ -157,10 +111,7 @@ def individual_summary_from_dict(
     elim = scores.get("elimination_context") or {}
     degrad = scores.get("degradation_context") or {}
 
-    # Three disjoint exit branches — each renders only the fields its
-    # source check actually wrote, so the operator can tell at a glance
-    # whether a candidate was cut by Bayesian posterior (PoBB) or by
-    # degradation / scoring error (DegradationCheck / scoring_error_abort).
+    # Three disjoint exit branches — operator can tell if cut by PoBB or DegradationCheck.
     if elim.get("leader_locked"):
         eq = int(elim.get("queries_scored", 0))
         eqt = int(elim.get("total_queries", 0))

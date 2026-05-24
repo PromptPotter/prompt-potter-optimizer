@@ -1,9 +1,4 @@
-"""Per-sample HIT/MISS line formatter — fired from ``LiveDisplay.on_sample_scored``.
-
-Pure: no I/O, no mutation. The sole entry point is :func:`fmt_query_result`;
-the annotation helpers are private and exist only to keep the main
-function readable.
-"""
+"""Per-sample HIT/MISS line formatter (``LiveDisplay.on_sample_scored``). Pure."""
 
 from __future__ import annotations
 
@@ -23,16 +18,12 @@ from promptpotter.shared.errors import is_error_result
 
 
 def _ellide(s: str, n: int) -> str:
-    """Truncate *s* to *n* chars; append ``…`` when cut so the operator sees it."""
+    """Truncate to *n* chars; append ``…`` when cut."""
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
 def _append_annotation(line: str, indent: str, color: str, emoji: str, text: str) -> str:
-    """Append a per-sample annotation line under the query it describes.
-
-    ``indent`` mirrors the query line's leading whitespace so the emoji sits
-    directly under the HIT/MISS tag instead of floating at column 0.
-    """
+    """Append an annotation line under the query; indent mirrors the query's leading whitespace."""
     return line + f"\n{indent}{color}{emoji} {text}{RESET}"
 
 
@@ -45,12 +36,8 @@ def fmt_query_result(
 ) -> str:
     """Format a single query result as a HIT/MISS line with timing.
 
-    When *prefix* is given it replaces the default 8-space indent so the
-    caller can merge a counter into the same line. *scoring_formula* is
-    the dataset's scoring formula (from ``campaign_config["scoring"]``);
-    when provided, ``predicted`` is parsed via ``extract_display_answer``
-    so markers like ``**bold**`` or ``\\boxed{…}`` collapse to the
-    single-token answer.
+    *scoring_formula* (from ``campaign_config["scoring"]``) routes ``predicted``
+    through ``extract_display_answer`` so ``**bold**`` / ``\\boxed{…}`` collapse to one token.
     """
     from promptpotter.application.scoring.metrics import find_rank
 
@@ -90,12 +77,7 @@ def fmt_query_result(
 
     cache_marker = "\U0001f4d6" if cached else ""
 
-    # Per-LLM-node token column: `[tag] io=N/M` groups in pipeline order.
-    # Values are prefixed with `~` when the entry is a chars/4 estimate rather
-    # than a provider-exact count. Single-node pipelines drop the io-group
-    # tag (source is unambiguous). The standalone step tag is kept only as
-    # the cache-marker anchor — `HIT [ai]📖 io=…` when cached, `HIT io=…`
-    # when not.
+    # Per-LLM-node token column: `[tag] io=N/M`; `~` prefix = chars/4 estimate.
     single_node = len(DISPLAY_TAGS) == 1
     step_tokens = pd.get("step_tokens") or {}
     tok_col = ""
@@ -191,10 +173,7 @@ def fmt_query_result(
             "score counts but flag this candidate",
         )
     elif r.get("degraded_observed") and not classify_result(r).is_fatal:
-        # Fatal classifications kill the candidate on this same query (see
-        # DegradationCheck fast-path). The "toward rerun" counter would
-        # suggest "more data coming" — meaningless when the candidate is
-        # already dead. The ⚠ warning line above tells the real story.
+        # Skip the "toward rerun" annotation on fatal classifications — candidate is already dead.
         obs = r.get("degraded_obs_count", "?")
         threshold = r.get("degraded_obs_threshold", "?")
         line = _append_annotation(

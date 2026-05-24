@@ -1,23 +1,4 @@
-"""Smoke-test a dataset end-to-end: one L1 round, minimal budget.
-
-Runs the real `init_services → prepare_scoring_context → run_optimization_notebook`
-path against any dataset registered in ``DATASET_LOADERS``. Designed for first-
-contact verification of a newly scaffolded `datasets/{name}/` bring-up:
-
-- dataset loader present in the registry
-- static `pipeline.json` schema parses and resolves
-- backend is reachable
-- L1 generate / score / critique loop runs end-to-end
-- per-node pipeline routing works when only one node is active
-
-Typical usage::
-
-    python scripts/smoke_campaign.py --dataset bbeh
-    python scripts/smoke_campaign.py --dataset aime_2025 --samples 3 --variants 2
-
-~90 seconds on `gpt-oss-120b` via Groq. Skips held-out evaluation — the
-round trace already proves the pipeline is wired.
-"""
+"""Smoke-test a dataset end-to-end: one L1 round, minimal budget. ~90s on gpt-oss-120b via Groq."""
 
 from __future__ import annotations
 
@@ -29,8 +10,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Force utf-8 stdout so Windows cp1252 console doesn't choke on box-drawing
-# characters emitted by LiveDisplay.
+# Force utf-8 stdout so Windows cp1252 console doesn't choke on box-drawing characters.
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
@@ -96,7 +76,7 @@ def _build_config(
 
 
 def _infer_scoring(dataset: str) -> str:
-    """Prefer the dataset's own campaign.json formula; fall back to exact_match."""
+    """Prefer the dataset's own ``campaign.json`` formula; fall back to ``exact_match``."""
     import json
 
     cfg_path = _REPO_ROOT / "datasets" / dataset / "campaign.json"

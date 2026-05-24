@@ -1,11 +1,7 @@
-"""Online adaptive sample picker — 1PL Rasch CAT, one knob-free objective.
+"""Online adaptive sample picker — 1PL Rasch CAT.
 
-``score(s) = decision_information_gain(s)`` = mutual information between the
-next outcome and the keep/abort verdict ``θ_c > θ_s``. Peaks on the contested
-band; zero on always-hit/always-miss. Means-known limit recovers Bernoulli
-Chernoff information (Garivier-Kaufmann 2016 Track-and-Stop). The
-``se_δ``-aware ability update damps outcomes on poorly-characterized samples —
-a candidate-miss can't be told apart from a hard-sample miss. Pure module.
+``score(s) = decision_information_gain(s)`` = MI between next outcome and verdict ``θ_c > θ_s``;
+means-known limit recovers Bernoulli Chernoff information (Garivier-Kaufmann 2016 Track-and-Stop).
 """
 
 from __future__ import annotations
@@ -54,14 +50,7 @@ def marginal_hit_probability(
     delta_s: float,
     se_delta_s: float,
 ) -> float:
-    """Probit-marginalized hit probability ``E[σ(θ_c − δ_s)]``.
-
-    ``σ((μ_c − δ_s) / √(1 + π·(var_c + se_δ_s²)/8))`` — the value the
-    seed-centred decision-IG reads on each sample. Same math the candidate-
-    posterior update uses internally; exposed as its own helper so the API
-    layer's ``p_hat`` column reads from one source rather than reimplementing
-    the formula.
-    """
+    """Probit-marginalized hit probability ``E[σ(θ_c − δ_s)] ≈ σ((μ_c − δ_s) / √(1 + π·(var_c + se_δ_s²)/8))``."""
     v = var_c + se_delta_s * se_delta_s
     return _sigmoid((mu_c - delta_s) / math.sqrt(1.0 + _PROBIT_SCALE * v))
 
@@ -96,10 +85,7 @@ def posterior_from_outcomes(
     prior_var: float,
     outcomes: Iterable[tuple[float, float, bool]],
 ) -> tuple[float, float]:
-    """Fold ``update_theta_posterior`` across (δ_s, se_δ_s, hit) triples.
-
-    Stateless — callers refold from scratch each picker fire; O(n) microseconds.
-    """
+    """Fold ``update_theta_posterior`` across ``(δ_s, se_δ_s, hit)`` triples. Stateless."""
     mu, var = prior_mu, prior_var
     for delta_s, se_delta_s, hit in outcomes:
         mu, var = update_theta_posterior(mu, var, delta_s, se_delta_s, hit)
@@ -155,11 +141,7 @@ def next_sample(
     delta_se_map: dict[int, float],
     remaining: set[int],
 ) -> int | None:
-    """Pick the remaining sample with the highest pick-value; ``None`` ⇒ loop exit.
-
-    Ties → ascending sid (matches :func:`expected_order`). Samples absent from the
-    maps fall back to a centred uncertain prior and sort high.
-    """
+    """Pick the remaining sample with the highest pick-value; ``None`` ⇒ loop exit. Ties → asc sid."""
     if not remaining:
         return None
     return max(
@@ -187,11 +169,7 @@ def expected_order(
     delta_se_map: dict[int, float],
     sample_ids: Iterable[int],
 ) -> list[int]:
-    """Full ranking of ``sample_ids`` by descending pick-value; ties → ascending sid.
-
-    Serialized into ``dashboard.json::hard_sample_order`` at the ``(μ_c, var_c)``
-    the caller supplies (live posterior mid-round, seed-centred prior at round boundary).
-    """
+    """Full ranking of ``sample_ids`` by descending pick-value; ties → asc sid."""
     return sorted(
         sample_ids,
         key=lambda sid: (

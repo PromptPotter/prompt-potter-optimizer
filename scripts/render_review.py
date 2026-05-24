@@ -1,19 +1,5 @@
-"""Render review.md for any cycle dir, on demand.
-
-Standalone wrapper around `promptpotter.application.review.render_review_md`
-so the meta-campaign skill (and the operator) can backfill review.md when
-the in-loop renderer didn't fire — e.g. on forks that inherit a parent's
-final block, or when emitter was None during finalize.
-
-Usage:
-    python scripts/render_review.py <cycle_dir> \
-        [--audit-dir <other_cycle_dir>/.runtime/cache/rounds]
-
-If --audit-dir is omitted, audits are read from <cycle_dir>/.runtime/cache/rounds.
-Forks that share their parent's audits can point --audit-dir at the parent.
-
-Writes review.md alongside index.json.
-"""
+"""Render ``review.md`` for any cycle dir, on demand. Wraps
+``promptpotter.application.review.render_review_md``."""
 
 from __future__ import annotations
 
@@ -61,8 +47,7 @@ def main(argv: list[str]) -> int:
     audits = _load_audits(audit_dir, len(rounds)) if audit_dir.exists() else [None] * len(rounds)
 
     ctx: list[str] = []
-    # Best-effort task_context — fork inherits parent's so we don't always have it.
-    # Pull from last round's opt_search_point.task_context when present.
+    # Best-effort task_context — pull from last round's opt_search_point when present.
     if rounds:
         tc = (rounds[-1].get("opt_search_point") or {}).get("task_context") or {}
         if isinstance(tc, dict):

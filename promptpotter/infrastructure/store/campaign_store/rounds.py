@@ -1,8 +1,4 @@
-"""Round + candidate detail-file CRUD under a cycle dir.
-
-``rounds/round_{N:04d}.json`` is the public round detail; the candidate
-files under ``.runtime/cache/candidates/`` are the mid-round checkpoint.
-"""
+"""Round + candidate detail-file CRUD under a cycle dir."""
 
 from __future__ import annotations
 
@@ -32,7 +28,7 @@ class RoundMixin(CampaignStoreKernel):
         cycle_id: str,
         round_data: dict[str, Any],
     ) -> Path:
-        """Persist a round_data detail file and update the cycle index."""
+        """Persist a round detail file and update the cycle index."""
         round_id = round_data["round_id"]
         validate_path_component(round_id)
         round_num = round_data.get("round", 0)
@@ -62,7 +58,6 @@ class RoundMixin(CampaignStoreKernel):
         cycle_id: str,
         round_num: int,
     ) -> dict[str, Any] | None:
-        """Load a round_data detail by round number. ``None`` if not found."""
         return read_json_optional(
             self._rounds_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json",
         )
@@ -74,7 +69,7 @@ class RoundMixin(CampaignStoreKernel):
         start: int,
         end: int,
     ) -> list[dict[str, Any]]:
-        """Load rounds ``start..end`` inclusive, in round order. Missing rounds skipped."""
+        """Load rounds ``start..end`` inclusive. Missing rounds skipped."""
         out: list[dict[str, Any]] = []
         for r in range(start, end + 1):
             round_data = self.load_round_file(campaign_id, cycle_id, r)
@@ -89,7 +84,7 @@ class RoundMixin(CampaignStoreKernel):
         round_num: int,
         candidates: list[dict[str, Any]],
     ) -> None:
-        """Persist generated candidates before scoring (mid-round checkpoint)."""
+        """Persist generated candidates before scoring."""
         path = self._candidates_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json"
         write_json(path, candidates)
         logger.debug("Saved %d candidates for round %d → %s", len(candidates), round_num, path.name)
@@ -100,7 +95,6 @@ class RoundMixin(CampaignStoreKernel):
         cycle_id: str,
         round_num: int,
     ) -> list[dict[str, Any]] | None:
-        """Load persisted candidates for a round. ``None`` if not on disk."""
         return read_json_optional(
             self._candidates_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json",
         )
@@ -111,7 +105,7 @@ class RoundMixin(CampaignStoreKernel):
         cycle_id: str,
         round_num: int,
     ) -> None:
-        """Delete persisted candidates for a round (forces fresh generation)."""
+        """Delete cached candidates (forces fresh generation)."""
         path = self._candidates_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json"
         if path.exists():
             path.unlink()

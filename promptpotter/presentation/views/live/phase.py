@@ -1,9 +1,4 @@
-"""Round-summary renderers — single-caller (``LiveDisplay.on_round_complete``).
-
-Pure: no I/O, no mutation. The progress table, the round-stats block,
-and the patience-status footer all run after L1_SCORE:exit and are the
-last things that hit the terminal before the next round starts.
-"""
+"""Round-summary renderers (``LiveDisplay.on_round_complete``). Pure: no I/O, no mutation."""
 
 from __future__ import annotations
 
@@ -23,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def fmt_elapsed(seconds: float) -> str:
-    """Render a wall-clock duration as ``Xm YYs`` or ``Xh YYm``."""
+    """Wall-clock duration as ``Xm YYs`` or ``Xh YYm``."""
     s = int(seconds)
     if s < 60:
         return f"{s}s"
@@ -33,13 +28,7 @@ def fmt_elapsed(seconds: float) -> str:
 
 
 def render_progress_table(rounds: list[dict[str, Any]], window: int = 8) -> str:
-    """Round-over-round trajectory table: accuracy, composite_fitness, rolling avg, trend, plateau.
-
-    Items in ``rounds`` must have at minimum ``round`` and ``accuracy``.
-    The ``Composite`` column is always shown so the operator never has to
-    wonder whether composite_fitness was hidden because it equalled
-    accuracy on every round so far.
-    """
+    """Round-over-round trajectory table: accuracy, composite_fitness, rolling avg, trend, plateau."""
     if not rounds:
         return ""
 
@@ -89,11 +78,7 @@ def render_round_stats(
     round_result: RoundResult,
     pipeline_schema: PipelineSchema | None,
 ) -> str:
-    """hits/total, candidate count, pipeline terminations, degradation%, recall@1/5.
-
-    Best-effort: the pipeline-stats block is wrapped in try/except and
-    returns just the hits line when ``round_result.results`` is empty.
-    """
+    """hits/total, candidate count, pipeline terminations, degradation%, recall@1/5."""
     lines: list[str] = []
     hits = round_result.hits
     total = round_result.total
@@ -143,14 +128,7 @@ def render_round_stats(
         if degraded > 0:
             lines.append(_node_line(f"Degradation: {degraded / n_results:.0%}"))
 
-        # Recall@k requires a ranker / candidate_source node to produce
-        # ranked_items; for llm_only-style pipelines (single-shot
-        # generation tagged ``node_role: ranker``) the item shape can't be
-        # matched against ground_truth, so the previous unconditional
-        # "Recall: top-1=0% top-5=0%" was misleading. Skip when no
-        # ranked-item-emitting node exists, OR when find_rank could not
-        # place ground_truth for any valid sample (rank-shaped data
-        # missing).
+        # Skip recall@k for llm_only-style pipelines — no ranked_items to match against ground_truth.
         valid = [r for r in results if not is_error_result(r)]
         if valid and ranked_item_keys:
             ranks = [
@@ -175,14 +153,7 @@ def render_round_stats(
 
 
 def render_patience_status(improved: bool, l1_stall_count: int, l1_patience: int) -> str:
-    """Green tick on improvement; yellow patience counter on stall.
-
-    The patience counter is informational — exhausting it does not stop
-    the loop on its own (L2/L3 escalation may extend). The actual stop
-    banner is printed by the runner at cycle teardown with the real
-    stop_reason; printing a speculative "Stopping" line here previously
-    contradicted the next round actually running.
-    """
+    """Green tick on improvement; yellow patience counter on stall (informational only)."""
     if improved:
         return _node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}")
     return _node_line(f"{YELLOW}⚠ No improvement ({l1_stall_count}/{l1_patience} patience){RESET}")

@@ -20,12 +20,7 @@ SESSION_ARTIFACTS = {"session.json"}
 
 @pytest.fixture
 def session_campaign_cycle_dirs(tmp_path: Path) -> tuple[Path, Path, Path]:
-    """Create session + campaign + cycle dirs with minimal manifests.
-
-    Layout: ``{tmp_path}/sessions/{session_id}/``,
-    ``{tmp_path}/campaigns/{campaign_id}/`` (manifest + telemetry), and
-    ``campaigns/{campaign_id}/cycles/{cycle_id}/`` (per-cycle audit).
-    """
+    """Create session + campaign + cycle dirs with minimal manifests."""
     session_id = "s_test1234"
     campaign_id = "testds__20260101-000000"
     cycle_id = "cycle_test_abc"
@@ -68,8 +63,7 @@ def session_campaign_cycle_dirs(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 def test_artifact_sets_are_disjoint_and_well_formed() -> None:
-    """The artifact bands must never overlap; each fixed key lands in the
-    expected set."""
+    """The artifact bands must never overlap; each fixed key lands in the expected set."""
     bands = CAMPAIGN_DIR_ARTIFACTS | SESSION_TELEMETRY_ARTIFACTS | CYCLE_OPERATOR_ARTIFACTS
     assert bands.isdisjoint(SESSION_ARTIFACTS)
     assert PER_CYCLE_INTERNAL_UMBRELLA not in bands
@@ -82,9 +76,7 @@ def test_artifact_sets_are_disjoint_and_well_formed() -> None:
 def test_emitter_produces_all_artifacts(
     session_campaign_cycle_dirs: tuple[Path, Path, Path],
 ) -> None:
-    """Emitter lifecycle produces per-session telemetry in the session's
-    root cycle dir; the runner mirror produces operator artifacts at the
-    cycle dir."""
+    """Emitter produces per-session telemetry in the root cycle dir; runner mirror produces operator artifacts."""
     from types import SimpleNamespace
 
     from promptpotter.application.config import CampaignConfig
@@ -108,7 +100,6 @@ def test_emitter_produces_all_artifacts(
             "degradation_threshold": 0.4,
         }
     )
-    # The seeded cycle is the session root — telemetry binds to its dir.
     emitter = LiveDashboardView(
         SessionFamilyDir(cycle_dir),
         session_dir,
@@ -137,11 +128,7 @@ def test_emitter_produces_all_artifacts(
             0,
         )
 
-    # Simulate a single round lifecycle.  The emitter only reads a handful of
-    # fields off the ``env`` payload (cycle_id, scoring.scoring_set, obs,
-    # resumed_from_round, pipeline_schema) so a SimpleNamespace is enough.
-    # Cycle requires session+config; the emitter doesn't read them off
-    # ``init_state`` here, so SimpleNamespace stand-ins are fine.
+    # Single round lifecycle — SimpleNamespace stand-ins for env/state suffice.
     init_state = Cycle(
         session=cast("Any", SimpleNamespace(pipeline_schema=None)),
         config=config,
@@ -203,7 +190,6 @@ def test_emitter_produces_all_artifacts(
             0,
         )
 
-    # Simulate a query measurement
     fire_snapshot(
         "sample_scored",
         {
@@ -239,7 +225,6 @@ def test_emitter_produces_all_artifacts(
         qt=2,
     )
 
-    # Simulate candidate scoring
     fire_snapshot(
         "candidate_scored",
         {"scores": {"accuracy": 0.6, "hits": 1, "total": 2}},
@@ -247,7 +232,6 @@ def test_emitter_produces_all_artifacts(
         ct=1,
     )
 
-    # Simulate round complete
     round_result = RoundResult(
         round=0,
         label="C1",
@@ -268,8 +252,7 @@ def test_emitter_produces_all_artifacts(
         0,
     )
 
-    # Mirror runner._finalize_run: fold the run summary into index.json::final
-    # and render log.md + review.md from the index + round_data dump.
+    # Mirror runner._finalize_run: fold the run summary into index.json::final + render log/review.
     from promptpotter.application.review import render_review_md
     from promptpotter.presentation.views.render import to_markdown
     from promptpotter.presentation.writers import from_disk_log
@@ -308,17 +291,15 @@ def test_emitter_produces_all_artifacts(
     missing_session = [a for a in SESSION_ARTIFACTS if not (session_dir / a).exists()]
     assert not missing_session, f"Session-tree parity violated — missing: {missing_session}"
 
-    # Internals: the legacy top-level ``ledger.jsonl`` / ``streams/`` /
-    # ``.cache/`` paths must NOT exist next to operator files.
-    assert not (cycle_dir / "ledger.jsonl").exists(), "ledger.jsonl moved under .runtime/"
-    assert not (cycle_dir / ".cache").exists(), ".cache/ replaced by .runtime/cache/"
-    assert not (cycle_dir / "streams").exists(), "streams/ moved under .runtime/"
+    # Runtime internals must NOT exist next to operator files.
+    assert not (cycle_dir / "ledger.jsonl").exists()
+    assert not (cycle_dir / ".cache").exists()
+    assert not (cycle_dir / "streams").exists()
 
 
 def test_campaign_records_parent_session(
     session_campaign_cycle_dirs: tuple[Path, Path, Path],
 ) -> None:
-    """Every cycle records its parent session id in index.json."""
     _session_dir, _campaign_dir, cycle_dir = session_campaign_cycle_dirs
     data = json.loads((cycle_dir / "index.json").read_text(encoding="utf-8"))
     assert data["parent_session_id"], "index.json must carry parent_session_id"
@@ -364,17 +345,7 @@ def test_legacy_session_suffix_still_parses() -> None:
 
 
 def test_observers_built_via_shared_helper() -> None:
-    """Entry points MUST construct projections + callbacks via ``build_run_observers``.
-
-    Direct ``RunCallbacks()``, ``AuditTrailView()``, ``LiveDashboardView()``,
-    or ``PoBBStreamView()`` construction in ``presentation/`` is forbidden —
-    a new entry point that bypasses the helper would create a divergent observer
-    wiring (different bind order, missing subscribers, two-phase init regression).
-
-    LiveDisplay is allowed because it's a presentation-layer concern that the
-    helper accepts as input. The helper itself owns the ledger + audit + dashboard
-    + pobb construction.
-    """
+    """Entry points construct projections via ``build_run_observers`` — no direct RunCallbacks/projection ctors."""
     BANNED = {
         "RunCallbacks",
         "AuditTrailView",
@@ -404,13 +375,7 @@ def test_observers_built_via_shared_helper() -> None:
 
 
 def test_run_callbacks_requires_ledger() -> None:
-    """RunCallbacks must be constructed with a ledger — no two-phase init.
-
-    The pre-refactor ``RunListener`` allowed ``listener=None`` then late-bound the
-    ledger via a setter, which buffered events in a dead path (the ledger was
-    always bound before any event fired). Forbid the regression: dataclass
-    construction without a ledger raises ``TypeError`` at boot.
-    """
+    """RunCallbacks must be constructed with a ledger — no two-phase init."""
     from promptpotter.application.run_observers import RunCallbacks
 
     with pytest.raises(TypeError):
@@ -418,15 +383,7 @@ def test_run_callbacks_requires_ledger() -> None:
 
 
 def test_no_direct_artifact_writes_outside_stores() -> None:
-    """Entry points and orchestrators MUST NOT write campaign artifacts directly.
-
-    The persistence invariant says only Stores own atomic file ops on the
-    campaign tree. cycle.py and the sweep paths used to bypass this with
-    direct write_json/shutil.copyfile/Path.write_text calls into campaign
-    dirs — silently passing the existence check above. AST-walk those
-    modules and forbid the bypass; introducing a new direct write here
-    fails the test with a file:line:func pointer.
-    """
+    """Entry points + orchestrators must not write campaign artifacts directly — route through Stores."""
     BANNED_FUNCS = {"write_json", "write_text", "write_bytes", "copyfile", "copy", "copy2"}
     repo_root = Path(__file__).resolve().parents[1]
     guarded_paths = [
@@ -458,35 +415,13 @@ def test_no_direct_artifact_writes_outside_stores() -> None:
 
 
 def test_score_search_point_callers_explicit_per_sample_visibility() -> None:
-    """Every ``score_search_point()`` call must explicitly pass ``on_sample_scored``.
-
-    Class of bug guarded: backend runs ``measure_sample`` for many seconds
-    (sometimes minutes, across many samples) while the CLI shows nothing.
-    The operator sees silence, panics, kills the process — and the LLM
-    credits already burned are real money. The function's signature now
-    declares these keywords without defaults (mypy catches the omission at
-    the call site as you type); this test backs it up structurally so the
-    invariant survives a future signature drift.
-
-    Two real instances caught the day this test was added:
-
-    * ``_pobb_backfill`` (``application/optimization/l1/score.py``) silently
-      ran 5+ deprecated-cache backfill measurements per round.
-    * ``elevate_to_decisive`` (``application/optimization/pobb/elevation.py``)
-      silently ran every top-up sample.
-
-    Both are wired now. ``elevation.py`` passes ``on_sample_scored=None``
-    deliberately (the ``compare`` CLI verb has its own per-topup stream),
-    with the reasoning inline. Future ``=None`` call sites are allowed
-    — the keyword being PRESENT is what we enforce — but the explicit
-    ``None`` is grep-able and code review can audit the reasoning.
-    """
+    """Every ``score_search_point()`` call must explicitly pass ``on_sample_scored``."""
     repo_root = Path(__file__).resolve().parents[1]
     offenders: list[str] = []
     for src_path in (repo_root / "promptpotter").rglob("*.py"):
         try:
             tree = ast.parse(src_path.read_text(encoding="utf-8"))
-        except SyntaxError:  # pragma: no cover — defensive against partial edits
+        except SyntaxError:  # pragma: no cover
             continue
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -512,12 +447,7 @@ def test_score_search_point_callers_explicit_per_sample_visibility() -> None:
 
 
 def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
-    """FileSink's Langfuse shadow must be wire-format compatible: camelCase
-    fields on observations/scores, and nested spans carry parentObservationId.
-
-    A JSON from ``campaigns/{cycle_id}/langfuse/`` should be uploadable to
-    Langfuse's ingestion API without a transform pass.
-    """
+    """FileSink's Langfuse shadow must be wire-format compatible (camelCase fields, parentObservationId)."""
     from promptpotter.infrastructure.tracing import (
         CampaignEnd,
         CampaignStart,
@@ -601,36 +531,32 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
         assert "startTime" in obs
         assert "endTime" in obs
         for snake in ("trace_id", "start_time", "end_time"):
-            assert snake not in obs, f"snake_case field {snake!r} leaked into {obs['name']}"
+            assert snake not in obs
 
     round_obs = next(o for o in observations if o["name"].startswith("round_"))
     node_obs = next(o for o in observations if o["name"] == "l1_generate")
-    assert "parentObservationId" not in round_obs, "round span has no parent (trace-level)"
-    assert node_obs["parentObservationId"] == round_obs["id"], "node must nest under round"
+    assert "parentObservationId" not in round_obs
+    assert node_obs["parentObservationId"] == round_obs["id"]
 
     score_files = list((cycle_root / "langfuse" / "scores").glob("*.jsonl"))
-    assert score_files, "at least one score jsonl expected"
+    assert score_files
     scores = [json.loads(line) for p in score_files for line in p.read_text().splitlines() if line]
-    assert scores, "at least one score entry expected"
+    assert scores
     for score in scores:
         assert "traceId" in score and score["traceId"] == trace_id
         assert "dataType" in score
         for snake in ("trace_id", "data_type"):
-            assert snake not in score, f"snake_case field {snake!r} leaked into score"
+            assert snake not in score
 
 
 ROOT = pathlib.Path(__file__).parent.parent / "promptpotter"
 
 
-# Documented runtime cross-layer imports. The codebase is currently clean
-# at runtime; this allowlist exists so that any *intentional* future
-# violation can be tracked here with a TODO pointer rather than slipping
-# in silently. Stale entries fail the test, so the list cannot drift.
+# Allowlist for intentional runtime cross-layer imports; stale entries fail the test.
 KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset()
 
 
 def _layer(rel_posix: str) -> str | None:
-    """Map a source file path to its hexagonal layer."""
     if "/domain/" in rel_posix:
         return "domain"
     if "/application/intelligence/" in rel_posix:
@@ -647,7 +573,6 @@ def _layer(rel_posix: str) -> str | None:
 
 
 def _target_layer(module: str) -> str | None:
-    """Map an imported promptpotter module to its hexagonal layer."""
     if module.startswith("promptpotter.domain"):
         return "domain"
     if module.startswith("promptpotter.application.intelligence"):
@@ -664,7 +589,6 @@ def _target_layer(module: str) -> str | None:
 
 
 def _is_violation(src: str, tgt: str) -> bool:
-    """The runtime-import rules. Tightest at the bottom (domain), loosest at the top."""
     if src == "domain" and tgt != "domain":
         return True
     if src == "intelligence" and tgt == "optimization":
@@ -673,7 +597,7 @@ def _is_violation(src: str, tgt: str) -> bool:
 
 
 class _RuntimeImports(ast.NodeVisitor):
-    """Collect imports, skipping ``if TYPE_CHECKING:`` blocks."""
+    """Collect runtime imports; skips ``if TYPE_CHECKING:`` blocks."""
 
     def __init__(self) -> None:
         self.modules: list[str] = []
@@ -724,24 +648,14 @@ _CYCLE_FORBIDDEN_PROMPT_SURFACE = frozenset(
 
 
 def test_cycle_does_not_import_prompt_surface() -> None:
-    """Cycle must not import from prompt-surface or escalation modules.
-
-    The cycle ↔ pipeline back-edge (cycle.py importing L2/L3 strategies
-    from pipeline.py at module top) was the structural smell that drove
-    the C1 split. Reasserting it would re-introduce the circular
-    workaround. Guard: cycle.py imports neither the surface compilers
-    nor the escalation driver — escalation imports cycle, never the
-    reverse.
-    """
+    """``cycle.py`` must not import prompt-surface or escalation modules — escalation imports cycle."""
     cycle_path = ROOT / "application" / "optimization" / "cycle.py"
     tree = ast.parse(cycle_path.read_text(encoding="utf-8"))
     visitor = _RuntimeImports()
     visitor.visit(tree)
     forbidden = sorted(set(visitor.modules) & _CYCLE_FORBIDDEN_PROMPT_SURFACE)
-    assert not forbidden, (
-        "cycle.py must not import from prompt-surface modules at runtime — "
-        "those modules import cycle. A back-edge re-introduces the cycle.\n"
-        "Forbidden imports detected:\n  " + "\n  ".join(forbidden)
+    assert not forbidden, "cycle.py back-edge to prompt-surface modules:\n  " + "\n  ".join(
+        forbidden
     )
 
 
@@ -749,23 +663,15 @@ def test_no_unexpected_runtime_layer_violations() -> None:
     found = _scan_violations()
     new = found - KNOWN_VIOLATIONS
     stale = KNOWN_VIOLATIONS - found
-    assert not new, (
-        "New runtime layer-import violations detected. "
-        "Either fix the import, or — if intentional and pending a rework — add it "
-        "to KNOWN_VIOLATIONS with a TODO pointer.\nNew violations:\n  "
-        + "\n  ".join(f"{src}: {tgt}" for src, tgt in sorted(new))
+    assert not new, "New runtime layer-import violations:\n  " + "\n  ".join(
+        f"{src}: {tgt}" for src, tgt in sorted(new)
     )
-    assert not stale, (
-        "KNOWN_VIOLATIONS contains entries that no longer occur in the source. "
-        "Remove them to keep the allowlist accurate.\nStale entries:\n  "
-        + "\n  ".join(f"{src}: {tgt}" for src, tgt in sorted(stale))
+    assert not stale, "Stale KNOWN_VIOLATIONS:\n  " + "\n  ".join(
+        f"{src}: {tgt}" for src, tgt in sorted(stale)
     )
 
 
-# Sole permitted module for archive method-access — the §3.7 facade.
 _ARCHIVE_FACADE_MODULE = "infrastructure/store/archive_views.py"
-# Permitted same-layer access: the archive itself can call its own methods,
-# and ``stores.archive`` exposure inside ``stores.py`` is part of the surface.
 _ARCHIVE_INTERNAL_MODULES = frozenset(
     {
         "infrastructure/store/measurement_archive.py",
@@ -773,9 +679,8 @@ _ARCHIVE_INTERNAL_MODULES = frozenset(
         "infrastructure/store/__init__.py",
     }
 )
-# Pattern catches ``store.archive.method(``, ``self.archive.method(``,
-# ``cls.archive.method(``, plus the alias form ``= session.store.archive``
-# which then enables ``archive.method(`` calls.
+# Catches ``store.archive.method(`` / ``self.archive.method(`` / ``cls.archive.method(``
+# + alias ``= session.store.archive``.
 _ARCHIVE_DIRECT_PATTERNS = (
     re.compile(r"\b(?:store|self|cls)\.archive\.[a-zA-Z_]"),
     re.compile(r"=\s*\S+\.store\.archive\b"),
@@ -783,16 +688,7 @@ _ARCHIVE_DIRECT_PATTERNS = (
 
 
 def test_no_direct_archive_access_outside_facade() -> None:
-    """Every read/write of MeasurementArchive routes through ``archive_views``.
-
-    The §3.7 facade (``infrastructure/store/archive_views.py``) is the sole
-    gateway. Direct method calls (``store.archive.X(...)``) and aliasing
-    (``archive = session.store.archive``) outside the facade are drift —
-    multiple readers + writers of the database core without a gated entry
-    is the same problem ``CycleEventLog`` solved for events. Same-layer
-    archive internals (``measurement_archive.py``, ``stores.py``,
-    ``__init__.py``) are exempt.
-    """
+    """Every MeasurementArchive read/write routes through ``archive_views``."""
     offenders: list[str] = []
     for path in ROOT.rglob("*.py"):
         rel = path.relative_to(ROOT).as_posix()
@@ -807,8 +703,7 @@ def test_no_direct_archive_access_outside_facade() -> None:
         text = path.read_text(encoding="utf-8")
         for pattern in _ARCHIVE_DIRECT_PATTERNS:
             for match in pattern.finditer(text):
-                # Strip docstring matches (heuristic: the matching line begins
-                # with ``"`` or ``#`` after the line's leading whitespace).
+                # Skip comment/docstring lines.
                 line_start = text.rfind("\n", 0, match.start()) + 1
                 line_end = text.find("\n", match.start())
                 line = text[line_start : line_end if line_end != -1 else None]
@@ -819,13 +714,10 @@ def test_no_direct_archive_access_outside_facade() -> None:
                     f"{rel}:{text[: match.start()].count(chr(10)) + 1}: {line.strip()}"
                 )
     assert not offenders, (
-        "Direct MeasurementArchive access outside the facade detected. "
-        "Route through ``promptpotter.infrastructure.store.archive_views`` instead.\n"
-        "Offenders:\n  " + "\n  ".join(offenders)
+        "Direct MeasurementArchive access outside facade — route through archive_views:\n  "
+        + "\n  ".join(offenders)
     )
 
-
-# Resume-checkpoint kind registry — single seam for divergence gating.
 
 from promptpotter.application.optimization.resume_and_fork import (  # noqa: E402
     REPLAYERS,
@@ -870,10 +762,7 @@ def test_archival_kinds_have_no_replayer() -> None:
     )
 
 
-# Match calls only — ``(?<!def )`` skips the helper definition. Then greedily
-# skip the first argument (the decisions list / ledger sink) up to the first
-# comma not nested in brackets/parens, and require the next token to start
-# with ``ResumeCheckpointKind.``. Bare-string second args fail the match.
+# Match calls only — `(?<!def )` skips the helper definition; second arg must start with `ResumeCheckpointKind.`.
 _RECORD_DECISION = re.compile(
     r"""(?<!def\ )record_decision\s*\(
         \s*[^,()\[\]]+,
@@ -884,7 +773,7 @@ _RECORD_DECISION = re.compile(
 
 
 def test_no_bare_string_decision_kinds() -> None:
-    """Every record_decision call passes a ResumeCheckpointKind, not a bare string."""
+    """``record_decision`` calls pass a ``ResumeCheckpointKind``, not a bare string."""
     offenders: list[str] = []
     for py in _SRC_ROOT.rglob("*.py"):
         text = py.read_text(encoding="utf-8")
@@ -898,7 +787,7 @@ def test_no_bare_string_decision_kinds() -> None:
 
 
 def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
-    """Append decision/phase/snapshot, read back via iter() — types preserved."""
+    """Append decision/phase/snapshot; ``iter()`` preserves types."""
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc1"))
 
     d = ResumeCheckpointRecord(
@@ -927,7 +816,6 @@ def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
 
 
 def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
-    """``_open_cycle_ledger`` opens the ledger under the per-cycle audit dir."""
     from types import SimpleNamespace
 
     from promptpotter.application.bootstrap.session import _open_cycle_ledger
@@ -950,7 +838,7 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
 
 
 def test_runcallbacks_emits_records_to_ledger(tmp_path: Path) -> None:
-    """RunCallbacks is the single ingress: every callback appends one typed record."""
+    """Single ingress: every RunCallbacks callback appends one typed record."""
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.phases import PhaseEvent
 
@@ -981,7 +869,7 @@ def test_runcallbacks_emits_records_to_ledger(tmp_path: Path) -> None:
 
 
 def test_runledger_inherit_from_replays_parent_records_first(tmp_path: Path) -> None:
-    """A fork's iter() walks parent's records up to the cut offset, then its own."""
+    """Fork ``iter()`` walks parent's records up to the cut offset, then its own."""
     parent = CycleEventLog.open(CycleDir(tmp_path / "parent"))
     parent.append(PhaseRecord(phase="round", event="complete", round=0))
     parent.append(
@@ -1003,7 +891,6 @@ def test_runledger_inherit_from_replays_parent_records_first(tmp_path: Path) -> 
 
 
 def test_divergence_hint_lists_every_decision_kind() -> None:
-    """The CLI hint shown on resume-divergence enumerates every kind by gating mode."""
     from promptpotter.presentation.cli.campaign_runner import _DIVERGENCE_HINT
 
     for kind, mode in RESUME_CHECKPOINT_GATING.items():
@@ -1012,14 +899,11 @@ def test_divergence_hint_lists_every_decision_kind() -> None:
         )
 
 
-# Reconstructable state — ledger is single SoT (§3.8 invariant).
-
 from promptpotter.application.optimization.escalation.state import EscalationState  # noqa: E402
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailView  # noqa: E402
 
 
 def _scripted_ledger(tmp_path: Path) -> CycleEventLog:
-    """Two-round + L2-fire scripted ledger; no LLM calls fired."""
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc"))
     ledger.append(
         PhaseRecord(
@@ -1056,7 +940,6 @@ def _scripted_ledger(tmp_path: Path) -> CycleEventLog:
 
 
 def test_escalation_state_round_trips_through_ledger(tmp_path: Path) -> None:
-    """Live-mutated EscalationState equals the value rebuilt from the ledger."""
     ledger = _scripted_ledger(tmp_path)
     rebuilt = EscalationState.from_ledger(ledger)
     live = EscalationState()
@@ -1076,10 +959,7 @@ def test_escalation_state_round_trips_through_ledger(tmp_path: Path) -> None:
         "_l3_best_composite_fitness_at_entry",
     ]
     for field in fields:
-        assert getattr(rebuilt, field) == getattr(live, field), (
-            f"EscalationState.{field} drift: ledger={getattr(rebuilt, field)} "
-            f"live={getattr(live, field)}"
-        )
+        assert getattr(rebuilt, field) == getattr(live, field)
 
 
 def test_audit_trail_round_trips_llm_call_records(tmp_path: Path) -> None:
@@ -1101,7 +981,7 @@ def test_audit_trail_round_trips_llm_call_records(tmp_path: Path) -> None:
     ledger.append(PhaseRecord(phase="round", event="complete", round=2))
 
     written = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0002.json"
-    assert written.exists(), "round-complete must flush a derived view of the ledger"
+    assert written.exists()
 
     fresh_dir = tmp_path / "fresh" / "cyc1"
     fresh_dir.mkdir(parents=True)
@@ -1110,16 +990,11 @@ def test_audit_trail_round_trips_llm_call_records(tmp_path: Path) -> None:
         fresh.on_record(record, offset)
 
     fresh_written = fresh_dir / ".runtime" / "cache" / "rounds" / "round_0002.json"
-    assert fresh_written.exists(), "ledger replay must reconstruct the same round file"
+    assert fresh_written.exists()
 
     live_payload = json.loads(written.read_text(encoding="utf-8"))
     fresh_payload = json.loads(fresh_written.read_text(encoding="utf-8"))
-    assert fresh_payload == live_payload, (
-        "AuditTrailView drift: live-bind vs replay-from-ledger produced different content"
-    )
-
-
-# Security boundaries — log redaction, path traversal, prompt-injection fence.
+    assert fresh_payload == live_payload
 
 
 def test_secret_redaction_filter_scrubs_settings_values_and_prefixes(
@@ -1303,22 +1178,8 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     assert "UNTRUSTED" not in tc_text
 
 
-# Round-event trio — every completed round emits enter + complete + display
-# via ``_close_round`` (the structural fence for §0 ledger subscription).
-
-
 def test_run_round_loop_continue_paths_route_through_close_round() -> None:
-    """Every ``continue`` inside the round-loop ``while`` calls ``_close_round``.
-
-    ``_close_round`` emits the trio's tail (``round:display`` via
-    ``cb.on_round_complete`` and ``round:complete`` via ``_persist_round``)
-    and is the sole seam where rounds become visible to display + audit.
-    A branch that issues ``round:enter`` (via ``cb.set_round`` /
-    ``ledger.append(PhaseRecord(...event="enter"...))``) and then
-    ``continue``s without first calling ``_close_round`` collapses §0's
-    "display is a ledger subscriber" invariant for that round.
-    ``_post_round`` is sanctioned because it calls ``_close_round`` itself.
-    """
+    """Every ``continue`` inside the round-loop ``while`` calls ``close_round`` (or ``post_round``)."""
     runner_src = (ROOT / "application" / "runner" / "loop.py").read_text(encoding="utf-8")
     tree = ast.parse(runner_src)
 
@@ -1328,10 +1189,8 @@ def test_run_round_loop_continue_paths_route_through_close_round() -> None:
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "run_round_loop"
     )
 
-    # The round-loop is the only ``while`` directly inside the try/while
-    # nesting at function-body scope.
     while_nodes = [n for n in ast.walk(fn) if isinstance(n, ast.While)]
-    assert len(while_nodes) == 1, "expected one while-loop in run_round_loop"
+    assert len(while_nodes) == 1
     round_loop = while_nodes[0]
 
     sanctioned = {"close_round", "post_round"}
@@ -1344,8 +1203,7 @@ def test_run_round_loop_continue_paths_route_through_close_round() -> None:
                     return True
         return False
 
-    # Walk top-level statements in the while body; each ``if`` whose body
-    # ends with ``continue`` is a round-loop branch that closes the round.
+    # Each top-level ``if`` whose body ``continue``s is a round-loop branch that must close the round.
     offenders: list[str] = []
     for stmt in round_loop.body:
         if not isinstance(stmt, ast.If):
@@ -1357,25 +1215,13 @@ def test_run_round_loop_continue_paths_route_through_close_round() -> None:
                 f"line {stmt.lineno}: ``continue`` without close_round/post_round call"
             )
 
-    assert not offenders, (
-        "round-loop branches must route through close_round before continuing:\n  "
-        + "\n  ".join(offenders)
+    assert not offenders, "round-loop branches must route through close_round:\n  " + "\n  ".join(
+        offenders
     )
 
 
-# Dispatch + domain-shape guardrails: INJECTIONS↔renderer parity,
-# all LLM calls funnel through dispatch (Q8), pipeline_params nested-by-node.
-
-
 def test_every_injection_renderer_is_wired() -> None:
-    """Every INJECTIONS slot resolves to a renderer, and no renderer is orphaned.
-
-    Forward: each ``_Injection`` carries a callable renderer and its
-    ``name`` matches its registry key. Reverse: every ``_r_*`` renderer
-    defined across the ``injections/`` package is referenced by some
-    INJECTIONS entry — a renderer written but never wired (or stranded
-    after a slot was deleted) is dead code the dispatch hub never reaches.
-    """
+    """Every INJECTIONS slot resolves to a renderer; every ``_r_*`` renderer is wired."""
     import importlib
     import inspect
     import pkgutil
@@ -1403,15 +1249,7 @@ def test_every_injection_renderer_is_wired() -> None:
 
 
 def test_llm_calls_funnel_through_dispatch() -> None:
-    """The raw provider call ``.chat()`` has exactly one call-site module.
-
-    Every optimizer LLM call goes ``llm_call() → _chat_under_deadline() →
-    llm_client.chat()`` inside ``dispatch/llm_call/call.py``. That module
-    emits the ``LLMCallRecord`` to the ledger, and its caller sites
-    (l1_generate, l1_critique, L2, L3) wrap the call in ``observed_node()``.
-    A ``.chat()`` invoked anywhere else is an untraced LLM call —
-    pre-flight gate Q8. AST-walk ``promptpotter/`` and forbid the bypass.
-    """
+    """Raw ``.chat()`` calls live only in ``dispatch/llm_call/call.py`` (pre-flight gate Q8)."""
     allowed = "application/optimization/dispatch/llm_call/call.py"
     offenders: list[str] = []
     for src_path in ROOT.rglob("*.py"):
@@ -1426,32 +1264,21 @@ def test_llm_calls_funnel_through_dispatch() -> None:
                 and node.func.attr == "chat"
             ):
                 offenders.append(f"{rel}:{node.lineno}")
-    assert not offenders, (
-        "Direct ``.chat()`` call outside dispatch/llm_call/call.py — route the "
-        "LLM call through ``llm_call()`` so it is traced (observed_node + "
-        "LLMCallRecord):\n  " + "\n  ".join(offenders)
+    assert not offenders, "Direct ``.chat()`` outside dispatch/llm_call/call.py:\n  " + "\n  ".join(
+        offenders
     )
 
 
 def test_pipeline_params_rejects_flat_param_map() -> None:
-    """``JobSearchPoint.pipeline_params`` is nested-by-node — a flat map is rejected.
-
-    The nested shape ``{node: {param: value}}`` is the only format; the
-    pre-nested flat ``{param: value}`` map was removed everywhere. A field
-    validator on the frozen model rejects it at construction, so a new
-    caller cannot reintroduce the flat format silently.
-    """
+    """``JobSearchPoint.pipeline_params`` is nested-by-node ⇒ flat ``{param: value}`` rejected."""
     from pydantic import ValidationError
 
     from promptpotter.domain.search_point import JobSearchPoint
 
-    # Nested node configs, the reserved ``steps`` list, empty, and unset
-    # all construct cleanly.
     JobSearchPoint(pipeline_params={"llm_only": {"model": "x", "temperature": 0.1}})
     JobSearchPoint(pipeline_params={"steps": ["llm_ranking"], "llm_ranking": {"prompt": "x"}})
     JobSearchPoint(pipeline_params={})
     JobSearchPoint(pipeline_params=None)
 
-    # A flat param map (bare scalar values) fails at construction.
     with pytest.raises(ValidationError):
         JobSearchPoint(pipeline_params={"model": "x", "temperature": 0.1})

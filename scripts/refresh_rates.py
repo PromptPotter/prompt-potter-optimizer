@@ -1,11 +1,4 @@
-"""Manually refresh the cached LiteLLM model price table.
-
-Usage: ``python scripts/refresh_rates.py``
-
-Same code path the CLI runs at every ``optimize`` start — exposed as a
-script for pre-warming the cache (e.g. before going offline) or for CI.
-Exits 0 on a successful fetch, 1 on network/parse failure.
-"""
+"""Manually refresh the cached LiteLLM model price table. Exits 0 on success, 1 on failure."""
 
 from __future__ import annotations
 

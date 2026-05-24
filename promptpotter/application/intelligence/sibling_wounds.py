@@ -1,18 +1,4 @@
-"""Cross-cycle wound inheritance — surface sibling runtime_failures to a fresh fork.
-
-When `optimize --fork-on-divergence` mints a sibling cycle, the new cycle's
-`opt_sp.wounds.runtime_failures` starts empty even though sibling forks of
-the same root may carry hard-won evidence about which configs degrade
-(empty_response, HTTP 413, etc.). This helper walks the sibling fork tree
-and aggregates that evidence so the new cycle's L1 sees it from round 1.
-
-Pure read — no I/O writes. The aggregation is *additive*: deduped by
-(source, dominant_warning, observed_config) tuple, same key the
-intra-cycle dedup in `Cycle.absorb_round` uses. The model-aware filter
-in `_r_runtime_failures` still drops entries that don't match the new
-cycle's pipeline config — that's intentional, this just makes them
-available for the renderer to filter.
-"""
+"""Cross-cycle wound inheritance — surface sibling runtime_failures to a fresh fork."""
 
 from __future__ import annotations
 
@@ -27,15 +13,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Stop reasons that mean "this sibling ran to a meaningful boundary" — its
-# terminal opt_sp carries trustworthy runtime_failures evidence.
+# Sibling ran to a meaningful boundary — terminal opt_sp carries trustworthy runtime_failures.
 _FINISHED_STOP_REASONS = frozenset(
     {"max_rounds", "goal_reached", "infinite_stall", "perfect_score", "l3_patience"}
 )
 
 
 def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
-    """Mirror of `Cycle._rf_dedup_key` so cross-cycle dedup matches intra-cycle."""
+    """Mirror of ``Cycle._rf_dedup_key`` so cross-cycle dedup matches intra-cycle."""
     cfg = rf_dict.get("observed_config") or {}
     return (
         rf_dict.get("source", ""),
@@ -51,18 +36,7 @@ def gather_sibling_runtime_failures(
     backend_id: str,
     exclude_cycle_id: str | None = None,
 ) -> list[RuntimeFailure]:
-    """Aggregate runtime_failures from finished sibling cycles of `root_cycle_id`.
-
-    Walks the campaign's flat `cycles/` dir; for each cycle that shares the
-    same family root and has a finished `index.json::stop_reason`, reads the
-    last round_NNNN.json's terminal `opt_search_point.wounds.runtime_failures`.
-    Returns a deduped list of `RuntimeFailure` objects.
-
-    `exclude_cycle_id` skips one specific sibling (used at fork-mint time
-    to avoid inheriting from oneself when the new fork is already on disk).
-
-    Best-effort: malformed JSON or missing files are skipped silently.
-    """
+    """Aggregate deduped runtime_failures from finished sibling cycles of ``root_cycle_id``."""
     from promptpotter.infrastructure.store import root_cycle_id as _root_of
 
     out: list[RuntimeFailure] = []

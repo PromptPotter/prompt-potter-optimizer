@@ -1,16 +1,7 @@
-"""Per-sample chronological measurement series for the cycle + campaign scopes.
+"""Per-sample chronological measurement series at cycle + campaign scope.
 
-Sibling to :func:`promptpotter.infrastructure.store.archive_views.measurement_series_for_samples`,
-which serves the dataset (cross-campaign) scope. All three feed the
-read-only ``/datasets/{name}/measurement-series`` endpoint that powers
-the hard-sample-leaderboard heatmap.
-
-The two functions here walk per-cycle ``rounds/round_*.json`` files
-directly — series for an in-flight cycle land before the run is archived,
-and a campaign-pooled view needs the same in-flight visibility across
-every cycle in the campaign. Errored items (predicate
-:func:`promptpotter.shared.errors.is_error_result`) are dropped so the
-Rasch fit and the heatmap see the same observation set.
+Walks per-cycle ``rounds/round_*.json`` directly so in-flight cycles land before archive.
+Errored items dropped to match the Rasch / heatmap observation set.
 """
 
 from __future__ import annotations
@@ -36,16 +27,9 @@ def cycle_measurement_series(
     cycle_id: str,
     sample_ids: set[int],
 ) -> dict[int, list[dict[str, Any]]]:
-    """Walk one cycle's ``rounds/round_*.json``, returning per-sample series.
+    """Walk one cycle's ``rounds/round_*.json`` → per-sample series.
 
-    Ord = ``{round:04d}/{cand_idx:02d}`` so series sort chronologically by
-    round then by scoreboard position within the round. Candidates not
-    appearing in the round's scoreboard sink to slot 99.
-
-    Samples in *sample_ids* with no measurements come back as empty lists;
-    samples outside *sample_ids* are skipped. Missing or unreadable round
-    files are silently skipped — a cycle still mid-round may have an
-    open file.
+    Ord = ``{round:04d}/{cand_idx:02d}``; candidates absent from the scoreboard sink to slot 99.
     """
     cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     rounds_dir = cycle_dir / "rounds"
@@ -100,11 +84,7 @@ def campaign_measurement_series(
     campaign_id: str,
     sample_ids: set[int],
 ) -> dict[int, list[dict[str, Any]]]:
-    """Pool every cycle's round-file series across one campaign.
-
-    Ord is prefixed with the cycle id so series from different cycles in
-    the campaign stay distinct under lexicographic sort.
-    """
+    """Pool every cycle's round-file series across one campaign; ord prefixed by cycle id."""
     out: dict[int, list[dict[str, Any]]] = {sid: [] for sid in sample_ids}
     for entry in store.campaigns.enumerate_cycles():
         if entry["campaign_id"] != campaign_id:

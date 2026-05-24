@@ -1,8 +1,4 @@
-"""Per-cycle ``index.json`` CRUD — create, update, rewind, enumerate.
-
-Every method takes a leading ``campaign_id`` because a cycle id is unique
-only within its campaign — the path spine is ``(campaign_id, cycle_id)``.
-"""
+"""Per-cycle ``index.json`` CRUD — create, update, rewind, enumerate."""
 
 from __future__ import annotations
 
@@ -30,9 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def _rmtree_robust(path: Path) -> None:
-    """``shutil.rmtree`` surviving Windows-isms: ``\\\\?\\`` long-path prefix,
-    chmod-on-PermissionError, transient-handle backoff. Prefix is a no-op on POSIX.
-    """
+    """``shutil.rmtree`` with Windows-isms — long-path prefix, chmod-on-PermissionError, backoff."""
     target_str = str(path.resolve())
     if os.name == "nt" and not target_str.startswith("\\\\?\\"):
         target_str = "\\\\?\\" + target_str
@@ -59,13 +53,7 @@ def _rmtree_robust(path: Path) -> None:
 
 
 def _unit_kind(sibling_kind: str, fork_trigger: str | None) -> str:
-    """Operator-facing unit kind for the sidebar — four kinds folded from on-disk state:
-
-    - ``session`` — root run; ``resume`` extends it, never branches.
-    - ``divergent_resume`` — ``resume --fork-on-divergence`` branch.
-    - ``user_fork`` — operator-initiated branch (HITL / diag-BFS / sweep).
-    - ``l3_fork`` — reserved for L3 auto-fork; unused today (L3 fork-proposals are observation-only).
-    """
+    """Sidebar unit kind ∈ {``session``, ``divergent_resume``, ``user_fork``, ``l3_fork``}."""
     if sibling_kind == "root":
         return "session"
     if fork_trigger == "scoring_divergence":
@@ -79,7 +67,7 @@ class CycleIndexMixin(CampaignStoreKernel):
     """Per-cycle ``index.json`` CRUD, rewind, and cross-campaign enumeration."""
 
     def load(self, campaign_id: str, cycle_id: str) -> dict[str, Any] | None:
-        """Load a cycle's ``index.json``; ``cycle_id`` is injected from the dir name."""
+        """Load a cycle's ``index.json``; ``cycle_id`` injected from dir name."""
         data: dict[str, Any] | None = read_json_optional(self._index_path(campaign_id, cycle_id))
         if data is None:
             return None
@@ -92,7 +80,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         cycle_id: str,
         metadata: dict[str, Any],
     ) -> Path:
-        """Create/augment cycle ``index.json``; replay merges keys without clobbering ``rounds``/``best_*``."""
+        """Create/augment cycle ``index.json``; replay merges keys without clobbering rounds/best."""
         path = self._index_path(campaign_id, cycle_id)
         existing = read_json_optional(path) or {}
         existing.pop("cycle_id", None)
@@ -125,7 +113,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         *,
         remove: Sequence[str] = (),
     ) -> None:
-        """Merge *updates* into the cycle ``index.json`` and write back (+ timestamp)."""
+        """Merge updates into ``index.json`` and write back (+ timestamp)."""
         path = self._index_path(campaign_id, cycle_id)
         data = read_json(path)
         for key in remove:
@@ -140,9 +128,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         cycle_id: str,
         after_round: int,
     ) -> None:
-        """Archive ``round_NNNN.json`` + matching candidate files for rounds > ``after_round``
-        into ``.runtime/archived/resumed_at_<ts>/``; rebuild the round index. Ledger-admissibility-gated.
-        """
+        """Archive round + candidate files for rounds > ``after_round`` into ``.runtime/archived/resumed_at_<ts>/``; rebuild the round index. Ledger-admissibility-gated."""
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
         rounds_dir = self._rounds_dir(campaign_id, cycle_id)
         candidates_dir = self._candidates_dir(campaign_id, cycle_id)
@@ -216,7 +202,6 @@ class CycleIndexMixin(CampaignStoreKernel):
         cycle_id: str,
         survivors: list[Path],
     ) -> None:
-        """Recompute ``rounds`` / ``n_rounds`` / ``best_*`` from surviving detail files."""
         index_path = self._index_path(campaign_id, cycle_id)
         data = read_json(index_path)
 
@@ -245,17 +230,10 @@ class CycleIndexMixin(CampaignStoreKernel):
         crash_traceback: str | None = None,
         final: dict[str, Any] | None = None,
     ) -> None:
-        """Write terminal status/stop_reason + outcome summary to the cycle index.
-
-        ``final`` = the frozen verdict (``index.json::final``) read by the meta-campaign
-        skill / ``review.md`` / leaderboard; caller assembles, this just persists.
-        """
+        """Write terminal status/stop_reason + outcome summary to the cycle index."""
         from promptpotter.shared.errors import graceful
 
-        # Monotonic round count: a degenerate finalize (diverged/crashed during
-        # init, no Cycle built) carries n_rounds=0 and must not regress a cycle
-        # with real rounds. On no-advance, only status/stop_reason/finished_at
-        # reflect this run.
+        # Monotonic round count — a degenerate finalize (n_rounds=0) must not regress real rounds.
         existing = read_json_optional(self._index_path(campaign_id, cycle_id)) or {}
         no_advance = n_rounds < int(existing.get("n_rounds") or 0)
 
@@ -282,7 +260,6 @@ class CycleIndexMixin(CampaignStoreKernel):
             self.update(campaign_id, cycle_id, updates, remove=remove_keys)
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
-        """Summary row for every cycle on disk, optionally filtered by backend."""
         results = []
         for index_path in self._index_files():
             data = read_json(index_path)
@@ -308,7 +285,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         return results
 
     def enumerate_cycles(self) -> list[dict[str, Any]]:
-        """Every cycle on disk in the webapp-picker shape; unreadable indexes contribute ``status='unreadable'`` stubs."""
+        """Every cycle on disk in the webapp-picker shape; unreadable → ``status='unreadable'`` stubs."""
         results: list[dict[str, Any]] = []
         for index_path in self._index_files():
             campaign_id, cycle_id = self._ids_from_index_path(index_path)
@@ -370,7 +347,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         return results
 
     def try_delete_stub_cycle(self, campaign_id: str, cycle_id: str) -> tuple[bool, str]:
-        """Delete a stub cycle dir → ``(deleted, reason)``. Guards: dir exists, ``n_rounds == 0``, not a family root, no children."""
+        """Delete a stub cycle dir → ``(deleted, reason)``. Guards: ``n_rounds == 0``, not a family root, no children."""
         cycle_dir = self.cycle_dir(campaign_id, cycle_id)
         index_path = cycle_dir / "index.json"
         if not index_path.is_file():

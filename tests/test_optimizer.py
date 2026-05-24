@@ -1,9 +1,4 @@
-"""Optimizer loop invariants — L1 detector, L2/L3 output validators, PoBB, layout, sweep round-trip.
-
-Seven named invariants: L1 detect_invariants, L2 verbatim/duplicate/paraphrase,
-L3 plan validators, l1_layout HARD/SOFT, PoBB (incl. paired lucky-prefix),
-SweepPayload round-trip, L2 action=probe_round.
-"""
+"""Optimizer loop invariants — L1 detector, L2/L3 output validators, PoBB, layout, sweep round-trip."""
 
 from __future__ import annotations
 
@@ -96,8 +91,6 @@ def test_duplicate_signature_attaches_validation_failure():
 
 
 def test_parse_population_attaches_forbidden_axis_failure_to_osp():
-    """A ``model`` override under default ``forbidden_axes_strict=True`` lands as
-    ``ValidationFailure(reason='forbidden_axis')`` on the OSP."""
     from promptpotter.application.optimization.l1.population import parse_population
     from promptpotter.domain.pipeline_schema import (
         NodePromptMeta,
@@ -129,7 +122,6 @@ def _osp(**kwargs) -> OptSearchPoint:
 
 
 def test_task_context_verbatim_repeat_fires_when_proposed_merge_is_no_op():
-    """Non-empty L2 proposal that merges to None ⇒ verbatim-repeat outcome."""
     out = L2_TASK_CONTEXT_VERBATIM_REPEAT.run(
         {"task_context_proposed": {"domain": "biotech"}, "task_context_applied": None},
         opt_sp=_osp(),
@@ -151,9 +143,6 @@ def test_run_l2_output_validators_aggregates_task_context_repeat():
 
 
 def test_duplicate_insert_fires_when_proposed_lines_already_in_prior_framing():
-    """L2 re-asserts ≥3 lines from the prior task_context — merge still
-    succeeds (added a 4th line) so verbatim_repeat is quiet, but
-    duplicate_insert fires and force-triggers L3 via wound-4."""
     osp = _osp(
         task_context=TaskDecomposition(
             domain="math",
@@ -184,7 +173,7 @@ def test_duplicate_insert_fires_when_proposed_lines_already_in_prior_framing():
 
 
 def test_duplicate_insert_quiet_below_threshold():
-    """Two duplicate lines + one new ⇒ below the 3-line floor; no fire."""
+    """Below the 3-line floor ⇒ no fire."""
     osp = _osp(task_context=TaskDecomposition(key_challenges="line A\nline B"))
     out = L2_DUPLICATE_INSERT.run(
         {
@@ -199,13 +188,7 @@ def test_duplicate_insert_quiet_below_threshold():
 
 
 def test_paraphrase_repeat_fires_on_word_set_overlap_above_threshold():
-    """Paraphrase that shares ≥50% of words with prior framing ⇒ fire.
-
-    Verbatim-repeat (no-op merge) and duplicate-insert (≥3 line overlap)
-    both miss a paraphrase that uses different wording but carries the
-    same instruction on the same target axis. This validator catches
-    that gap.
-    """
+    """Paraphrase sharing ≥50% of words with prior framing ⇒ fire."""
     prior = (
         "Problem misreading (2/N): targeting L1 axis 'instruction' to add "
         "a mandatory problem-restate and constraint-check step before solving."
@@ -231,7 +214,6 @@ def test_paraphrase_repeat_fires_on_word_set_overlap_above_threshold():
 
 
 def test_paraphrase_repeat_quiet_on_genuine_refinement():
-    """Different words / different concept ⇒ no fire."""
     prior = "Problem misreading on geometry: failing coordinate setup."
     refinement = (
         "Combinatorial enumeration failing: candidates skip casework on "
@@ -249,11 +231,7 @@ def test_paraphrase_repeat_quiet_on_genuine_refinement():
 
 
 def test_l1_config_not_in_runtime_failures_fires_on_reproposal():
-    """L1 proposing a config whose (param, value) matches a known runtime
-    failure ⇒ ValidationFailure. Catches the operator-observed bug:
-    `max_tokens=1800` already recorded as `empty_response` in a sibling
-    fork's wounds (inherited at Cycle.start) — L1 re-proposes it anyway.
-    """
+    """L1 proposing a (param, value) matching a known runtime failure ⇒ ValidationFailure."""
     from promptpotter.application.optimization.validators.l1_strict import (
         L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
     )
@@ -286,7 +264,7 @@ def test_l1_config_not_in_runtime_failures_fires_on_reproposal():
 
 
 def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
-    """Novel (param, value) ⇒ no fire. The check only catches exact reproposals."""
+    """Novel (param, value) ⇒ no fire."""
     from promptpotter.application.optimization.validators.l1_strict import (
         L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
     )
@@ -305,7 +283,6 @@ def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
             first_seen_round=1,
         )
     ]
-    # max_tokens=2400 differs from the failing 1800 ⇒ legitimate exploration
     out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
         {"llm_only": {"max_tokens": 2400}},
         opt_sp=osp,
@@ -338,7 +315,6 @@ def test_run_l3_output_validators_aggregates():
 
 
 def test_layout_missing_mandatory_placeholder_is_hard_failure():
-    """Mandatory placeholders must appear somewhere across all slots."""
     bad = L1Layout(task_intent=["task_context"], problem_description=["rendered_prompt"])
     result = validate_l1_layout(bad)
     assert result.is_valid is False
@@ -347,7 +323,6 @@ def test_layout_missing_mandatory_placeholder_is_hard_failure():
 
 
 def test_layout_unknown_placeholder_is_hard_failure():
-    """Placeholder names must be in L1_POSSIBLE."""
     bad = L1Layout(
         task_intent=["task_context", "made_up_signal"],
         problem_description=["rendered_prompt", "pipeline_param_catalogue", "plan"],
@@ -359,7 +334,6 @@ def test_layout_unknown_placeholder_is_hard_failure():
 
 
 def test_layout_duplicate_within_slot_is_hard_failure():
-    """No slot may list the same placeholder twice."""
     bad = L1Layout(
         task_intent=["task_context", "task_context"],
         problem_description=["rendered_prompt", "pipeline_param_catalogue", "plan"],
@@ -383,7 +357,6 @@ def test_posterior_best_probabilities_sums_to_one():
 
 
 def test_high_signal_collapses_to_clear_winner():
-    """Clear-leader regime: P(loser is best) → 0; P(winner is best) → 1."""
     rng = np.random.default_rng(0)
     histories = {
         "winner": [1.0] * 8,
@@ -395,34 +368,16 @@ def test_high_signal_collapses_to_clear_winner():
 
 
 def _measurements(scores: list[float], sample_ids: list[int] | None = None) -> list[dict]:
-    """Build minimal QueryMeasurement-shaped dicts for PoBB paired tests.
-
-    Paired PoBB requires every result carry a ``sample_id`` so the leader
-    and candidate vectors line up by sample. The SP slot only matters when
-    backfill_fn is wired; these tests don't backfill, so a sentinel object
-    suffices.
-    """
+    """Minimal QueryMeasurement-shaped dicts for PoBB paired tests."""
     ids = sample_ids if sample_ids is not None else list(range(len(scores)))
     return [{"sample_id": sid, "fitness": float(s)} for sid, s in zip(ids, scores, strict=True)]
 
 
-_DUMMY_SP = types.SimpleNamespace()  # tests never invoke backfill; SP is opaque storage
+_DUMMY_SP = types.SimpleNamespace()
 
 
 def test_pobb_check_gates_elimination_on_posterior_and_separability():
-    """PoBB.check() must clear BOTH gates to eliminate.
-
-    Part 1 — posterior gate fires on a separated loser. Leader 20/20 vs
-    candidate 0/5 at ε=0.05: Wilson CIs ([0.83,1.00] vs [0.00,0.43]) do
-    NOT overlap, so the separability floor stays out of the way and the
-    Bayesian gate is the deciding signal.
-
-    Part 2 — separability floor blocks elimination on small-n noise.
-    Leader has 11/20 hits with 2/4 on samples 0-3, candidate runs
-    samples 0-3 at 0/4. Posterior P(cand>leader) ≈ 0.05–0.10 < ε=0.20
-    so the Bayesian gate WOULD fire — but Wilson CIs ([0.00,0.49] vs
-    [0.15, 0.85]) overlap, so the apparent gap is noise. Floor must refuse.
-    """
+    """PoBB.check() must clear BOTH posterior AND separability gates."""
     # Part 1 — separated arms, posterior gate fires
     check_sep = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
     check_sep.register_completed(_measurements([1.0] * 20), candidate_id="winner", sp=_DUMMY_SP)
@@ -459,26 +414,16 @@ def test_pobb_check_gates_elimination_on_posterior_and_separability():
 
 
 def test_pobb_dominance_aborts_when_catch_up_impossible():
-    """Pure arithmetic abort: if cand can't match seed even hitting every
-    remaining sample, fire elimination before the Bayesian posterior runs.
-
-    Models the user-reported pattern: leader at 10/20, candidate runs the
-    first 11 samples at 0/11. Even hitting all 9 remaining samples caps
-    the candidate at 9/20 < 10/20 → abort. The deciding observation can
-    be a HIT or a MISS — dominance doesn't depend on the latest evidence,
-    only on the structural budget.
-    """
+    """Arithmetic abort: cand_max_hits < seed_hits ⇒ eliminate before the posterior runs."""
     check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
-    seed_scores = [1.0] * 10 + [0.0] * 10  # seed = 10/20 hits across full universe
+    seed_scores = [1.0] * 10 + [0.0] * 10
     check.register_completed(
         _measurements(seed_scores, sample_ids=list(range(20))),
         candidate_id="origin",
         sp=_DUMMY_SP,
     )
-    # Tell PoBB the candidate's sample budget covers all 20 samples.
     check.set_sample_universe(list(range(20)))
     check.set_current("doomed")
-    # Candidate ran 11 samples, all misses. Max possible final = 0 + 9 = 9 < 10.
     sig = check.check(
         _measurements([0.0] * 11, sample_ids=list(range(11))),
         candidate_idx=1,
@@ -496,26 +441,18 @@ def test_pobb_dominance_aborts_when_catch_up_impossible():
 
 
 def test_pobb_locks_in_dominant_leader():
-    """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED.
-
-    Under paired PoBB, ``leader_id`` in the trace dict is the *hardest
-    prior* — the prior the candidate just beat with the lowest
-    ``P(cand > prior)``. The candidate is locked in as the round leader
-    whenever ``min(per-prior P(cand > prior)) >= lock_in``; no separate
-    ``leader == current`` guard is needed.
-    """
+    """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED."""
     check = PoBBCheck(
         PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8), n_samples=20
     )
-    # Prior: weak candidate. Current: clear leader.
     check.register_completed(_measurements([0.0] * 20), candidate_id="weak_prior", sp=_DUMMY_SP)
     check.set_current("strong_current")
     sig = check.check(_measurements([1.0] * 8), candidate_idx=1, n_total_candidates=3)
     assert sig is not None
     assert sig.target == EscalationTarget.LEADER_LOCKED
     cr = sig.check_result
-    assert cr["leader_id"] == "weak_prior"  # hardest (and only) prior
-    assert cr["p_best"] >= 0.95  # min over per-prior P(cand > prior) is ≥ 0.95
+    assert cr["leader_id"] == "weak_prior"
+    assert cr["p_best"] >= 0.95
     assert cr["queries_scored"] == 8
     # Two candidates remain unscored (idx=1 of 3).
     assert sig.candidates_skipped == 1
@@ -584,13 +521,9 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
     for sid in candidate_samples:
         await check_paired.backfill_for_sample(types.SimpleNamespace(id=sid))
 
-    assert backfill_calls == [(9,), (12,), (13,), (14,), (8,)], (
-        "per-sample backfill must request one sample per call, in iteration order"
-    )
+    assert backfill_calls == [(9,), (12,), (13,), (14,), (8,)]
     leader_paired = check_paired.priors_by_sample["R1_lucky_winner"]
-    assert all(str(sid) in leader_paired for sid in candidate_samples), (
-        "leader history must cover every candidate sample after backfill"
-    )
+    assert all(str(sid) in leader_paired for sid in candidate_samples)
 
     check_paired.set_current("R2_challenger")
     sig = check_paired.check(
@@ -598,14 +531,9 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         candidate_idx=0,
         n_total_candidates=6,
     )
-    # Leader's honest mean on this set is 1/5 (0.2); candidate is 0/5. The gap
-    # is small enough that p_best(candidate) stays above ε=0.05 — the
-    # candidate is not auto-eliminated against a deflated, fairly-measured leader.
+    # Leader honest mean 1/5; candidate 0/5 — gap small ⇒ p_best must stay ≥ ε=0.05.
     if sig is not None:
-        assert sig.check_result["p_best"] >= 0.05, (
-            "after backfill exposes the leader's true hard-sample performance, the "
-            f"candidate must clear ε=0.05 (got p_best={sig.check_result['p_best']:.3f})"
-        )
+        assert sig.check_result["p_best"] >= 0.05
 
 
 def _cs(
@@ -616,7 +544,6 @@ def _cs(
     elimination_stopped: bool = False,
     degradation_context: dict | None = None,
 ) -> CandidateScore:
-    """Minimal CandidateScore for leader-eligibility tests."""
     return CandidateScore(
         candidate_id=candidate_id,
         label=candidate_id,
@@ -633,17 +560,7 @@ def _cs(
 
 
 def test_leader_eligibility_excludes_fatal_degradation_and_keeps_pobb_eliminated():
-    """Winner-selection must not crown a candidate whose run halted on fatal degradation.
-
-    The AIME cycle pathology: C1.3 hit a fatal ``llm_only:empty_response`` at
-    q6/20, leaving 5 HIT + 1 DEPR. Accuracy on the valid subset (5/5 or 5/6)
-    sits well above origin, so the old ``escalation_aborted AND NOT
-    elimination_stopped`` filter let it through — fatal degradation also
-    flips ``elimination_stopped`` so the second leg cancelled the first.
-    The disqualifier must be ``degradation_context`` (set only by degradation
-    + scoring_error_abort checks). PoBB-eliminated candidates stay eligible —
-    they went through fair paired comparison.
-    """
+    """Winner-selection: fatal degradation disqualifies; PoBB elimination does not."""
     fatal = _cs(
         candidate_id="C1.3",
         accuracy=0.8333,
@@ -656,26 +573,20 @@ def test_leader_eligibility_excludes_fatal_degradation_and_keeps_pobb_eliminated
         accuracy=0.40,
         escalation_aborted=True,
         elimination_stopped=True,
-        degradation_context={},  # PoBB elimination doesn't populate degradation_context
+        degradation_context={},
     )
     clean_loser = _cs(candidate_id="C1.4", accuracy=0.45)
 
-    assert not is_leader_eligible(fatal), (
-        "fatal degradation halt must disqualify regardless of partial accuracy"
-    )
-    assert is_leader_eligible(pobb_eliminated), (
-        "PoBB-eliminated candidate is a measured comparison — keep it eligible"
-    )
-    assert is_leader_eligible(clean_loser), "fully-scored low-accuracy candidate is eligible"
+    assert not is_leader_eligible(fatal)
+    assert is_leader_eligible(pobb_eliminated)
+    assert is_leader_eligible(clean_loser)
 
 
 def _full_layout_dict() -> dict[str, list[str]]:
-    """Layout with all mandatory placeholders — passes hard validators."""
     return default_l1_layout().model_dump()
 
 
 def _operator_sweep_payload(**kwargs: object) -> ForkPayload:
-    """Build the operator-sweep ForkPayload shape the runner constructs."""
     return ForkPayload(
         trigger=ForkTrigger.OPERATOR_SWEEP,
         reason=str(kwargs.pop("reason", "canonical case")),
@@ -700,10 +611,10 @@ def test_fork_payload_roundtrips_through_opt_search_point() -> None:
 
 
 def test_fork_payload_rejects_layout_missing_mandatory_placeholder() -> None:
-    """Hard validator: every L1_MANDATORY placeholder must appear somewhere."""
+    """Every L1_MANDATORY placeholder must appear somewhere."""
     bad_layout = {
         "task_intent": ["task_context"],
-        "problem_description": ["rendered_prompt"],  # missing pipeline_param_catalogue + plan
+        "problem_description": ["rendered_prompt"],
     }
     payload = _operator_sweep_payload(l1_layout=bad_layout)
     osp = OptSearchPoint.from_prompt_fields({"persona": "p"})
@@ -712,7 +623,6 @@ def test_fork_payload_rejects_layout_missing_mandatory_placeholder() -> None:
 
 
 def _l2_cycle_stub() -> types.SimpleNamespace:
-    """Minimal Cycle attributes _apply_l2 reads."""
     from promptpotter.application.optimization.escalation.state import EscalationState
 
     return types.SimpleNamespace(
@@ -762,8 +672,7 @@ def test_apply_l2_normal_action_records_commitment_without_probe_state():
 
 
 def test_l3_to_l2_note_is_in_signals_but_not_l1_possible():
-    """Hard structural guard: the note channel is L2-only. Adding it to
-    ``L1_POSSIBLE`` would let L2 leak L3's L2-private guidance to L1."""
+    """The L3→L2 note channel is L2-only; must not appear in ``L1_POSSIBLE``."""
     from promptpotter.application.optimization.dispatch.hub import INJECTIONS
     from promptpotter.domain.l1_layout import L1_POSSIBLE
 
@@ -772,9 +681,7 @@ def test_l3_to_l2_note_is_in_signals_but_not_l1_possible():
 
 
 def test_l3_note_is_memory_field_and_forwarded_via_copy_memory_to():
-    """Stickiness across L2-fire OSP swaps: ``l3_note`` is in
-    ``MEMORY_FIELDS`` so :meth:`copy_memory_to` forwards it onto the
-    fresh OSP that ``_run_transition`` mints."""
+    """``l3_note`` rides ``MEMORY_FIELDS`` so it survives the L2-fire OSP swap."""
     assert "wounds" in OptSearchPoint.MEMORY_FIELDS
 
     osp = _osp(wounds=WoundChannels(l3_note="constraint X discovered, steer L2 around it"))
@@ -821,7 +728,6 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
 
 
 def test_optimizer_prompts_load_with_no_unresolvable_slots():
-    """Every shipping optimizer prompt's ``{{slot}}`` references resolve."""
     from promptpotter.application.optimization.dispatch.llm_call import (
         list_optimizer_prompts,
         load_optimizer_prompt,
@@ -834,7 +740,6 @@ def test_optimizer_prompts_load_with_no_unresolvable_slots():
 
 
 def test_validate_template_raises_on_unknown_slot():
-    """Typo guard: a slot not in INJECTIONS and not in _TEMPLATE_EXTRAS raises."""
     from promptpotter.application.optimization.dispatch.hub import validate_template
     from promptpotter.domain.opt_search_point import PromptTemplate
 
@@ -863,7 +768,6 @@ def _empty_cycle_slice():
 
 
 def test_axis_memory_renders_when_axes_digest_yields_content():
-    """``axis_memory`` wraps :meth:`AxisIndex.digest` into a labeled block."""
     from promptpotter.application.optimization.dispatch.hub import (
         DispatchHub,
         InjectionBundle,
@@ -890,7 +794,6 @@ def test_axis_memory_renders_when_axes_digest_yields_content():
 
 
 def test_axis_memory_empty_when_axes_or_digest_absent():
-    """Pre-first-round and empty-digest paths render to empty string."""
     from promptpotter.application.optimization.dispatch.hub import (
         DispatchHub,
         InjectionBundle,
@@ -915,7 +818,6 @@ def test_axis_memory_empty_when_axes_or_digest_absent():
 
 
 def test_axis_memory_listed_in_l1_possible_and_default_layout():
-    """L1 wiring: L2 may pick axis_memory; default layout includes it."""
     from promptpotter.domain.l1_layout import L1_POSSIBLE, default_l1_layout
 
     assert "axis_memory" in L1_POSSIBLE
@@ -926,11 +828,7 @@ def test_axis_memory_listed_in_l1_possible_and_default_layout():
 
 
 def test_dispatch_budget_caps_injections_and_sheds_by_tier(monkeypatch):
-    """The prompt-budget self-healing unit, end to end: char_cap truncates an
-    LLM overrun; the allocator sheds OPTIONAL before CORE, never MANDATORY; an
-    unhealable prompt halts with StopReason.PROMPT_BUDGET; a raising renderer
-    halts with InjectionRenderError unless --ignore-render-errors downgrades it
-    to an empty render."""
+    """char_cap truncates; OPTIONAL sheds before CORE; MANDATORY never sheds; unhealable ⇒ PROMPT_BUDGET halt."""
     import pytest
 
     from promptpotter.application.optimization.dispatch.hub import (
@@ -961,52 +859,45 @@ def test_dispatch_budget_caps_injections_and_sheds_by_tier(monkeypatch):
             **kw,
         )
 
-    # Per-injection char cap: an LLM that overruns its budget is truncated +
-    # warned (self-healing). Read the live cap so the assertion tracks
-    # re-tuned cap constants instead of pinning a stale literal.
     plan_cap = INJECTIONS["plan"].char_cap
     assert plan_cap is not None
     capped = DispatchHub.render("plan", _bundle(opt_sp=OptSearchPoint(plan="x" * 5000)))
-    assert len(capped) <= plan_cap + 1, "char_cap must truncate an overrun LLM injection"
+    assert len(capped) <= plan_cap + 1
     assert capped.endswith("…")
 
-    unit = BUDGET // 4  # real injection names so INJECTIONS[name].tier resolves
+    unit = BUDGET // 4
 
     # Shedding the lone OPTIONAL injection is enough — CORE + MANDATORY kept.
     out = _apply_budget(
         unit,
         {
-            "rendered_prompt": "M" * unit,  # MANDATORY
-            "diagnostics": "C" * unit,  # CORE
-            "axis_memory": "O" * (2 * unit),  # OPTIONAL
+            "rendered_prompt": "M" * unit,
+            "diagnostics": "C" * unit,
+            "axis_memory": "O" * (2 * unit),
         },
     )
-    assert out["rendered_prompt"] and out["diagnostics"], "OPTIONAL must shed first"
+    assert out["rendered_prompt"] and out["diagnostics"]
     assert out["axis_memory"] == ""
     assert unit + sum(len(v) for v in out.values()) <= BUDGET
 
-    # OPTIONAL alone insufficient → CORE sheds too; MANDATORY always survives.
+    # OPTIONAL alone insufficient → CORE sheds too; MANDATORY survives.
     out2 = _apply_budget(
         unit,
         {
-            "rendered_prompt": "M" * (2 * unit),  # MANDATORY
-            "diagnostics": "C" * (2 * unit),  # CORE
-            "axis_memory": "O" * unit,  # OPTIONAL
+            "rendered_prompt": "M" * (2 * unit),
+            "diagnostics": "C" * (2 * unit),
+            "axis_memory": "O" * unit,
         },
     )
-    assert out2["rendered_prompt"], "MANDATORY survives even when CORE must shed"
+    assert out2["rendered_prompt"]
     assert out2["axis_memory"] == "" and out2["diagnostics"] == ""
     assert unit + sum(len(v) for v in out2.values()) <= BUDGET
 
-    # Unhealable: MANDATORY content alone is over budget after every OPTIONAL
-    # and CORE injection is shed — the loop halts with PROMPT_BUDGET.
+    # Unhealable: MANDATORY alone > budget ⇒ halt with PROMPT_BUDGET.
     with pytest.raises(StopLoop) as halt:
         _apply_budget(BUDGET, {"rendered_prompt": "M" * BUDGET})
     assert halt.value.reason is StopReason.PROMPT_BUDGET
 
-    # A renderer that raises is code drift: DispatchHub.render re-raises it as
-    # InjectionRenderError so the loop can halt with RENDER_ERROR — unless the
-    # operator's --ignore-render-errors downgrades it to an empty render.
     def _boom(_b):
         raise AttributeError("renamed data-model field")
 
@@ -1023,10 +914,7 @@ def test_dispatch_budget_caps_injections_and_sheds_by_tier(monkeypatch):
 
 
 async def test_optimizer_call_deadline_retries_once_then_raises(monkeypatch):
-    """``_chat_under_deadline`` bounds an optimizer call with a total
-    wall-clock deadline the provider SDK's per-read timeout is not: a first
-    timeout is treated as transient and retried, a second raises TimeoutError
-    — which the round loop turns into StopReason.OPTIMIZER_TIMEOUT."""
+    """``_chat_under_deadline`` retries one transient timeout, raises TimeoutError on the second."""
     import asyncio
 
     import pytest
@@ -1036,8 +924,6 @@ async def test_optimizer_call_deadline_retries_once_then_raises(monkeypatch):
     monkeypatch.setattr(llm_call_mod, "OPTIMIZER_CALL_DEADLINE_S", 0.05)
 
     class _Client:
-        """Hangs (asyncio.timeout cancels the sleep) for the first N calls."""
-
         def __init__(self, hang_calls: int) -> None:
             self.hang_calls = hang_calls
             self.calls = 0
@@ -1045,15 +931,13 @@ async def test_optimizer_call_deadline_retries_once_then_raises(monkeypatch):
         async def chat(self, **_kw):
             self.calls += 1
             if self.calls <= self.hang_calls:
-                await asyncio.sleep(10)  # cancelled by the deadline, not awaited
+                await asyncio.sleep(10)
             return "ok"
 
-    # One transient timeout → retried once → the second attempt succeeds.
     recovers = _Client(hang_calls=1)
     result = await llm_call_mod._chat_under_deadline(recovers, node_label="l1_generate")
     assert result == "ok" and recovers.calls == 2
 
-    # Both attempts blow the deadline → TimeoutError propagates for the loop.
     never = _Client(hang_calls=2)
     with pytest.raises(TimeoutError):
         await llm_call_mod._chat_under_deadline(never, node_label="l1_generate")
@@ -1064,14 +948,13 @@ async def test_optimizer_call_deadline_retries_once_then_raises(monkeypatch):
 
 
 def test_default_round_rules_reproduce_observe_round_fsm():
-    """Phase 2a parity: DEFAULT_ROUND_RULES matches observe_round's branches."""
+    """DEFAULT_ROUND_RULES matches observe_round's branches."""
     from promptpotter.application.optimization.escalation import (
         EscalationInputs,
         decide_escalation,
     )
     from promptpotter.application.optimization.escalation.state import NextAction
 
-    # Branch 1 — perfect accuracy → STOP_PERFECT (priority 100)
     perfect = EscalationInputs(
         improved=True,
         current_accuracy=1.0,
@@ -1080,7 +963,6 @@ def test_default_round_rules_reproduce_observe_round_fsm():
     )
     assert decide_escalation(perfect).next_action == NextAction.STOP_PERFECT
 
-    # Branch 2 — stall < patience → CONTINUE (priority 50)
     continuing = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
@@ -1089,7 +971,6 @@ def test_default_round_rules_reproduce_observe_round_fsm():
     )
     assert decide_escalation(continuing).next_action == NextAction.CONTINUE
 
-    # Branch 3 — patience exhausted → FIRE_L2 (priority 10, fall-through)
     fire = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
@@ -1100,15 +981,13 @@ def test_default_round_rules_reproduce_observe_round_fsm():
 
 
 def test_l2_axis_yield_drought_rule_fires_when_signal_supports_it():
-    """Permanent rule: yield-drought preempts l1_continue when AxisIndex
-    shows zero productive axes; quiet when the signal isn't available."""
+    """Yield-drought preempts l1_continue when AxisIndex shows zero productive axes."""
     from promptpotter.application.optimization.escalation import (
         EscalationInputs,
         decide_escalation,
     )
     from promptpotter.application.optimization.escalation.state import NextAction
 
-    # Drought signal + L1 has stalled at least one round → FIRE_L2 (priority 60)
     drought = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
@@ -1118,7 +997,6 @@ def test_l2_axis_yield_drought_rule_fires_when_signal_supports_it():
     )
     assert decide_escalation(drought).next_action == NextAction.FIRE_L2
 
-    # Signal shows productive axes → CONTINUE (l1_continue at priority 50 wins)
     productive = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
@@ -1128,7 +1006,6 @@ def test_l2_axis_yield_drought_rule_fires_when_signal_supports_it():
     )
     assert decide_escalation(productive).next_action == NextAction.CONTINUE
 
-    # Pre-first-round (AxisIndex not initialised) → CONTINUE
     no_evidence = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
@@ -1140,16 +1017,13 @@ def test_l2_axis_yield_drought_rule_fires_when_signal_supports_it():
 
 
 def test_l1_patience_zero_fires_l2_every_round():
-    """l1_patience=0 unifies the 'fire L2 every round' cadence under the
-    patience primitive: l1_continue never matches, l1_to_l2 fall-through
-    fires L2 each round; perfect_accuracy still preempts."""
+    """l1_patience=0 fires L2 every round; perfect_accuracy still preempts."""
     from promptpotter.application.optimization.escalation import (
         EscalationInputs,
         decide_escalation,
     )
     from promptpotter.application.optimization.escalation.state import NextAction
 
-    # patience=0 + improving round → l1_continue (0<0=False) → fall through to l1_to_l2
     improving = EscalationInputs(
         improved=True,
         current_accuracy=0.5,
@@ -1158,7 +1032,6 @@ def test_l1_patience_zero_fires_l2_every_round():
     )
     assert decide_escalation(improving).next_action == NextAction.FIRE_L2
 
-    # patience=0 + stalling round → same fall-through
     stalling = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
@@ -1167,7 +1040,6 @@ def test_l1_patience_zero_fires_l2_every_round():
     )
     assert decide_escalation(stalling).next_action == NextAction.FIRE_L2
 
-    # perfect_accuracy (priority 100) still preempts the cadence
     perfect = EscalationInputs(
         improved=True,
         current_accuracy=1.0,
@@ -1177,10 +1049,7 @@ def test_l1_patience_zero_fires_l2_every_round():
     assert decide_escalation(perfect).next_action == NextAction.STOP_PERFECT
 
 
-# ---------------------------------------------------------------------------
-# JobSearchPoint / OptSearchPoint shape + L2-layout copy_memory contract
-# (merged from test_search_point.py — same L1-surface bucket)
-# ---------------------------------------------------------------------------
+# JobSearchPoint / OptSearchPoint shape + L2-layout copy_memory contract.
 
 import pydantic  # noqa: E402
 
@@ -1241,17 +1110,13 @@ def test_to_job_search_point_projects_prompt_fields_and_few_shot_block():
 
 
 def test_render_does_not_leak_l3_plan_into_target_prompt():
-    """L3's strategic plan is meta-optimizer guidance — it MUST NOT be appended
-    to the target prompt fed to the task model. Plan reaches L1/L2/L3 prompts
-    via the dispatch hub's `_r_plan` injection only.
-    """
+    """L3's plan reaches L1/L2/L3 prompts via ``_r_plan`` only — never via ``OptSearchPoint.render``."""
     sentinel = "REVISED_OPTIMIZATION_FRAMEWORK_PLAN_SENTINEL"
     osp = OptSearchPoint(persona="Expert", instruction="Solve.", plan=sentinel)
     assert sentinel not in osp.render()
 
 
 def test_copy_memory_carries_l1_layout_into_adoption_target():
-    """L2-written L1 layout must survive L2→L3 adoption."""
     custom = L1Layout(
         persona=["plan"],
         task_intent=["task_context"],
@@ -1267,10 +1132,7 @@ def test_copy_memory_carries_l1_layout_into_adoption_target():
     assert "diagnostics" not in parent.l1_layout.persona
 
 
-# ---------------------------------------------------------------------------
-# compute_round_diagnostics — pure function over scoring data
-# (merged from test_round_diagnostics.py — round-readout invariants)
-# ---------------------------------------------------------------------------
+# compute_round_diagnostics — pure function over scoring data.
 
 
 def _round(round_num: int, accuracy: float, results: list[dict]) -> RoundResult:
@@ -1297,7 +1159,6 @@ def _miss(query: str, gt: str) -> dict:
 
 
 def test_diag_rank_lookup_no_schema_lands_everything_not_found():
-    """No schema → no ranked_item_keys → find_rank always None → not_found bucket only."""
     results = [_hit("q1", "a"), _miss("q2", "b"), _miss("q3", "c")]
     rr = _round(0, 0.33, results)
     diag = compute_round_diagnostics(rr, [rr], pipeline_schema=None)
@@ -1310,7 +1171,6 @@ def test_diag_rank_lookup_no_schema_lands_everything_not_found():
 
 
 def test_diag_trajectory_classification_picks_up_plateau():
-    """Three+ rounds with negligible deltas → plateau (or ceiling at best)."""
     rounds = [
         _round(0, 0.50, [_hit("q1", "a")]),
         _round(1, 0.51, [_hit("q1", "a")]),
@@ -1322,7 +1182,6 @@ def test_diag_trajectory_classification_picks_up_plateau():
 
 
 def test_diag_probe_outcome_gated_by_probe_just_completed_flag():
-    """probe_outcome is populated only when probe_just_completed=True."""
     results = [_hit("q1", "a"), _hit("q2", "b"), _miss("q3", "c"), _miss("q4", "d")]
     rr = _round(0, 0.5, results)
 
@@ -1345,19 +1204,10 @@ def test_diag_probe_outcome_gated_by_probe_just_completed_flag():
 
 
 def test_merge_into_cumulative_preserves_prior_on_untouched_samples():
-    """Guards the round-over-round origin invariant: when a PoBB-locked
-    winner only measures a subset of samples, the cumulative pool must
-    retain the prior origin's measurements on samples the winner didn't
-    touch. Without this, ``tr.current_results`` shrinks after every
-    leader-lock — PoBB priors decohere, best-tracking compares
-    incommensurable composites, and L2/L3 stall detection falsely fires
-    on probe rounds."""
+    """Subset-measured winner must not shrink the cumulative pool — prior samples are preserved."""
     from promptpotter.application.optimization.cycle import _merge_into_cumulative
 
-    # Prior origin scored all 20 samples; hits on 0-9, misses on 10-19.
     prior = [{"sample_id": i, "fitness": 1.0 if i < 10 else 0.0, "hit": i < 10} for i in range(20)]
-    # Winner was leader-locked at q8/20 on the hardest samples (10..17),
-    # hit 3 of them (samples 10, 12, 15).
     winner_hits = {10, 12, 15}
     winner = [
         {"sample_id": sid, "fitness": 1.0 if sid in winner_hits else 0.0, "hit": sid in winner_hits}
@@ -1366,27 +1216,16 @@ def test_merge_into_cumulative_preserves_prior_on_untouched_samples():
     merged = _merge_into_cumulative(prior, winner)
     by_sid = {r["sample_id"]: r for r in merged}
 
-    # All 20 samples present — cumulative pool DID NOT shrink to 8.
     assert set(by_sid.keys()) == set(range(20))
-    # Winner overwrites for shared samples — sample 10 reflects the new HIT
-    # (prior had it as MISS); sample 11 stays MISS (winner also MISS).
     assert by_sid[10]["hit"] is True
     assert by_sid[11]["hit"] is False
-    # Samples 18-19 — winner didn't touch them, prior's MISS preserved.
     assert by_sid[19]["hit"] is False
-    # Samples 0-9 — winner didn't touch them, prior's HITs preserved.
     assert all(by_sid[i]["hit"] is True for i in range(10))
-    # Empty incoming → cumulative unchanged.
     assert _merge_into_cumulative(prior, []) == prior
 
 
 def test_l2_behavior_checks_score_conformant_vs_stub_fires():
-    """L2 conformance contract: a well-formed ``l2_context`` fire passes
-    every behaviour check; a stub fire (terse rationale, no axis, verbatim
-    task_context) fails them. The score is dataset-independent — it reads
-    only the meta-prompt's output shape — which is what makes it the anchor
-    for iterating ``l2_context`` across datasets. A round where L2 did not
-    fire yields no results, so an absent fire never scores as a failure."""
+    """Conformant L2 fire passes every behaviour check; stub fails them; no-fire ⇒ no results."""
     from promptpotter.application.optimization.validators.l1_behavior import CheckContext
     from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
 
@@ -1418,5 +1257,4 @@ def test_l2_behavior_checks_score_conformant_vs_stub_fires():
     failed = {c.check_id for c in stub if not c.passed}
     assert {"l2_rationale_substantive", "l2_evidence_anchored"} <= failed
 
-    # A round where L2 did not fire — no l2_context node — yields nothing.
     assert run_all_l2_checks({"nodes": {"l1_generate": {}}}, ctx) == []

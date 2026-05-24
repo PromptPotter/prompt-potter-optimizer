@@ -1,9 +1,4 @@
-"""Fork-sibling ``index.json`` writers — divergence / diag / sweep.
-
-Each writer mints a sibling cycle's ``index.json`` within the parent's
-campaign; ``copy_parent_rounds_and_candidates`` carries the inherited
-round/candidate detail files forward.
-"""
+"""Fork-sibling ``index.json`` writers — divergence / diag / sweep."""
 
 from __future__ import annotations
 
@@ -29,7 +24,7 @@ class ForkMixin(CampaignStoreKernel):
         forked_at: str,
         forked_from_round: int,
     ) -> Path:
-        """Divergence-fork ``index.json`` inheriting parent state (same campaign)."""
+        """Divergence-fork ``index.json`` inheriting parent state."""
         parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         best_acc = max(
             (float(t.get("accuracy", 0.0)) for t in surviving_rounds),
@@ -69,7 +64,6 @@ class ForkMixin(CampaignStoreKernel):
         *,
         forked_at: str,
     ) -> Path:
-        """Clean-slate diag-sibling ``index.json``."""
         parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         blob = fresh_sibling_index_blob(parent_index, parent_cycle_id, "diag", forked_at)
         path = self._index_path(campaign_id, new_cycle_id)
@@ -85,7 +79,6 @@ class ForkMixin(CampaignStoreKernel):
         sweep_batch_id: str,
         forked_at: str,
     ) -> Path:
-        """Clean-slate sweep-fork ``index.json`` carrying ``sweep_batch_id``."""
         parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         blob = fresh_sibling_index_blob(
             parent_index,
@@ -106,7 +99,7 @@ class ForkMixin(CampaignStoreKernel):
         *,
         before_round: int,
     ) -> int:
-        """Copy parent's ``rounds/`` + ``candidates/`` files for rounds < ``before_round``."""
+        """Copy parent's round + candidate files for rounds < ``before_round``."""
         copy_specs: tuple[tuple[Path, Path, str], ...] = (
             (
                 self._rounds_dir(campaign_id, parent_cycle_id),

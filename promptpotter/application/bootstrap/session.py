@@ -1,7 +1,4 @@
-"""Session/Cycle identity + `active_session.json` claim. Owns `Session`, its per-cycle bundles
-(`CycleState`, `ScoringContext`), the tenant context, and the mint/claim helpers.
-Store/client/dataset wiring lives in `wiring`; the scoring-context builder in `scoring_context`.
-"""
+"""Session/Cycle identity + active-session-pointer claim. Owns ``Session`` + per-cycle bundles."""
 
 from __future__ import annotations
 
@@ -41,15 +38,11 @@ class TenantContext:
 
 @dataclass
 class ScoringContext:
-    """Per-cycle scoring policy + active scoring set; populated post-Session-init."""
-
     scorer: Scorer | None = None
     scorer_id: str = "none"
     scorer_formula: str | None = None
     round_scorer: RoundScorer | None = None
-    scorer_round_formula: str | None = (
-        None  # None = registry default; else what scoring_steer.json replaced.
-    )
+    scorer_round_formula: str | None = None
     scoring_set: list[Sample] = field(default_factory=list)
     sample_index: SampleIndex | None = None
     degradation_checks: list[StopRule] = field(default_factory=list)
@@ -57,28 +50,22 @@ class ScoringContext:
 
 @dataclass
 class CycleState:
-    """Per-cycle plumbing bundle — flips on fork. Ledger is sole ingress; `EscalationState` is the FSM."""
+    """Per-cycle bundle — flips on fork."""
 
     cycle_id: str = ""
     tracing_campaign_id: str = ""
-    # Next L1 round to execute. Origin = round 0; fresh ⇒ 1, resumed ⇒ len(prior_l1_rounds) + 1.
     resumed_from_round: int = 1
     obs: ObservabilityBridge | None = None
     audit_projection: AuditTrailView | None = None
     ledger: CycleEventLog | None = None
-    # Set on StopReason.CRASHED; `_finalize_run` stamps it onto `index.json::final.crash_traceback`
-    # so the cause survives past terminal scrollback.
     crash_traceback: str | None = None
 
 
 @dataclass
 class Session:
-    """Session-scoped wiring + identity + per-cycle bundles."""
-
-    # -- Wiring ----------------------------------------------------------
     store: Stores
     backend_id: str
-    experiment_id: str  # Backend-side experiment id (TermNorm vocabulary). Distinct from cycle_id.
+    experiment_id: str
     backend_client: BackendClient
     pipeline_schema: PipelineSchema | None
     samples: list[Sample] = field(default_factory=list)
@@ -90,19 +77,14 @@ class Session:
     pipeline_params: dict[str, Any] = field(default_factory=dict)
     langfuse: LangfuseLogger | None = None
 
-    # -- Identity --------------------------------------------------------
     session_id: str = ""
-    # Stable across forks within the campaign — only `state.cycle_id` flips on a fork.
     campaign_id: str = ""
 
-    # -- Per-cycle bundles ----------------------------------------------
     state: CycleState = field(default_factory=CycleState)
     scoring: ScoringContext = field(default_factory=ScoringContext)
 
-    # -- Runtime config --------------------------------------------------
     source: str = ""
 
-    # -- Lifecycle hook --------------------------------------------------
     stop_check: Callable[[], bool] | None = None
 
 
@@ -113,7 +95,6 @@ def new_session_state(
     pipeline_params: dict[str, Any],
     active_steps: list[str],
 ) -> dict[str, Any]:
-    """Fresh campaign session-state dict (shared by CLI init + orchestrator)."""
     return {
         "phase": "init",
         "init_params": init_params,
@@ -129,7 +110,6 @@ def new_session_state(
 
 
 def _build_index_header(session: Session, dataset_size: int) -> dict[str, Any]:
-    """index.json header — tool/version/pipeline/backend/dataset identity."""
     from promptpotter.config.settings import APP_VERSION
 
     schema = session.pipeline_schema
@@ -159,15 +139,7 @@ def auto_mint_session(
     active_steps: list[str] | None = None,
     label: str = "",
 ) -> tuple[str, str, str]:
-    """Mint fresh campaign + session + root cycle; claim the active pointer.
-
-    Each `new` mints a distinct campaign (`{dataset}__{rand6_hex}`) regardless of declaration
-    overlap on disk. Target + optimizer-prompt hashes ride as properties on `campaign.json` for
-    resume-time drift warnings, not as the id. Two `new` calls on the same declaration share a
-    content-addressed root cycle id + byte-identical origin scores but diverge from round 1.
-
-    Mutates *session* (`session_id`, `campaign_id`, `state.cycle_id`); claims the 4-key pointer.
-    """
+    """Mint fresh campaign + session + root cycle; claim the active pointer."""
     from datetime import UTC, datetime
 
     from promptpotter.application.optimization.dispatch.llm_call import (
@@ -234,8 +206,7 @@ def auto_mint_session(
 
     save_active_pointer(session.store.tenant_id, session_id, campaign_id, root_cycle)
 
-    # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window. Built for
-    # `_persist` side-effect; the optimization loop builds its own emitter.
+    # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window.
     from promptpotter.application.origin import build_campaign_emitter
     from promptpotter.shared.errors import graceful
 
@@ -252,7 +223,6 @@ def auto_mint_session(
 
 
 def _open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
-    """Open per-cycle CycleEventLog; None when no store; idempotent (offsets cumulate)."""
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.infrastructure.ledger import CycleEventLog
 

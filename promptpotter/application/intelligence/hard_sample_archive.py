@@ -1,9 +1,4 @@
-"""Cross-cycle hard-sample artifact — archive-sourced peer of :mod:`hard_sample_sorter`.
-
-Same artifact shape + Rasch fit; observations come from
-:class:`MeasurementArchive` (via :mod:`archive_views`) instead of one cycle's
-``rounds``, with candidate IDs ``content_hash[:12]`` for cross-cycle stability.
-"""
+"""Cross-cycle hard-sample artifact — archive-sourced peer of :mod:`hard_sample_sorter`."""
 
 from __future__ import annotations
 
@@ -34,11 +29,9 @@ def build_archive_observations(
     dataset_name: str | None,
     include_unknown: bool = False,
 ) -> list[Observation]:
-    """Walk every archive measurement → ``Observation(content_hash[:12], sample_id, hit)`` triples.
+    """Walk archive measurements → ``Observation(content_hash[:12], sample_id, hit)`` triples.
 
-    Skips entries missing ``sample_id`` / ``content_hash`` or flagged as errors.
-    ``dataset_name=None`` is admin/forensic only — the keyword exists to
-    prevent integer-``sample_id`` cross-dataset pollution.
+    ``dataset_name=None`` is admin/forensic only — prevents cross-dataset ``sample_id`` pollution.
     """
     obs: list[Observation] = []
     for entry in archive_views.list_runs(
@@ -79,11 +72,7 @@ def build_archive_hard_samples_artifact(
     top_k_samples: int | None = 40,
     include_unknown: bool = False,
 ) -> dict[str, Any]:
-    """Per-dataset hard-samples artifact fit on every archive measurement.
-
-    Same shape as :func:`hard_sample_sorter.build_hard_samples_artifact`;
-    ``cycle_id`` is always ``None`` (spans all cycles). ``top_k_*=None`` ⇒ full matrix.
-    """
+    """Per-dataset hard-samples artifact fit on every archive measurement (``cycle_id=None``)."""
     return build_hard_samples_artifact_from_observations(
         build_archive_observations(
             stores,

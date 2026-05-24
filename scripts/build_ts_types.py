@@ -1,30 +1,5 @@
-"""Generate TypeScript interfaces from Pydantic models.
-
-Single source of truth for the cross-language shapes the webapp polls.
-The Pydantic models named in :data:`EXPORTED_MODELS` are walked and
-emitted as TS ``interface``/``type`` declarations into
-``webapp/lib/api/types.generated.ts``. CI re-runs this script; a non-empty
-diff is the failure mode.
-
-Type mapping (covers ~95% of the Pydantic surface in use today):
-
-* ``str`` → ``string``
-* ``int``, ``float`` → ``number``
-* ``bool`` → ``boolean``
-* ``X | None`` → ``X | null``
-* ``list[X]`` / ``tuple[X, ...]`` → ``X[]``
-* ``tuple[X, Y, ...]`` (fixed-length) → ``[X, Y, ...]``
-* ``dict[str, V]`` → ``Record<string, V>``
-* ``Literal["a", "b"]`` → ``"a" | "b"``
-* Nested ``BaseModel`` → reference to the matching TS interface
-* ``Any`` → ``unknown``
-
-Models with ``extra='allow'`` get ``[key: string]: unknown`` to mirror the
-runtime laxness. Models with ``extra='forbid'`` get an exhaustive
-interface (the writer is closed).
-
-Run via ``python scripts/build_ts_types.py``.
-"""
+"""Generate TS interfaces from the Pydantic models in :data:`EXPORTED_MODELS`
+→ ``webapp/lib/api/types.generated.ts``. CI re-runs this; non-empty diff fails."""
 
 from __future__ import annotations
 
@@ -91,8 +66,7 @@ from promptpotter.presentation.api.routers.measurements import (
 from promptpotter.presentation.api.routers.verify import DiagnosticRunListResponse
 
 EXPORTED_MODELS: list[type[BaseModel]] = [
-    # Order matters: nested types first so the TS file reads top-down.
-    # --- domain ---
+    # Nested types first so the TS file reads top-down.
     OriginSummary,
     RoundSummaryCandidate,
     RoundSummary,
@@ -144,7 +118,6 @@ def _is_none_type(t: typing.Any) -> bool:
 
 
 def _emit_type(annotation: typing.Any) -> str:
-    """Render *annotation* as a TS type expression."""
     if annotation is typing.Any:
         return "unknown"
     if annotation is str:
@@ -159,14 +132,12 @@ def _emit_type(annotation: typing.Any) -> str:
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
 
-    # `X | Y | None` — flatten the union, push None to the tail.
     if origin in (typing.Union, types.UnionType):
         has_none = any(_is_none_type(a) for a in args)
         non_none = [a for a in args if not _is_none_type(a)]
         rendered = " | ".join(_emit_type(a) for a in non_none)
         return f"{rendered} | null" if has_none else rendered
 
-    # `Literal["a", "b"]` — quoted string union (or numeric for int literals).
     if origin is typing.Literal:
         return " | ".join(repr(a) if isinstance(a, str) else str(a) for a in args)
 
@@ -181,25 +152,18 @@ def _emit_type(annotation: typing.Any) -> str:
         return f"[{rendered}]"
 
     if origin is dict:
-        k_type, v_type = args
-        # Pydantic JSON keys are always strings on the wire even when typed
-        # as int — match that by always emitting `string` keys.
-        del k_type
+        # Pydantic JSON keys are always strings on the wire even when typed as int.
+        _k, v_type = args
         return f"Record<string, {_emit_type(v_type)}>"
 
-    # Nested BaseModel reference.
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return annotation.__name__
 
-    # Fallthrough — let the developer notice unsupported shapes via the diff.
     return "unknown"
 
 
 def _emit_field(name: str, info: FieldInfo) -> str:
-    # Every Pydantic field with a default is serialized on the wire (defaults
-    # are not omitted), so the TS shape has no `?` — only `| null` when the
-    # annotation includes `None`. This matches what the webapp actually sees
-    # in ``dashboard.json``.
+    # Pydantic serializes defaults on the wire ⇒ no `?` in TS, only `| null` for Optional.
     annotation = info.annotation
     ts_type = _emit_type(annotation)
     description = info.description

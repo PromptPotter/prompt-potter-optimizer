@@ -59,10 +59,7 @@ __all__ = [
 
 
 def render_completion_html(result: CycleResult) -> str:
-    """HTML render of the final-winner summary, for inline notebook display.
-
-    Empty string when the result has no winner block to render.
-    """
+    """HTML render of the final-winner summary; ``""`` when no winner."""
     if not result.winner_prompt_fields:
         return ""
     prompt_json = html.escape(
@@ -84,7 +81,7 @@ def render_completion_html(result: CycleResult) -> str:
 
 
 def _try_display_html(html_body: str) -> bool:
-    """If running inside IPython, render ``html_body`` inline; else return False."""
+    """Render ``html_body`` inline inside IPython; ``False`` outside."""
     if not html_body:
         return False
     try:
@@ -106,12 +103,7 @@ def render_completion(
     dataset_name: str | None = None,
     campaign_id: str | None = None,
 ) -> str:
-    """Render the closing summary box (interrupted vs complete) + pipeline overrides.
-
-    ``dataset_name`` / ``campaign_id`` name the campaign the way the CLI's
-    ``new`` / ``resume`` stdout does — the same campaign dir holds the
-    standalone-dashboard artifacts.
-    """
+    """Render the closing summary box (interrupted vs complete) + pipeline overrides."""
     interrupted = result.stop_reason == "interrupted"
     title = (
         f"{YELLOW}{BOLD}INTERRUPTED{RESET} — stopped by user"
@@ -155,7 +147,6 @@ async def init_notebook_session(
 ) -> Session:
     """Init store, client, pipeline schema, scoring data — with notebook-friendly logging."""
     setup_logging()
-    # views/notebook_run.py → views → presentation → promptpotter → repo_root
     project_root = Path(__file__).resolve().parent.parent.parent.parent
 
     session = await _init_services(
@@ -199,12 +190,7 @@ async def prepare_origin_notebook(
     pipeline_params: dict[str, Any] | None = None,
     experiment_id: str | None = None,
 ) -> tuple[RunObservers, list[Sample], CampaignOrigin]:
-    """Build observers + score origin as a separate notebook cell.
-
-    Auto-mints session+cycle, opens the ledger, binds the LiveDisplay so the
-    origin phase ticks live (same path the CLI uses). Returns observers +
-    dataset + origin for the next cell to feed into ``run_optimization_notebook``.
-    """
+    """Build observers + score origin in a separate notebook cell; auto-mints session + cycle."""
     scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
     display = LiveDisplay(
         origin_acc=0.0,

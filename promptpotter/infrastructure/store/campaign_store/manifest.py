@@ -1,15 +1,4 @@
-"""Campaign-manifest CRUD — ``campaign.json`` + the cycle tree.
-
-A campaign holds one session root (the bare ``cycle_<target_hash>``)
-plus any fork/diag/sweep descendants of it. ``campaign_id`` is a fresh
-per-call random (``{dataset}__{rand6_hex}``) so each ``new`` mints a
-distinct campaign; the declaration is recorded as properties on
-``campaign.json`` for drift detection on resume.
-
-:meth:`list_sessions` walks every session-root cycle in the ``cycles/``
-tree, ordered by the ``_s{N}`` suffix where present (legacy on-disk
-shape — see :mod:`promptpotter.infrastructure.store.paths`).
-"""
+"""Campaign-manifest CRUD — ``campaign.json`` + the cycle tree."""
 
 from __future__ import annotations
 
@@ -26,20 +15,19 @@ class CampaignManifestMixin(CampaignStoreKernel):
     """``campaign.json`` manifest CRUD + session-root enumeration."""
 
     def create_campaign(self, campaign: Campaign) -> Path:
-        """Write the ``campaign.json`` manifest. The single config-snapshot writer."""
+        """Write ``campaign.json``; the single config-snapshot writer."""
         path = self._manifest_path(campaign.campaign_id)
         write_json(path, campaign.model_dump(mode="json"))
         return path
 
     def update_campaign(self, campaign_id: str, updates: dict[str, Any]) -> None:
-        """Merge *updates* into ``campaign.json`` and write back."""
         path = self._manifest_path(campaign_id)
         data = read_json(path)
         data.update(updates)
         write_json(path, data)
 
     def list_campaign_ids(self) -> list[str]:
-        """Every campaign id on disk (dir with a ``campaign.json``), sorted."""
+        """Every campaign id on disk (dir with ``campaign.json``), sorted."""
         campaigns_dir = self._base_dir / "campaigns"
         if not campaigns_dir.exists():
             return []
@@ -50,7 +38,6 @@ class CampaignManifestMixin(CampaignStoreKernel):
         )
 
     def list_campaigns(self, dataset_name: str | None = None) -> list[Campaign]:
-        """Every campaign manifest, optionally filtered to one dataset."""
         out: list[Campaign] = []
         for cid in self.list_campaign_ids():
             campaign = self.load_campaign(cid)
@@ -62,20 +49,12 @@ class CampaignManifestMixin(CampaignStoreKernel):
         return out
 
     def mark_campaign_finished(self, campaign_id: str, *, status: str, finished_at: str) -> None:
-        """Stamp the terminal ``status`` + ``finished_at`` onto ``campaign.json``."""
         if self.load_campaign(campaign_id) is None:
             return
         self.update_campaign(campaign_id, {"status": status, "finished_at": finished_at})
 
     def list_sessions(self, campaign_id: str) -> list[str]:
-        """Every session-root cycle id in the campaign's cycle tree, ordered by
-        session index.
-
-        A session root is a cycle that is its own family root — no
-        ``_fork_``/``_diag_``/``_sweep_`` separator. New campaigns hold a
-        single session root (bare ``cycle_<target_hash>``); legacy
-        multi-session forests are ordered via :func:`session_index`.
-        """
+        """Session-root cycle ids in the campaign tree, ordered by ``session_index``."""
         cycles_dir = self.campaign_root_dir(campaign_id) / "cycles"
         if not cycles_dir.exists():
             return []

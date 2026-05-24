@@ -1,12 +1,4 @@
-"""Pure ``index.json`` shape helpers — round summary + fresh-sibling blob.
-
-Used by :class:`CampaignStore` when projecting a round_data detail into
-the index's ``rounds[]`` shape and when minting a clean-slate sibling
-cycle that inherits parent metadata.
-
-The cycle ``index.json`` carries no ``config`` snapshot — the frozen
-``CampaignConfig`` lives once in the campaign manifest (``campaign.json``).
-"""
+"""Pure ``index.json`` shape helpers — round summary + fresh-sibling blob."""
 
 from __future__ import annotations
 
@@ -14,7 +6,7 @@ from typing import Any
 
 
 def round_summary(round_data: dict[str, Any]) -> dict[str, Any]:
-    """Projection of a round_data detail into the ``index.json::rounds`` shape."""
+    """Projection of round detail into the ``index.json::rounds`` shape."""
     round_num = round_data.get("round", 0)
     return {
         "round_id": round_data.get("round_id", f"round_{round_num}"),
@@ -38,10 +30,7 @@ def fresh_sibling_index_blob(
 ) -> dict[str, Any]:
     """Clean-slate sibling index inheriting type/backend from the parent.
 
-    ``sibling_kind`` is one of ``fork`` / ``diag`` / ``sweep`` — recorded
-    in ``index.json`` so directory layout stays flat. No ``campaign_id``
-    field (the campaign owns identity); no ``config`` (the manifest owns
-    the snapshot).
+    ``sibling_kind ∈ {fork, diag, sweep}``.
     """
     return {
         "type": parent_index.get("type", "optimization_loop"),

@@ -1,7 +1,6 @@
-"""Hard-sample-sorter — (candidate, sample, hit) → θ_c-ranked × δ_s-ranked matrix.
+"""Hard-sample-sorter — ``(candidate, sample, hit)`` → θ_c-ranked × δ_s-ranked matrix.
 
-Standalone capability (no optimizer loop). Spec: `docs/specs/hard-sample-sorter.md`.
-Pure read-only; reuses `build_observations` so error/missing-sample policy lives in one place.
+Spec: ``docs/specs/hard-sample-sorter.md``.
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ ARTIFACT_SCHEMA_VERSION = 3
 
 
 def _candidate_hit_rates(observations: list[Observation]) -> dict[str, float]:
-    """Mean hit rate per candidate over measured cells. Tie-breaker for θ_c."""
+    """Mean hit rate per candidate; θ_c tie-breaker."""
     totals: dict[str, int] = {}
     hits: dict[str, int] = {}
     for o in observations:
@@ -38,7 +37,7 @@ def _candidate_hit_rates(observations: list[Observation]) -> dict[str, float]:
 
 
 def _sample_miss_rates(observations: list[Observation]) -> dict[int, float]:
-    """Mean miss rate per sample over measured cells. Tie-breaker for δ_s."""
+    """Mean miss rate per sample; δ_s tie-breaker."""
     totals: dict[int, int] = {}
     misses: dict[int, int] = {}
     for o in observations:
@@ -56,8 +55,8 @@ def _pick_score_under_prior(
     seed_var: float,
 ) -> dict[int, float]:
     """Per-sample pick-value for a fresh mutation centred at θ_seed (not population-mean 0).
-    Contested samples (δ near seed) score high; always-hit/always-miss score near 0. Same `pick_value`
-    function the live picker calls — this is the round-boundary snapshot of that statistical model.
+
+    Round-boundary snapshot of the same ``pick_value`` the live picker calls.
     """
     var_theta = sigma_theta * sigma_theta
     return {
@@ -89,7 +88,7 @@ def _resolve_sample_order(
 
 
 def _resolve_pick_order(pick_score: dict[int, float]) -> list[int]:
-    """Desc pick-value, asc sid for determinism. Snapshot only — `adaptive_picker` re-ranks live."""
+    """Desc pick-value, asc sid; snapshot only — ``adaptive_picker`` re-ranks live."""
     return sorted(pick_score.keys(), key=lambda sid: (-pick_score[sid], sid))
 
 
@@ -98,9 +97,7 @@ def empty_artifact(
     cycle_id: str | None = None,
     disabled: bool = False,
 ) -> dict[str, Any]:
-    """Schema-valid stub for zero-obs / disabled campaigns — keeps `CAMPAIGN_ARTIFACTS` parity
-    without a special-case read path; renderers short-circuit on `n_observations == 0`.
-    """
+    """Schema-valid stub for zero-obs / disabled campaigns; renderers short-circuit on ``n_observations == 0``."""
     return {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "cycle_id": cycle_id,
@@ -128,9 +125,7 @@ def build_hard_samples_artifact(
     top_k_samples: int | None = 40,
     posterior: RaschPosterior | None = None,
 ) -> dict[str, Any]:
-    """Thin wrapper — projects `rounds` to observations then delegates. Skips Rasch refit if
-    *posterior* supplied. Pure.
-    """
+    """Thin wrapper — projects ``rounds`` to observations then delegates. Pure."""
     return build_hard_samples_artifact_from_observations(
         build_observations(rounds),
         cycle_id=cycle_id,
@@ -148,10 +143,7 @@ def build_hard_samples_artifact_from_observations(
     top_k_samples: int | None = 40,
     posterior: RaschPosterior | None = None,
 ) -> dict[str, Any]:
-    """Pre-built-observations variant — used by `hard_sample_archive` (which builds obs from the
-    MeasurementArchive). Fits Rasch if no *posterior* supplied, then truncates to top-K. Cells are
-    restricted to (candidate_order × sample_order). `top_k_*=None` ⇒ full matrix. Pure.
-    """
+    """Pre-built-observations variant; fits Rasch when ``posterior`` absent, truncates to top-K."""
     if not observations:
         return empty_artifact(cycle_id=cycle_id)
 
@@ -159,8 +151,6 @@ def build_hard_samples_artifact_from_observations(
         posterior = fit_rasch(observations)
     hit_rates = _candidate_hit_rates(observations)
     miss_rates = _sample_miss_rates(observations)
-    # Picker scores a fresh mutation against the seed (best fitted candidate); cold start uses
-    # the centred population prior.
     if posterior.theta:
         best_cid = max(posterior.theta, key=lambda cid: posterior.theta[cid])
         seed_mu = posterior.theta[best_cid]
@@ -202,7 +192,6 @@ def build_hard_samples_artifact_from_observations(
     rasch_view = {
         "converged": bool(posterior.converged),
         "iterations": int(posterior.n_iterations),
-        # EB hyperparameters — population spreads + mean difficulty (shrinkage strength).
         "sigma_theta": float(posterior.sigma_theta),
         "sigma_delta": float(posterior.sigma_delta),
         "mu_delta": float(posterior.mu_delta),
