@@ -1111,7 +1111,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
                 RuntimeFailure(
                     source="llm_only",
                     dominant_warning=poisoned_warning,
-                    warning_types=(poisoned_warning,),
+                    warning_types={poisoned_warning: 1},
                     degraded_rate=0.5,
                     degraded_count=1,
                     total_scored=2,

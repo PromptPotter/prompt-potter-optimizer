@@ -197,7 +197,7 @@ Sibling cycles (forks, diag, sweeps) live under `forks/`, `diag/`, `sweeps/<batc
 
 ## 8. What is NOT stable
 
-- **Internal module structure** beyond §1–§7. The dispatch hub split into `hub/{bundle, injections, facade, builder}` is internal — only the public symbols (`DispatchHub`, `INJECTIONS`, `build_bundle`, `validate_template`) are stable.
+- **Internal module structure** beyond §1–§7. The dispatch hub split into `hub/{bundle, injections, facade}` is internal — only the public symbols (`DispatchHub`, `INJECTIONS`, `build_bundle`, `validate_template`) are stable.
 - **Private types** (`_Injection`, `_TEMPLATE_EXTRAS`, etc., plus any `_`-prefixed name or dataclass not re-exported through its package `__init__`).
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `LiveStateCore`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).

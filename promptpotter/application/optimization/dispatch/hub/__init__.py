@@ -28,17 +28,17 @@ in place instead.
 
 Module map:
 
-* :mod:`bundle` — types (``InjectionBundle``, ``CycleSlice``,
+* :mod:`bundle` — frozen types (``InjectionBundle``, ``CycleSlice``,
   ``RoundDigest``, ``InjectionKind``, ``_Injection``) + format constants
-  + the dataset-content fence helper.
+  + the dataset-content fence helper. ``Cycle``-free by contract so
+  renderer tests can construct bundles directly.
 * :mod:`injections` — the renderers and the :data:`INJECTIONS` registry.
-* :mod:`facade` — :class:`DispatchHub` + :func:`validate_template`.
-* :mod:`builder` — :func:`build_bundle` (wires live ``Cycle`` state).
+* :mod:`facade` — :class:`DispatchHub`, :func:`build_bundle` (the live
+  ``Cycle``-snapshot path), and :func:`validate_template`.
 """
 
 from __future__ import annotations
 
-from promptpotter.application.optimization.dispatch.hub.builder import build_bundle
 from promptpotter.application.optimization.dispatch.hub.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -48,12 +48,13 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 from promptpotter.application.optimization.dispatch.hub.facade import (
     DispatchHub,
     InjectionRenderError,
+    build_bundle,
     validate_template,
 )
-from promptpotter.application.optimization.dispatch.hub.injections import (
-    INJECTIONS,
+from promptpotter.application.optimization.dispatch.hub.injections.layer_state import (
     format_l1_critique_for_prompt,
 )
+from promptpotter.application.optimization.dispatch.hub.injections.registry import INJECTIONS
 
 __all__ = [
     "INJECTIONS",

@@ -1,25 +1,37 @@
-"""`DispatchHub` façade + load-time template validation.
+"""`DispatchHub` façade + ``build_bundle`` + load-time template validation.
 
+* `build_bundle` — snapshot live ``Cycle`` state into a frozen ``InjectionBundle``.
 * `fill_l1` — resolve L2-authored `opt_sp.l1_layout` for L1_GENERATE, return modified PromptTemplate.
 * `fill_fixed` — walk a fixed template body (L1_CRITIQUE / L2 / L3) → `{name: rendered}` dict.
 
 `validate_template` raises at load time on typos so they don't silently render to empty.
+
+``bundle.py`` stays ``Cycle``-free (frozen types only — renderer tests
+construct bundles directly); the ``Cycle`` knot lives here in the
+``build_bundle`` snapshot path.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.dispatch.hub.bundle import (
     OPTIMIZER_PROMPT_CHAR_BUDGET,
+    CycleSlice,
     InjectionBundle,
     InjectionTier,
+    RoundDigest,
 )
-from promptpotter.application.optimization.dispatch.hub.injections import INJECTIONS
+from promptpotter.application.optimization.dispatch.hub.injections.registry import INJECTIONS
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, L1Layout
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.phases import StopLoop, StopReason
+
+if TYPE_CHECKING:
+    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.domain.results import RoundResult
 
 logger = logging.getLogger(__name__)
 
@@ -178,4 +190,52 @@ class DispatchHub:
         return _apply_budget(static_chars, rendered)
 
 
-__all__ = ["DispatchHub", "InjectionRenderError", "validate_template"]
+def build_bundle(
+    cycle: Cycle,
+    *,
+    latest_round: RoundResult | None = None,
+) -> InjectionBundle:
+    """Snapshot cycle state for one optimizer LLM call. Pass *latest_round* explicitly for L1_CRITIQUE
+    (the just-completed round isn't folded into ``cycle.rounds`` until critique fires); L2/L3 omit it."""
+    if latest_round is None and cycle.rounds:
+        latest_round = cycle.rounds[-1]
+    latest_diag = latest_round.diagnostics if latest_round else None
+    latest_crit = latest_round.critique if latest_round else None
+    round_num = latest_round.round + 1 if latest_round else 1
+
+    current_sp = cycle.tracking.current_sp
+    current_pp = current_sp.pipeline_params if current_sp is not None else None
+    cs = CycleSlice(
+        round_num=round_num,
+        current_accuracy=cycle.tracking.current_accuracy,
+        best_accuracy=cycle.tracking.best_accuracy,
+        best_round=cycle.tracking.best_round,
+        l1_stall_count=cycle.escalation.l1_stall_count,
+        l2_round=cycle.escalation.l2_round,
+        l2_stall_count=cycle.escalation.l2_stall_count,
+        l3_round=cycle.escalation.l3_round,
+        l3_stall_count=cycle.escalation.l3_stall_count,
+        pipeline_params=dict(current_pp) if current_pp else {},
+    )
+
+    # Trajectory pair: frozen origin hits + live cumulative misses (the cluster nothing has solved).
+    origin_per_sample = list(cycle.tracking.origin_per_sample_results)
+    trajectory_misses = [r for r in cycle.tracking.current_results if not r.get("hit")]
+
+    return InjectionBundle(
+        opt_sp=cycle.opt_sp,
+        pipeline_schema=cycle.session.pipeline_schema,
+        cycle_slice=cs,
+        digest=RoundDigest(
+            diagnostics=latest_diag,
+            critique=latest_crit,
+        ),
+        axes=cycle.axes,
+        origin_per_sample=origin_per_sample,
+        trajectory_misses=trajectory_misses,
+        forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
+        ignore_render_errors=cycle.ignore_render_errors,
+    )
+
+
+__all__ = ["DispatchHub", "InjectionRenderError", "build_bundle", "validate_template"]

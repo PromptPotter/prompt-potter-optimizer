@@ -104,7 +104,10 @@ def min_detectable_effect(n: int, alpha: float = 0.05, power: float = 0.8) -> fl
 def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     """Normal posterior (mean, se) on the population mean of *scores*.
 
-    SE clipped to ``1/(4n)`` (Beta-Binomial worst case, bounded [0,1]).
+    SE clipped to ``1/(4n)`` — Beta-Binomial worst-case SE on a [0,1]
+    bounded score. Protects against the small-n binary regime (e.g. 4/4
+    hits has empirical ``var=0`` and would collapse the posterior to a
+    point mass, prematurely stopping exploration).
     """
     n = len(scores)
     if n == 0:

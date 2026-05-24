@@ -38,7 +38,14 @@ class PromptTemplate(SearchPoint):
     thinking_style: str = ""
     answer_format: str = ""
     few_shot_examples: list[FewShotExample] = Field(default_factory=list)
-    plan: str = ""
+    plan: str = Field(
+        default="",
+        description=(
+            "Strategic frame written by ``l3_plan`` and read by every layer "
+            "next round; persistent until the next L3 fire. Empty until L3 "
+            "fires for the first time."
+        ),
+    )
 
     def render(self) -> str:
         """Assemble non-empty decomposition fields, double-newline-joined."""
@@ -171,8 +178,23 @@ class OptSearchPoint(PromptTemplate):
     model_config = ConfigDict(extra="forbid")
 
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
-    l1_overrides: dict[str, Any] = Field(default_factory=dict)
-    task_context: TaskDecomposition = Field(default_factory=TaskDecomposition)
+    l1_overrides: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Per-individual L1 meta-prompt overrides keyed by the surface "
+            "field name (``persona``, ``instruction``, …). L2 writes here "
+            "to nudge L1 without rewriting the shared meta-prompt."
+        ),
+    )
+    task_context: TaskDecomposition = Field(
+        default_factory=TaskDecomposition,
+        description=(
+            "Persistent task-framing dict refined by ``l2_context`` and "
+            "spliced around ``problem_description`` at render time. "
+            "Accumulative: each L2 fire merges deltas rather than "
+            "rewriting wholesale."
+        ),
+    )
 
     @field_validator("task_context", mode="before")
     @classmethod
@@ -183,10 +205,36 @@ class OptSearchPoint(PromptTemplate):
             return TaskDecomposition.from_dict(v)
         return TaskDecomposition()
 
-    wounds: WoundChannels = Field(default_factory=WoundChannels)
-    l1_layout: L1Layout = Field(default_factory=default_l1_layout)
-    l1_supplemental_rules: list[L1SupplementalRule] = Field(default_factory=list)
-    l1_situational_examples: list[L1SituationalExample] = Field(default_factory=list)
+    wounds: WoundChannels = Field(
+        default_factory=WoundChannels,
+        description=(
+            "Four wound streams (validation/runtime/l2-guard/l3-guard) + "
+            "sticky L3 note. Rendered by dispatch-hub injections; absorbed "
+            "by L2 next round."
+        ),
+    )
+    l1_layout: L1Layout = Field(
+        default_factory=default_l1_layout,
+        description=(
+            "L2-authored ordered list of injection slots that "
+            "``DispatchHub.fill_l1`` walks to compose the L1 meta-prompt. "
+            "L2's primary lever for changing what evidence L1 sees."
+        ),
+    )
+    l1_supplemental_rules: list[L1SupplementalRule] = Field(
+        default_factory=list,
+        description=(
+            "L2-authored situational rules rendered inline in L1's "
+            "instruction. Cumulative across rounds; L3 may prune."
+        ),
+    )
+    l1_situational_examples: list[L1SituationalExample] = Field(
+        default_factory=list,
+        description=(
+            "Worked examples pinned to a ``trigger_id`` (auto-trigger or "
+            "L2-authored rule). Rendered alongside the matching rule."
+        ),
+    )
 
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
         "wounds",

@@ -145,8 +145,8 @@ def build_score_report(
         expected_samples=len(dataset),
         invalid=invalid,
         resumed_from_cache=resumed_from_cache,
-        validation_failures=[vf.to_dict() for vf in osp.wounds.validation_failures],
-        runtime_failures=[new_runtime_failure.to_dict()] if new_runtime_failure else [],
+        validation_failures=[vf.model_dump() for vf in osp.wounds.validation_failures],
+        runtime_failures=[new_runtime_failure.model_dump()] if new_runtime_failure else [],
         elimination_context=dict(elimination_context) if elimination_context else {},
         degradation_context=dict(degradation_context) if degradation_context else {},
     )

@@ -846,7 +846,7 @@ def test_dispatch_budget_caps_injections_and_sheds_by_tier(monkeypatch):
         _Injection,
     )
     from promptpotter.application.optimization.dispatch.hub.facade import _apply_budget
-    from promptpotter.application.optimization.dispatch.hub.injections import INJECTIONS
+    from promptpotter.application.optimization.dispatch.hub.injections.registry import INJECTIONS
     from promptpotter.domain.phases import StopLoop, StopReason
 
     def _bundle(**kw):

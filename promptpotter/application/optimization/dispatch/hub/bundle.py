@@ -1,8 +1,12 @@
 """Bundle types — per-call state container + signal classification.
 
 Every renderer reads an ``InjectionBundle`` (built once per transition by
-``builder.build_bundle``, consumed by ``DispatchHub``). ``InjectionKind``
-splits by origin: MEASUREMENT / DERIVED / TRACE / DIRECTIVE."""
+``facade.build_bundle``, consumed by ``DispatchHub``). ``InjectionKind``
+splits by origin: MEASUREMENT / DERIVED / TRACE / DIRECTIVE.
+
+This module stays ``Cycle``-free by contract so renderer tests can
+construct bundles directly; the ``Cycle``-snapshot path lives in
+``facade.py`` alongside ``DispatchHub``."""
 
 from __future__ import annotations
 

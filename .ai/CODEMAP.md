@@ -57,7 +57,7 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 | `decide_escalation` | `promptpotter/application/optimization/escalation/decide.py:37` |
 | `DispatchHub` | `promptpotter/application/optimization/dispatch/hub/facade.py:117` |
 | `DispatchHub.fill_l1` / `.fill_fixed` | `dispatch/hub/facade.py:207` / `:240` |
-| `build_bundle` | `promptpotter/application/optimization/dispatch/hub/builder.py:27` |
+| `build_bundle` | `promptpotter/application/optimization/dispatch/hub/facade.py:193` |
 | `INJECTIONS` (slot registry) | `promptpotter/application/optimization/dispatch/hub/injections/registry.py:97` |
 | `validate_template` | `promptpotter/application/optimization/dispatch/hub/facade.py:50` |
 | `load_optimizer_prompt` | `promptpotter/application/optimization/dispatch/llm_call/prompts.py:161` |
@@ -129,7 +129,7 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 **`promptpotter/application/optimization/`** — orchestration
 - `cycle.py` — `Cycle` state container (rounds / population / stall counters)
 - `l1/` — round loop: `generate.py`, `score/` (signal_effect/candidate/loop/winner), `resume.py`, `execute.py`, `critique.py`, `population.py`, `stats.py`
-- `dispatch/` — info-flow ingress: `hub/` (`injections/` for `INJECTIONS` + renderers, `facade.py` for `DispatchHub` + `validate_template`, `builder.py` for `build_bundle`, `bundle.py` for `InjectionBundle` types), `llm_call/` (`call.py` + `prompts.py`), `schemas.py` (manifest at `datasets/_optimizer/pipeline.json`)
+- `dispatch/` — info-flow ingress: `hub/` (`injections/` for `INJECTIONS` + renderers, `facade.py` for `DispatchHub` + `validate_template` + `build_bundle`, `bundle.py` for `InjectionBundle` types), `llm_call/` (`call.py` + `prompts.py`), `schemas.py` (manifest at `datasets/_optimizer/pipeline.json`)
 - `pobb/` — `elimination/` package (`checks.py` PoBBCheck/Config + DegradationCheck, `classification.py` classify_result), `elevation.py` (compare-cycle arbitration)
 - `validators/` — `l1_strict.py` (schema), `l1_behavior.py` + `l2_behavior.py` (soft checks), `l2_l3.py` (L2/L3 output)
 - `escalation/` — `state.py` (escalation state), `decide.py` (router), `rules.py`, `firing/` (L2/L3 drivers: `executor.py` + `l2_driver.py` + `l3_driver.py`)
@@ -192,7 +192,7 @@ Six high-frequency multi-file recipes. Touch the listed files **in order**.
 
 **2. Add a new INJECTIONS slot**
 1. `promptpotter/application/optimization/dispatch/hub/injections/registry.py` — add `_Injection` row to `INJECTIONS` (`:118`); write its renderer fn in the matching `injections/` module
-2. Caller side: if a new bundle field is needed, extend the `InjectionBundle` (`dispatch/hub/bundle.py`) / `build_bundle()` (`dispatch/hub/builder.py:27`)
+2. Caller side: if a new bundle field is needed, extend the `InjectionBundle` (`dispatch/hub/bundle.py`) / `build_bundle()` (`dispatch/hub/facade.py:193`)
 3. `datasets/{name}/prompts/{node}.json` — add `{{slot_name}}` to the relevant prompt
 4. Validation runs automatically at template-load time via `validate_template` (`dispatch/hub/facade.py:42`)
 
