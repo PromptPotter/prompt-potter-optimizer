@@ -5,24 +5,7 @@ import { type DashboardSnapshot, roundOf } from "@/lib/poll";
 import { useRoundFile } from "@/lib/useRoundFile";
 import { phaseToNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
-
-// Node block as written by AuditTrailView._handle_llm_call
-// (promptpotter/infrastructure/projections/audit_trail.py:222-243).
-// Both dashboard.json::current_round.nodes and round_NNNN.json::nodes share
-// this shape — input/output are loose dicts whose contents vary by node.
-interface NodeBlock {
-  input?: Record<string, unknown>;
-  output?: Record<string, unknown>;
-  model?: string;
-  duration_s?: number;
-  timestamp?: string;
-  round?: number;
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  };
-}
+import type { NodeBlock } from "@/lib/types/round";
 
 interface Props {
   id: string;

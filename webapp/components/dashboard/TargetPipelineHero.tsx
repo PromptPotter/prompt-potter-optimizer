@@ -115,7 +115,7 @@ function MultiNodeStrip({
   connector: string | null;
   currentNodes: Record<string, NodeDataLike>;
 }) {
-  const { node: selected, setNode: setSelected } = useSelection();
+  const { node: selected, setSelectionForNode: setSelected } = useSelection();
   const interior = interiorNodes(view);
   const CELL_W = 72;
   const CELL_H = 70;

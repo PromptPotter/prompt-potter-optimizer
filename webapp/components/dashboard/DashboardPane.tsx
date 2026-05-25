@@ -6,13 +6,8 @@ import {
   fetchPipeline,
   type HardSamplesScope,
 } from "@/lib/api";
-import {
-  CycleStreamProvider,
-  roundOf,
-  useCycleStream,
-  type DashboardSnapshot,
-  type StatusKind,
-} from "@/lib/poll";
+import { CycleStreamProvider } from "@/lib/poll";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/useDatasetPreview";
 import { useLocalStorage } from "@/lib/useLocalStorage";
@@ -22,19 +17,14 @@ import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { StatusBar } from "@/components/status/StatusBar";
 import { ConsolePane } from "@/components/console/ConsolePane";
-import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
-import { OptimizerNodeDetail } from "@/components/workflow/OptimizerNodeDetail";
-import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { TopStrip } from "./TopStrip";
 import { ChatPane } from "./ChatPane";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "./LiveStateCard";
-import { LineageTree } from "./LineageTree";
 import { RoundTabsStrip } from "./round-samples/RoundTabsStrip";
-import { RoundSamplesCard } from "./round-samples/RoundSamplesCard";
 import { CyclePicker } from "./CyclePicker";
-import { SelectionProvider, useSelection } from "./SelectionContext";
-import { ScoringInspector } from "./ScoringInspector";
+import { SelectionProvider } from "./SelectionContext";
+import { NowTriad } from "./NowTriad";
 import { FilesPane } from "@/components/tree/FilesPane";
 import { LeveragePanel } from "@/components/leverage/LeveragePanel";
 import { ComparePane } from "@/components/compare/ComparePane";
@@ -124,18 +114,11 @@ function DashboardPaneInner() {
     [setSidebarCollapsed],
   );
 
-  const dashState = useCycleStream();
-  const dash: DashboardSnapshot | null = dashState.dash;
-  // Canonical round number — derived once, threaded down to children that
-  // need it (FitnessPanel, HardSamples*). Completed-round
-  // summaries ride `dash.rounds[]` directly; deep-audit round files are
-  // lazy-fetched via `useRoundFile` at the use site.
-  const dashRound = roundOf(dash);
-  // Liveness — the single gate for mid-run guards (fork modal, Live badge,
-  // Stop button) and every transient indicator (blinking rows, pulsing
-  // nodes). The stream centralizes the poll's success/age classification;
-  // read it from there rather than re-deriving a second signal.
-  const isLive = dashState.isLive;
+  // Single-ingress dashboard read. `useDashboard` wraps `useCycleStream`
+  // and exposes the derived round number — no component re-runs `roundOf`
+  // on its own, no second snapshot path.
+  const dashState = useDashboard();
+  const { dash, dashRound, isLive } = dashState;
 
   // One-shot pipeline (topology) lookup
   useEffect(() => {
@@ -326,7 +309,7 @@ function DashboardPaneInner() {
                 </div>
               </div>
               <div className="dash-spine-narrow">
-                <NowRow
+                <NowTriad
                   dash={dash}
                   dashRound={dashRound}
                   status={dashState.status}
@@ -361,110 +344,4 @@ function DashboardPaneInner() {
   );
 }
 
-// The Now lane's main row + drill-down. Always renders the 3-col
-// Lineage/Fitness/Optimizer strip so the operator can keep clicking
-// between optimizer nodes; when a node is selected, appends
-// OptimizerNodeDetail beneath the row as a slave content panel rather
-// than swapping the navigator out. Lives inside SelectionProvider so it
-// can call useSelection.
-function NowRow({
-  dash,
-  dashRound,
-  status,
-  pipeline,
-  campaignId,
-  cycleId,
-  themeKey,
-  onSelectCycle,
-  isLive,
-}: {
-  dash: DashboardSnapshot | null;
-  dashRound: number | null;
-  status: StatusKind;
-  pipeline: PipelineDoc | null;
-  campaignId: string | null;
-  cycleId: string | null;
-  themeKey: string;
-  onSelectCycle: (campaignId: string, cycleId: string) => void;
-  isLive: boolean;
-}) {
-  const { node, setNode } = useSelection();
-  return (
-    <>
-      {/* Two-row grid via grid-areas in CSS:
-            row 1: FitnessPanel (1fr) + LineageTree (1fr) — equal height
-            row 2: InspectorCard (full width)
-          The three group tightly because clicks in any one re-anchor the
-          others through the shared SelectionContext (selected + round).
-          The round-tabs strip lives at the top of the page beside TopStrip;
-          WorkflowCanvas below — pipeline topology is a different concern
-          from the per-candidate drill that ties this triad. */}
-      <div className="dash-row-verdict">
-        <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
-        <LineageTree
-          dash={dash}
-          campaignId={campaignId}
-          cycleId={cycleId}
-          onSelectCycle={onSelectCycle}
-        />
-        <InspectorCard
-          campaignId={campaignId}
-          cycleId={cycleId}
-          isLive={isLive}
-        />
-      </div>
-      <RoundSamplesCard
-        dash={dash}
-        status={status}
-        campaignId={campaignId}
-        cycleId={cycleId}
-      />
-      <WorkflowCanvas pipeline={pipeline} dash={dash} isLive={isLive} />
-      {node && (
-        <OptimizerNodeDetail
-          id={node}
-          pipeline={pipeline}
-          dash={dash}
-          isLive={isLive}
-          campaignId={campaignId}
-          cycleId={cycleId}
-          onClose={() => setNode(null)}
-        />
-      )}
-    </>
-  );
-}
-
-// Inspector cell of the dash-row-verdict grid. Lives inside SelectionProvider
-// so it reads the candidate selection that LineageTree + FitnessPanel write to.
-// Always renders the card frame (even empty) so its slot in the grid doesn't
-// collapse and the lineage/fitness clicks have a stable target to reveal into.
-function InspectorCard({
-  campaignId,
-  cycleId,
-  isLive,
-}: {
-  campaignId: string | null;
-  cycleId: string | null;
-  isLive: boolean;
-}) {
-  const { selected, setSelected } = useSelection();
-  return (
-    <div className={`card inspector-card${selected ? "" : " empty"}`}>
-      {selected ? (
-        <ScoringInspector
-          campaignId={campaignId}
-          cycleId={cycleId}
-          selected={selected}
-          isLive={isLive}
-          onClose={() => setSelected(null)}
-        />
-      ) : (
-        <div className="inspector-empty">
-          Click a lineage stub or a fitness bar to inspect its searchpoint.
-        </div>
-      )}
-    </div>
-  );
-}
 

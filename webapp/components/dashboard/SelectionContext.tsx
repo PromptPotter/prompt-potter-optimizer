@@ -1,48 +1,44 @@
 "use client";
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import type { SelectedCandidate } from "@/lib/types/selection";
 
-// One shared candidate-selection slot. Every panel that shows or surfaces
-// a candidate (LineageTree, FitnessPanel, ScoringInspector, future
-// Workflow per-candidate detail) reads + writes through this context so
-// clicking in any of them highlights the same row everywhere.
+// One shared selection store for the dashboard. Three axes:
 //
-// `candidate_id` matches LineageTree's fallback (`r{round}_{idx}` when the
-// round file doesn't carry an explicit id) — FitnessPanel uses the same
-// composition so the two surfaces line up bar-for-stub.
-export interface SelectedCandidate {
-  round: number;
-  candidate_id: string;
-  label: string;
-  accuracy: number | null;
-  is_winner: boolean;
-}
+//   - candidate — which searchpoint is the operator inspecting
+//   - round     — which L1-round are the lineage / fitness / samples
+//                 surfaces scoped to (null = follow live in-flight)
+//   - node      — which optimizer node is open for drill (workflow detail)
+//
+// The candidate and round axes are coupled: a candidate selection
+// implies a round (the candidate's). Writes go through the helpers
+// below so the pair stays coherent — no orphan `setRound` that
+// strands the prior candidate on a different round, no orphan
+// `setSelected` that leaves the samples view scoped elsewhere.
+
+export type { SelectedCandidate };
 
 interface Ctx {
-  selected: SelectedCandidate | null;
-  setSelected: (c: SelectedCandidate | null) => void;
-  // Workflow node selection — separate slot from candidate because the
-  // two can coexist (operator can pick a candidate AND a specific node
-  // to drill into within that searchpoint). SharedInspector reads both.
-  node: string | null;
-  setNode: (n: string | null) => void;
-  // Shared round focus — the L1-round axis that ties Lineage, Fitness,
-  // Live Samples, and Inspector together. Writers: RoundTabsStrip (the
-  // primary user-facing picker), LineageTree (click a stub → focus that
-  // round), FitnessPanel (click a bar → focus that round). Readers:
-  // RoundSamplesCard scopes its drill, the strip highlights the active
-  // tab. null = "follow the live in-flight round" (the implicit default).
+  candidate: SelectedCandidate | null;
   round: number | null;
-  setRound: (r: number | null) => void;
+  node: string | null;
+  // Atomic candidate+round write. Passing null clears both axes.
+  setSelectionForCandidate: (c: SelectedCandidate | null) => void;
+  // Round-axis write. Clears any candidate selection whose round
+  // differs — a stranded highlight on the wrong round is never the
+  // user's intent.
+  setSelectionForRound: (r: number | null) => void;
+  // Workflow-node write. Independent of the candidate/round pair.
+  setSelectionForNode: (n: string | null) => void;
 }
 
 const SelectionCtx = createContext<Ctx | null>(null);
 
 // Provider lives high in DashboardPane (above the shell) so selection
-// persists across Chat/Dashboard/Files tab switches. Auto-clears when the
-// operator picks a different cycle: a stale `candidate_id` would point
-// into the wrong cycle's tree, a stale `node` would mismatch the new
-// cycle's pipeline, and a stale round number would scope the samples
-// drill into the wrong cycle's round_NNNN.json.
+// persists across Chat/Dashboard/Files tab switches. Auto-clears when
+// the operator picks a different cycle: a stale candidate_id would
+// point into the wrong cycle's tree, a stale node would mismatch the
+// new cycle's pipeline, and a stale round would scope drills into
+// the wrong cycle's round_NNNN.json.
 export function SelectionProvider({
   cycleId,
   children,
@@ -50,18 +46,50 @@ export function SelectionProvider({
   cycleId: string | null;
   children: ReactNode;
 }) {
-  const [selected, setSelected] = useState<SelectedCandidate | null>(null);
-  const [node, setNode] = useState<string | null>(null);
+  const [candidate, setCandidate] = useState<SelectedCandidate | null>(null);
   const [round, setRound] = useState<number | null>(null);
+  const [node, setNode] = useState<string | null>(null);
   const [prevCycle, setPrevCycle] = useState(cycleId);
   if (cycleId !== prevCycle) {
     setPrevCycle(cycleId);
-    setSelected(null);
-    setNode(null);
+    setCandidate(null);
     setRound(null);
+    setNode(null);
   }
+
+  const setSelectionForCandidate = useCallback(
+    (c: SelectedCandidate | null) => {
+      setCandidate(c);
+      setRound(c ? c.round : null);
+    },
+    [],
+  );
+
+  const setSelectionForRound = useCallback((r: number | null) => {
+    setRound(r);
+    // Drop candidate when its round no longer matches; r=null (follow
+    // live) leaves the candidate alone so a live-mode click on the
+    // round-tabs strip doesn't blow away a still-relevant selection.
+    if (r != null) {
+      setCandidate((prev) => (prev && prev.round !== r ? null : prev));
+    }
+  }, []);
+
+  const setSelectionForNode = useCallback((n: string | null) => {
+    setNode(n);
+  }, []);
+
   return (
-    <SelectionCtx.Provider value={{ selected, setSelected, node, setNode, round, setRound }}>
+    <SelectionCtx.Provider
+      value={{
+        candidate,
+        round,
+        node,
+        setSelectionForCandidate,
+        setSelectionForRound,
+        setSelectionForNode,
+      }}
+    >
       {children}
     </SelectionCtx.Provider>
   );

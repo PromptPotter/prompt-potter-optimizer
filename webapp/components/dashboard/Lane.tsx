@@ -2,8 +2,8 @@
 import type { ReactNode } from "react";
 import { useLocalStorage } from "@/lib/useLocalStorage";
 
-// Collapsible signal section. Three of these stack on the Dashboard tab
-// (Now / Verdict / Why). Each lane's open/closed state persists in
+// Collapsible signal section. Two of these stack on the Dashboard tab
+// (Now / Live state). Each lane's open/closed state persists in
 // localStorage under `promptpotter.dash.lane.{id}` so a reload returns the
 // operator to the layout they last left.
 

@@ -31,7 +31,7 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
   const activeId = phaseToNodeId(dash?.state);
   // Node selection rides the shared SelectionContext so the Now lane can
   // swap the 3-col row for OptimizerNodeDetail when a node is picked.
-  const { node: selected, setNode: setSelected } = useSelection();
+  const { node: selected, setSelectionForNode: setSelected } = useSelection();
   // Bumped by the MutationObserver below on `data-theme` flips; drives the
   // `colors` memo so SVG strokes/labels re-derive from the new CSS vars.
   const [themeTick, setThemeTick] = useState(0);

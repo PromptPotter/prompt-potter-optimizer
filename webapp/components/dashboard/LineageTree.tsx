@@ -1,28 +1,13 @@
 "use client";
 import { useMemo } from "react";
-import {
-  liveL1Candidates,
-  roundOf,
-  type DashboardSnapshot,
-} from "@/lib/poll";
+import type { DashboardSnapshot } from "@/lib/poll";
 import { rootCycleId, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
-import { computeAccuracyFromSamples } from "@/lib/sample-line";
 import { CardFrame } from "@/components/ui/card";
 import { useSelection } from "./SelectionContext";
 import { FamilyTree } from "./FamilyTree";
-
-interface Candidate {
-  candidate_id?: string;
-  label?: string;
-  accuracy?: number;
-  is_winner?: boolean;
-}
-
-interface RoundView {
-  round: number;
-  scoreboard?: Candidate[];
-}
+import { roundCandidatesByRound } from "@/lib/derivations/round-candidates";
+import type { CandidateRow } from "@/lib/types/candidate";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -52,54 +37,28 @@ const LEFT_PAD = 16;
 const TOP_PAD = 20;
 
 interface ChildPos {
-  round: number;
-  idx: number;
-  cand: Candidate;
+  row: CandidateRow;
   x: number;           // start of child's horizontal stub
   y: number;
   labelX: number;
 }
 
 export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props) {
-  const { selected, setSelected, setRound } = useSelection();
-  // Source of truth: `dash.rounds[]` for completed rounds, plus a
-  // partial live round when the dash carries in-flight L1 candidates
-  // that `round:display` hasn't summarized yet. Without the in-flight
-  // tail, the tree would lag the chart by one round (operator sees
-  // C4.x bars in the chart but no R4 column in the tree).
-  const rounds: RoundView[] = useMemo(() => {
-    const out: RoundView[] = [];
-    for (const r of dash?.rounds ?? []) {
-      out.push({
-        round: r.round,
-        scoreboard: r.candidates.map((c) => ({
-          candidate_id: c.candidate_id,
-          label: c.label,
-          accuracy: c.accuracy,
-          is_winner: c.is_winner,
-        })),
-      });
-    }
-    const inflight = liveL1Candidates(dash);
-    const currentRound = roundOf(dash);
-    if (inflight.length > 0 && currentRound != null && !out.some((r) => r.round === currentRound)) {
-      const scoreboard: Candidate[] = inflight.map((c) => {
-        const i = Number(c.idx);
-        const acc =
-          typeof c.stats?.accuracy === "number"
-            ? c.stats.accuracy
-            : computeAccuracyFromSamples(c.samples);
-        return {
-          candidate_id: `r${currentRound}_${i}`,
-          label: c.label,
-          accuracy: acc ?? undefined,
-          is_winner: false,
-        };
-      });
-      out.push({ round: currentRound, scoreboard });
-    }
-    return out;
-  }, [dash]);
+  const { candidate: selected, setSelectionForCandidate } = useSelection();
+
+  // One canonical candidate spine for the whole dashboard. Lineage
+  // and FitnessPanel share this derivation so the two surfaces agree
+  // on count, ordering, ids, and labels — no more R1.2-vs-C1.1 drift.
+  const byRound = useMemo(() => roundCandidatesByRound(dash), [dash]);
+
+  // L1 rounds in display order — round 0 is origin and rendered as the
+  // trunk stub, not as a column. Everything ≥1 becomes a column.
+  const l1Rounds = useMemo(() => {
+    const nums = [...byRound.keys()].filter((r) => r > 0).sort((a, b) => a - b);
+    return nums.map((round) => ({ round, rows: byRound.get(round) ?? [] }));
+  }, [byRound]);
+
+  const originRow = byRound.get(0)?.[0] ?? null;
 
   // Walk rounds in order. Each round's children sit at column N (1-indexed),
   // vertically centered on the parent of round N (origin or prior winner).
@@ -111,19 +70,19 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
     let parentX = LEFT_PAD;
     let parentY = TOP_PAD + 4 * ROW_H; // initial guess; recomputed per-round
     let maxY = parentY;
-    rounds.forEach((r, ri) => {
-      const cands = r.scoreboard ?? [];
-      if (cands.length === 0) return;
+    l1Rounds.forEach((r, ri) => {
+      const rows = r.rows;
+      if (rows.length === 0) return;
       const colRight = LEFT_PAD + r.round * ROUND_W;
       const childStubX = colRight - STUB;
       // Center children vertically on parentY when possible.
-      const span = (cands.length - 1) * ROW_H;
+      const span = (rows.length - 1) * ROW_H;
       const top = Math.max(TOP_PAD, parentY - span / 2);
-      const cys = cands.map((_, i) => top + i * ROW_H);
-      cands.forEach((c, i) => {
+      const cys = rows.map((_, i) => top + i * ROW_H);
+      rows.forEach((row, i) => {
         const cy = cys[i];
-        children.push({ round: r.round, idx: i, cand: c, x: childStubX, y: cy, labelX: colRight + 4 });
-        segs.push({ px: parentX, py: parentY, cx: childStubX, cy, winner: !!c.is_winner });
+        children.push({ row, x: childStubX, y: cy, labelX: colRight + 4 });
+        segs.push({ px: parentX, py: parentY, cx: childStubX, cy, winner: row.is_winner });
         if (cy > maxY) maxY = cy;
       });
       // Re-center parent for round 1 (origin) onto its children so the
@@ -134,7 +93,7 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
         for (const s of segs) s.py = mid;
       }
       // Next parent = winner of this round
-      const winnerIdx = cands.findIndex((c) => c.is_winner);
+      const winnerIdx = rows.findIndex((row) => row.is_winner);
       if (winnerIdx >= 0) {
         parentX = colRight;
         parentY = cys[winnerIdx];
@@ -150,15 +109,34 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
       height: maxY + TOP_PAD,
       // Right padding sized for the final column's label text ("R{N}.{i} {pct}%")
       // — ~80px is enough; the prior 140 left a wide empty strip on the right.
-      totalW: LEFT_PAD + (rounds[rounds.length - 1]?.round ?? 1) * ROUND_W + 80,
-      originY: rounds.length > 0 ? (segs[0]?.py ?? TOP_PAD) : TOP_PAD,
+      totalW: LEFT_PAD + (l1Rounds[l1Rounds.length - 1]?.round ?? 1) * ROUND_W + 80,
+      originY: l1Rounds.length > 0 ? (segs[0]?.py ?? TOP_PAD) : TOP_PAD,
     };
-  }, [rounds]);
+  }, [l1Rounds]);
 
-  // Live origin if available — surfaces before the first round closes.
-  const originAcc = dash?.origin?.accuracy ?? null;
+  // Pure render: select a row when not selected, deselect when re-clicked.
+  // Routed through SelectionContext.setSelectionForCandidate so the round
+  // axis updates atomically — round-tabs strip + samples view follow.
+  const onPickRow = (row: CandidateRow, isSelected: boolean) => {
+    if (isSelected) {
+      setSelectionForCandidate(null);
+      return;
+    }
+    setSelectionForCandidate({
+      round: row.round,
+      candidate_id: row.candidate_id,
+      label: row.label,
+      accuracy: row.accuracy,
+      is_winner: row.is_winner,
+    });
+  };
 
-  if (rounds.length === 0) {
+  const isRowSelected = (row: CandidateRow): boolean =>
+    selected != null &&
+    selected.round === row.round &&
+    selected.candidate_id === row.candidate_id;
+
+  if (l1Rounds.length === 0) {
     // Inherited fork: dashboard.json is shared at the family root, so
     // origin / round / best surface the parent's state. The fork's own
     // rounds dir is just empty because it hasn't run a new round yet —
@@ -204,8 +182,8 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
               {inheritedBest != null ? ` · best ${fmtPct0(inheritedBest)}` : ""}
               {" · no new rounds yet"}
             </>
-          ) : originAcc != null ? (
-            `origin ${fmtPct0(originAcc)} · waiting for round 1`
+          ) : originRow?.accuracy != null ? (
+            `origin ${fmtPct0(originRow.accuracy)} · waiting for round 1`
           ) : (
             "No rounds on disk yet — the tree appears once round 1 lands."
           )}
@@ -214,12 +192,18 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
     );
   }
 
+  // Clickable origin (C0) — same selection contract as any L1 candidate
+  // so the operator can route to the inspector + samples view for origin
+  // just by clicking it. Was a non-interactive text label before;
+  // matches the fitness chart, which always treated C0 as a bar.
+  const originSelected = originRow ? isRowSelected(originRow) : false;
+
   return (
     <CardFrame
       className="lineage-card"
       title={<span>Lineage</span>}
       actions={
-        <span className="badge">{branches.children.length} candidates · {rounds.length} round{rounds.length === 1 ? "" : "s"}</span>
+        <span className="badge">{branches.children.length} candidates · {l1Rounds.length} round{l1Rounds.length === 1 ? "" : "s"}</span>
       }
     >
       {/* Campaign cladogram sits above the candidate cladogram — same
@@ -240,15 +224,32 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
           aria-label="Search-point lineage tree"
           shapeRendering="crispEdges"
         >
-          {/* Origin label, anchored at the trunk's left tip. */}
-          <text
-            x={LEFT_PAD - 4}
-            y={originY - 4}
-            className="lineage-label"
-            textAnchor="end"
-          >
-            origin {fmtPct0(originAcc)}
-          </text>
+          {/* Origin label — clickable when an origin row exists in
+              the candidate spine. Selecting it routes the inspector
+              + samples view to C0 just like any other stub. */}
+          {originRow ? (
+            <g
+              className={`lineage-node lineage-node-origin${originSelected ? " selected" : ""}`}
+              onClick={() => onPickRow(originRow, originSelected)}
+              style={{ cursor: "pointer" }}
+            >
+              <text
+                x={LEFT_PAD - 4}
+                y={originY - 4}
+                className={`lineage-label${originSelected ? " selected" : ""}`}
+                textAnchor="end"
+              >
+                {originRow.label} {fmtPct0(originRow.accuracy)}
+              </text>
+              <rect
+                x={0}
+                y={originY - 14}
+                width={LEFT_PAD}
+                height={20}
+                fill="transparent"
+              />
+            </g>
+          ) : null}
 
           {/* Slanted branches from parent point to each child's stub start. */}
           {branches.segs.map((s, i) => (
@@ -265,30 +266,12 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
           {/* Horizontal child stubs + labels. Clickable: selecting a node
              feeds the ScoringInspector embedded below within this card. */}
           {branches.children.map((c) => {
-            const cid = c.cand.candidate_id ?? `r${c.round}_${c.idx}`;
-            const isSelected =
-              selected != null && selected.round === c.round && selected.candidate_id === cid;
+            const isSelected = isRowSelected(c.row);
             return (
               <g
-                key={`child-${c.round}-${c.idx}`}
+                key={c.row.key}
                 className={`lineage-node${isSelected ? " selected" : ""}`}
-                onClick={() => {
-                  if (isSelected) {
-                    setSelected(null);
-                  } else {
-                    setSelected({
-                      round: c.round,
-                      candidate_id: cid,
-                      label: c.cand.label ?? cid,
-                      accuracy: typeof c.cand.accuracy === "number" ? c.cand.accuracy : null,
-                      is_winner: !!c.cand.is_winner,
-                    });
-                    // Anchor the round-tabs strip + samples drill on the
-                    // round this stub belongs to. The strip highlights it,
-                    // the samples card scopes to round_NNNN.json.
-                    setRound(c.round);
-                  }
-                }}
+                onClick={() => onPickRow(c.row, isSelected)}
                 style={{ cursor: "pointer" }}
               >
                 <line
@@ -296,14 +279,14 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
                   y1={c.y}
                   x2={c.x + STUB}
                   y2={c.y}
-                  className={`lineage-stub${c.cand.is_winner ? " winner" : ""}`}
+                  className={`lineage-stub${c.row.is_winner ? " winner" : ""}`}
                 />
                 <text
                   x={c.labelX}
                   y={c.y + 3}
-                  className={`lineage-label${c.cand.is_winner ? " winner" : ""}`}
+                  className={`lineage-label${c.row.is_winner ? " winner" : ""}`}
                 >
-                  R{c.round}.{c.idx + 1} {fmtPct0(c.cand.accuracy)}
+                  {c.row.label} {fmtPct0(c.row.accuracy)}
                 </text>
                 {/* Invisible hit-rect over the label so the row catches clicks
                    beyond just the thin stub. */}
@@ -314,7 +297,7 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
                   height={20}
                   fill="transparent"
                 />
-                <title>{c.cand.label ?? c.cand.candidate_id ?? ""}</title>
+                <title>{c.row.label}</title>
               </g>
             );
           })}

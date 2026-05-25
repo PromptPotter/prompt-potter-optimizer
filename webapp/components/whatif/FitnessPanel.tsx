@@ -1,11 +1,9 @@
 "use client";
 import { useEffect, useMemo } from "react";
-import { WHATIF_INLINE_META, buildRows, setsEqual, whatifIdentifiersInFormula, type Row } from "./meta";
-import { FitnessChart, type BarSlot } from "./FitnessChart";
+import { WHATIF_INLINE_META, buildRows, whatifIdentifiersInFormula, type Row } from "./meta";
+import { FitnessChart } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
-import { computeAccuracyFromSamples } from "@/lib/sample-line";
 import { CardFrame } from "@/components/ui/card";
-import { candidateLabel } from "@/lib/candidate-label";
 import {
   liveL1Candidates,
   type DashboardSnapshot,
@@ -13,11 +11,11 @@ import {
 } from "@/lib/poll";
 import type { RoundSummary } from "@/lib/api/types";
 import { useSelection } from "@/components/dashboard/SelectionContext";
-import { correctedFromEvaluators } from "./fitness-bars";
 import { WhatIfGrid } from "./WhatIfGrid";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useFetch } from "@/lib/useFetch";
 import { useWorkspace } from "@/lib/workspace";
+import { useFitnessBars } from "./useFitnessBars";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -32,7 +30,7 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
   // FitnessChart resolves selectedKey → bar index by matching `bar.key`
   // against the SelectedCandidate's {round, candidate_id}. Aliased away
   // from the evaluator-set `selected` already in this component.
-  const { selected: selectedCandidate, setSelected: setSelectedCandidate, setRound } = useSelection();
+  const { candidate: selectedCandidate, setSelectionForCandidate } = useSelection();
   // Default view: chart-only (one bar per candidate = accuracy). The
   // composite chip pairs the formula-weighted score; the what-if chip
   // opens the ablation widget below the chart. State lives in a module
@@ -188,100 +186,12 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
     setSelected(next);
   };
 
-  // ── 4. Assemble the unified bar list:
-  //   [origin] + [historical round candidates...] + [in-flight current round]
-  const bars: BarSlot[] = useMemo(() => {
-    const out: BarSlot[] = [];
-    // When selected matches the formula's evaluators, reuse the backend's composite byte-for-byte — recomputing as a mean drifts by float ε and can't represent non-mean formulas.
-    const useComposite = setsEqual(selected, inActive);
-
-    // Origin — single source on `dash.origin`. The `> 0` guard skips a
-    // not-yet-scored bootstrap value.
-    const originAccuracy =
-      dash?.origin && dash.origin.accuracy > 0 ? dash.origin.accuracy : null;
-    const originSamples =
-      dash?.origin && dash.origin.samples > 0 ? dash.origin.samples : null;
-    if (originAccuracy != null || history.length > 0 || inflightCandidates.length > 0) {
-      out.push({
-        key: "C0",
-        label: "C0",
-        accuracy: originAccuracy,
-        composite: null,
-        whatif: null,
-        started: originAccuracy != null,
-        nSamples: originSamples,
-        nExpected: null,
-      });
-    }
-
-    const historicalRoundsSeen = new Set<number>();
-    for (const h of history) {
-      const roundNum = h.round;
-      historicalRoundsSeen.add(roundNum);
-      h.candidates.forEach((c, i) => {
-        const label = c.label || candidateLabel(roundNum, i);
-        const diag = diagByLabel.get(label);
-        out.push({
-          key: `R${roundNum}.${i}`,
-          label,
-          accuracy: c.accuracy,
-          composite: c.composite_fitness,
-          whatif: useComposite ? c.composite_fitness : correctedFromEvaluators(c.evaluators, selected, rows),
-          started: true,
-          nSamples: c.scored_samples,
-          nExpected: c.expected_samples,
-          candidateId: c.candidate_id || `r${roundNum}_${i}`,
-          round: roundNum,
-          isWinner: c.is_winner,
-          diag: diag
-            ? {
-                accuracy: diag.workspace_accuracy,
-                workspaceN: diag.workspace_n,
-                samplesAdded: diag.samples_added,
-              }
-            : undefined,
-        });
-      });
-    }
-
-    // In-flight: only if the current round hasn't yet been summarized
-    // into `dash.rounds[]` (i.e. `round:display` hasn't fired yet).
-    if (
-      inflightCandidates.length > 0 &&
-      !historicalRoundsSeen.has(currentRound)
-    ) {
-      for (const c of inflightCandidates) {
-        const i = Number(c.idx);
-        if (!Number.isFinite(i) || i < 0) continue;
-        const ev = c.stats?.evaluators ?? {};
-        const acc = typeof c.stats?.accuracy === "number"
-          ? c.stats.accuracy
-          : computeAccuracyFromSamples(c.samples);
-        const comp = typeof c.stats?.composite_fitness === "number"
-          ? c.stats.composite_fitness
-          : null;
-        out.push({
-          key: `live.${currentRound}.${i}`,
-          label: c.label || candidateLabel(currentRound, i),
-          accuracy: acc,
-          composite: comp,
-          whatif: useComposite && comp != null ? comp : correctedFromEvaluators(ev, selected, rows),
-          started:
-            (c.samples?.length ?? 0) > 0 ||
-            typeof c.stats?.accuracy === "number" ||
-            typeof c.stats?.composite_fitness === "number" ||
-            Object.keys(ev).length > 0,
-          nSamples: c.samples?.length ?? null,
-          nExpected: null,
-          candidateId: `r${currentRound}_${i}`,
-          round: currentRound,
-          isWinner: false,
-        });
-      }
-    }
-
-    return out;
-  }, [dash, history, inflightCandidates, selected, rows, currentRound, inActive, diagByLabel]);
+  // Decorate the canonical candidate spine with what-if + diag overlays.
+  // The spine itself (origin + historical + in-flight, uniform ids and
+  // labels) comes from `useRoundCandidates` — the same source
+  // LineageTree reads. With one derivation the two surfaces cannot
+  // disagree on count, labels, or selection target.
+  const bars = useFitnessBars(selected, inActive, rows, diagByLabel);
 
   return (
     <CardFrame
@@ -344,19 +254,19 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
             }
             onSelect={(bar) => {
               if (!bar || !bar.candidateId || bar.round == null) {
-                setSelectedCandidate(null);
+                setSelectionForCandidate(null);
                 return;
               }
-              setSelectedCandidate({
+              // Atomic candidate+round write — the round axis follows
+              // the bar's round so a click in either surface re-anchors
+              // the other on the same tick.
+              setSelectionForCandidate({
                 round: bar.round,
                 candidate_id: bar.candidateId,
                 label: bar.label,
                 accuracy: bar.accuracy,
                 is_winner: !!bar.isWinner,
               });
-              // Anchor the round-tabs strip + samples drill on this bar's
-              // round so a click in either surface re-anchors the other.
-              setRound(bar.round);
             }}
           />
         </div>

@@ -5,7 +5,8 @@ import { bumpRevalidation } from "@/lib/revalidate";
 import { useRoundFile } from "@/lib/useRoundFile";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
 import { fmtPct1 } from "@/lib/format";
-import type { SelectedCandidate } from "./SelectionContext";
+import type { SelectedCandidate } from "@/lib/types/selection";
+import type { ScoreboardEntry } from "@/lib/types/round";
 
 interface Props {
   campaignId: string | null;
@@ -13,18 +14,6 @@ interface Props {
   selected: SelectedCandidate | null;
   isLive: boolean;
   onClose: () => void;
-}
-
-interface ScoreboardEntry {
-  candidate_id?: string;
-  label?: string;
-  accuracy?: number;
-  composite?: number;
-  hits?: number;
-  total?: number;
-  is_winner?: boolean;
-  per_sample?: Record<string, unknown>[];
-  [k: string]: unknown;
 }
 
 export function ScoringInspector({

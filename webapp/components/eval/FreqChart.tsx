@@ -1,23 +1,26 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered } from "@/lib/chart-config";
 import { getCss } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
 import { parseSampleLine } from "@/lib/sample-line";
-import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
+import {
+  liveL1Candidates,
+  roundOf,
+  type DashboardSnapshot,
+} from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useRoundFile } from "@/lib/useRoundFile";
 import { CardFrame } from "@/components/ui/card";
+import { useSelection } from "@/components/dashboard/SelectionContext";
+import type { RawResultRow } from "@/lib/types/round";
 
 ensureChartRegistered();
 
-interface ResultRow {
-  score?: number;
-  error?: unknown;
-  predicted?: string;
-  ground_truth?: string;
-}
+// Local alias kept to the fields FreqChart actually buckets. Same
+// shape, narrower view — the chart never touches sample_id / hit / fitness.
+type ResultRow = Pick<RawResultRow, "score" | "error" | "predicted" | "ground_truth">;
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -59,19 +62,31 @@ function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
 export function FreqChart({ dash, themeKey }: Props) {
   const chartRef = useRef(null);
   const { campaignId, cycleId } = useWorkspace();
+  const { round: selectedRound } = useSelection();
 
-  // Latest completed round from the dashboard summary. `dash.rounds` is sorted
-  // ascending — the last entry is the most recent. Null until the first round
-  // closes; the lazy fetch returns EMPTY in that window and the live bucket
-  // path below carries the chart.
-  const rounds = dash?.rounds ?? [];
-  const latestRound = rounds.length > 0 ? rounds[rounds.length - 1].round : null;
-  const { doc: latestRoundDoc } = useRoundFile(campaignId, cycleId, latestRound);
-  const latestResults = (latestRoundDoc?.results as ResultRow[] | undefined) ?? [];
+  // Source-of-truth split (AGENTS.md no-stitch rule):
+  //   - live mode (selectedRound == null or matches the in-flight round)
+  //     reads only `dashboard.json`'s in-flight sample lines.
+  //   - historical mode (any other round) reads only `round_NNNN.json`'s
+  //     `results[]` via `useRoundFile`.
+  // No fallback chain between the two — a click on a historical round
+  // tab shows that round's bucket, even if it temporarily looks empty
+  // while the file loads. The chart never silently merges sources.
+  const liveRound = roundOf(dash);
+  const isLiveView =
+    selectedRound == null ||
+    (liveRound != null && selectedRound === liveRound);
+  // Only fetch a round file when we're actually in historical mode —
+  // null tells `useRoundFile` to stay idle.
+  const historicalRoundArg = isLiveView ? null : selectedRound;
+  const { doc: roundDoc } = useRoundFile(campaignId, cycleId, historicalRoundArg);
 
-  const live = liveResultsFrom(dash);
-  const useLive = live.length > 0;
-  const data = bucketScores(useLive ? live : latestResults);
+  const results: ResultRow[] = useMemo(() => {
+    if (isLiveView) return liveResultsFrom(dash);
+    return (roundDoc?.results as ResultRow[] | undefined) ?? [];
+  }, [isLiveView, dash, roundDoc]);
+
+  const data = bucketScores(results);
   const accStrong = getCss("--color-accent-strong");
   const acc = getCss("--color-accent");
   const colors = data.map((_, i) => (i < 5 ? accStrong : acc));
@@ -91,7 +106,11 @@ export function FreqChart({ dash, themeKey }: Props) {
   return (
     <CardFrame
       title={<span title={TERMS.stub_score_freq}>Score Frequency</span>}
-      actions={<span className="badge">{useLive ? "live" : "round"}</span>}
+      actions={
+        <span className="badge">
+          {isLiveView ? "live" : `R${selectedRound}`}
+        </span>
+      }
     >
       <div style={{ position: "relative", height: 140 }}>
         <Bar key={themeKey} ref={chartRef} data={chartData} options={options} />

@@ -68,5 +68,28 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # Candidate-list construction in components is banned. The spine is
+      # `roundCandidates(dash)` (sole consumer of `liveL1Candidates`) +
+      # the `useRoundCandidates` hook. Two surfaces re-deriving the same
+      # candidate list independently is what produced the lineage/fitness
+      # alignment bug; one centralized spine makes that drift impossible.
+      # Single-field reads (`dash.origin`, `roundOf(dash)`) remain
+      # allowed — they don't replicate the spine. Migration of the
+      # remaining `liveL1Candidates` sites (FreqChart per-sample bucket,
+      # HardSamplesHeatmap per-candidate marks, FitnessPanel evaluator
+      # union) is a follow-up; each site needs its own derivation, not a
+      # shared one.
+      - name: Anti-rot — no liveL1Candidates outside the spine
+        run: |
+          violations=$(grep -RnlE 'liveL1Candidates' components/ \
+            | grep -vE 'FreqChart\.tsx|HardSamplesHeatmap\.tsx|FitnessPanel\.tsx' \
+            || true)
+          if [ -n "$violations" ]; then
+            echo "❌ liveL1Candidates is the candidate-spine constructor — only roundCandidates() and the three named follow-up sites may call it."
+            echo "   New consumers must go through useRoundCandidates() or roundCandidates() in lib/derivations/round-candidates.ts."
+            echo "$violations"
+            exit 1
+          fi
+
       - name: Build
         run: npm run build

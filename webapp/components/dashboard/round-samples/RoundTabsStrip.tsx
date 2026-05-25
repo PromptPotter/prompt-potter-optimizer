@@ -16,7 +16,7 @@ interface Props {
 //   round === liveRound    → explicit "show live" (same view as null)
 //   round  <  liveRound    → drill into a completed round
 export function RoundTabsStrip({ dash }: Props) {
-  const { round: selectedRound, setRound } = useSelection();
+  const { round: selectedRound, setSelectionForRound } = useSelection();
   const completed = ((dash?.rounds ?? []).map((r) => r.round)).sort((a, b) => a - b);
   const liveRound = roundOf(dash);
   // The pill represents the in-flight round only when it isn't already
@@ -42,7 +42,7 @@ export function RoundTabsStrip({ dash }: Props) {
               role="tab"
               aria-selected={active}
               className={`round-tab${active ? " active" : ""}`}
-              onClick={() => setRound(r)}
+              onClick={() => setSelectionForRound(r)}
               title={`Show round ${r} samples`}
             >
               {r}
@@ -55,7 +55,7 @@ export function RoundTabsStrip({ dash }: Props) {
             role="tab"
             aria-selected={followingLive}
             className={`round-tab round-tab-live${followingLive ? " active" : ""}`}
-            onClick={() => setRound(null)}
+            onClick={() => setSelectionForRound(null)}
             title="Follow the in-flight round"
           >
             <span className="round-tab-live-dot" aria-hidden />
