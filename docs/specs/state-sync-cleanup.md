@@ -20,6 +20,8 @@ Observed drift: 3↔4 collisions on manual rename (`cycle_0c7c4ceee267` ↔ `cyc
 
 **Two surfaces.** `active_session.json` is ground truth for *what's running now* (`{tenant_id, session_id, cycle_id}`, three writers: mint / fork / sweep_restore). `state.json` per cycle dir is *what that cycle's last known state was* — renamed from `dashboard.json`, per-cycle, written **only at teardown**.
 
+**Convergence with [`identity-foundation.md`](identity-foundation.md):** the `tenant_id` field on `active_session.json` is the same `TenantId` newtype the Stage-0 `IdentityContext` carries (per [`spend-and-tenancy.md`](spend-and-tenancy.md)). Phase 1 of this spec touches `index.json` writers — the same files `spend-and-tenancy.md` re-touches for the `IdentityContext` reification. **Sequence Phase 1 before the spend-and-tenancy reification** to avoid double-touching the store seam. Identity-foundation Stages 1+ do not alter the on-disk identity field — the seam just gains a richer source.
+
 **Identity rule.** Directory name **IS** the cycle id. `index.json::campaign_id` is removed; `CampaignStore` reads `index_path.parent.name`. Rename the dir, you renamed the cycle.
 
 **Live view.** `GET /api/v1/live` reads `active_session.json`, opens that cycle's ledger, returns `derive_live_state(ledger)`. Shared helper between webapp and CLI's `LiveDisplay`. No file polling, no race.
