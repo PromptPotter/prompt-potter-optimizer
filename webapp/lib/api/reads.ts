@@ -33,6 +33,21 @@ export function fetchDatasetPipeline(name: string, signal?: AbortSignal): Promis
   return jget(`${API}/datasets/${encodeURIComponent(name)}/pipeline`, signal);
 }
 
+// Registered backend connections — the operator-level multi-backend list.
+// Mirrors `BackendConnection` (promptpotter/domain/backend.py):
+// {id, name, backend_type, base_url, created_at}. Drives the connector-node
+// popover on the Input→LLM arrow.
+export interface BackendInfo {
+  id: string;
+  name: string;
+  backend_type: string;
+  base_url: string;
+  created_at: string;
+}
+export function fetchBackends(signal?: AbortSignal): Promise<BackendInfo[]> {
+  return jget<BackendInfo[]>(`${API}/backends`, signal);
+}
+
 // Per-cycle file content. Files live either under the cycle dir
 // (`scope=cycle`) or at the campaign dir (`scope=campaign` — campaign.json,
 // log.md, hard_samples.json). `dashboard.json` is NOT a campaign artifact —

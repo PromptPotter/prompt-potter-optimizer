@@ -30,6 +30,8 @@ Any Groq-hosted model ID works; `openai/gpt-oss-120b` is the recommended default
 
 To use Anthropic, OpenAI, or OpenRouter instead of (or alongside) Groq, set the corresponding `*_API_KEY` and switch `optimizer_llm.provider` in your dataset's `campaign.json` to `"anthropic"`, `"openai"`, or `"openrouter"`. Provider selection is per-campaign — there is no env-var default.
 
+Connecting to a remote / auth-gated backend? See [`operations/backend-integration.md § Connection security`](../operations/backend-integration.md#connection-security).
+
 ## 4. Install
 
 ```bash

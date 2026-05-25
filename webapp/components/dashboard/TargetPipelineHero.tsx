@@ -1,18 +1,17 @@
 "use client";
 import type { NodeDataLike, PipelineView, PipelineViewNode } from "@/components/workflow/types";
+import { useConnectorView } from "@/lib/hooks/useConnectorView";
+import { ConnectorNode } from "./ConnectorNode";
 import { useSelection } from "./SelectionContext";
 
 interface Props {
-  view: PipelineView | null;
-  // Original-cased connector name (e.g. "TermNorm Local"). Rendered as a
-  // small uppercase tag at the top of the multi-node chip; omitted in the
-  // single-node fallback so the brand chip stays minimal.
-  connector: string | null;
-  // dash.current_round.nodes — keyed by node id, carries the live model
-  // name and timing for each LLM node.
-  currentNodes: Record<string, NodeDataLike>;
   samplesOpen: boolean;
   onToggle: () => void;
+  // Active dataset id — feeds `useConnectorView`, which owns the dataset
+  // overlay + registered-backends fetches and the live-node join. Three
+  // props total (samplesOpen, onToggle, datasetName); everything the
+  // hero needs about the connector/backend surface comes from the hook.
+  datasetName: string | null;
 }
 
 const ATTACH_ICON = (
@@ -205,14 +204,9 @@ function MultiNodeStrip({
   );
 }
 
-export function TargetPipelineHero({
-  view,
-  connector,
-  currentNodes,
-  samplesOpen,
-  onToggle,
-}: Props) {
-  const interior = view ? interiorNodes(view) : [];
+export function TargetPipelineHero({ samplesOpen, onToggle, datasetName }: Props) {
+  const cv = useConnectorView(datasetName);
+  const interior = cv.view ? interiorNodes(cv.view) : [];
   const isSingle = interior.length <= 1;
 
   return (
@@ -230,14 +224,16 @@ export function TargetPipelineHero({
           <div className="val">Query</div>
         </div>
       </button>
-      <div className="wf-hero-arrow" />
+      <div className="wf-hero-arrow">
+        <ConnectorNode view={cv} />
+      </div>
       {isSingle ? (
         <SingleNodeChip
           node={interior[0] ?? { id: "llm", label: "LLM", kind: "llm" }}
-          currentNodes={currentNodes}
+          currentNodes={cv.currentNodes}
         />
       ) : (
-        <MultiNodeStrip view={view!} connector={connector} currentNodes={currentNodes} />
+        <MultiNodeStrip view={cv.view!} connector={cv.connector} currentNodes={cv.currentNodes} />
       )}
       <div className="wf-hero-arrow" />
       <button

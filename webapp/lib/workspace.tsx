@@ -1,9 +1,9 @@
 "use client";
 // Single source of truth for workspace identity. One provider polls the
 // server's active pointer (`/active`) and the cycle list (`/cycles`)
-// together; every surface — DashboardPane, CyclePicker, Sidebar,
-// ComparePane — subscribes here via `useWorkspace()` instead of fetching
-// those endpoints on its own.
+// together; every surface — DashboardPane, CyclePicker, Sidebar —
+// subscribes here via `useWorkspace()` instead of fetching those
+// endpoints on its own.
 //
 // Workspace identity is four-level: dataset → campaign → unit, with the
 // operator's active pointer the lens into them. A `cycle_id` is unique

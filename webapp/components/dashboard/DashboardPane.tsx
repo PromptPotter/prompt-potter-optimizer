@@ -1,11 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import {
-  fetchCycleFile,
-  fetchDatasetPipeline,
-  fetchPipeline,
-  type HardSamplesScope,
-} from "@/lib/api";
+import { fetchCycleFile, fetchPipeline, type HardSamplesScope } from "@/lib/api";
 import { CycleStreamProvider } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
@@ -26,11 +21,9 @@ import { CyclePicker } from "./CyclePicker";
 import { SelectionProvider } from "./SelectionContext";
 import { NowTriad } from "./NowTriad";
 import { FilesPane } from "@/components/tree/FilesPane";
-import { LeveragePanel } from "@/components/leverage/LeveragePanel";
-import { ComparePane } from "@/components/compare/ComparePane";
 import { VerifyPane } from "@/components/verify/VerifyPane";
 
-import type { PipelineDoc, PipelineView } from "@/components/workflow/types";
+import type { PipelineDoc } from "@/components/workflow/types";
 
 export function DashboardPane() {
   // `campaignId` + `cycleId` are owned by WorkspaceProvider (the single
@@ -58,26 +51,18 @@ function DashboardPaneInner() {
     cycles,
     selectCycle,
   } = useWorkspace();
-  // Replit-style sub-tabs (Chat / Dashboard / Files) scoped to the
-  // currently-selected cycle. The sidebar is persistent across all
-  // three. Default = chat: that's where new cycles get conceived and
-  // where the conversational interface lives. Flipping the default to
-  // "dashboard" on initial mount tripped React #185 — the hero/fitness
-  // chain doesn't handle null→non-null cycleId during the first paint;
-  // chat dodges that path. Revisit when we untangle the dashboard
-  // first-render sequence.
+  // Replit-style sub-tabs (Chat / Dashboard / Verify) scoped to the
+  // currently-selected cycle. Files is reachable only via the StatusBar's
+  // "Open files" link — not exposed on the topbar. Default = chat: that's
+  // where new cycles get conceived and where the conversational interface
+  // lives. Flipping the default to "dashboard" on initial mount tripped
+  // React #185 — the hero/fitness chain doesn't handle null→non-null
+  // cycleId during the first paint; chat dodges that path. Revisit when
+  // we untangle the dashboard first-render sequence.
   const [tab, setTab] = useState<Tab>("chat");
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<PipelineDoc | null>(null);
-  // Target connector pipeline view — what the dataset's `pipelines.default`
-  // actually wires up. Drives the data-driven chat-pane hero (N=1 keeps the
-  // single-LLM chip look; N≥2 renders dot+outside-label chain). Fetched once
-  // per datasetName change.
-  const [targetPipelineView, setTargetPipelineView] = useState<PipelineView | null>(null);
-  // Original-cased connector name (e.g. "TermNorm Local") rendered as a
-  // small uppercase tag inside the multi-node chip. Same fetch as the view.
-  const [targetConnector, setTargetConnector] = useState<string | null>(null);
   // Hard-sample view scope — campaign = only the current campaign's cycles
   // (the default view), dataset = every campaign on this dataset, which is
   // the real series the optimizer's picker follows. Clicking the heat-map
@@ -135,44 +120,6 @@ function DashboardPaneInner() {
       cancelled = true;
     };
   }, []);
-
-  // The active dataset is bound at cycle-identity time, but a unit switch
-  // changes it — drop the stale target-pipeline view render-phase so the
-  // effect below refetches cleanly.
-  const [prevDatasetName, setPrevDatasetName] = useState(datasetName);
-  if (datasetName !== prevDatasetName) {
-    setPrevDatasetName(datasetName);
-    setTargetPipelineView(null);
-    setTargetConnector(null);
-  }
-
-  // Target connector pipeline view per active dataset. Same one-shot pattern
-  // as the optimizer pipeline — the dataset's `pipelines.default` is bound
-  // at cycle-identity hash time and doesn't mutate mid-loop.
-  useEffect(() => {
-    if (!datasetName) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const resp = (await fetchDatasetPipeline(datasetName)) as {
-          view?: PipelineView | null;
-          connector?: string | null;
-        };
-        if (!cancelled) {
-          setTargetPipelineView(resp?.view ?? null);
-          setTargetConnector(resp?.connector ?? null);
-        }
-      } catch {
-        if (!cancelled) {
-          setTargetPipelineView(null);
-          setTargetConnector(null);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [datasetName]);
 
   // Cycle title (dataset name) from index.json
   useEffect(() => {
@@ -272,8 +219,6 @@ function DashboardPaneInner() {
             archivePerSample={archivePerSample}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={setHardSamplesScope}
-            targetPipelineView={targetPipelineView}
-            targetConnector={targetConnector}
           />
         ) : tab === "dashboard" ? (
           <div className="content" id="content-dashboard">
@@ -330,10 +275,6 @@ function DashboardPaneInner() {
           </div>
         ) : tab === "files" ? (
           <FilesPane campaignId={campaignId} cycleId={cycleId} />
-        ) : tab === "compare" ? (
-          <ComparePane themeKey={themeKey} />
-        ) : tab === "leverage" ? (
-          <LeveragePanel />
         ) : (
           <VerifyPane />
         )}

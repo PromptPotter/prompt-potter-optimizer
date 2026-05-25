@@ -4,9 +4,9 @@ import type { Theme } from "@/lib/theme";
 
 // Per-cycle sub-tabs (Replit-style): the sidebar carries the campaign
 // library; the topbar carries the views over the *currently-selected*
-// campaign. Plus two install-wide tabs (Leverage, Verify) that aggregate
-// across every campaign on disk and are not scoped to a single cycle.
-export type Tab = "chat" | "dashboard" | "files" | "leverage" | "compare" | "verify";
+// campaign. `files` is part of the type but not rendered here — the
+// StatusBar's "Open files" link is the sole entry point into FilesPane.
+export type Tab = "chat" | "dashboard" | "files" | "verify";
 
 interface Props {
   tab: Tab;
@@ -17,9 +17,6 @@ interface Props {
 const TABS: { id: Tab; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "dashboard", label: "Dashboard" },
-  { id: "files", label: "Files" },
-  { id: "compare", label: "Compare" },
-  { id: "leverage", label: "Leverage" },
   { id: "verify", label: "Verify" },
 ];
 

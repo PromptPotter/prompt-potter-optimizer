@@ -728,6 +728,9 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    page. The SVG aspect-locks; cap width → height drops in lockstep. */
 .workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;margin-bottom:14px}
 .workflow-toolbar{padding:6px 12px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--color-text-secondary)}
+.workflow-round-pick{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-tertiary)}
+.workflow-round-pick select{background:var(--color-background-secondary);color:var(--color-text-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-sm);padding:1px 6px;font-family:inherit;font-size:11px;cursor:pointer}
+.workflow-round-pick select:hover{border-color:var(--color-accent)}
 .workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%;display:flex;align-items:center;justify-content:center}
 .workflow-canvas{position:relative;width:100%;max-width:460px;aspect-ratio:500/290;margin:0 auto;overflow:hidden}
 /* SVG `<g>` wrapping each node — keyboard focus + click affordance. */
@@ -761,8 +764,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .opt-detail-status{font-size:12px;color:var(--color-text-tertiary);margin-left:4px}
 .opt-detail-status.live{color:var(--color-success);font-weight:500}
 .opt-detail-head-actions{display:flex;align-items:center;gap:10px;flex:none}
-.opt-detail-round-pick{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-tertiary)}
-.opt-detail-round-pick select{background:var(--color-background-secondary);color:var(--color-text-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-sm);padding:1px 6px;font-family:inherit;font-size:11px}
+.opt-detail-round-tag{font-size:11px;color:var(--color-text-tertiary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-sm);padding:1px 8px;white-space:nowrap}
 .opt-detail-close{background:none;border:0;color:var(--color-text-tertiary);font-size:18px;line-height:1;cursor:pointer;padding:0 6px;font-family:inherit;border-radius:var(--border-radius-sm)}
 .opt-detail-close:hover{color:var(--color-accent);background:var(--color-background-secondary)}
 
@@ -905,6 +907,65 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
   border-left:9px solid var(--color-accent);border-top:5px solid transparent;border-bottom:5px solid transparent;
   filter:drop-shadow(0 0 5px var(--color-accent-glow))
 }
+/* Connector-state node — small dot shifted ~7px above the arrow line so it
+   reads as a tiny satellite over the wire, not a chip blocking it. Hit area
+   stays 14px (a11y) via a transparent button; the visible dot is 6px and
+   lives in ::before so the wrapper can carry hover state cleanly. */
+.connector{position:absolute;left:50%;top:50%;transform:translate(-50%,calc(-50% - 7px));z-index:3}
+.connector-dot{
+  appearance:none;border:0;padding:0;cursor:pointer;background:transparent;
+  width:14px;height:14px;position:relative;outline:none
+}
+.connector-dot::before{
+  content:'';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:6px;height:6px;border-radius:50%;
+  background:var(--color-text-tertiary);
+  transition:transform .15s ease,background .15s ease,box-shadow .15s ease
+}
+.connector.live .connector-dot::before{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
+.connector-dot:hover::before,.connector-dot:focus-visible::before{transform:translate(-50%,-50%) scale(1.35)}
+.connector.live .connector-dot:hover::before,.connector.live .connector-dot:focus-visible::before{box-shadow:0 0 7px var(--color-success)}
+.connector-pop{
+  position:absolute;left:50%;top:calc(100% + 10px);transform:translateX(-50%);
+  min-width:240px;max-width:300px;
+  background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);
+  border-radius:8px;padding:10px 12px;
+  box-shadow:0 8px 24px rgba(0,0,0,.18);
+  opacity:0;pointer-events:none;transition:opacity .12s ease;z-index:4
+}
+.connector:hover .connector-pop,.connector:focus-within .connector-pop{opacity:1;pointer-events:auto}
+.connector-pop-head{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--color-text-primary);margin-bottom:6px}
+.connector-pop-head .dot{width:6px;height:6px;border-radius:50%;background:var(--color-text-tertiary);flex-shrink:0}
+.connector.live .connector-pop-head .dot{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
+.connector-pop-head .name{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.connector-pop-head .kind{font-size:9px;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary);flex-shrink:0}
+.connector-pop-head .state{font-size:11px;color:var(--color-text-tertiary);flex-shrink:0}
+.connector-pop-url{font-size:10px;color:var(--color-text-tertiary);font-family:var(--font-mono,ui-monospace,monospace);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.connector-pop-sec{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.connector-pop-sec .sec-chip{font-size:9px;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary)}
+.connector-pop-sec .sec-chip.ok{color:var(--color-success);background:rgba(var(--color-success-rgb,46,160,67),.12)}
+.connector-pop-sec .sec-chip.warn{color:var(--color-warn-text,#c9a227);background:var(--color-warn-bg)}
+.connector-pop-sec .sec-doc{margin-left:auto;font-size:10px;color:var(--color-accent);text-decoration:none}
+.connector-pop-sec .sec-doc:hover{text-decoration:underline}
+.connector-pop-nodes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:11px}
+.connector-pop-nodes li{display:flex;align-items:center;gap:6px;color:var(--color-text-secondary)}
+.connector-pop-nodes .kind{font-size:9px;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary)}
+.connector-pop-nodes .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.connector-pop-nodes .model{font-size:10px;color:var(--color-accent);font-family:var(--font-mono,ui-monospace,monospace)}
+.connector-pop-nodes .empty{font-style:italic;color:var(--color-text-tertiary)}
+.connector-pop-switch{margin-top:8px;padding-top:8px;border-top:1px solid var(--color-border-tertiary)}
+.connector-pop-switch .head{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:4px}
+.connector-pop-switch ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+.connector-pop-switch .alt{
+  appearance:none;border:1px solid var(--color-border-tertiary);background:transparent;
+  width:100%;display:flex;align-items:center;gap:6px;
+  padding:5px 8px;border-radius:6px;
+  font-size:11px;color:var(--color-text-secondary);
+  cursor:not-allowed;opacity:.7
+}
+.connector-pop-switch .alt-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.connector-pop-switch .alt-type{font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
+.connector-pop-foot{margin-top:8px;padding-top:6px;border-top:1px dashed var(--color-border-tertiary);font-size:10px;color:var(--color-text-tertiary);font-style:italic;text-align:center}
 /* Multi-node connector hero — reuses .wf-hero-node.llm chip frame for one
    shared visual surface across 1-node and N-node datasets. Just slightly
    wider/taller so the dot row fits, with smaller dots + label-wrap on
@@ -933,8 +994,6 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:620px;min-width:0}
 .chat-panel-header{padding:14px 18px;border-bottom:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between}
 .chat-panel-title{font-size:15px;font-weight:500;color:var(--color-text-primary)}
-.chat-panel-status{font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px}
-.chat-panel-status .dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 6px var(--color-success)}
 .chat-messages{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
 .chat-msg{max-width:75%;padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.5}
 .chat-msg.user{

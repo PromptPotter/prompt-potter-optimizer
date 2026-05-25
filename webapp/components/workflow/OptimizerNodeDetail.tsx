@@ -1,8 +1,9 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { PipelineDoc } from "./types";
 import { type DashboardSnapshot, roundOf } from "@/lib/poll";
 import { useRoundFile } from "@/lib/useRoundFile";
+import { useSelection } from "@/components/dashboard/SelectionContext";
 import { phaseToNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
 import type { NodeBlock } from "@/lib/types/round";
@@ -75,33 +76,21 @@ export function OptimizerNodeDetail({
   const cfg = pipeline?.nodes?.[id];
   const cfgInner = (cfg?.config ?? {}) as Record<string, unknown>;
 
-  // Available rounds in the picker, newest first. The live round (if any)
-  // sits at the top with a "(live)" label. Completed rounds come from
-  // `dash.rounds[]` — the summary surface owns "which rounds exist on disk."
+  // The viewed round is owned by SelectionContext — the same source of
+  // truth the RoundTabsStrip, lineage tree, fitness chart, samples view,
+  // and the Optimizer card's toolbar picker all read/write. `null` =
+  // follow live; when no explicit pick exists we fall through to the
+  // live round, then to the most recent completed round.
+  const { round: selectedRound } = useSelection();
   const liveRound = roundOf(dash);
   const completedRounds = useMemo(() => {
     const out = (dash?.rounds ?? []).map((r) => r.round);
     return out.sort((a, b) => b - a);
   }, [dash?.rounds]);
-  const pickerOptions = useMemo(() => {
-    const seen = new Set<number>();
-    const out: { round: number; live: boolean }[] = [];
-    if (liveRound != null) {
-      out.push({ round: liveRound, live: true });
-      seen.add(liveRound);
-    }
-    for (const r of completedRounds) {
-      if (seen.has(r)) continue;
-      out.push({ round: r, live: false });
-      seen.add(r);
-    }
-    return out;
-  }, [liveRound, completedRounds]);
-
-  const [pickedRound, setPickedRound] = useState<number | null>(null);
   const activeRound =
-    pickedRound != null ? pickedRound : (pickerOptions[0]?.round ?? null);
+    selectedRound ?? liveRound ?? completedRounds[0] ?? null;
   const activeIsLive = activeRound != null && activeRound === liveRound;
+  const lastFiredRound = completedRounds[0] ?? null;
 
   // Live round: read inline (no fetch). Historical round: lazy-fetch the
   // round file; `block` is null until it lands.
@@ -132,7 +121,6 @@ export function OptimizerNodeDetail({
 
   const livePhaseNode = phaseToNodeId(dash?.state ?? null);
   const isLiveNow = isLive && livePhaseNode === id;
-  const lastFiredRound = pickerOptions.find((o) => !o.live)?.round ?? null;
   const statusLine = isLiveNow
     ? `live · round ${liveRound ?? "—"}`
     : lastFiredRound != null
@@ -163,22 +151,14 @@ export function OptimizerNodeDetail({
           </span>
         </div>
         <div className="opt-detail-head-actions">
-          {pickerOptions.length > 1 && (
-            <label className="opt-detail-round-pick">
-              round
-              <select
-                value={activeRound ?? ""}
-                onChange={(e) => setPickedRound(Number(e.target.value))}
-                aria-label="Choose round"
-              >
-                {pickerOptions.map((o) => (
-                  <option key={o.round} value={o.round}>
-                    {o.round}
-                    {o.live ? " (live)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {activeRound != null && (
+            <span
+              className="opt-detail-round-tag"
+              title="Round is set from the Optimizer toolbar picker (or the round-tabs strip)"
+            >
+              round {activeRound}
+              {activeIsLive ? " · live" : ""}
+            </span>
           )}
           <button
             type="button"

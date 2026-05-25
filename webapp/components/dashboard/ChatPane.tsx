@@ -9,7 +9,6 @@ import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
 import { ConfigMenu } from "@/components/dashboard/ConfigMenu";
 import { CyclePicker } from "@/components/dashboard/CyclePicker";
 import { TargetPipelineHero } from "@/components/dashboard/TargetPipelineHero";
-import type { NodeDataLike, PipelineView } from "@/components/workflow/types";
 
 interface Props {
   cycleId: string | null;
@@ -29,11 +28,6 @@ interface Props {
   archivePerSample: Map<number, MeasurementDot[]>;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
-  // Connector pipeline view derived from datasets/{name}/pipeline.json's
-  // pipelines.default. Drives the data-driven hero: 1 node = original
-  // glassmorphic LLM chip; N nodes = dot+outside-label chain.
-  targetPipelineView: PipelineView | null;
-  targetConnector: string | null;
 }
 
 // Vanilla "New Job" pane, ported verbatim. Inert UI — chat input + most
@@ -57,8 +51,6 @@ export function ChatPane({
   archivePerSample,
   hardSamplesScope,
   onHardSamplesScopeChange,
-  targetPipelineView,
-  targetConnector,
 }: Props) {
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
@@ -143,9 +135,6 @@ export function ChatPane({
     return fmtDuration(remainingSec);
   })();
 
-  const currentNodes =
-    (dash?.current_round?.nodes as Record<string, NodeDataLike> | undefined) ?? {};
-
   return (
     <div className="content chat-content" id="content-chat">
       <div className={`chat-job-bar${jobOpen ? " open" : ""}`}>
@@ -217,11 +206,9 @@ export function ChatPane({
           <ConfigMenu datasetName={datasetName} />
         </div>
         <TargetPipelineHero
-          view={targetPipelineView}
-          connector={targetConnector}
-          currentNodes={currentNodes}
           samplesOpen={samplesOpen}
           onToggle={toggleSamples}
+          datasetName={datasetName}
         />
         {samplesOpen && (
           <HardSamplesHeatmap
@@ -245,7 +232,6 @@ export function ChatPane({
         <div className="chat-panel">
           <div className="chat-panel-header">
             <div className="chat-panel-title">New Chat</div>
-            <div className="chat-panel-status"><span className="dot" />connected</div>
           </div>
           <div className="chat-messages">
             <div className="chat-msg user">My pipeline above is stuck at 73%. Can&apos;t push past that.</div>

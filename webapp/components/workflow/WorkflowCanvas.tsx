@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CANVAS_W, CANVAS_H, DOT_R, EDGES, LAYOUT, phaseToNodeId } from "./layout";
 import { TERMS } from "@/lib/terms";
 import { getCss } from "@/lib/theme";
@@ -31,7 +31,25 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
   const activeId = phaseToNodeId(dash?.state);
   // Node selection rides the shared SelectionContext so the Now lane can
   // swap the 3-col row for OptimizerNodeDetail when a node is picked.
-  const { node: selected, setSelectionForNode: setSelected } = useSelection();
+  // The round picker in the toolbar writes `selection.round` — the same
+  // viewed-round state the lineage tree, fitness chart, RoundTabsStrip,
+  // RoundSamplesView, and OptimizerNodeDetail all read.
+  const {
+    node: selected,
+    setSelectionForNode: setSelected,
+    round: selectedRound,
+    setSelectionForRound,
+  } = useSelection();
+  const liveRound = roundOf(dash);
+  const completedRounds = useMemo(
+    () => ((dash?.rounds ?? []).map((r) => r.round)).sort((a, b) => b - a),
+    [dash?.rounds],
+  );
+  // `live` only appears when there's an in-flight round NOT yet summarized
+  // into `dash.rounds[]` — otherwise the picker would carry both a "live"
+  // entry and a completed entry for the same round number.
+  const liveActive = liveRound != null && !completedRounds.includes(liveRound);
+  const showPicker = completedRounds.length > 0 || liveActive;
   // Bumped by the MutationObserver below on `data-theme` flips; drives the
   // `colors` memo so SVG strokes/labels re-derive from the new CSS vars.
   const [themeTick, setThemeTick] = useState(0);
@@ -86,12 +104,28 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
         <span style={{ color: isLive ? colors.ok : colors.txt }}>
           ● {isLive ? "live" : dash ? "idle" : "pending"}
         </span>
-        {(() => {
-          const r = roundOf(dash);
-          return r != null && r !== 0 ? (
-            <span style={{ color: "var(--color-text-tertiary)", marginLeft: 6 }}>round {r}</span>
-          ) : null;
-        })()}
+        {showPicker && (
+          <label className="workflow-round-pick">
+            round
+            <select
+              value={selectedRound ?? ""}
+              onChange={(e) =>
+                setSelectionForRound(
+                  e.target.value === "" ? null : Number(e.target.value),
+                )
+              }
+              aria-label="Choose round to inspect"
+              title="Switch the viewed round — drives the optimizer node detail, lineage, fitness, and samples"
+            >
+              {liveActive && <option value="">{liveRound} (live)</option>}
+              {completedRounds.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <div className="workflow-canvas-bg">
         <div className="workflow-canvas">
