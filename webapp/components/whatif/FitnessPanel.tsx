@@ -32,7 +32,7 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
   // FitnessChart resolves selectedKey → bar index by matching `bar.key`
   // against the SelectedCandidate's {round, candidate_id}. Aliased away
   // from the evaluator-set `selected` already in this component.
-  const { selected: selectedCandidate, setSelected: setSelectedCandidate } = useSelection();
+  const { selected: selectedCandidate, setSelected: setSelectedCandidate, setRound } = useSelection();
   // Default view: chart-only (one bar per candidate = accuracy). The
   // composite chip pairs the formula-weighted score; the what-if chip
   // opens the ablation widget below the chart. State lives in a module
@@ -188,22 +188,6 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
     setSelected(next);
   };
 
-  const resetActual = () => {
-    const next = new Set<string>();
-    for (const a of viewApplicable) {
-      if (inActive.has(a)) next.add(a);
-    }
-    setSelected(next);
-  };
-  const selectNone = () => setSelected(new Set());
-  const selectAll = () => {
-    const next = new Set<string>();
-    for (const a of viewApplicable) next.add(a);
-    setSelected(next);
-  };
-
-  const selectableCount = rows.filter((r) => r.applicable).length;
-
   // ── 4. Assemble the unified bar list:
   //   [origin] + [historical round candidates...] + [in-flight current round]
   const bars: BarSlot[] = useMemo(() => {
@@ -331,55 +315,60 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
         </div>
       }
     >
-      {(showComposite || showWhatIf) && (
-        <div className="fitness-legend">
-          <span><span className="dot accuracy" />accuracy</span>
-          {showComposite && <span><span className="dot composite" />composite</span>}
-          {showWhatIf && <span><span className="dot whatif" />what-if</span>}
-        </div>
-      )}
       <div className="fitness-body">
-      <FitnessChart
-        bars={bars}
-        showComposite={showComposite}
-        showWhatIf={showWhatIf}
-        themeKey={themeKey}
-        selectedKey={
-          selectedCandidate
-            ? bars.find(
-                (b) =>
-                  b.round === selectedCandidate.round &&
-                  b.candidateId === selectedCandidate.candidate_id,
-              )?.key ?? null
-            : null
-        }
-        onSelect={(bar) => {
-          if (!bar || !bar.candidateId || bar.round == null) {
-            setSelectedCandidate(null);
-            return;
-          }
-          setSelectedCandidate({
-            round: bar.round,
-            candidate_id: bar.candidateId,
-            label: bar.label,
-            accuracy: bar.accuracy,
-            is_winner: !!bar.isWinner,
-          });
-        }}
-      />
-      {showWhatIf && (
-        <WhatIfGrid
-          rows={rows}
-          selected={selected}
-          inActive={inActive}
-          selectableCount={selectableCount}
-          bars={bars}
-          onToggle={toggle}
-          onResetActual={resetActual}
-          onSelectNone={selectNone}
-          onSelectAll={selectAll}
-        />
-      )}
+        {/* Legend + chart wrapped so the legend sits over the chart's
+            width specifically — when What-If opens and the card stretches,
+            the legend stays anchored above the bars instead of drifting
+            to the centre of the wider card. */}
+        <div className="fitness-chart-wrap">
+          {(showComposite || showWhatIf) && (
+            <div className="fitness-legend">
+              <span><span className="dot accuracy" />accuracy</span>
+              {showComposite && <span><span className="dot composite" />composite</span>}
+              {showWhatIf && <span><span className="dot whatif" />what-if</span>}
+            </div>
+          )}
+          <FitnessChart
+            bars={bars}
+            showComposite={showComposite}
+            showWhatIf={showWhatIf}
+            themeKey={themeKey}
+            selectedKey={
+              selectedCandidate
+                ? bars.find(
+                    (b) =>
+                      b.round === selectedCandidate.round &&
+                      b.candidateId === selectedCandidate.candidate_id,
+                  )?.key ?? null
+                : null
+            }
+            onSelect={(bar) => {
+              if (!bar || !bar.candidateId || bar.round == null) {
+                setSelectedCandidate(null);
+                return;
+              }
+              setSelectedCandidate({
+                round: bar.round,
+                candidate_id: bar.candidateId,
+                label: bar.label,
+                accuracy: bar.accuracy,
+                is_winner: !!bar.isWinner,
+              });
+              // Anchor the round-tabs strip + samples drill on this bar's
+              // round so a click in either surface re-anchors the other.
+              setRound(bar.round);
+            }}
+          />
+        </div>
+        {showWhatIf && (
+          <WhatIfGrid
+            rows={rows}
+            selected={selected}
+            inActive={inActive}
+            bars={bars}
+            onToggle={toggle}
+          />
+        )}
       </div>
     </CardFrame>
   );

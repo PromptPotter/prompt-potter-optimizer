@@ -318,9 +318,10 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
    when its KV grid overflows. */
 .dash-row-now{--row-h:280px;width:100%}
 .dash-row-now > .live-state-card{height:var(--row-h);overflow:auto;margin-bottom:0}
-.dash-row-verdict > .workflow-card{width:100%;max-width:none;display:flex;flex-direction:column;margin:0}
-.dash-row-verdict > .workflow-card .workflow-canvas-bg{display:flex;align-items:center;justify-content:center}
-.dash-row-verdict > .workflow-card .workflow-canvas{width:100%;height:auto;max-width:100%;aspect-ratio:500/290;flex:none}
+/* WorkflowCanvas lives outside .dash-row-verdict now — it sits below
+   the triad as its own card. Compact width so pipeline topology stays
+   glanceable without dominating the page; the operator's eye should
+   land on the per-candidate triad first. */
 
 /* NOW-lane combo row — two-row grid via grid-areas:
      row 1: FitnessPanel spans both columns (per-candidate panel sits OVER
@@ -330,43 +331,122 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
    Lineage drops the prior fixed `--row-h` so the family tree can extend
    the card down the page when there are dozens of forks; the inner
    scrolls are uncapped so the SVG drives the height directly. */
-.dash-row-verdict{width:100%;display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);grid-template-areas:"fitness fitness" "lineage workflow";gap:18px;align-items:start}
+/* Triad layout:
+     What-If CLOSED:
+       row 1: fitness (~460px) | lineage (fills)
+       row 2: inspector (full width)
+     What-If OPEN (toggled via :has() on the fitness-card.whatif-open):
+       row 1: fitness card spans full width — chart on its left at fixed
+              width, evaluator tile grid on its right
+       row 2: lineage (2fr) | inspector (1fr, shrunk)
+     The chart frame is locked to its closed-mode dimensions
+     (432px × 160px) when What-If opens so the accuracy/composite/what-if
+     bars stay in the exact same position the operator just clicked from.
+     align-items:start so neither row-1 card forces the other to a height. */
+.dash-row-verdict{width:100%;display:grid;grid-template-columns:minmax(460px,auto) minmax(0,1fr);grid-template-areas:"fitness lineage" "inspector inspector";gap:18px;align-items:start}
 .dash-row-verdict > *{min-width:0}
-.dash-row-verdict > .fitness-card{grid-area:fitness}
-.dash-row-verdict > .lineage-card{grid-area:lineage}
-.dash-row-verdict > .workflow-card{grid-area:workflow}
+.dash-row-verdict > .fitness-card{grid-area:fitness;justify-self:start}
+.dash-row-verdict > .lineage-card{grid-area:lineage;justify-self:stretch}
+.dash-row-verdict > .inspector-card{grid-area:inspector}
 .dash-row-verdict > .lineage-card,
 .dash-row-verdict > .fitness-card,
-.dash-row-verdict > .workflow-card{display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
-.dash-row-verdict > .workflow-card{padding:0}
-.dash-row-verdict > .lineage-card{height:auto}
-.dash-row-verdict > .fitness-card{height:240px}
-.dash-row-verdict > .workflow-card{height:240px}
-.dash-row-verdict .lineage-scroll{flex:1;min-height:0}
+.dash-row-verdict > .inspector-card{display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
+.dash-row-verdict > .fitness-card{min-height:240px;margin-left:0;margin-right:0}
+.dash-row-verdict > .fitness-card.whatif-open{height:auto;justify-self:stretch}
+.dash-row-verdict > .lineage-card{height:240px}
+.dash-row-verdict > .inspector-card{min-height:120px;height:auto}
+.dash-row-verdict .lineage-scroll{flex:1;min-height:0;overflow:auto}
 .dash-row-verdict .family-cladogram-scroll{max-height:none}
 .dash-row-verdict .fitness-chart-frame{flex:1;height:160px;min-height:0}
 .dash-row-verdict .fitness-body{flex:1;display:flex;flex-direction:column;min-height:0}
-@media (max-width:960px){.dash-row-verdict{grid-template-columns:1fr;grid-template-areas:"fitness" "lineage" "workflow";max-width:none}}
+/* When What-If is open inside the triad, fitness spans full width and
+   lineage drops to row 2 beside the (now narrower) inspector. */
+.dash-row-verdict:has(> .fitness-card.whatif-open){grid-template-columns:minmax(0,2fr) minmax(0,1fr);grid-template-areas:"fitness fitness" "lineage inspector"}
+@media (max-width:960px){.dash-row-verdict{grid-template-columns:1fr;grid-template-areas:"fitness" "lineage" "inspector";max-width:none}.dash-row-verdict > .fitness-card{justify-self:stretch}.dash-row-verdict:has(> .fitness-card.whatif-open){grid-template-columns:1fr;grid-template-areas:"fitness" "lineage" "inspector"}}
 
-/* Shared inspector slot inside the WHY lane — ScoringInspector for the
-   currently-picked candidate; shows a hint when nothing is picked. */
-.shared-inspector{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
-.shared-inspector > *{flex:1 1 360px;min-width:0}
-.shared-inspector.empty{display:block;padding:18px;border:0.5px dashed var(--color-border-tertiary);border-radius:var(--border-radius-md);color:var(--color-text-tertiary);font-size:13px;text-align:center}
+/* Inspector card — sits as a full-width row below fitness+lineage.
+   Empty-state styling mirrors the prior .shared-inspector.empty hint so
+   the slot reads as "waiting for a pick" rather than "broken"; the full
+   ScoringInspector replaces it when a candidate is selected. */
+.dash-row-verdict > .inspector-card.empty{border-style:dashed;border-color:var(--color-border-tertiary)}
+.dash-row-verdict > .inspector-card .inspector-empty{padding:16px 24px;color:var(--color-text-tertiary);font-size:13px;text-align:center;line-height:1.5}
+.dash-row-verdict > .inspector-card .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
 
-/* Live samples — breaks out of the 980 column. Spans the full available
-   content-area width so the rolling log gets the room it deserves. The
-   margin override pulls it past the centered max-width set on its
-   siblings above (since this section is intentionally NOT in the
-   #content-dashboard > {centered list}). */
-.dash-samples-wide{width:100%}
-.dash-samples-wide > *{margin-bottom:0}
-.dash-samples-wide .samples-list{height:clamp(260px,38vh,520px)}
+/* Top row — TopStrip on the left, round-tabs strip on the right. The
+   round-tabs sit beside the headline KPIs so the round axis is visible
+   in the first second of looking at the page. align-items:stretch keeps
+   both cards the same height. */
+.dash-top-row{display:flex;align-items:stretch;gap:14px;width:100%}
+.dash-top-row > .topstrip{flex:1 1 auto;min-width:0}
+.dash-top-row > .round-tabs-strip{flex:0 1 auto;min-width:200px;max-width:55%;margin-bottom:0}
+@media (max-width:960px){.dash-top-row{flex-direction:column}.dash-top-row > .round-tabs-strip{max-width:none}}
 
-/* Eval charts band — Freq + Trend, both kept short and side-by-side under
-   the live samples breakout. */
-.dash-charts{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.dash-charts > *{margin-bottom:0;min-width:0}
+/* Eval charts inside LiveStateCard — stacked vertically because the
+   narrow spine doesn't have width for the prior side-by-side layout.
+   Same Trend + Score Frequency cards from the dropped Verdict lane. */
+.lsc-charts{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+.lsc-charts > *{margin-bottom:0;min-width:0}
+
+/* Round-tabs strip — clickable circle per L1 round, plus a LIVE pill for
+   the in-flight round. Sits directly above the fitness/lineage/inspector
+   triad so the round axis that ties them together is visible at a glance.
+   Horizontal scroll handles long campaigns (100 rounds = 100 circles). */
+.round-tabs-strip{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--color-background-tertiary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);margin-bottom:14px}
+.round-tabs-label{font-size:10px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600;flex:0 0 auto}
+.round-tabs-scroll{display:flex;align-items:center;gap:5px;flex:1;overflow-x:auto;scrollbar-width:thin;padding:2px 0}
+.round-tab{flex:0 0 auto;min-width:28px;height:28px;padding:0 6px;border-radius:14px;border:1px solid var(--color-border);background:transparent;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;transition:background-color 100ms,color 100ms,border-color 100ms}
+.round-tab:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+.round-tab.active{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border-color:var(--color-accent);font-weight:600}
+.round-tab-live{padding:0 10px;font-weight:600;gap:6px}
+.round-tab-live-dot{width:6px;height:6px;border-radius:50%;background:var(--color-status-success,#10b981);box-shadow:0 0 4px var(--color-status-success,#10b981);display:inline-block;animation:round-tab-live-pulse 1.6s ease-in-out infinite}
+@keyframes round-tab-live-pulse{0%,100%{opacity:.5}50%{opacity:1}}
+
+/* Round samples card — single card whose body switches between LiveTape
+   (rolling) and RoundSamplesTable (historical) based on selection.round. */
+.round-samples-card{margin-bottom:14px}
+.round-back-live{background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;font-family:inherit;font-size:11px;padding:2px 8px;border-radius:10px}
+.round-back-live:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+
+/* LiveTape — per-candidate grouped stream of compact sample lines.
+   Sticky group headers anchor the eye while newer rows pile on top. */
+.live-tape{height:clamp(260px,38vh,520px);overflow-y:auto;font-family:var(--font-mono);font-size:12px;line-height:1.5;padding:4px 0}
+.tape-group{margin-bottom:8px}
+.tape-group-head{position:sticky;top:0;z-index:1;background:var(--color-background-tertiary);display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border-bottom:0.5px solid var(--color-border-tertiary);font-size:11px}
+.tape-cand-label{color:var(--color-text-primary);font-weight:600}
+.tape-tally{display:inline-flex;gap:8px;font-weight:500}
+.tape-row{padding:2px 8px;display:block;border-bottom:0.5px dotted transparent}
+.tape-row > summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:8px}
+.tape-row > summary::-webkit-details-marker{display:none}
+.tape-row > summary:hover{background:var(--color-background-hover)}
+.tape-row[open]{border-bottom-color:var(--color-border-tertiary);padding-bottom:8px}
+.tape-row-raw{padding:2px 8px;color:var(--color-text-secondary)}
+.tape-row .idx{color:var(--color-text-tertiary);flex:0 0 auto}
+.tape-row .elapsed{color:var(--color-text-tertiary);flex:0 0 auto;min-width:42px;text-align:right}
+.tape-row .scorer{color:var(--color-text-secondary);flex:0 0 auto;min-width:80px}
+.tape-row .body{color:var(--color-text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tape-detail{padding:6px 8px 4px 96px;display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;font-size:12px}
+.tape-detail .kv-label{color:var(--color-text-tertiary)}
+
+/* RoundSamplesTable — historical-round drill. Sortable + filterable
+   table of every sample run for every candidate this round. */
+.round-samples-table-wrap{display:flex;flex-direction:column;gap:8px}
+.rst-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:4px 4px 8px}
+.rst-cand-select{background:var(--color-background-secondary,rgba(127,127,127,0.06));border:0;border-radius:4px;color:inherit;font:inherit;font-size:12px;padding:4px 8px;cursor:pointer;max-width:320px}
+.rst-toggle{display:inline-flex;align-items:center;gap:0;border:1px solid var(--color-border);border-radius:6px;overflow:hidden}
+.rst-toggle-label{padding:0 8px;color:var(--color-text-tertiary);font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:600;background:var(--color-background-tertiary);border-right:1px solid var(--color-border);align-self:stretch;display:flex;align-items:center}
+.rst-toggle button{background:transparent;border:0;color:var(--color-text-secondary);padding:4px 10px;font-family:inherit;font-size:11px;cursor:pointer;border-right:1px solid var(--color-border)}
+.rst-toggle button:last-child{border-right:0}
+.rst-toggle button:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
+.rst-toggle button.on{background:var(--color-accent);color:var(--color-accent-contrast,#fff);font-weight:600}
+.rst-count{margin-left:auto;color:var(--color-text-tertiary);font-size:11px;font-family:var(--font-mono)}
+.rst-table-scroll{max-height:clamp(280px,46vh,640px);overflow:auto;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md)}
+.rst-table{width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:12px}
+.rst-table thead th{position:sticky;top:0;background:var(--color-background-tertiary);text-align:left;padding:6px 10px;border-bottom:1px solid var(--color-border-tertiary);font-weight:600;color:var(--color-text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.04em;z-index:1}
+.rst-table tbody td{padding:5px 10px;border-bottom:0.5px solid var(--color-border-tertiary);vertical-align:top}
+.rst-table tbody tr:hover{background:var(--color-background-hover)}
+.rst-table .rst-cand{font-weight:500;white-space:nowrap}
+.rst-table .mono{font-family:var(--font-mono);color:var(--color-text-secondary)}
+.rst-table .rst-ellipsis{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* Hero / progress fluidity — collapses the KPI trio under the title block on
    narrow viewports without leaving the cells overlapping. */
@@ -559,27 +639,21 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .kv-val.warn{color:var(--color-danger)}
 .kv-val.ok{color:var(--color-success)}
 
-/* Live samples */
-.samples-card{margin-bottom:14px}
-.samples-list{font-family:var(--font-mono);font-size:12px;line-height:1.45;height:clamp(320px,50vh,720px);overflow-y:auto;background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:6px 10px;border:0.5px solid var(--color-border-tertiary)}
-.samples-card{display:flex;flex-direction:column}
-.samples-card .samples-list{flex:1 1 auto;min-height:0}
-.samples-list .row{display:flex;gap:8px;align-items:origin;border-bottom:0.5px dotted var(--color-border-tertiary);padding:2px 0}
-.samples-list .row:last-child{border-bottom:none}
-.samples-list .tag-hit{color:var(--color-success);font-weight:600}
-.samples-list .tag-miss{color:var(--color-danger);font-weight:600}
-.samples-list .idx{color:var(--color-text-tertiary);min-width:42px}
-.samples-list .elapsed{color:var(--color-text-tertiary);min-width:50px;text-align:right}
-.samples-list .body{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text-secondary)}
-.samples-empty{color:var(--color-text-tertiary);font-size:12px;font-style:italic;padding:14px 8px;text-align:center}
+/* Shared sample-state tokens — consumed by both LiveTape and
+   RoundSamplesTable. HIT/MISS colour reads identically across the
+   rolling stream and the historical drill so the operator's eye
+   tracks the same signal across modes. */
+.tag-hit{color:var(--color-success);font-weight:600}
+.tag-miss{color:var(--color-danger);font-weight:600}
+.samples-empty{color:var(--color-text-tertiary);font-size:12px;font-style:italic;padding:24px 12px;text-align:center}
 
 /* Fitness card — chart-first surface with two progressive-disclosure
    chips (Composite, What-If). Default view = single bar per candidate
    (accuracy); chips reveal paired bars and the ablation widget. The card
-   auto-shrinks to the chart width by default; opening the What-If body
-   expands it to dashboard-wide so the tile grid fits. */
+   auto-shrinks to the chart width by default. What-If renders below the
+   chart in-card; the card grows vertically without resizing the chart
+   so the bars never shift on toggle. */
 .fitness-card{margin-bottom:14px;width:auto;max-width:100%;margin-left:auto;margin-right:auto}
-.fitness-card.whatif-open{max-width:100%}
 .fitness-toggles{display:flex;gap:6px}
 .fitness-chip{font-family:inherit;font-size:11px;padding:3px 9px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);cursor:pointer;letter-spacing:.04em;transition:background .15s,color .15s,border-color .15s}
 .fitness-chip:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
@@ -596,32 +670,48 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .fitness-legend .dot.accuracy{background:rgba(var(--color-accent-rgb),0.95)}
 .fitness-legend .dot.composite{background:rgba(var(--color-accent-rgb),0.55)}
 .fitness-legend .dot.whatif{background:var(--color-accent-strong)}
-/* When What-If is open, chart (left) and evaluator cards (right) sit
-   side-by-side. The body block becomes a flex row; we re-target the chart
-   frame + the whatif body so the existing JSX (chart + sibling
-   .fitness-whatif div) reflows without restructuring. */
-.fitness-card.whatif-open .fitness-chart-frame{width:auto;flex:1 1 0;min-width:340px}
-.fitness-card.whatif-open .fitness-body{display:flex;flex-direction:row;align-items:stretch;gap:18px}
-.fitness-card.whatif-open .fitness-whatif{margin-top:0;padding-top:0;padding-left:18px;border-top:none;border-left:0.5px solid var(--color-border-tertiary);flex:1 1 auto;min-width:0;max-width:520px}
-@media (max-width:880px){
-  .fitness-card.whatif-open .fitness-body{flex-direction:column}
-  .fitness-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:none;border-top:0.5px solid var(--color-border-tertiary);max-width:none}
+/* What-If opens to the RIGHT of the chart (side-by-side) inside the
+   fitness card. .fitness-chart-wrap groups the legend + chart so the
+   legend stays positioned above the bars (matching the Composite-only
+   placement) when the card stretches; without the wrap, the legend
+   centres itself across the full widened card. The wrap is locked to
+   432px (= 460px card - 28px padding) so bars don't shift on toggle.
+   The card itself stretches to the full triad-row width via the :has()
+   rule above; the What-If panel fills everything to the right. */
+.fitness-chart-wrap{display:flex;flex-direction:column;width:100%;min-width:0}
+/* When What-If is open, the card becomes a 2-column grid so the WhatIf
+   panel can span the FULL card height (rows 1+2 of col 2) instead of
+   sitting below the title in only-the-body row. The title pins to col 1
+   (432px), chart sits below it; the right panel starts at the very top
+   of the card — no wasted empty space above the legend. .fitness-body
+   uses display:contents so its children participate directly in the
+   card's grid without needing a JSX restructure. */
+.fitness-card.whatif-open{display:grid;grid-template-columns:432px minmax(0,1fr);column-gap:18px;align-items:start}
+.fitness-card.whatif-open > .card-title{grid-column:1;grid-row:1;max-width:432px}
+.fitness-card.whatif-open > .fitness-body{display:contents}
+.fitness-card.whatif-open .fitness-chart-wrap{grid-column:1;grid-row:2;width:432px}
+.fitness-card.whatif-open .fitness-whatif{grid-column:2;grid-row:1 / span 2;align-self:stretch;min-width:0;margin-top:0;padding-top:0;padding-left:18px;border-top:0;border-left:0.5px solid var(--color-border-tertiary)}
+@media (max-width:960px){
+  .fitness-card.whatif-open{display:flex;flex-direction:column}
+  .fitness-card.whatif-open > .card-title{max-width:none}
+  .fitness-card.whatif-open > .fitness-body{display:flex;flex-direction:column}
+  .fitness-card.whatif-open .fitness-chart-wrap{width:100%}
+  .fitness-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border-tertiary);margin-top:0}
 }
 .fitness-whatif{margin-top:18px;padding-top:18px;border-top:0.5px solid var(--color-border-tertiary)}
 .fitness-empty{color:var(--color-text-tertiary);font-style:italic;font-size:12px;padding:16px 0;text-align:center}
-.whatif-intro{font-size:12px;color:var(--color-text-secondary);line-height:1.55;margin-bottom:12px}
-.whatif-intro code{font-family:var(--font-mono);background:var(--color-background-secondary);padding:1px 5px;border-radius:3px;color:var(--color-text-primary)}
 .whatif-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
 .whatif-legend .swatch{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:middle;margin-right:5px;border:1.5px solid var(--color-text-tertiary);background:var(--color-background-secondary);text-align:center;line-height:11px;font-size:11px;font-weight:900}
 .whatif-legend .swatch.optional{border-style:dashed}
-.whatif-legend .swatch.disabled{opacity:.4}
 .whatif-legend .swatch.checked{color:var(--color-accent)}
 .whatif-legend .swatch.active{
   background:linear-gradient(180deg,rgba(var(--color-accent-rgb),0.16) 0%,rgba(var(--color-accent-rgb),0.05) 100%);
   border:1.5px solid rgba(var(--color-accent-rgb),0.32);
   box-shadow:0 0 6px rgba(var(--color-accent-rgb),0.18);
 }
-.whatif-grid-wrap{overflow-y:auto;max-height:300px;padding:6px 4px 6px 0;margin-bottom:12px}
+/* Exactly two rows of tiles visible: 2 × 108px tile + 1 × 10px gap +
+   2 × 6px wrap padding = 238px. Anything beyond two rows scrolls. */
+.whatif-grid-wrap{overflow-y:auto;max-height:238px;padding:6px 4px 6px 0;margin-bottom:12px}
 .whatif-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:10px}
 .whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border-tertiary);border-radius:9px;padding:13px 7px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:108px;user-select:none;z-index:1;font-family:inherit}
 .whatif-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}
@@ -643,11 +733,6 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .whatif-ico svg{width:100%;height:100%}
 .whatif-sq.in-active .whatif-ico{color:var(--color-text-primary)}
 .whatif-name{font-size:11px;color:var(--color-text-primary);font-weight:500;line-height:1.2;word-break:break-word;font-family:var(--font-mono)}
-.whatif-controls{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:10px;flex-wrap:wrap}
-.whatif-status{font-size:12px;color:var(--color-text-secondary);font-family:var(--font-mono)}
-.whatif-actions{display:flex;gap:6px}
-.whatif-btn{background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:5px 10px;font-size:12px;cursor:pointer;font-family:inherit;transition:background .15s,color .15s,border-color .15s}
-.whatif-btn:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
 .whatif-summary{font-family:var(--font-mono);font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px 12px;margin-top:14px;line-height:1.6}
 .whatif-summary .rank-up{color:var(--color-accent);font-weight:700}
 .whatif-summary .rank-down{color:var(--color-text-secondary);font-weight:600}
@@ -661,11 +746,13 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .raw-card details[open] summary::before{content:'▾ '}
 .raw-card pre{font-family:var(--font-mono);font-size:13px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px 14px;margin-top:10px;max-height:480px;overflow:auto;line-height:1.5}
 
-/* Workflow canvas */
-.workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden}
-.workflow-toolbar{padding:10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:13px;color:var(--color-text-secondary)}
-.workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%}
-.workflow-canvas{position:relative;width:100%;max-width:960px;aspect-ratio:500/290;margin:0 auto;overflow:hidden}
+/* Workflow canvas — sized small. Pipeline topology is reference info,
+   not a primary view; cap the canvas so it doesn't take a third of the
+   page. The SVG aspect-locks; cap width → height drops in lockstep. */
+.workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;margin-bottom:14px}
+.workflow-toolbar{padding:6px 12px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--color-text-secondary)}
+.workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%;display:flex;align-items:center;justify-content:center}
+.workflow-canvas{position:relative;width:100%;max-width:460px;aspect-ratio:500/290;margin:0 auto;overflow:hidden}
 /* SVG `<g>` wrapping each node — keyboard focus + click affordance. */
 .wf-node{cursor:pointer;user-select:none;outline:none}
 .wf-node[aria-disabled="true"]{cursor:default}

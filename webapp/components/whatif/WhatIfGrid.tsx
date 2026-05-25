@@ -9,12 +9,8 @@ interface Props {
   rows: Row[];
   selected: Set<string>;
   inActive: Set<string>;
-  selectableCount: number;
   bars: BarSlot[];
   onToggle: (name: string) => void;
-  onResetActual: () => void;
-  onSelectNone: () => void;
-  onSelectAll: () => void;
 }
 
 // The what-if ablation widget: pick evaluators to recompute candidate scores
@@ -24,31 +20,15 @@ export function WhatIfGrid({
   rows,
   selected,
   inActive,
-  selectableCount,
   bars,
   onToggle,
-  onResetActual,
-  onSelectNone,
-  onSelectAll,
 }: Props) {
   return (
     <div className="fitness-whatif">
-      <div className="whatif-intro">
-        Toggle evaluators on/off to recompute candidate scores as <code>mean(direction-corrected selected)</code> and watch the candidate ranking shift. The actual <code>composite_fitness</code> on disk is unchanged — this is a client-side preview to explore <em>&quot;what if I scored without X?&quot;</em>
-      </div>
       <div className="whatif-legend">
         <span><span className="swatch checked">✓</span>selected (counts in what-if)</span>
         <span><span className="swatch active" />used in actual formula</span>
         <span><span className="swatch optional" />available, not in formula</span>
-        <span><span className="swatch disabled" />not applicable to this pipeline</span>
-      </div>
-      <div className="whatif-controls">
-        <span className="whatif-status">{selected.size} of {selectableCount} evaluator{selectableCount === 1 ? "" : "s"} selected</span>
-        <div className="whatif-actions">
-          <button type="button" className="whatif-btn" onClick={onResetActual}>Reset to actual</button>
-          <button type="button" className="whatif-btn" onClick={onSelectNone}>None</button>
-          <button type="button" className="whatif-btn" onClick={onSelectAll}>All</button>
-        </div>
       </div>
       <div className="whatif-grid-wrap">
         <div className="whatif-grid">

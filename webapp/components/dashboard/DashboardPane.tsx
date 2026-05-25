@@ -11,6 +11,7 @@ import {
   roundOf,
   useCycleStream,
   type DashboardSnapshot,
+  type StatusKind,
 } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/useDatasetPreview";
@@ -24,15 +25,13 @@ import { ConsolePane } from "@/components/console/ConsolePane";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { OptimizerNodeDetail } from "@/components/workflow/OptimizerNodeDetail";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
-import { FreqChart } from "@/components/eval/FreqChart";
-import { TrendChart } from "@/components/eval/TrendChart";
-import { RawJsonCard } from "@/components/raw/RawJsonCard";
 import { TopStrip } from "./TopStrip";
 import { ChatPane } from "./ChatPane";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "./LiveStateCard";
-import { LiveSamplesCard } from "./LiveSamplesCard";
 import { LineageTree } from "./LineageTree";
+import { RoundTabsStrip } from "./round-samples/RoundTabsStrip";
+import { RoundSamplesCard } from "./round-samples/RoundSamplesCard";
 import { CyclePicker } from "./CyclePicker";
 import { SelectionProvider, useSelection } from "./SelectionContext";
 import { ScoringInspector } from "./ScoringInspector";
@@ -128,7 +127,7 @@ function DashboardPaneInner() {
   const dashState = useCycleStream();
   const dash: DashboardSnapshot | null = dashState.dash;
   // Canonical round number — derived once, threaded down to children that
-  // need it (LiveSamplesCard, FitnessPanel, HardSamples*). Completed-round
+  // need it (FitnessPanel, HardSamples*). Completed-round
   // summaries ride `dash.rounds[]` directly; deep-audit round files are
   // lazy-fetched via `useRoundFile` at the use site.
   const dashRound = roundOf(dash);
@@ -318,12 +317,19 @@ function DashboardPaneInner() {
             </div>
             <Lane id="now" title="Now" subtitle="What's running right now" defaultOpen>
               <div className="dash-spine-narrow">
-                <TopStrip dash={dash} dashRound={dashRound} />
+                {/* TopStrip + RoundTabsStrip share one row so the round
+                    axis (LIVE pill + completed-round circles) sits beside
+                    the headline KPIs the operator scans first. */}
+                <div className="dash-top-row">
+                  <TopStrip dash={dash} dashRound={dashRound} />
+                  <RoundTabsStrip dash={dash} />
+                </div>
               </div>
               <div className="dash-spine-narrow">
                 <NowRow
                   dash={dash}
                   dashRound={dashRound}
+                  status={dashState.status}
                   pipeline={pipeline}
                   campaignId={campaignId}
                   cycleId={cycleId}
@@ -332,33 +338,10 @@ function DashboardPaneInner() {
                   isLive={isLive}
                 />
               </div>
-              <div className="dash-spine-narrow">
-                <LiveStateCard dash={dash} />
-              </div>
-              <div className="dash-spine-wide">
-                <section className="dash-samples-wide" aria-label="Live samples">
-                  <LiveSamplesCard dash={dash} dashRound={dashRound} status={dashState.status} />
-                </section>
-              </div>
             </Lane>
-            <Lane id="verdict" title="Verdict" subtitle="Has it improved? By how much?" defaultOpen>
+            <Lane id="livestate" title="Live state" subtitle="Raw dashboard.json + trend + score frequency" defaultOpen>
               <div className="dash-spine-narrow">
-                <div className="dash-charts">
-                  <FreqChart dash={dash} themeKey={themeKey} />
-                  <TrendChart dash={dash} themeKey={themeKey} />
-                </div>
-              </div>
-            </Lane>
-            <Lane id="why" title="Why" subtitle="Drill into a candidate" defaultOpen={false}>
-              <div className="dash-spine-wide">
-                <WhyInspector
-                  campaignId={campaignId}
-                  cycleId={cycleId}
-                  isLive={isLive}
-                />
-              </div>
-              <div className="dash-spine-narrow">
-                <RawJsonCard dash={dash} />
+                <LiveStateCard dash={dash} themeKey={themeKey} />
               </div>
             </Lane>
           </div>
@@ -387,6 +370,7 @@ function DashboardPaneInner() {
 function NowRow({
   dash,
   dashRound,
+  status,
   pipeline,
   campaignId,
   cycleId,
@@ -396,6 +380,7 @@ function NowRow({
 }: {
   dash: DashboardSnapshot | null;
   dashRound: number | null;
+  status: StatusKind;
   pipeline: PipelineDoc | null;
   campaignId: string | null;
   cycleId: string | null;
@@ -407,10 +392,13 @@ function NowRow({
   return (
     <>
       {/* Two-row grid via grid-areas in CSS:
-            row 1: FitnessPanel spans full width (over lineage + workflow)
-            row 2: LineageTree (2fr, content-height) + WorkflowCanvas (1fr)
-          Render order matches source order so the grid-area assignment
-          is the only thing that decides placement. */}
+            row 1: FitnessPanel (1fr) + LineageTree (1fr) — equal height
+            row 2: InspectorCard (full width)
+          The three group tightly because clicks in any one re-anchor the
+          others through the shared SelectionContext (selected + round).
+          The round-tabs strip lives at the top of the page beside TopStrip;
+          WorkflowCanvas below — pipeline topology is a different concern
+          from the per-candidate drill that ties this triad. */}
       <div className="dash-row-verdict">
         <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
         <LineageTree
@@ -419,8 +407,19 @@ function NowRow({
           cycleId={cycleId}
           onSelectCycle={onSelectCycle}
         />
-        <WorkflowCanvas pipeline={pipeline} dash={dash} isLive={isLive} />
+        <InspectorCard
+          campaignId={campaignId}
+          cycleId={cycleId}
+          isLive={isLive}
+        />
       </div>
+      <RoundSamplesCard
+        dash={dash}
+        status={status}
+        campaignId={campaignId}
+        cycleId={cycleId}
+      />
+      <WorkflowCanvas pipeline={pipeline} dash={dash} isLive={isLive} />
       {node && (
         <OptimizerNodeDetail
           id={node}
@@ -436,9 +435,11 @@ function NowRow({
   );
 }
 
-// Inspector slot inside the Why lane. Lives inside SelectionProvider so it
-// can read the candidate selection that LineageTree + FitnessPanel write to.
-function WhyInspector({
+// Inspector cell of the dash-row-verdict grid. Lives inside SelectionProvider
+// so it reads the candidate selection that LineageTree + FitnessPanel write to.
+// Always renders the card frame (even empty) so its slot in the grid doesn't
+// collapse and the lineage/fitness clicks have a stable target to reveal into.
+function InspectorCard({
   campaignId,
   cycleId,
   isLive,
@@ -448,22 +449,21 @@ function WhyInspector({
   isLive: boolean;
 }) {
   const { selected, setSelected } = useSelection();
-  if (!selected) {
-    return (
-      <div className="shared-inspector empty">
-        Select a lineage stub or a fitness bar above to inspect its searchpoint here.
-      </div>
-    );
-  }
   return (
-    <div className="shared-inspector">
-      <ScoringInspector
-        campaignId={campaignId}
-        cycleId={cycleId}
-        selected={selected}
-        isLive={isLive}
-        onClose={() => setSelected(null)}
-      />
+    <div className={`card inspector-card${selected ? "" : " empty"}`}>
+      {selected ? (
+        <ScoringInspector
+          campaignId={campaignId}
+          cycleId={cycleId}
+          selected={selected}
+          isLive={isLive}
+          onClose={() => setSelected(null)}
+        />
+      ) : (
+        <div className="inspector-empty">
+          Click a lineage stub or a fitness bar to inspect its searchpoint.
+        </div>
+      )}
     </div>
   );
 }

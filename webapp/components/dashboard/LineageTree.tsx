@@ -61,7 +61,7 @@ interface ChildPos {
 }
 
 export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props) {
-  const { selected, setSelected } = useSelection();
+  const { selected, setSelected, setRound } = useSelection();
   // Source of truth: `dash.rounds[]` for completed rounds, plus a
   // partial live round when the dash carries in-flight L1 candidates
   // that `round:display` hasn't summarized yet. Without the in-flight
@@ -283,6 +283,10 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
                       accuracy: typeof c.cand.accuracy === "number" ? c.cand.accuracy : null,
                       is_winner: !!c.cand.is_winner,
                     });
+                    // Anchor the round-tabs strip + samples drill on the
+                    // round this stub belongs to. The strip highlights it,
+                    // the samples card scopes to round_NNNN.json.
+                    setRound(c.round);
                   }
                 }}
                 style={{ cursor: "pointer" }}

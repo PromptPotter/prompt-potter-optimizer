@@ -2,9 +2,12 @@
 import type { DashboardSnapshot } from "@/lib/poll";
 import { fmtNum, fmtClock } from "@/lib/format";
 import { CardFrame } from "@/components/ui/card";
+import { FreqChart } from "@/components/eval/FreqChart";
+import { TrendChart } from "@/components/eval/TrendChart";
 
 interface Props {
   dash: DashboardSnapshot | null;
+  themeKey: string;
 }
 
 // Fields surfaced elsewhere (header, payload block, dedicated cards, workflow
@@ -52,7 +55,7 @@ const FORMATTERS: Record<string, (v: unknown) => string> = {
   state_since: fmtClock,
 };
 
-export function LiveStateCard({ dash }: Props) {
+export function LiveStateCard({ dash, themeKey }: Props) {
   const formula = (dash as { composite_fitness_formula?: string } | null)?.composite_fitness_formula || "—";
 
   // Build the KV grid: derived origin row first (flattened from the
@@ -128,6 +131,14 @@ export function LiveStateCard({ dash }: Props) {
       <div className={`payload-block${payloadEmpty ? " empty" : ""}`}>{payloadText}</div>
       <BackendWarnings dash={dash} />
       <PoBBBackfillLog dash={dash} />
+      {/* Trend + Score Frequency — relocated from the former Verdict lane
+          so the campaign's shape stays glanceable next to the live state.
+          Stacked vertically because the narrow spine doesn't have room for
+          the old side-by-side .dash-charts grid. */}
+      <div className="lsc-charts">
+        <TrendChart dash={dash} themeKey={themeKey} />
+        <FreqChart dash={dash} themeKey={themeKey} />
+      </div>
     </CardFrame>
   );
 }

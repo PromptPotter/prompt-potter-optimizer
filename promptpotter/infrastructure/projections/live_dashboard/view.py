@@ -202,7 +202,14 @@ class _RoundBuffer:
                 "hit": bool(result.get("hit")),
                 "cached": bool(result.get("cached", False)),
                 "query": result.get("query") or "",
-                "prediction": result.get("prediction") or "",
+                # Scored result dicts carry the field as ``predicted`` (past
+                # tense, matching round_NNNN.json::results[]). Reading
+                # ``prediction`` here returned None on every sample → the live
+                # tape rendered every row as an empty prediction. The compact
+                # ``_fmt_sample_line`` reader below stays on ``prediction``
+                # because that is the live-sample dict's outbound key — the
+                # mismatch was only on the inbound source name.
+                "prediction": result.get("predicted") or "",
                 "ground_truth": result.get("ground_truth") or "",
                 "time_s": round(query_time, 2),
                 "terminated_at": pd.get("terminated_at") or "",
