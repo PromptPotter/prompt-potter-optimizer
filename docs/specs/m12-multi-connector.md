@@ -33,7 +33,7 @@ Generalize the connector boundary (TermNorm is currently the only registered con
 | TermNorm | `connectors/termnorm.py` |
 | Backend client | `infrastructure/backend.py` |
 | Pipeline discovery | `infrastructure/backend.py::fetch_pipeline` |
-| Identity seam | `domain/tenant.py`, `domain/identity.py`, `Session.identity` (per [`identity-foundation.md`](identity-foundation.md) + [`spend-and-tenancy.md`](spend-and-tenancy.md)) |
-| Token usage | `domain/run_records.py::TokenUsageRecord` |
-| Spend rollup | `infrastructure/projections/live_state.py`, `shared/spend.py` |
+| Identity seam | `promptpotter/domain/identity.py` (newtypes), `promptpotter/shared/identity.py` (`IdentityContext`), `Session.identity` (per [`identity-foundation.md`](identity-foundation.md) + [`spend-and-tenancy.md`](spend-and-tenancy.md)) |
+| Token usage | `domain/run_records.py::TokenUsageRecord` (canonical ledger record; emitted via `emit_token_usage` from `infrastructure/llm/models.py`, reads `_CYCLE_LEDGER` ContextVar) |
+| Spend rollup | `infrastructure/projections/live_dashboard/view.py::LiveDashboardView._handle_token_usage` (sole writer) + `spend_total_used_usd` accessor; shapes + resume backfill in `infrastructure/projections/live_state.py`; rate resolution in `shared/spend.py` |
 | Per-sample scorer | `application/scoring/formula/compiler.py::compile_scorer` |

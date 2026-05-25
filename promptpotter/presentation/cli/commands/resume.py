@@ -19,6 +19,7 @@ from promptpotter.presentation.cli.commands._shared import (
     _prepare_cycle,
     campaign_result_human,
     confirm_tty,
+    identity_from_args,
     init_services_cli,
     log_startup_summary,
 )
@@ -191,7 +192,7 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
     from promptpotter.application.optimization.resume_and_fork import _mint_fork
     from promptpotter.domain.run_records import ForkPayload, ForkTrigger
 
-    tenant_id = session.tenant.tenant_id if session.tenant else "default"
+    tenant_id = session.identity.tenant_id
     new_cycle_id = _mint_fork(
         session.store.campaigns,
         ctx.campaign_id,
@@ -243,7 +244,10 @@ async def _drive_optimization(
         sweep=False,
         diag=getattr(args, "diag", False),
         halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
-        max_spend_usd=getattr(args, "max_spend_usd", None),
+        # CLI ``--spend-budget`` overrides ``OptimizationConfig.spend_budget_usd``;
+        # falls back to the config value when no flag is given.
+        spend_budget_usd=getattr(args, "spend_budget_usd", None)
+        or campaign_config.optimization.spend_budget_usd,
     )
     return cycle_result
 
@@ -342,7 +346,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             "ERROR: no active campaign to resume. Run `python -m promptpotter new <dataset>` first."
         )
     campaign_config = ctx.campaign_config
-    session = await init_services_cli(**ctx.init_params)
+    session = await init_services_cli(**ctx.init_params, identity=identity_from_args(args))
 
     status = await session.backend_client.check_status()
     if status.get("status") == "unreachable":
@@ -378,7 +382,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             sweep=False,
             diag=False,
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
-            max_spend_usd=getattr(args, "max_spend_usd", None),
+            spend_budget_usd=getattr(args, "spend_budget_usd", None),
             tenant=getattr(args, "tenant", "default"),
             verbose=getattr(args, "verbose", False),
             session=getattr(args, "session", None),

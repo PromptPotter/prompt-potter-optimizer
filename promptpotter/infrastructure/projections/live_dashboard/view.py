@@ -45,11 +45,10 @@ from promptpotter.infrastructure.projections.live_dashboard.factory import resol
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import build_round_summary
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
-    accumulate_backend_spend,
     apply_p_best_update,
     apply_phase,
-    apply_token_usage,
     backfill_spend_rates,
+    empty_bucket,
     empty_spend,
     top_n_p_best,
 )
@@ -61,6 +60,7 @@ from promptpotter.infrastructure.store import (
 )
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import has_pipeline_warnings
+from promptpotter.shared.spend import compute_usd
 
 if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
@@ -599,7 +599,9 @@ class LiveDashboardView(DerivedView):
         s["total_queries_scored"] += 1
         if not is_cached:
             s["total_backend_calls"] += 1
-            accumulate_backend_spend(s["spend"], pd)
+            # Backend spend rides the canonical ledger via emit_token_usage
+            # at measure_sample (one TokenUsageRecord per pipeline node per
+            # uncached sample); _handle_token_usage is the sole writer.
 
         s["current_query_payload"] = None
         s["current_sample_id"] = None
@@ -607,9 +609,43 @@ class LiveDashboardView(DerivedView):
         self._set_state("between_candidates" if last_in_candidate else "between_samples")
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
-        """Route an optimizer LLM call into the spend rollup, then persist."""
-        apply_token_usage(self.state["spend"], record)
+        """Sole writer for ``state['spend']``: optimizer → ``loop``, backend → ``backend``.
+
+        Bucket-add + total recompute inline in one method. ``record.cost_usd``
+        (provider-reported wire cost, e.g. OpenRouter ``usage.cost``) short-
+        circuits the rate-table when present; absent ⇒ ``compute_usd`` rate-
+        tables the tokens. Per-record write keeps the projection self-contained:
+        no parallel writer, no helper chain.
+        """
+        spend = self.state["spend"]
+        bucket_key = "loop" if record.kind == "optimizer" else "backend"
+        bucket = spend.setdefault(bucket_key, empty_bucket())
+        in_tok = int(record.input_tokens)
+        out_tok = int(record.output_tokens)
+        bucket["input_tokens"] += in_tok
+        bucket["output_tokens"] += out_tok
+        if record.model and not bucket.get("model"):
+            bucket["model"] = record.model
+        usd = compute_usd(record.model, in_tok, out_tok, override_usd=record.cost_usd)
+        if usd is not None:
+            bucket["used_usd"] = round(bucket["used_usd"] + usd, 6)
+            bucket["rate_known"] = True
+        spend["total_used_usd"] = round(
+            spend.get("backend", {}).get("used_usd", 0.0)
+            + spend.get("loop", {}).get("used_usd", 0.0),
+            6,
+        )
         self._persist()
+
+    @property
+    def spend_total_used_usd(self) -> float:
+        """Clean accessor for the spend halt probe.
+
+        Reads the live spend rollup the projection owns; the halt loop goes
+        through this property so the dashboard remains the single owner of
+        spend semantics (no probe reaching into ``self.state['spend']``)."""
+        spend = self.state.get("spend") or {}
+        return float(spend.get("total_used_usd") or 0.0)
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         """Publish the in-flight optimizer LLM call to `dashboard.json::in_flight` —

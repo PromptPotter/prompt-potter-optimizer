@@ -58,7 +58,7 @@ class StopReason(enum.StrEnum):
     SWEEP_COMPLETE = "sweep_complete"
     DIAG_COMPLETE = "diag_complete"
     TARGET_HIT = "target_hit"
-    MAX_SPEND = "max_spend"
+    SPEND_BUDGET = "spend_budget"
     RENDER_ERROR = "render_error"
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
 

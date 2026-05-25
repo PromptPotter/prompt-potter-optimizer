@@ -48,8 +48,9 @@ class BackfillLogEntry(BaseModel):
 
 
 class SpendBucket(BaseModel):
-    """One spend sub-bucket (backend or optimizer-loop). Mutated only via
-    :func:`live_state.add_to_spend_bucket`.
+    """One spend sub-bucket (backend or optimizer-loop). Mutated only by
+    :meth:`LiveDashboardView._handle_token_usage` — the sole writer for
+    ``dashboard.json::spend`` after the canonical-ledger collapse.
     """
 
     model_config = ConfigDict(extra="forbid")

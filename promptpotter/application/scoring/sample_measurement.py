@@ -14,6 +14,7 @@ from promptpotter.application.scoring.metrics import find_rank
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement
+from promptpotter.infrastructure.llm import emit_token_usage
 from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 
 if TYPE_CHECKING:
@@ -335,6 +336,32 @@ async def measure_sample(
         step_tokens = _compute_step_tokens(data, pipeline_schema, wire_params)
         if step_tokens:
             pd["step_tokens"] = step_tokens
+            # Fan backend cost onto the same canonical ledger optimizer cost
+            # rides — one TokenUsageRecord per pipeline node per uncached
+            # sample. measure_sample only reaches here for fresh backend
+            # calls (cache hits return early), so this never double-counts.
+            backend_model = data.get("llm_provider")
+            step_timings = data.get("step_timings") or {}
+            for node_name, entry in step_tokens.items():
+                in_tok = int(entry.get("input", 0) or 0)
+                out_tok = int(entry.get("output", 0) or 0)
+                if in_tok == 0 and out_tok == 0:
+                    continue
+                raw_cost = entry.get("cost_usd") if isinstance(entry, dict) else None
+                cost_usd: float | None
+                cost_usd = float(raw_cost) if isinstance(raw_cost, (int, float)) else None
+                raw_dur = step_timings.get(node_name)
+                duration_s: float
+                duration_s = float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0
+                emit_token_usage(
+                    node=str(node_name),
+                    kind="backend",
+                    input_tokens=in_tok,
+                    output_tokens=out_tok,
+                    duration_s=duration_s,
+                    model=backend_model,
+                    cost_usd=cost_usd,
+                )
 
         result: dict[str, Any] = {
             "sample_id": sample.id,

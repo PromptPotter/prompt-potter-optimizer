@@ -18,6 +18,7 @@ from promptpotter.presentation.cli.commands._shared import (
     _prepare_cycle,
     campaign_result_human,
     get_verbose,
+    identity_from_args,
     init_services_cli,
 )
 from promptpotter.presentation.cli.session import load_campaign_config, load_session
@@ -115,7 +116,7 @@ async def _mint_fresh_session(
         experiment_id=args.experiment_id,
         dataset_name=dataset_name,
         take_over=True,
-        tenant_id=getattr(args, "tenant", "default"),
+        identity=identity_from_args(args),
     )
     backend_id = session.backend_id
 
@@ -299,7 +300,10 @@ async def _run_loop(
         sweep=getattr(args, "sweep", False),
         diag=getattr(args, "diag", False),
         halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
-        max_spend_usd=getattr(args, "max_spend_usd", None),
+        # CLI ``--spend-budget`` overrides ``OptimizationConfig.spend_budget_usd``;
+        # falls back to the config value when no flag is given.
+        spend_budget_usd=getattr(args, "spend_budget_usd", None)
+        or campaign_config.optimization.spend_budget_usd,
     )
 
     ctx.state["best_accuracy"] = cycle_result.best_accuracy

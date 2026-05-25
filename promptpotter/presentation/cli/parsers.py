@@ -48,7 +48,11 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
-    """Shared --halt-at / --max-spend flags (new + resume)."""
+    """Shared --halt-at / --spend-budget flags (new + resume).
+
+    ``--spend-budget`` overrides ``campaign.json::optimization.spend_budget_usd``
+    when supplied; either source halts the cycle at the next round boundary
+    once cumulative spend (optimizer + backend) crosses the threshold."""
     p.add_argument(
         "--halt-at",
         dest="halt_at_accuracy",
@@ -58,8 +62,8 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
         help="Halt when best accuracy ≥ ACC (e.g. 0.66).",
     )
     p.add_argument(
-        "--max-spend",
-        dest="max_spend_usd",
+        "--spend-budget",
+        dest="spend_budget_usd",
         type=float,
         default=None,
         metavar="USD",
@@ -228,7 +232,7 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
     # time-to ----------------------------------------------------------------
     p_time_to = sweep_sub.add_parser(
         "time-to",
-        help="Run optimize, halt on target accuracy / max-rounds / max-spend; write one result JSON.",
+        help="Run optimize, halt on target accuracy / max-rounds / spend-budget; write one result JSON.",
     )
     p_time_to.add_argument(
         "target",
@@ -244,8 +248,8 @@ def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
         help="Round ceiling (overrides campaign.json::optimization.max_rounds for this sweep).",
     )
     p_time_to.add_argument(
-        "--max-spend",
-        dest="max_spend",
+        "--spend-budget",
+        dest="spend_budget",
         type=float,
         default=None,
         help="Halt when cumulative cycle spend (USD, optimizer + backend) ≥ this value.",

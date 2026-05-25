@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 def _sweep_early_exit_reason(stop_reason: str) -> str:
     """Map ``StopReason`` → sweep-result ``early_exit_reason`` enum.
 
-    ``target_hit | max_rounds | max_spend`` is the documented surface;
+    ``target_hit | max_rounds | spend_budget`` is the documented surface;
     anything else (patience, interrupt, hard-cap) lands as the raw
     stop_reason string so the operator sees why the sweep didn't bottom
     out on one of the three intentional exits.
@@ -40,7 +40,7 @@ def _sweep_early_exit_reason(stop_reason: str) -> str:
     mapping = {
         StopReason.TARGET_HIT.value: "target_hit",
         StopReason.MAX_ROUNDS.value: "max_rounds",
-        StopReason.MAX_SPEND.value: "max_spend",
+        StopReason.SPEND_BUDGET.value: "spend_budget",
     }
     return mapping.get(stop_reason, stop_reason)
 
@@ -151,10 +151,10 @@ async def _run_sweep_optimize(
     train_data: list[Sample],
     *,
     halt_at_accuracy: float | None = None,
-    max_spend_usd: float | None = None,
+    spend_budget_usd: float | None = None,
 ) -> tuple[Any, Any]:
     """Drive ``run_optimization`` for any sweep verb — honors
-    ``halt_at_accuracy`` / ``max_spend_usd`` and the active optimizer-prompt
+    ``halt_at_accuracy`` / ``spend_budget_usd`` and the active optimizer-prompt
     override (managed by the caller via :func:`optimizer_prompt_override`).
     Returns ``(cycle_result, observers)``."""
     from promptpotter.application.runner import (
@@ -178,7 +178,7 @@ async def _run_sweep_optimize(
         sweep=False,
         diag=False,
         halt_at_accuracy=halt_at_accuracy,
-        max_spend_usd=max_spend_usd,
+        spend_budget_usd=spend_budget_usd,
     )
     ctx.state["best_accuracy"] = cycle_result.best_accuracy
     ctx.save_phase("optimize")

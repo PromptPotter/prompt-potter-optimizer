@@ -1,6 +1,6 @@
 # Identity Foundation — OIDC wire + RLS data, sized 1 → 1B users
 
-> **Status:** Forward direction — load-bearing foundation. No code shipped under this spec; the existing `TenantContext` (`application/bootstrap/session.py:33`) is the Stage-0 reification.
+> **Status:** Stage 0 fully shipped — identity seam (`IdentityContext` in `promptpotter/shared/identity.py`, newtypes in `promptpotter/domain/identity.py`, `build_stores(identity, …)` rewrite, `Session.identity` replaces deleted `TenantContext`, FastAPI `resolve_identity` / `IdentityDep` / `StoreDep`) **plus** the first payload riding it (token/cost on the canonical ledger — see [`spend-and-tenancy.md`](spend-and-tenancy.md) for the highway architecture). Stage-1 OIDC client + Stage-2 RLS adapter remain forward direction.
 > **Load-bearing scope:** every multi-tenant code path in the cluster ([`spend-and-tenancy.md`](spend-and-tenancy.md), [`m12-control-plane.md`](m12-control-plane.md), [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md), [`state-sync-cleanup.md`](state-sync-cleanup.md)) consumes the contracts pinned here. **Cluster front-door.**
 
 The premise: the codebase commits today to two wire-and-data contracts that scale from one operator on a laptop to Facebook/Netflix-shape without rewriting prior code. Every other multi-tenant spec is a **consumer**, not a peer.
@@ -35,7 +35,7 @@ Every request that crosses a trust boundary into the application carries an **OI
 - **Tokens never enter app code.** They're verified at the boundary (`presentation/api/middleware/`); past the boundary, the codebase sees `IdentityContext` only. PR rule: a JWT type appearing outside `presentation/api/middleware/` and `infrastructure/identity/` is a block.
 - **Session pattern** — first-party browser sessions are **server-side sessions keyed by HttpOnly cookie**, per [The Copenhagen Book](https://thecopenhagenbook.com/sessions) (Lucia Auth's author deprecated his library in favor of these patterns; framework-agnostic; OWASP-aligned). **ID Tokens are only for cross-trust-boundary** (callback from the provider, B2B SSO, service-to-service). The "stuff a JWT in a cookie" anti-pattern is an explicit gate violation.
 - **Code anchor (Stage 1+):** `promptpotter/infrastructure/identity/` (new) — `OIDCClient`, `IdTokenVerifier`, `JWKSCache`. ~200 LoC plus `cryptography` for signature verification.
-- **Code anchor (Stage 0):** `IdentityContext` constructed by `presentation/api/deps.py::identity_context` returning the auth-off default; CLI seam returns the same default from `presentation/cli/commands/_shared.py::init_services_cli`.
+- **Code anchor (Stage 0, shipped):** `IdentityContext` constructed by `presentation/api/deps.py::resolve_identity` returning the auth-off default; CLI seam constructs it from `args.tenant` via `presentation/cli/commands/_shared.py::identity_from_args` and threads it through `init_services_cli(identity=…)`.
 
 ### Contract B — PostgreSQL RLS (data / storage isolation)
 
@@ -90,9 +90,9 @@ The **EnterpriseUser extension** (`urn:ietf:params:scim:schemas:extension:enterp
 
 [Schema.org `Person`](https://schema.org/Person) ([`schemaorg/schemaorg`](https://github.com/schemaorg/schemaorg)) is emitted as JSON-LD on marketing pages and public profile surfaces for SEO. **It is an output projection, not the internal model.** Its 70+ Person properties include noise the application has no use for (`spouse`, `netWorth`, `height`, `colleague`). The application stores SCIM; the public-facing renderer projects a small subset of SCIM fields into Schema.org JSON-LD at response time.
 
-## `IdentityContext` — the new layer above `TenantContext`
+## `IdentityContext` — the identity carrier
 
-`TenantContext` (`application/bootstrap/session.py:33`) describes *which slice of storage* a call uses. `IdentityContext` describes *who is making the call*. They're distinct concerns; `IdentityContext` carries (and supersedes) the `TenantContext` data.
+`IdentityContext` (`promptpotter/shared/identity.py`) describes *who is making the call*; its `tenant_id` field describes *which slice of storage* a call uses. The two prior concerns (the deleted `TenantContext` carried only the slice) collapse into one frozen dataclass.
 
 ```python
 @dataclass(frozen=True)
@@ -106,7 +106,7 @@ class IdentityContext:
 
 - **Stage 0** — `IdentityContext(user_id=UserId("default"), tenant_id=TenantId("default"), issuer=None, claims={}, capabilities=frozenset())`. Constructed once at bootstrap. The single-operator path is the auth-off branch — one branch, not a feature flag.
 - **Stage 1** — constructed by the OIDC middleware from a verified ID Token. `user_id = f"{issuer}:{sub}"`, `tenant_id` from the custom `tenant_id` claim (provider-set for B2B, install-scoped fallback for casual users), `issuer` from `iss`.
-- **`TenantContext` collapses into `IdentityContext`.** `Session.tenant: TenantContext | None` (`application/bootstrap/session.py:74`) becomes `Session.identity: IdentityContext`. The spend-and-tenancy seam — and every consumer — takes `IdentityContext`, never bare `tenant_id` or bare `TenantContext`. **Behavior change, no shim.**
+- **`TenantContext` collapsed into `IdentityContext`** (shipped). `Session.identity: IdentityContext` (`application/bootstrap/session.py`) replaces the deleted `Session.tenant`. The spend-and-tenancy seam — and every consumer — takes `IdentityContext`, never bare `tenant_id` or bare `TenantContext`. Behavior change, no shim.
 
 ## No-drift gates
 
@@ -121,7 +121,7 @@ Enforceable rules. A PR violating any of these is a block; gates marked **(test)
 
 ## Minimal-deps invariant
 
-- **Stage 0 — zero new deps.** Stdlib only. The existing `TenantContext` is reified into `IdentityContext`; no library required.
+- **Stage 0 — zero new deps.** Stdlib only. `IdentityContext` (`shared/identity.py`) + four newtypes (`domain/identity.py`) ship without any library.
 - **Stage 1 — one new Python dep: `cryptography`** for JWT/JWS signature verification against JWKS. Everything else (HTTP discovery fetch, session cookies, opaque token generation, PKCE) is stdlib. The OIDC client is ~200 LoC we write ourselves.
 - **Stage 2 — zero new Python deps.** Open-source IdPs (Ory / Zitadel / Keycloak / Authentik) are **sibling processes** — we call them over HTTP/OIDC, we do not import a Python auth library. The PostgreSQL adapter rides our existing storage abstractions plus the `psycopg` binding we'd already need for any DB store.
 - **Never** add a Python auth library (no `python-jose`, no `authlib`, no `python-social-auth`, no `flask-login`-shape framework). Either we implement OIDC client ourselves (Stage 1) or we call out to a sibling IdP (Stage 2).
@@ -171,12 +171,13 @@ Skip-list (do not adopt):
 
 | Concern | Stage | File |
 |---|---|---|
-| `IdentityContext` (new) | 0+ | `promptpotter/application/bootstrap/session.py` (replaces `TenantContext`) |
-| `UserId` / `Issuer` newtypes (new) | 0+ | `promptpotter/domain/identity.py` (new; sibling to `domain/tenant.py` from `spend-and-tenancy.md`) |
-| `TenantId` newtype | 0+ | `promptpotter/domain/tenant.py` (per `spend-and-tenancy.md`) |
-| Auth-off resolver | 0 | `promptpotter/presentation/api/deps.py::identity_context` (returns default) |
-| CLI seam | 0+ | `promptpotter/presentation/cli/commands/_shared.py::init_services_cli` |
-| Store construction | 0+ | `promptpotter/infrastructure/store/stores.py::build_stores(identity, …)` |
+| `IdentityContext` (shipped) | 0+ | `promptpotter/shared/identity.py` |
+| `TenantId` / `UserId` / `Issuer` / `SafeName` newtypes + `safe_name` validator (shipped) | 0+ | `promptpotter/domain/identity.py` |
+| `Session.identity` field (shipped — replaces deleted `Session.tenant: TenantContext | None`) | 0+ | `promptpotter/application/bootstrap/session.py` |
+| Auth-off resolver (shipped) | 0 | `promptpotter/presentation/api/deps.py::resolve_identity` → `IdentityDep` → `build_stores_from_identity` → `StoreDep` |
+| CLI seam (shipped) | 0+ | `promptpotter/presentation/cli/commands/_shared.py::identity_from_args` + `init_services_cli(identity=…)` |
+| Store construction (shipped) | 0+ | `promptpotter/infrastructure/store/stores.py::build_stores(identity, *, projects_root=…, datasets_root=…)` |
+| Invariant test (shipped — gates #3, #4, #6) | 0 | `tests/test_identity.py::test_identity_seam_no_drift` |
 | OIDC client (Stage 1) | 1 | `promptpotter/infrastructure/identity/` (new) — `client.py`, `verifier.py`, `jwks.py`, `session.py` |
 | OIDC middleware (Stage 1) | 1 | `promptpotter/presentation/api/middleware/oidc.py` (new) |
 | RLS adapter (Stage 2) | 2 | `promptpotter/infrastructure/store/postgres/` (new) — drop-in for the file-based `stores.py` |
@@ -193,7 +194,7 @@ Skip-list (do not adopt):
 
 The amendment lands as a docs-only PR before any Stage-1 code. CLAUDE.md §6 Q4 sub-rule applies — the gate blocks code introducing a new I/O kind without §0 backing.
 
-Stage-0 work (the `IdentityContext` reification under `spend-and-tenancy.md`) does **not** require the amendment — it's a refinement of the existing `TenantContext` seam, not a new ingress. The amendment lands with Stage 1.
+Stage-0 work (the `IdentityContext` seam — shipped) does **not** require the amendment — it's a refinement of the prior tenant-context seam, not a new ingress. The amendment lands with Stage 1.
 
 ## What's out of scope (explicit)
 

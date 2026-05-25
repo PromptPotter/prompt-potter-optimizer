@@ -39,6 +39,9 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 | `PipelineSchema` | `promptpotter/domain/pipeline_schema.py:120` |
 | `ResumeCheckpointKind` (exhaustive enum) | `promptpotter/domain/run_records.py:32` |
 | `SessionFamilyDir` / `CycleDir` (path newtypes) | `promptpotter/domain/cycle_paths.py:32` / `:33` |
+| `TenantId` / `UserId` / `Issuer` / `SafeName` (identity newtypes) | `promptpotter/domain/identity.py:19` / `:20` / `:21` / `:22` |
+| `IdentityContext` (5-field identity carrier) | `promptpotter/shared/identity.py:26` |
+| `default_identity` (Stage-0 single-operator factory) | `promptpotter/shared/identity.py:36` |
 
 ### Application — optimization
 | Symbol | File:line |
@@ -71,8 +74,8 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 | `measure_sample` | `promptpotter/application/scoring/sample_measurement.py:263` |
 | `compile_scorer` | `promptpotter/application/scoring/formula/compiler.py:131` |
 | `compute_composite_fitness` | `promptpotter/application/scoring/metrics.py:207` |
-| `Session` | `promptpotter/application/bootstrap/session.py:75` |
-| `ScoringContext` | `promptpotter/application/bootstrap/session.py:48` |
+| `Session` | `promptpotter/application/bootstrap/session.py:59` |
+| `ScorerSetup` | `promptpotter/application/bootstrap/session.py:34` |
 
 ### Infrastructure
 | Symbol | File:line |
@@ -82,11 +85,19 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 | `LiveDashboardView` (root-only) | `promptpotter/infrastructure/projections/live_dashboard/view.py:60` |
 | `AuditTrailView` (per-cycle) | `promptpotter/infrastructure/projections/audit_trail.py:90` |
 | `PoBBStreamView` | `promptpotter/infrastructure/projections/pobb_stream.py:32` |
-| `Stores` (frozen composite) | `promptpotter/infrastructure/store/stores.py:88` |
-| `build_stores` | `promptpotter/infrastructure/store/stores.py:106` |
+| `Stores` (frozen composite, carries `IdentityContext`) | `promptpotter/infrastructure/store/stores.py:88` |
+| `build_stores(identity, *, projects_root=…, datasets_root=…)` | `promptpotter/infrastructure/store/stores.py:116` |
+| `resolve_identity` / `IdentityDep` / `StoreDep` (FastAPI seam) | `promptpotter/presentation/api/deps.py:15` / `:25` / `:33` |
 | `BackendClient` | `promptpotter/infrastructure/backend.py:64` |
 | `OpenAICompatibleClient` | `promptpotter/infrastructure/llm/openai_compat.py:33` |
 | `AnthropicClient` | `promptpotter/infrastructure/llm/anthropic.py:22` |
+| `emit_token_usage` (kwargs-only; reads `_CYCLE_LEDGER` ContextVar) | `promptpotter/infrastructure/llm/models.py:82` |
+| `_CYCLE_LEDGER` / `_CURRENT_ROUND` ContextVars | `promptpotter/infrastructure/llm/models.py:58` / `:59` |
+| `set_cycle_ledger` / `reset_cycle_ledger` | `promptpotter/infrastructure/llm/models.py:62` / `:69` |
+| `set_current_round` / `reset_current_round` | `promptpotter/infrastructure/llm/models.py:73` / `:78` |
+| `LiveDashboardView._handle_token_usage` (sole spend writer) | `promptpotter/infrastructure/projections/live_dashboard/view.py:611` |
+| `LiveDashboardView.spend_total_used_usd` (halt-probe accessor) | `promptpotter/infrastructure/projections/live_dashboard/view.py:641` |
+| `TokenUsageRecord` (canonical per-call cost record) | `promptpotter/domain/run_records.py:100` |
 
 ### Connectors
 | Symbol | File:line |

@@ -1,5 +1,5 @@
 """Round loop — generate → score → escalate → stop. Sweep/diag short-circuit after one round;
-``halt_at_accuracy`` + ``max_spend_usd`` are sweep-toolkit halts checked every clean round."""
+``halt_at_accuracy`` + ``spend_budget_usd`` are sweep-toolkit halts checked every clean round."""
 
 from __future__ import annotations
 
@@ -56,11 +56,11 @@ async def run_round_loop(
     sweep: bool = False,
     diag: bool = False,
     halt_at_accuracy: float | None = None,
-    max_spend_usd: float | None = None,
+    spend_budget_usd: float | None = None,
     spend_probe: Callable[[], float] | None = None,
 ) -> StopReason:
     """Round loop. sweep/diag halt after round 2. ``halt_at_accuracy`` → TARGET_HIT;
-    ``max_spend_usd`` + ``spend_probe`` → MAX_SPEND (omit spend_probe ⇒ no spend halt)."""
+    ``spend_budget_usd`` + ``spend_probe`` → SPEND_BUDGET (omit spend_probe ⇒ no spend halt)."""
     opt = config.optimization
     # resumed_from_round = next L1 round (fresh=1); clean_rounds = lifetime L1 completed (origin not counted).
     round_num = session.state.resumed_from_round
@@ -153,11 +153,11 @@ async def run_round_loop(
             if halt_at_accuracy is not None and cycle.tracking.best_accuracy >= halt_at_accuracy:
                 return StopReason.TARGET_HIT
             if (
-                max_spend_usd is not None
+                spend_budget_usd is not None
                 and spend_probe is not None
-                and spend_probe() >= max_spend_usd
+                and spend_probe() >= spend_budget_usd
             ):
-                return StopReason.MAX_SPEND
+                return StopReason.SPEND_BUDGET
 
             if sweep and clean_rounds >= 1:
                 await run_sweep_generation_only(cycle, session, cb, round_num)

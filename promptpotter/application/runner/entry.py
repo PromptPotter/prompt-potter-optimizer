@@ -60,7 +60,7 @@ async def run_optimization(
     diag: bool = False,
     fork_payload: ForkPayload | None = None,
     halt_at_accuracy: float | None = None,
-    max_spend_usd: float | None = None,
+    spend_budget_usd: float | None = None,
 ) -> CycleResult:
     """End-to-end optimization. *observers* MUST be pre-built (ledger bound before origin).
     *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
@@ -143,12 +143,6 @@ async def run_optimization(
             observers.callbacks._phase_ctx = parent_phase_ctx
             cb = observers.callbacks
 
-        def _probe_cycle_spend() -> float:
-            if observers.dashboard is None:
-                return 0.0
-            spend = observers.dashboard.state.get("spend") or {}
-            return float(spend.get("total_used_usd") or 0.0)
-
         stop_reason = await run_round_loop(
             cycle,
             dataset,
@@ -158,8 +152,16 @@ async def run_optimization(
             sweep=sweep,
             diag=diag,
             halt_at_accuracy=halt_at_accuracy,
-            max_spend_usd=max_spend_usd,
-            spend_probe=_probe_cycle_spend if max_spend_usd is not None else None,
+            spend_budget_usd=spend_budget_usd,
+            # Halt probe reads LiveDashboardView's clean accessor; the dashboard
+            # is the sole owner of the spend rollup, so the probe goes through
+            # the projection that already accumulates the records — not a
+            # parallel reader.
+            spend_probe=(
+                (lambda: observers.dashboard.spend_total_used_usd)
+                if spend_budget_usd is not None
+                else None
+            ),
         )
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
         cause = (

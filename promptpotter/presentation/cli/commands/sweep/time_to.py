@@ -43,7 +43,7 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
     campaign_config = load_session(args).campaign_config
     target_acc = args.target / 100.0
     max_rounds = int(args.max_rounds)
-    max_spend = float(args.max_spend) if args.max_spend is not None else None
+    spend_budget = float(args.spend_budget) if args.spend_budget is not None else None
     sweep_opt = campaign_config.optimization.model_copy(update={"max_rounds": max_rounds})
     campaign_config = campaign_config.model_copy(update={"optimization": sweep_opt})
 
@@ -68,10 +68,10 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
     template = _resolve_template(variant)
 
     logger.info(
-        "Sweep time-to %d%%: max_rounds=%d max_spend=%s slice=%s l1=%s",
+        "Sweep time-to %d%%: max_rounds=%d spend_budget=%s slice=%s l1=%s",
         args.target,
         max_rounds,
-        f"${max_spend:.2f}" if max_spend is not None else "uncapped",
+        f"${spend_budget:.2f}" if spend_budget is not None else "uncapped",
         resolved_slice,
         variant.label or "current",
     )
@@ -85,7 +85,7 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
                 session,
                 train_data,
                 halt_at_accuracy=target_acc,
-                max_spend_usd=max_spend,
+                spend_budget_usd=spend_budget,
             )
     except ResumeDivergenceError as div:
         return CommandResult(

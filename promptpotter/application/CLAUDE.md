@@ -40,6 +40,17 @@ intelligence; intelligence does not depend on either.
 - Backend tunables ride the per-dataset overlay
   (`datasets/{name}/pipeline.json::nodes.{name}.config`) merged by
   `configure_and_apply_pipeline()` (`config.py:344`). See **Backend overlay** below for the merge contract.
+- **Per-call telemetry from deep async chains uses the `emit_*` shape**, not
+  `RunCallbacks`. Canonical template (set by `TokenUsageRecord`):
+  define the `*Record` in `domain/run_records.py`, add the `*Record` arm to
+  the `CycleRecord` discriminated union + a `_handle_*` no-op default to
+  `DerivedView` (`infrastructure/projections/base.py`), write a kwargs-only
+  `emit_*` helper that reads the active ledger from the `_CYCLE_LEDGER`
+  ContextVar (`infrastructure/llm/models.py`) and appends, register the
+  projection subscriber. No process-global sink, no wrapper dataclass — the
+  call site goes from kwargs to ledger in one hop. `RunCallbacks` stays the
+  shape for high-frequency snapshot/phase events the runner already drives;
+  emit_*-style is the shape for per-call telemetry buried inside dispatch.
 
 ## Backend overlay
 

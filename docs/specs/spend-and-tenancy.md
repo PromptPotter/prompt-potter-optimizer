@@ -1,7 +1,7 @@
 # Spend Tracking — the first consumer of the identity foundation
 
-> **Status:** Forward direction — partial scaffolding shipped (see Status section).
-> **Depends on:** [`identity-foundation.md`](identity-foundation.md) Stage 0 (`IdentityContext` reification — `TenantContext` collapses into it).
+> **Status:** Phases 1–3 shipped. Identity seam + emission collapse (M1 + M2 — kwargs `emit_token_usage` over `_CYCLE_LEDGER` ContextVar, `TokenUsage` wrapper + `_token_usage_sink` global deleted) + single-writer collapse (M3 + M4 — backend per-step `emit_token_usage(kind="backend")` over `step_tokens`, `accumulate_backend_spend` deleted, `LiveDashboardView._handle_token_usage` is sole spend writer, halt probe reads `LiveDashboardView.spend_total_used_usd` accessor) all on disk. `OptimizationConfig.spend_budget_usd` field + `--spend-budget` CLI + `StopReason.SPEND_BUDGET` rename landed. Operator chose option (B): spend stays inside `LiveDashboardView` ownership; no separate `SpendProjection`, no `spend.json` file.
+> **Depends on:** [`identity-foundation.md`](identity-foundation.md) Stage 0 (`IdentityContext` seam — shipped).
 > **First consumer of:** the identity-foundation seam. Demonstrates the seam works end-to-end with a working spend payload as proof.
 
 Spend tracking is the **payload** that lands the Stage-0 `IdentityContext` seam through the codebase. The contracts — OIDC-shape identity, tenant-scoped storage — live in [`identity-foundation.md`](identity-foundation.md). This spec covers what flows through the seam first.
@@ -10,14 +10,29 @@ This is **not** "spend tracking with `tenant_id` sprinkled on." It is the spend 
 
 ## Status (what's already on disk)
 
-- `TenantContext` exists — `application/bootstrap/session.py:33` (`tenant_id`, `user_id`, `capabilities`); default-constructed, never plumbed end-to-end. Per `identity-foundation.md`, this collapses into `IdentityContext` in Stage 0.
-- `build_stores(tenant_id=DEFAULT_TENANT_ID="default")` already roots under `projects/{tenant_id}/` — `infrastructure/store/stores.py:106`, `infrastructure/store/paths.py:DEFAULT_TENANT_ID`.
-- `validate_path_component(tenant_id)` already called inside `build_stores` — but `tenant_id` is a bare `str`, not a newtype.
+- **`IdentityContext` seam shipped** — `promptpotter/shared/identity.py` carries the 5-field frozen dataclass; `default_identity(tenant_id="default")` is the Stage-0 factory; `TenantId` / `UserId` / `Issuer` / `SafeName` newtypes live in `promptpotter/domain/identity.py`; `safe_name()` validator gates path-segment use. **`TenantContext` deleted**; `Session.identity: IdentityContext` replaces `Session.tenant`.
+- **`build_stores(identity, *, projects_root=…, datasets_root=…)` shipped** — `infrastructure/store/stores.py`. `Stores.identity` is the sole tenant-scope source; `Stores.tenant_id` is a derived `@property` returning the `TenantId` newtype. `DEFAULT_TENANT_ID` removed.
+- **FastAPI seam shipped** — `presentation/api/deps.py::resolve_identity` returns the Stage-0 default; `IdentityDep` / `build_stores_from_identity` / `StoreDep` chain it. Stage 1 (M12 OIDC client) replaces only `resolve_identity`.
+- **CLI seam shipped** — `presentation/cli/commands/_shared.py::identity_from_args` reads `args.tenant`; `init_services_cli(identity=…)` + `init_services(identity=…)` accept the `IdentityContext`. All 8 build_stores call sites migrated.
+- **Invariant test shipped** — `tests/test_identity.py::test_identity_seam_no_drift` bundles no-drift gates #3 (`build_stores` signature), #4 (`Stores.identity` sole tenant source), #6 (SCIM-named field set).
 - `shared/spend.py` shipped — three-layer rate resolution (wire passthrough → `~/.promptpotter/rates.json` 24 h TTL → bundled `shared/data/rates.json`), stdlib-only fetcher, 8 MB cap.
-- `TokenUsage.cost_usd` slot exists — `infrastructure/llm/models.py:51`; OpenRouter wire cost extracted in `application/optimization/dispatch/llm_call/call.py:360`.
-- `--max_spend_usd` plumbed CLI → loop, `StopReason.MAX_SPEND` exists (`domain/phases.py:61`), `_probe_cycle_spend` in `application/runner/entry.py:146`.
+- `TokenUsageRecord` is the sole cross-ledger shape for per-call cost telemetry (`domain/run_records.py::TokenUsageRecord`). `TokenUsage` dataclass deleted. OpenRouter wire cost extracted in `application/optimization/dispatch/llm_call/call.py` and passed as `cost_usd=` kwarg.
+- `--spend-budget` plumbed CLI → loop, `StopReason.SPEND_BUDGET` exists (`domain/phases.py:61`), halt probe at `application/runner/entry.py` reads `observers.dashboard.spend_total_used_usd` (clean accessor on the dashboard projection; no `state["spend"]` peek).
 
-**What's missing (Stage-0 identity-foundation reification + spend payload):** `TenantId` / `UserId` / `SafeName` newtypes (Stage-0 deliverables of identity-foundation); `IdentityContext` as the sole construction route for `Stores`; `OptimizationConfig.spend_budget_usd` config-side field (today's `--max_spend_usd` is CLI-only); explicit single-operator bootstrap path that makes the whole thing invisible at default settings; identity-scoped ledger event for backend spend.
+**What landed (Phases 2–3 of the token-unification arc):** backend cost flows through `emit_token_usage(kind="backend", ...)` at the per-node call boundary in `application/scoring/sample_measurement.py` (one `TokenUsageRecord` per pipeline node per uncached sample, alongside optimizer-kind records on the same `events.jsonl`); `accumulate_backend_spend` deleted; `LiveDashboardView._handle_token_usage` is the sole writer for both buckets (`backend` + `loop`) and the sole rollup point for `dashboard.json::spend::total_used_usd`; the 3-hop chain (`_handle → apply → bucket`) collapsed into one method; `MAX_SPEND` → `SPEND_BUDGET` rename complete (StopReason + CLI flag + config field); `OptimizationConfig.spend_budget_usd: float | None = None` is the config-side budget (CLI `--spend-budget` overrides when both are supplied); halt probe goes through the `LiveDashboardView.spend_total_used_usd` property (operator-accepted Display→Control short-circuit — the dashboard owns spend semantics, so reading it back is not a parallel pipeline).
+
+## Highway architecture (what shipped)
+
+Tokens ride the canonical ledger alongside every other record — not a parallel pipeline. The "highway" is the existing `events.jsonl` per-cycle stream; what this arc did is **promote the path tokens take through that highway to the optimal sequence**, by eliminating four middlemen:
+
+1. **Process global gone** — `_token_usage_sink` deleted. `emit_token_usage` reads the active ledger from `_CYCLE_LEDGER: ContextVar[CycleEventLog | None]` (`infrastructure/llm/models.py`); `build_run_observers` calls `set_cycle_ledger(ledger)` at cycle start; `RunObservers.drain_all` resets it on teardown. Per-asyncio-task isolation — concurrent cycles (M12+) get isolation for free.
+2. **Wrapper dataclass gone** — `TokenUsage` deleted. `emit_token_usage(*, node, kind, input_tokens, output_tokens, duration_s, model=None, cost_usd=None)` is kwargs-only; builds `TokenUsageRecord` directly inside the helper. Round is read from `_CURRENT_ROUND: ContextVar[int | None]` (set by `RunCallbacks.set_round`).
+3. **Sole spend writer** — `LiveDashboardView._handle_token_usage` routes by `record.kind` (`optimizer` → `loop`, `backend` → `backend`), adds to the bucket, recomputes `total_used_usd` — all inline. No `apply_token_usage` / `add_to_spend_bucket` chain.
+4. **No dual writer** — backend cost flows through `emit_token_usage(kind="backend", ...)` at the `measure_sample` per-step site (over `step_tokens`, uncached only). `accumulate_backend_spend` deleted; the `view.py::_absorb_sample_scored` site no longer touches `state['spend']`.
+
+Both cost routes — backend-LLM cost and optimizer-loop token cost — flow parallel through the same ledger as `TokenUsageRecord` with different `kind`. `AuditTrailView` continues to record them into `round_NNNN.json` like every other record (audit trail). `LiveDashboardView` projects them into `dashboard.json::spend` (display surface). Identity scope rides the ledger path (tenant prefix on the per-cycle directory) — no per-record `tenant_id` field.
+
+Forward direction for matching-shape flows: every other `RunCallbacks.on_*` method that wraps a per-call event in a `*Record` and appends is a candidate for the same `emit_*` shape after this arc proves the template — see [`code-debt-cleanup.md`](code-debt-cleanup.md) for the catalogue entry.
 
 ## What's in scope
 
@@ -25,25 +40,25 @@ This is **not** "spend tracking with `tenant_id` sprinkled on." It is the spend 
 
 Reifies the Stage-0 deliverables of [`identity-foundation.md`](identity-foundation.md):
 
-- `TenantId(str)` — `NewType` at `domain/tenant.py` (new file, peer to `cycle_paths.py`). Constructed via one factory: `TenantId.parse(raw: str) → TenantId`, wrapping `validate_path_component`. `validate_path_component` becomes a consumer of the newtype, not its source of truth.
-- `UserId(str)` — `NewType` at `domain/identity.py` (new file). Stage 0: always `UserId("default")`. Stage 1: `f"{issuer}:{sub}"` from the verified ID Token (per identity-foundation Contract A).
+- `TenantId(str)` — `NewType` at `promptpotter/domain/identity.py` (shipped, alongside `UserId` / `Issuer` / `SafeName`). Constructed indirectly: callers receive a `TenantId` only by reading `IdentityContext.tenant_id` — no raw factory. `safe_name(raw: str) → SafeName` validates slug-strict path segments at the identity-layer boundary.
+- `UserId(str)` — `NewType` at `promptpotter/domain/identity.py` (shipped). Stage 0: always `UserId("default")`. Stage 1: `f"{issuer}:{sub}"` from the verified ID Token (per identity-foundation Contract A).
 - `SafeName(str)` — same shape, for any user-supplied path segment that isn't a tenant or user id (campaign labels, future project ids). Distinct from `TenantId` / `UserId` so a function signature can't accept the wrong identity by accident.
 - All `mypy --strict` clean (domain layer rule, `domain/CLAUDE.md`).
 
 ### 2. `IdentityContext` is the construction route for `Stores`
 
-- `TenantContext` (`application/bootstrap/session.py:33`) is renamed/restructured to `IdentityContext` per identity-foundation. `Session.tenant: TenantContext | None` becomes `Session.identity: IdentityContext`. **Behavior change, no shim.**
-- `build_stores(identity: IdentityContext, …)` replaces today's `build_stores(tenant_id=…)`. The newtype + the context object collapse into one parameter — no caller passes a raw string ever again. `build_stores` reads `identity.tenant_id` to root the file-based stores under `projects/{tenant_id}/`.
+- `TenantContext` deleted; `Session.identity: IdentityContext` (`application/bootstrap/session.py`) replaces `Session.tenant: TenantContext | None`. Behavior change, no shim. **(shipped)**
+- `build_stores(identity, *, projects_root=…, datasets_root=…)` (`infrastructure/store/stores.py`) is the only construction route. The newtype + the context object collapse into one positional argument — no caller passes a raw string. `build_stores` reads `identity.tenant_id` to root the file-based stores under `projects/{tenant_id}/`. **(shipped)**
 - Spend events that carry user identity use SCIM-named fields (`User.id`, `User.externalId`); the `org_id` tenant claim feeds `IdentityContext.tenant_id`. See [`identity-foundation.md` § Data model](identity-foundation.md#data-model--scim-20-core--enterpriseuser).
 
 ### 3. Single seam per entry point
 
-The seam is where `IdentityContext` enters the process. Three entry points, three seams, **one** construction function (`resolve_identity_context() → IdentityContext`) so the rule "tenant prefix is derived from identity, never from a request field" is enforceable by `tests/test_invariants.py` (no-drift gate #4 from identity-foundation):
+The seam is where `IdentityContext` enters the process. Three entry points, two construction functions (`default_identity()` in `shared/identity.py` for the auth-off default; `identity_from_args(args)` in `presentation/cli/commands/_shared.py` for the CLI seam) so the rule "tenant prefix is derived from identity, never from a request field" is enforceable by `tests/test_identity.py` (no-drift gates #3 + #4 from identity-foundation):
 
 | Entry point | Seam | Single-operator default (Stage 0) |
 |---|---|---|
-| CLI (`new` / `resume` / `verify` / `reset` / `sweep`) | `presentation/cli/commands/_shared.py::init_services_cli` resolves `IdentityContext` from `args.tenant` (default `"default"`) before constructing `Stores`. | `IdentityContext(user_id=UserId("default"), tenant_id=TenantId("default"), issuer=None, claims={}, capabilities=frozenset())` — the existing `getattr(args, "tenant", "default")` path, made type-safe. |
-| FastAPI (`presentation/api/`) | New `presentation/api/deps.py::identity_context` dependency; OIDC middleware (Stage 1 / M12) populates it, auth-off mode returns the Stage-0 default. | Auth-off mode is the single-operator path; one branch, not a feature flag. |
+| CLI (`new` / `resume` / `verify` / `reset` / `sweep`) | `presentation/cli/commands/_shared.py::identity_from_args(args)` derives the `IdentityContext` from `args.tenant`; `init_services_cli(identity=…)` threads it into `init_services` and then `build_stores`. | `default_identity()` → `IdentityContext(user_id=UserId("default"), tenant_id=TenantId("default"), issuer=None, claims={}, capabilities=frozenset())`. |
+| FastAPI (`presentation/api/`) | `presentation/api/deps.py::resolve_identity` returns the Stage-0 default; `IdentityDep` / `build_stores_from_identity` / `StoreDep` chain it for routers. Stage-1 OIDC middleware replaces only `resolve_identity`. | Same `default_identity()` value; auth-off mode is one branch, not a feature flag. |
 | Background jobs (fork, sweep, sweep_restore) | Inherit from parent `Session.identity` — already populated; never re-resolved from disk. `application/sweep/sweep_runner.py`, `application/optimization/resume_and_fork/fork_siblings.py`. | Same `IdentityContext` flows through; no extra ceremony. |
 
 **Auth-off definition (Stage 0).** A single boolean at startup (`settings.AUTH_OFF`, default `True`). When set: the FastAPI dependency returns the Stage-0 `IdentityContext` default unconditionally and OIDC middleware is not mounted. The CLI is auth-off by definition (no request context). **If a reader of this spec can't convince themselves that today's `python -m promptpotter new aime` runs unchanged, the spec is wrong** — the only delta is internal types. Stage 1 (OIDC client) flips the default but does not rewrite this seam — same `IdentityContext`, different source.
@@ -84,22 +99,26 @@ On first upgrade: the on-disk layout is already `projects/{tenant}/` with `tenan
 
 | Concern | File |
 |---|---|
-| `TenantContext` (existing — collapses into `IdentityContext`) | `application/bootstrap/session.py:33` |
-| `TenantId` / `UserId` / `SafeName` (new) | `domain/tenant.py`, `domain/identity.py` (new) |
-| `IdentityContext` (new — supersedes `TenantContext`) | `application/bootstrap/session.py` |
-| `build_stores` rooting | `infrastructure/store/stores.py:106` |
-| Path-component validator | `infrastructure/store/base.py:16`, `infrastructure/store/paths.py:DEFAULT_TENANT_ID` |
-| CLI seam | `presentation/cli/commands/_shared.py::init_services_cli`, `presentation/cli/commands/new.py:118` |
-| API seam | `presentation/api/deps.py` (new `identity_context` dep), `presentation/api/routers/` (consumers) |
+| `IdentityContext` (shipped — supersedes deleted `TenantContext`) | `promptpotter/shared/identity.py` |
+| `TenantId` / `UserId` / `Issuer` / `SafeName` newtypes + `safe_name` (shipped) | `promptpotter/domain/identity.py` |
+| `Session.identity` field (shipped) | `promptpotter/application/bootstrap/session.py` |
+| `build_stores(identity, …)` rooting (shipped) | `promptpotter/infrastructure/store/stores.py` |
+| Path-component validator | `promptpotter/infrastructure/store/base.py::validate_path_component` (`safe_name` is the slug-strict superset for identity slugs) |
+| CLI seam (shipped) | `promptpotter/presentation/cli/commands/_shared.py::identity_from_args` + `init_services_cli(identity=…)` |
+| API seam (shipped) | `promptpotter/presentation/api/deps.py::resolve_identity` → `IdentityDep` → `build_stores_from_identity` → `StoreDep` (routers consume `StoreDep` unchanged) |
 | Background job inheritance | `application/sweep/sweep_runner.py`, `application/optimization/resume_and_fork/fork_siblings.py` |
 | Spend resolution | `shared/spend.py`, `shared/data/rates.json` |
-| Token emit site | `application/optimization/dispatch/llm_call/call.py:360` |
-| Token shape | `infrastructure/llm/models.py:51` |
-| Dashboard projection | `infrastructure/projections/live_dashboard/view.py` |
-| State aggregator | `infrastructure/projections/live_state/` |
-| Budget config | `application/config.py::OptimizationConfig` |
-| Stop reason | `domain/phases.py:61` (rename `MAX_SPEND` → `SPEND_BUDGET`) |
-| Budget probe + halt | `application/runner/entry.py:146` |
+| Token emit (optimizer) | `application/optimization/dispatch/llm_call/call.py` (kwargs `emit_token_usage(...)`) |
+| Token emit (backend) | `application/scoring/sample_measurement.py` (per-step over `step_tokens`, uncached only) |
+| Token emit helper + ContextVars | `infrastructure/llm/models.py` (`emit_token_usage`, `_CYCLE_LEDGER`, `_CURRENT_ROUND`, `set_cycle_ledger`, `set_current_round`) |
+| ContextVar lifecycle | `application/run_observers.py` (`build_run_observers` sets, `RunObservers.drain_all` resets) |
+| Token shape | `domain/run_records.py::TokenUsageRecord` |
+| Sole spend writer + halt accessor | `infrastructure/projections/live_dashboard/view.py::LiveDashboardView._handle_token_usage` + `LiveDashboardView.spend_total_used_usd` property |
+| Bucket shapes + resume backfill | `infrastructure/projections/live_state.py` (`empty_bucket`, `empty_spend`, `backfill_spend_rates`) |
+| Budget config | `application/config.py::OptimizationConfig.spend_budget_usd` |
+| Stop reason | `domain/phases.py::StopReason.SPEND_BUDGET` |
+| Budget probe + halt | `application/runner/entry.py` (`spend_probe=lambda: observers.dashboard.spend_total_used_usd`) |
+| CLI flag | `presentation/cli/parsers.py::_add_runtime_halts` (`--spend-budget`) |
 
 ## Cross-refs
 

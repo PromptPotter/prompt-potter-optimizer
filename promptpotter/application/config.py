@@ -74,6 +74,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "pobb_epsilon"): "policy",
     ("optimization", "improvement_significance"): "policy",
     ("optimization", "zero_signal_filter_enabled"): "policy",
+    ("optimization", "spend_budget_usd"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
     # OptimizerLLMConfig — provider/model swap changes the L1/L2/L3 candidate distribution → data.
@@ -161,6 +162,16 @@ class OptimizationConfig(BaseModel):
     )
 
     zero_signal_filter_enabled: bool = Field(False)
+
+    spend_budget_usd: float | None = Field(
+        None,
+        description=(
+            "Halt this cycle when cumulative spend (optimizer + backend) ≥ this "
+            "value in USD. CLI ``--spend-budget`` overrides the config value when "
+            "both are supplied. Tenant-wide enforcement is M12 / JobRegistry work; "
+            "this gate halts the current cycle at the next round boundary."
+        ),
+    )
 
     forbidden_axes_strict: bool = Field(
         True,

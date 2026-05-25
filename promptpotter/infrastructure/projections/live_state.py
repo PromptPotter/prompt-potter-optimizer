@@ -1,8 +1,11 @@
 """LiveStateCore + spend bookkeeping — shared accumulators for live subscribers.
 
 ``LiveDisplay`` and ``LiveDashboardView`` both subscribe to the same ledger;
-the overlap (round number, origin/best anchors, PoBB snapshot, backend/loop
-spend rollup) lives here. Surface-specific state stays on each class."""
+the overlap (round number, origin/best anchors, PoBB snapshot, spend
+bucket shapes + resume backfill) lives here. The per-record spend-bucket
+mutator lives on ``LiveDashboardView`` (the sole writer) — what stays
+here is the bucket *shape* + the resume-time rate backfill that runs once
+on construction."""
 
 from __future__ import annotations
 
@@ -10,16 +13,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.run_records import TokenUsageRecord
 from promptpotter.shared.spend import compute_usd
 
 __all__ = [
     "LiveStateCore",
-    "accumulate_backend_spend",
-    "add_to_spend_bucket",
     "apply_p_best_update",
     "apply_phase",
-    "apply_token_usage",
     "backfill_spend_rates",
     "empty_bucket",
     "empty_spend",
@@ -46,70 +45,6 @@ def empty_spend() -> dict[str, Any]:
         "total_used_usd": 0.0,
         "budget_usd": None,
     }
-
-
-def add_to_spend_bucket(
-    spend: dict[str, Any],
-    bucket: str,
-    in_tok: int,
-    out_tok: int,
-    model: str | None,
-    wire_cost_usd: float | None,
-) -> None:
-    """Single mutator for both buckets; recomputes the running total.
-    ``wire_cost_usd`` is the provider-reported USD (OpenRouter); when present it
-    short-circuits the rate table and matches the operator's invoice."""
-    b = spend.setdefault(bucket, empty_bucket())
-    b["input_tokens"] += in_tok
-    b["output_tokens"] += out_tok
-    if model and not b.get("model"):
-        b["model"] = model
-    usd = compute_usd(model, in_tok, out_tok, override_usd=wire_cost_usd)
-    if usd is not None:
-        b["used_usd"] = round(b["used_usd"] + usd, 6)
-        b["rate_known"] = True
-    spend["total_used_usd"] = round(
-        spend.get("backend", {}).get("used_usd", 0.0) + spend.get("loop", {}).get("used_usd", 0.0),
-        6,
-    )
-
-
-def accumulate_backend_spend(spend: dict[str, Any], pipeline_data: dict[str, Any]) -> None:
-    """Sum per-sample backend tokens into ``spend['backend']``.
-    Reads ``step_tokens`` + ``llm_provider``; per-step ``cost_usd`` short-circuits
-    the rate table. Unknown models still bump tokens (chip falls back to a
-    token-count, not a fake zero). Cached samples skip this call."""
-    step_tokens = pipeline_data.get("step_tokens") or {}
-    if not isinstance(step_tokens, dict):
-        return
-    in_tok = 0
-    out_tok = 0
-    wire_cost: float | None = None
-    for entry in step_tokens.values():
-        if not isinstance(entry, dict):
-            continue
-        in_tok += int(entry.get("input", 0) or 0)
-        out_tok += int(entry.get("output", 0) or 0)
-        step_cost = entry.get("cost_usd")
-        if step_cost is not None:
-            wire_cost = (wire_cost or 0.0) + float(step_cost)
-    if in_tok == 0 and out_tok == 0:
-        return
-    model = pipeline_data.get("llm_provider")
-    add_to_spend_bucket(spend, "backend", in_tok, out_tok, model, wire_cost)
-
-
-def apply_token_usage(spend: dict[str, Any], record: TokenUsageRecord) -> None:
-    """Optimizer call → ``spend['loop']``; backend-kind events → ``backend``."""
-    bucket = "loop" if record.kind == "optimizer" else "backend"
-    add_to_spend_bucket(
-        spend,
-        bucket,
-        int(record.input_tokens),
-        int(record.output_tokens),
-        record.model,
-        record.cost_usd,
-    )
 
 
 def backfill_spend_rates(spend: dict[str, Any]) -> dict[str, Any]:

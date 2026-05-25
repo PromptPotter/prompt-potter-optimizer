@@ -13,11 +13,21 @@ typed event constructor over `CycleEventLog.append`. Orchestration uses
 `RunCallbacks`; the ledger is the only thing that touches disk for the
 campaign event stream.
 
+Per-call telemetry that fires from deep inside the dispatch chain (today:
+`TokenUsageRecord` from both the optimizer LLM-call site and the backend
+per-step site in `application/scoring/sample_measurement.py`) uses the
+`emit_*` shape instead of `RunCallbacks`: a kwargs-only helper in
+`infrastructure/llm/models.py` reads the active ledger from a per-cycle
+`ContextVar` (`_CYCLE_LEDGER`, set by `build_run_observers`, reset by
+`drain_all`) and appends a typed `*Record`. Same canonical ledger, no
+process global, no sink-installation indirection. New per-call surfaces
+follow the same pattern.
+
 **Two newtype-guarded projections** under `projections/`:
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardView` | session-family root cycle | `dashboard.json`, `output.log` | **Display surface** — origin + completed-round summaries (`dash.rounds[]`) + in-flight `current_round` block. Sole webapp source for the chart, lineage tree, trend sparkline. |
+| `LiveDashboardView` | session-family root cycle | `dashboard.json`, `output.log` | **Display surface** — origin + completed-round summaries (`dash.rounds[]`) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
 | `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
 | `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
@@ -54,12 +64,16 @@ admissibility checks.
 
 ## Stores — composite over leaves
 
-`store/stores.py`: `Stores` frozen dataclass + `build_stores(base_dir)`
-builder. Composite over focused leaf stores (`BackendStore`,
-`CampaignStore` (`store/campaign_store/`), `DatasetRunStore`, `PlanStore`,
-`SessionStore`). Shared
-I/O + `EntityStore` in `store/base.py`. Path helpers in `store/paths.py`;
-the `CycleDir` / `SessionFamilyDir` write-target newtypes in
+`store/stores.py`: `Stores` frozen dataclass + `build_stores(identity,
+*, projects_root=…, datasets_root=…)` builder. `identity` is the
+Stage-0 `IdentityContext` (`shared/identity.py`); `Stores.identity` is
+the sole source of tenant scope, with `Stores.tenant_id` a derived
+`@property` returning the `TenantId` newtype (identity-foundation
+no-drift gate #4 — never an independent field). Composite over focused
+leaf stores (`BackendStore`, `CampaignStore` (`store/campaign_store/`),
+`DatasetRunStore`, `PlanStore`, `SessionStore`). Shared I/O +
+`EntityStore` in `store/base.py`. Path helpers in `store/paths.py`; the
+`CycleDir` / `SessionFamilyDir` write-target newtypes in
 `domain/cycle_paths.py` — projections and stores accept these newtypes,
 not raw `str`/`Path`. `archive/` is cross-cycle/session/tenant;
 `MeasurementArchive` is the DB core.
