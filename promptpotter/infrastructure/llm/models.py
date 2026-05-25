@@ -1,19 +1,26 @@
 """Data types crossing the LLM client boundary.
 
 - ``LLMResponse`` — standardized response every client returns.
-- ``TokenUsage`` + emission sink — runner installs a sink so optimizer events reach
-  the ledger via ``RunCallbacks.on_token_usage``."""
+- ``emit_token_usage`` — single emission path. Builds ``TokenUsageRecord`` and
+  appends it to the active cycle ledger read from a ContextVar. The runner
+  installs the ledger via ``set_cycle_ledger`` at cycle start and clears it
+  on ``drain_all``; concurrent cycles (M12+) get task-local isolation for
+  free. No process global, no wrapper dataclass — call site to ledger in
+  one hop."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Literal
+from contextvars import ContextVar, Token
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
 from promptpotter.config.settings import settings
+from promptpotter.domain.run_records import TokenUsageRecord
+
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 
@@ -48,61 +55,81 @@ class LLMResponse(BaseModel):
     )
 
 
-@dataclass(frozen=True)
-class TokenUsage:
-    """Per-call LLM token record.
-
-    ``model`` = provider-reported model id (``response.model``) so cost resolution
-    rate-tables it without re-deriving the call site's config. ``cost_usd``
-    populated when the provider ships USD on the wire (today: OpenRouter);
-    ``None`` ⇒ rate-table path runs.
-
-    ``kind="optimizer"`` (meta-prompt) vs ``"backend"`` (in-pipeline) — sinks
-    threshold separately."""
-
-    node: str
-    kind: Literal["optimizer", "backend"]
-    input_tokens: int
-    output_tokens: int
-    duration_s: float
-    model: str | None = None
-    cost_usd: float | None = None
-
-    @property
-    def total_tokens(self) -> int:
-        return self.input_tokens + self.output_tokens
+_CYCLE_LEDGER: ContextVar[CycleEventLog | None] = ContextVar("cycle_ledger", default=None)
+_CURRENT_ROUND: ContextVar[int | None] = ContextVar("current_round", default=None)
 
 
-# Module-level sink installed by the runner; default no-op. ``llm_call.py``
-# imports the function, not the slot, so mid-run re-binding is safe.
-_token_usage_sink: Callable[[TokenUsage], None] | None = None
+def set_cycle_ledger(ledger: CycleEventLog | None) -> Token[CycleEventLog | None]:
+    """Bind the cycle ledger ``emit_token_usage`` appends to.
+
+    Returns the reset ``Token``; ``drain_all`` pairs it with ``reset_cycle_ledger``."""
+    return _CYCLE_LEDGER.set(ledger)
 
 
-def set_token_usage_sink(sink: Callable[[TokenUsage], None] | None) -> None:
-    """Install (or clear) the sink for ``emit_token_usage``; additive (overflow-warning always runs)."""
-    global _token_usage_sink
-    _token_usage_sink = sink
+def reset_cycle_ledger(token: Token[CycleEventLog | None]) -> None:
+    _CYCLE_LEDGER.reset(token)
 
 
-def emit_token_usage(usage: TokenUsage) -> None:
-    """Warn on overlong optimizer prompts and forward to the active sink."""
-    if usage.kind == "optimizer":
+def set_current_round(round_num: int | None) -> Token[int | None]:
+    """Bind the round number stamped onto each ``TokenUsageRecord``."""
+    return _CURRENT_ROUND.set(round_num)
+
+
+def reset_current_round(token: Token[int | None]) -> None:
+    _CURRENT_ROUND.reset(token)
+
+
+def emit_token_usage(
+    *,
+    node: str,
+    kind: Literal["optimizer", "backend"],
+    input_tokens: int,
+    output_tokens: int,
+    duration_s: float,
+    model: str | None = None,
+    cost_usd: float | None = None,
+) -> None:
+    """Build ``TokenUsageRecord`` and append it to the active cycle ledger.
+
+    Reads ledger + round from ContextVars (per-asyncio-task isolation —
+    concurrent cycles for M12+ just work). Overlong-prompt warning fires
+    on the optimizer kind only, regardless of ledger presence (kept here
+    because it's a real signal about meta-prompt drift)."""
+    if kind == "optimizer":
         threshold = settings.OPTIMIZER_PROMPT_WARN_TOKENS
-        if usage.input_tokens > threshold:
+        if input_tokens > threshold:
             logger.warning(
                 "optimizer node %r prompt at %d tokens (threshold=%d) — tune the "
                 "template or drop context; large meta-prompts reduce signal-to-noise "
                 "for the optimizer LLM and risk provider TPM caps",
-                usage.node,
-                usage.input_tokens,
+                node,
+                input_tokens,
                 threshold,
             )
-    sink = _token_usage_sink
-    if sink is not None:
-        try:
-            sink(usage)
-        except Exception:
-            logger.exception("token_usage sink raised; suppressing")
+    ledger = _CYCLE_LEDGER.get()
+    if ledger is None:
+        return
+    record = TokenUsageRecord(
+        kind=kind,
+        node=node,
+        model=model,
+        input_tokens=int(input_tokens),
+        output_tokens=int(output_tokens),
+        duration_s=float(duration_s),
+        cost_usd=cost_usd,
+        round=_CURRENT_ROUND.get(),
+    )
+    try:
+        ledger.append(record)
+    except Exception:
+        logger.exception("emit_token_usage append failed")
 
 
-__all__ = ["LLMResponse", "TokenUsage", "emit_token_usage", "set_token_usage_sink"]
+__all__ = [
+    "LLMResponse",
+    "emit_token_usage",
+    "reset_current_round",
+    "reset_cycle_ledger",
+    "set_current_round",
+    "set_cycle_ledger",
+]

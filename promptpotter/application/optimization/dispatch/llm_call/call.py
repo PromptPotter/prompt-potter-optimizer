@@ -39,7 +39,6 @@ from promptpotter.infrastructure.llm import (
     MAX_429_ATTEMPTS,
     LLMClientBase,
     LLMResponse,
-    TokenUsage,
     diagnose_rate_limit_scope,
     emit_token_usage,
     extract_parsed_json,
@@ -359,15 +358,13 @@ async def llm_call(
         # projection rate-tables the tokens.
         cost_raw = response.usage.get("cost") or response.usage.get("total_cost")
         emit_token_usage(
-            TokenUsage(
-                node=node or "llm_call",
-                kind="optimizer",
-                input_tokens=response.usage.get("prompt_tokens", 0),
-                output_tokens=response.usage.get("completion_tokens", 0),
-                duration_s=duration_s,
-                model=response.model,
-                cost_usd=float(cost_raw) if cost_raw is not None else None,
-            )
+            node=node or "llm_call",
+            kind="optimizer",
+            input_tokens=response.usage.get("prompt_tokens", 0),
+            output_tokens=response.usage.get("completion_tokens", 0),
+            duration_s=duration_s,
+            model=response.model,
+            cost_usd=float(cost_raw) if cost_raw is not None else None,
         )
 
         if context.cache is not None and cache_key is not None:

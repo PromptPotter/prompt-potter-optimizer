@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from contextvars import Token
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -16,9 +17,14 @@ from promptpotter.application.origin import (
     load_origin_prompt,
 )
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord, TokenUsageRecord
+from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm import TokenUsage
+from promptpotter.infrastructure.llm import (
+    reset_current_round,
+    reset_cycle_ledger,
+    set_current_round,
+    set_cycle_ledger,
+)
 from promptpotter.infrastructure.projections import (
     AuditTrailView,
     LiveDashboardView,
@@ -47,11 +53,17 @@ class RunCallbacks:
     Ledger required at construction (no deferred binding). PhaseRecord-view ctx
     is owned here (``from_phase_event`` is stateful) and serialised onto
     ``PhaseRecord.payload['view']``.
+
+    ``_round_token`` is the reset handle for the ``_CURRENT_ROUND`` ContextVar
+    that ``emit_token_usage`` reads — set on every ``set_round`` call so the
+    next emission stamps the correct round; reset on ``drain_all`` so the
+    process doesn't leak round state into the next cycle.
     """
 
     ledger: CycleEventLog
     _phase_ctx: ViewContext = field(default_factory=ViewContext)
     _current_round: int = 0
+    _round_token: Token[int | None] | None = field(default=None, init=False, repr=False)
 
     def _emit(self, record: Any) -> None:
         with graceful("ledger append failed"):
@@ -206,39 +218,50 @@ class RunCallbacks:
         )
 
     def set_round(self, round_num: int) -> None:
-        self._current_round = round_num
+        """Update the current-round marker stamped onto every subsequent
+        ``TokenUsageRecord`` via the ``_CURRENT_ROUND`` ContextVar.
 
-    def on_token_usage(self, usage: TokenUsage) -> None:
-        """Forward ``emit_token_usage`` → ``TokenUsageRecord``; dashboard sums into ``spend.loop``. Installed via ``set_token_usage_sink`` by the runner."""
-        self._emit(
-            TokenUsageRecord(
-                kind=usage.kind,
-                node=usage.node,
-                model=usage.model,
-                input_tokens=int(usage.input_tokens),
-                output_tokens=int(usage.output_tokens),
-                duration_s=float(usage.duration_s),
-                cost_usd=usage.cost_usd,
-                round=self._current_round,
-            )
-        )
+        We always ``set`` a fresh value rather than re-using the prior token —
+        the reset hand-off lives on ``drain_all`` (one reset per cycle), not
+        per-round. The previous reset token is dropped on the floor on
+        purpose: only the first ``set`` carries a meaningful default-restore
+        token, and that's the one ``drain_all`` keeps."""
+        self._current_round = round_num
+        token = set_current_round(round_num)
+        if self._round_token is None:
+            self._round_token = token
 
 
 @dataclass(frozen=True)
 class RunObservers:
-    """Frozen bundle: callbacks + projections + display, all bound to one ledger."""
+    """Frozen bundle: callbacks + projections + display, all bound to one ledger.
+
+    ``_ledger_token`` is the reset handle for the ``_CYCLE_LEDGER`` ContextVar
+    that ``emit_token_usage`` reads — set on construction so the next emission
+    finds the ledger; reset on ``drain_all`` so the process doesn't leak ledger
+    state into the next cycle (or into background tasks holding stale refs).
+    """
 
     callbacks: RunCallbacks
     audit: AuditTrailView
     dashboard: LiveDashboardView
     pobb: PoBBStreamView
     display: LiveDisplay | None
+    _ledger_token: Token[CycleEventLog | None] | None = None
 
     def drain_all(self) -> None:
-        """``drain()`` every projection; called by ``_finalize_run`` so the audit cache reflects the ledger even on interrupt."""
+        """``drain()`` every projection + reset both emission ContextVars; called
+        by ``_finalize_run`` on every stop reason so the audit cache reflects
+        the ledger even on interrupt and no stale ledger ref survives the
+        cycle."""
         self.audit.drain()
         self.dashboard.drain()
         self.pobb.drain()
+        if self._ledger_token is not None:
+            reset_cycle_ledger(self._ledger_token)
+        if self.callbacks._round_token is not None:
+            reset_current_round(self.callbacks._round_token)
+            self.callbacks._round_token = None
 
 
 @dataclass(frozen=True)
@@ -348,10 +371,10 @@ def build_run_observers(
     session.state.ledger = ledger
 
     callbacks = RunCallbacks(ledger=ledger)
-    # Sink is process-global; a subsequent build_run_observers call replaces it cleanly.
-    from promptpotter.infrastructure.llm import set_token_usage_sink
-
-    set_token_usage_sink(callbacks.on_token_usage)
+    # Bind the ledger into the per-asyncio-task ContextVar so emit_token_usage
+    # finds it without a process-global sink. Token rides on RunObservers so
+    # drain_all can restore the prior context on teardown.
+    ledger_token = set_cycle_ledger(ledger)
 
     return RunObservers(
         callbacks=callbacks,
@@ -359,4 +382,5 @@ def build_run_observers(
         dashboard=dashboard,
         pobb=pobb,
         display=display,
+        _ledger_token=ledger_token,
     )

@@ -25,9 +25,11 @@ from promptpotter.infrastructure.llm.json_parse import (
 )
 from promptpotter.infrastructure.llm.models import (
     LLMResponse,
-    TokenUsage,
     emit_token_usage,
-    set_token_usage_sink,
+    reset_current_round,
+    reset_cycle_ledger,
+    set_current_round,
+    set_cycle_ledger,
 )
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 from promptpotter.infrastructure.llm.rate_limit import (
@@ -52,14 +54,16 @@ __all__ = [
     "ProviderSpec",
     "RateLimitReservation",
     "RateLimiter",
-    "TokenUsage",
     "diagnose_rate_limit_scope",
     "emit_token_usage",
     "estimate_tokens",
     "extract_parsed_json",
     "get_llm_client",
     "parse_retry_after",
-    "set_token_usage_sink",
+    "reset_current_round",
+    "reset_cycle_ledger",
+    "set_current_round",
+    "set_cycle_ledger",
     "try_parse_json",
     "wait_with_countdown",
 ]
