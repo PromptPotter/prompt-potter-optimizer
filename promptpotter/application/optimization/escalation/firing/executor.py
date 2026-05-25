@@ -1,11 +1,11 @@
-"""L2/L3 transition runner + `escalate_l2` cascade.
+"""L2/L3 transition runner + `escalate_l2` cascade + per-layer parse/apply.
 
 V1 contract:
 * L2 writes `task_context` + `action` + optional `axis_targeted` / `l1_layout` / `l1_overrides`.
 * L3 writes `plan` (required) + optional `note` (sticky L3→L2; wholesale-replaced on each L3 fire).
 
-`LayerStrategy` spec lives in `optimization/transitions.py`; L2/L3 instances + their
-parse/apply/enter/exit in `.l2_driver` / `.l3_driver`.
+`LayerStrategy` spec lives in `optimization/transitions.py`; the L2/L3 instances + their
+parse/apply/enter/exit are the module-level constants `L2` and `L3` below.
 """
 
 from __future__ import annotations
@@ -23,20 +23,23 @@ from promptpotter.application.optimization.dispatch.llm_call import (
     load_optimizer_prompt,
     run_optimizer_node,
 )
-from promptpotter.application.optimization.escalation.firing.l2_driver import L2
-from promptpotter.application.optimization.escalation.firing.l3_driver import L3
+from promptpotter.application.optimization.dispatch.schemas import L2ContextOutput, L3PlanOutput
 from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.resume_and_fork import (
     ResumeCheckpointKind,
     record_decision,
 )
-from promptpotter.application.optimization.transitions import LayerStrategy
-from promptpotter.domain.l1_layout import coerce_l1_layout, validate_l1_layout
+from promptpotter.application.optimization.transitions import LayerStrategy, TransitionResult
+from promptpotter.application.optimization.validators.l2_output import run_l2_output_validators
+from promptpotter.application.optimization.validators.l3_output import run_l3_output_validators
+from promptpotter.domain.l1_layout import L1Layout, coerce_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.phases import PhaseEvent, StopReason, emit_phase
+from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopReason, emit_phase
 from promptpotter.domain.run_records import ForkPayload
+from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
+from promptpotter.shared import truncate
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -45,6 +48,231 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# L2 — parse + apply + enter/exit payloads + strategy constant.
+# L2 refines task_context (broadcast framing) + optionally edits l1_layout / l1_overrides.
+# No pipeline_params deltas — those belong to L1.
+# ---------------------------------------------------------------------------
+
+
+def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
+    rationale = raw.rationale or "L2 refine_strategy transition"
+    changes: dict[str, Any] = {"changes_description": f"L2: {truncate(rationale, 80)}"}
+    if raw.l1_overrides:
+        changes["l1_overrides"] = {**opt_sp.memory.l1_overrides, **raw.l1_overrides}
+
+    new_task_context = None
+    proposed_tc = raw.task_context if raw.task_context else None
+    if proposed_tc:
+        merged = opt_sp.memory.task_context.merge(proposed_tc)
+        if merged.to_dict() != opt_sp.memory.task_context.to_dict():
+            new_task_context = merged
+
+    proposed_layout = coerce_l1_layout(raw.l1_layout)
+    layout_outcomes: list[ValidatorOutcome] = []
+    accepted_layout: L1Layout | None = None
+    if proposed_layout is not None:
+        layout_result = validate_l1_layout(proposed_layout, prior_layout=opt_sp.memory.l1_layout)
+        layout_outcomes = list(layout_result.outcomes)
+        if layout_result.is_valid:
+            accepted_layout = proposed_layout
+
+    # Supplemental rules + situational examples: full-replace; non-empty ⇒ replace L2-authored layer; empty ⇒ keep current.
+    new_supplemental = list(raw.l1_supplemental_rules) if raw.l1_supplemental_rules else None
+    new_examples = list(raw.l1_situational_examples) if raw.l1_situational_examples else None
+
+    failures = run_l2_output_validators(
+        {
+            "task_context_proposed": proposed_tc,
+            "task_context_applied": new_task_context,
+            "l1_supplemental_rules_proposed": new_supplemental,
+            "l1_situational_examples_proposed": new_examples,
+        },
+        opt_sp,
+    )
+    failures.extend(layout_outcomes)
+    if failures:
+        logger.warning(
+            "L2 output failed %d validator(s): %s",
+            len(failures),
+            ", ".join(o.validator_id for o in failures),
+        )
+
+    return TransitionResult(
+        opt_search_point=opt_sp.mutate(source="l2_context", **changes),
+        task_context=new_task_context,
+        action=raw.action,
+        axis_targeted=raw.axis_targeted,
+        l1_layout=accepted_layout,
+        l1_supplemental_rules=new_supplemental,
+        l1_situational_examples=new_examples,
+        l2_guard_breaches=failures,
+        debug_prompt=prompt,
+        debug_response=raw.model_dump(),
+    )
+
+
+def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
+    osp = cycle.opt_sp
+    if result.task_context:
+        osp.memory.task_context = result.task_context
+    if result.l1_layout is not None:
+        osp.memory.l1_layout = result.l1_layout
+    if result.l1_supplemental_rules is not None:
+        osp.memory.l1_supplemental_rules = result.l1_supplemental_rules
+    if result.l1_situational_examples is not None:
+        osp.memory.l1_situational_examples = result.l1_situational_examples
+    osp.memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
+    cycle.escalation.record_l2_fired(
+        best_accuracy=cycle.tracking.best_accuracy,
+        best_composite_fitness=cycle.tracking.best_composite_fitness,
+    )
+    # Don't clobber prior axis when LLM omits it — stale axis beats empty for the next probe-outcome render.
+    if result.axis_targeted:
+        cycle.last_l2_axis = result.axis_targeted
+
+    is_probe = result.action == "probe_round"
+    record_decision(
+        cycle.pending_decisions,
+        ResumeCheckpointKind.PROBE_ROUND_COMMITMENT,
+        {"round_num": round_num, "l2_round": cycle.escalation.l2_round},
+        is_probe,
+        data={
+            "action": result.action,
+            "task_context_changed": result.task_context is not None,
+            "changes_description": result.opt_search_point.lineage.changes_description or "",
+            "axis_targeted": result.axis_targeted,
+        },
+        round=round_num,
+    )
+    if is_probe:
+        cycle.probe_next_round = True
+
+
+def _l2_enter(cycle: Cycle) -> dict[str, Any]:
+    return {
+        "l2_round": cycle.escalation.l2_round,
+        "l1_stall_count": cycle.escalation.l1_stall_count,
+        "l1_overrides": cycle.opt_sp.memory.l1_overrides,
+        "current_accuracy": cycle.tracking.current_accuracy,
+        "best_accuracy": cycle.tracking.best_accuracy,
+    }
+
+
+def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
+    # ``l2_*_at_entry`` are read by ``EscalationFSM.fold`` on resume (canonical post-fire L2 state from ``record_l2_fired``).
+    return {
+        "l2_round": cycle.escalation.l2_round,
+        "l2_stall_count": cycle.escalation.l2_stall_count,
+        "l2_best_accuracy_at_entry": cycle.escalation.l2_best_accuracy_at_entry,
+        "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
+        "param_changes_count": len(result.opt_search_point.memory.l1_overrides),
+        "task_context_changed": result.task_context is not None,
+        "l1_layout_changed": result.l1_layout is not None,
+        "l1_supplemental_rules_n": (
+            len(result.l1_supplemental_rules) if result.l1_supplemental_rules is not None else None
+        ),
+        "l1_situational_examples_n": (
+            len(result.l1_situational_examples)
+            if result.l1_situational_examples is not None
+            else None
+        ),
+        "changes_description": result.opt_search_point.lineage.changes_description or "",
+        "action": result.action,
+        "axis_targeted": result.axis_targeted,
+        "warned_samples": len(cycle.warned_queries),
+        "l2_prompt": result.debug_prompt,
+        "l2_response": result.debug_response,
+    }
+
+
+L2 = LayerStrategy(
+    layer_id="L2",
+    template_name="l2_context",
+    default_temperature=0.3,
+    phase=CampaignPhase.REFINE_STRATEGY,
+    parse=_parse_l2,
+    apply=_apply_l2,
+    enter_payload_fn=_l2_enter,
+    exit_payload_fn=_l2_exit,
+)
+
+
+# ---------------------------------------------------------------------------
+# L3 — parse + apply + enter/exit payloads + strategy constant.
+# L3 rewrites ``plan`` (strategic frame). Optional ``note`` is the sticky L3→L2 pointer
+# (survives L2 fires, replaced wholesale on each L3 fire). No ``pipeline_params`` deltas.
+# ---------------------------------------------------------------------------
+
+
+def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
+    new_plan = raw.plan or opt_sp.plan
+    rationale = raw.rationale or "L3 modify_plan transition"
+    failures = run_l3_output_validators({"plan": new_plan}, opt_sp)
+    if failures:
+        logger.warning(
+            "L3 output failed %d validator(s): %s",
+            len(failures),
+            ", ".join(o.validator_id for o in failures),
+        )
+    return TransitionResult(
+        opt_search_point=opt_sp.mutate(
+            plan=new_plan, changes_description=f"L3: {truncate(rationale, 80)}", source="l3_plan"
+        ),
+        l3_note=raw.note,
+        l3_guard_breaches=failures,
+        fork_proposal=raw.fork_proposal,
+        debug_prompt=prompt,
+        debug_response=raw.model_dump(),
+    )
+
+
+def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
+    # Order matters: ``_run_transition``'s ``copy_memory_to`` carried prior l3_note onto the new OSP;
+    # overwrite with L3's output (may be ``""``) — the "cleared only when L3 fires again" contract.
+    cycle.opt_sp.memory.wounds.l3_note = result.l3_note
+    cycle.opt_sp.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
+    cycle.escalation.record_l3_fired(
+        best_accuracy=cycle.tracking.best_accuracy,
+        best_composite_fitness=cycle.tracking.best_composite_fitness,
+    )
+
+
+def _l3_enter(cycle: Cycle) -> dict[str, Any]:
+    return {
+        "l3_round": cycle.escalation.l3_round,
+        "l2_stall_count": cycle.escalation.l2_stall_count,
+        "current_plan_preview": str(cycle.opt_sp.plan)[:120],
+    }
+
+
+def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
+    # ``l3_*_at_entry`` read by ``EscalationFSM.fold`` on resume; ``record_l3_fired`` resets L2 state to these.
+    payload: dict[str, Any] = {
+        "l3_round": cycle.escalation.l3_round,
+        "l3_stall_count": cycle.escalation.l3_stall_count,
+        "l3_best_accuracy_at_entry": cycle.escalation.l3_best_accuracy_at_entry,
+        "l3_best_composite_fitness_at_entry": cycle.escalation.l3_best_composite_fitness_at_entry,
+        "new_plan_preview": str(result.opt_search_point.plan)[:120],
+        "changes_description": result.opt_search_point.lineage.changes_description or "",
+    }
+    if result.fork_proposal is not None:
+        payload["fork_proposal"] = result.fork_proposal.model_dump()
+    return payload
+
+
+L3 = LayerStrategy(
+    layer_id="L3",
+    template_name="l3_plan",
+    default_temperature=0.5,
+    phase=CampaignPhase.MODIFY_PLAN,
+    parse=_parse_l3,
+    apply=_apply_l3,
+    enter_payload_fn=_l3_enter,
+    exit_payload_fn=_l3_exit,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +510,12 @@ async def escalate_l2(
 
 
 __all__ = [
+    "L2",
+    "L3",
+    "_apply_l2",
+    "_apply_l3",
+    "_parse_l2",
+    "_parse_l3",
     "apply_fork_payload_to_osp",
     "escalate_l2",
 ]

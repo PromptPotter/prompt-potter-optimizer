@@ -2,22 +2,22 @@
 
 import { API, jget } from "./client";
 import type {
-  ActiveSession,
+  ActiveSessionResponse,
   CampaignDetail,
   CampaignLineageResponse,
   CampaignListResponse,
   CyclesResponse,
-  DatasetPreview,
+  DatasetPreviewResponse,
   DiagnosticRunListResponse,
-  FileResponse,
-  FilesListing,
+  FileContentResponse,
+  FilesResponse,
   HardSamplesScope,
   LeverageResponse,
   MeasurementSeriesResponse,
 } from "./types";
 
-export function fetchActive(signal?: AbortSignal): Promise<ActiveSession> {
-  return jget<ActiveSession>(`${API}/active`, signal);
+export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse> {
+  return jget<ActiveSessionResponse>(`${API}/active`, signal);
 }
 
 export function fetchPipeline(signal?: AbortSignal): Promise<unknown> {
@@ -43,20 +43,20 @@ export function fetchCycleFile(
   scope: string,
   path: string,
   signal?: AbortSignal,
-): Promise<FileResponse> {
+): Promise<FileContentResponse> {
   const url =
     `${API}/campaigns/${encodeURIComponent(campaignId)}` +
     `/cycles/${encodeURIComponent(cycleId)}/file` +
     `?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`;
-  return jget<FileResponse>(url, signal);
+  return jget<FileContentResponse>(url, signal);
 }
 
 export function fetchFiles(
   campaignId: string,
   cycleId: string,
   signal?: AbortSignal,
-): Promise<FilesListing> {
-  return jget<FilesListing>(
+): Promise<FilesResponse> {
+  return jget<FilesResponse>(
     `${API}/campaigns/${encodeURIComponent(campaignId)}` +
       `/cycles/${encodeURIComponent(cycleId)}/files`,
     signal,
@@ -70,13 +70,13 @@ export function fetchDatasetPreview(
   scope: HardSamplesScope = "dataset",
   campaignId?: string,
   cycleId?: string,
-): Promise<DatasetPreview> {
+): Promise<DatasetPreviewResponse> {
   const params = new URLSearchParams({ limit: String(limit), scope });
   if ((scope === "campaign" || scope === "cycle") && campaignId) {
     params.set("campaign_id", campaignId);
   }
   if (scope === "cycle" && cycleId) params.set("cycle_id", cycleId);
-  return jget<DatasetPreview>(
+  return jget<DatasetPreviewResponse>(
     `${API}/datasets/${encodeURIComponent(name)}/preview?${params.toString()}`,
     signal,
   );

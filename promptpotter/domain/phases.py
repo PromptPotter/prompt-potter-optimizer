@@ -41,9 +41,6 @@ class StopReason(enum.StrEnum):
     - ``RENDER_ERROR`` — an injection renderer raised (usually code drift on
       a renamed field). Failing injection + traceback in ``index.json::final``.
       Fix the renderer and ``resume``.
-    - ``PROMPT_BUDGET`` — composed prompt still over
-      ``OPTIMIZER_PROMPT_CHAR_BUDGET`` after shedding every OPTIONAL + CORE
-      injection. Compact parent prompt / trim meta-prompt, then ``resume``.
     - ``OPTIMIZER_TIMEOUT`` — optimizer LLM blew its wall-clock twice (provider
       stalled mid-stream, see ``llm_call._chat_under_deadline``); plain ``resume``.
 
@@ -63,7 +60,6 @@ class StopReason(enum.StrEnum):
     TARGET_HIT = "target_hit"
     MAX_SPEND = "max_spend"
     RENDER_ERROR = "render_error"
-    PROMPT_BUDGET = "prompt_budget_exceeded"
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
 
 

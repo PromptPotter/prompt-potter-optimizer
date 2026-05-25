@@ -86,9 +86,7 @@ OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 # Set just above the real l1_generate floor: the distilled static body is
 # ~3k, but the injected half (rendered_prompt + diagnostics + axis_memory +
 # critique + …) carries a mid-campaign round to ~7.9k. 8,000 keeps healthy
-# rounds quiet and flags only genuine bloat. Distinct from the dispatch-hub
-# allocator's hard ``OPTIMIZER_PROMPT_CHAR_BUDGET`` — this only warns, it
-# never sheds.
+# rounds quiet and flags only genuine bloat.
 OPTIMIZER_PROMPT_WARN_CHARS: int = 8_000
 
 # PoBB elimination — default posterior-of-being-best threshold ε. A

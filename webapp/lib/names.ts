@@ -2,12 +2,12 @@
 //
 // Every surface that shows a human-readable campaign or unit name resolves it
 // here, so adding an operator rename feature is a one-field change:
-//   - campaign rename writes `Campaign.label` (already wired end-to-end) —
+//   - campaign rename writes `CampaignSummary.label` (already wired end-to-end) —
 //     `campaignDisplayName` already prefers it;
 //   - session rename will add an optional per-session label override consumed
 //     by `unitDisplayName`. No session-label field exists yet.
 
-import type { Campaign, CycleListEntry, UnitKind } from "./api";
+import type { CampaignSummary, CycleListEntry, UnitKind } from "./api";
 import { sessionIndexOf, shortFamilyTail } from "./ids";
 
 // Operator-facing unit-kind labels — the time-horizon taxonomy. A session
@@ -21,7 +21,7 @@ export const UNIT_KIND_LABEL: Record<UnitKind, string> = {
 
 // Campaign row name — the operator label when set, else the dataset name
 // (the campaign IS "the {dataset} experiment"), else the raw id.
-export function campaignDisplayName(c: Campaign): string {
+export function campaignDisplayName(c: CampaignSummary): string {
   return c.label || c.dataset_name || c.campaign_id;
 }
 

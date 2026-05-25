@@ -14,8 +14,8 @@ import {
 } from "react";
 import { fetchDashboard } from "./api";
 import type {
-  DashboardOrigin,
-  DashboardRoundSummary,
+  OriginSummary,
+  RoundSummary,
 } from "./api/types";
 import { rootCycleId } from "./ids";
 import { usePoll } from "./usePoll";
@@ -52,11 +52,11 @@ export interface DashboardSnapshot {
   };
   // Origin row — accuracy + sample count behind C0. Replaces the prior
   // pair of top-level `origin_accuracy` / `origin_samples` scalars.
-  origin?: DashboardOrigin;
+  origin?: OriginSummary;
   // Completed-round display summaries; sole source of truth for the
   // FitnessChart, TrendChart, TopStrip sparkline, and LineageTree.
   // Sorted ascending by `round`; empty until the first round closes.
-  rounds?: DashboardRoundSummary[];
+  rounds?: RoundSummary[];
   evaluators?: unknown[];
   scoring?: unknown;
   // Set on ``sample_started``, cleared on ``sample_scored``. The dataset

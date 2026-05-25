@@ -2,7 +2,7 @@
 // the collapsed-node persistence codec. Pure — no React; the Sidebar tree-row
 // components own the rendering.
 
-import type { Campaign, CycleListEntry } from "@/lib/api";
+import type { CampaignSummary, CycleListEntry } from "@/lib/api";
 import { rootCycleId, sessionIndexOf } from "@/lib/ids";
 
 // One session in a campaign's forest: its root cycle + every fork / diag /
@@ -16,7 +16,7 @@ export interface SessionGroup {
 
 // One campaign's row in the tree: the manifest + its N sessions.
 export interface CampaignGroup {
-  campaign: Campaign;
+  campaign: CampaignSummary;
   sessions: SessionGroup[];
   // Most-recent updated_at across every session — sorts campaigns so the
   // one being actively worked on stays at the top.
@@ -68,7 +68,7 @@ export function buildUnitTree(
 // campaign isn't in the campaign list is dropped — the registry is the
 // source of truth for what's a campaign.
 export function groupCampaigns(
-  campaigns: Campaign[],
+  campaigns: CampaignSummary[],
   cycles: CycleListEntry[],
 ): CampaignGroup[] {
   const cyclesByCampaign = new Map<string, CycleListEntry[]>();

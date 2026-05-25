@@ -18,7 +18,6 @@ from promptpotter.domain.escalation_signals import EscalationSignal, EscalationT
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.statistics import (
     paired_better_probabilities,
-    paired_diff_ci_overlaps_zero,
     paired_diff_posterior,
     pobb_should_stop,
 )
@@ -330,10 +329,6 @@ class PoBBCheck:
             )
 
         if not pobb_should_stop(p_best_current, self.epsilon):
-            return None
-
-        # Separability floor: block elimination while paired-diff CI vs hardest crosses zero.
-        if paired_diff_ci_overlaps_zero(scores, paired_priors[hardest_prior_id], alpha=0.05):
             return None
 
         return _eliminate(

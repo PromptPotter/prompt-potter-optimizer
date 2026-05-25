@@ -11,7 +11,7 @@ import {
   type DashboardSnapshot,
   type LiveCandidate,
 } from "@/lib/poll";
-import type { DashboardRoundSummary } from "@/lib/api/types";
+import type { RoundSummary } from "@/lib/api/types";
 import { useSelection } from "@/components/dashboard/SelectionContext";
 import { correctedFromEvaluators } from "./fitness-bars";
 import { WhatIfGrid } from "./WhatIfGrid";
@@ -61,7 +61,7 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
   // of truth for historical bars. The projection accumulates these at
   // `round:display` so the chart never has to stitch live + finalized
   // round-file fetches.
-  const history: DashboardRoundSummary[] = useMemo(
+  const history: RoundSummary[] = useMemo(
     () => (dash?.rounds ?? []).slice().sort((a, b) => a.round - b.round),
     [dash?.rounds],
   );

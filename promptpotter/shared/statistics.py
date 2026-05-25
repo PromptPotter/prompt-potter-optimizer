@@ -29,35 +29,6 @@ def wilson_ci(hits: int, total: int, alpha: float = 0.05) -> tuple[float, float]
     return (max(0.0, center - margin), min(1.0, center + margin))
 
 
-def wilson_overlap(
-    scores_a: list[float],
-    scores_b: list[float],
-    alpha: float = 0.05,
-    hit_threshold: float = 0.5,
-) -> bool:
-    """True iff the two arms' Wilson hit-rate CIs intersect.
-
-    Both arms are scored on the same sample set (caller's responsibility);
-    each score is converted to a binary hit via ``score > hit_threshold``
-    (the same convention used everywhere else in the optimizer). The
-    intervals are Wilson-score at confidence ``1 - alpha``.
-
-    Used by ``PoBBCheck.check()`` as a separability floor: don't eliminate
-    a candidate while its hit-rate CI overlaps the leader's, because the
-    apparent gap is still inside binomial noise — particularly important
-    at small n on samples the picker chose for high seed-vs-population
-    discrimination, where p ≈ 0.5 and P(0/4 | p=0.5) is non-trivial.
-    """
-    n_a, n_b = len(scores_a), len(scores_b)
-    if n_a == 0 or n_b == 0:
-        return True  # no data ⇒ indistinguishable
-    hits_a = sum(1 for s in scores_a if s > hit_threshold)
-    hits_b = sum(1 for s in scores_b if s > hit_threshold)
-    lo_a, hi_a = wilson_ci(hits_a, n_a, alpha=alpha)
-    lo_b, hi_b = wilson_ci(hits_b, n_b, alpha=alpha)
-    return not (hi_a < lo_b or hi_b < lo_a)
-
-
 def proportion_test(
     hits_a: int,
     total_a: int,
@@ -258,35 +229,12 @@ def paired_diff_posterior(
     return (mean_d, se_d, n)
 
 
-def paired_diff_ci_overlaps_zero(
-    candidate_scores: list[float],
-    prior_scores: list[float],
-    alpha: float = 0.05,
-) -> bool:
-    """Paired-difference CI analogue of ``wilson_overlap``.
-
-    Two-sided ``(1 − alpha)`` Normal CI on the mean paired difference;
-    True ⇒ CI crosses zero, so the arms are not separated. SE floor
-    ``1/(4n)`` keeps n=4 perfect wins from spuriously separating.
-    """
-    if not candidate_scores or not prior_scores:
-        return True
-    mean_d, se_d, _n = paired_diff_posterior(candidate_scores, prior_scores)
-    from scipy.stats import norm
-
-    z = float(norm.ppf(1 - alpha / 2))
-    half_width = z * se_d
-    return (mean_d - half_width) <= 0.0 <= (mean_d + half_width)
-
-
 __all__ = [
     "min_detectable_effect",
     "paired_better_probabilities",
-    "paired_diff_ci_overlaps_zero",
     "paired_diff_posterior",
     "pobb_should_stop",
     "posterior_best_probabilities",
     "proportion_test",
     "wilson_ci",
-    "wilson_overlap",
 ]

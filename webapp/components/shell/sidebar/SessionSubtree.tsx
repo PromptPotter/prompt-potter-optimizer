@@ -1,5 +1,5 @@
 "use client";
-import type { Campaign } from "@/lib/api";
+import type { CampaignSummary } from "@/lib/api";
 import { campaignOriginHash } from "@/lib/ids";
 import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
@@ -21,7 +21,7 @@ export function SessionSubtree({
   activeCycleId,
   onSelectCycle,
 }: {
-  campaign: Campaign;
+  campaign: CampaignSummary;
   session: SessionGroup;
   isCampaignRow: boolean;
   open: boolean;

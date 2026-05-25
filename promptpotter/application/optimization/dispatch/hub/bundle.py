@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes import AxisIndex
 
 
-# Per-injection caps — first line of defense; dispatch-hub budget allocator is last resort.
+# Per-injection caps — bound LLM-authored output to keep individual blocks tight.
 AXES_ENUM_PREVIEW = 4
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
@@ -37,11 +37,6 @@ TASK_CONTEXT_VALUE_CAP = 300
 # `runtime_failures` signal only emits first-seen failures in the last K rounds; older entries
 # collapse to a suppression line so long campaigns + small models stay within budget.
 RUNTIME_FAILURE_RECENCY_WINDOW = 6
-
-# Aggregate ceiling for one composed meta-prompt (~2500 tokens). Hub sheds OPTIONAL → CORE to hold
-# the line; MANDATORY never sheds. Soft warn at OPTIMIZER_PROMPT_WARN_CHARS (7500). See
-# docs/specs/archive/dispatch-prompt-budget.md.
-OPTIMIZER_PROMPT_CHAR_BUDGET = 10_000
 
 # Untrusted-content fence — wraps signals carrying sample queries / ground truths / model echoes /
 # pipeline warnings. Note rides inside the open tag so call sites don't carry the instruction.
@@ -69,27 +64,18 @@ class InjectionKind(enum.StrEnum):
     DIRECTIVE = "directive"
 
 
-class InjectionTier(enum.IntEnum):
-    """Drop priority for the budget allocator — lowest tier sheds first. `IntEnum` for sort-by-tier."""
-
-    OPTIONAL = 0  # cross-cycle nice-to-haves — shed first
-    CORE = 1  # this round's failure evidence — shed only after OPTIONAL
-    MANDATORY = 2  # parent prompt, contract, framing — never shed
-
-
 @dataclass(frozen=True)
 class _Injection:
-    """One INJECTIONS entry — kind + renderer + tier + per-injection ``char_cap``.
+    """One INJECTIONS entry — kind + renderer + per-injection ``char_cap``.
 
-    ``tier`` + ``char_cap`` have no defaults (omitting either = TypeError; coding
-    mistakes fail loud, not silently uncapped). ``char_cap`` bounds LLM-authored text;
-    ``None`` for *_RENDER_CAP-bounded derived/measurement renderers."""
+    ``char_cap`` has no default (omitting it = TypeError; coding mistakes fail loud,
+    not silently uncapped). Bounds LLM-authored text; ``None`` for
+    *_RENDER_CAP-bounded derived/measurement renderers."""
 
     name: str
     kind: InjectionKind
     render: Callable[[InjectionBundle], str]
     description: str
-    tier: InjectionTier
     char_cap: int | None
 
 
@@ -165,7 +151,6 @@ __all__ = [
     "FAILURE_WARNING_PREVIEW",
     "INTRACTABLE_SAMPLES_RENDER_CAP",
     "NEAR_MISS_RENDER_CAP",
-    "OPTIMIZER_PROMPT_CHAR_BUDGET",
     "PIPELINE_PARAM_CATALOGUE_MODEL_CAP",
     "RUNTIME_FAILURE_RECENCY_WINDOW",
     "SAMPLE_RENDER_CAP",
@@ -173,7 +158,6 @@ __all__ = [
     "CycleSlice",
     "InjectionBundle",
     "InjectionKind",
-    "InjectionTier",
     "RoundDigest",
     "fence_untrusted",
 ]

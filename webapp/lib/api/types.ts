@@ -5,68 +5,45 @@
 // keeps in sync with the Pydantic source of truth. Edits to those shapes go
 // in the Python model + regenerate; hand-editing the generated file is
 // forbidden.
-//
-// Old webapp-side names (`Campaign`, `ActiveSession`, `DatasetPreview`,
-// `Dashboard*`, `FileResponse`, `FilesListing`) are kept as aliases over
-// the generated server-side names so consumers don't have to be touched
-// here. Collapsing the aliases is tracked as Tier 5 cosmetic in
-// `docs/specs/code-debt-cleanup.md`.
-
-import type {
-  ActiveSessionResponse,
-  CampaignSummary,
-  DatasetItem as GeneratedDatasetItem,
-  DatasetPreviewResponse,
-  FileContentResponse,
-  FilesResponse,
-  MeasurementDot as GeneratedMeasurementDot,
-  MeasurementSeriesResponse as GeneratedMeasurementSeriesResponse,
-  OriginSummary,
-  RoundSummary,
-  RoundSummaryCandidate,
-} from "./types.generated";
 
 export type {
+  ActiveSessionResponse,
   BackendWarning,
   CampaignLineageCandidate,
   CampaignLineageCycle,
   CampaignLineageResponse,
   CampaignLineageRound,
   CampaignListResponse,
+  CampaignSummary,
   CleanupEmptyResponse,
   CreateForkRequest,
   CreateForkResponse,
   CycleListEntry,
   CyclesResponse,
+  DatasetItem,
   DatasetPipelineResponse,
+  DatasetPreviewResponse,
   DeleteCycleResponse,
   DiagnosticRunListResponse,
   DiagnosticRunRecord,
+  FileContentResponse,
   FileEntry,
+  FilesResponse,
   InFlightCall,
   LeverageResponse,
   LiveDashboardState,
+  MeasurementDot,
+  MeasurementSeriesResponse,
+  OriginSummary,
   PerQueryRow,
+  RoundSummary,
+  RoundSummaryCandidate,
   SampleSeries,
   SessionSummary,
   SpendBucket,
   SpendRollup,
   StopCycleResponse,
 } from "./types.generated";
-
-// Old-name aliases — webapp consumers still use the prefix-free names.
-// Collapse target: Tier 5 cosmetic in docs/specs/code-debt-cleanup.md.
-export type ActiveSession = ActiveSessionResponse;
-export type Campaign = CampaignSummary;
-export type DatasetItem = GeneratedDatasetItem;
-export type DatasetPreview = DatasetPreviewResponse;
-export type MeasurementDot = GeneratedMeasurementDot;
-export type MeasurementSeriesResponse = GeneratedMeasurementSeriesResponse;
-export type DashboardOrigin = OriginSummary;
-export type DashboardRoundCandidate = RoundSummaryCandidate;
-export type DashboardRoundSummary = RoundSummary;
-export type FileResponse = FileContentResponse;
-export type FilesListing = FilesResponse;
 
 // Literal-type unions — not derivable from Pydantic; hand-maintained.
 // Three named data scopes — same vocabulary as the heatmap artifacts and

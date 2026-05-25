@@ -32,7 +32,7 @@ import {
   fetchActive,
   fetchCampaigns,
   fetchCycles,
-  type Campaign,
+  type CampaignSummary,
   type CycleListEntry,
 } from "./api";
 import { usePoll } from "./usePoll";
@@ -55,7 +55,7 @@ export interface WorkspaceState {
   // Campaign manifests (GET /campaigns) — polled in the same tick as
   // /cycles. Carries the operator-editable `label`; surfaces resolve a
   // campaign's display name from here. Last-good list survives a failed tick.
-  campaigns: Campaign[];
+  campaigns: CampaignSummary[];
   activeError: string | null;
   // User pin → following=false. Both ids required: a cycle_id alone is
   // ambiguous across campaigns.
@@ -103,7 +103,7 @@ export function WorkspaceProvider({
   const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [cycles, setCycles] = useState<CycleListEntry[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
   const [cyclesLoaded, setCyclesLoaded] = useState(false);
   const [cyclesError, setCyclesError] = useState<string | null>(null);
   const [activeError, setActiveError] = useState<string | null>(null);

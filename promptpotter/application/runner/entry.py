@@ -242,13 +242,10 @@ def _finalize_run(
     is_interrupted = stop_reason == StopReason.INTERRUPTED
     is_crashed = stop_reason == StopReason.CRASHED
     is_render_error = stop_reason == StopReason.RENDER_ERROR
-    is_prompt_budget = stop_reason == StopReason.PROMPT_BUDGET
     is_optimizer_timeout = stop_reason == StopReason.OPTIMIZER_TIMEOUT
-    # All five reasons leave the round partial. Render-error stashes a traceback like crash does;
-    # prompt-budget + optimizer-timeout are graceful (cause is in the log).
-    halted_mid_round = (
-        is_interrupted or is_crashed or is_render_error or is_prompt_budget or is_optimizer_timeout
-    )
+    # All four reasons leave the round partial. Render-error stashes a traceback like crash does;
+    # optimizer-timeout is graceful (cause is in the log).
+    halted_mid_round = is_interrupted or is_crashed or is_render_error or is_optimizer_timeout
     has_traceback = is_crashed or is_render_error
     emitter = observers.dashboard
     if session.state.cycle_id:
@@ -257,7 +254,6 @@ def _finalize_run(
             str(StopReason.CRASHED): "crashed",
             str(StopReason.DIVERGED): "diverged",
             str(StopReason.RENDER_ERROR): "render_error",
-            str(StopReason.PROMPT_BUDGET): "prompt_budget",
             str(StopReason.OPTIMIZER_TIMEOUT): "optimizer_timeout",
         }
         # Active round at teardown — surfaces on `interrupted_round` so the operator sees which

@@ -390,9 +390,8 @@ def _measurements(scores: list[float], sample_ids: list[int] | None = None) -> l
 _DUMMY_SP = types.SimpleNamespace()
 
 
-def test_pobb_check_gates_elimination_on_posterior_and_separability():
-    """PoBB.check() must clear BOTH posterior AND separability gates."""
-    # Part 1 — separated arms, posterior gate fires
+def test_pobb_check_gates_elimination_on_posterior():
+    """PoBB.check() fires when the paired-difference posterior clears the ε gate."""
     check_sep = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
     check_sep.register_completed(_measurements([1.0] * 20), candidate_id="winner", sp=_DUMMY_SP)
     check_sep.set_current("loser")
@@ -404,27 +403,6 @@ def test_pobb_check_gates_elimination_on_posterior_and_separability():
     assert cr["p_best"] < 0.05
     assert "p_best_snapshot" in cr
     assert cr["epsilon"] == pytest.approx(0.05)
-
-    # Part 2 — overlapping CIs, floor refuses elimination
-    check_noise = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.20), n_samples=20)
-    leader_scores = [1.0, 0.0, 1.0, 0.0] + [1.0] * 9 + [0.0] * 7
-    check_noise.register_completed(
-        _measurements(leader_scores, sample_ids=list(range(20))),
-        candidate_id="leader",
-        sp=_DUMMY_SP,
-    )
-    # Disarm the dominance gate (cand_max = 0 + 16 = 16 ≥ leader's 11).
-    check_noise.set_sample_universe(list(range(20)))
-    check_noise.set_current("equivalent_candidate")
-    sig_noise = check_noise.check(
-        _measurements([0.0, 0.0, 0.0, 0.0], sample_ids=[0, 1, 2, 3]),
-        candidate_idx=1,
-        n_total_candidates=6,
-    )
-    assert sig_noise is None, (
-        "Wilson floor must refuse elimination at 0/4 vs 2/4 — CIs overlap, "
-        "gap is binomial noise. Got eliminated."
-    )
 
 
 def test_pobb_dominance_aborts_when_catch_up_impossible():
@@ -844,11 +822,11 @@ def test_axis_memory_listed_in_l1_possible_and_default_layout():
     assert "axis_memory" in default_l1_layout().problem_description
 
 
-# Dispatch prompt-budget allocator: sheds lowest-tier-first; MANDATORY tier never shed.
+# Per-injection char_cap truncation + renderer-error bubbling.
 
 
-def test_dispatch_budget_caps_injections_and_sheds_by_tier(monkeypatch):
-    """char_cap truncates; OPTIONAL sheds before CORE; MANDATORY never sheds; unhealable ⇒ PROMPT_BUDGET halt."""
+def test_dispatch_caps_and_surfaces_renderer_errors(monkeypatch):
+    """char_cap truncates LLM-authored text + appends `…`; renderer exceptions wrap as InjectionRenderError."""
     import pytest
 
     from promptpotter.application.optimization.dispatch.hub import (
@@ -858,16 +836,10 @@ def test_dispatch_budget_caps_injections_and_sheds_by_tier(monkeypatch):
         RoundDigest,
     )
     from promptpotter.application.optimization.dispatch.hub.bundle import (
-        OPTIMIZER_PROMPT_CHAR_BUDGET as BUDGET,
-    )
-    from promptpotter.application.optimization.dispatch.hub.bundle import (
         InjectionKind,
-        InjectionTier,
         _Injection,
     )
-    from promptpotter.application.optimization.dispatch.hub.facade import _apply_budget
     from promptpotter.application.optimization.dispatch.hub.injections.registry import INJECTIONS
-    from promptpotter.domain.phases import StopLoop, StopReason
 
     def _bundle(**kw):
         return InjectionBundle(
@@ -885,48 +857,13 @@ def test_dispatch_budget_caps_injections_and_sheds_by_tier(monkeypatch):
     assert len(capped) <= plan_cap + 1
     assert capped.endswith("…")
 
-    unit = BUDGET // 4
-
-    # Shedding the lone OPTIONAL injection is enough — CORE + MANDATORY kept.
-    out = _apply_budget(
-        unit,
-        {
-            "rendered_prompt": "M" * unit,
-            "diagnostics": "C" * unit,
-            "axis_memory": "O" * (2 * unit),
-        },
-    )
-    assert out["rendered_prompt"] and out["diagnostics"]
-    assert out["axis_memory"] == ""
-    assert unit + sum(len(v) for v in out.values()) <= BUDGET
-
-    # OPTIONAL alone insufficient → CORE sheds too; MANDATORY survives.
-    out2 = _apply_budget(
-        unit,
-        {
-            "rendered_prompt": "M" * (2 * unit),
-            "diagnostics": "C" * (2 * unit),
-            "axis_memory": "O" * unit,
-        },
-    )
-    assert out2["rendered_prompt"]
-    assert out2["axis_memory"] == "" and out2["diagnostics"] == ""
-    assert unit + sum(len(v) for v in out2.values()) <= BUDGET
-
-    # Unhealable: MANDATORY alone > budget ⇒ halt with PROMPT_BUDGET.
-    with pytest.raises(StopLoop) as halt:
-        _apply_budget(BUDGET, {"rendered_prompt": "M" * BUDGET})
-    assert halt.value.reason is StopReason.PROMPT_BUDGET
-
     def _boom(_b):
         raise AttributeError("renamed data-model field")
 
     monkeypatch.setitem(
         INJECTIONS,
         "plan",
-        _Injection(
-            "plan", InjectionKind.TRACE, _boom, "", tier=InjectionTier.MANDATORY, char_cap=1200
-        ),
+        _Injection("plan", InjectionKind.TRACE, _boom, "", char_cap=1200),
     )
     with pytest.raises(InjectionRenderError):
         DispatchHub.render("plan", _bundle())
