@@ -19,6 +19,7 @@ from promptpotter.application.optimization.dispatch.hub import (
     build_bundle,
 )
 from promptpotter.application.optimization.dispatch.llm_call import (
+    LLMCallContext,
     load_optimizer_prompt,
     run_optimizer_node,
 )
@@ -63,11 +64,11 @@ def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkPayload) -> N
                 "Expect a dict whose keys are L1 layout slots and values are lists of "
                 "placeholder names."
             )
-        result = validate_l1_layout(layout, prior_layout=opt_sp.l1_layout)
+        result = validate_l1_layout(layout, prior_layout=opt_sp.memory.l1_layout)
         if not result.is_valid:
             ids = sorted({o.validator_id for o in result.outcomes if not o.passed})
             raise ValueError(f"Fork payload l1_layout failed hard validators: {ids}")
-        opt_sp.l1_layout = layout
+        opt_sp.memory.l1_layout = layout
 
 
 # ---------------------------------------------------------------------------
@@ -111,9 +112,11 @@ async def _run_transition(
             llm_client=client,
             model=config.optimizer_llm.model,
             temperature=transition.default_temperature,
-            ledger=cycle.session.state.ledger,
-            round_num=round_num,
-            optimizer_call_cache=cycle.session.store.optimizer_calls,
+            context=LLMCallContext(
+                ledger=cycle.session.state.ledger,
+                round_num=round_num,
+                cache=cycle.session.store.optimizer_calls,
+            ),
         )
         result = transition.parse(raw, cycle.opt_sp, prompt)
 
@@ -220,7 +223,7 @@ async def escalate_l2(
         # validator) skips L3. The fork_f13331ff cascade — L3 short plan → L1 malformed plan →
         # empty L1 — showed firing L3 on a single soft-reject layers escalations instead of
         # letting the loop self-correct.
-        breaches = cycle.opt_sp.wounds.l2_guard_breaches
+        breaches = cycle.opt_sp.memory.wounds.l2_guard_breaches
         SOFT_REJECT_IDS = {
             "l2_task_context_verbatim_repeat",
             "l2_task_context_paraphrase_repeat",

@@ -39,7 +39,7 @@ def _rf_matches_current_config(
 
 def _r_validation_failures(b: InjectionBundle) -> str:
     """Wound 1 — L1 parse-time validator. Fenced (echoes LLM-proposed values)."""
-    failures = b.opt_sp.wounds.validation_failures
+    failures = b.opt_sp.memory.wounds.validation_failures
     if not failures:
         return ""
     sec = ["L1 VALIDATION FAILURES (last round produced invalid variants):"]
@@ -57,7 +57,7 @@ def _r_runtime_failures(b: InjectionBundle) -> str:
     ACCUMULATED entries filter through `_rf_matches_current_config`; NEW (first-seen this round)
     always pass — they describe the failure being heard right now.
     """
-    runtime_failures = b.opt_sp.wounds.runtime_failures
+    runtime_failures = b.opt_sp.memory.wounds.runtime_failures
     if not runtime_failures:
         return ""
     round_num = b.cycle_slice.round_num
@@ -98,12 +98,12 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
 
 def _r_l2_guard_breaches(b: InjectionBundle) -> str:
     """Wound 4 — L2_CONTEXT guard outcomes; non-empty force-triggers an L3 heal."""
-    return _render_guard_breaches(b.opt_sp.wounds.l2_guard_breaches, "L2")
+    return _render_guard_breaches(b.opt_sp.memory.wounds.l2_guard_breaches, "L2")
 
 
 def _r_l3_guard_breaches(b: InjectionBundle) -> str:
     """L3_PLAN guard outcomes — L3 reads its own past breaches to avoid repeating them."""
-    return _render_guard_breaches(b.opt_sp.wounds.l3_guard_breaches, "L3")
+    return _render_guard_breaches(b.opt_sp.memory.wounds.l3_guard_breaches, "L3")
 
 
 def _format_runtime_failure_lines(rf: Any) -> list[str]:

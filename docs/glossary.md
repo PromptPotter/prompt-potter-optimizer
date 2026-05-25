@@ -194,7 +194,7 @@ The persisted world is a four-entity containment hierarchy
 - **Patience** — L1's per-cycle stall budget. Bumps after each
   no-improvement round; resets on improvement.
 - **Stall** — N consecutive non-improving rounds for L1, L2, or L3.
-  Tracked on `EscalationState.l1_stall_count` etc.
+  Tracked on `EscalationFSM.l1_stall_count` etc.
 - **Escalation** — the post-round router (`decide_escalation` over
   `DEFAULT_ESCALATION_RULES`) deciding CONTINUE / FIRE_L2 / STOP_*.
   `application/optimization/escalation/`.

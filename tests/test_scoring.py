@@ -313,7 +313,9 @@ def test_matched_origin_stats_restricts_to_candidate_subset():
 
 def test_composite_fitness_zeroed_on_validation_failure():
     fake_opt_sp = SimpleNamespace(
-        wounds=SimpleNamespace(validation_failures=[object()], runtime_failures=[])
+        memory=SimpleNamespace(
+            wounds=SimpleNamespace(validation_failures=[object()], runtime_failures=[])
+        )
     )
     scored = compute_composite_fitness(
         [_eval_result(score=1.0)], _single_node_schema(), opt_sp=fake_opt_sp

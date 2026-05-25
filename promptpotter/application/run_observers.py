@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bootstrap.session import auto_mint_session
@@ -28,6 +28,7 @@ from promptpotter.presentation.views.view_ingress import (
     from_phase_event,
     view_to_wire_dict,
 )
+from promptpotter.presentation.views.view_models import ViewContext
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -49,7 +50,7 @@ class RunCallbacks:
     """
 
     ledger: CycleEventLog
-    _phase_ctx: dict[str, Any] = field(default_factory=dict)
+    _phase_ctx: ViewContext = field(default_factory=ViewContext)
     _current_round: int = 0
 
     def _emit(self, record: Any) -> None:
@@ -68,8 +69,8 @@ class RunCallbacks:
         )
 
     def on_round_complete(self, round_result: Any, l1_stall_count: int) -> None:
-        # ``event="display"`` keeps ``EscalationState.fold`` reading only the lean ``event="complete"`` audit emit.
-        self._phase_ctx["l1_stall_count"] = l1_stall_count
+        # ``event="display"`` keeps ``EscalationFSM.fold`` reading only the lean ``event="complete"`` audit emit.
+        self._phase_ctx.l1_stall_count = l1_stall_count
         self._emit(
             PhaseRecord(
                 phase="round",
@@ -78,7 +79,7 @@ class RunCallbacks:
                 payload={
                     "round_result": round_result,
                     "l1_stall_count": l1_stall_count,
-                    "phase_ctx": dict(self._phase_ctx),
+                    "phase_ctx": asdict(self._phase_ctx),
                 },
             )
         )
@@ -125,7 +126,7 @@ class RunCallbacks:
             "candidate_scored",
             idx,
             total,
-            {"scores": scores, "phase_ctx": dict(self._phase_ctx)},
+            {"scores": scores, "phase_ctx": asdict(self._phase_ctx)},
         )
 
     def on_sample_started(

@@ -44,7 +44,7 @@ async def generate_or_load_candidates(
     # Cap n_variants at 3× config so L2 can't blow up the round budget.
     opt = config.optimization
     model = config.optimizer_llm.model
-    opt_params = cycle.opt_sp.l1_overrides
+    opt_params = cycle.opt_sp.memory.l1_overrides
     _n_variants = min(opt_params.get("n_variants", opt.n_variants), opt.n_variants * 3)
     _creativity = opt_params.get("creativity", L1_CREATIVITY)
     prompt_preview = cycle.opt_sp.render()[:120]
@@ -63,7 +63,9 @@ async def generate_or_load_candidates(
         has_l1_critique=bool(cycle.rounds[-1].critique) if cycle.rounds else False,
         pipeline_params=cycle.tracking.current_sp.pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
-        parent_task_context={k: v for k, v in cycle.opt_sp.task_context.to_dict().items() if v},
+        parent_task_context={
+            k: v for k, v in cycle.opt_sp.memory.task_context.to_dict().items() if v
+        },
     )
 
     if session.state.cycle_id:

@@ -64,7 +64,7 @@ def _r_prompt_budget_status(b: InjectionBundle) -> str:
 
     yours: list[str] = [
         _cap_line(f"task_context.{k}", len(v), TASK_CONTEXT_VALUE_CAP)
-        for k, v in b.opt_sp.task_context.to_dict().items()
+        for k, v in b.opt_sp.memory.task_context.to_dict().items()
         if v and k not in {"raw_description", "upstream_context", "downstream_context"}
     ]
     others: list[str] = []
@@ -103,7 +103,7 @@ INJECTIONS: dict[str, _Injection] = {
     "l3_to_l2_note": _Injection(
         "l3_to_l2_note",
         InjectionKind.DIRECTIVE,
-        accessor_renderer(lambda b: b.opt_sp.wounds.l3_note, "L3 NOTE TO L2:\n{value}"),
+        accessor_renderer(lambda b: b.opt_sp.memory.wounds.l3_note, "L3 NOTE TO L2:\n{value}"),
         "Sticky L3→L2 pointer. Mounted only in L2's template; absent from L1.",
         tier=InjectionTier.OPTIONAL,
         char_cap=400,
@@ -184,7 +184,7 @@ INJECTIONS: dict[str, _Injection] = {
         "l1_overrides",
         InjectionKind.TRACE,
         accessor_renderer(
-            lambda b: b.opt_sp.l1_overrides, "CURRENT L1 CONFIG: {value}", json_value=True
+            lambda b: b.opt_sp.memory.l1_overrides, "CURRENT L1 CONFIG: {value}", json_value=True
         ),
         "Current L1 runtime knobs (creativity, n_variants, etc.) as JSON.",
         tier=InjectionTier.OPTIONAL,

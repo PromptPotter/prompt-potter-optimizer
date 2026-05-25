@@ -94,7 +94,7 @@ SELF_HEALERS: tuple[SelfHealerSpec, ...] = (
 
 def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
     """Build the per-channel self-heal Evaluator: ``min(len(events)/n_samples, 1.0)``,
-    ``direction='low'``. ``events`` is the matching list on ``opt_sp.wounds``."""
+    ``direction='low'``. ``events`` is the matching list on ``opt_sp.memory.wounds``."""
 
     def compute(*, results: list[QueryMeasurement], opt_sp: Any = None, **_: Any) -> float:
         if not results or opt_sp is None:

@@ -63,9 +63,9 @@ def test_no_op_clone_attaches_validation_failure():
 
     stats = detect_invariants(proposals, parent)
 
-    no_op_reasons = [vf.reason for vf in proposals[0].osp.wounds.validation_failures]
+    no_op_reasons = [vf.reason for vf in proposals[0].osp.memory.wounds.validation_failures]
     assert "no_op_variant" in no_op_reasons
-    assert proposals[1].osp.wounds.validation_failures == []
+    assert proposals[1].osp.memory.wounds.validation_failures == []
     assert stats.l1_n_no_op == 1
     assert stats.l1_n_duplicate == 0
     assert stats.l1_yield == 0.5
@@ -81,10 +81,10 @@ def test_duplicate_signature_attaches_validation_failure():
 
     stats = detect_invariants(proposals, parent)
 
-    assert proposals[0].osp.wounds.validation_failures == []
-    dup_reasons = [vf.reason for vf in proposals[1].osp.wounds.validation_failures]
+    assert proposals[0].osp.memory.wounds.validation_failures == []
+    dup_reasons = [vf.reason for vf in proposals[1].osp.memory.wounds.validation_failures]
     assert "duplicate_variant" in dup_reasons
-    assert proposals[2].osp.wounds.validation_failures == []
+    assert proposals[2].osp.memory.wounds.validation_failures == []
     assert stats.l1_n_duplicate == 1
     assert stats.l1_n_no_op == 0
     assert stats.l1_yield == 2 / 3
@@ -111,13 +111,27 @@ def test_parse_population_attaches_forbidden_axis_failure_to_osp():
 
     osp_list, _ = parse_population([proposal], pipeline_params=None, schema=schema)
 
-    failures = osp_list[0].wounds.validation_failures
+    failures = osp_list[0].memory.wounds.validation_failures
     assert len(failures) == 1
     assert failures[0].reason == "forbidden_axis"
     assert failures[0].axis == "llm_only.model"
 
 
 def _osp(**kwargs) -> OptSearchPoint:
+    from promptpotter.domain.opt_search_point import L2L3Memory
+
+    memory_fields = {
+        "wounds",
+        "l1_layout",
+        "l1_overrides",
+        "l1_supplemental_rules",
+        "l1_situational_examples",
+        "task_context",
+    }
+    if "memory" not in kwargs and (
+        mem_kwargs := {k: kwargs.pop(k) for k in list(kwargs) if k in memory_fields}
+    ):
+        kwargs["memory"] = L2L3Memory(**mem_kwargs)
     return OptSearchPoint(persona="Expert", instruction="Rank items.", **kwargs)
 
 
@@ -159,7 +173,7 @@ def test_duplicate_insert_fires_when_proposed_lines_already_in_prior_framing():
             "Step 4: emit the answer"  # genuinely new — merge succeeds
         ),
     }
-    merged = osp.task_context.merge(proposed)
+    merged = osp.memory.task_context.merge(proposed)
     out = L2_DUPLICATE_INSERT.run(
         {"task_context_proposed": proposed, "task_context_applied": merged},
         opt_sp=osp,
@@ -178,7 +192,7 @@ def test_duplicate_insert_quiet_below_threshold():
     out = L2_DUPLICATE_INSERT.run(
         {
             "task_context_proposed": {"key_challenges": "line A\nline B\nline C"},
-            "task_context_applied": osp.task_context.merge(
+            "task_context_applied": osp.memory.task_context.merge(
                 {"key_challenges": "line A\nline B\nline C"}
             ),
         },
@@ -202,7 +216,7 @@ def test_paraphrase_repeat_fires_on_word_set_overlap_above_threshold():
     out = L2_TASK_CONTEXT_PARAPHRASE_REPEAT.run(
         {
             "task_context_proposed": {"key_challenges": paraphrase},
-            "task_context_applied": osp.task_context.merge({"key_challenges": paraphrase}),
+            "task_context_applied": osp.memory.task_context.merge({"key_challenges": paraphrase}),
         },
         opt_sp=osp,
     )
@@ -223,7 +237,7 @@ def test_paraphrase_repeat_quiet_on_genuine_refinement():
     out = L2_TASK_CONTEXT_PARAPHRASE_REPEAT.run(
         {
             "task_context_proposed": {"key_challenges": refinement},
-            "task_context_applied": osp.task_context.merge({"key_challenges": refinement}),
+            "task_context_applied": osp.memory.task_context.merge({"key_challenges": refinement}),
         },
         opt_sp=osp,
     )
@@ -238,7 +252,7 @@ def test_l1_config_not_in_runtime_failures_fires_on_reproposal():
     from promptpotter.domain.escalation_signals import RuntimeFailure
 
     osp = _osp()
-    osp.wounds.runtime_failures = [
+    osp.memory.wounds.runtime_failures = [
         RuntimeFailure(
             source="degradation_check",
             dominant_warning="llm_only:empty_response",
@@ -271,7 +285,7 @@ def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
     from promptpotter.domain.escalation_signals import RuntimeFailure
 
     osp = _osp()
-    osp.wounds.runtime_failures = [
+    osp.memory.wounds.runtime_failures = [
         RuntimeFailure(
             source="degradation_check",
             dominant_warning="llm_only:empty_response",
@@ -602,12 +616,12 @@ def test_fork_payload_roundtrips_through_opt_search_point() -> None:
     osp = OptSearchPoint.from_prompt_fields({"persona": "p", "task_intent": "t"})
     apply_fork_payload_to_osp(osp, payload)
 
-    assert osp.l1_layout.model_dump() == layout_dict
+    assert osp.memory.l1_layout.model_dump() == layout_dict
 
     dump = osp.model_dump()
     reloaded = OptSearchPoint(**dump)
 
-    assert reloaded.l1_layout.model_dump() == layout_dict
+    assert reloaded.memory.l1_layout.model_dump() == layout_dict
 
 
 def test_fork_payload_rejects_layout_missing_mandatory_placeholder() -> None:
@@ -623,11 +637,11 @@ def test_fork_payload_rejects_layout_missing_mandatory_placeholder() -> None:
 
 
 def _l2_cycle_stub() -> types.SimpleNamespace:
-    from promptpotter.application.optimization.escalation.state import EscalationState
+    from promptpotter.application.optimization.escalation.state import EscalationFSM
 
     return types.SimpleNamespace(
         opt_sp=_osp(),
-        escalation=EscalationState(),
+        escalation=EscalationFSM(),
         pending_decisions=[],
         probe_next_round=False,
         last_l2_axis="",
@@ -680,21 +694,27 @@ def test_l3_to_l2_note_is_in_signals_but_not_l1_possible():
     assert "l3_to_l2_note" not in L1_POSSIBLE
 
 
-def test_l3_note_is_memory_field_and_forwarded_via_copy_memory_to():
-    """``l3_note`` rides ``MEMORY_FIELDS`` so it survives the L2-fire OSP swap."""
-    assert "wounds" in OptSearchPoint.MEMORY_FIELDS
+def test_l3_note_rides_memory_and_forwarded_via_copy_memory_to():
+    """``l3_note`` lives on ``OptSearchPoint.memory.wounds`` so it survives the L2-fire OSP swap."""
+    from promptpotter.domain.opt_search_point import L2L3Memory
 
-    osp = _osp(wounds=WoundChannels(l3_note="constraint X discovered, steer L2 around it"))
+    assert "wounds" in L2L3Memory.model_fields
+
+    osp = _osp(
+        memory=L2L3Memory(
+            wounds=WoundChannels(l3_note="constraint X discovered, steer L2 around it")
+        )
+    )
     target = _osp()
     osp.copy_memory_to(target)
-    assert target.wounds.l3_note == osp.wounds.l3_note
+    assert target.memory.wounds.l3_note == osp.memory.wounds.l3_note
 
 
 def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
     """L3 fire wholesale-replaces ``cycle.opt_sp.l3_note`` — even with an
     empty/missing ``note``, prior content is wiped. That's the contract:
     each L3 fire produces a complete (or null) note."""
-    from promptpotter.application.optimization.escalation.state import EscalationState
+    from promptpotter.application.optimization.escalation.state import EscalationFSM
 
     osp = _osp(plan="prior plan", wounds=WoundChannels(l3_note="prior note"))
     raw = L3PlanOutput(plan="x" * 200, note="new sticky pointer", rationale="test")
@@ -705,13 +725,13 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
     # fresh OSP (carries the prior note), then apply L3 (overwrites).
     cycle = types.SimpleNamespace(
         opt_sp=result.opt_search_point,
-        escalation=EscalationState(),
+        escalation=EscalationFSM(),
         tracking=types.SimpleNamespace(best_accuracy=0.0, best_composite_fitness=0.0),
     )
     osp.copy_memory_to(cycle.opt_sp)
-    assert cycle.opt_sp.wounds.l3_note == "prior note"  # copy_memory_to forwarded
+    assert cycle.opt_sp.memory.wounds.l3_note == "prior note"  # copy_memory_to forwarded
     _apply_l3(cycle, result, round_num=5)
-    assert cycle.opt_sp.wounds.l3_note == "new sticky pointer"  # _apply_l3 replaced
+    assert cycle.opt_sp.memory.wounds.l3_note == "new sticky pointer"  # _apply_l3 replaced
 
     # And: missing note → wipe.
     raw_no_note = L3PlanOutput(plan="y" * 200, rationale="test")
@@ -1116,19 +1136,24 @@ def test_render_does_not_leak_l3_plan_into_target_prompt():
 
 
 def test_copy_memory_carries_l1_layout_into_adoption_target():
+    from promptpotter.domain.opt_search_point import L2L3Memory
+
     custom = L1Layout(
         persona=["plan"],
         task_intent=["task_context"],
         problem_description=["rendered_prompt", "pipeline_param_catalogue"],
     )
-    parent = OptSearchPoint(l1_layout=custom)
+    parent = OptSearchPoint(memory=L2L3Memory(l1_layout=custom))
     child = OptSearchPoint()
     parent.copy_memory_to(child)
-    assert child.l1_layout.persona == ["plan"]
-    assert child.l1_layout.task_intent == ["task_context"]
-    assert child.l1_layout.problem_description == ["rendered_prompt", "pipeline_param_catalogue"]
-    child.l1_layout.persona.append("diagnostics")
-    assert "diagnostics" not in parent.l1_layout.persona
+    assert child.memory.l1_layout.persona == ["plan"]
+    assert child.memory.l1_layout.task_intent == ["task_context"]
+    assert child.memory.l1_layout.problem_description == [
+        "rendered_prompt",
+        "pipeline_param_catalogue",
+    ]
+    child.memory.l1_layout.persona.append("diagnostics")
+    assert "diagnostics" not in parent.memory.l1_layout.persona
 
 
 # compute_round_diagnostics — pure function over scoring data.
@@ -1225,13 +1250,13 @@ def test_merge_into_cumulative_preserves_prior_on_untouched_samples():
 
 def test_l2_behavior_checks_score_conformant_vs_stub_fires():
     """Conformant L2 fire passes every behaviour check; stub fails them; no-fire ⇒ no results."""
-    from promptpotter.application.optimization.validators.l1_behavior import CheckContext
+    from promptpotter.application.optimization.validators.l1_behavior import ValidatorContext
     from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
 
     def _round(response: dict) -> dict:
         return {"nodes": {"l2_context": {"output": {"response": response}}}}
 
-    ctx = CheckContext(
+    ctx = ValidatorContext(
         round_num=3,
         opt_search_point={"task_context": {"key_challenges": "the prior framing"}},
     )

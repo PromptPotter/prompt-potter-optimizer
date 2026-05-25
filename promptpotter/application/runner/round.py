@@ -57,7 +57,7 @@ def persist_round(
     is_probe: bool = False,
 ) -> None:
     """Flush decisions, mirror to ledger, write round_data + log.md/review.md, flush recorder.
-    ``is_probe`` rides the ``round:complete`` payload so ``EscalationState.fold`` can ignore probe
+    ``is_probe`` rides the ``round:complete`` payload so ``EscalationFSM.fold`` can ignore probe
     rounds; the emit is unconditional (every completed round lands on the ledger)."""
     flushed: list[ResumeCheckpointRecord] = []
     if cycle.pending_decisions:

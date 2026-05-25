@@ -42,6 +42,7 @@ from promptpotter.presentation.views.view_models import (
     RoundStartView,
     ScoreEntry,
     SpDiffView,
+    ViewContext,
     WarningEntry,
 )
 from promptpotter.shared.statistics import min_detectable_effect, wilson_ci
@@ -62,7 +63,7 @@ def _truncate(s: str, max_len: int) -> str:
 # --- per-phase typed builders (live; with ctx side effects) ---------------
 
 
-def _init_enter(d: dict[str, Any], ctx: dict[str, Any]) -> InitEnterView:
+def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     config = d["config"]
     dataset = d["dataset"]
     session = d.get("env")
@@ -70,18 +71,18 @@ def _init_enter(d: dict[str, Any], ctx: dict[str, Any]) -> InitEnterView:
     opt = config.optimization
     sample = config.sp_budget_ttest
 
-    ctx["max_rounds"] = opt.max_rounds or 0
-    ctx["patience"] = opt.l1_patience
+    ctx.max_rounds = opt.max_rounds or 0
+    ctx.patience = opt.l1_patience
     origin_pp = session.pipeline_params if session is not None else None
     if not origin_pp and schema is not None:
         origin_pp = schema.to_pipeline_params()
-    ctx["original_sp_flat"] = flatten_sp_summary(origin_pp)
-    ctx["node_param_keys"] = (
+    ctx.original_sp_flat = flatten_sp_summary(origin_pp)
+    ctx.node_param_keys = (
         {s: sorted(k) for s, k in schema.node_param_keys().items()} if schema else None
     )
-    ctx["round_num"] = 0
-    ctx["l1_stall_count"] = 0
-    ctx["origin_accuracy"] = 0.0
+    ctx.round_num = 0
+    ctx.l1_stall_count = 0
+    ctx.origin_accuracy = 0.0
 
     # Resolve the per-round composite formula at INIT.enter so the live
     # dashboard can stamp it before origin scoring fires (matches _init_exit
@@ -103,15 +104,15 @@ def _init_enter(d: dict[str, Any], ctx: dict[str, Any]) -> InitEnterView:
 
         full = default_per_round_formula(schema)
         short = default_per_round_formula_short(schema)
-    ctx["composite_fitness_formula"] = full
-    ctx["composite_fitness_formula_short"] = short
+    ctx.composite_fitness_formula = full
+    ctx.composite_fitness_formula_short = short
 
     return InitEnterView(
         warnings=tuple(
             WarningEntry(title=w.title, detail=w.detail) for w in (d.get("warnings") or [])
         ),
-        max_rounds=ctx["max_rounds"],
-        patience=ctx["patience"],
+        max_rounds=ctx.max_rounds,
+        patience=ctx.patience,
         n_variants=opt.n_variants,
         sp_budget_ttest=sample,
         dataset_size=len(dataset),
@@ -122,11 +123,11 @@ def _init_enter(d: dict[str, Any], ctx: dict[str, Any]) -> InitEnterView:
     )
 
 
-def _init_exit(d: dict[str, Any], ctx: dict[str, Any]) -> InitExitView:
+def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     cycle = d["state"]
     session = d["env"]
-    ctx["origin_accuracy"] = cycle.tracking.current_accuracy
-    ctx["origin_composite_fitness"] = cycle.tracking.current_composite_fitness
+    ctx.origin_accuracy = cycle.tracking.current_accuracy
+    ctx.origin_composite_fitness = cycle.tracking.current_composite_fitness
     schema = session.pipeline_schema
     explicit = session.scoring.scorer_round_formula
     if explicit:
@@ -141,14 +142,14 @@ def _init_exit(d: dict[str, Any], ctx: dict[str, Any]) -> InitExitView:
 
         full = default_per_round_formula(schema)
         short = default_per_round_formula_short(schema)
-    ctx["composite_fitness_formula"] = full
-    ctx["composite_fitness_formula_short"] = short
+    ctx.composite_fitness_formula = full
+    ctx.composite_fitness_formula_short = short
 
     overlays: dict[str, str] = {}
     for field_name, value in cycle.opt_sp.prompt_field_dict().items():
         if value:
             overlays[field_name] = str(value)
-            ctx["original_sp_flat"][field_name] = str(value)
+            ctx.original_sp_flat[field_name] = str(value)
 
     return InitExitView(
         origin_acc=cycle.tracking.origin_accuracy,
@@ -157,16 +158,16 @@ def _init_exit(d: dict[str, Any], ctx: dict[str, Any]) -> InitExitView:
         obs_on=session.state.obs is not None,
         resumed_from_round=session.state.resumed_from_round,
         cached_rounds_count=len(cycle.rounds),
-        task_context_keys=len(cycle.opt_sp.task_context),
+        task_context_keys=len(cycle.opt_sp.memory.task_context),
         l2_round=cycle.escalation.l2_round,
         prompt_field_overlays=overlays,
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
-        origin_composite_fitness=ctx["origin_composite_fitness"],
+        origin_composite_fitness=ctx.origin_composite_fitness or 0.0,
     )
 
 
-def _l1_generate_enter(d: dict[str, Any], ctx: dict[str, Any]) -> RoundStartView:
+def _l1_generate_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
     # Header renders before candidates exist — describes parent SP, not the
     # round's mutation mode (sp_diff table emits that next render).
     preview = (d.get("prompt_preview") or "").replace("\n", " ").strip()
@@ -179,21 +180,14 @@ def _l1_generate_enter(d: dict[str, Any], ctx: dict[str, Any]) -> RoundStartView
     for field_name, value in (d.get("parent_task_context") or {}).items():
         if value:
             new_flat[f"tc.{field_name}"] = str(value)
-    ctx["previous_sp_flat"] = dict(
-        (
-            ctx.get("original_sp_flat")
-            if ctx.get("round_num", 0) == 0
-            else ctx.get("current_sp_flat")
-        )
-        or {}
-    )
-    ctx["current_sp_flat"] = new_flat
+    ctx.previous_sp_flat = dict(ctx.original_sp_flat if ctx.round_num == 0 else ctx.current_sp_flat)
+    ctx.current_sp_flat = new_flat
 
     return RoundStartView(
-        round=ctx.get("round_num", 0),
-        max_rounds=ctx.get("max_rounds", 0),
-        l1_stall_count=ctx.get("l1_stall_count", 0),
-        patience=ctx.get("patience", 0),
+        round=ctx.round_num,
+        max_rounds=ctx.max_rounds,
+        l1_stall_count=ctx.l1_stall_count,
+        patience=ctx.patience,
         current_acc=d.get("current_accuracy", 0.0),
         prompt_preview=preview,
         n_variants=d.get("n_variants", 0),
@@ -202,11 +196,11 @@ def _l1_generate_enter(d: dict[str, Any], ctx: dict[str, Any]) -> RoundStartView
     )
 
 
-def _l1_generate_exit(d: dict[str, Any], ctx: dict[str, Any]) -> CandidatesGeneratedView:
+def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGeneratedView:
     candidates_meta = d.get("candidates", [])
-    parent = ctx.get("current_sp_flat") or {}
+    parent = ctx.current_sp_flat
     columns: list[tuple[str, dict[str, str]]] = [
-        ("Start", dict(ctx.get("original_sp_flat") or {})),
+        ("Start", dict(ctx.original_sp_flat)),
         ("Parent", dict(parent)),
     ]
     clone_labels: list[str] = []
@@ -222,8 +216,8 @@ def _l1_generate_exit(d: dict[str, Any], ctx: dict[str, Any]) -> CandidatesGener
     n_dup = int(d.get("l1_n_duplicate", 0))
     sp_diff = SpDiffView(
         columns=tuple(columns),
-        node_param_keys=ctx.get("node_param_keys"),
-        round_num=ctx.get("round_num", 0),
+        node_param_keys=ctx.node_param_keys,
+        round_num=ctx.round_num,
         clone_labels=tuple(clone_labels),
         l1_yield=l1_yield,
         l1_n_no_op=n_no_op,
@@ -241,7 +235,7 @@ def _l1_generate_exit(d: dict[str, Any], ctx: dict[str, Any]) -> CandidatesGener
     )
 
 
-def _l1_score_exit(d: dict[str, Any], ctx: dict[str, Any]) -> RoundCompleteView:
+def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     score_entries = [score_entry_from_dict(s) for s in d.get("candidate_scores") or []]
 
     winner = pick_round_winner(score_entries)
@@ -252,7 +246,7 @@ def _l1_score_exit(d: dict[str, Any], ctx: dict[str, Any]) -> RoundCompleteView:
 
     w_acc = float(d.get("winner_accuracy", 0.0))
     improved = bool(d.get("improved", False))
-    origin_acc = ctx.get("origin_accuracy", 0.0)
+    origin_acc = ctx.origin_accuracy
     # Matched-pair origin (winner-measured samples); fallback ``origin_acc``
     # for round 0 / pre-gate events. Δ uses this so operator-visible Δ
     # matches the ``improved`` gate, not the full-set comparison that
@@ -263,10 +257,10 @@ def _l1_score_exit(d: dict[str, Any], ctx: dict[str, Any]) -> RoundCompleteView:
     delta = w_acc - matched_origin_acc
     p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
     if improved:
-        ctx["origin_accuracy"] = w_acc
+        ctx.origin_accuracy = w_acc
 
     return RoundCompleteView(
-        round=int(ctx.get("round_num", 0)),
+        round=ctx.round_num,
         origin_acc=origin_acc,
         scores=tuple(score_entries),
         winner_label=winner_label,
@@ -281,16 +275,16 @@ def _l1_score_exit(d: dict[str, Any], ctx: dict[str, Any]) -> RoundCompleteView:
         improved_reason=d.get("improved_reason"),
         next_action=str(d.get("next_action", "?") or "?"),
         l1_critique_text=format_l1_critique_for_prompt(d.get("critique") or {}),
-        composite_fitness_formula=ctx.get("composite_fitness_formula"),
-        composite_fitness_formula_short=ctx.get("composite_fitness_formula_short"),
-        origin_composite_fitness=ctx.get("origin_composite_fitness"),
+        composite_fitness_formula=ctx.composite_fitness_formula,
+        composite_fitness_formula_short=ctx.composite_fitness_formula_short,
+        origin_composite_fitness=ctx.origin_composite_fitness,
         matched_origin_accuracy=matched_origin_acc,
         matched_origin_hits=matched_origin_hits,
         matched_origin_composite=matched_origin_composite,
     )
 
 
-def _escalation_enter(d: dict[str, Any], ctx: dict[str, Any]) -> EscalationEnterView:
+def _escalation_enter(d: dict[str, Any], ctx: ViewContext) -> EscalationEnterView:
     return EscalationEnterView(
         check_name=d.get("check_name", "?"),
         target=d.get("target", "?"),
@@ -299,7 +293,7 @@ def _escalation_enter(d: dict[str, Any], ctx: dict[str, Any]) -> EscalationEnter
     )
 
 
-def _escalation_exit(d: dict[str, Any], ctx: dict[str, Any]) -> EscalationExitView:
+def _escalation_exit(d: dict[str, Any], ctx: ViewContext) -> EscalationExitView:
     return EscalationExitView(
         classifications=tuple(
             (c.get("warning_type", ""), c.get("status", ""))
@@ -308,7 +302,7 @@ def _escalation_exit(d: dict[str, Any], ctx: dict[str, Any]) -> EscalationExitVi
     )
 
 
-def _refine_enter(d: dict[str, Any], ctx: dict[str, Any]) -> L2RefineEnterView:
+def _refine_enter(d: dict[str, Any], ctx: ViewContext) -> L2RefineEnterView:
     params = d.get("l1_overrides") or {}
     return L2RefineEnterView(
         l2_round=d.get("l2_round", "?"),
@@ -320,7 +314,7 @@ def _refine_enter(d: dict[str, Any], ctx: dict[str, Any]) -> L2RefineEnterView:
     )
 
 
-def _refine_exit(d: dict[str, Any], ctx: dict[str, Any]) -> L2RefineExitView:
+def _refine_exit(d: dict[str, Any], ctx: ViewContext) -> L2RefineExitView:
     return L2RefineExitView(
         param_changes_count=d.get("param_changes_count", 0),
         task_context_changed=bool(d.get("task_context_changed", False)),
@@ -333,7 +327,7 @@ def _refine_exit(d: dict[str, Any], ctx: dict[str, Any]) -> L2RefineExitView:
     )
 
 
-def _probe_enter(d: dict[str, Any], ctx: dict[str, Any]) -> ProbeEnterView:
+def _probe_enter(d: dict[str, Any], ctx: ViewContext) -> ProbeEnterView:
     queries = list(d.get("probe_queries") or [])
     return ProbeEnterView(
         n_probe_samples=d.get("n_probe_samples", len(queries)),
@@ -341,14 +335,14 @@ def _probe_enter(d: dict[str, Any], ctx: dict[str, Any]) -> ProbeEnterView:
     )
 
 
-def _probe_exit(d: dict[str, Any], ctx: dict[str, Any]) -> ProbeExitView:
+def _probe_exit(d: dict[str, Any], ctx: ViewContext) -> ProbeExitView:
     return ProbeExitView(
         n_probed=d.get("n_probed", 0),
         probe_hits=d.get("probe_hits", 0),
     )
 
 
-def _plan_enter(d: dict[str, Any], ctx: dict[str, Any]) -> PlanEnterView:
+def _plan_enter(d: dict[str, Any], ctx: ViewContext) -> PlanEnterView:
     return PlanEnterView(
         l3_round=d.get("l3_round", "?"),
         l2_stall_count=d.get("l2_stall_count", "?"),
@@ -356,7 +350,7 @@ def _plan_enter(d: dict[str, Any], ctx: dict[str, Any]) -> PlanEnterView:
     )
 
 
-def _plan_exit(d: dict[str, Any], ctx: dict[str, Any]) -> PlanExitView:
+def _plan_exit(d: dict[str, Any], ctx: ViewContext) -> PlanExitView:
     return PlanExitView(
         new_plan_preview=_truncate(d.get("new_plan_preview", "") or "", 55),
         changes_description=d.get("changes_description", ""),
@@ -383,10 +377,10 @@ _BUILDERS: dict[str, Any] = {
 # --- live entry points ----------------------------------------------------
 
 
-def from_phase_event(event: PhaseEvent, ctx: dict[str, Any]) -> AnyView | None:
+def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
     """Build a typed view from a ``PhaseEvent``; ``None`` for unregistered phases."""
     if event.round is not None:
-        ctx["round_num"] = event.round
+        ctx.round_num = event.round
     builder = _BUILDERS.get(f"{event.phase}:{event.event}")
     return builder(event.data, ctx) if builder is not None else None
 

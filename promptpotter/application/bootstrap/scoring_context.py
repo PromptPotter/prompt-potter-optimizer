@@ -1,4 +1,4 @@
-"""ScoringContext build + cycle bootstrap.
+"""ScorerSetup build + cycle bootstrap.
 
 - ``populate_session_scoring`` — attach scorer + per-round scorer + obs to a Session.
 - ``bootstrap_cycle`` — resume existing cycle or create one.

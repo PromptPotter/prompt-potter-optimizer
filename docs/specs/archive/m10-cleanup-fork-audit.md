@@ -65,7 +65,7 @@ What stays in place (correctly scoped already):
 
 What `cycle.py` shrinks to (after §3.6):
 
-- `Cycle` dataclass + `TrackingState` dataclass.
+- `Cycle` dataclass + `CycleRoundState` dataclass.
 - `_build_scoreboard` helper (round-trial projection).
 - `_rf_dedup_key` (runtime-failure dedup key).
 - ~313 lines (down from 788).

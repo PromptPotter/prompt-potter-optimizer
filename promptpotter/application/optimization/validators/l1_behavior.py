@@ -24,8 +24,8 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, PARAM_SCOPE_K
 
 __all__ = [
     "CHECK_REGISTRY",
-    "CheckContext",
     "CheckResult",
+    "ValidatorContext",
     "extract_l1_variants",
     "run_all_checks",
 ]
@@ -57,7 +57,7 @@ class CheckResult:
 
 
 @dataclass(frozen=True)
-class CheckContext:
+class ValidatorContext:
     """Context shared by all behaviour checks for one round.
 
     ``prior_rounds`` are the round dicts strictly before ``round_num``,
@@ -86,7 +86,7 @@ class CheckContext:
     peaked_axes: frozenset[str] = field(default_factory=frozenset)
 
 
-CheckFn = Callable[[dict[str, Any], CheckContext], CheckResult]
+CheckFn = Callable[[dict[str, Any], ValidatorContext], CheckResult]
 
 
 # --- helpers ---------------------------------------------------------------
@@ -130,7 +130,7 @@ def _key_phrases(text: str, *, min_len: int = 4, max_phrases: int = 6) -> list[s
 # --- checks ----------------------------------------------------------------
 
 
-def _check_context_object_honored(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+def _check_context_object_honored(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
     """Each variant must reference at least one ``context_object`` item."""
     items = [c for c in ctx.context_object if isinstance(c, str) and c.strip()]
     variants = extract_l1_variants(round_dict)
@@ -158,7 +158,7 @@ def _check_context_object_honored(round_dict: dict[str, Any], ctx: CheckContext)
     )
 
 
-def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
     """No param-scope mutations while prompt-field exploration hasn't settled."""
     variants = extract_l1_variants(round_dict)
     if not variants:
@@ -196,7 +196,7 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: CheckContext)
     )
 
 
-def _check_forbidden_axes_honored(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+def _check_forbidden_axes_honored(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
     """No variant may mutate ``PARAM_FORBIDDEN_KEYS`` (``model``, ``provider``).
 
     These ride the per-dataset overlay and are out of L1's surface — touching
@@ -227,7 +227,9 @@ def _check_forbidden_axes_honored(round_dict: dict[str, Any], ctx: CheckContext)
     )
 
 
-def _check_evidence_grounding_present(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+def _check_evidence_grounding_present(
+    round_dict: dict[str, Any], ctx: ValidatorContext
+) -> CheckResult:
     """Each L1 variant must cite a panel field that justifies its mutation.
 
     Per ``promptpotter/CLAUDE.md`` L1 contract: *no data justifying a choice
@@ -280,7 +282,9 @@ def _check_evidence_grounding_present(round_dict: dict[str, Any], ctx: CheckCont
     )
 
 
-def _check_not_only_param_variants(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+def _check_not_only_param_variants(
+    round_dict: dict[str, Any], ctx: ValidatorContext
+) -> CheckResult:
     """≥1 variant per round must mutate a prompt-field axis (``prompt_fields_override``)."""
     variants = extract_l1_variants(round_dict)
     if not variants:
@@ -311,7 +315,7 @@ CHECK_REGISTRY: dict[str, CheckFn] = {
 }
 
 
-def run_all_checks(round_dict: dict[str, Any], ctx: CheckContext) -> list[CheckResult]:
+def run_all_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[CheckResult]:
     """Run every registered check against one round, in registry order."""
     return [fn(round_dict, ctx) for fn in CHECK_REGISTRY.values()]
 
@@ -328,7 +332,7 @@ _REBUT_SIGNALS: tuple[str, ...] = (
 
 
 def _cited_peaked_axis(
-    variant: dict[str, Any], citation: str, field_name: str, ctx: CheckContext
+    variant: dict[str, Any], citation: str, field_name: str, ctx: ValidatorContext
 ) -> str | None:
     """Return the first peaked axis that this variant's evidence_grounding
     + target/override fields appear to mutate, or None.
@@ -361,7 +365,7 @@ def _cited_peaked_axis(
     return None
 
 
-def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: CheckContext) -> bool:
+def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: ValidatorContext) -> bool:
     """True iff the variant's reasoning/citation cites a real rebut for the
     peaked-axis guard: a sibling_yield row this round, or an explicit
     wide-exploration budget. Permissive substring match — the prompt
@@ -404,7 +408,7 @@ def _touched_forbidden_keys(pp_override: dict[str, Any]) -> set[str]:
     return out
 
 
-def _stale_prompt_field(ctx: CheckContext) -> str | None:
+def _stale_prompt_field(ctx: ValidatorContext) -> str | None:
     """Return a prompt-string field name unchanged for the past 2 rounds, or None.
 
     Inspects ``prior_rounds`` (most-recent last) and looks at each round's

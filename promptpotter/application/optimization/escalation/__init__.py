@@ -1,6 +1,6 @@
 """Escalation FSM + L2/L3 firing driver + post-round routing.
 
-- :mod:`.state` — :class:`EscalationState` (cause-driven L1/L2/L3 stall
+- :mod:`.state` — :class:`EscalationFSM` (cause-driven L1/L2/L3 stall
   counters), :class:`EscalationEvent`, :class:`NextAction`. Counters
   mutate only via observation methods; ``signals from measurement, not
   the calendar`` is structural (no public setter to assign a
@@ -29,16 +29,16 @@ from promptpotter.application.optimization.escalation.rules import (
 )
 from promptpotter.application.optimization.escalation.state import (
     EscalationEvent,
-    EscalationState,
+    EscalationFSM,
     NextAction,
 )
 
 __all__ = [
     "DEFAULT_ESCALATION_RULES",
     "EscalationEvent",
+    "EscalationFSM",
     "EscalationInputs",
     "EscalationRule",
-    "EscalationState",
     "NextAction",
     "apply_fork_payload_to_osp",
     "decide_escalation",

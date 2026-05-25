@@ -54,7 +54,7 @@ class EscalationEvent:
         return _NEXT_ACTION_TO_STOP.get(self.next_action)
 
 
-class EscalationState:
+class EscalationFSM:
     """Cause-driven L1/L2/L3 counters; mutation surface = observations + post-fire bookkeepers."""
 
     __slots__ = (
@@ -243,7 +243,7 @@ class EscalationState:
             self._l2_best_composite_fitness_at_entry = best_comp
 
     @classmethod
-    def from_ledger(cls, ledger: CycleEventLog | None) -> EscalationState:
+    def from_ledger(cls, ledger: CycleEventLog | None) -> EscalationFSM:
         """Rebuild state by folding every record in ``ledger``. ``None`` ⇒ fresh state."""
         s = cls()
         if ledger is None:
@@ -253,4 +253,4 @@ class EscalationState:
         return s
 
 
-__all__ = ["EscalationEvent", "EscalationState", "NextAction"]
+__all__ = ["EscalationEvent", "EscalationFSM", "NextAction"]

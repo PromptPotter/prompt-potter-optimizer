@@ -29,7 +29,7 @@ If a panel field speaks against a mutation, `l1_generate` does not propose it.
 
 Each emitted variant declares an `evidence_grounding: {field, citation}` naming the panel entry that justifies the mutation. `field ∈ EVIDENCE_GROUNDING_FIELDS`; `stall_exploration` is the escape hatch and is only valid when `escalation_panel.exploration_budget ∈ {normal, wide}`. Variants without a real citation fail the `evidence_grounding_present` behavior check (`application/optimization/validators/l1_behavior.py`) — surfaced in `review.md` and `round_NNNN.json`. The Track 4 healing rule that converts this signal into an L2 `task_context` nudge lives behind `m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface`.
 
-Channel: `task_context` (L2-refined task framing) and `plan` (L3-set strategy) arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill_l1` walking `opt_sp.l1_layout` over the `INJECTIONS` registry (`dispatch/hub/injections/registry.py`).
+Channel: `task_context` (L2-refined task framing) and `plan` (L3-set strategy) arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill_l1` walking `opt_sp.memory.l1_layout` over the `INJECTIONS` registry (`dispatch/hub/injections/registry.py`).
 
 **Reviewing an L1 round trace.** Load
 [`docs/developer/l1-candidate-analysis-checklist.md`](../docs/developer/l1-candidate-analysis-checklist.md)

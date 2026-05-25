@@ -40,12 +40,12 @@ L1 generate is the only layer with an L2-mutable layout; the rest run on fixed t
 | Field | Writer | Reader(s) | Lifetime |
 |-------|--------|-----------|----------|
 | `RoundResult.critique` | L1 critique | L2, L3 (`critique` injection via `cycle.latest_round.critique`) | per round (lives on the round audit, not OSP) |
-| `OSP.task_context` | L2 (refines via merge) | L1, L1 critique, L2, L3 (`task_context` injection — broadcast) | persistent, accumulative |
-| `OSP.l1_layout` | L2 | L1 generate (`fill_l1`) | persistent (in `MEMORY_FIELDS`) |
+| `OSP.memory.task_context` | L2 (refines via merge) | L1, L1 critique, L2, L3 (`task_context` injection — broadcast) | persistent, accumulative; inherits through `mutate()` |
+| `OSP.memory.l1_layout` | L2 | L1 generate (`fill_l1`) | persistent (on `L2L3Memory`, copied on adopt) |
 | `OSP.plan` | L3 | every prompt (`plan` injection in all 4 templates) | persistent — never cleared |
-| `OSP.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
-| `OSP.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (`l2_guard_breaches` injection) | persistent until L3 fires |
-| `OSP.wounds.l3_guard_breaches` | L3 parser | L3 next fire (`l3_guard_breaches` injection) | persistent |
+| `OSP.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
+| `OSP.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (`l2_guard_breaches` injection) | persistent until L3 fires |
+| `OSP.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (`l3_guard_breaches` injection) | persistent |
 
 **Symmetric broadcast:** L3 writes `plan`; every prompt reads it via the same `_r_plan` renderer. L2 writes `task_context`; every prompt reads it via the same `_r_task_context` renderer. L1 sees both as framing inputs; L2 reads them as the strategic + task context for the next refinement.
 
@@ -76,7 +76,7 @@ L2 owns the L1-only injection subset via `l1_layout`; see [`l1-generate-surface.
 
 ## 2. Dispatch (which layer fires when)
 
-The runner asks the escalation rules engine after every round. `EscalationState.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation` (`application/optimization/escalation/decide.py`), which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`:
+The runner asks the escalation rules engine after every round. `EscalationFSM.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation` (`application/optimization/escalation/decide.py`), which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`:
 
 ```
 round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_with_positive_yield, …)

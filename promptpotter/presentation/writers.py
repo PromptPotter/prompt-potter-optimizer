@@ -455,7 +455,7 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
         rounds = store.load_rounds_range(campaign_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
         cycle_dir = store.cycle_dir(campaign_id, cycle_id)
         round_audits = load_round_audits(cycle_dir, rounds)
-        td = cycle.opt_sp.task_context
+        td = cycle.opt_sp.memory.task_context
         context_object = [
             td.pipeline_purpose,
             td.optimization_goals,

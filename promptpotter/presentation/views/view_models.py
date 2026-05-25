@@ -40,8 +40,34 @@ __all__ = [
     "SpDiffView",
     "SweepPayloadRow",
     "SweepSummaryView",
+    "ViewContext",
     "WarningEntry",
 ]
+
+
+@dataclass
+class ViewContext:
+    """Mutable per-cycle scratch state threaded through ``from_phase_event``.
+
+    Owned by ``RunCallbacks._phase_ctx`` and serialized to the wire via
+    ``asdict`` on round-complete + candidate-scored emits so ledger subscribers
+    can re-sync their own dict-shaped copy. Distinct from the frozen ``*View``
+    dataclasses: those are immutable per-event payloads; this carries running
+    state the builders mutate as phase events flow in.
+    """
+
+    max_rounds: int = 0
+    patience: int = 0
+    round_num: int = 0
+    l1_stall_count: int = 0
+    origin_accuracy: float = 0.0
+    origin_composite_fitness: float | None = None
+    composite_fitness_formula: str | None = None
+    composite_fitness_formula_short: str | None = None
+    original_sp_flat: dict[str, str] = field(default_factory=dict)
+    previous_sp_flat: dict[str, str] = field(default_factory=dict)
+    current_sp_flat: dict[str, str] = field(default_factory=dict)
+    node_param_keys: dict[str, list[str]] | None = None
 
 
 @dataclass(frozen=True)

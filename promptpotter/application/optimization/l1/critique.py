@@ -9,7 +9,10 @@ from promptpotter.application.optimization.dispatch.hub import (
     DispatchHub,
     build_bundle,
 )
-from promptpotter.application.optimization.dispatch.llm_call import run_optimizer_node
+from promptpotter.application.optimization.dispatch.llm_call import (
+    LLMCallContext,
+    run_optimizer_node,
+)
 from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.llm import LLMClientBase
@@ -53,9 +56,11 @@ async def run_l1_critique(
         prompt_vars=prompt_vars,
         llm_client=llm_client,
         model=model,
-        ledger=ledger,
-        round_num=round_num,
-        optimizer_call_cache=cycle.session.store.optimizer_calls,
+        context=LLMCallContext(
+            ledger=ledger,
+            round_num=round_num,
+            cache=cycle.session.store.optimizer_calls,
+        ),
     )
     assert isinstance(result, L1CritiqueOutput), (
         f"l1_critique must return L1CritiqueOutput, got {type(result).__name__}"

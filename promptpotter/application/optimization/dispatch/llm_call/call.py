@@ -13,6 +13,7 @@ import asyncio
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -52,7 +53,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["llm_call", "run_optimizer_node"]
+__all__ = ["LLMCallContext", "llm_call", "run_optimizer_node"]
+
+
+@dataclass(frozen=True)
+class LLMCallContext:
+    """Audit + cache context for one optimizer LLM call.
+
+    Bundles the four kwargs that always travel together across
+    ``llm_call`` and ``run_optimizer_node``: the ledger that receives
+    start/progress/end records, the round/candidate identity those records
+    carry, and the cross-cycle response cache. Defaults to all-``None`` —
+    used by non-ledger paths (checkin) and by callers that don't need the
+    audit trail.
+    """
+
+    ledger: CycleEventLog | None = None
+    round_num: int | None = None
+    candidate_idx: int | None = None
+    cache: OptimizerCallCache | None = None
 
 
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
@@ -160,10 +179,7 @@ async def llm_call(
     trace_meta: dict[str, Any] | None = None,
     response_model: type[BaseModel] | None = None,
     response_schema: dict[str, Any] | None = None,
-    ledger: CycleEventLog | None = None,
-    round_num: int | None = None,
-    candidate_idx: int | None = None,
-    cache: OptimizerCallCache | None = None,
+    context: LLMCallContext | None = None,
     **overrides: Any,
 ) -> LLMResponse:
     """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides.
@@ -176,19 +192,20 @@ async def llm_call(
     content is still validated against *response_model* for type-level
     guarantee on the Python side.
 
-    When *cache* is provided, the resolved ``(messages, model, temperature,
-    response_model, response_schema, provider)`` tuple is hashed and
-    looked up before firing the LLM. A hit replays the stored
+    *context* bundles the four call-audit kwargs (ledger, round, candidate,
+    cache). When ``context.cache`` is set, the resolved ``(messages, model,
+    temperature, response_model, response_schema, provider)`` tuple is
+    hashed and looked up before firing the LLM; a hit replays the stored
     ``LLMResponse`` (and emits an ``LLMCallRecord`` with ``cached: true``)
-    instead of calling the provider — cross-cycle and cross-fork by
-    construction.
-
-    When *ledger* is provided, an :class:`LLMCallRecord` is appended
-    after each successful call (or cache hit) — the audit-trail
-    projection picks it up via ``on_record`` and shapes it into the
-    round's ``nodes.<node>`` block. Callers MUST pass the ledger; the
-    direct ``recorder.add_action`` write path is gone.
+    instead of calling the provider. When ``context.ledger`` is set, an
+    :class:`LLMCallRecord` is appended after each successful call or cache
+    hit — the audit-trail projection picks it up via ``on_record`` and
+    shapes it into the round's ``nodes.<node>`` block. Callers MUST pass
+    the ledger via ``context``; the direct ``recorder.add_action`` write
+    path is gone.
     """
+    if context is None:
+        context = LLMCallContext()
     if config is None:
         if node:
             schema_node = get_optimizer_schema().get_node(node)
@@ -203,7 +220,7 @@ async def llm_call(
 
     cache_key: str | None = None
     cached_payload: dict[str, Any] | None = None
-    if cache is not None:
+    if context.cache is not None:
         cache_key = hash_call(
             messages=messages,
             model=merged.get("model"),
@@ -212,7 +229,7 @@ async def llm_call(
             json_schema=response_schema,
             response_model=response_model.__name__ if response_model else None,
         )
-        cached_payload = cache.load(cache_key)
+        cached_payload = context.cache.load(cache_key)
 
     _t0 = time.monotonic()
 
@@ -221,7 +238,7 @@ async def llm_call(
     # dashboard.json::in_flight even mid-call) with the eventual
     # LLMCallRecord. Empty string when no ledger is bound (call-site tests,
     # one-shot tools).
-    call_id = uuid.uuid4().hex if ledger is not None else ""
+    call_id = uuid.uuid4().hex if context.ledger is not None else ""
 
     if cached_payload is not None:
         response = LLMResponse.model_validate(cached_payload)
@@ -235,13 +252,13 @@ async def llm_call(
         logger.debug("OptimizerCallCache hit for %s (%s)", node or "llm_call", cache_key)
     else:
         prompt_chars = sum(len(m.get("content") or "") for m in messages)
-        if ledger is not None:
-            ledger.append(
+        if context.ledger is not None:
+            context.ledger.append(
                 LLMCallStartRecord(
                     call_id=call_id,
                     node=node or "llm_call",
-                    round=round_num,
-                    candidate_idx=candidate_idx,
+                    round=context.round_num,
+                    candidate_idx=context.candidate_idx,
                     model=merged.get("model"),
                     started_at_ms=int(time.time() * 1000),
                     prompt_chars=prompt_chars,
@@ -267,13 +284,13 @@ async def llm_call(
         # 30-200s. Cancelled on completion (any path) by the finally
         # block below; short calls under HEARTBEAT_INTERVAL_S never tick.
         heartbeat_task: asyncio.Task[None] | None = None
-        if ledger is not None:
+        if context.ledger is not None:
             heartbeat_task = asyncio.create_task(
                 _heartbeat(
-                    ledger,
+                    context.ledger,
                     call_id=call_id,
                     node=node or "llm_call",
-                    round_num=round_num,
+                    round_num=context.round_num,
                     start_monotonic=_t0,
                 )
             )
@@ -353,10 +370,10 @@ async def llm_call(
             )
         )
 
-        if cache is not None and cache_key is not None:
-            cache.save(cache_key, response.model_dump())
+        if context.cache is not None and cache_key is not None:
+            context.cache.save(cache_key, response.model_dump())
 
-    if ledger is not None:
+    if context.ledger is not None:
         payload: dict[str, Any] = {
             "type": node or "llm_call",
             "config": {
@@ -380,11 +397,11 @@ async def llm_call(
             payload.update(trace_meta)
         else:
             payload["messages"] = messages
-        ledger.append(
+        context.ledger.append(
             LLMCallRecord(
                 node=node or "llm_call",
-                round=round_num,
-                candidate_idx=candidate_idx,
+                round=context.round_num,
+                candidate_idx=context.candidate_idx,
                 call_id=call_id,
                 payload=payload,
             )
@@ -402,11 +419,8 @@ async def run_optimizer_node(
     temperature: float = 0.0,
     response_schema: dict[str, Any] | None = None,
     user_content: str | None = None,
-    ledger: CycleEventLog | None = None,
-    round_num: int | None = None,
-    candidate_idx: int | None = None,
+    context: LLMCallContext | None = None,
     template: PromptTemplate | None = None,
-    optimizer_call_cache: OptimizerCallCache | None = None,
 ) -> tuple[Any, str]:
     """Load prompt template, compile, call LLM → (parsed_result, prompt_text).
 
@@ -425,8 +439,8 @@ async def run_optimizer_node(
     derived from the response model — used by ``l1_generate`` whose
     schema is built dynamically per backend ``PipelineSchema``.
 
-    When *optimizer_call_cache* is provided, it is forwarded to :func:`llm_call`
-    for content-addressed cross-cycle reuse of optimizer LLM responses.
+    *context* bundles the audit/cache kwargs (ledger, round, candidate,
+    cache); forwarded verbatim to :func:`llm_call`.
     """
     if template is None:
         template = load_optimizer_prompt(template_name)
@@ -445,10 +459,7 @@ async def run_optimizer_node(
         model=model,
         temperature=temperature,
         response_schema=response_schema,
-        ledger=ledger,
-        round_num=round_num,
-        candidate_idx=candidate_idx,
-        cache=optimizer_call_cache,
+        context=context,
         trace_meta={
             "template_name": template_name,
             "template_fields": template.prompt_field_dict(),

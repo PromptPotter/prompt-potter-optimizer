@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import re
 import uuid
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -172,18 +172,56 @@ class IndividualLineage(BaseModel):
     evidence_grounding: EvidenceGrounding | None = None
 
 
-class OptSearchPoint(PromptTemplate):
-    """Optimizer working state: prompt fields + lineage + L2/L3 state + memory."""
+class L2L3Memory(BaseModel):
+    """L2/L3-authored state that travels with the candidate.
+
+    Bundled together because all six are authored by the escalation layers
+    (L2 writes most; L3 writes ``wounds.l3_note`` + ``wounds.l3_guard_breaches``)
+    and consumed by the dispatch-hub injections that compose the four
+    optimizer prompts. ``OptSearchPoint.copy_memory_to`` deep-copies the
+    whole bundle on L2/L3 adopt; ``OptSearchPoint.mutate`` (L1 child)
+    inherits ``task_context`` + ``l1_overrides`` and resets the other four
+    to defaults — the propagation asymmetry lives in those two methods.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    lineage: IndividualLineage = Field(default_factory=IndividualLineage)
+    wounds: WoundChannels = Field(
+        default_factory=WoundChannels,
+        description=(
+            "Four wound streams (validation/runtime/l2-guard/l3-guard) + "
+            "sticky L3 note. Rendered by dispatch-hub injections; absorbed "
+            "by L2 next round."
+        ),
+    )
+    l1_layout: L1Layout = Field(
+        default_factory=default_l1_layout,
+        description=(
+            "L2-authored ordered list of injection slots that "
+            "``DispatchHub.fill_l1`` walks to compose the L1 meta-prompt. "
+            "L2's primary lever for changing what evidence L1 sees."
+        ),
+    )
     l1_overrides: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "Per-individual L1 meta-prompt overrides keyed by the surface "
             "field name (``persona``, ``instruction``, …). L2 writes here "
             "to nudge L1 without rewriting the shared meta-prompt."
+        ),
+    )
+    l1_supplemental_rules: list[L1SupplementalRule] = Field(
+        default_factory=list,
+        description=(
+            "L2-authored situational rules rendered inline in L1's "
+            "instruction. Cumulative across rounds; L3 may prune."
+        ),
+    )
+    l1_situational_examples: list[L1SituationalExample] = Field(
+        default_factory=list,
+        description=(
+            "Worked examples pinned to a ``trigger_id`` (auto-trigger or "
+            "L2-authored rule). Rendered alongside the matching rule."
         ),
     )
     task_context: TaskDecomposition = Field(
@@ -205,56 +243,25 @@ class OptSearchPoint(PromptTemplate):
             return TaskDecomposition.from_dict(v)
         return TaskDecomposition()
 
-    wounds: WoundChannels = Field(
-        default_factory=WoundChannels,
-        description=(
-            "Four wound streams (validation/runtime/l2-guard/l3-guard) + "
-            "sticky L3 note. Rendered by dispatch-hub injections; absorbed "
-            "by L2 next round."
-        ),
-    )
-    l1_layout: L1Layout = Field(
-        default_factory=default_l1_layout,
-        description=(
-            "L2-authored ordered list of injection slots that "
-            "``DispatchHub.fill_l1`` walks to compose the L1 meta-prompt. "
-            "L2's primary lever for changing what evidence L1 sees."
-        ),
-    )
-    l1_supplemental_rules: list[L1SupplementalRule] = Field(
-        default_factory=list,
-        description=(
-            "L2-authored situational rules rendered inline in L1's "
-            "instruction. Cumulative across rounds; L3 may prune."
-        ),
-    )
-    l1_situational_examples: list[L1SituationalExample] = Field(
-        default_factory=list,
-        description=(
-            "Worked examples pinned to a ``trigger_id`` (auto-trigger or "
-            "L2-authored rule). Rendered alongside the matching rule."
-        ),
-    )
 
-    MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "wounds",
-        "l1_layout",
-        "l1_overrides",
-        "l1_supplemental_rules",
-        "l1_situational_examples",
-    )
+class OptSearchPoint(PromptTemplate):
+    """Optimizer working state: prompt fields + lineage + L2/L3 memory."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lineage: IndividualLineage = Field(default_factory=IndividualLineage)
+    memory: L2L3Memory = Field(default_factory=L2L3Memory)
 
     def copy_memory_to(self, target: OptSearchPoint) -> None:
-        """Deep-copy MEMORY_FIELDS onto *target* for L2/L3 adopt."""
-        for f in self.MEMORY_FIELDS:
-            setattr(target, f, copy.deepcopy(getattr(self, f)))
+        """Deep-copy the L2/L3 memory onto *target* for L2/L3 adopt."""
+        target.memory = self.memory.model_copy(deep=True)
 
     def _field_value(self, name: str) -> str:
         """Splice ``task_context`` up/downstream context around ``problem_description``."""
         v: str = getattr(self, name)
         if name != "problem_description" or not v:
             return v
-        tc = self.task_context
+        tc = self.memory.task_context
         if not (tc.upstream_context or tc.downstream_context):
             return v
         return "\n\n".join(p for p in (tc.upstream_context, v, tc.downstream_context) if p)
@@ -292,8 +299,10 @@ class OptSearchPoint(PromptTemplate):
         )
 
     def mutate(self, **changes: Any) -> OptSearchPoint:
-        """Child OSP: prompt + L2/L3 state copied; memory empty.
-        Memory only flows on L2/L3 adopt via ``copy_memory_to``."""
+        """Child OSP: prompt fields + ``task_context`` + ``l1_overrides`` inherit
+        from parent; ``wounds``/``l1_layout``/``l1_supplemental_rules``/
+        ``l1_situational_examples`` reset to defaults. The reset four flow on
+        L2/L3 adopt via ``copy_memory_to`` instead."""
         data: dict[str, Any] = {}
         for f in PROMPT_STRING_FIELDS:
             data[f] = changes.pop(f, getattr(self, f))
@@ -304,8 +313,10 @@ class OptSearchPoint(PromptTemplate):
             data["few_shot_examples"] = fse
         else:
             data["few_shot_examples"] = [ex.model_copy() for ex in self.few_shot_examples]
-        data["l1_overrides"] = changes.pop("l1_overrides", dict(self.l1_overrides))
-        data["task_context"] = changes.pop("task_context", self.task_context.to_dict())
+        data["memory"] = L2L3Memory(
+            l1_overrides=changes.pop("l1_overrides", dict(self.memory.l1_overrides)),
+            task_context=changes.pop("task_context", self.memory.task_context.to_dict()),
+        )
         data["plan"] = changes.pop("plan", self.plan)
         data["lineage"] = IndividualLineage(
             parent_id=self.lineage.id,
@@ -374,6 +385,7 @@ __all__ = [
     "IndividualLineage",
     "L1SituationalExample",
     "L1SupplementalRule",
+    "L2L3Memory",
     "OptSearchPoint",
     "PromptTemplate",
     "WoundChannels",

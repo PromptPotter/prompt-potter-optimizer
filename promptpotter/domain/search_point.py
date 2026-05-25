@@ -112,7 +112,39 @@ class TaskDecomposition:
     """Typed domain context produced by task-description decomposition.
 
     All fields default to ``""`` so the object is always safe to read
-    without ``.get()`` guards.
+    without ``.get()`` guards. Operator/LLM-facing — these strings ride
+    the ``task_context`` injection into every optimizer prompt (L1, L1
+    critique, L2, L3), so the per-field semantics are load-bearing.
+
+    Field semantics (also reflected in the L2 meta-prompt):
+
+    - ``domain`` — one-line task family ("competition mathematics",
+      "biomedical entity normalization"). Steers L1's persona /
+      thinking_style; rarely changes after origin.
+    - ``pipeline_purpose`` — one-sentence "what this campaign is
+      trying to produce", framed for an outside reader. Set at
+      origin, refined by L2 only on plan-level shifts.
+    - ``data_characteristics`` — concrete properties of the sample
+      pool L1 should account for (length, modality, distribution
+      skew, known bias). Evidence-anchored — cites observations from
+      `parent_panel` / `sibling_yield`, not speculation.
+    - ``optimization_goals`` — what we're optimising for, in
+      operator vocabulary (accuracy vs latency vs compactness). Maps
+      conceptually to the composite-fitness formula but is not its
+      verbatim text.
+    - ``key_challenges`` — the failure patterns L1 should defend
+      against next round. L2's primary refinement surface;
+      accumulative, merged on each L2 fire. The
+      `l2_task_context_verbatim_repeat` validator fires here when L2
+      restates without delta.
+    - ``upstream_context`` — task-framing prepended around
+      ``problem_description`` at render time (see
+      ``OptSearchPoint._field_value``).
+    - ``downstream_context`` — task-framing appended around
+      ``problem_description`` at render time.
+    - ``raw_description`` — verbatim operator-supplied task
+      description (``datasets/{name}/task_description.md``);
+      preserved separately so refinements never overwrite the source.
     """
 
     domain: str = ""

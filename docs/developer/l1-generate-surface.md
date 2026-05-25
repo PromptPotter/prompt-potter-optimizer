@@ -75,6 +75,6 @@ Renderers stay layer-agnostic. Per-layer specialisation is the kind of complexit
 - `INJECTIONS`: `promptpotter/application/optimization/dispatch/hub/injections/registry.py`; `InjectionBundle`: `dispatch/hub/bundle.py`; `DispatchHub` + `build_bundle`: `dispatch/hub/facade.py`
 - `L1Layout`, `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `promptpotter/domain/l1_layout.py`
 - L1 generate compose path: `promptpotter/application/optimization/l1/generate.py::l1_generate`
-- OSP layout field: `promptpotter/domain/opt_search_point.py` — `l1_layout` (in `MEMORY_FIELDS`)
+- OSP layout field: `promptpotter/domain/opt_search_point.py` — `OptSearchPoint.memory.l1_layout` on the `L2L3Memory` sub-model
 
 L2-side orchestration: [`l2-internals.md`](l2-internals.md).

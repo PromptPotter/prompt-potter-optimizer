@@ -31,20 +31,20 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
     rationale = raw.rationale or "L2 refine_strategy transition"
     changes: dict[str, Any] = {"changes_description": f"L2: {truncate(rationale, 80)}"}
     if raw.l1_overrides:
-        changes["l1_overrides"] = {**opt_sp.l1_overrides, **raw.l1_overrides}
+        changes["l1_overrides"] = {**opt_sp.memory.l1_overrides, **raw.l1_overrides}
 
     new_task_context = None
     proposed_tc = raw.task_context if raw.task_context else None
     if proposed_tc:
-        merged = opt_sp.task_context.merge(proposed_tc)
-        if merged.to_dict() != opt_sp.task_context.to_dict():
+        merged = opt_sp.memory.task_context.merge(proposed_tc)
+        if merged.to_dict() != opt_sp.memory.task_context.to_dict():
             new_task_context = merged
 
     proposed_layout = coerce_l1_layout(raw.l1_layout)
     layout_outcomes: list[ValidatorOutcome] = []
     accepted_layout: L1Layout | None = None
     if proposed_layout is not None:
-        layout_result = validate_l1_layout(proposed_layout, prior_layout=opt_sp.l1_layout)
+        layout_result = validate_l1_layout(proposed_layout, prior_layout=opt_sp.memory.l1_layout)
         layout_outcomes = list(layout_result.outcomes)
         if layout_result.is_valid:
             accepted_layout = proposed_layout
@@ -87,14 +87,14 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
 def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     osp = cycle.opt_sp
     if result.task_context:
-        osp.task_context = result.task_context
+        osp.memory.task_context = result.task_context
     if result.l1_layout is not None:
-        osp.l1_layout = result.l1_layout
+        osp.memory.l1_layout = result.l1_layout
     if result.l1_supplemental_rules is not None:
-        osp.l1_supplemental_rules = result.l1_supplemental_rules
+        osp.memory.l1_supplemental_rules = result.l1_supplemental_rules
     if result.l1_situational_examples is not None:
-        osp.l1_situational_examples = result.l1_situational_examples
-    osp.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
+        osp.memory.l1_situational_examples = result.l1_situational_examples
+    osp.memory.wounds.l2_guard_breaches = list(result.l2_guard_breaches)
     cycle.escalation.record_l2_fired(
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
@@ -125,20 +125,20 @@ def _l2_enter(cycle: Cycle) -> dict[str, Any]:
     return {
         "l2_round": cycle.escalation.l2_round,
         "l1_stall_count": cycle.escalation.l1_stall_count,
-        "l1_overrides": cycle.opt_sp.l1_overrides,
+        "l1_overrides": cycle.opt_sp.memory.l1_overrides,
         "current_accuracy": cycle.tracking.current_accuracy,
         "best_accuracy": cycle.tracking.best_accuracy,
     }
 
 
 def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-    # ``l2_*_at_entry`` are read by ``EscalationState.fold`` on resume (canonical post-fire L2 state from ``record_l2_fired``).
+    # ``l2_*_at_entry`` are read by ``EscalationFSM.fold`` on resume (canonical post-fire L2 state from ``record_l2_fired``).
     return {
         "l2_round": cycle.escalation.l2_round,
         "l2_stall_count": cycle.escalation.l2_stall_count,
         "l2_best_accuracy_at_entry": cycle.escalation.l2_best_accuracy_at_entry,
         "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
-        "param_changes_count": len(result.opt_search_point.l1_overrides),
+        "param_changes_count": len(result.opt_search_point.memory.l1_overrides),
         "task_context_changed": result.task_context is not None,
         "l1_layout_changed": result.l1_layout is not None,
         "l1_supplemental_rules_n": (

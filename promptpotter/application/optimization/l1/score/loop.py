@@ -258,8 +258,8 @@ async def score_population(
         # Fold outcomes into live obs so next candidate's picker + leaderboard see them.
         round_live_obs.extend(_filtered_obs({osp_c.lineage.id: cr_result.results}))
         if cr_result.runtime_failure is not None:
-            osp_c.wounds.runtime_failures = [
-                *osp_c.wounds.runtime_failures,
+            osp_c.memory.wounds.runtime_failures = [
+                *osp_c.memory.wounds.runtime_failures,
                 cr_result.runtime_failure,
             ]
         candidate_scores.append(cr_result.report)

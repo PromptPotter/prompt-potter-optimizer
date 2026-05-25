@@ -5,7 +5,7 @@ prompts. Owns the injection registry (:data:`INJECTIONS`), the
 :class:`InjectionKind` classification, the typed
 :class:`InjectionBundle` per-call state, and the two rendering paths:
 
-* :meth:`DispatchHub.fill_l1` — resolves L2-authored ``opt_sp.l1_layout``
+* :meth:`DispatchHub.fill_l1` — resolves L2-authored ``opt_sp.memory.l1_layout``
   for L1_GENERATE.
 * :meth:`DispatchHub.fill_fixed` — walks a fixed template's body for
   L1_CRITIQUE / L2 / L3 and produces a ``{name → rendered}`` dict.

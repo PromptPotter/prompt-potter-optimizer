@@ -13,8 +13,8 @@ from typing import Any
 from promptpotter.application.optimization.l1.stats import L1Stats, compute_l1_stats
 from promptpotter.application.optimization.validators.l1_behavior import (
     CHECK_REGISTRY,
-    CheckContext,
     CheckResult,
+    ValidatorContext,
     extract_l1_variants,
     run_all_checks,
 )
@@ -121,7 +121,7 @@ def _compute_behavior_per_round(
         round_num = int(round_data.get("round") or i)
         peaked_raw = round_data.get("axis_memory_peaked") or []
         peaked_axes = frozenset(str(a) for a in peaked_raw if isinstance(a, str))
-        ctx = CheckContext(
+        ctx = ValidatorContext(
             round_num=round_num,
             prior_rounds=list(prior_audits),
             opt_search_point=dict(round_data.get("opt_search_point") or {}),

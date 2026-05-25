@@ -28,8 +28,8 @@ from collections.abc import Callable
 from typing import Any
 
 from promptpotter.application.optimization.validators.l1_behavior import (
-    CheckContext,
     CheckResult,
+    ValidatorContext,
 )
 
 __all__ = [
@@ -48,7 +48,7 @@ L2_RATIONALE_FLOOR_CHARS = 40
 # A digit or a `#N` sample reference — the cheap evidence-anchor signal.
 _EVIDENCE_RE = re.compile(r"#\d+|\d")
 
-CheckFn = Callable[[dict[str, Any], CheckContext], CheckResult]
+CheckFn = Callable[[dict[str, Any], ValidatorContext], CheckResult]
 
 
 def extract_l2_output(round_dict: dict[str, Any] | None) -> dict[str, Any]:
@@ -74,7 +74,7 @@ def l2_fired(round_dict: dict[str, Any] | None) -> bool:
 # --- checks ----------------------------------------------------------------
 
 
-def _check_rationale_substantive(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+def _check_rationale_substantive(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
     """L2's ``rationale`` must carry real diagnostic content, not a stub."""
     rationale = str(extract_l2_output(round_dict).get("rationale") or "").strip()
     if len(rationale) >= L2_RATIONALE_FLOOR_CHARS:
@@ -86,7 +86,7 @@ def _check_rationale_substantive(round_dict: dict[str, Any], ctx: CheckContext) 
     )
 
 
-def _check_evidence_anchored(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+def _check_evidence_anchored(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
     """L2's refinement must be evidence-anchored — name a targeted axis or
     cite a specific sample / number, not a speculative 'maybe try X'.
 
@@ -107,7 +107,9 @@ def _check_evidence_anchored(round_dict: dict[str, Any], ctx: CheckContext) -> C
     )
 
 
-def _check_task_context_not_verbatim(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+def _check_task_context_not_verbatim(
+    round_dict: dict[str, Any], ctx: ValidatorContext
+) -> CheckResult:
     """A proposed ``task_context`` refinement must change ≥1 field vs the
     prior OSP framing — a no-op refinement is a wasted L2 fire."""
     proposed = extract_l2_output(round_dict).get("task_context")
@@ -129,7 +131,7 @@ def _check_task_context_not_verbatim(round_dict: dict[str, Any], ctx: CheckConte
     )
 
 
-def _check_targets_l1_surface(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+def _check_targets_l1_surface(round_dict: dict[str, Any], ctx: ValidatorContext) -> CheckResult:
     """An L2 fire must change *something* L1 reads — ``task_context``,
     ``l1_layout``, ``l1_overrides``, or a supplemental rule / situational
     example. A fire that changes nothing is a wasted escalation."""
@@ -162,7 +164,7 @@ L2_CHECK_REGISTRY: dict[str, CheckFn] = {
 }
 
 
-def run_all_l2_checks(round_dict: dict[str, Any], ctx: CheckContext) -> list[CheckResult]:
+def run_all_l2_checks(round_dict: dict[str, Any], ctx: ValidatorContext) -> list[CheckResult]:
     """Run every L2 behaviour check against one round, in registry order.
 
     Empty list when L2 did not fire this round — there is nothing to

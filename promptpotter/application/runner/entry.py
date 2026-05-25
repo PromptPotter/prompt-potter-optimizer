@@ -127,7 +127,7 @@ async def run_optimization(
         if forked and pre_loop_cycle_id:
             # Carry phase_ctx across the rebuild — INIT.enter (max_rounds, patience, formulas)
             # fired on the parent callbacks and won't re-fire (else RoundStartView reads zeros on every forked round).
-            parent_phase_ctx = dict(observers.callbacks._phase_ctx)
+            parent_phase_ctx = observers.callbacks._phase_ctx
             observers = build_run_observers(
                 session=session,
                 campaign_config=campaign_config,
@@ -140,7 +140,7 @@ async def run_optimization(
                     parent_dashboard=observers.dashboard,
                 ),
             )
-            observers.callbacks._phase_ctx.update(parent_phase_ctx)
+            observers.callbacks._phase_ctx = parent_phase_ctx
             cb = observers.callbacks
 
         def _probe_cycle_spend() -> float:

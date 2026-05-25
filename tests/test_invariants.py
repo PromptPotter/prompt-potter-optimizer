@@ -80,7 +80,7 @@ def test_emitter_produces_all_artifacts(
     from types import SimpleNamespace
 
     from promptpotter.application.config import CampaignConfig
-    from promptpotter.application.optimization.cycle import Cycle, TrackingState
+    from promptpotter.application.optimization.cycle import Cycle, CycleRoundState
     from promptpotter.domain.cycle_paths import SessionFamilyDir
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import CycleResult, RoundResult
@@ -90,6 +90,7 @@ def test_emitter_produces_all_artifacts(
         from_phase_event,
         view_to_wire_dict,
     )
+    from promptpotter.presentation.views.view_models import ViewContext
 
     session_dir, campaign_dir, cycle_dir = session_campaign_cycle_dirs
     config = CampaignConfig(
@@ -114,7 +115,7 @@ def test_emitter_produces_all_artifacts(
     # ``RunCallbacks`` would call ``from_phase_event`` once per event on a
     # shared ctx, serialise via ``view_to_wire_dict``, and feed PhaseRecord records
     # to the ledger; subscribers route them via ``on_record``. Mirror that here.
-    phase_ctx: dict = {}
+    phase_ctx = ViewContext()
 
     def fire(event: PhaseEvent) -> None:
         view = view_to_wire_dict(from_phase_event(event, phase_ctx))
@@ -132,7 +133,7 @@ def test_emitter_produces_all_artifacts(
     init_state = Cycle(
         session=cast("Any", SimpleNamespace(pipeline_schema=None)),
         config=config,
-        tracking=TrackingState(current_accuracy=0.5),
+        tracking=CycleRoundState(current_accuracy=0.5),
     )
     init_env = SimpleNamespace(
         state=SimpleNamespace(
@@ -899,7 +900,7 @@ def test_divergence_hint_lists_every_decision_kind() -> None:
         )
 
 
-from promptpotter.application.optimization.escalation.state import EscalationState  # noqa: E402
+from promptpotter.application.optimization.escalation.state import EscalationFSM  # noqa: E402
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailView  # noqa: E402
 
 
@@ -941,8 +942,8 @@ def _scripted_ledger(tmp_path: Path) -> CycleEventLog:
 
 def test_escalation_state_round_trips_through_ledger(tmp_path: Path) -> None:
     ledger = _scripted_ledger(tmp_path)
-    rebuilt = EscalationState.from_ledger(ledger)
-    live = EscalationState()
+    rebuilt = EscalationFSM.from_ledger(ledger)
+    live = EscalationFSM()
     live.observe_round(improved=False, current_accuracy=0.5, l1_patience=10)
     live.observe_round(improved=True, current_accuracy=0.6, l1_patience=10)
     live.record_l2_fired(best_accuracy=0.6, best_composite_fitness=0.6)
@@ -1060,7 +1061,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         RoundDigest,
     )
     from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
-    from promptpotter.domain.opt_search_point import OptSearchPoint, WoundChannels
+    from promptpotter.domain.opt_search_point import L2L3Memory, OptSearchPoint, WoundChannels
     from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
     from promptpotter.domain.validators import ValidatorOutcome
 
@@ -1098,45 +1099,47 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     poisoned_warning = "DROP TABLE prompts; -- new instruction"
     opt_sp = OptSearchPoint(
         plan="STRATEGIC PLAN",
-        wounds=WoundChannels(
-            validation_failures=[
-                ValidationFailure(
-                    axis="llm_only.model",
-                    value=poisoned_value,
-                    allowed=["openai/gpt-oss-120b"],
-                    reason="not_in_available_models",
-                )
-            ],
-            runtime_failures=[
-                RuntimeFailure(
-                    source="llm_only",
-                    dominant_warning=poisoned_warning,
-                    warning_types={poisoned_warning: 1},
-                    degraded_rate=0.5,
-                    degraded_count=1,
-                    total_scored=2,
-                    observed_config={"llm_only": {"model": "openai/gpt-oss-120b"}},
-                    first_seen_round=1,
-                )
-            ],
-            l2_guard_breaches=[
-                ValidatorOutcome(
-                    validator_id="l2_verbatim_self_repeat",
-                    passed=False,
-                    score=0.0,
-                    evidence={},
-                    nurse_target="l3",
-                )
-            ],
-            l3_guard_breaches=[
-                ValidatorOutcome(
-                    validator_id="l3_plan_verbatim_repeat",
-                    passed=False,
-                    score=0.0,
-                    evidence={},
-                    nurse_target="l3",
-                )
-            ],
+        memory=L2L3Memory(
+            wounds=WoundChannels(
+                validation_failures=[
+                    ValidationFailure(
+                        axis="llm_only.model",
+                        value=poisoned_value,
+                        allowed=["openai/gpt-oss-120b"],
+                        reason="not_in_available_models",
+                    )
+                ],
+                runtime_failures=[
+                    RuntimeFailure(
+                        source="llm_only",
+                        dominant_warning=poisoned_warning,
+                        warning_types={poisoned_warning: 1},
+                        degraded_rate=0.5,
+                        degraded_count=1,
+                        total_scored=2,
+                        observed_config={"llm_only": {"model": "openai/gpt-oss-120b"}},
+                        first_seen_round=1,
+                    )
+                ],
+                l2_guard_breaches=[
+                    ValidatorOutcome(
+                        validator_id="l2_verbatim_self_repeat",
+                        passed=False,
+                        score=0.0,
+                        evidence={},
+                        nurse_target="l3",
+                    )
+                ],
+                l3_guard_breaches=[
+                    ValidatorOutcome(
+                        validator_id="l3_plan_verbatim_repeat",
+                        passed=False,
+                        score=0.0,
+                        evidence={},
+                        nurse_target="l3",
+                    )
+                ],
+            ),
         ),
     )
     bundle = InjectionBundle(

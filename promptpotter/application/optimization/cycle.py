@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.optimization.escalation.state import EscalationState
+from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.optimization.pobb.elimination import extract_warning_types
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Cycle", "TrackingState"]
+__all__ = ["Cycle", "CycleRoundState"]
 
 
 def _build_scoreboard(
@@ -89,8 +89,86 @@ def _merge_into_cumulative(
     return list(by_sid.values())
 
 
+def _build_initial_opt_sp(
+    origin_osp: OptSearchPoint, task_context: TaskDecomposition
+) -> OptSearchPoint:
+    """Seed the optimizer state from a scored origin: nest task_context + a copied
+    l1_overrides dict under ``memory`` so L2/L3 mutations don't share references."""
+    return origin_osp.model_copy(
+        update={
+            "memory": origin_osp.memory.model_copy(
+                update={
+                    "task_context": task_context,
+                    "l1_overrides": dict(origin_osp.memory.l1_overrides),
+                }
+            ),
+        }
+    )
+
+
+def _assert_overlay_preserved(
+    sp: JobSearchPoint, session_pipeline_params: dict[str, Any] | None
+) -> None:
+    """Dataset-overlay keys must survive into ``sp.pipeline_params`` so ``content_hash``
+    flips on overlay edits and the wire adapter forwards the overlay. ``Cycle.start``
+    must pass ``session.pipeline_params`` (the merged overlay), not a sparse schema view."""
+    sp_pp = sp.pipeline_params or {}
+    for node, cfg in (session_pipeline_params or {}).items():
+        if node == "steps" or not isinstance(cfg, dict):
+            continue
+        missing = set(cfg) - set(sp_pp.get(node, {}))
+        assert not missing, (
+            f"overlay keys stripped from {node}: {sorted(missing)} — "
+            "Cycle.start must pass session.pipeline_params, not a sparse schema view"
+        )
+
+
+def _load_archive_observations(session: Session) -> list[Observation]:
+    """Per-(backend, dataset) prior-measurement observations for the intelligence layer."""
+    from promptpotter.application.intelligence.hard_sample_archive import (
+        build_archive_observations,
+    )
+
+    return build_archive_observations(
+        session.store,
+        session.backend_id,
+        dataset_name=session.dataset_name,
+    )
+
+
+def _inherit_sibling_runtime_failures(opt_sp: OptSearchPoint, session: Session) -> None:
+    """Pull RuntimeFailures from sibling forks of this cycle's root so L1 sees configs
+    prior siblings already proved to fail (``_r_runtime_failures`` filters by pipeline match)."""
+    from promptpotter.application.intelligence.sibling_wounds import (
+        gather_sibling_runtime_failures,
+    )
+    from promptpotter.infrastructure.store import root_cycle_id as _root_cycle_id
+
+    if not session.state.cycle_id:
+        return
+    try:
+        root_id = _root_cycle_id(session.state.cycle_id)
+        failures = gather_sibling_runtime_failures(
+            session.store,
+            session.campaign_id,
+            root_id,
+            session.backend_id,
+            exclude_cycle_id=session.state.cycle_id,
+        )
+    except Exception:
+        logger.debug("sibling runtime_failures inheritance skipped", exc_info=True)
+        return
+    if failures:
+        opt_sp.memory.wounds.runtime_failures.extend(failures)
+        logger.info(
+            "inherited %d runtime_failures from sibling forks of %s",
+            len(failures),
+            session.state.cycle_id,
+        )
+
+
 @dataclass
-class TrackingState:
+class CycleRoundState:
     """Current/best/origin searchpoint trajectory; ``origin_*`` is round-0 frozen."""
 
     current_sp: JobSearchPoint | None = None
@@ -114,14 +192,14 @@ class Cycle:
     config: CampaignConfig
 
     rounds: list[RoundResult] = field(default_factory=list)
-    tracking: TrackingState = field(default_factory=TrackingState)
+    tracking: CycleRoundState = field(default_factory=CycleRoundState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
     # L2 inter-round bridge: probe_next_round set on action="probe_round" (consumed next round); last_l2_axis labels the probe.
     probe_next_round: bool = False
     last_l2_axis: str = ""
     warned_queries: set[str] = field(default_factory=set)
     axes: AxisIndex | None = None
-    escalation: EscalationState = field(default_factory=EscalationState)
+    escalation: EscalationFSM = field(default_factory=EscalationFSM)
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     state_version: int = 1
     last_rasch_posterior: Any = None
@@ -150,68 +228,18 @@ class Cycle:
             if origin_results and schema is not None
             else origin_accuracy
         )
-        opt_sp = origin_osp.model_copy(
-            update={
-                "task_context": task_context,
-                "l1_overrides": dict(origin_osp.l1_overrides),
-            }
-        )
+        opt_sp = _build_initial_opt_sp(origin_osp, task_context)
         # Pass session.pipeline_params (carries dataset overlay) — schema.to_pipeline_params() is sparse and strips operator config.
         sp = opt_sp.to_job_search_point(
             base_pipeline_params=session.pipeline_params or None,
             schema=schema,
         )
-        # Invariant: dataset-overlay keys survive into sp.pipeline_params so content_hash
-        # flips on overlay edits and the wire adapter forwards the overlay.
-        _sp_pp = sp.pipeline_params or {}
-        for _node, _cfg in (session.pipeline_params or {}).items():
-            if _node == "steps" or not isinstance(_cfg, dict):
-                continue
-            _missing = set(_cfg) - set(_sp_pp.get(_node, {}))
-            assert not _missing, (
-                f"overlay keys stripped from {_node}: {sorted(_missing)} — "
-                "Cycle.start must pass session.pipeline_params, not a sparse schema view"
-            )
-        from promptpotter.application.intelligence.hard_sample_archive import (
-            build_archive_observations,
-        )
-        from promptpotter.application.intelligence.sibling_wounds import (
-            gather_sibling_runtime_failures,
-        )
-        from promptpotter.infrastructure.store import root_cycle_id as _root_cycle_id
-
-        archive_obs = build_archive_observations(
-            session.store,
-            session.backend_id,
-            dataset_name=session.dataset_name,
-        )
-
-        # Inherit sibling runtime_failures so L1 sees configs prior siblings already proved to fail
-        # (_r_runtime_failures drops entries that don't match the new pipeline config).
-        inherited_failures: list[RuntimeFailure] = []
-        if session.state.cycle_id:
-            try:
-                root_id = _root_cycle_id(session.state.cycle_id)
-                inherited_failures = gather_sibling_runtime_failures(
-                    session.store,
-                    session.campaign_id,
-                    root_id,
-                    session.backend_id,
-                    exclude_cycle_id=session.state.cycle_id,
-                )
-            except Exception:
-                logger.debug("sibling runtime_failures inheritance skipped", exc_info=True)
-        if inherited_failures:
-            opt_sp.wounds.runtime_failures.extend(inherited_failures)
-            logger.info(
-                "inherited %d runtime_failures from sibling forks of %s",
-                len(inherited_failures),
-                session.state.cycle_id,
-            )
+        _assert_overlay_preserved(sp, session.pipeline_params)
+        _inherit_sibling_runtime_failures(opt_sp, session)
         return cls(
             session=session,
             config=config,
-            tracking=TrackingState(
+            tracking=CycleRoundState(
                 current_sp=sp,
                 current_accuracy=origin_accuracy,
                 current_composite_fitness=composite_fitness,
@@ -224,13 +252,13 @@ class Cycle:
                 origin_per_sample_results=list(origin_results or []),
             ),
             opt_sp=opt_sp,
-            archive_observations=archive_obs,
+            archive_observations=_load_archive_observations(session),
         )
 
     def replay_priors(self, priors: list[dict[str, Any]]) -> None:
         """Reconstruct round-loop state from persisted prior rounds (in-place).
 
-        ``EscalationState`` is NOT touched — caller rebuilds via ``from_ledger``.
+        ``EscalationFSM`` is NOT touched — caller rebuilds via ``from_ledger``.
         """
         if not priors:
             return
@@ -306,7 +334,7 @@ class Cycle:
             if extract_warning_types(r) and (q := r.get("query")):
                 self.warned_queries.add(q)
         existing_keys = {
-            _rf_dedup_key(rf.model_dump()) for rf in self.opt_sp.wounds.runtime_failures
+            _rf_dedup_key(rf.model_dump()) for rf in self.opt_sp.memory.wounds.runtime_failures
         }
         for cs in rr.candidate_scores:
             for rf_dict in cs.get("runtime_failures") or []:
@@ -314,7 +342,7 @@ class Cycle:
                 if k in existing_keys:
                     continue
                 existing_keys.add(k)
-                self.opt_sp.wounds.runtime_failures.append(RuntimeFailure(**rf_dict))
+                self.opt_sp.memory.wounds.runtime_failures.append(RuntimeFailure(**rf_dict))
 
         self.rounds.append(rr)
         for f in PROMPT_STRING_FIELDS:

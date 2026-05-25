@@ -57,7 +57,7 @@ Independent, follow established patterns, no architecture change:
 
 ### Tier 5 — cosmetic
 
-- Seven `*Context` / `*State` classes (`TenantContext`, `ScoringContext`, `CheckContext`, `_LoopContext`, `ReplayContext`, `CycleState`) — uniform suffix masks distinct concepts; rename to semantic roles.
+- Seven `*Context` / `*State` classes (`TenantContext`, `ScorerSetup`, `ValidatorContext`, `QueryLoopState`, `ReplayContext`, `CycleSnapshot`) — uniform suffix masks distinct concepts; rename to semantic roles.
 - `presentation/views/view_models.py` has 20+ view dataclasses re-declaring `timestamp` / `round_num` / `cycle_id` — wants a base.
 - `task_context: dict[str, Any]` / `l1_layout: dict[str, list[str]]` at L2 output boundary works but key contract is implicit; typed sub-schema would harden it.
 - **Collapse TS↔Pydantic naming aliases.** Six aliases in `webapp/lib/api/types.ts` today (`ActiveSession → ActiveSessionResponse`, `Campaign → CampaignSummary`, `DatasetPreview → DatasetPreviewResponse`, plus three `Dashboard*` ones from the prior cutover). Two-convention drift between webapp's `Dashboard*` / unprefixed names and the server's domain / `*Response` names. Pick one (suggest: drop the prefix, use Pydantic names verbatim) and update the webapp consumers so aliases go away.
@@ -82,7 +82,7 @@ Post-compaction follow-on. Tiers 1 / 3 of this spec called for "split the god-fi
 
 **Tier-3-level arcs (mini-spec first):**
 
-- **Extract `Cycle.start()` bootstrap helpers** (audit-3.A) — `application/optimization/cycle.py` (~516L) carries 18 fields and a 200+ LOC factory that inlines archive-observation discovery + sibling-failure inheritance + pipeline-param validation. Extract `_inherit_sibling_runtime_failures()` + `_load_archive_observations()` to a new `bootstrap/cycle_builders.py`. High blast — runner, resume path, fork minting, intelligence-layer init all touch.
+- ~~**Extract `Cycle.start()` bootstrap helpers**~~ (audit-3.A, DONE 2026-05-25) — extracted four private module-level helpers in `cycle.py` itself: `_build_initial_opt_sp`, `_assert_overlay_preserved`, `_inherit_sibling_runtime_failures`, `_load_archive_observations`. `Cycle.start()` collapsed from ~103 LOC to a 36-LOC orchestrator that names each step. Deviated from the "new `bootstrap/cycle_builders.py` module" shape in the original audit — keeping helpers local mirrors audit-1.C's live_dashboard inlines and avoids the high-blast new-dependency edges (no public API change, zero `cycle.*` access sites touched). mypy strict (235 files) + 212 pytest + ruff format/check green.
 - **`view.py` three-concerns split** (audit-3.B) — after audit-1.C inlines and audit-2.B inverts, `view.py` becomes three cohesive sections (scalar tracking / round-state mutations / builders + persist). Visibly section the file or extract a private `_RoundState` class. **Prereq: audit-1.C + audit-2.B both landed.**
 
 **Done log** (populated as items ship — format: `<commit-hash>` · `<audit-tag>` · one-line summary):
@@ -92,6 +92,7 @@ Post-compaction follow-on. Tiers 1 / 3 of this spec called for "split the god-fi
 - *pending commit* · audit-1.C · four `live_dashboard/` helper submodules (`candidate_block`, `score`, `sample`, `pobb`) inlined into `view.py` as class methods + module-level helpers; submodule files deleted.
 - *pending commit* · audit-1.B · four trivial accessor renderers (`_r_plan`, `_r_rendered_prompt`, `_r_l3_to_l2_note`, `_r_l1_overrides`) collapsed via a new `accessor_renderer(accessor, template, *, json_value=False)` factory in `bundle.py`. `_r_critique` + `_r_task_context` kept (real logic).
 - *pending commit* · audit-2.B · `AuditTrailView.snapshot_nodes()` + `_sticky_nodes` + `rehydrate_sticky()` removed. `LiveDashboardView` now owns its own `_sticky_llm_calls` mirror, fed by overriding `_handle_llm_call` (sticky + in-flight clear) and seeded on resume via `read_most_recent_round_nodes(rounds_dir)`. Shared `build_node_block(record)` projects `LLMCallRecord → nodes[*]` for both subscribers. Production-side analogue of the read-side display-source unification.
+- `abce3c03` · audit-3.A · `Cycle.start()` bootstrap collapsed from ~103 LOC to a 36-LOC orchestrator by lifting four private helpers into `cycle.py`: `_build_initial_opt_sp` (origin OSP seed with task_context + l1_overrides nested under `memory`), `_assert_overlay_preserved` (dataset-overlay invariant), `_load_archive_observations` (per-(backend, dataset) prior measurements), `_inherit_sibling_runtime_failures` (pull RuntimeFailures from sibling forks). Deviated from the audit's "new `bootstrap/cycle_builders.py` module" — keeping helpers local mirrors audit-1.C's inlines and avoids new dependency edges. Zero `cycle.*` access sites touched; closes the Tier 6 audit backlog.
 
 **Notes from this session (2026-05-24):**
 
@@ -362,7 +363,7 @@ Each item is one PR + standard CI gate. D.5 needs its own mini-spec
 before any PR — high blast radius.
 
 #### polish-D.1 — Type the `view_ingress` dict boundary
-**Status:** TODO · **Workstream:** D · **Confidence:** HIGH · **Blast:** Medium · **Prereqs:** None
+**Status:** DONE · **Workstream:** D · **Confidence:** HIGH · **Blast:** Medium · **Prereqs:** None · **Note:** `ViewContext` dataclass with 12 typed fields added to `view_models.py`; all builders + `from_phase_event` take `ViewContext` instead of `dict[str, Any]`; `RunCallbacks._phase_ctx` typed accordingly; wire boundary uses `asdict()`. `display.py` stays dict-based (reads JSON-deserialized wire). `.get()` count on `view_ingress.py` dropped 115→99; the remainder are `d.get(...)` reads against `PhaseEvent.data` (the genuine external boundary the spec noted). mypy strict + pytest + ruff format/check green.
 **Files:** `promptpotter/presentation/views/view_ingress.py` (529L, 115 `.get()` ladder sites); secondary touch on `view_models.py`, `display.py`, `RunCallbacks` ingress.
 **Why:** Biggest leverage on the "parameter soup" root cause already noted in this spec's Tier 3. The 115-`.get()` count is the symptom; the cause is untyped `dict[str, Any]` passed through the `PhaseEvent → View → wire_dict` pipeline.
 **Steps:**
@@ -372,7 +373,7 @@ before any PR — high blast radius.
 **Verification:** `grep -c "\.get(" promptpotter/presentation/views/view_ingress.py` drops materially (target ~< 40). `mypy --strict promptpotter/` clean. `pytest -q` green.
 
 #### polish-D.2 — Bundle `llm_call` context
-**Status:** TODO · **Workstream:** D · **Confidence:** HIGH · **Blast:** Small · **Prereqs:** None
+**Status:** DONE · **Workstream:** D · **Confidence:** HIGH · **Blast:** Small · **Prereqs:** None · **Note:** `LLMCallContext(ledger, round_num, candidate_idx, cache)` frozen dataclass added to `call.py` + re-exported from `dispatch/llm_call/__init__.py`. `llm_call()` + `run_optimizer_node()` signatures collapsed: four loose kwargs → one `context` arg. Three call sites updated (`l1/generate.py`, `l1/critique.py`, `escalation/firing/executor.py`); `task_context.py` checkin call drops to the default `context=None`. mypy strict + 212 pytest + ruff format/check green.
 **Files:** `promptpotter/application/optimization/dispatch/llm_call/call.py` (458L); call sites in `dispatch/hub/facade.py` + escalation firing.
 **Why:** `llm_call()` takes 11 kwargs; `run_optimizer_node()` 15 params. Tier 3 of this spec already names this. Mirrors today's audit-2.B inversion in spirit.
 **Steps:**
@@ -382,7 +383,7 @@ before any PR — high blast radius.
 **Verification:** `llm_call()` signature down to `(llm, prompt, context, …)` plus genuinely-distinct prompt/template args. mypy strict + pytest green.
 
 #### polish-D.3 — Extract `L2L3Memory` from `OptSearchPoint`
-**Status:** TODO · **Workstream:** D · **Confidence:** HIGH · **Blast:** Medium · **Prereqs:** None (but verify against memory note [[architecture-opt-search-point-design]] before splitting)
+**Status:** DONE · **Workstream:** D · **Confidence:** HIGH · **Blast:** Medium · **Note:** Decided full ship after rejecting the memory-note PromptDecomposition heuristic (only 1 iteration site here vs. 15+ for prompt fields; 90 individual reads are mechanical). `L2L3Memory(BaseModel)` defined in `domain/opt_search_point.py` carrying all six L2/L3-authored fields + the `_coerce_task_context` validator. OSP shape: 8 prompt fields (PromptTemplate base) + `lineage` + `memory: L2L3Memory`. `copy_memory_to` collapsed to `target.memory = self.memory.model_copy(deep=True)`; `mutate()` preserves the propagation asymmetry (task_context + l1_overrides inherit; wounds/l1_layout/l1_supplemental_rules/l1_situational_examples reset to defaults). Mechanical sweep of 90 reads across 22 files; `Cycle.start` model_copy updated to nest under `memory`. On-disk migration script `scripts/migrate_to_l2l3_memory.py` walked 151 OSPs across 151 files in active campaigns — idempotent, dry-run flag. Developer docs (l2-internals.md, README.md, l1-generate-surface.md, self-healing-internals.md) + per-layer CLAUDE.md (promptpotter/CLAUDE.md, domain/CLAUDE.md) updated. mypy strict + 212 pytest + ruff format/check green.
 **Files:** `promptpotter/domain/opt_search_point.py` (383L, 38 fields).
 **Why:** OptSearchPoint inherits from PromptTemplate (8 fields) + adds lineage + wounds + l1_layout + l1_overrides + l1_supplemental_rules + l1_situational_examples + task_context = 38 fields. Mental model is muddied.
 **Steps:**
@@ -393,7 +394,7 @@ before any PR — high blast radius.
 **Verification:** Domain tests pass; serialization round-trip on a real campaign's `OptSearchPoint` matches pre-refactor; dispatch-hub renderer tests green; full pytest green.
 
 #### polish-D.4 — Three-concern split of `live_dashboard/view.py`
-**Status:** TODO · **Workstream:** D · **Confidence:** MEDIUM · **Blast:** Medium · **Prereqs:** Today's audit-1.C + audit-2.B (both shipped in `f412a92c`) — **prereqs met**
+**Status:** DONE · **Workstream:** D · **Confidence:** MEDIUM · **Blast:** Medium · **Prereqs:** Today's audit-1.C + audit-2.B (both shipped in `f412a92c`) — **prereqs met** · **Note:** Spec offered two options (three private inner classes OR namespaced method groups); took the surgical valid path. Extracted `_RoundBuffer` `@dataclass` (the cleanest extractable concern — the round-local candidate buffer feeding `dashboard.json::current_round.nodes.l1_score`) with the 5 round-state mutators (`slot`, `seed_candidate`, `append_sample`, `set_candidate_scores`, `update_p_best`). Added class-level docstring on `LiveDashboardView` naming all three concerns + their section dividers. Block builders + scalar mutations stay on the view (read across multiple state sources; pulling them into inner classes would introduce ~75 LOC of back-ref plumbing for marginal clarity gain — same wire shape either way). 775 → 814L (+39, within "line count not materially different"). mypy strict + 212 pytest + ruff format/check green.
 **Files:** `promptpotter/infrastructure/projections/live_dashboard/view.py` (~775L after today's audit-1.C inlines).
 **Why:** Post-inline, view.py still has 37 methods spanning state tracking + sample/candidate mutations + block builders. Three cohesive concerns visibly mixed.
 **Steps:**
@@ -403,17 +404,17 @@ before any PR — high blast radius.
 **Verification:** view.py line count not materially different (this is a clarity refactor, not LOC reduction). mypy strict + pytest green. Manual smoke at `/ui/` over a quick campaign — `dashboard.json` shape unchanged.
 
 #### polish-D.5 — Extract `CycleRunConfig` from `cycle.py` (mini-spec first)
-**Status:** HELD · **Workstream:** D · **Confidence:** MEDIUM-HIGH · **Blast:** Large · **Prereqs:** polish-D.3 should land first (both reshape inner state); needs its own mini-spec before any PR.
+**Status:** RETRACTED (2026-05-25) — `Cycle` carries 14 fields, not 18 (`CycleRoundState` was already extracted as part of the post-compaction shape). With the trajectory already grouped, the remaining flat fields are single-purpose slots that don't suffer from confusion. Extracting `CycleRunConfig` would force `.run_config.session` / `.round_state.opt_sp` indirection across 121 `cycle.*` access sites in 20 files for marginal mental-model gain — crosses the "no abstractions beyond what the task requires" line. The genuine local complexity in this file (200+ LOC `Cycle.start()` factory) was the right cleanup target and was lifted into private helpers as audit-3.A.
 **Files:** `promptpotter/application/optimization/cycle.py` (~404L, 18 fields) + the runner, resume path, fork bootstrap, intelligence-layer init.
 **Why:** `Cycle` carries 18 fields bridging three concerns: (a) immutable run config (session, config, axes), (b) round-mutable state (tracking, opt_sp, rounds), (c) cache (archive_observations, last_rasch_posterior, pending_decisions).
 **Steps when unblocked:**
 1. Write `docs/specs/cycle-state-split.md` mini-spec covering the proposed cut.
-2. Extract `CycleRunConfig` (session, config, axes, escalation, state_version). Rename `TrackingState` → `CycleRoundState`. Cycle composes the two + `archive_cache`.
+2. Extract `CycleRunConfig` (session, config, axes, escalation, state_version). Rename `CycleRoundState` → `CycleRoundState`. Cycle composes the two + `archive_cache`.
 3. Update runner, resume path, fork minting, intelligence-layer init — anything that reads `cycle.*` directly.
 **Verification (when run):** mypy strict + pytest green; smoke pass through fresh `new` + 3 rounds + `resume` + `--fork-on-divergence`.
 
 #### polish-D.6 — Typed `task_context` schema
-**Status:** TODO · **Workstream:** D · **Confidence:** HIGH · **Blast:** Small · **Prereqs:** None (could ride alongside polish-D.3)
+**Status:** DONE · **Workstream:** D · **Confidence:** HIGH · **Blast:** Small · **Note:** Collapsed to docs-only — `task_context` is *already* typed via the `TaskDecomposition` dataclass (`domain/search_point.py`, 8 explicit string fields + `FIELDS` ClassVar + typed `merge` / `from_dict` / `to_dict`). The "dict-like at the L2 output boundary" is intentional and documented inline on `L2ContextOutput`'s task_context field (`dispatch/schemas.py:231-237`) — `TaskDecomposition.merge` owns the key set and merges in. The remaining gap was per-field documentation, which I added directly to the dataclass docstring (operator/LLM-facing semantics for each of the 8 fields, plus `_field_value` splice behaviour for upstream/downstream_context). No Pydantic conversion — the dataclass is doing its job; converting just for `Field(description=)` would be over-engineering.
 **Files:** Wherever `task_context: dict[str, Any]` is consumed — at minimum `domain/`, `dispatch/hub/injections/layer_state.py::_r_task_context`, L2 output parsing.
 **Why:** `task_context` is dict-like at the L2 output boundary; key contract is implicit. Typed sub-schema would harden it.
 **Steps:**
@@ -423,8 +424,8 @@ before any PR — high blast radius.
 **Verification:** Removes `.get()` calls in render paths. mypy strict + pytest green. Existing L2 outputs from on-disk round files round-trip cleanly.
 
 #### polish-D.7 — `*Context` / `*State` naming arc
-**Status:** TODO · **Workstream:** D · **Confidence:** HIGH · **Blast:** Small (cosmetic, no logic change) · **Prereqs:** None
-**Files:** Repo-wide rename: `TenantContext`, `ScoringContext`, `CheckContext`, `_LoopContext`, `ReplayContext`, `CycleState`, `TrackingState`, `EscalationState`.
+**Status:** DONE · **Workstream:** D · **Confidence:** HIGH · **Blast:** Small (cosmetic, no logic change) · **Note:** All six suggested mappings applied repo-wide via mechanical regex sweep: `ScoringContext → ScorerSetup`, `CycleState → CycleSnapshot`, `CheckContext → ValidatorContext`, `_LoopContext → QueryLoopState`, `TrackingState → CycleRoundState`, `EscalationState → EscalationFSM`. 25 files touched (source + tests + docs). `TenantContext` + `ReplayContext` kept as-is — already precise. mypy strict + ruff format/check + 212 pytest green.
+**Files:** Repo-wide rename: `TenantContext`, `ScorerSetup`, `ValidatorContext`, `QueryLoopState`, `ReplayContext`, `CycleSnapshot`, `CycleRoundState`, `EscalationFSM`.
 **Why:** Uniform suffixes mask distinct concepts. Rename to semantic roles.
 **Suggested mappings:** `ScoringContext → ScorerSetup`, `CycleState → CycleSnapshot`, `CheckContext → ValidatorContext`, `_LoopContext → QueryLoopState`, `TrackingState → CycleRoundState`, `EscalationState → EscalationFSM`. `TenantContext` and `ReplayContext` may already be precise; keep if so.
 **Steps:**
@@ -544,9 +545,11 @@ first, then Pass 2, then Pass 3):
 33. polish-D.7 (`*Context` / `*State` naming arc) — cosmetic clean-up at the end
 
 **Held (need evidence or mini-spec):**
-- polish-D.5 (CycleRunConfig extraction — mini-spec required, prereqs polish-D.3)
 - audit-2.D (`_apply_budget` shed-rate — instrument first, carry from Tier 6 above)
 - audit-2.E (PoBB separability gate — verify lines still exist, carry from Tier 6 above)
+
+**Retracted on inspection:**
+- polish-D.5 (`CycleRunConfig` extraction) — see RETRACTED note on the item above; abstraction over `Cycle`'s 14 single-purpose fields would force `.run_config.X` / `.round_state.Y` indirection at 121 access sites for marginal mental-model gain. The local complexity it was meant to address (the 200+ LOC `Cycle.start()` factory) shipped under audit-3.A instead.
 
 ### Pre-public-release end-of-arc gate (7 checks for the 98% bar)
 
@@ -568,6 +571,28 @@ All 6 green = codebase is at the 98% public-release bar.
 ### Done log — polish arc
 
 Format: `<commit-hash>` · `polish-X.Y` · one-line summary.
+
+**Pass 3 — Architecture iteration (in progress):**
+- `41b846da` · polish-D.1 + D.2 + D.4 (squashed) · ViewContext dataclass for view_ingress boundary + LLMCallContext bundle for `llm_call` (four kwargs → one context arg) + `live_dashboard/view.py` three-concern visibility (extract `_RoundBuffer` @dataclass + class-level concerns docstring).
+- `415f8ba2` · polish-D.3 · extract `L2L3Memory` from `OptSearchPoint` (6 L2/L3-authored fields bundled under `memory`; 90 read sites swept across 22 files; on-disk migration script for 151 OSPs in active campaigns; developer docs + CLAUDE.md updated).
+- `06342a3a` · polish-D.6 + D.7 · per-field docstrings added to `TaskDecomposition` (D.6 collapsed to docs-only per resume plan) + six `*Context`/`*State` renames via repo-wide mechanical sweep (D.7).
+
+**Pass 2 — Coherence + first-run smoothness (complete, squashed into `6e3cfd87`):**
+- A.2 · jargon translation across terms.ts + workflow/layout.ts + parsers.py.
+- A.4 · operator-visible TODO sweep (no-op; prior compaction cleared it).
+- B.3 · ConfigMenu wholesale removal + ChatPane simplification.
+- B.4 · terms.ts copy audit pass (future-tense + jargon leftovers).
+- B.6 · DONE-by-prereq (collapsed into B.3).
+- C.2 · status banners on m11-spend-tracking + m12-control-plane + m12-multi-connector.
+- C.3 · docs/roadmap.md public front door + root README link.
+- C.4 · docs/specs/CLAUDE.md index refresh (Live / Forward / Reference / Archive).
+- C.6 · audience banner prepended to all 7 docs/concepts/*.md files.
+- C.7 · observability.md jargon scrub (DispatchHub / L2Surface / fill_fixed dropped).
+- E.1 · enriched TermNorm-unreachable message with .bat path + install-guide link.
+- E.2 · `.env` first-run prompt via promptpotter/config/env_bootstrap.py.
+- E.4 · friendly five-verb landing card on bare `python -m promptpotter` with no active session.
+- E.6 · `[project.scripts]` console entry point in pyproject.toml.
+- audit-1.E · stale LiveStateProjection row removed from infrastructure/CLAUDE.md.
 
 **Pass 1 — Visible polish (complete):**
 - `c7794a11` · polish-A.1 · scrub M-milestone refs from operator surfaces (webapp, ops docs, README, manual, API docstring).

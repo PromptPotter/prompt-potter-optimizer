@@ -13,9 +13,9 @@ shrinking under M10.
 | File | Tests | §0 bucket | Role |
 |---|---:|---|---|
 | `test_invariants.py` | 10 | central loop / state+persistence / on-disk / archive | The named-invariant suite — artifact-set parity, hexagonal layer leaks, `MeasurementArchive` direct-access ban, optimizer-LLM-call observability coverage. The structural guard. |
-| `test_decision_kinds_registry.py` | 10 | central loop / errors-heal | `ResumeCheckpointKind` exhaustiveness, replayed-vs-archival pairing, no bare-string kind passes, ledger round-trip; `EscalationState` reconstructs from ledger. |
+| `test_decision_kinds_registry.py` | 10 | central loop / errors-heal | `ResumeCheckpointKind` exhaustiveness, replayed-vs-archival pairing, no bare-string kind passes, ledger round-trip; `EscalationFSM` reconstructs from ledger. |
 | `test_rescore_and_fork.py` | 15 | central loop / state+persistence | `--from N` resume + `--fork-on-divergence` regression net (rescore on load, replay walker, fork mints, rewind safety). |
-| `test_reconstructable_state.py` | 3 | central loop / state+persistence | §3.8 ratification — `EscalationState` + `AuditTrailView` round-trip via the ledger. |
+| `test_reconstructable_state.py` | 3 | central loop / state+persistence | §3.8 ratification — `EscalationFSM` + `AuditTrailView` round-trip via the ledger. |
 | `test_optimizer_pipeline_parity.py` | 1 | dispatch / state+persistence | §3.5 — `pipeline.json` and `optimizer_pipeline.json` parse via the same parser under `extra="forbid"`. |
 | `test_optimizer.py` | 35 | central loop / dispatch / errors-heal | L1 detector + L2/L3 output validators + PoBB elimination + layout validators + sweep payload + escalation rules engine + INJECTIONS validation. |
 | `test_pipeline_config.py` | 12 | dispatch / state+persistence | `PipelineSchema` + `JobSearchPoint` content-hash + `PipelineNode.runtime/short_circuit/node_type` parsing + the 6-node pipeline shape. |

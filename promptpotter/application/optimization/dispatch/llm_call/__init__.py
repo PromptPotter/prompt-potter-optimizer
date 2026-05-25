@@ -17,6 +17,7 @@ validation plus client-side ``model_validate`` on the parsed JSON.
 from __future__ import annotations
 
 from promptpotter.application.optimization.dispatch.llm_call.call import (
+    LLMCallContext,
     llm_call,
     run_optimizer_node,
 )
@@ -30,6 +31,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 )
 
 __all__ = [
+    "LLMCallContext",
     "combined_optimizer_prompt_hash",
     "compute_optimizer_prompt_hashes",
     "get_optimizer_schema",

@@ -137,17 +137,17 @@ Mirrors `Evaluator` (`name, description, scope, compute, …`) so future composi
 
 ## Optimizer-memory state
 
-Fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (`domain/opt_search_point.py`) travel with each candidate cross-round:
+Fields on `OptSearchPoint.memory` (the `L2L3Memory` sub-model in `domain/opt_search_point.py`) travel with each candidate cross-round:
 
 | Field | Lifecycle | Wound |
 |---|---|---|
-| `task_context` | persistent, accumulative; merged on each L2 fire | Wound 1, Wound 2 — L2 writeback |
-| `validation_failures` | per-candidate (set at L1 parse) | Wound 1 — L2 reads |
-| `runtime_failures` | per-candidate + cumulative outer-memory mirror | Wound 2 + 3 |
-| `l2_guard_breaches` | per-round, set by L2 post-parse | Wound 4 — L3 reads |
-| `l3_guard_breaches` | per-round, set by L3 post-parse | L3 self-heal |
+| `task_context` | persistent, accumulative; merged on each L2 fire; inherits through `mutate()` | Wound 1, Wound 2 — L2 writeback |
+| `wounds.validation_failures` | per-candidate (set at L1 parse) | Wound 1 — L2 reads |
+| `wounds.runtime_failures` | per-candidate + cumulative outer-memory mirror | Wound 2 + 3 |
+| `wounds.l2_guard_breaches` | per-round, set by L2 post-parse | Wound 4 — L3 reads |
+| `wounds.l3_guard_breaches` | per-round, set by L3 post-parse | L3 self-heal |
 
-The L1 critique itself lives on `RoundResult.critique` (a dict, not in `MEMORY_FIELDS`); the dispatch hub's `critique` injection reads it from `cycle.latest_round.critique`. Per-round trajectory + cumulative warned-query subset (probe-round source) live on `Cycle` (`Cycle.rounds`, `Cycle.warned_queries`), not OSP.
+The L1 critique itself lives on `RoundResult.critique` (a dict, not on `L2L3Memory`); the dispatch hub's `critique` injection reads it from `cycle.latest_round.critique`. Per-round trajectory + cumulative warned-query subset (probe-round source) live on `Cycle` (`Cycle.rounds`, `Cycle.warned_queries`), not OSP.
 
 ## Mid-eval termination — what is and isn't healing
 

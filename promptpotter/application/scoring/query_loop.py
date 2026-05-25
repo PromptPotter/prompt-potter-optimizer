@@ -94,7 +94,7 @@ def _materialize_cached(
 
 
 @dataclass
-class _LoopContext:
+class QueryLoopState:
     """Read-only context threaded through per-sample processing."""
 
     search_point: JobSearchPoint
@@ -139,7 +139,7 @@ class _SampleOutcome:
 async def _maybe_recover_degraded(
     result: QueryMeasurement,
     sample: Sample,
-    ctx: _LoopContext,
+    ctx: QueryLoopState,
 ) -> QueryMeasurement:
     """Run the stale-data protocol if the result is degraded."""
     from promptpotter.application.scoring.sample_measurement import STALE_DATA_LOAD_PROTOCOL
@@ -176,7 +176,7 @@ async def _process_cache_hit(
     idx: int,
     dataset_len: int,
     state: _LoopState,
-    ctx: _LoopContext,
+    ctx: QueryLoopState,
     check_escalation: Callable[[], EscalationSignal | None],
 ) -> _SampleOutcome:
     """Materialize a prior-cache result, append, and check escalation."""
@@ -205,7 +205,7 @@ async def _process_fresh_sample(
     idx: int,
     dataset_len: int,
     state: _LoopState,
-    ctx: _LoopContext,
+    ctx: QueryLoopState,
     check_escalation: Callable[[], EscalationSignal | None],
 ) -> _SampleOutcome:
     """Backend-measure one sample; render rescored DEPR row before retry; classify errors."""
@@ -283,7 +283,7 @@ async def run_query_loop(
     """
     assert session.scoring.scorer is not None, "session.scoring.scorer required for scoring"
     state = _LoopState(results=[])
-    ctx = _LoopContext(
+    ctx = QueryLoopState(
         search_point=search_point,
         session=session,
         cached_sample_results=cached_sample_results,

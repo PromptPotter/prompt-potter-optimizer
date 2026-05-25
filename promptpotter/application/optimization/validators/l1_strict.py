@@ -290,7 +290,7 @@ def _check_l1_config_in_runtime_failures(
     """Reject candidates that re-propose a config already proven to fail.
 
     Pure wire-level check — for each (param, value) in the candidate's
-    ``pipeline_params_override``, scan ``opt_sp.wounds.runtime_failures``
+    ``pipeline_params_override``, scan ``opt_sp.memory.wounds.runtime_failures``
     for an entry whose ``observed_config`` carries that same (param, value).
     If matched, emit ``ValidationFailure(reason="reproposes_known_failing_config")``.
     No LLM evidence judgment — just "we already proved this fails."
@@ -302,7 +302,7 @@ def _check_l1_config_in_runtime_failures(
     """
     if not source_output or opt_sp is None:
         return None
-    failures_list = list(opt_sp.wounds.runtime_failures)
+    failures_list = list(opt_sp.memory.wounds.runtime_failures)
     if not failures_list:
         return None
     out_failures: list[ValidationFailure] = []
@@ -338,7 +338,7 @@ L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
     description=(
         "Reject L1 candidates whose pipeline_params_override matches an "
         "(axis, value) tuple already recorded as failing in "
-        "opt_sp.wounds.runtime_failures. Mechanical wire-level check; no "
+        "opt_sp.memory.wounds.runtime_failures. Mechanical wire-level check; no "
         "LLM citation required. Heals via Wound 1 (L2 absorbs)."
     ),
     nurse_target="l2",
@@ -396,13 +396,15 @@ def detect_invariants(
     invariant failures are dropped first so resume-from-disk doesn't dup.
     """
     for cp in proposals:
-        cp.osp.wounds.validation_failures = [
-            vf for vf in cp.osp.wounds.validation_failures if vf.reason not in _INVARIANT_REASONS
+        cp.osp.memory.wounds.validation_failures = [
+            vf
+            for vf in cp.osp.memory.wounds.validation_failures
+            if vf.reason not in _INVARIANT_REASONS
         ]
     seen: dict[tuple[Any, ...], int] = {}
     n_no_op = 0
     n_duplicate = 0
-    parent_tc = parent_osp.task_context.to_dict()
+    parent_tc = parent_osp.memory.task_context.to_dict()
     for i, cp in enumerate(proposals):
         child = cp.osp
         pf_delta = tuple(
@@ -410,7 +412,7 @@ def detect_invariants(
             for f in PROMPT_STRING_FIELDS
             if getattr(child, f) != getattr(parent_osp, f)
         )
-        child_tc = child.task_context.to_dict()
+        child_tc = child.memory.task_context.to_dict()
         tc_delta = tuple(sorted((k, v) for k, v in child_tc.items() if v != parent_tc.get(k)))
         no_canon = tuple(
             sorted(
@@ -421,8 +423,8 @@ def detect_invariants(
         )
         sig = (pf_delta, tc_delta, no_canon)
         if not any(sig):
-            cp.osp.wounds.validation_failures = [
-                *cp.osp.wounds.validation_failures,
+            cp.osp.memory.wounds.validation_failures = [
+                *cp.osp.memory.wounds.validation_failures,
                 ValidationFailure(
                     axis="variant",
                     value="(no mutation)",
@@ -434,8 +436,8 @@ def detect_invariants(
             continue
         if sig in seen:
             twin = seen[sig]
-            cp.osp.wounds.validation_failures = [
-                *cp.osp.wounds.validation_failures,
+            cp.osp.memory.wounds.validation_failures = [
+                *cp.osp.memory.wounds.validation_failures,
                 ValidationFailure(
                     axis="variant",
                     value=f"duplicate of C{twin + 1}",

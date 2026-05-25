@@ -1,7 +1,7 @@
 """`DispatchHub` façade + ``build_bundle`` + load-time template validation.
 
 * `build_bundle` — snapshot live ``Cycle`` state into a frozen ``InjectionBundle``.
-* `fill_l1` — resolve L2-authored `opt_sp.l1_layout` for L1_GENERATE, return modified PromptTemplate.
+* `fill_l1` — resolve L2-authored `opt_sp.memory.l1_layout` for L1_GENERATE, return modified PromptTemplate.
 * `fill_fixed` — walk a fixed template body (L1_CRITIQUE / L2 / L3) → `{name: rendered}` dict.
 
 `validate_template` raises at load time on typos so they don't silently render to empty.

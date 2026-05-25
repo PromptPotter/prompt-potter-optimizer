@@ -89,7 +89,7 @@ def _check_task_context_paraphrase_repeat(
     proposed = source_output.get("task_context_proposed")
     if not isinstance(proposed, dict) or not proposed:
         return None
-    prior = opt_sp.task_context.to_dict()
+    prior = opt_sp.memory.task_context.to_dict()
     worst_overlap = 0.0
     worst_field = ""
     for field_name, new_value in proposed.items():
@@ -137,7 +137,7 @@ def _check_duplicate_insert(
     proposed = source_output.get("task_context_proposed")
     if not isinstance(proposed, dict) or not proposed:
         return None
-    prior = opt_sp.task_context.to_dict()
+    prior = opt_sp.memory.task_context.to_dict()
     duplicate_lines = 0
     overlapped_fields: list[str] = []
     for field_name, new_value in proposed.items():
@@ -286,7 +286,7 @@ def _check_situational_example_dangling_trigger(
             for r in rules_proposed
         }
     elif opt_sp is not None:
-        rule_ids = {r.rule_id for r in opt_sp.l1_supplemental_rules}
+        rule_ids = {r.rule_id for r in opt_sp.memory.l1_supplemental_rules}
     else:
         rule_ids = set()
     allowed: set[str] = set(_AUTO_TRIGGER_IDS) | {r for r in rule_ids if r}

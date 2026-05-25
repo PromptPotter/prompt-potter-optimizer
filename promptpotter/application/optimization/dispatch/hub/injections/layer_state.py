@@ -27,7 +27,7 @@ _LATEX_CORRUPTION_RE = re.compile(r"(?<!\\b)oxed\{|(?<![a-zA-Z])athematical")
 
 
 def _r_task_context(b: InjectionBundle) -> str:
-    tc = b.opt_sp.task_context
+    tc = b.opt_sp.memory.task_context
     if not tc:
         return ""
     skip = {"raw_description", "upstream_context", "downstream_context"}
@@ -102,19 +102,19 @@ def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
     triggers: list[str] = []
     if b.axes is not None and b.axes.peaked_axes():
         triggers.append("peaked_axis")
-    if b.opt_sp.wounds.runtime_failures:
+    if b.opt_sp.memory.wounds.runtime_failures:
         triggers.append("runtime_failure")
     sa = (b.digest.critique or {}).get("suggested_axes") or []
     if any(a in PARAM_SCOPE_KEYS for a in sa):
         triggers.append("continuous_envelope")
-    key_challenges = b.opt_sp.task_context.key_challenges or ""
+    key_challenges = b.opt_sp.memory.task_context.key_challenges or ""
     if "targeting L1 axis" in key_challenges:
         triggers.append("chain_bind")
-    if b.opt_sp.wounds.l2_guard_breaches:
+    if b.opt_sp.memory.wounds.l2_guard_breaches:
         triggers.append("l2_stall_diversity")
     if _LATEX_CORRUPTION_RE.search(b.opt_sp.render()):
         triggers.append("latex_repair")
-    if any(vf.reason == "forbidden_axis" for vf in b.opt_sp.wounds.validation_failures):
+    if any(vf.reason == "forbidden_axis" for vf in b.opt_sp.memory.wounds.validation_failures):
         triggers.append("forbidden_axis_attempted")
     return triggers
 
@@ -126,7 +126,7 @@ def _r_l1_supplemental_rules(b: InjectionBundle) -> str:
         body = AUTO_RULES.get(trigger_id)
         if body:
             rendered.append((trigger_id, body))
-    for rule in b.opt_sp.l1_supplemental_rules:
+    for rule in b.opt_sp.memory.l1_supplemental_rules:
         body = f"{rule.body} [citation: {rule.citation}]"
         rendered.append((rule.rule_id, body))
     if not rendered:
@@ -142,9 +142,9 @@ def _r_l1_situational_examples(b: InjectionBundle) -> str:
     active trigger filter out (would orphan from the rule). L2 entry overrides matching built-in.
     """
     auto_triggers = _detect_auto_triggers(b)
-    l2_rule_ids = {r.rule_id for r in b.opt_sp.l1_supplemental_rules}
+    l2_rule_ids = {r.rule_id for r in b.opt_sp.memory.l1_supplemental_rules}
     active = set(auto_triggers) | l2_rule_ids
-    l2_example_triggers = {ex.trigger_id for ex in b.opt_sp.l1_situational_examples}
+    l2_example_triggers = {ex.trigger_id for ex in b.opt_sp.memory.l1_situational_examples}
 
     blocks: list[str] = []
     for trigger_id in auto_triggers:
@@ -153,7 +153,7 @@ def _r_l1_situational_examples(b: InjectionBundle) -> str:
         builtin = BUILTIN_EXAMPLES.get(trigger_id)
         if builtin:
             blocks.append(_format_example(trigger_id, builtin))
-    for l2_ex in b.opt_sp.l1_situational_examples:
+    for l2_ex in b.opt_sp.memory.l1_situational_examples:
         if l2_ex.trigger_id not in active:
             continue
         blocks.append(_format_example(l2_ex.trigger_id, l2_ex.model_dump()))

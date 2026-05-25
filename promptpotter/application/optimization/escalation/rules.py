@@ -1,4 +1,4 @@
-"""Default escalation rule set — reproduces ``EscalationState.observe_round``.
+"""Default escalation rule set — reproduces ``EscalationFSM.observe_round``.
 
 Each rule = (predicate over ``EscalationInputs``, action, priority, reason
 template). Higher priority wins; ties resolve by list order.

@@ -46,8 +46,8 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> Transit
 def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     # Order matters: ``_run_transition``'s ``copy_memory_to`` carried prior l3_note onto the new OSP;
     # overwrite with L3's output (may be ``""``) — the "cleared only when L3 fires again" contract.
-    cycle.opt_sp.wounds.l3_note = result.l3_note
-    cycle.opt_sp.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
+    cycle.opt_sp.memory.wounds.l3_note = result.l3_note
+    cycle.opt_sp.memory.wounds.l3_guard_breaches = list(result.l3_guard_breaches)
     cycle.escalation.record_l3_fired(
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
@@ -63,7 +63,7 @@ def _l3_enter(cycle: Cycle) -> dict[str, Any]:
 
 
 def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-    # ``l3_*_at_entry`` read by ``EscalationState.fold`` on resume; ``record_l3_fired`` resets L2 state to these.
+    # ``l3_*_at_entry`` read by ``EscalationFSM.fold`` on resume; ``record_l3_fired`` resets L2 state to these.
     payload: dict[str, Any] = {
         "l3_round": cycle.escalation.l3_round,
         "l3_stall_count": cycle.escalation.l3_stall_count,

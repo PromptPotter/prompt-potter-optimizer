@@ -275,7 +275,7 @@ Move + rename (after step 0 lands):
   - `DEFAULT_ROUND_RULES` → `DEFAULT_ESCALATION_RULES`
   - `CadenceRule` → `EscalationRule`
 - Update root `CLAUDE.md` backbone table: drop the `cadence` row;
-  the existing `EscalationState` row absorbs the rule-engine description.
+  the existing `EscalationFSM` row absorbs the rule-engine description.
 - Update every doc reference (output of §1).
 
 Behavior is unchanged. Same priority-sorted first-match-wins. Same

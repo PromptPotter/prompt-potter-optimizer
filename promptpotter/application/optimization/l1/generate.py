@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.dispatch.hub import DispatchHub, build_bundle
 from promptpotter.application.optimization.dispatch.llm_call import (
+    LLMCallContext,
     load_optimizer_prompt,
     run_optimizer_node,
 )
@@ -64,7 +65,7 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
             summary["prompt_fields"] = prompt_fields
         # Third L1 mutation slot — lets SP-diff render task_context-only candidates as a mutation,
         # not a bare [clone].
-        summary["task_context"] = cp.osp.task_context.to_dict()
+        summary["task_context"] = cp.osp.memory.task_context.to_dict()
         summaries.append(summary)
     return summaries
 
@@ -92,7 +93,9 @@ async def l1_generate(
     tracing_campaign_id = cycle.session.state.tracing_campaign_id
 
     bundle = build_bundle(cycle)
-    template = DispatchHub.fill_l1(load_optimizer_prompt("l1_generate"), opt_sp.l1_layout, bundle)
+    template = DispatchHub.fill_l1(
+        load_optimizer_prompt("l1_generate"), opt_sp.memory.l1_layout, bundle
+    )
     # `instruction` slot isn't in L1_LAYOUT_SLOTS so fill_l1 skips it — we substitute its two
     # injection placeholders via compile_prompt kwargs here.
     prompt_vars: dict[str, str] = {
@@ -110,10 +113,12 @@ async def l1_generate(
             model=model,
             temperature=creativity,
             response_schema=output_schema,
-            ledger=cycle.session.state.ledger,
-            round_num=round_num,
+            context=LLMCallContext(
+                ledger=cycle.session.state.ledger,
+                round_num=round_num,
+                cache=cycle.session.store.optimizer_calls,
+            ),
             template=template,
-            optimizer_call_cache=cycle.session.store.optimizer_calls,
         )
     except MetaPromptParseError as parse_err:
         # Schema-noncompliant after one repair retry. Split provider-degraded (empty) vs
@@ -129,7 +134,7 @@ async def l1_generate(
             else "meta-prompt parse failure after retry",
             len(raw),
         )
-        opt_sp.wounds.validation_failures.append(
+        opt_sp.memory.wounds.validation_failures.append(
             ValidationFailure(
                 axis="l1_generate.output",
                 value=_truncate_raw(parse_err.raw, 300),
@@ -163,7 +168,7 @@ async def l1_generate(
             round_num,
             type(generated).__name__,
         )
-        opt_sp.wounds.validation_failures.append(
+        opt_sp.memory.wounds.validation_failures.append(
             ValidationFailure(
                 axis="l1_generate.output",
                 value=_truncate_raw(str(generated), 300),
@@ -193,7 +198,7 @@ async def l1_generate(
             **prompt_changes,
         )
         if tc_changes:
-            child.task_context = child.task_context.merge(tc_changes)
+            child.memory.task_context = child.memory.task_context.merge(tc_changes)
         population.append(
             CandidateProposal(
                 osp=child,

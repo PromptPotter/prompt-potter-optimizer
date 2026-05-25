@@ -1,8 +1,25 @@
-"""``LiveDashboardView`` — session-family ``dashboard.json`` writer."""
+"""``LiveDashboardView`` — session-family ``dashboard.json`` writer.
+
+Three cohesive concerns share this class — read it in three slices:
+
+1. **Scalar mutations** (``_apply_phase`` + the ``_handle_*`` dispatch
+   methods). Phase / snapshot / LLM-call / token-usage records mutate
+   ``self.state`` (the on-disk scalar shape) and the sticky LLM-call
+   mirror. The ``# -- Scalar mutations ----`` divider marks the section.
+2. **Round buffer** (``_RoundBuffer`` inner dataclass + its mutators).
+   Owns the per-round candidate buffer feeding
+   ``dashboard.json::current_round.nodes.l1_score``. Snapshot
+   handlers delegate the per-candidate / per-sample writes here.
+3. **Block builders** (``_build_l1_score_block``, ``_build_pobb_block``,
+   ``_fmt_sample_line``). Pure projections from scalar state + round
+   buffer to the dashboard.json output shape. Called by ``_persist`` and
+   by the round-complete flush in ``_handle_phase``.
+"""
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -110,6 +127,126 @@ def _fmt_sample_line(s: dict[str, Any]) -> str:
     )
 
 
+@dataclass
+class _RoundBuffer:
+    """Round-local candidate buffer + per-sample tally.
+
+    Owns the data structure that
+    ``dashboard.json::current_round.nodes.l1_score`` projects from.
+    Snapshot-record fan-out (``candidate_started`` / ``sample_scored`` /
+    ``candidate_scored`` / ``p_best_update``) lands here; the block
+    builders read these fields verbatim.
+    """
+
+    round_num: int = 0
+    candidates: dict[int, dict[str, Any]] = field(default_factory=dict)
+    p_best_top: list[dict[str, Any]] = field(default_factory=list)
+
+    def reset(self, round_num: int) -> None:
+        """L1_GENERATE:enter clears the candidate buffer; historical rounds[] is untouched."""
+        self.round_num = round_num
+        self.candidates = {}
+        self.p_best_top = []
+
+    def slot(self, idx: int, total: int = 0) -> dict[str, Any]:
+        """Lazy-init a candidate slot. Sample / score / p_best callbacks may fire
+        before ``candidate_started`` seeds the slot, so all mutators funnel here.
+
+        ``changes_description`` holds the human-readable mutation text; the
+        canonical display ``label`` is composed in ``_build_l1_score_block``
+        from the slot's round + idx via :func:`candidate_label`.
+        """
+        return self.candidates.setdefault(
+            idx,
+            {
+                "idx": idx,
+                "total": total,
+                "changes_description": "",
+                "samples": [],
+                "scores": None,
+            },
+        )
+
+    def seed_candidate(
+        self,
+        idx: int,
+        total: int,
+        changes_description: str,
+        pp_override: dict[str, Any] | None,
+    ) -> None:
+        """Seed a slot so CURRENT shows labelled pending rows before scoring lands."""
+        entry = self.slot(idx, total)
+        entry["total"] = total
+        entry["changes_description"] = changes_description or ""
+        entry["pp_override"] = pp_override
+
+    def append_sample(
+        self,
+        ci: int,
+        ct: int,
+        qi: int,
+        qt: int,
+        result: dict[str, Any],
+    ) -> None:
+        """Append one scored sample to its candidate slot."""
+        pd = result.get("pipeline_data") or {}
+        query_time = float(pd.get("total_time", 0.0) or 0.0)
+        # Tokens may live on result or pd; prefer result, preserve 0 vs None.
+        in_tok = result.get("input_tokens")
+        out_tok = result.get("output_tokens")
+        self.slot(ci, ct)["samples"].append(
+            {
+                "qi": qi,
+                "qt": qt,
+                "sample_id": result.get("sample_id"),
+                "hit": bool(result.get("hit")),
+                "cached": bool(result.get("cached", False)),
+                "query": result.get("query") or "",
+                "prediction": result.get("prediction") or "",
+                "ground_truth": result.get("ground_truth") or "",
+                "time_s": round(query_time, 2),
+                "terminated_at": pd.get("terminated_at") or "",
+                "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
+                "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,
+            }
+        )
+
+    def set_candidate_scores(self, idx: int, total: int, scores: dict[str, Any]) -> None:
+        """Store the score report verbatim — single source of truth shared with
+        ``round_result.candidate_scores`` (same dict instance)."""
+        self.slot(idx, total)["scores"] = scores
+
+    def update_p_best(
+        self,
+        idx: int,
+        total: int,
+        current_id: str,
+        n_samples: int,
+        p_best: dict[str, float],
+    ) -> None:
+        """Merge per-sample P(best) into the candidate slot + top-5 leaderboard.
+
+        Stores each candidate's ``p_best``, signed delta vs prior query, and a
+        capped trajectory list; refreshes the round-wide top-5 view consumed
+        by ``_build_pobb_block``.
+        """
+        cand = self.slot(idx, total)
+        current = float(p_best.get(current_id, 0.0))
+        prev = float(cand.get("p_best", current))
+        history: list[float] = list(cand.get("p_best_history") or [])
+        history.append(current)
+        # Cap history at 64 entries — round size rarely exceeds 40.
+        if len(history) > 64:
+            history = history[-64:]
+        cand["p_best"] = current
+        cand["p_best_delta"] = current - prev
+        cand["p_best_history"] = history
+        cand["p_best_n_samples"] = n_samples
+
+        # Round-wide leaderboard (top-5 by P(best)).
+        self.p_best_top = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(p_best)]
+
+
 class LiveDashboardView(DerivedView):
     """Per-cycle dashboard writer; not an optimizer checkpoint."""
 
@@ -170,7 +307,7 @@ class LiveDashboardView(DerivedView):
             "in_flight": None,
         }
         self.short_formula_template: str | None = None
-        self._round: dict[str, Any] = {"round": 0, "candidates": {}}
+        self._buffer = _RoundBuffer()
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
         # audit-trail. Each ``LLMCallRecord`` mutates the matching phase-keyed slot;
         # the audit-trail records the same event independently into its round flush.
@@ -301,7 +438,7 @@ class LiveDashboardView(DerivedView):
             record.phase == "origin"
             and record.event == "exit"
             and self._recorder is not None
-            and self._round.get("candidates")
+            and self._buffer.candidates
         ):
             self._recorder.set_l1_score(self._build_l1_score_block())
 
@@ -318,7 +455,7 @@ class LiveDashboardView(DerivedView):
         # L1_GENERATE:enter wipes the live candidate buffer (current_round.nodes.l1_score) —
         # historical `rounds[]` is untouched.
         if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
-            self._round = {"round": self.state["round"], "candidates": {}}
+            self._buffer.reset(int(self.state["round"]))
         self._persist()
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
@@ -339,10 +476,10 @@ class LiveDashboardView(DerivedView):
             result = payload.get("result") or {}
             self._update_sample_markers(ci, ct, qi, qt)
             self._absorb_sample_scored(result, last_in_candidate=(qi + 1 >= qt))
-            self._append_sample(ci, ct, qi, qt, result)
+            self._buffer.append_sample(ci, ct, qi, qt, result)
             self._persist()
         elif ev == "candidate_started":
-            self._seed_candidate(
+            self._buffer.seed_candidate(
                 ci,
                 ct,
                 payload.get("changes_description") or "",
@@ -352,16 +489,16 @@ class LiveDashboardView(DerivedView):
         elif ev == "candidate_scored":
             scores = payload.get("scores") or {}
             self._update_current_acc(scores)
-            self._set_candidate_scores(ci, ct, scores)
+            self._buffer.set_candidate_scores(ci, ct, scores)
             # flushed by next sample_scored or by round_complete.
         elif ev == "p_best_update":
-            self._update_p_best(
-                ci,
-                ct,
-                payload.get("current_id") or "",
-                int(payload.get("n_samples") or 0),
-                {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
-            )
+            current_id = payload.get("current_id") or ""
+            n_samples = int(payload.get("n_samples") or 0)
+            p_best = {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()}
+            self._buffer.update_p_best(ci, ct, current_id, n_samples, p_best)
+            # Mirror the latest snapshot into the shared core so LiveDisplay sees
+            # the same round-wide P(best) state.
+            apply_p_best_update(self._core, current_id, n_samples, p_best)
             self._persist()
         elif ev == "sample_order_preview":
             order_raw = payload.get("sample_order")
@@ -519,109 +656,11 @@ class LiveDashboardView(DerivedView):
         s["patience"] = f"{l1_stall_count}/{self.patience_max}"
 
     # -- Round-state mutations (snapshot-record fan-out) ----------------------
-
-    def _candidate_slot(self, idx: int, total: int = 0) -> dict[str, Any]:
-        """Lazy-init a candidate slot. Sample/score/p_best callbacks may fire
-        before ``candidate_started`` seeds the slot, so all mutators funnel here.
-
-        ``changes_description`` holds the human-readable mutation text; the
-        canonical display ``label`` is composed in ``_build_l1_score_block``
-        from the slot's round + idx via :func:`candidate_label`.
-        """
-        slot: dict[str, Any] = self._round.setdefault("candidates", {}).setdefault(
-            idx,
-            {
-                "idx": idx,
-                "total": total,
-                "changes_description": "",
-                "samples": [],
-                "scores": None,
-            },
-        )
-        return slot
-
-    def _seed_candidate(
-        self,
-        idx: int,
-        total: int,
-        changes_description: str,
-        pp_override: dict[str, Any] | None,
-    ) -> None:
-        """Seed a slot so CURRENT shows labelled pending rows before scoring lands."""
-        entry = self._candidate_slot(idx, total)
-        entry["total"] = total
-        entry["changes_description"] = changes_description or ""
-        entry["pp_override"] = pp_override
-
-    def _append_sample(
-        self,
-        ci: int,
-        ct: int,
-        qi: int,
-        qt: int,
-        result: dict[str, Any],
-    ) -> None:
-        """Append one scored sample to its candidate slot."""
-        pd = result.get("pipeline_data") or {}
-        query_time = float(pd.get("total_time", 0.0) or 0.0)
-        # Tokens may live on result or pd; prefer result, preserve 0 vs None.
-        in_tok = result.get("input_tokens")
-        out_tok = result.get("output_tokens")
-        self._candidate_slot(ci, ct)["samples"].append(
-            {
-                "qi": qi,
-                "qt": qt,
-                "sample_id": result.get("sample_id"),
-                "hit": bool(result.get("hit")),
-                "cached": bool(result.get("cached", False)),
-                "query": result.get("query") or "",
-                "prediction": result.get("prediction") or "",
-                "ground_truth": result.get("ground_truth") or "",
-                "time_s": round(query_time, 2),
-                "terminated_at": pd.get("terminated_at") or "",
-                "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
-                "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,
-            }
-        )
-
-    def _set_candidate_scores(self, idx: int, total: int, scores: dict[str, Any]) -> None:
-        """Store the score report verbatim — single source of truth shared with
-        ``round_result.candidate_scores`` (same dict instance)."""
-        self._candidate_slot(idx, total)["scores"] = scores
-
-    def _update_p_best(
-        self,
-        idx: int,
-        total: int,
-        current_id: str,
-        n_samples: int,
-        p_best: dict[str, float],
-    ) -> None:
-        """Merge per-sample P(best) into the candidate slot + top-5 leaderboard.
-
-        Stores each candidate's ``p_best``, signed delta vs prior query, and a
-        capped trajectory list. Mirrors the snapshot into the shared core and
-        publishes the round-wide top-5 view at ``round_dict["p_best_top"]``.
-        """
-        cand = self._candidate_slot(idx, total)
-        current = float(p_best.get(current_id, 0.0))
-        prev = float(cand.get("p_best", current))
-        history: list[float] = list(cand.get("p_best_history") or [])
-        history.append(current)
-        # Cap history at 64 entries — round size rarely exceeds 40.
-        if len(history) > 64:
-            history = history[-64:]
-        cand["p_best"] = current
-        cand["p_best_delta"] = current - prev
-        cand["p_best_history"] = history
-        cand["p_best_n_samples"] = n_samples
-
-        # Mirror the latest snapshot into the shared core so both renderers
-        # see the same round-wide P(best) state.
-        apply_p_best_update(self._core, current_id, n_samples, p_best)
-
-        # Round-wide leaderboard (top-5 by P(best)).
-        self._round["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(p_best)]
+    # The per-candidate / per-sample / P(best) writes live on the ``_RoundBuffer``
+    # inner dataclass; ``_handle_snapshot`` above routes each snapshot kind to
+    # the matching ``self._buffer.*`` method. ``_append_backfill`` stays here
+    # because it writes to ``state["backfill_log"]`` (scalar state), not the
+    # round buffer.
 
     def _append_backfill(
         self,
@@ -672,8 +711,8 @@ class LiveDashboardView(DerivedView):
         """
         live = round_result is None
         active_formula = self.state.get("composite_fitness_formula")
-        candidates = self._round.get("candidates") or {}
-        round_num = int(self._round.get("round", 0))
+        candidates = self._buffer.candidates
+        round_num = self._buffer.round_num
         input_candidates: list[dict[str, Any]] = []
         output_candidates: list[dict[str, Any]] = []
         for idx in sorted(candidates.keys()):
@@ -744,7 +783,7 @@ class LiveDashboardView(DerivedView):
             "n_samples": self._core.current_p_best_n,
             "leader_prob": float(leader_prob),
             "posterior_width": float(1.0 - leader_prob),
-            "top": list(self._round.get("p_best_top") or []),
+            "top": list(self._buffer.p_best_top),
         }
 
     # -- Internal --------------------------------------------------------------
@@ -755,7 +794,7 @@ class LiveDashboardView(DerivedView):
         # `_sticky_llm_calls` is the sole source for non-l1_score blocks; the
         # audit-trail records the same events independently into round_NNNN.json.
         nodes: dict[str, Any] = dict(self._sticky_llm_calls)
-        if self._round.get("candidates"):
+        if self._buffer.candidates:
             nodes["l1_score"] = self._build_l1_score_block()
         ordered = {
             k: nodes.pop(k) for k in ("l1_generate", "l1_critique", "l1_score") if k in nodes
@@ -763,7 +802,7 @@ class LiveDashboardView(DerivedView):
         ordered.update(nodes)
         s = self.state
         s["current_round"] = {
-            "round": self._round.get("round", 0),
+            "round": self._buffer.round_num,
             "nodes": ordered,
             "pobb": self._build_pobb_block(),
         }

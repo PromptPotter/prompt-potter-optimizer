@@ -29,7 +29,7 @@ from promptpotter.infrastructure.projections import (
     LiveDashboardView,
 )
 from promptpotter.presentation.views.view_ingress import from_phase_event
-from promptpotter.presentation.views.view_models import RoundCompleteView
+from promptpotter.presentation.views.view_models import RoundCompleteView, ViewContext
 from promptpotter.presentation.writers import from_disk_round
 from promptpotter.shared.statistics import wilson_ci
 
@@ -114,13 +114,13 @@ def test_round_complete_view_roundtrip() -> None:
 
     # Live path: build a phase event identical to what l1.py emits at
     # L1_SCORE:exit, run from_phase_event with a fresh ctx.
-    ctx = {
-        "round_num": 1,
-        "origin_accuracy": origin_acc,
-        "origin_composite_fitness": 0.40,
-        "composite_fitness_formula": "0.7*acc + 0.3*recall",
-        "composite_fitness_formula_short": "0.7*A + 0.3*R",
-    }
+    ctx = ViewContext(
+        round_num=1,
+        origin_accuracy=origin_acc,
+        origin_composite_fitness=0.40,
+        composite_fitness_formula="0.7*acc + 0.3*recall",
+        composite_fitness_formula_short="0.7*A + 0.3*R",
+    )
     event = PhaseEvent(
         phase="l1_score",
         event="exit",
@@ -166,9 +166,9 @@ def test_round_complete_view_roundtrip() -> None:
     }
     disk_view = from_disk_round(
         round_data,
-        composite_fitness_formula=ctx["composite_fitness_formula"],
-        composite_fitness_formula_short=ctx["composite_fitness_formula_short"],
-        origin_composite_fitness=ctx["origin_composite_fitness"],
+        composite_fitness_formula=ctx.composite_fitness_formula,
+        composite_fitness_formula_short=ctx.composite_fitness_formula_short,
+        origin_composite_fitness=ctx.origin_composite_fitness,
     )
 
     # The live view carries an in-memory ``next_action`` flag that the
@@ -192,7 +192,7 @@ def test_round_complete_view_no_improvement() -> None:
             "escalation_aborted": False,
         },
     ]
-    ctx = {"round_num": 1, "origin_accuracy": origin_acc}
+    ctx = ViewContext(round_num=1, origin_accuracy=origin_acc)
     event = PhaseEvent(
         phase="l1_score",
         event="exit",

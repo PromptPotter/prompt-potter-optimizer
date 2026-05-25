@@ -11,7 +11,7 @@ either:
   with ``ForkTrigger.SCORING_DIVERGENCE``, retargets the active pointer,
   and returns the new cycle's id and resume offset.
 
-The escalation FSM is rebuilt via ``EscalationState.from_ledger`` because
+The escalation FSM is rebuilt via ``EscalationFSM.from_ledger`` because
 the ledger is the SoT for layer-stall counters across resume.
 """
 
@@ -21,7 +21,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.config import DiffScope
-from promptpotter.application.optimization.escalation.state import EscalationState
+from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,
     _mint_fork,
@@ -95,7 +95,7 @@ def resume_with_divergence_check(
                     campaign_id, {"config": cycle.config.model_dump(mode="json")}
                 )
             cycle.replay_priors(prior)
-            cycle.escalation = EscalationState.from_ledger(session.state.ledger)
+            cycle.escalation = EscalationFSM.from_ledger(session.state.ledger)
             return None
         if scope is DiffScope.DATA_AFFECTING and diffed:
             logger.info(
@@ -127,7 +127,7 @@ def resume_with_divergence_check(
                     surviving_rounds=survivors,
                 )
                 cycle.replay_priors(survivors)
-                cycle.escalation = EscalationState.from_ledger(session.state.ledger)
+                cycle.escalation = EscalationFSM.from_ledger(session.state.ledger)
                 logger.warning(
                     "Resume diverged at round %d (%s); forked → %s",
                     div.round_num,
@@ -153,5 +153,5 @@ def resume_with_divergence_check(
             )
 
     cycle.replay_priors(prior)
-    cycle.escalation = EscalationState.from_ledger(session.state.ledger)
+    cycle.escalation = EscalationFSM.from_ledger(session.state.ledger)
     return None

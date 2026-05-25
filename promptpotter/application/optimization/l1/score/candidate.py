@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class CandidateRunResult:
     """One candidate's full lifecycle output. ``runtime_failure`` is the
-    caller's signal to append to ``osp_c.wounds.runtime_failures``; the function
+    caller's signal to append to ``osp_c.memory.wounds.runtime_failures``; the function
     cannot mutate it directly because the OSP is shared with other paths."""
 
     outcome: CandidateOutcome
@@ -83,7 +83,7 @@ async def score_one_candidate(
     label = candidate_label(round_num, idx)
 
     # Path 1 — validation-skip synthetic-0.
-    if osp_c.wounds.validation_failures:
+    if osp_c.memory.wounds.validation_failures:
         return CandidateRunResult(
             outcome=CandidateOutcome.SKIPPED_VALIDATION,
             results=[],

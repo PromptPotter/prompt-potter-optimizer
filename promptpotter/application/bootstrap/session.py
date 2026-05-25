@@ -37,7 +37,7 @@ class TenantContext:
 
 
 @dataclass
-class ScoringContext:
+class ScorerSetup:
     scorer: Scorer | None = None
     scorer_id: str = "none"
     scorer_formula: str | None = None
@@ -49,7 +49,7 @@ class ScoringContext:
 
 
 @dataclass
-class CycleState:
+class CycleSnapshot:
     """Per-cycle bundle — flips on fork."""
 
     cycle_id: str = ""
@@ -80,8 +80,8 @@ class Session:
     session_id: str = ""
     campaign_id: str = ""
 
-    state: CycleState = field(default_factory=CycleState)
-    scoring: ScoringContext = field(default_factory=ScoringContext)
+    state: CycleSnapshot = field(default_factory=CycleSnapshot)
+    scoring: ScorerSetup = field(default_factory=ScorerSetup)
 
     source: str = ""
 
@@ -233,8 +233,8 @@ def _open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
 
 
 __all__ = [
-    "CycleState",
-    "ScoringContext",
+    "CycleSnapshot",
+    "ScorerSetup",
     "Session",
     "TenantContext",
     "auto_mint_session",

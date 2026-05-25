@@ -7,7 +7,7 @@ Two entry points are re-exported here:
 * :func:`init_optimization_loop` — preflight, cycle bootstrap, observability,
   scoring (see :mod:`scoring_context`).
 
-Internals (``Session``, ``ScoringContext``, ``CycleState``,
+Internals (``Session``, ``ScorerSetup``, ``CycleSnapshot``,
 ``auto_mint_session``, ``populate_session_scoring``, ``bootstrap_cycle``,
 ``_open_cycle_ledger``) are NOT re-exported. Callers either need an entry
 point above or the relevant submodule directly: ``from

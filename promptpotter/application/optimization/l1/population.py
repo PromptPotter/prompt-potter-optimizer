@@ -82,7 +82,7 @@ def parse_population(
             if outcome is not None:
                 failures.extend(outcome.evidence["failures"])
             # Re-propose check: rejects (param, value) already in
-            # opt_sp.wounds.runtime_failures; runs even when schema-compliance passes.
+            # opt_sp.memory.wounds.runtime_failures; runs even when schema-compliance passes.
             rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
                 pipeline_params_override,
                 opt_sp=osp,
@@ -90,7 +90,7 @@ def parse_population(
             if rf_outcome is not None:
                 failures.extend(rf_outcome.evidence["failures"])
             if failures:
-                osp.wounds.validation_failures = failures
+                osp.memory.wounds.validation_failures = failures
                 for vf in failures:
                     logger.warning(
                         "candidate %s: validation failure on %s — proposed %r not in allowed %r (reason=%s)",
@@ -145,7 +145,7 @@ def build_score_report(
         expected_samples=len(dataset),
         invalid=invalid,
         resumed_from_cache=resumed_from_cache,
-        validation_failures=[vf.model_dump() for vf in osp.wounds.validation_failures],
+        validation_failures=[vf.model_dump() for vf in osp.memory.wounds.validation_failures],
         runtime_failures=[new_runtime_failure.model_dump()] if new_runtime_failure else [],
         elimination_context=dict(elimination_context) if elimination_context else {},
         degradation_context=dict(degradation_context) if degradation_context else {},
