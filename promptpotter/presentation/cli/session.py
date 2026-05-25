@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.store import Stores, build_stores
+from promptpotter.shared.identity import default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
@@ -82,7 +83,7 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
             "ERROR: No active session.\n\n"
             "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint()
         )
-    store = build_stores(tenant_id=getattr(args, "tenant", "default"))
+    store = build_stores(default_identity(tenant_id=getattr(args, "tenant", None) or "default"))
     _tid, pointer_sid, pointer_cid, pointer_cyid = read_active_pointer()
     session_id = getattr(args, "session", None) or pointer_sid
     if not session_id:

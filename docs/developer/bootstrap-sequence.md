@@ -7,13 +7,15 @@ calling them out-of-order leaves the session under-wired.
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │  init_services            (wiring.py)                               │
-│    ├─ build_stores(project_root)                                    │
+│    ├─ resolve identity     (default_identity() at Stage-0;          │
+│    │                        Stage-1 swaps in OIDC verification)     │
+│    ├─ build_stores(identity, projects_root=…)                       │
 │    ├─ tenant guard         (refuse drift unless take_over=True)     │
 │    ├─ connector resolve    (datasets/{name}/pipeline.json)          │
 │    ├─ BackendClient        (wire + session adapter from connector)  │
 │    ├─ GET /pipeline        (merged with dataset overlay)            │
 │    ├─ register backend     (idempotent)                             │
-│    ├─ Session(...)         (store, client, schema, tenant)          │
+│    ├─ Session(...)         (store, client, schema, identity)        │
 │    └─ load dataset          OR  sync experiment extract             │
 │    ↓                                                                │
 │  postcondition: session has store + client + schema + samples        │

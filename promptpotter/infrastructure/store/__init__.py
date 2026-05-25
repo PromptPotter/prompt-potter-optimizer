@@ -14,6 +14,7 @@ import json
 import uuid
 from pathlib import Path
 
+from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.backend_store import BackendStore
 from promptpotter.infrastructure.store.base import validate_path_component, write_json
@@ -40,8 +41,15 @@ def mint_session_id() -> str:
     return f"s_{uuid.uuid4().hex[:8]}"
 
 
-def save_active_pointer(tenant_id: str, session_id: str, campaign_id: str, cycle_id: str) -> None:
-    """Persist the active pointer — tenant, session, campaign, cycle."""
+def save_active_pointer(
+    tenant_id: TenantId, session_id: str, campaign_id: str, cycle_id: str
+) -> None:
+    """Persist the active pointer — tenant, session, campaign, cycle.
+
+    *tenant_id* is the :class:`TenantId` newtype from the caller's
+    :class:`IdentityContext`; the on-disk JSON key remains ``tenant_id``
+    (file format, not internal API).
+    """
     validate_path_component(tenant_id)
     validate_path_component(session_id)
     validate_path_component(campaign_id)

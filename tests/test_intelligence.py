@@ -16,6 +16,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import build_stores
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
+from promptpotter.shared.identity import default_identity
 
 
 def _seed_archive_run(
@@ -170,7 +171,9 @@ def _seed_indexed_run(
 
 @pytest.fixture
 def indexed_stores(tmp_path: Path):
-    s = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
+    s = build_stores(
+        default_identity(), projects_root=tmp_path / "projects", datasets_root=tmp_path / "datasets"
+    )
     _seed_indexed_run(
         s.archive,
         "run_a",
@@ -339,7 +342,9 @@ def test_dead_queries_respects_min_observations() -> None:
 
 
 def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
-    store = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
+    store = build_stores(
+        default_identity(), projects_root=tmp_path / "projects", datasets_root=tmp_path / "datasets"
+    )
     items = [
         {"query": "a", "ground_truth": "A"},
         {"query": "b", "ground_truth": "B"},

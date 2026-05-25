@@ -22,6 +22,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import build_stores, walk_cycle_lineage
+from promptpotter.shared.identity import default_identity
 
 # Every cycle lives inside a campaign; the tests pin one.
 _CAMPAIGN = "testds__20260101-000000"
@@ -166,7 +167,7 @@ def test_mint_fork_scoring_divergence_inherits_and_appends_fork_cut(
     rounds = _seed_cycle(tmp_path, tenant, parent, n_rounds=4)
     ptr = _patch_pointer(monkeypatch, tmp_path)
 
-    stores = build_stores(tmp_path, tenant_id=tenant)
+    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
     parent_dir = stores.campaigns.cycle_dir(_CAMPAIGN, parent)
     new_cycle = _mint_fork(
         stores.campaigns,
@@ -212,7 +213,7 @@ def test_mint_fork_operator_diag_counted_id_clean_slate(tmp_path: Path, monkeypa
     parent = "cyclediagparent"
     _seed_cycle(tmp_path, tenant, parent, n_rounds=2)
     _patch_pointer(monkeypatch, tmp_path)
-    stores = build_stores(tmp_path, tenant_id=tenant)
+    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
 
     sib1 = _mint_fork(stores.campaigns, _CAMPAIGN, tenant, "s_test", parent, 0, _diag_payload())
     sib2 = _mint_fork(stores.campaigns, _CAMPAIGN, tenant, "s_test", parent, 0, _diag_payload())
@@ -234,7 +235,7 @@ def test_mint_fork_operator_sweep_no_inherit_and_dedup_fields(tmp_path: Path, mo
     parent = "cyclesweepparent"
     _seed_cycle(tmp_path, tenant, parent, n_rounds=1)
     _patch_pointer(monkeypatch, tmp_path)
-    stores = build_stores(tmp_path, tenant_id=tenant)
+    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
     parent_dir = stores.campaigns.cycle_dir(_CAMPAIGN, parent)
 
     new_cycle = _mint_fork(
@@ -274,7 +275,7 @@ def test_walk_cycle_lineage_walks_parent_chain(tmp_path: Path, monkeypatch) -> N
     parent = "cycle_lineage_root"
     _seed_cycle(tmp_path, tenant, parent, n_rounds=2)
     _patch_pointer(monkeypatch, tmp_path)
-    stores = build_stores(tmp_path, tenant_id=tenant)
+    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
 
     fork = _mint_fork(
         stores.campaigns,

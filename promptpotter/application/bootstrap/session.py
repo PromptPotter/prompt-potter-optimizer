@@ -16,6 +16,7 @@ from promptpotter.infrastructure.store import (
     save_active_pointer,
 )
 from promptpotter.infrastructure.store.base import validate_path_component
+from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes import SampleIndex
@@ -27,13 +28,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class TenantContext:
-    tenant_id: str
-    user_id: str | None = None
-    capabilities: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass
@@ -71,7 +65,7 @@ class Session:
     samples: list[Sample] = field(default_factory=list)
     experiment_extract: dict[str, Any] = field(default_factory=dict)
     index_terms: list[str] = field(default_factory=list)
-    tenant: TenantContext | None = None
+    identity: IdentityContext = field(default_factory=default_identity)
     dataset_name: str | None = None
     project_root: str = ""
     pipeline_params: dict[str, Any] = field(default_factory=dict)
@@ -236,7 +230,6 @@ __all__ = [
     "CycleSnapshot",
     "ScorerSetup",
     "Session",
-    "TenantContext",
     "auto_mint_session",
     "new_session_state",
 ]

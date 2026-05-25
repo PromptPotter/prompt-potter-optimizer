@@ -32,6 +32,8 @@ from promptpotter.infrastructure.store import (
     cycle_dir_for,
 )
 from promptpotter.main import WEBAPP_DIR, app
+from promptpotter.presentation.api.deps import build_stores_from_identity
+from promptpotter.shared.identity import default_identity
 
 _CAMPAIGN_ID = "apitest__20260101-000000"
 
@@ -43,7 +45,9 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str, str]]:
     datasets_root = tmp_path / "datasets"
     cycle_id = "cycle_apitest_001"
 
-    stores = build_stores(projects_root, datasets_root=datasets_root)
+    stores = build_stores(
+        default_identity(), projects_root=projects_root, datasets_root=datasets_root
+    )
 
     campaign_dir = campaign_root_dir_for(stores.base_dir, _CAMPAIGN_ID)
     cycle_dir = cycle_dir_for(stores.base_dir, _CAMPAIGN_ID, cycle_id)
@@ -118,7 +122,7 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str, str]]:
     def _override_stores():
         return stores
 
-    app.dependency_overrides[build_stores] = _override_stores
+    app.dependency_overrides[build_stores_from_identity] = _override_stores
     try:
         yield TestClient(app), _CAMPAIGN_ID, cycle_id
     finally:

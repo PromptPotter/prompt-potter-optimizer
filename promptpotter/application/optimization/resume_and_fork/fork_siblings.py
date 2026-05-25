@@ -20,6 +20,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     record_decision,
 )
 from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.identity import TenantId
 from promptpotter.domain.run_records import ForkPayload, ForkTrigger
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import (
@@ -47,7 +48,7 @@ class ForkResult(NamedTuple):
 def _fork_sibling_setup(
     campaign_store: CampaignStore,
     campaign_id: str,
-    tenant_id: str,
+    tenant_id: TenantId,
     session_id: str,
     parent_cycle_id: str,
     new_cycle_id: str,
@@ -121,7 +122,7 @@ def _next_diag_sibling_id(
 def _mint_fork(
     campaign_store: CampaignStore,
     campaign_id: str,
-    tenant_id: str,
+    tenant_id: TenantId,
     session_id: str,
     parent_cycle_id: str,
     fork_from_round: int,
@@ -231,7 +232,7 @@ def cleanup_stub_fork_if_empty(
     *,
     campaign_store: CampaignStore,
     campaign_id: str,
-    tenant_id: str,
+    tenant_id: TenantId,
     session_id: str,
     cycle_id: str,
     parent_cycle_id: str,

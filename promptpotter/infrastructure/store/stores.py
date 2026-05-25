@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store.backend_store import BackendStore
 from promptpotter.infrastructure.store.base import (
     read_json_optional,
-    validate_path_component,
     write_json,
 )
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
@@ -25,11 +25,11 @@ from promptpotter.infrastructure.store.measurement_archive import MeasurementArc
 from promptpotter.infrastructure.store.paths import (
     DEFAULT_DATASETS_ROOT,
     DEFAULT_PROJECTS_ROOT,
-    DEFAULT_TENANT_ID,
 )
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.sweep_store import SweepStore
 from promptpotter.shared.hashing import HASH_TRUNCATE
+from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +90,15 @@ class Stores:
 
     Sessions + campaigns are peer trees under the tenant; campaign records its
     parent session via ``index.json::parent_session_id``. Construct via :func:`build_stores`.
+
+    ``identity`` carries the full Stage-0 :class:`IdentityContext` — read
+    ``identity.tenant_id`` for the tenant slug. There is no ``Stores.tenant_id``
+    field (per identity-foundation no-drift gate #4: ``IdentityContext.tenant_id``
+    is the only source of tenant scope).
     """
 
     base_dir: Path
-    tenant_id: str
+    identity: IdentityContext
     backends: BackendStore
     sessions: SessionStore
     campaigns: CampaignStore
@@ -102,25 +107,32 @@ class Stores:
     optimizer_calls: OptimizerCallCache
     diagnostic_runs: DiagnosticRunStore
 
+    @property
+    def tenant_id(self) -> TenantId:
+        """Convenience accessor — equals ``self.identity.tenant_id``."""
+        return self.identity.tenant_id
+
 
 def build_stores(
+    identity: IdentityContext,
+    *,
     projects_root: Path | str | None = None,
-    tenant_id: str = DEFAULT_TENANT_ID,
     datasets_root: Path | str | None = None,
 ) -> Stores:
-    """Assemble a tenant-rooted :class:`Stores` bundle.
+    """Assemble an :class:`IdentityContext`-rooted :class:`Stores` bundle.
 
     Defaults: ``projects_root=<repo>/.promptpotter/projects``,
-    ``tenant_id='default'`` (single-user CLI), ``datasets_root=<repo>/datasets``
-    (survives ``.promptpotter/`` resets). Tests pass ``tmp_path``.
+    ``datasets_root=<repo>/datasets`` (survives ``.promptpotter/`` resets).
+    Tests pass ``tmp_path``. The tenant slug rides ``identity.tenant_id`` —
+    use :func:`~promptpotter.shared.identity.default_identity` for Stage-0
+    single-operator callers.
     """
-    validate_path_component(tenant_id)
     root = Path(projects_root) if projects_root else DEFAULT_PROJECTS_ROOT
-    tenant_dir = root / tenant_id
+    tenant_dir = root / identity.tenant_id
     ds_root = Path(datasets_root) if datasets_root else DEFAULT_DATASETS_ROOT
     return Stores(
         base_dir=tenant_dir,
-        tenant_id=tenant_id,
+        identity=identity,
         backends=BackendStore(tenant_dir, ds_root),
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),

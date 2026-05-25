@@ -21,6 +21,7 @@ from promptpotter.infrastructure.store import archive_views, build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     get_verbose,
+    identity_from_args,
     init_services_cli,
 )
 
@@ -133,7 +134,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.domain.opt_search_point import OptSearchPoint
 
-    stores = build_stores(tenant_id=getattr(args, "tenant", "default"))
+    stores = build_stores(identity_from_args(args))
     campaign_id = _resolve_campaign(stores, args.campaign)
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
@@ -183,7 +184,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         backend_id=campaign.backend_id or campaign.dataset_name,
         dataset_name=campaign.dataset_name,
         take_over=False,
-        tenant_id=getattr(args, "tenant", "default"),
+        identity=identity_from_args(args),
     )
     session.campaign_id = campaign_id
     session.state.cycle_id = cycle_id

@@ -63,9 +63,11 @@ async def _fork_and_bind(
     from promptpotter.application.optimization.resume_and_fork import _mint_fork
     from promptpotter.domain.run_records import ForkPayload, ForkTrigger
     from promptpotter.infrastructure.store import build_stores
+    from promptpotter.shared.identity import default_identity
 
-    tenant_id = getattr(args, "tenant", "default")
-    store = build_stores(tenant_id=tenant_id)
+    identity = default_identity(tenant_id=getattr(args, "tenant", None) or "default")
+    tenant_id = identity.tenant_id
+    store = build_stores(identity)
     source_file = variant.path.name if variant.path else f"current-{variant.label or 'unset'}.json"
     fork_payload = ForkPayload(
         trigger=ForkTrigger.OPERATOR_SWEEP,
@@ -86,7 +88,7 @@ async def _fork_and_bind(
     fork_ctx = load_session(args)
     fork_session = await init_services(
         **fork_ctx.init_params,
-        tenant_id=tenant_id,
+        identity=identity,
         on_status=lambda msg: logger.info(msg) if get_verbose() else None,
     )
     fork_session.session_id = fork_ctx.session_id
@@ -311,7 +313,7 @@ async def _run_panel_verb(
         # (active identity lives only in active_session.json), so the
         # pointer restore is sufficient — no sidecar dashboard rewrite.
         save_active_pointer(
-            getattr(args, "tenant", "default"),
+            session.identity.tenant_id,
             ctx.session_id,
             ctx.campaign_id,
             parent_cycle_id,
@@ -351,7 +353,11 @@ async def _cmd_sweep_round2(args: argparse.Namespace) -> CommandResult:
     from promptpotter.infrastructure.store import build_stores
 
     if getattr(args, "from_sweep", None):
-        stores = build_stores(tenant_id=getattr(args, "tenant", "default"))
+        from promptpotter.shared.identity import default_identity
+
+        stores = build_stores(
+            default_identity(tenant_id=getattr(args, "tenant", None) or "default")
+        )
         prior = find_sweep_results(stores.base_dir, sweep_id=args.from_sweep, verb="round1")
         if not prior:
             return CommandResult(

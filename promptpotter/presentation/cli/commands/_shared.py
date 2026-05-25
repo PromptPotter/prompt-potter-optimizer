@@ -24,6 +24,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
+from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -102,9 +103,13 @@ async def init_services_cli(
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     dataset_name: str | None = None,
     take_over: bool = False,
-    tenant_id: str = "default",
+    identity: IdentityContext | None = None,
 ) -> Session:
-    """Initialize services for a CLI command (logging style + service init)."""
+    """Initialize services for a CLI command (logging style + service init).
+
+    *identity* defaults to the Stage-0 :func:`default_identity`; CLI callers
+    derive it from ``args.tenant`` via :func:`identity_from_args`.
+    """
     from promptpotter.application.bootstrap import init_services
     from promptpotter.config.logging import setup_logging
 
@@ -118,8 +123,19 @@ async def init_services_cli(
         dataset_name=dataset_name,
         on_status=lambda msg: logger.info(msg) if _VERBOSE else None,
         take_over=take_over,
-        tenant_id=tenant_id,
+        identity=identity if identity is not None else default_identity(),
     )
+
+
+def identity_from_args(args: Any) -> IdentityContext:
+    """Build the Stage-0 :class:`IdentityContext` from CLI ``argparse`` flags.
+
+    Reads ``args.tenant`` (defaults to ``'default'`` when absent). The CLI is
+    the seam where ``--tenant <slug>`` becomes the
+    :class:`~promptpotter.domain.identity.TenantId`; everything past this
+    point passes :class:`IdentityContext`, never bare strings.
+    """
+    return default_identity(tenant_id=getattr(args, "tenant", None) or "default")
 
 
 def _prepare_cycle(
@@ -236,6 +252,7 @@ __all__ = [
     "campaign_result_human",
     "confirm_tty",
     "get_verbose",
+    "identity_from_args",
     "init_services_cli",
     "log_startup_summary",
     "set_verbose",

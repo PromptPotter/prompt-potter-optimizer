@@ -23,7 +23,6 @@ from promptpotter.infrastructure.store.base import validate_path_component
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PROJECTS_ROOT = _REPO_ROOT / ".promptpotter" / "projects"
-DEFAULT_TENANT_ID = "default"
 DEFAULT_DATASETS_ROOT = _REPO_ROOT / "datasets"
 
 
@@ -96,7 +95,6 @@ def session_dir_for(tenant_root: Path, session_id: str) -> Path:
 __all__ = [
     "DEFAULT_DATASETS_ROOT",
     "DEFAULT_PROJECTS_ROOT",
-    "DEFAULT_TENANT_ID",
     "campaign_root_dir_for",
     "cycle_dir_for",
     "root_cycle_id",

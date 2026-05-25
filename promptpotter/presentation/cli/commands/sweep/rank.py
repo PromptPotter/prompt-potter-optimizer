@@ -12,8 +12,9 @@ async def _cmd_sweep_rank(args: argparse.Namespace) -> CommandResult:
     read — no optimize call, no LLM spend."""
     from promptpotter.application.sweep import find_sweep_results, rank_sweep_results
     from promptpotter.infrastructure.store import build_stores
+    from promptpotter.shared.identity import default_identity
 
-    stores = build_stores(tenant_id=getattr(args, "tenant", "default"))
+    stores = build_stores(default_identity(tenant_id=getattr(args, "tenant", None) or "default"))
     results = find_sweep_results(
         stores.base_dir,
         dataset=args.dataset,

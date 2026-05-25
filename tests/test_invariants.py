@@ -821,8 +821,11 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
 
     from promptpotter.application.bootstrap.session import _open_cycle_ledger
     from promptpotter.infrastructure.store import build_stores
+    from promptpotter.shared.identity import default_identity
 
-    stores = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
+    stores = build_stores(
+        default_identity(), projects_root=tmp_path / "projects", datasets_root=tmp_path / "datasets"
+    )
     fake_session = SimpleNamespace(store=stores, campaign_id="ds__20260101-000000")
 
     ledger = _open_cycle_ledger(fake_session, "cycle_x")  # type: ignore[arg-type]

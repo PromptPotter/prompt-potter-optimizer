@@ -97,9 +97,11 @@ async def run_sweep_batch(
         run_optimization as _orch_run_optimization,
     )
     from promptpotter.presentation.cli.session import load_session
+    from promptpotter.shared.identity import default_identity
 
-    tenant_id = getattr(args, "tenant", "default")
-    store = build_stores(tenant_id=tenant_id)
+    identity = default_identity(tenant_id=getattr(args, "tenant", None) or "default")
+    tenant_id = identity.tenant_id
+    store = build_stores(identity)
     parent_cycle_id = root_ctx.cycle_id
     campaign_id = root_ctx.campaign_id
     existing = existing_fork_source_files(store, campaign_id, parent_cycle_id)
@@ -162,7 +164,7 @@ async def run_sweep_batch(
             fork_ctx = load_session(args)
             fork_session = await init_services(
                 **fork_ctx.init_params,
-                tenant_id=tenant_id,
+                identity=identity,
                 on_status=(lambda msg: logger.info(msg) if verbose else None),
             )
             fork_session.session_id = fork_ctx.session_id
