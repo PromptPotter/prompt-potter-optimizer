@@ -18,11 +18,6 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      # Cheap, dependency-free — fail fast before the pip install if a
-      # `.ai/CODEMAP.md` symbol citation has gone stale.
-      - name: CODEMAP anti-rot check
-        run: python scripts/check_codemap.py
-
       - name: Install dependencies
         run: pip install -e ".[stats,dev]"
 

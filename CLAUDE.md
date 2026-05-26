@@ -1,7 +1,6 @@
 # CLAUDE.md
 
 > Read [`docs/architecture.md`](docs/architecture.md) first — §0 + §0.5 are what every PR measures against.
-> AI quick-start: [`.ai/CODEMAP.md`](.ai/CODEMAP.md) (verified `symbol → file:line` + hot-workflow recipes; grep companion `.ai/SYMBOLS.txt`; regenerate via `python scripts/build_ai_index.py`).
 > Per-layer CLAUDE.md tree listed under **Pointers** below.
 
 ## What this is
@@ -97,6 +96,8 @@ Non-negotiables only — full style, code-shape, tests, CLI, git rules in [`docs
 **Index files** (AI-readable maps of subtrees): [`datasets/CLAUDE.md`](datasets/CLAUDE.md) (per-dataset layout + reference points + `promptpotter-self` L4 case) · [`docs/CLAUDE.md`](docs/CLAUDE.md) (docs-tree map + hot-question anchors).
 
 **Topical docs:** `docs/manual/` install→first run→reading→troubleshooting · `docs/concepts/` how it works · `docs/operations/` CLI/env/persistence/rewind-and-fork/observability · `docs/developer/README.md` architecture brief (prompt structure, dispatch, scoring node, cross-run memory) · [`docs/developer/conventions.md`](docs/developer/conventions.md) full style + code-shape rules · [`docs/developer/stable-api.md`](docs/developer/stable-api.md) v1 fork-readiness surface · [`docs/glossary.md`](docs/glossary.md) domain vocabulary + canonical file pointers · `tests/CLAUDE.md` test charter.
+
+**Design surface:** [`.impeccable.md`](.impeccable.md) — design context (theme-is-audience: dark=operator, light=buyer; the Potter is force-multiplier not friendly-wizard; accessibility is a positioning feature). Loaded by `frontend-design`, `critique`, `polish`, etc.
 
 ## Pre-flight gate
 

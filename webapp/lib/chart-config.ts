@@ -39,15 +39,21 @@ export function ensureChartRegistered(): void {
 // its container; each caller spreads its own `plugins` / `scales` over the
 // base (a shallow spread — axis/legend config stays at the call site, where
 // it visibly diverges chart to chart).
+//
+// `animation: false` is the project-wide default. The dashboard polls
+// dashboard.json every 2 s; a 200 ms tween that interpolates every bar's
+// height on every poll is a constant frame-cost for a metric that already
+// changes legibly without animation. Operators who want a smoother update
+// can override at the call site.
 
 export function lineChartDefaults(
   over?: Partial<ChartOptions<"line">>,
 ): ChartOptions<"line"> {
-  return { responsive: true, maintainAspectRatio: false, ...over };
+  return { responsive: true, maintainAspectRatio: false, animation: false, ...over };
 }
 
 export function barChartDefaults(
   over?: Partial<ChartOptions<"bar">>,
 ): ChartOptions<"bar"> {
-  return { responsive: true, maintainAspectRatio: false, ...over };
+  return { responsive: true, maintainAspectRatio: false, animation: false, ...over };
 }

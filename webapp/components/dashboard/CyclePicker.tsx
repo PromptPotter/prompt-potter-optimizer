@@ -1,4 +1,5 @@
 "use client";
+import { memo, useMemo } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { useCycleStream } from "@/lib/poll";
 import type { CycleListEntry } from "@/lib/api";
@@ -28,7 +29,23 @@ function optionText(c: CycleListEntry): string {
   return `${unitDisplayName(c)} · best ${fmtPct0(c.best_accuracy)} · ${c.status}`;
 }
 
-export function CyclePicker({
+// The live badge subscribes to the 2 s dashboard.json poll on its own. Kept
+// out of the picker body so the picker's heavy optgroup tree doesn't rebuild
+// on every tick.
+function LiveBadge() {
+  const { isLive } = useCycleStream();
+  if (!isLive) return null;
+  return (
+    <span
+      className="live-badge"
+      title="Campaign is actively running — dashboard updated in the last 60s"
+    >
+      ● Live
+    </span>
+  );
+}
+
+function CyclePickerImpl({
   variant = "breadcrumb",
 }: {
   variant?: "breadcrumb" | "standalone";
@@ -45,9 +62,36 @@ export function CyclePicker({
     selectCycle,
     followActive,
   } = useWorkspace();
-  const { isLive } = useCycleStream();
 
   const standalone = variant === "standalone";
+
+  // Group + sort lives in a useMemo keyed on `cycles` so the O(N log N) work
+  // only fires when the workspace poll actually mutates the list. Without
+  // this the body re-ran on every parent re-render (i.e. every 2 s while a
+  // dashboard tick propagates through the tree).
+  const { groups, groupKeys } = useMemo(() => {
+    const g = new Map<string, CycleListEntry[]>();
+    for (const c of cycles) {
+      const arr = g.get(c.campaign_id) ?? [];
+      arr.push(c);
+      g.set(c.campaign_id, arr);
+    }
+    for (const arr of g.values()) {
+      arr.sort((a, b) => {
+        const sa = sessionIndexOf(rootCycleId(a.cycle_id));
+        const sb = sessionIndexOf(rootCycleId(b.cycle_id));
+        if (sa !== sb) return sa - sb;
+        if (a.is_root !== b.is_root) return a.is_root ? -1 : 1;
+        return a.updated_at < b.updated_at ? 1 : -1;
+      });
+    }
+    const lastTouched = (entries: CycleListEntry[]) =>
+      Math.max(...entries.map((c) => Date.parse(c.updated_at) || 0));
+    const keys = [...g.keys()].sort(
+      (a, b) => lastTouched(g.get(b)!) - lastTouched(g.get(a)!),
+    );
+    return { groups: g, groupKeys: keys };
+  }, [cycles]);
 
   if (cyclesError && cycles.length === 0) {
     return <span className="cycle-picker-err">campaigns: {cyclesError}</span>;
@@ -58,30 +102,6 @@ export function CyclePicker({
   if (cycles.length === 0) {
     return <span>{standalone ? "New Job" : cycleId || "No campaigns yet"}</span>;
   }
-
-  // Group options by campaign. Within a campaign, order by session index;
-  // each session root is followed by its forks (root first, then by recency).
-  const groups = new Map<string, CycleListEntry[]>();
-  for (const c of cycles) {
-    const arr = groups.get(c.campaign_id) ?? [];
-    arr.push(c);
-    groups.set(c.campaign_id, arr);
-  }
-  for (const arr of groups.values()) {
-    arr.sort((a, b) => {
-      const sa = sessionIndexOf(rootCycleId(a.cycle_id));
-      const sb = sessionIndexOf(rootCycleId(b.cycle_id));
-      if (sa !== sb) return sa - sb;
-      if (a.is_root !== b.is_root) return a.is_root ? -1 : 1;
-      return a.updated_at < b.updated_at ? 1 : -1;
-    });
-  }
-  // Optgroups ordered most-recently-active campaign first.
-  const lastTouched = (entries: CycleListEntry[]) =>
-    Math.max(...entries.map((c) => Date.parse(c.updated_at) || 0));
-  const groupKeys = [...groups.keys()].sort(
-    (a, b) => lastTouched(groups.get(b)!) - lastTouched(groups.get(a)!),
-  );
 
   const currentKey = campaignId && cycleId ? unitKey(campaignId, cycleId) : "";
   const selectedKnown = cycles.some(
@@ -139,14 +159,12 @@ export function CyclePicker({
           ↪ Follow active
         </button>
       )}
-      {isLive && (
-        <span
-          className="live-badge"
-          title="Campaign is actively running — dashboard updated in the last 60s"
-        >
-          ● Live
-        </span>
-      )}
+      <LiveBadge />
     </span>
   );
 }
+
+// memo so re-renders of the parent tree that don't change the picker's only
+// prop are skipped — useWorkspace consumers still trigger an update via
+// context subscription when its fields change.
+export const CyclePicker = memo(CyclePickerImpl);

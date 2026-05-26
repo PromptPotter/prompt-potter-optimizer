@@ -29,6 +29,8 @@ interface Props {
   // all campaigns on the dataset) is owned by DashboardPane and re-fetches
   // this map; the heat-map merges live mid-round samples on top.
   archivePerSample: Map<number, ArchiveDot[]>;
+  // True while the displayed dataset slice is from a prior (unit, scope).
+  datasetStale: boolean;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
 }
@@ -85,6 +87,7 @@ export function HardSamplesHeatmap({
   datasetUnmeasuredCount,
   datasetSplitTest,
   archivePerSample,
+  datasetStale,
   hardSamplesScope,
   onHardSamplesScopeChange,
 }: Props) {
@@ -198,6 +201,7 @@ export function HardSamplesHeatmap({
             datasetMeasuredCount={datasetMeasuredCount}
             datasetUnmeasuredCount={datasetUnmeasuredCount}
             datasetSplitTest={datasetSplitTest}
+            datasetStale={datasetStale}
             scope={hardSamplesScope}
             onScopeChange={onHardSamplesScopeChange}
           />

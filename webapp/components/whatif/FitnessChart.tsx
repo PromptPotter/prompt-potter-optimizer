@@ -247,7 +247,10 @@ export const FitnessChart = memo(function FitnessChart({
   const options = useMemo<ChartOptions<"bar">>(() => ({
     responsive: true,
     maintainAspectRatio: false,
-    animation: { duration: 200 },
+    // Animation off — see chart-config.ts for the rationale. Chart.js's
+    // internal data-diff is fast enough that a poll-driven update lands in
+    // a single frame; the prior 200 ms tween was visible jank, not polish.
+    animation: false,
     onClick: (_evt, elements) => {
       if (!elements || elements.length === 0) return;
       const idx = elements[0].index;
@@ -291,7 +294,13 @@ export const FitnessChart = memo(function FitnessChart({
 
   return (
     <div className="fitness-chart-frame">
-      <Bar key={themeKey} data={data} options={options} plugins={CHART_PLUGINS} />
+      {/* No `key={themeKey}` remount: chart-instance survives theme swap.
+          The `data` + `options` memos pull from `getCss(...)` and depend on
+          themeKey, so the new colour strings flow into chart.js on the
+          next memo evaluation; chart.js's own diff applies them in place
+          (single-digit ms canvas redraw) rather than tearing down and
+          recreating the canvas (10-15 ms with re-allocation). */}
+      <Bar data={data} options={options} plugins={CHART_PLUGINS} />
     </div>
   );
 });

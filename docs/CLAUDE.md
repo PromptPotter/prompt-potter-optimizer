@@ -40,7 +40,6 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | What datasets do we use? Why didn't we use Y? | [`operations/dataset-selection-rationale.md`](operations/dataset-selection-rationale.md) |
 | What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT meta-campaign NOTES.md) |
 | What's the canonical split for this benchmark? | [`operations/adding-a-dataset.md`](operations/adding-a-dataset.md) |
-| Where does X live in the code? | [`../.ai/CODEMAP.md`](../.ai/CODEMAP.md) (verified `symbol → file:line`) |
 
 ## L4 — the recursion case
 

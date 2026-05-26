@@ -78,8 +78,8 @@ export function HardSamplesFooter({
         className="hs-sync-toggle"
         title={
           syncLive
-            ? "Sort follows the picker's Info-gain ranking. Order only refreshes when the artifact regenerates (round boundary) — not on every 2 s poll, so the table doesn't flash. Untick to sort columns manually."
-            : "Sort with column headers. Tick to follow the picker's Info-gain ranking — order refreshes once per round, not per poll."
+            ? "Sort follows the queue mechanism's Info-gain ranking. Order only refreshes when the artifact regenerates (round boundary) — not on every 2 s poll, so the table doesn't flash. Untick to sort columns manually."
+            : "Sort with column headers. Tick to follow the queue mechanism's Info-gain ranking — order refreshes once per round, not per poll."
         }
       >
         <input type="checkbox" checked={syncLive} onChange={onToggleSyncLive} />

@@ -2,10 +2,12 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type PointerEvent,
 } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { MeasHeatCell } from "./MeasHeatCell";
@@ -62,6 +64,9 @@ interface Props {
   // Owner (DashboardPane) refetches the preview when scope changes.
   scope?: HardSamplesScope;
   onScopeChange?: (s: HardSamplesScope) => void;
+  // Displayed roster is from a prior (unit, scope) and a fresh fetch is in
+  // flight — the table dims via the `stale` data-attr but never blanks.
+  datasetStale?: boolean;
 }
 
 export function HardSamplesTable({
@@ -77,6 +82,7 @@ export function HardSamplesTable({
   datasetSplitTest,
   scope,
   onScopeChange,
+  datasetStale,
 }: Props) {
   // Drop columns with nothing to show: the History heat-map needs
   // `perSample`; the Task column needs at least one sample carrying a task
@@ -219,40 +225,53 @@ export function HardSamplesTable({
   }, [items, columns, perSampleSig, ordCols.length]);
 
   // Live-sort ("Auto-sort"): rank the WHOLE table by Info gain (pick_score)
-  // descending — the picker's expected decision-information-gain. Contested
+  // descending — the queue mechanism's expected decision-information-gain. Contested
   // samples rise to the top; always-hit and always-miss samples sink
   // together at the bottom. Rows without any actual measurement in this
   // scope sink last in sample_id order. Dot-presence is the
   // "measured-in-scope" signal — `pick_score !== null` is non-null on
   // prior-only rows too, so it overcounts under campaign scope.
   const liveSortActive = persisted.syncLive;
-  // Stable content signature of the sort-affecting fields. ``pick_score``
-  // only refreshes when the hard-samples artifact regenerates (round
-  // boundary). When this signature is constant across polls, the sorted-id
-  // memo below short-circuits to the prior reference and the table doesn't
-  // flash.
-  const liveSortSig = useMemo(() => {
-    if (!liveSortActive) return "";
-    return items
-      .map((it) => {
-        const m = (perSample?.get(it.sample_id)?.length ?? 0) > 0 ? "m" : "u";
-        const p = it.pick_score === null ? "n" : it.pick_score.toFixed(6);
-        return `${it.sample_id}:${m}:${p}`;
-      })
-      .join("|");
+  // Numeric FNV-1a hash over the sort-affecting fields. Same role the old
+  // string-concat signature played — sortedIds re-runs only when this
+  // changes — but ~100× cheaper: no string allocation, just one O(n) walk
+  // emitting a single uint32. pick_score is quantised to 1e-6 (the value's
+  // visible precision in the picker) so float jitter doesn't churn the key.
+  const liveSortSig = useMemo<number>(() => {
+    if (!liveSortActive) return 0;
+    let h = 2166136261;
+    for (const it of items) {
+      const m = (perSample?.get(it.sample_id)?.length ?? 0) > 0 ? 1 : 0;
+      const pi = it.pick_score === null ? -1 : Math.round(it.pick_score * 1e6) | 0;
+      h = Math.imul(h ^ it.sample_id, 16777619) >>> 0;
+      h = Math.imul(h ^ m, 16777619) >>> 0;
+      h = Math.imul(h ^ pi, 16777619) >>> 0;
+    }
+    return h;
   }, [items, perSample, liveSortActive]);
-  // Manual-sort signature for when Auto-sort is off. Keys on the picked
-  // column's raw value so a poll that only moved an unrelated field doesn't
-  // shuffle the visible sort.
-  const manualSortSig = useMemo(() => {
-    if (liveSortActive || !sortBy) return "";
-    return items
-      .map((it) => {
-        const v = cellFor(sortBy.col, it, perSample?.get(it.sample_id) ?? []).raw;
-        const k = v === null || v === undefined ? "n" : String(v);
-        return `${it.sample_id}:${k}`;
-      })
-      .join("|");
+  // Manual-sort hash for when Auto-sort is off. Keys on the picked column's
+  // raw value so a poll that only moved an unrelated field doesn't shuffle
+  // the visible sort.
+  const manualSortSig = useMemo<number>(() => {
+    if (liveSortActive || !sortBy) return 0;
+    let h = 2166136261;
+    for (const it of items) {
+      const v = cellFor(sortBy.col, it, perSample?.get(it.sample_id) ?? []).raw;
+      let k: number;
+      if (v === null || v === undefined) k = -1;
+      else if (typeof v === "number") k = Math.round(v * 1e6) | 0;
+      else if (typeof v === "boolean") k = v ? 1 : 0;
+      else {
+        // String hash mixed in. Lightweight — sortBy doesn't change every poll.
+        let s = 5381;
+        const str = String(v);
+        for (let i = 0; i < str.length; i++) s = (s * 33) ^ str.charCodeAt(i);
+        k = s | 0;
+      }
+      h = Math.imul(h ^ it.sample_id, 16777619) >>> 0;
+      h = Math.imul(h ^ k, 16777619) >>> 0;
+    }
+    return h;
   }, [items, perSample, sortBy, liveSortActive]);
   // Sort the IDs, not the items. ID order is the actual stability surface;
   // the render loop projects items by ID downstream so cell values always
@@ -310,6 +329,22 @@ export function HardSamplesTable({
     }
     return out;
   }, [items, sortedIds]);
+
+  // Per-sample ord → dot lookup. Built once per `perSample` change rather
+  // than once per row per render — the row loop just `.get(sample_id)` it.
+  // Identity equality on the inner Maps is preserved across renders that
+  // don't touch the data, so `MeasHeatCell`'s prop equality survives polls.
+  const byOrdBySample = useMemo(() => {
+    const out = new Map<number, Map<string, MeasurementDot>>();
+    if (!perSample) return out;
+    for (const [sid, ms] of perSample) {
+      const m = new Map<string, MeasurementDot>();
+      for (const x of ms) m.set(x.ord, x);
+      out.set(sid, m);
+    }
+    return out;
+  }, [perSample]);
+  const EMPTY_BY_ORD = useMemo(() => new Map<string, MeasurementDot>(), []);
 
   const widthFor = (col: ColDef): number => {
     if (persisted.folded.includes(col.id)) return FOLDED_WIDTH;
@@ -399,6 +434,23 @@ export function HardSamplesTable({
     setSortBy(null);
   };
 
+  // Virtualised body. The scroll element holds the sticky header + the
+  // window of rows; tanstack-virtual mounts only the rows in (or near) the
+  // viewport so DOM cost stays O(visible) instead of O(items). estimateSize
+  // matches the cell's `contain-intrinsic-size` so the scroll-bar is
+  // accurate before any row measures. Overscan 10 keeps a few rows above
+  // and below the viewport pre-painted to absorb fast scrolls.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const ROW_HEIGHT = 26;
+  const virtualizer = useVirtualizer({
+    count: sortedItems.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 10,
+  });
+  const virtualRows = virtualizer.getVirtualItems();
+  const totalHeight = virtualizer.getTotalSize();
+
   if (datasetItems.length === 0) return null;
 
   // Text-wrap toggle applies to left-aligned text columns only — never the
@@ -416,10 +468,14 @@ export function HardSamplesTable({
         // manual corner-resize (which writes inline `width`) still wins
         // and survives re-renders.
         style={{ "--hs-table-w": `${totalWidth}px` } as CSSProperties}
+        data-stale={datasetStale ? "true" : undefined}
       >
-        <div className="hs-scroll">
+        <div className="hs-scroll" ref={scrollRef}>
+          {/* Header row — sits at the top of the scroll element; each
+              .hs-header cell carries its own position:sticky;top:0 so it
+              hugs the scroll container's top edge as rows pass under it. */}
           <div
-            className={`hs-grid${liveSortActive ? " sync-live" : ""}`}
+            className={`hs-grid hs-header-row${liveSortActive ? " sync-live" : ""}`}
             style={{
               gridTemplateColumns: gridTemplate,
               minWidth: `${totalWidth}px`,
@@ -427,7 +483,7 @@ export function HardSamplesTable({
           >
             {columns.map((col) => {
               const folded = persisted.folded.includes(col.id);
-              // Under live-sort the rows follow the picker's blended
+              // Under live-sort the rows follow the queue mechanism's blended
               // pick-value ranking — which is the "Pick" column descending;
               // mark it so the operator can see what the order is. Otherwise
               // the manual header-click sort owns the marker.
@@ -500,13 +556,27 @@ export function HardSamplesTable({
                 </div>
               );
             })}
+          </div>
 
-            {sortedItems.map((item, idx) => {
+          {/* Virtualised body. Height is set so the scroll-bar reflects the
+              full row count; rows are absolutely positioned via translateY.
+              tanstack-virtual mounts only the rows in (or near) the
+              viewport, so rendering 1000 samples × 10 cols becomes
+              ~30 visible rows × 10 cols of actual DOM. */}
+          <div
+            className="hs-body"
+            style={{
+              height: `${totalHeight}px`,
+              position: "relative",
+              minWidth: `${totalWidth}px`,
+            }}
+          >
+            {virtualRows.map((vrow) => {
+              const idx = vrow.index;
+              const item = sortedItems[idx];
+              if (!item) return null;
               const meas = perSample?.get(item.sample_id) ?? [];
-              // Per-row ord → dot lookup the heat-map canvas folds into
-              // pixel columns (see MeasHeatCell / heat-canvas.ts).
-              const byOrd = new Map<string, MeasurementDot>();
-              for (const m of meas) byOrd.set(m.ord, m);
+              const byOrd = byOrdBySample.get(item.sample_id) ?? EMPTY_BY_ORD;
               // Mark every cell in the row currently being scored so the
               // soft-blink keyframe (globals.css) animates the whole row,
               // not just one cell. Independent of the sort-sync toggle —
@@ -519,67 +589,85 @@ export function HardSamplesTable({
                 dash?.state === "scoring" &&
                 typeof dash?.current_sample_id === "number" &&
                 item.sample_id === dash.current_sample_id;
-              return columns.map((col) => {
-                const folded = persisted.folded.includes(col.id);
-                const wrapped = persisted.wrapped.includes(col.id) && wrappable(col);
-                const isRank = col.id === "rank";
-                const isMeas = col.id === "measurements";
-                const cell = isRank
-                  ? ({ text: String(idx + 1), raw: idx + 1 } as CellValue)
-                  : cellFor(col.id, item, meas);
-                const isExpandable =
-                  !isRank &&
-                  !isMeas &&
-                  !col.numeric &&
-                  col.align === "left" &&
-                  Boolean(cell.raw);
-                const onClick = folded
-                  ? () => toggleFold(col.id)
-                  : isExpandable
-                    ? () =>
-                        setPopover({
-                          col: col.id,
-                          sampleId: item.sample_id,
-                          text: String(cell.raw),
-                        })
-                    : undefined;
-                return (
-                  <div
-                    key={`${item.sample_id}-${col.id}`}
-                    className={`hs-cell${folded ? " folded" : ""}${wrapped ? " wrapped" : ""}${isRank ? " rank" : ""}${isMeas ? " meas" : ""}`}
-                    data-align={col.align}
-                    data-running={isRunning ? "true" : undefined}
-                    style={cell.style}
-                    title={folded ? undefined : cell.title}
-                    onClick={onClick}
-                  >
-                    {folded ? "" : isMeas ? (
-                      ordCols.length === 0 && !isRunning ? (
-                        <span className="hs-heat-empty">—</span>
-                      ) : (
-                        <MeasHeatCell
-                          byOrd={byOrd}
-                          ordCols={ordCols}
-                          ordIndex={ordIndex}
-                          widthPx={measColWidth}
-                          isRunning={isRunning}
-                          drawSig={drawSig}
-                          themeKey={themeKey}
-                          onSelectOrd={(ord) =>
-                            setSelectedOrd((cur) => (cur === ord ? null : ord))
-                          }
-                          onHover={(ord, hit, x, y) =>
-                            setHoverTip({ ord, hit, x, y })
-                          }
-                          onHoverEnd={() => setHoverTip(null)}
-                        />
-                      )
-                    ) : (
-                      cell.text
-                    )}
-                  </div>
-                );
-              });
+              return (
+                <div
+                  key={item.sample_id}
+                  className={`hs-row${liveSortActive ? " sync-live" : ""}`}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${vrow.start}px)`,
+                    height: `${ROW_HEIGHT}px`,
+                    display: "grid",
+                    gridTemplateColumns: gridTemplate,
+                  }}
+                >
+                  {columns.map((col) => {
+                    const folded = persisted.folded.includes(col.id);
+                    const wrapped =
+                      persisted.wrapped.includes(col.id) && wrappable(col);
+                    const isRank = col.id === "rank";
+                    const isMeas = col.id === "measurements";
+                    const cell = isRank
+                      ? ({ text: String(idx + 1), raw: idx + 1 } as CellValue)
+                      : cellFor(col.id, item, meas);
+                    const isExpandable =
+                      !isRank &&
+                      !isMeas &&
+                      !col.numeric &&
+                      col.align === "left" &&
+                      Boolean(cell.raw);
+                    const onClick = folded
+                      ? () => toggleFold(col.id)
+                      : isExpandable
+                        ? () =>
+                            setPopover({
+                              col: col.id,
+                              sampleId: item.sample_id,
+                              text: String(cell.raw),
+                            })
+                        : undefined;
+                    return (
+                      <div
+                        key={col.id}
+                        className={`hs-cell${folded ? " folded" : ""}${wrapped ? " wrapped" : ""}${isRank ? " rank" : ""}${isMeas ? " meas" : ""}`}
+                        data-align={col.align}
+                        data-running={isRunning ? "true" : undefined}
+                        style={cell.style}
+                        title={folded ? undefined : cell.title}
+                        onClick={onClick}
+                      >
+                        {folded ? "" : isMeas ? (
+                          ordCols.length === 0 && !isRunning ? (
+                            <span className="hs-heat-empty">—</span>
+                          ) : (
+                            <MeasHeatCell
+                              byOrd={byOrd}
+                              ordCols={ordCols}
+                              ordIndex={ordIndex}
+                              widthPx={measColWidth}
+                              isRunning={isRunning}
+                              drawSig={drawSig}
+                              themeKey={themeKey}
+                              onSelectOrd={(ord) =>
+                                setSelectedOrd((cur) => (cur === ord ? null : ord))
+                              }
+                              onHover={(ord, hit, x, y) =>
+                                setHoverTip({ ord, hit, x, y })
+                              }
+                              onHoverEnd={() => setHoverTip(null)}
+                            />
+                          )
+                        ) : (
+                          cell.text
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
             })}
 
             {selectedOrd != null &&

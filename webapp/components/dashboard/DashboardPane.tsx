@@ -71,7 +71,10 @@ function DashboardPaneInner() {
   // scope regardless of this toggle — see l1/execute.py round-subset fit.
   const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("campaign");
   // Dataset roster + per-sample measurement history for the unit in view.
-  // One hook owns the fetch chain and blanks cleanly on a unit switch.
+  // One hook owns the fetch chain. Cached per (unit, scope); a campaign or
+  // scope switch shows the prior data marked stale until the new fetch
+  // lands — never blanks. `dataVersion` is a monotonic stamp on each fresh
+  // load; downstream components key per-row memos on it.
   const {
     datasetName,
     items: datasetItems,
@@ -79,6 +82,7 @@ function DashboardPaneInner() {
     unmeasuredCount: datasetUnmeasuredCount,
     splitTest: datasetSplitTest,
     archivePerSample,
+    isStale: datasetStale,
   } = useDatasetPreview(campaignId, cycleId, hardSamplesScope);
   const [themeKey, setThemeKey] = useState<string>("init");
   // Edit mode — off by default; gates Stop run + Fork-from-here. Never
@@ -217,6 +221,7 @@ function DashboardPaneInner() {
             datasetUnmeasuredCount={datasetUnmeasuredCount}
             datasetSplitTest={datasetSplitTest}
             archivePerSample={archivePerSample}
+            datasetStale={datasetStale}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={setHardSamplesScope}
           />

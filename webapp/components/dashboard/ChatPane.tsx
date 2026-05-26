@@ -26,6 +26,9 @@ interface Props {
   datasetUnmeasuredCount: number;
   datasetSplitTest: number | null;
   archivePerSample: Map<number, MeasurementDot[]>;
+  // True while the displayed dataset slice is from a prior (unit, scope) and
+  // a fresh fetch is in flight — lets the table dim instead of blanking.
+  datasetStale: boolean;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
 }
@@ -49,6 +52,7 @@ export function ChatPane({
   datasetUnmeasuredCount,
   datasetSplitTest,
   archivePerSample,
+  datasetStale,
   hardSamplesScope,
   onHardSamplesScopeChange,
 }: Props) {
@@ -222,6 +226,7 @@ export function ChatPane({
             datasetUnmeasuredCount={datasetUnmeasuredCount}
             datasetSplitTest={datasetSplitTest}
             archivePerSample={archivePerSample}
+            datasetStale={datasetStale}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={onHardSamplesScopeChange}
           />

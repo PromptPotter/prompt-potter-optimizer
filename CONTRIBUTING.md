@@ -2,8 +2,7 @@
 
 PromptPotter is **LLM-driven program evolution** for prompts and pipeline
 params. Start with [`docs/architecture.md`](docs/architecture.md) — §0 + §0.5
-are what every change is measured against. The AI quick-start map is
-[`.ai/CODEMAP.md`](.ai/CODEMAP.md).
+are what every change is measured against.
 
 ## Setup
 
@@ -23,12 +22,6 @@ ruff check . && ruff format --check . && deptry . && mypy promptpotter/ && pytes
 
 Webapp changes additionally run, and CI gates,
 `cd webapp && npm run lint && npx tsc --noEmit && npm run build`.
-
-CI also runs `python scripts/check_codemap.py` — it fails if a
-`.ai/CODEMAP.md` symbol citation no longer resolves. After a refactor
-that moves a backbone symbol, run it locally and re-cite the affected
-rows (and regenerate `.ai/SYMBOLS.txt` via
-`python scripts/build_ai_index.py`).
 
 ## Type checking
 

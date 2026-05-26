@@ -19,6 +19,12 @@ interface Props {
 }
 
 export const TrendChart = memo(function TrendChart({ dash, themeKey }: Props) {
+  // themeKey isn't read inside the body — it's a memo-bust prop. When the
+  // operator flips the theme, DashboardPane bumps themeKey, which trips
+  // memo gates so memo'd chart components re-render and pick up the new
+  // CSS-var colours. Without this reference the unused-vars rule would
+  // flag it; the prop must stay or the memo gate eats theme changes.
+  void themeKey;
   const points: Point[] = useMemo(() => {
     const out: Point[] = [];
     for (const r of dash?.rounds ?? []) {
@@ -48,6 +54,10 @@ export const TrendChart = memo(function TrendChart({ dash, themeKey }: Props) {
     scales: { x: { display: false }, y: { display: false, min: 0, max: 1 } },
   });
 
+  // No `key={themeKey}` remount: data/options are rebuilt inline each
+  // render (no useMemo), so they pull fresh CSS-var colours via getCss()
+  // every time. Chart.js then diffs them into the live canvas instead of
+  // the previous teardown-and-recreate cost on every theme swap.
   return (
     <CardFrame title={<span>Trend</span>} actions={<span className="badge">campaign</span>}>
       <div style={{ position: "relative", height: 140 }}>
@@ -56,7 +66,7 @@ export const TrendChart = memo(function TrendChart({ dash, themeKey }: Props) {
             Trend builds up as rounds finish. Each completed round adds a point.
           </div>
         ) : (
-          <Line key={themeKey} data={data} options={options} />
+          <Line data={data} options={options} />
         )}
       </div>
     </CardFrame>

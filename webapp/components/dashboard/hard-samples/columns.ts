@@ -57,7 +57,7 @@ export const COLUMNS: ColDef[] = [
   { id: "hit_rate",      label: "Hit rate",   align: "right",  numeric: true  },
   { id: "pick_score",    label: "Info gain",  align: "right",  numeric: true  },
   // Diagnostic columns — what feeds the Info gain. Promoted from the
-  // Info-gain tooltip so the operator can read the picker's inputs
+  // Info-gain tooltip so the operator can read the queue mechanism's inputs
   // row-by-row without hovering. p_hat is the smoking gun for "always-miss
   // sample ranking high": EB-shrunk δ_s + tight se(δ_s) leave p_hat near
   // 0.5 even when hit rate is 0/N.
@@ -75,7 +75,7 @@ export interface PersistedState {
   folded: ColId[];
   wrapped: ColId[];
   // When true ("Auto-sort"), the table ranks every row by Info gain
-  // (pick_score) descending — the picker's expected decision-information-
+  // (pick_score) descending — the queue mechanism's expected decision-information-
   // gain — and header-click sorting is suppressed. The Info gain column
   // carries the sort marker. Default ON.
   syncLive: boolean;
@@ -145,7 +145,7 @@ export function cellFor(
       };
     }
     case "pick_score": {
-      // Info gain — the picker's expected decision-information-gain from one
+      // Info gain — the queue mechanism's expected decision-information-gain from one
       // measurement of this sample. High = contested (the measurement tells
       // good prompts from bad); near-zero = always-hit or always-miss
       // (predictable, uninformative). The hover tooltip + the δ / se(δ) /
@@ -160,7 +160,7 @@ export function cellFor(
           : "δ —  (unmeasured)";
       const pLine =
         item.p_hat !== null
-          ? `p̂(hit | seed)=${(item.p_hat * 100).toFixed(0)}%  (marginal hit prob the picker reads)`
+          ? `p̂(hit | seed)=${(item.p_hat * 100).toFixed(0)}%  (marginal hit prob the queue mechanism reads)`
           : "p̂ —  (unmeasured)";
       return {
         text: item.pick_score.toFixed(4),
@@ -177,7 +177,7 @@ export function cellFor(
     case "p_hat": {
       // Marginal hit probability at the seed's ability — what
       // decision-IG actually reads. 0.5 = contested; 0 or 1 = predictable.
-      // The picker rewards contested + tight se(δ) — a 0/17 row whose
+      // The queue mechanism rewards contested + tight se(δ) — a 0/17 row whose
       // EB-shrunk δ keeps p̂ near 0.5 can outrank an honestly contested 1/2
       // row, which is the explanation operators want when reading the sort.
       if (item.p_hat === null) return { text: "—", raw: null };
@@ -188,7 +188,7 @@ export function cellFor(
           `p̂(hit | seed) = ${(item.p_hat * 100).toFixed(1)}%\n` +
           `σ((θ_seed − δ_s) / √(1 + π·(σ_θ² + se(δ)²)/8))\n` +
           `0.5 → contested at the seed's ability (high info gain potential).\n` +
-          `0 or 1 → predictable; even a hit/miss tells the picker little.`,
+          `0 or 1 → predictable; even a hit/miss tells the queue mechanism little.`,
       };
     }
     case "delta": {
@@ -209,7 +209,7 @@ export function cellFor(
       // SE of δ_s — how confidently the Rasch model places this sample's
       // difficulty. Small even at low n on boundary samples (prior precision
       // dominates observed Fisher when p(1−p) → 0); that's how a 0/17 row
-      // ends up with tight se(δ) and the picker treating it as a
+      // ends up with tight se(δ) and the queue mechanism treating it as a
       // high-confidence, near-boundary measurement.
       if (item.delta_se === null) return { text: "—", raw: null };
       return {
@@ -218,7 +218,7 @@ export function cellFor(
         title:
           `se(δ_s) = ${item.delta_se.toFixed(4)}\n` +
           `Small se(δ) on a low-hit-rate row = EB tightness from prior precision, ` +
-          `not data confidence in extremity. Picker reads it as "well-characterized" ` +
+          `not data confidence in extremity. Queue mechanism reads it as "well-characterized" ` +
           `and rewards it.`,
       };
     }

@@ -1267,9 +1267,22 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 /* One <canvas> per row — the whole hit/miss history compressed into the
    column width. See MeasHeatCell.tsx / heat-canvas.ts. */
 .hs-heat-canvas{display:block;width:100%;height:20px;cursor:pointer}
-/* Selection marker — one element over the History column, anchored in
-   .hs-grid, spanning every row below the sticky header. */
-.hs-heat-marker{position:absolute;top:30px;bottom:0;width:2px;background:var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);pointer-events:none;z-index:1}
+/* Virtualised body. .hs-header-row holds the sticky headers; .hs-body is
+   the scroll-bar-sizing container that holds the absolutely-positioned
+   .hs-row windows. Both keep the same grid template as the header so cell
+   widths stay aligned across the sticky boundary. */
+.hs-header-row{position:sticky;top:0;z-index:3}
+.hs-body{will-change:transform}
+.hs-row{border-bottom:1px solid var(--color-border-tertiary)}
+.hs-row > .hs-cell{border-bottom:0}
+/* Selection marker — anchored inside .hs-body, spans the full virtual
+   height (the body's height drives the scroll-bar, so 0..100% covers every
+   virtual row regardless of which ones are mounted right now). */
+.hs-heat-marker{position:absolute;top:0;bottom:0;width:2px;background:var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);pointer-events:none;z-index:1}
+/* Stale dim — applied while useDatasetPreview is fetching a fresh slice
+   over a prior-unit cache hit. The prior data stays readable but the
+   block dims so the operator knows it's transitional. */
+.hs-block[data-stale="true"]{opacity:.55;transition:opacity .12s}
 .hs-heat-tip{position:fixed;z-index:1000;padding:3px 7px;border-radius:4px;background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);font-family:var(--font-mono);font-size:11px;color:var(--color-text-primary);white-space:nowrap;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,0.35)}
 @media (prefers-reduced-motion:reduce){
   .hs-cell[data-running="true"]{animation:none;background-color:rgba(var(--color-accent-rgb),0.12)}
