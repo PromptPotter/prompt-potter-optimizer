@@ -206,7 +206,7 @@ dataset" vs "everything" identically.
 
 **State + persistence.** Three entry points (CLI, notebook, webapp)
 share **one** orchestration layer and **one** set of data types — no
-per-entry-point copies. **Three I/O kinds** the orchestrator reads or
+per-entry-point copies. **Four I/O kinds** the orchestrator reads or
 writes through, each with its own ingress: (1) **Persistence** — the
 sole writer is per-cycle `CycleEventLog.append`. Operator-initiated
 HITL collapses into this ingress: `inherit_from(parent, offset)` mints
@@ -220,8 +220,25 @@ campaign artifacts. (3) **Control-local** — `stop_check` on
 "Stop run" button rides this kind by writing a `.runtime/stop.flag`
 file the running loop polls via `stop_check`; the API route writing
 the flag is an explicitly-sanctioned mutation listed in
-`promptpotter/presentation/CLAUDE.md`. M12's orchestrator daemon will
-add a fourth (Control-remote) on the same persistence ingress. Adding a new I/O kind requires
+`promptpotter/presentation/CLAUDE.md`. (4) **Control-remote** —
+HTTP-ingressed mutations authored by signed-in operators or
+signed-in clients. Every command is appended to the canonical
+per-cycle `events.jsonl` as a `CommandRecord` by a sole
+`CommandDispatcher` at the FastAPI seam (kwargs-only `emit_command`,
+ContextVar-scoped identity + cycle); the runner subscribes to
+`CommandRecord` as another ledger driver, applies the mutation, and
+acknowledges via a sibling `CommandAckRecord` written by a sole
+`RunnerCommandSubscriber` (kwargs-only `emit_command_ack`).
+Outbound, a sole `EventStreamView` projection fans out
+`ProjectionEnvelope` frames over SSE. Identity scope rides the
+existing cycle-dir tenant prefix; commands and acks carry no
+per-record `tenant_id`. The closed inbound command set is declared
+in `docs/specs/m12-api-openapi.yaml` (OpenAPI 3.1); the closed
+outbound event set is declared in
+`docs/specs/m12-events-asyncapi.yaml` (AsyncAPI 3.0); adding a
+command or event kind requires updating the YAML first, in its own
+PR. The permanent system-networking contract is
+`docs/adr/0001-m12-control-plane.md`. Adding a new I/O kind requires
 amending §0 first; the pre-flight gate (CLAUDE.md Q4 sub-rule)
 blocks code that introduces one without §0 backing. Hexagonal layer
 separation is enforced by
@@ -414,6 +431,16 @@ the PR description.
   cleanup PR cannot collapse Campaign back into the root cycle.
 - **Per-cycle `CycleEventLog` + `DerivedView` dispatch** — the
   persistence backbone. No second ingress, ever.
+- **Control-remote highway** — the `CommandRecord` / `CommandAckRecord`
+  / `ProjectionEnvelope` triple riding the canonical `events.jsonl` via
+  sole `CommandDispatcher` (inbound), sole `RunnerCommandSubscriber`
+  (ack), sole `EventStreamView` (outbound SSE). The closed inbound +
+  outbound sets live in `docs/specs/m12-api-openapi.yaml` and
+  `docs/specs/m12-events-asyncapi.yaml`; the permanent contract is
+  `docs/adr/0001-m12-control-plane.md`. Cleanup PRs cannot collapse
+  commands into a parallel queue, drop the YAML-first rule, or remove
+  the sole-writer invariants — every M12-onward interactive surface
+  rides this highway.
 - **Hard-sample sorter (Rasch)**
   (`application/intelligence/hard_sample_sorter.py`) + the leaderboard
   it powers — first-class per §0.

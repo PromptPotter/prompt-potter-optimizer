@@ -61,7 +61,7 @@ PromptPotter's `BackendClient` (`promptpotter/infrastructure/backend.py`) talks 
 
 **Local dev shortcut:** if backend and optimizer run on the same machine, use `http://127.0.0.1:8000` and leave `TERMNORM_TOKEN` unset on both sides. The header is omitted, the backend doesn't enforce auth, and no traffic leaves the loopback interface.
 
-**What is *not* secured yet** (M12 control-plane scope, [`docs/specs/m12-control-plane.md`](../specs/m12-control-plane.md)): mutual-TLS for connector traffic; rotating the bearer token without restarting the optimizer; per-tenant token isolation in a multi-user webapp install (today the whole install shares one `TERMNORM_TOKEN`).
+**What is *not* secured yet** (M12 control-plane scope, [`docs/adr/0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md)): mutual-TLS for connector traffic; rotating the bearer token without restarting the optimizer; per-tenant token isolation in a multi-user webapp install (today the whole install shares one `TERMNORM_TOKEN`).
 
 ## Currently tested with
 

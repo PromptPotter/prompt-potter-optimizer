@@ -1,7 +1,7 @@
 # Identity Foundation — OIDC wire + RLS data, sized 1 → 1B users
 
 > **Status:** Stage 0 fully shipped — identity seam (`IdentityContext` in `promptpotter/shared/identity.py`, newtypes in `promptpotter/domain/identity.py`, `build_stores(identity, …)` rewrite, `Session.identity` replaces deleted `TenantContext`, FastAPI `resolve_identity` / `IdentityDep` / `StoreDep`) **plus** the first payload riding it (token/cost on the canonical ledger — see [`spend-and-tenancy.md`](spend-and-tenancy.md) for the highway architecture). Stage-1 OIDC client + Stage-2 RLS adapter remain forward direction.
-> **Load-bearing scope:** every multi-tenant code path in the cluster ([`spend-and-tenancy.md`](spend-and-tenancy.md), [`m12-control-plane.md`](m12-control-plane.md), [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md), [`state-sync-cleanup.md`](state-sync-cleanup.md)) consumes the contracts pinned here. **Cluster front-door.**
+> **Load-bearing scope:** every multi-tenant code path in the cluster ([`spend-and-tenancy.md`](spend-and-tenancy.md), [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md), [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md), [`state-sync-cleanup.md`](state-sync-cleanup.md)) consumes the contracts pinned here. **Cluster front-door.**
 
 The premise: the codebase commits today to two wire-and-data contracts that scale from one operator on a laptop to Facebook/Netflix-shape without rewriting prior code. Every other multi-tenant spec is a **consumer**, not a peer.
 
@@ -211,7 +211,7 @@ Stage-0 work (the `IdentityContext` seam — shipped) does **not** require the a
 ## Cross-refs (consumer specs)
 
 - [`spend-and-tenancy.md`](spend-and-tenancy.md) — **first consumer.** Lands the `IdentityContext` reification at Stage 0; spend tracking is the payload demonstrating the seam works end-to-end.
-- [`m12-control-plane.md`](m12-control-plane.md) — **second consumer.** Stage 1 OIDC client lands here; `JobRegistry` scopes on `IdentityContext`; auth-off mode is the Stage-0 fallback.
+- [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md) — **second consumer.** Stage 1 OIDC client lands here; `JobRegistry` scopes on `IdentityContext`; auth-off mode is the Stage-0 fallback.
 - [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md) — **third consumer.** Install / User / Project nouns map onto OIDC claims (`Install = iss`, `User = sub`, project scoping rides `tenant_id` claim). Stage 2 considered when self-hosters demand native identity.
 - [`state-sync-cleanup.md`](state-sync-cleanup.md) — convergence: identity-collapse touches the same store-seam files; sequence Phase 1 before the Stage-0 `IdentityContext` reification to avoid touching `index.json` writers twice.
 - [`docs/architecture.md` §0](../architecture.md) — Identity I/O kind amendment lands here at Stage 1.

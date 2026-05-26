@@ -85,7 +85,7 @@ On first upgrade: the on-disk layout is already `projects/{tenant}/` with `tenan
 - **PostgreSQL RLS adapter** — Stage 2 of identity-foundation; today's `projects/{tenant_id}/` is the Stage-0 form of the data-isolation contract.
 - **RBAC, capability checks beyond a flat `frozenset[str]`** — `IdentityContext.capabilities` exists but stays empty in M11.
 - **Billing, quotas, per-tenant rate limiting** — M13+ backlog.
-- **`JobRegistry` identity-scoping** — lives in `m12-control-plane.md`. This spec is the seam; the work lives there.
+- **`JobRegistry` identity-scoping** — lives in `../adr/0001-m12-control-plane.md`. This spec is the seam; the work lives there.
 - **Webapp tenant chips / install picker** — M12 (control plane) + M13 (multi-user UI).
 - **M13 vocabulary shift (`Install` / `User` / `Project`)** — on-disk identity stays `tenant_id`; `Install` is what M13 *calls* it (mapped onto OIDC `iss` per identity-foundation). See `m13-chat-first-user-web.md` for the rename plan.
 - **`state-sync-cleanup.md` Phase 1** (identity collapse, `index.json::campaign_id` removal) — dependency, not absorbed. Land Phase 1 first if you don't want to re-touch the same files.
@@ -123,6 +123,6 @@ On first upgrade: the on-disk layout is already `projects/{tenant}/` with `tenan
 ## Cross-refs
 
 - [`identity-foundation.md`](identity-foundation.md) — **the foundation this spec consumes.** The two contracts (OIDC wire + RLS data), the `IdentityContext` shape, the three-stage staging, the no-drift gates. Read it first.
-- [`m12-control-plane.md`](m12-control-plane.md) — Stage-1 OIDC client, `JobRegistry` identity-scoping, hub mode (next consumer of identity-foundation).
+- [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md) — Stage-1 OIDC client, `JobRegistry` identity-scoping, hub mode (next consumer of identity-foundation).
 - [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md) — `Install` is the user-facing name for `TenantId` (mapped onto OIDC `iss`); vocabulary shifts, on-disk identity unchanged.
 - [`state-sync-cleanup.md`](state-sync-cleanup.md) — Phase 1 dependency (identity collapse touches the same store-seam files).

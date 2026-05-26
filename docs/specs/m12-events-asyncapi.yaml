@@ -1,0 +1,226 @@
+# PromptPotter Control-remote — closed outbound event set
+#
+# This file is the source of truth for the outbound SSE event channel.
+# Every `ProjectionEnvelope` variant (kind + payload schema) MUST be
+# declared here BEFORE a record class is added to
+# `promptpotter/domain/run_records.py::CycleRecord` or before a projection
+# emits it as an SSE frame from `EventStreamView`.
+#
+# Drift detection: `tests/test_control_plane_drift.py` + AsyncAPI Studio CLI lint.
+#
+# Permanent contract: docs/adr/0001-m12-control-plane.md
+# §0 definition: docs/architecture.md (§0 "State + persistence" — Four I/O kinds)
+#
+# Status: Profile -1 scaffold. The closed outbound set is the seven existing
+# CycleRecord kinds; Profile B adds CommandRecord + CommandAckRecord. No SSE
+# handler ships at Profile -1 — the channel + ProjectionEnvelope envelope land
+# at Profile A.
+
+asyncapi: 3.0.0
+
+info:
+  title: PromptPotter Control-remote event stream
+  version: 0.0.0-profile-minus-1
+  description: |
+    The outbound Server-Sent Events channel for PromptPotter's interactive
+    control plane. Every frame on the wire is a `ProjectionEnvelope` whose
+    `kind` field discriminates the payload schema. The envelope is closed —
+    no raw payload variants, no envelope variation.
+
+    See `docs/adr/0001-m12-control-plane.md` for the permanent contract, the
+    Profile gradient (A-E), and the 20-item security checklist. The
+    snapshot-then-tail subscription contract (security boxes 13-15) is
+    enforced at Profile A.
+
+  contact:
+    name: PromptPotter maintainers
+  license:
+    name: See repository LICENSE
+
+servers:
+  local:
+    host: localhost:8001
+    protocol: http
+    description: Local dev (uvicorn + auth-off, Stage 0 / Profile B default).
+  hosted:
+    host: '{install}.promptpotter.dev'
+    protocol: https
+    description: Hosted hub (Profile D - placeholder, OIDC required).
+    variables:
+      install:
+        default: example
+        description: Per-install hostname slug.
+
+channels:
+  cycleEvents:
+    address: /campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe
+    title: Cycle event stream
+    summary: |
+      SSE stream of every record appended to the canonical per-cycle
+      `events.jsonl`, plus a leading snapshot frame and periodic heartbeats.
+      Sole writer: `EventStreamView` projection (`infrastructure/projections/event_stream/view.py`).
+    description: |
+      Subscription contract (security boxes 13-15):
+        1. Snapshot frame first. The first message on the stream is a
+           `snapshot` envelope whose payload matches the current
+           `dashboard.json` state for this cycle.
+        2. Then the live tail. Subsequent messages are individual record
+           projections with strictly-increasing `sequence`.
+        3. Heartbeat every 15 s during idle so proxies and clients can
+           distinguish "no events" from "stream broken."
+        4. Missed frames are detectable via `sequence` gap. Clients SHOULD
+           re-subscribe to receive a fresh snapshot if a gap is observed.
+    parameters:
+      campaign_id:
+        description: Target campaign id (matches `campaigns/{campaign_id}/`).
+      cycle_id:
+        description: Target cycle id (matches `cycles/{cycle_id}/`).
+    bindings:
+      http:
+        type: response
+        method: GET
+        headers:
+          type: object
+          properties:
+            Last-Event-ID:
+              type: string
+              description: |
+                Optional resume token; client may provide the last
+                `ProjectionEnvelope.sequence` it received to resume from
+                that point. If omitted, the snapshot-then-tail flow runs
+                from the current state.
+    messages:
+      projectionFrame:
+        $ref: '#/components/messages/ProjectionFrame'
+      heartbeatFrame:
+        $ref: '#/components/messages/HeartbeatFrame'
+
+operations:
+  subscribeCycleEvents:
+    action: receive
+    channel:
+      $ref: '#/channels/cycleEvents'
+    summary: |
+      Client subscribes to the cycle's event stream. Sole writer is
+      `EventStreamView`. No multi-writer semantics, no broadcast-shape
+      negotiation - the runtime owns the order.
+    messages:
+      - $ref: '#/channels/cycleEvents/messages/projectionFrame'
+      - $ref: '#/channels/cycleEvents/messages/heartbeatFrame'
+
+components:
+  messages:
+    ProjectionFrame:
+      name: projectionFrame
+      title: A single projection envelope on the SSE channel.
+      summary: |
+        Every non-heartbeat SSE frame is one of these. `event:` is always
+        `projection`; `data:` is the serialized `ProjectionEnvelope`.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ProjectionEnvelope'
+
+    HeartbeatFrame:
+      name: heartbeatFrame
+      title: Idle-keepalive heartbeat.
+      summary: |
+        Fired every 15 s during idle. `event:` is `heartbeat`; `data:` is the
+        serialized `HeartbeatPayload`. Heartbeats do NOT advance `sequence`.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/HeartbeatPayload'
+
+  schemas:
+    ProjectionEnvelope:
+      type: object
+      description: |
+        Closed envelope shape. Every SSE frame outside of heartbeats has
+        this exact shape - no raw payload variants, no envelope variation.
+      required: [kind, version, cycle_id, sequence, payload]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          description: |
+            The record kind discriminator. MUST be one of the kinds enumerated
+            below. Adding a new kind requires updating this file first; the
+            corresponding record class is then added to
+            `promptpotter/domain/run_records.py::CycleRecord`.
+          enum:
+            # Profile -1: the existing seven ledger record kinds. Values
+            # mirror `record_type: Literal[...]` in `promptpotter/domain/run_records.py`.
+            - decision
+            - llm_call_progress
+            - llm_call
+            - llm_call_start
+            - phase
+            - snapshot
+            - token_usage
+            # Profile A: snapshot-then-tail boundary marker (projection-only,
+            # no underlying record class - synthesized by EventStreamView).
+            - stream_snapshot
+            # Profile B: inbound command + runner ack (added to CycleRecord
+            # union when Profile B handlers land).
+            - command
+            - command_ack
+        version:
+          type: integer
+          minimum: 1
+          description: |
+            Schema version of this envelope. Bumped only when the envelope
+            shape itself changes (which requires a §0 amendment).
+        cycle_id:
+          type: string
+          description: |
+            Target cycle id. MUST match the `cycle_id` path parameter the
+            client subscribed against (the channel enforces tenant scope;
+            the runtime enforces cross-tenant rejection per security box 12).
+        sequence:
+          type: integer
+          minimum: 0
+          description: |
+            Monotonically-increasing per-stream sequence. The snapshot frame
+            carries the sequence of the LAST record included in the snapshot;
+            subsequent live tail frames are strictly greater. Heartbeats do
+            NOT advance sequence.
+        payload:
+          description: |
+            Per-kind payload. Each kind's schema is the corresponding record
+            class in `promptpotter/domain/run_records.py`. The schemas below
+            are the source of truth; record classes mirror them.
+          oneOf:
+            - $ref: '#/components/schemas/StreamSnapshotPayload'
+            - $ref: '#/components/schemas/RecordProjectionPayload'
+
+    StreamSnapshotPayload:
+      type: object
+      description: |
+        Payload of the `stream_snapshot` frame - the first message on the
+        stream. Mirrors the current `dashboard.json` content for the cycle
+        at the moment of subscription. Detailed schema fills in at Profile A.
+      additionalProperties: true
+
+    RecordProjectionPayload:
+      type: object
+      description: |
+        Payload for any non-snapshot record kind. The detailed per-kind
+        schemas fill in as records ship through Profile A (existing seven)
+        + Profile B (command + command_ack). At Profile -1 this is an
+        open object; drift test asserts each declared `kind` has a tight
+        schema before its handler lands.
+      additionalProperties: true
+
+    HeartbeatPayload:
+      type: object
+      required: [emitted_at]
+      additionalProperties: false
+      properties:
+        emitted_at:
+          type: string
+          format: date-time
+          description: Server-side wall-clock timestamp of the heartbeat.
+        cycle_id:
+          type: string
+          description: |
+            The cycle this heartbeat belongs to. Lets a client multiplexing
+            multiple subscriptions discriminate them.

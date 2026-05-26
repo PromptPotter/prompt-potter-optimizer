@@ -1,0 +1,253 @@
+# PromptPotter Control-remote — closed inbound command set
+#
+# This file is the source of truth for the inbound HTTP command surface.
+# Every `POST /commands/{kind}` operation MUST be declared here BEFORE a
+# handler lands in `promptpotter/presentation/api/routers/commands.py`.
+# Drift detection: `tests/test_control_plane_drift.py` + Spectral lint.
+#
+# Permanent contract: docs/adr/0001-m12-control-plane.md
+# §0 definition: docs/architecture.md (§0 "State + persistence" — Four I/O kinds)
+#
+# Status: Profile -1 scaffold. paths{} is intentionally empty. Profile B
+# fills it with the migrated 6 sanctioned POSTs + M12-new command kinds.
+
+openapi: 3.1.0
+
+info:
+  title: PromptPotter Control-remote API
+  version: 0.0.0-profile-minus-1
+  summary: Closed inbound command set for the M12 Control-remote I/O kind.
+  description: |
+    The HTTP command surface for PromptPotter's interactive control plane.
+    Every operation is a Control-remote command: an HTTP-ingressed mutation
+    authored by a signed-in operator or signed-in client, appended to the
+    canonical per-cycle `events.jsonl` as a `CommandRecord` by the sole
+    `CommandDispatcher` at the FastAPI seam.
+
+    See `docs/adr/0001-m12-control-plane.md` for the permanent contract, the
+    Profile gradient (A-E), and the 20-item security checklist that every
+    handler is measured against.
+
+    Conformance: handlers MUST reject any request that omits the
+    `Idempotency-Key` header. State-mutating handlers MUST additionally
+    reject any request that omits the `Expected-Version` header. Mismatch
+    on `Expected-Version` returns 409 `version_conflict`.
+
+  contact:
+    name: PromptPotter maintainers
+  license:
+    name: See repository LICENSE
+
+servers:
+  - url: http://localhost:8001
+    description: Local dev (uvicorn + auth-off, Stage 0 / Profile B default).
+  - url: https://{install}.promptpotter.dev
+    description: Hosted hub (Profile D — placeholder, OIDC required).
+    variables:
+      install:
+        default: example
+        description: Per-install hostname slug.
+
+tags:
+  - name: cycle-control
+    description: Commands that mutate a single cycle's state (pause, resume, step, rewind).
+  - name: cycle-lifecycle
+    description: Commands that mint, fork, or delete cycles.
+  - name: budget
+    description: Commands that change halt / spend / round budgets mid-cycle.
+  - name: pipeline-params
+    description: Commands that mutate pipeline_params on the active cycle.
+  - name: backends
+    description: Commands that register or sync external backends.
+
+# Profile -1: empty. Profile B populates this with `/commands/{kind}` operations.
+# Each operation MUST:
+#   - declare both `Idempotency-Key` and (for state mutations) `Expected-Version` parameters
+#   - reference `#/components/schemas/CommandEnvelope` for the request body
+#   - reference `#/components/responses/CommandAccepted` for the 202 response
+#   - reference `#/components/responses/VersionConflict` for the 409 response
+#   - declare a `tag` matching one of the tags above
+paths: {}
+
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Client-generated UUID-or-equivalent identifying this command attempt.
+        The dispatcher dedupes by hash lookup against `events.jsonl`; a second
+        POST with the same `Idempotency-Key` returns the original 202 response,
+        not a fresh command.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+        pattern: '^[A-Za-z0-9_-]+$'
+    ExpectedVersion:
+      name: Expected-Version
+      in: header
+      required: true
+      description: |
+        The ledger offset (or round number, for round-grained commands) the
+        client believes the target cycle is at. The runner rejects the command
+        with 409 `version_conflict` if the cycle has advanced past this point.
+        Optimistic-concurrency floor: mandatory on every state-mutating command.
+      schema:
+        type: integer
+        minimum: 0
+
+  schemas:
+    CommandEnvelope:
+      type: object
+      required: [kind, payload]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          description: |
+            The command kind. MUST be one of the kinds declared in this
+            file's `paths` keys (the closed set). Examples once Profile B
+            lands: `pause-cycle`, `resume-cycle`, `fork-cycle`,
+            `change-spend-budget`. See `docs/adr/0001-m12-control-plane.md`
+            Profile B table.
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z][a-z0-9-]*$'
+        payload:
+          description: |
+            Per-kind payload. Each declared operation in `paths` overrides
+            this with a tighter schema (using `$ref` or inline). The base
+            envelope only guarantees the field is present.
+          type: object
+          additionalProperties: true
+        client_metadata:
+          type: object
+          description: |
+            Optional client-supplied metadata (e.g. UI surface that issued
+            the command, user-agent build id). Stored on the `CommandRecord`
+            for debugging; never used for authorization.
+          additionalProperties: true
+
+    CommandAcceptedBody:
+      type: object
+      required: [command_id, correlation_id, ledger_sequence]
+      additionalProperties: false
+      properties:
+        command_id:
+          type: string
+          description: |
+            Stable id of the `CommandRecord` appended to `events.jsonl`.
+            Clients use this to correlate the eventual `CommandAckRecord`
+            frame on the SSE channel.
+        correlation_id:
+          type: string
+          description: |
+            Echoes the `Idempotency-Key` from the request. Idempotent: a
+            second POST with the same key returns the same `command_id` +
+            `correlation_id` pair.
+        ledger_sequence:
+          type: integer
+          minimum: 0
+          description: |
+            The ledger offset at which the `CommandRecord` was appended.
+            Client subscribers can use this to align the SSE tail.
+
+    ErrorEnvelope:
+      type: object
+      required: [error, message]
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+          description: |
+            Stable error code. Closed set includes `version_conflict` (409),
+            `idempotency_key_missing` (400), `expected_version_missing` (400),
+            `capability_denied` (403), `command_kind_unknown` (404),
+            `payload_invalid` (422). New codes require a YAML update first.
+          enum:
+            - version_conflict
+            - idempotency_key_missing
+            - expected_version_missing
+            - capability_denied
+            - command_kind_unknown
+            - payload_invalid
+            - tenant_mismatch
+        message:
+          type: string
+          description: Human-readable explanation; never load-bearing for clients.
+        details:
+          type: object
+          additionalProperties: true
+          description: |
+            Optional per-error structured detail. For `version_conflict`,
+            includes `expected_version` (what the client sent) and
+            `actual_version` (what the runner observed).
+
+  responses:
+    CommandAccepted:
+      description: |
+        Command appended to the canonical ledger as a `CommandRecord`. The
+        runner will apply it asynchronously and emit a `CommandAckRecord`
+        observable via the SSE channel; clients MUST NOT treat this 202 as
+        confirmation that the mutation has been applied (no client-side
+        optimistic mutations — security checkbox #17).
+      headers:
+        Idempotency-Key:
+          description: Echo of the request's `Idempotency-Key`.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CommandAcceptedBody'
+
+    VersionConflict:
+      description: |
+        `Expected-Version` did not match the cycle's current ledger offset.
+        Client SHOULD refresh state from the SSE snapshot and retry with
+        the new version. Returned with 409 status.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    IdempotencyKeyMissing:
+      description: Request omitted the mandatory `Idempotency-Key` header.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    CapabilityDenied:
+      description: |
+        Authenticated identity lacks the capability required for this
+        command kind. Returned with 403 status. At Profile B (auth-off),
+        the Stage-0 default identity has all capabilities granted; this
+        response begins to fire at Profile C with real OIDC subjects.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    PayloadInvalid:
+      description: |
+        Command body failed schema validation for the declared kind.
+        Returned with 422 status.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: pp_session
+      description: |
+        Opaque server-side session id (NOT a JWT). Issued by the OIDC
+        middleware at Profile C after ID Token verification; per
+        identity-foundation no-drift gate #2 the cookie itself carries no
+        claims. At Profile B (auth-off), this scheme is declared but the
+        Stage-0 default identity is returned unconditionally.

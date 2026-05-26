@@ -73,6 +73,11 @@ dev = [
     "ruff>=0.3.0",            # why kept: lint + format
     "mypy>=1.10.0",           # why kept: static type-check (CI gate)
     "deptry>=0.20.0",         # why kept: dependency audit (CI gate)
+    "pyyaml>=6.0",            # why kept: parse the Control-remote wire-contract YAMLs
+                              # (docs/specs/m12-api-openapi.yaml,
+                              # docs/specs/m12-events-asyncapi.yaml) for the
+                              # tests/test_control_plane_drift.py invariant.
+    "types-PyYAML>=6.0",      # why kept: mypy --strict stubs for the yaml import above.
 ]
 
 [project.urls]
@@ -196,6 +201,11 @@ DEP002 = [
     "ruff",
     "mypy",
     "deptry",
+    # test-only imports — pyyaml parses the M12 wire-contract YAMLs in
+    # tests/test_control_plane_drift.py; types-PyYAML is the matching
+    # mypy-strict stub. Neither is imported by promptpotter/ itself.
+    "pyyaml",
+    "types-PyYAML",
 ]
 # Optional features — imported lazily with install-message guards.
 # Declared in extras ([excel], [benchmarks], [observability], [anthropic], [jupyter]).

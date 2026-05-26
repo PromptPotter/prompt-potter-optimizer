@@ -6,7 +6,7 @@
 
 Launch, stop, resume, and fork a campaign from the webapp; a freshly minted campaign appears live with no browser reload; each cycle's `l1_generate` / `l1_critique` / `l2_context` revision is readable + diffable in the UI.
 
-**Why a mini-milestone:** the M10 exit gate is reached by many short tune-run-review cycles on the four optimizer meta-prompts. Pulling the single-operator write surface forward from M12 makes the loop smooth *before* the M10 gate. Single default tenant, no auth — multi-user hardening stays [`m12-control-plane.md`](m12-control-plane.md).
+**Why a mini-milestone:** the M10 exit gate is reached by many short tune-run-review cycles on the four optimizer meta-prompts. Pulling the single-operator write surface forward from M12 makes the loop smooth *before* the M10 gate. Single default tenant, no auth — multi-user hardening stays [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md).
 
 **Prerequisite:** [`state-sync-cleanup.md`](state-sync-cleanup.md) Phases 1–3 (identity collapse → per-cycle `state.json` → ledger-driven `GET /api/v1/live`) land first; Track D's SSE channels reuse `derive_live_state(ledger)`.
 
@@ -41,4 +41,4 @@ Launch, stop, resume, and fork a campaign from the webapp; a freshly minted camp
 
 ## Out of scope
 
-Auth + multi-tenant isolation + multi-user hub + whitelabel + chat-panel launcher → [`m12-control-plane.md`](m12-control-plane.md). Distributed / out-of-process workers → post-M13.
+Auth + multi-tenant isolation + multi-user hub + whitelabel + chat-panel launcher → [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md). Distributed / out-of-process workers → post-M13.

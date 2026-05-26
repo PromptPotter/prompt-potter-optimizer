@@ -8,6 +8,14 @@
 |---|---|
 | [verdict-resolution](verdict-resolution.md) | The single statistical model behind both the live adaptive queue mechanism and the persisted `hard_samples_*.json` ranking. Drops `explore_weight`. Its predecessor lives at [`archive/bayesian-sample-picker.md`](archive/bayesian-sample-picker.md). |
 
+## Permanent contracts (constitutions, not roadmaps)
+
+Permanent specs that stay alive after their target milestone ships. Items don't archive — they get certified and the prose moves into `docs/developer/` / `docs/operations/`, with checkboxes flipping in place. The spec is the perpetual staging area; the docs layer is the certified history.
+
+| Spec | What |
+|---|---|
+| [ADR-0001 m12-control-plane](../adr/0001-m12-control-plane.md) | **Permanent system-networking contract** (MADR format). Defines the Control-remote I/O kind (§0-amended), the closed inbound + outbound sets ([`m12-api-openapi.yaml`](m12-api-openapi.yaml) + [`m12-events-asyncapi.yaml`](m12-events-asyncapi.yaml)), the Profile gradient (A-E), and the 20-item security checklist every M12-onward interactive PR is measured against. Drift detector: [`tests/test_control_plane_drift.py`](../../tests/test_control_plane_drift.py). |
+
 ## Forward direction
 
 [roadmap.md](roadmap.md) is the front door. Specs below describe direction-of-travel, not chapter-and-verse implementation:
@@ -16,7 +24,7 @@
 - M10: [prompt-iteration framework](m10-prompt-iteration-framework.md) · [operator control loop](m10-operator-control-loop.md)
 - M11: [publication benchmarks](m11-publication-benchmarks.md)
 - [spend tracking](spend-and-tenancy.md) — first consumer of identity-foundation; lands the Stage-0 `IdentityContext` reification with spend as payload
-- M12: [multi-connector](m12-multi-connector.md) · [control plane](m12-control-plane.md) (lights up identity-foundation Stage 1 — OIDC client)
+- M12: [multi-connector](m12-multi-connector.md) (orthogonal to the wire surface; control-plane is a permanent contract above)
 - M13: [chat-first user web](m13-chat-first-user-web.md) (Install / User / Project nouns mapped onto OIDC claims; Stage 2 considered)
 - [state-sync cleanup](state-sync-cleanup.md) (pre-whitelabel foundation; sequence Phase 1 before spend-and-tenancy reification) · [m12+ backlog](m12-plus-backlog.md)
 
@@ -31,7 +39,7 @@
 [`archive/`](archive/) holds done + superseded specs. Recent moves:
 
 - [hard-sample-sorter](archive/hard-sample-sorter.md) — δ_s leaderboard Phase 1 shipped; phases 2–3 captured in [`m12-plus-backlog.md`](m12-plus-backlog.md).
-- [security-audit](archive/security-audit.md) — first hardening pass complete 2026-05-05; deferred items embedded in [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) (endpoint hardening) and [`m12-control-plane.md`](m12-control-plane.md) (tenancy + auth).
+- [security-audit](archive/security-audit.md) — first hardening pass complete 2026-05-05; deferred items embedded in [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) (endpoint hardening) and [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md) (tenancy + auth).
 
 Plus M0–M10 cleanup arcs, webapp display-source unification, bayesian-sample-picker, dispatch-prompt-budget, rasch-validation-plan, and M9 / M11 / M12 ancestors. Read for historical context.
 
