@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "promptpotter-optimizer"
-version = "0.6.1"
+version = "0.7.0"
 description = "Automatic prompt optimization for LLMs — give it a dataset, it finds a better prompt"
 readme = "README.md"
 license = "MIT"
