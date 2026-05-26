@@ -7,7 +7,6 @@ import { TrendChart } from "@/components/eval/TrendChart";
 
 interface Props {
   dash: DashboardSnapshot | null;
-  themeKey: string;
 }
 
 // Fields surfaced elsewhere (header, payload block, dedicated cards, workflow
@@ -55,7 +54,7 @@ const FORMATTERS: Record<string, (v: unknown) => string> = {
   state_since: fmtClock,
 };
 
-export function LiveStateCard({ dash, themeKey }: Props) {
+export function LiveStateCard({ dash }: Props) {
   const formula = (dash as { composite_fitness_formula?: string } | null)?.composite_fitness_formula || "—";
 
   // Build the KV grid: derived origin row first (flattened from the
@@ -136,8 +135,8 @@ export function LiveStateCard({ dash, themeKey }: Props) {
           Stacked vertically because the narrow spine doesn't have room for
           the old side-by-side .dash-charts grid. */}
       <div className="lsc-charts">
-        <TrendChart dash={dash} themeKey={themeKey} />
-        <FreqChart dash={dash} themeKey={themeKey} />
+        <TrendChart dash={dash} />
+        <FreqChart dash={dash} />
       </div>
     </CardFrame>
   );

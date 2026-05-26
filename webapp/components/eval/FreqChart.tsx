@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered } from "@/lib/chart-config";
-import { getCss } from "@/lib/theme";
+import { getCss, useThemeVersion } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
 import { parseSampleLine } from "@/lib/sample-line";
 import {
@@ -24,7 +24,6 @@ type ResultRow = Pick<RawResultRow, "score" | "error" | "predicted" | "ground_tr
 
 interface Props {
   dash: DashboardSnapshot | null;
-  themeKey: string;
 }
 
 const LABELS = ["0", "", "", "", "", "", "", "", "", "1"];
@@ -59,7 +58,8 @@ function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
   return out;
 }
 
-export function FreqChart({ dash, themeKey }: Props) {
+export function FreqChart({ dash }: Props) {
+  useThemeVersion();
   const chartRef = useRef(null);
   const { campaignId, cycleId } = useWorkspace();
   const { round: selectedRound } = useSelection();
@@ -91,9 +91,6 @@ export function FreqChart({ dash, themeKey }: Props) {
   const acc = getCss("--color-accent");
   const colors = data.map((_, i) => (i < 5 ? accStrong : acc));
 
-  // re-derive on theme change
-  useEffect(() => {}, [themeKey]);
-
   const chartData = {
     labels: LABELS,
     datasets: [{ data, backgroundColor: colors, borderRadius: 2 }],
@@ -113,7 +110,7 @@ export function FreqChart({ dash, themeKey }: Props) {
       }
     >
       <div style={{ position: "relative", height: 140 }}>
-        <Bar key={themeKey} ref={chartRef} data={chartData} options={options} />
+        <Bar ref={chartRef} data={chartData} options={options} />
       </div>
     </CardFrame>
   );

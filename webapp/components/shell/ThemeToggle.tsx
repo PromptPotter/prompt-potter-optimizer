@@ -1,17 +1,10 @@
 "use client";
 import { applyTheme, readStoredTheme, type Theme } from "@/lib/theme";
 
-interface Props {
-  onThemeChange?: (t: Theme) => void;
-}
-
-export function ThemeToggle({ onThemeChange }: Props) {
-  // No theme state: the button's sun/moon is pure CSS off `data-theme`.
-  // Read the current theme from storage at click time, flip, persist.
+export function ThemeToggle() {
   const flip = () => {
     const next: Theme = readStoredTheme() === "light" ? "dark" : "light";
     applyTheme(next);
-    onThemeChange?.(next);
   };
 
   return (

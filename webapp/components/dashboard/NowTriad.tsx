@@ -28,7 +28,6 @@ interface Props {
   pipeline: PipelineDoc | null;
   campaignId: string | null;
   cycleId: string | null;
-  themeKey: string;
   onSelectCycle: (campaignId: string, cycleId: string) => void;
   isLive: boolean;
 }
@@ -40,7 +39,6 @@ export function NowTriad({
   pipeline,
   campaignId,
   cycleId,
-  themeKey,
   onSelectCycle,
   isLive,
 }: Props) {
@@ -49,7 +47,7 @@ export function NowTriad({
   return (
     <>
       <div className="dash-row-triad">
-        <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
+        <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} />
         <LineageTree
           dash={dash}
           campaignId={campaignId}

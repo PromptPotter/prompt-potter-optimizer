@@ -1,6 +1,5 @@
 "use client";
 import { ThemeToggle } from "./ThemeToggle";
-import type { Theme } from "@/lib/theme";
 
 // Per-cycle sub-tabs (Replit-style): the sidebar carries the campaign
 // library; the topbar carries the views over the *currently-selected*
@@ -11,7 +10,6 @@ export type Tab = "chat" | "dashboard" | "files" | "verify";
 interface Props {
   tab: Tab;
   onTabChange: (t: Tab) => void;
-  onThemeChange?: (t: Theme) => void;
 }
 
 const TABS: { id: Tab; label: string }[] = [
@@ -20,7 +18,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "verify", label: "Verify" },
 ];
 
-export function Topbar({ tab, onTabChange, onThemeChange }: Props) {
+export function Topbar({ tab, onTabChange }: Props) {
   return (
     <header className="topbar">
       <input className="search" placeholder="Search analytics..." disabled aria-label="Search analytics" />
@@ -37,7 +35,7 @@ export function Topbar({ tab, onTabChange, onThemeChange }: Props) {
           >{t.label}</button>
         ))}
       </div>
-      <ThemeToggle onThemeChange={onThemeChange} />
+      <ThemeToggle />
     </header>
   );
 }

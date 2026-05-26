@@ -21,10 +21,9 @@ interface Props {
   dash: DashboardSnapshot | null;
   dashRound: number | null;
   cycleId: string | null;          // still used for one-shot evaluator-seed scoping
-  themeKey: string;
 }
 
-export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
+export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   // Shared candidate selection — driving any of {fitness bar, lineage stub}
   // sets this context slot; the other surface(s) re-render highlighted.
   // FitnessChart resolves selectedKey → bar index by matching `bar.key`
@@ -242,7 +241,6 @@ export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
             bars={bars}
             showComposite={showComposite}
             showWhatIf={showWhatIf}
-            themeKey={themeKey}
             selectedKey={
               selectedCandidate
                 ? bars.find(

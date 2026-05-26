@@ -3,6 +3,7 @@ import { memo, useCallback, useMemo } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { rootCycleId, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
+import { useStableContent } from "@/lib/stable";
 import { CardFrame } from "@/components/ui/card";
 import { useSelection } from "./SelectionContext";
 import { FamilyTree } from "./FamilyTree";
@@ -11,17 +12,12 @@ import type { CandidateRow } from "@/lib/types/candidate";
 
 interface Props {
   dash: DashboardSnapshot | null;
-  // The campaign the viewed cycle belongs to — needed for the campaign
-  // lineage fetch (FamilyTree) and any per-cycle resolution.
   campaignId: string | null;
   // The cycle currently in view. Used to recognise inherited forks: when
   // cycleId differs from rootCycleId(cycleId), the cycle is a sibling
   // (fork/diag/sweep) and its empty rounds[] doesn't mean "fresh" — it
   // means "no NEW rounds yet on top of inherited parent history."
   cycleId: string | null;
-  // Re-select the parent unit when the operator clicks the inheritance
-  // hint. A unit is the pair (campaignId, cycleId) — lineage is
-  // campaign-scoped, so the parent shares this view's campaignId.
   onSelectCycle?: (campaignId: string, cycleId: string) => void;
 }
 
@@ -36,31 +32,19 @@ const STUB = 24;       // child horizontal length, before the label
 const LEFT_PAD = 16;
 const TOP_PAD = 20;
 
-interface ChildPos {
-  row: CandidateRow;
-  x: number;           // start of child's horizontal stub
-  y: number;
-  labelX: number;
-}
-
-// One round-N node + its parent-to-child segment. Pairing them in one
-// shape lets the per-branch React.memo gate skip every prior round's
-// SVG on a selection change or a new-round mount.
+// One round-N branch: parent → child segment plus the child node's
+// position. Pairing them in one shape lets the per-branch React.memo gate
+// skip every prior round's SVG on selection change or new-round mount.
 interface BranchSlot {
   key: string;
+  row: CandidateRow;
   px: number;
   py: number;
   cx: number;
   cy: number;
-  winner: boolean;
-  child: ChildPos;
+  labelX: number;
 }
 
-// Single branch (slanted line + stub + label) rendered as its own memo'd
-// component. Selection-change re-renders only the selected child and the
-// previously-selected child; every other branch's memo gate rejects. A
-// new round mounts only the new round's BranchNodes; prior rounds reuse
-// their existing SVG nodes without any reconciliation work.
 const BranchNode = memo(function BranchNode({
   slot,
   isSelected,
@@ -70,7 +54,6 @@ const BranchNode = memo(function BranchNode({
   isSelected: boolean;
   onPick: (row: CandidateRow, isSelected: boolean) => void;
 }) {
-  const c = slot.child;
   return (
     <>
       <line
@@ -78,37 +61,37 @@ const BranchNode = memo(function BranchNode({
         y1={slot.py}
         x2={slot.cx}
         y2={slot.cy}
-        className={`lineage-branch${slot.winner ? " winner" : ""}`}
+        className={`lineage-branch${slot.row.is_winner ? " winner" : ""}`}
       />
       <g
         className={`lineage-node${isSelected ? " selected" : ""}`}
-        onClick={() => onPick(c.row, isSelected)}
+        onClick={() => onPick(slot.row, isSelected)}
         style={{ cursor: "pointer" }}
       >
         <line
-          x1={c.x}
-          y1={c.y}
-          x2={c.x + STUB}
-          y2={c.y}
-          className={`lineage-stub${c.row.is_winner ? " winner" : ""}`}
+          x1={slot.cx}
+          y1={slot.cy}
+          x2={slot.cx + STUB}
+          y2={slot.cy}
+          className={`lineage-stub${slot.row.is_winner ? " winner" : ""}`}
         />
         <text
-          x={c.labelX}
-          y={c.y + 3}
-          className={`lineage-label${c.row.is_winner ? " winner" : ""}`}
+          x={slot.labelX}
+          y={slot.cy + 3}
+          className={`lineage-label${slot.row.is_winner ? " winner" : ""}`}
         >
-          {c.row.label} {fmtPct0(c.row.accuracy)}
+          {slot.row.label} {fmtPct0(slot.row.accuracy)}
         </text>
         {/* Invisible hit-rect over the label so the row catches clicks
             beyond just the thin stub. */}
         <rect
-          x={c.x}
-          y={c.y - 10}
+          x={slot.cx}
+          y={slot.cy - 10}
           width={STUB + 110}
           height={20}
           fill="transparent"
         />
-        <title>{c.row.label}</title>
+        <title>{slot.row.label}</title>
       </g>
     </>
   );
@@ -124,35 +107,22 @@ export const LineageTree = memo(function LineageTree({
 
   // One canonical candidate spine for the whole dashboard. Lineage
   // and FitnessPanel share this derivation so the two surfaces agree
-  // on count, ordering, ids, and labels — no more R1.2-vs-C1.1 drift.
+  // on count, ordering, ids, and labels.
   const byRound = useMemo(() => roundCandidatesByRound(dash), [dash]);
 
   // L1 rounds in display order — round 0 is origin and rendered as the
   // trunk stub, not as a column. Everything ≥1 becomes a column.
-  const l1Rounds = useMemo(() => {
-    const nums = [...byRound.keys()].filter((r) => r > 0).sort((a, b) => a - b);
-    return nums.map((round) => ({ round, rows: byRound.get(round) ?? [] }));
-  }, [byRound]);
+  // useStableContent caches by content equality so the expensive layout
+  // memo below re-runs only when the tree shape actually changes (new
+  // round, new candidate, winner flip), not every poll.
+  const l1Rounds = useStableContent(
+    useMemo(() => {
+      const nums = [...byRound.keys()].filter((r) => r > 0).sort((a, b) => a - b);
+      return nums.map((round) => ({ round, rows: byRound.get(round) ?? [] }));
+    }, [byRound]),
+  );
 
   const originRow = byRound.get(0)?.[0] ?? null;
-
-  // Structural fingerprint of `l1Rounds` — captures round + per-row idx +
-  // winner flag, the only `row` fields the layout below reads. Accuracy /
-  // composite updates within a round bypass this key, so the heavy
-  // segment-mutation loop only re-runs when the tree shape actually
-  // changes (new round, new candidate, winner flip).
-  const l1RoundsKey = useMemo(
-    () =>
-      l1Rounds
-        .map(
-          (r) =>
-            `${r.round}:${r.rows
-              .map((row) => `${row.idx}${row.is_winner ? "*" : ""}`)
-              .join(",")}`,
-        )
-        .join("|"),
-    [l1Rounds],
-  );
 
   // Walk rounds in order. Each round's children sit at column N (1-indexed),
   // vertically centered on the parent of round N (origin or prior winner).
@@ -167,35 +137,30 @@ export const LineageTree = memo(function LineageTree({
       if (rows.length === 0) return;
       const colRight = LEFT_PAD + r.round * ROUND_W;
       const childStubX = colRight - STUB;
-      // Center children vertically on parentY when possible.
       const span = (rows.length - 1) * ROW_H;
       const top = Math.max(TOP_PAD, parentY - span / 2);
       const cys = rows.map((_, i) => top + i * ROW_H);
       const roundStart = slots.length;
       rows.forEach((row, i) => {
         const cy = cys[i];
-        const child: ChildPos = { row, x: childStubX, y: cy, labelX: colRight + 4 };
         slots.push({
           key: row.key,
+          row,
           px: parentX,
           py: parentY,
           cx: childStubX,
           cy,
-          winner: row.is_winner,
-          child,
+          labelX: colRight + 4,
         });
         if (cy > maxY) maxY = cy;
       });
       // Re-center parent for round 1 (origin) onto its children so the
-      // origin trunk aligns with the middle of the fan. Only the slots
-      // added in this round had their py set to the initial parentY; we
-      // rewrite them in place.
+      // origin trunk aligns with the middle of the fan.
       if (ri === 0) {
         const mid = (cys[0] + cys[cys.length - 1]) / 2;
         parentY = mid;
         for (let k = roundStart; k < slots.length; k++) slots[k].py = mid;
       }
-      // Next parent = winner of this round
       const winnerIdx = rows.findIndex((row) => row.is_winner);
       if (winnerIdx >= 0) {
         parentX = colRight;
@@ -210,23 +175,11 @@ export const LineageTree = memo(function LineageTree({
     return {
       branches: slots,
       height: maxY + TOP_PAD,
-      // Right padding sized for the final column's label text ("R{N}.{i} {pct}%")
-      // — ~80px is enough; the prior 140 left a wide empty strip on the right.
       totalW: LEFT_PAD + (l1Rounds[l1Rounds.length - 1]?.round ?? 1) * ROUND_W + 80,
       originY: l1Rounds.length > 0 ? (slots[0]?.py ?? TOP_PAD) : TOP_PAD,
     };
-    // Heavy layout — keyed on the structural fingerprint, not `l1Rounds`
-    // identity, so in-round accuracy updates don't re-trigger it. The closure
-    // still reads the latest `l1Rounds` (captured per render) for the actual
-    // row objects.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [l1RoundsKey]);
+  }, [l1Rounds]);
 
-  // Pure render: select a row when not selected, deselect when re-clicked.
-  // Routed through SelectionContext.setSelectionForCandidate so the round
-  // axis updates atomically — round-tabs strip + samples view follow.
-  // Stable across renders so memo'd BranchNode children don't invalidate
-  // their gates on every parent re-render.
   const onPickRow = useCallback(
     (row: CandidateRow, isSelected: boolean) => {
       if (isSelected) {
@@ -253,24 +206,16 @@ export const LineageTree = memo(function LineageTree({
     // Inherited fork: dashboard.json is shared at the family root, so
     // origin / round / best surface the parent's state. The fork's own
     // rounds dir is just empty because it hasn't run a new round yet —
-    // calling that "waiting for round 1" misleads. Detect via id shape
-    // (matches rootCycleId() in Python paths.py) and re-frame.
+    // calling that "waiting for round 1" misleads.
     const parentId = cycleId ? rootCycleId(cycleId) : null;
     const isInheritedSibling = parentId != null && parentId !== cycleId;
-    const inheritedBest =
-      (dash as { best_accuracy?: number } | null)?.best_accuracy ??
-      (dash as { best?: number } | null)?.best ??
-      null;
+    const inheritedBest = dash?.best ?? null;
     return (
       <CardFrame
         className="lineage-card"
         title={<span>Lineage</span>}
         actions={<span className="badge">{isInheritedSibling ? "inherited" : "waiting"}</span>}
       >
-        {/* Even when this cycle has no candidate rounds yet, the family
-            cladogram (root + descendants) is still informative — operator
-            can scan + click siblings. Self-hides when the family has no
-            descendants. */}
         <FamilyTree
           campaignId={campaignId}
           cycleId={cycleId}
@@ -307,8 +252,7 @@ export const LineageTree = memo(function LineageTree({
 
   // Clickable origin (C0) — same selection contract as any L1 candidate
   // so the operator can route to the inspector + samples view for origin
-  // just by clicking it. Was a non-interactive text label before;
-  // matches the fitness chart, which always treated C0 as a bar.
+  // just by clicking it.
   const originSelected = originRow ? isRowSelected(originRow) : false;
 
   return (
@@ -321,7 +265,7 @@ export const LineageTree = memo(function LineageTree({
     >
       {/* Campaign cladogram sits above the candidate cladogram — same
           visual language, different scale (cross-cycle vs within-cycle).
-          Self-hides for single-cycle campaigns so it stays out of the way. */}
+          Self-hides for single-cycle campaigns. */}
       <FamilyTree
         campaignId={campaignId}
         cycleId={cycleId}
@@ -337,9 +281,6 @@ export const LineageTree = memo(function LineageTree({
           aria-label="Search-point lineage tree"
           shapeRendering="crispEdges"
         >
-          {/* Origin label — clickable when an origin row exists in
-              the candidate spine. Selecting it routes the inspector
-              + samples view to C0 just like any other stub. */}
           {originRow ? (
             <g
               className={`lineage-node lineage-node-origin${originSelected ? " selected" : ""}`}
@@ -364,16 +305,11 @@ export const LineageTree = memo(function LineageTree({
             </g>
           ) : null}
 
-          {/* Each branch (parent→child line + stub + label) is its own
-              memo'd component. Selection change re-renders only the two
-              flipping nodes; a new round mounts only the new round's
-              BranchNodes — prior rounds reuse their existing SVG nodes
-              without React reconciliation work. */}
           {branches.map((slot) => (
             <BranchNode
               key={slot.key}
               slot={slot}
-              isSelected={isRowSelected(slot.child.row)}
+              isSelected={isRowSelected(slot.row)}
               onPick={onPickRow}
             />
           ))}

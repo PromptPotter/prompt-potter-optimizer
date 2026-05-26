@@ -7,7 +7,6 @@ import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/useDatasetPreview";
 import { useLocalStorage } from "@/lib/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
-import { Chart as ChartJS } from "chart.js";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { StatusBar } from "@/components/status/StatusBar";
@@ -84,7 +83,6 @@ function DashboardPaneInner() {
     archivePerSample,
     isStale: datasetStale,
   } = useDatasetPreview(campaignId, cycleId, hardSamplesScope);
-  const [themeKey, setThemeKey] = useState<string>("init");
   // Edit mode — off by default; gates Stop run + Fork-from-here. Never
   // persisted across reloads (no URL param, no localStorage) so the
   // operator never finds risky affordances quietly enabled.
@@ -148,16 +146,10 @@ function DashboardPaneInner() {
     };
   }, [campaignId, cycleId]);
 
-  // Re-applies chart defaults on theme swap; the themeKey bump forces all
-  // chart components to remount so they pick up the new --color-* values.
-  const onThemeChange = useCallback(() => {
-    applyChartDefaults(ChartJS);
-    setThemeKey(`t-${Date.now()}`);
-  }, []);
-
-  // Apply chart defaults once on mount.
+  // Apply chart defaults once on mount; theme flips re-apply via applyTheme
+  // (lib/theme.ts) and broadcast via useThemeVersion to subscribed canvases.
   useEffect(() => {
-    applyChartDefaults(ChartJS);
+    applyChartDefaults();
   }, []);
 
   // Status banner with no unit in view: a network failure and a genuinely
@@ -193,7 +185,7 @@ function DashboardPaneInner() {
         onToggleCollapse={toggleSidebar}
       />
       <main className="main">
-        <Topbar tab={tab} onTabChange={setTab} onThemeChange={onThemeChange} />
+        <Topbar tab={tab} onTabChange={setTab} />
         <StatusBar
           status={bannerStatus}
           statusText={bannerText}
@@ -214,7 +206,6 @@ function DashboardPaneInner() {
             isLive={isLive}
             dashRound={dashRound}
             cycleStartedAt={cycleStartedAt}
-            themeKey={themeKey}
             datasetName={datasetName}
             datasetItems={datasetItems}
             datasetMeasuredCount={datasetMeasuredCount}
@@ -266,7 +257,6 @@ function DashboardPaneInner() {
                   pipeline={pipeline}
                   campaignId={campaignId}
                   cycleId={cycleId}
-                  themeKey={themeKey}
                   onSelectCycle={selectCycle}
                   isLive={isLive}
                 />
@@ -274,7 +264,7 @@ function DashboardPaneInner() {
             </Lane>
             <Lane id="livestate" title="Live state" subtitle="Raw dashboard.json + trend + score frequency" defaultOpen>
               <div className="dash-spine-narrow">
-                <LiveStateCard dash={dash} themeKey={themeKey} />
+                <LiveStateCard dash={dash} />
               </div>
             </Lane>
           </div>

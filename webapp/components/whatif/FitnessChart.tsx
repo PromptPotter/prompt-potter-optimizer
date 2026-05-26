@@ -2,7 +2,7 @@
 import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { ensureChartRegistered } from "@/lib/chart-config";
-import { cssRgba, getCss } from "@/lib/theme";
+import { cssRgba, getCss, useThemeVersion } from "@/lib/theme";
 import type { ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
 
 ensureChartRegistered();
@@ -89,7 +89,6 @@ interface Props {
   bars: BarSlot[];
   showComposite: boolean;
   showWhatIf: boolean;
-  themeKey: string;
   selectedKey: string | null;
   onSelect: (bar: BarSlot | null) => void;
 }
@@ -98,10 +97,12 @@ export const FitnessChart = memo(function FitnessChart({
   bars,
   showComposite,
   showWhatIf,
-  themeKey,
   selectedKey,
   onSelect,
 }: Props) {
+  // Subscribe to theme so a flip re-runs this component and the data/options
+  // memos below pick up the new getCss() values.
+  const themeVersion = useThemeVersion();
   // One x-axis label per real bar. No empty-slot padding: chart.js spaces
   // categories evenly across the frame, and the `maxBarThickness` cap below
   // keeps individual bars narrow even at very low counts (a 2-bar round
@@ -145,8 +146,9 @@ export const FitnessChart = memo(function FitnessChart({
     if (idx < 0) return null;
     const colour = getCss("--color-selection");
     return { idx, colour };
+    // themeVersion gates getCss() — needed in deps; lint flags it unused.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bars, selectedKey, themeKey]);
+  }, [bars, selectedKey, themeVersion]);
 
   const hasVerify = useMemo(() => bars.some((b) => b?.diag != null), [bars]);
   const data = useMemo<ChartData<"bar">>(() => {
@@ -228,7 +230,7 @@ export const FitnessChart = memo(function FitnessChart({
     }
     return { labels, datasets };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, accPlot, compPlot, whatifPlot, verifyPlot, showComposite, showWhatIf, hasVerify, themeKey, selectionBorder]);
+  }, [labels, accPlot, compPlot, whatifPlot, verifyPlot, showComposite, showWhatIf, hasVerify, themeVersion, selectionBorder]);
 
   const tooltipFor = (label: string, idx: number): string => {
     if (label === "verify") {
@@ -290,16 +292,10 @@ export const FitnessChart = memo(function FitnessChart({
       sampleCount: { counts: bars.map((b) => b.nSamples) },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeKey, accRaw, compRaw, whatifRaw, verifyRaw, rotate, bars, selectedKey, onSelect]);
+  }), [themeVersion, accRaw, compRaw, whatifRaw, verifyRaw, rotate, bars, selectedKey, onSelect]);
 
   return (
     <div className="fitness-chart-frame">
-      {/* No `key={themeKey}` remount: chart-instance survives theme swap.
-          The `data` + `options` memos pull from `getCss(...)` and depend on
-          themeKey, so the new colour strings flow into chart.js on the
-          next memo evaluation; chart.js's own diff applies them in place
-          (single-digit ms canvas redraw) rather than tearing down and
-          recreating the canvas (10-15 ms with re-allocation). */}
       <Bar data={data} options={options} plugins={CHART_PLUGINS} />
     </div>
   );

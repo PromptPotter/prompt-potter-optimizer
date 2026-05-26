@@ -11,15 +11,7 @@ import { fmtPct0 } from "@/lib/format";
 // ${shortHash}`, option `${unit} · best X · status`. The `variant` prop
 // only switches the wrapper CSS class (and the empty-state copy) so the
 // chat header can size the trigger differently from the dashboard
-// breadcrumb; the labels themselves are identical in both contexts so
-// Chat and Dashboard are guaranteed to render the same dropdown.
-//
-// The picker also renders the "↪ Follow active" affordance (shown when
-// the viewed unit is pinned and the server pointer has moved elsewhere)
-// and the "● Live" badge (active campaign writing dashboard.json in the
-// last 60s). They live HERE — not in each tab's own header — so every
-// surface that exposes the picker also exposes the same navigation
-// affordances. Dashboard and Chat track the active pointer identically.
+// breadcrumb; the labels themselves are identical in both contexts.
 //
 // A `cycle_id` is unique only within its campaign, so every option is keyed
 // and valued by the composite `campaign_id::cycle_id` (unitKey); selecting
@@ -45,7 +37,7 @@ function LiveBadge() {
   );
 }
 
-function CyclePickerImpl({
+export const CyclePicker = memo(function CyclePicker({
   variant = "breadcrumb",
 }: {
   variant?: "breadcrumb" | "standalone";
@@ -66,9 +58,7 @@ function CyclePickerImpl({
   const standalone = variant === "standalone";
 
   // Group + sort lives in a useMemo keyed on `cycles` so the O(N log N) work
-  // only fires when the workspace poll actually mutates the list. Without
-  // this the body re-ran on every parent re-render (i.e. every 2 s while a
-  // dashboard tick propagates through the tree).
+  // only fires when the workspace poll actually mutates the list.
   const { groups, groupKeys } = useMemo(() => {
     const g = new Map<string, CycleListEntry[]>();
     for (const c of cycles) {
@@ -162,9 +152,4 @@ function CyclePickerImpl({
       <LiveBadge />
     </span>
   );
-}
-
-// memo so re-renders of the parent tree that don't change the picker's only
-// prop are skipped — useWorkspace consumers still trigger an update via
-// context subscription when its fields change.
-export const CyclePicker = memo(CyclePickerImpl);
+});

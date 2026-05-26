@@ -2,7 +2,8 @@
 // Lifted from webapp/index.html:890 + :896 (vanilla preservation list).
 // Canvas/SVG can't resolve var(...); these read off :root at call time.
 
-import type { Chart } from "chart.js";
+import { useSyncExternalStore } from "react";
+import { Chart as ChartJS } from "chart.js";
 
 export function getCss(name: string): string {
   if (typeof window === "undefined") return "";
@@ -13,14 +14,11 @@ export function cssRgba(rgbVar: string, alpha: number): string {
   return `rgba(${getCss(rgbVar)},${alpha})`;
 }
 
-// Re-callable on theme switch — called by ThemeToggle after flipping
-// data-theme. Updates Chart.defaults; existing chart instances should
-// re-render via .update().
-export function applyChartDefaults(ChartCtor?: typeof Chart): void {
-  const C = ChartCtor ?? (typeof window !== "undefined" ? (window as unknown as { Chart?: typeof Chart }).Chart : undefined);
-  if (!C || !("defaults" in C)) return;
-  C.defaults.color = getCss("--color-text-secondary");
-  C.defaults.borderColor = getCss("--color-border-tertiary");
+// Updates Chart.defaults to the current theme's CSS-var colours. Called
+// once on mount and re-called on every theme flip via bumpThemeVersion.
+export function applyChartDefaults(): void {
+  ChartJS.defaults.color = getCss("--color-text-secondary");
+  ChartJS.defaults.borderColor = getCss("--color-border-tertiary");
 }
 
 export const THEME_STORAGE_KEY = "promptpotter.theme";
@@ -50,4 +48,31 @@ export function applyTheme(t: Theme): void {
   } catch {
     /* ignore */
   }
+  bumpThemeVersion();
+}
+
+// Subscribable theme-change counter. Bumped after applyTheme flips the
+// data-theme attribute; canvas/SVG consumers that read CSS vars at paint
+// time subscribe via useThemeVersion() and use the counter as a memo dep
+// — no more synthetic themeKey prop carried through the tree.
+let themeVersion = 0;
+const themeListeners = new Set<() => void>();
+
+function bumpThemeVersion(): void {
+  themeVersion += 1;
+  applyChartDefaults();
+  for (const l of themeListeners) l();
+}
+
+function subscribeTheme(cb: () => void): () => void {
+  themeListeners.add(cb);
+  return () => themeListeners.delete(cb);
+}
+
+export function useThemeVersion(): number {
+  return useSyncExternalStore(
+    subscribeTheme,
+    () => themeVersion,
+    () => 0,
+  );
 }

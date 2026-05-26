@@ -280,6 +280,17 @@ someone (or something) can open. Constraint, not feature: forbids the
 lazy alternative (stdout-only logging, in-memory-only cross-round
 state) without adding complexity.
 
+**The file tree is read-out, not write-in.** `dashboard.json`,
+`campaign.json`, `index.json`, `round_NNNN.json`, the ledger — all are
+projections written by sole-writer subscribers under the single-writer
+invariant (pinned above). Operator hand-edits to these files are not
+the input channel; the next ledger event overwrites them. Operator
+input flows through the **Control** kinds only: Control-local
+(`.runtime/stop.flag`, polled by `stop_check`) and Control-remote
+(HTTP → `CommandRecord` on the ledger → runner subscriber → `CommandAckRecord`).
+The early "folder-UI" workflow of just opening files was — and remains —
+a read-out workflow; writes have always landed via the running loop.
+
 The on-disk layout makes the four-entity model literal. Under each
 tenant, `campaigns/{campaign_id}/` is the Campaign directory:
 `campaign.json` (manifest — `dataset_name, label, created_at, status,

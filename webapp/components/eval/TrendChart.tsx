@@ -2,7 +2,7 @@
 import { memo, useMemo } from "react";
 import { Line } from "react-chartjs-2";
 import { ensureChartRegistered, lineChartDefaults } from "@/lib/chart-config";
-import { cssRgba, getCss } from "@/lib/theme";
+import { cssRgba, getCss, useThemeVersion } from "@/lib/theme";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { CardFrame } from "@/components/ui/card";
 
@@ -15,16 +15,12 @@ interface Point {
 
 interface Props {
   dash: DashboardSnapshot | null;
-  themeKey: string;
 }
 
-export const TrendChart = memo(function TrendChart({ dash, themeKey }: Props) {
-  // themeKey isn't read inside the body — it's a memo-bust prop. When the
-  // operator flips the theme, DashboardPane bumps themeKey, which trips
-  // memo gates so memo'd chart components re-render and pick up the new
-  // CSS-var colours. Without this reference the unused-vars rule would
-  // flag it; the prop must stay or the memo gate eats theme changes.
-  void themeKey;
+export const TrendChart = memo(function TrendChart({ dash }: Props) {
+  // Subscribe to theme so a flip re-runs this component and pulls fresh
+  // getCss() values into the chart data/options below.
+  useThemeVersion();
   const points: Point[] = useMemo(() => {
     const out: Point[] = [];
     for (const r of dash?.rounds ?? []) {
@@ -54,10 +50,6 @@ export const TrendChart = memo(function TrendChart({ dash, themeKey }: Props) {
     scales: { x: { display: false }, y: { display: false, min: 0, max: 1 } },
   });
 
-  // No `key={themeKey}` remount: data/options are rebuilt inline each
-  // render (no useMemo), so they pull fresh CSS-var colours via getCss()
-  // every time. Chart.js then diffs them into the live canvas instead of
-  // the previous teardown-and-recreate cost on every theme swap.
   return (
     <CardFrame title={<span>Trend</span>} actions={<span className="badge">campaign</span>}>
       <div style={{ position: "relative", height: 140 }}>

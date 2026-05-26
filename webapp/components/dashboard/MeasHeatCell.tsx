@@ -10,6 +10,7 @@ import {
   type HeatDot,
   type Rgb,
 } from "@/lib/heat-canvas";
+import { useThemeVersion } from "@/lib/theme";
 
 // Canvas height in CSS px; the hit/miss bars are CELL_H tall, centred.
 const CANVAS_H = 20;
@@ -30,13 +31,6 @@ interface Props {
   widthPx: number;
   // True for the sample being scored right now — draws a pending marker.
   isRunning: boolean;
-  // Table-level ord+hit signature. Stable across polls; changes only when
-  // measurement data actually changes — the sole redraw gate (a fresh
-  // `byOrd`/`ordCols` Map every poll must NOT trigger a repaint).
-  drawSig: string;
-  // Active theme key — a flip swaps the CSS palette, so the canvas (which
-  // resolves colours imperatively) must repaint.
-  themeKey: string;
   onSelectOrd: (ord: string) => void;
   onHover: (ord: string, hit: boolean | null, clientX: number, clientY: number) => void;
   onHoverEnd: () => void;
@@ -74,12 +68,13 @@ export function MeasHeatCell({
   ordIndex,
   widthPx,
   isRunning,
-  drawSig,
-  themeKey,
   onSelectOrd,
   onHover,
   onHoverEnd,
 }: Props) {
+  // Subscribe to theme so a flip re-runs the paint effect with fresh CSS-var
+  // colours (canvas resolves them imperatively at paint time).
+  const themeVersion = useThemeVersion();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
   // Hovered ordinal index — drives the hover-grow. Only set in discrete
@@ -160,11 +155,7 @@ export function MeasHeatCell({
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-    // `byOrd`/`ordCols`/`ordIndex` are fresh objects every poll — read at
-    // paint time but kept out of the deps on purpose; `drawSig` is the
-    // content signature that says when a repaint is actually warranted.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawSig, widthPx, isRunning, themeKey, hoverIdx]);
+  }, [byOrd, ordCols, ordIndex, widthPx, isRunning, hoverIdx, themeVersion]);
 
   // Pointer x → ordinal index + whether the strip is in discrete mode.
   const locate = (

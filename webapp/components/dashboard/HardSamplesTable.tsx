@@ -10,6 +10,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
 import { type DashboardSnapshot } from "@/lib/poll";
+import { useStableContent } from "@/lib/stable";
 import { MeasHeatCell } from "./MeasHeatCell";
 import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
 import { useLocalStorage } from "@/lib/useLocalStorage";
@@ -41,9 +42,6 @@ interface Props {
   // this gate the matched row would pulse forever. `isLive` goes false once
   // the freshness signal lapses, so the blink stops on its own.
   isLive: boolean;
-  // Active theme key — forwarded to the heat-map canvas so a palette flip
-  // repaints it (canvas resolves colours imperatively, not via CSS vars).
-  themeKey: string;
   // Per-sample chronological measurement dots. When supplied, the table
   // shows a "measurements" column with one dot per measurement; when
   // omitted, the column is hidden.
@@ -55,13 +53,7 @@ interface Props {
   datasetItems: DatasetItem[];
   datasetMeasuredCount: number;
   datasetUnmeasuredCount: number;
-  // Held-out test fold size from campaign.json — shown in the footer as a
-  // held-out note; those samples are NOT rows in this table.
   datasetSplitTest: number | null;
-  // Data scope toggle. Campaign = the campaign's pooled Rasch fit over
-  // every cycle in it (campaigns/{campaign_id}/hard_samples.json). Dataset
-  // = the cross-campaign archive Rasch over every campaign on this dataset.
-  // Owner (DashboardPane) refetches the preview when scope changes.
   scope?: HardSamplesScope;
   onScopeChange?: (s: HardSamplesScope) => void;
   // Displayed roster is from a prior (unit, scope) and a fresh fetch is in
@@ -72,7 +64,6 @@ interface Props {
 export function HardSamplesTable({
   dash,
   isLive,
-  themeKey,
   perSample,
   compact,
   datasetName,
@@ -84,6 +75,10 @@ export function HardSamplesTable({
   onScopeChange,
   datasetStale,
 }: Props) {
+  // The Map identity churns every 2 s poll even when content is unchanged.
+  // Stabilise it once at the top — every memo below that depends on perSample
+  // (or values derived from it) then gates on real content change.
+  const stablePerSample = useStableContent(perSample);
   // Drop columns with nothing to show: the History heat-map needs
   // `perSample`; the Task column needs at least one sample carrying a task
   // label (datasets without task families never populate it).
@@ -91,17 +86,13 @@ export function HardSamplesTable({
     const hasTask = datasetItems.some((it) => (it.task ?? "") !== "");
     return COLUMNS.filter(
       (c) =>
-        (perSample || c.id !== "measurements") && (hasTask || c.id !== "task"),
+        (stablePerSample || c.id !== "measurements") && (hasTask || c.id !== "task"),
     );
-  }, [perSample, datasetItems]);
-  const measuredCount = datasetMeasuredCount;
-  const unmeasuredCount = datasetUnmeasuredCount;
+  }, [stablePerSample, datasetItems]);
 
   const [persisted, setPersisted] = useLocalStorage<PersistedState>(
     STORAGE_KEY,
     EMPTY_PERSISTED,
-    // Merge a stored blob over the defaults so a field added since it was
-    // written is still present.
     { deserialize: (raw) => ({ ...EMPTY_PERSISTED, ...(JSON.parse(raw) as Partial<PersistedState>) }) },
   );
   const [sortBy, setSortBy] = useState<{ col: ColId; dir: "asc" | "desc" } | null>(null);
@@ -114,7 +105,6 @@ export function HardSamplesTable({
     { ord: string; hit: boolean | null; x: number; y: number } | null
   >(null);
 
-  // Dismiss popover on Escape.
   useEffect(() => {
     if (!popover) return;
     const onKey = (e: KeyboardEvent) => {
@@ -124,44 +114,18 @@ export function HardSamplesTable({
     return () => window.removeEventListener("keydown", onKey);
   }, [popover]);
 
-  // Stable signature of measurement counts per sample. Drives auto-width
-  // recompute for the History column on real changes only.
-  const perSampleSig = useMemo(() => {
-    if (!perSample) return "";
-    return [...perSample.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([sid, ms]) => `${sid}:${ms.length}`)
-      .join(",");
-  }, [perSample]);
-
-  // Content signature of every measurement (ord + hit), sample-sorted.
-  // Stable across polls — `perSample` is a fresh Map each poll but its
-  // contents rarely change — so it is the sole gate for canvas repaints.
-  const drawSig = useMemo(() => {
-    if (!perSample) return "";
-    return [...perSample.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(
-        ([sid, ms]) =>
-          `${sid}:${ms.map((m) => m.ord + (m.hit ? "1" : "0")).join("")}`,
-      )
-      .join("|");
-  }, [perSample]);
-
   // Global ordinal universe — the union of every ord present across rows,
   // sorted lex. Each ord becomes one column in the Meas roster so rows
   // missing a given measurement show a blank cell at the same X as rows
   // that have it. This is what turns the old left-packed strip into a
   // proper heat-map.
   const ordCols = useMemo(() => {
-    if (!perSample) return [] as string[];
+    if (!stablePerSample) return [] as string[];
     const all = new Set<string>();
-    for (const ms of perSample.values()) for (const m of ms) all.add(m.ord);
+    for (const ms of stablePerSample.values()) for (const m of ms) all.add(m.ord);
     return [...all].sort();
-  }, [perSample]);
+  }, [stablePerSample]);
 
-  // Reverse index ord → position, so a row folds its own measurements into
-  // canvas columns without scanning the whole ordinal universe.
   const ordIndex = useMemo(() => {
     const m = new Map<string, number>();
     for (let i = 0; i < ordCols.length; i++) m.set(ordCols[i], i);
@@ -191,8 +155,7 @@ export function HardSamplesTable({
   }, [selectedOrd, ordCols]);
 
   // Drop the selection render-phase when its ord vanishes (scope toggle,
-  // cycle change) — avoids a stale highlight pinned to nothing. Converges:
-  // once null, the guard is false.
+  // cycle change). Converges: once null, the guard is false.
   if (selectedOrd != null && !ordCols.includes(selectedOrd)) {
     setSelectedOrd(null);
   }
@@ -206,80 +169,30 @@ export function HardSamplesTable({
   // mean something different (Rasch-fit population) and are unrelated.
   const items = useMemo(() => {
     if (!persisted.hideUnmeasured) return datasetItems;
-    if (!perSample) return datasetItems;
+    if (!stablePerSample) return datasetItems;
     return datasetItems.filter(
-      (it) => (perSample.get(it.sample_id)?.length ?? 0) > 0,
+      (it) => (stablePerSample.get(it.sample_id)?.length ?? 0) > 0,
     );
-  }, [datasetItems, perSample, persisted.hideUnmeasured]);
+  }, [datasetItems, stablePerSample, persisted.hideUnmeasured]);
 
   const autoWidths = useMemo<Partial<Record<ColId, number>>>(() => {
     if (items.length === 0) return {};
     const w: Partial<Record<ColId, number>> = {};
     for (const col of columns) {
-      w[col.id] = autoWidthFor(col, items, perSample, ordCols.length);
+      w[col.id] = autoWidthFor(col, items, stablePerSample, ordCols.length);
     }
     return w;
-    // `perSample` is read inside via cellFor; `perSampleSig` captures its
-    // per-sample counts so widths recompute on real changes, not every poll.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, columns, perSampleSig, ordCols.length]);
+  }, [items, columns, stablePerSample, ordCols.length]);
 
-  // Live-sort ("Auto-sort"): rank the WHOLE table by Info gain (pick_score)
-  // descending — the queue mechanism's expected decision-information-gain. Contested
-  // samples rise to the top; always-hit and always-miss samples sink
-  // together at the bottom. Rows without any actual measurement in this
-  // scope sink last in sample_id order. Dot-presence is the
-  // "measured-in-scope" signal — `pick_score !== null` is non-null on
-  // prior-only rows too, so it overcounts under campaign scope.
+  // Live-sort ("Auto-sort"): rank by Info gain (pick_score) descending. Rows
+  // without any actual measurement in this scope sink last in sample_id
+  // order. Dot-presence is the "measured-in-scope" signal — `pick_score !==
+  // null` is non-null on prior-only rows too, so it overcounts under
+  // campaign scope.
   const liveSortActive = persisted.syncLive;
-  // Numeric FNV-1a hash over the sort-affecting fields. Same role the old
-  // string-concat signature played — sortedIds re-runs only when this
-  // changes — but ~100× cheaper: no string allocation, just one O(n) walk
-  // emitting a single uint32. pick_score is quantised to 1e-6 (the value's
-  // visible precision in the picker) so float jitter doesn't churn the key.
-  const liveSortSig = useMemo<number>(() => {
-    if (!liveSortActive) return 0;
-    let h = 2166136261;
-    for (const it of items) {
-      const m = (perSample?.get(it.sample_id)?.length ?? 0) > 0 ? 1 : 0;
-      const pi = it.pick_score === null ? -1 : Math.round(it.pick_score * 1e6) | 0;
-      h = Math.imul(h ^ it.sample_id, 16777619) >>> 0;
-      h = Math.imul(h ^ m, 16777619) >>> 0;
-      h = Math.imul(h ^ pi, 16777619) >>> 0;
-    }
-    return h;
-  }, [items, perSample, liveSortActive]);
-  // Manual-sort hash for when Auto-sort is off. Keys on the picked column's
-  // raw value so a poll that only moved an unrelated field doesn't shuffle
-  // the visible sort.
-  const manualSortSig = useMemo<number>(() => {
-    if (liveSortActive || !sortBy) return 0;
-    let h = 2166136261;
-    for (const it of items) {
-      const v = cellFor(sortBy.col, it, perSample?.get(it.sample_id) ?? []).raw;
-      let k: number;
-      if (v === null || v === undefined) k = -1;
-      else if (typeof v === "number") k = Math.round(v * 1e6) | 0;
-      else if (typeof v === "boolean") k = v ? 1 : 0;
-      else {
-        // String hash mixed in. Lightweight — sortBy doesn't change every poll.
-        let s = 5381;
-        const str = String(v);
-        for (let i = 0; i < str.length; i++) s = (s * 33) ^ str.charCodeAt(i);
-        k = s | 0;
-      }
-      h = Math.imul(h ^ it.sample_id, 16777619) >>> 0;
-      h = Math.imul(h ^ k, 16777619) >>> 0;
-    }
-    return h;
-  }, [items, perSample, sortBy, liveSortActive]);
-  // Sort the IDs, not the items. ID order is the actual stability surface;
-  // the render loop projects items by ID downstream so cell values always
-  // reflect the latest poll. Dependencies are the content signatures, so
-  // unchanged-content polls return the prior reference.
   const sortedIds = useMemo<number[]>(() => {
     const measuredIn = (it: DatasetItem): boolean =>
-      (perSample?.get(it.sample_id)?.length ?? 0) > 0;
+      (stablePerSample?.get(it.sample_id)?.length ?? 0) > 0;
     if (liveSortActive) {
       return [...items]
         .sort((a, b) => {
@@ -298,7 +211,7 @@ export function HardSamplesTable({
     const { col, dir } = sortBy;
     const sign = dir === "asc" ? 1 : -1;
     const keyOf = (it: DatasetItem): number | string => {
-      const v = cellFor(col, it, perSample?.get(it.sample_id) ?? []).raw;
+      const v = cellFor(col, it, stablePerSample?.get(it.sample_id) ?? []).raw;
       if (v === null || v === undefined) return Number.NEGATIVE_INFINITY;
       if (typeof v === "boolean") return v ? 1 : 0;
       return v;
@@ -311,39 +224,27 @@ export function HardSamplesTable({
         return String(ka).localeCompare(String(kb)) * sign;
       })
       .map((it) => it.sample_id);
-    // items / perSample / sortBy are captured into the closure via the
-    // signatures above; redeclaring them as deps would re-run on every
-    // poll and defeat the damping.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveSortActive, sortBy, liveSortSig, manualSortSig]);
-  // Project items in the stable order. ``items`` may re-identify each
-  // poll, so this fresh map keeps cell values current; row position
-  // tracks ``sortedIds`` and stays stable.
-  const sortedItems = useMemo(() => {
-    const byId = new Map<number, DatasetItem>();
-    for (const it of items) byId.set(it.sample_id, it);
-    const out: DatasetItem[] = [];
-    for (const sid of sortedIds) {
-      const it = byId.get(sid);
-      if (it) out.push(it);
-    }
-    return out;
-  }, [items, sortedIds]);
+  }, [liveSortActive, sortBy, items, stablePerSample]);
 
-  // Per-sample ord → dot lookup. Built once per `perSample` change rather
-  // than once per row per render — the row loop just `.get(sample_id)` it.
-  // Identity equality on the inner Maps is preserved across renders that
-  // don't touch the data, so `MeasHeatCell`'s prop equality survives polls.
+  // Index items by sample_id so the row loop projects via stable order
+  // without a second sortedItems memo.
+  const byId = useMemo(() => {
+    const m = new Map<number, DatasetItem>();
+    for (const it of items) m.set(it.sample_id, it);
+    return m;
+  }, [items]);
+
+  // Per-sample ord → dot lookup, built once per stablePerSample change.
   const byOrdBySample = useMemo(() => {
     const out = new Map<number, Map<string, MeasurementDot>>();
-    if (!perSample) return out;
-    for (const [sid, ms] of perSample) {
+    if (!stablePerSample) return out;
+    for (const [sid, ms] of stablePerSample) {
       const m = new Map<string, MeasurementDot>();
       for (const x of ms) m.set(x.ord, x);
       out.set(sid, m);
     }
     return out;
-  }, [perSample]);
+  }, [stablePerSample]);
   const EMPTY_BY_ORD = useMemo(() => new Map<string, MeasurementDot>(), []);
 
   const widthFor = (col: ColDef): number => {
@@ -416,8 +317,7 @@ export function HardSamplesTable({
     }
     if (liveSortActive) {
       // Live-sort owns the order — column-click sorting is a no-op until
-      // the operator unlocks it via the sync chip. The header still
-      // reacts to fold/wrap/resize controls; just the sort cycle is mute.
+      // the operator unlocks it via the sync chip.
       return;
     }
     if (col === "rank") {
@@ -434,16 +334,10 @@ export function HardSamplesTable({
     setSortBy(null);
   };
 
-  // Virtualised body. The scroll element holds the sticky header + the
-  // window of rows; tanstack-virtual mounts only the rows in (or near) the
-  // viewport so DOM cost stays O(visible) instead of O(items). estimateSize
-  // matches the cell's `contain-intrinsic-size` so the scroll-bar is
-  // accurate before any row measures. Overscan 10 keeps a few rows above
-  // and below the viewport pre-painted to absorb fast scrolls.
   const scrollRef = useRef<HTMLDivElement>(null);
   const ROW_HEIGHT = 26;
   const virtualizer = useVirtualizer({
-    count: sortedItems.length,
+    count: sortedIds.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 10,
@@ -471,9 +365,6 @@ export function HardSamplesTable({
         data-stale={datasetStale ? "true" : undefined}
       >
         <div className="hs-scroll" ref={scrollRef}>
-          {/* Header row — sits at the top of the scroll element; each
-              .hs-header cell carries its own position:sticky;top:0 so it
-              hugs the scroll container's top edge as rows pass under it. */}
           <div
             className={`hs-grid hs-header-row${liveSortActive ? " sync-live" : ""}`}
             style={{
@@ -558,11 +449,6 @@ export function HardSamplesTable({
             })}
           </div>
 
-          {/* Virtualised body. Height is set so the scroll-bar reflects the
-              full row count; rows are absolutely positioned via translateY.
-              tanstack-virtual mounts only the rows in (or near) the
-              viewport, so rendering 1000 samples × 10 cols becomes
-              ~30 visible rows × 10 cols of actual DOM. */}
           <div
             className="hs-body"
             style={{
@@ -573,17 +459,16 @@ export function HardSamplesTable({
           >
             {virtualRows.map((vrow) => {
               const idx = vrow.index;
-              const item = sortedItems[idx];
+              const item = byId.get(sortedIds[idx]);
               if (!item) return null;
-              const meas = perSample?.get(item.sample_id) ?? [];
+              const meas = stablePerSample?.get(item.sample_id) ?? [];
               const byOrd = byOrdBySample.get(item.sample_id) ?? EMPTY_BY_ORD;
               // Mark every cell in the row currently being scored so the
               // soft-blink keyframe (globals.css) animates the whole row,
-              // not just one cell. Independent of the sort-sync toggle —
-              // operators sorting manually still want to see "this is the
-              // row the loop is on right now". Gated on `isLive` + the
-              // scoring phase so a stranded `current_sample_id` (process
-              // killed mid-sample, or a non-scoring phase) never blinks.
+              // not just one cell. Independent of the sort-sync toggle.
+              // Gated on `isLive` + the scoring phase so a stranded
+              // `current_sample_id` (process killed mid-sample, or a
+              // non-scoring phase) never blinks.
               const isRunning =
                 isLive &&
                 dash?.state === "scoring" &&
@@ -649,8 +534,6 @@ export function HardSamplesTable({
                               ordIndex={ordIndex}
                               widthPx={measColWidth}
                               isRunning={isRunning}
-                              drawSig={drawSig}
-                              themeKey={themeKey}
                               onSelectOrd={(ord) =>
                                 setSelectedOrd((cur) => (cur === ord ? null : ord))
                               }
@@ -699,8 +582,8 @@ export function HardSamplesTable({
             setPersisted((p) => ({ ...p, hideUnmeasured: !p.hideUnmeasured }))
           }
           datasetName={datasetName}
-          measuredCount={measuredCount}
-          unmeasuredCount={unmeasuredCount}
+          measuredCount={datasetMeasuredCount}
+          unmeasuredCount={datasetUnmeasuredCount}
           datasetSplitTest={datasetSplitTest}
           onResetLayout={resetLayout}
         />

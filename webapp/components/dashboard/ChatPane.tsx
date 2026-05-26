@@ -19,7 +19,6 @@ interface Props {
   isLive: boolean;
   dashRound: number | null;
   cycleStartedAt: string | null;
-  themeKey: string;
   datasetName: string | null;
   datasetItems: DatasetItem[];
   datasetMeasuredCount: number;
@@ -45,7 +44,6 @@ export function ChatPane({
   isLive,
   dashRound,
   cycleStartedAt,
-  themeKey,
   datasetName,
   datasetItems,
   datasetMeasuredCount,
@@ -192,7 +190,7 @@ export function ChatPane({
               <div className="row"><span className="lbl">Budget</span><span className="val">{budgetChip}</span></div>
             </div>
             <div className="job-whatif">
-              <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
+              <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} />
             </div>
             <div className="job-footer" title={TERMS.newjob_bar_adjust}>
               Adjust spend / finishing criteria — wired in M12
@@ -218,7 +216,6 @@ export function ChatPane({
           <HardSamplesHeatmap
             dash={dash}
             isLive={isLive}
-            themeKey={themeKey}
             dashRound={dashRound}
             datasetName={datasetName}
             datasetItems={datasetItems}

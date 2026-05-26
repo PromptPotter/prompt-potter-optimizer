@@ -16,8 +16,6 @@ interface Props {
   // Freshness gate — forwarded to HardSamplesTable so the row-scoring blink
   // stops when the optimizer process dies.
   isLive: boolean;
-  // Active theme key — forwarded to the heat-map canvas for palette repaints.
-  themeKey: string;
   dashRound: number | null;
   datasetName: string | null;
   datasetItems: DatasetItem[];
@@ -79,7 +77,6 @@ function liveMeasurements(
 export function HardSamplesHeatmap({
   dash,
   isLive,
-  themeKey,
   dashRound,
   datasetName,
   datasetItems,
@@ -194,7 +191,6 @@ export function HardSamplesHeatmap({
           <HardSamplesTable
             dash={dash}
             isLive={isLive}
-            themeKey={themeKey}
             perSample={perSample}
             datasetName={datasetName}
             datasetItems={datasetItems}

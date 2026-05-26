@@ -1,19 +1,10 @@
 "use client";
 // Dataset preview for the unit in view — the sample roster + per-sample
-// measurement history that back the hard-samples table.
-//
-// Cache shape: a process-local LRU keyed on (campaignId, cycleId, scope).
-// Switching campaigns or scopes that the operator has visited recently
-// hits the cache and snaps the table instantly; first visit pays one
-// network round-trip but the prior unit's data stays on screen marked
-// stale (`isStale: true`) so the table never blanks. Each scope is
-// purely itself: the campaign slice carries this campaign's
-// measured/unmeasured counts + this campaign's per-sample dots; no
-// fallback to the dataset slice — that would let dataset-wide numbers
-// leak into "This campaign" mode, which is the opposite of what the
-// toggle is for. The optimizer's own next-sample picker always runs on
-// the dataset scope (see l1/execute.py round-subset fit); this toggle
-// is display only.
+// measurement history that back the hard-samples table. Module-level LRU
+// keyed on (campaignId, cycleId, scope); on miss, the hook fetches and
+// shows the prior slice in the meantime (isStale: true) so the table never
+// blanks. Each scope is purely itself — no fallback between campaign and
+// dataset slices; the toggle is display-only.
 
 import { useEffect, useState } from "react";
 import {
@@ -25,7 +16,6 @@ import {
   type MeasurementDot,
 } from "./api";
 
-// One scope's roster + measurement evidence.
 interface ScopeSlice {
   items: DatasetItem[];
   measuredCount: number;
@@ -35,12 +25,7 @@ interface ScopeSlice {
 
 export interface DatasetPreviewState extends ScopeSlice {
   datasetName: string | null;
-  // Held-out test fold size declared in datasets/{name}/campaign.json —
-  // scope-independent. null when the dataset declares no split.
   splitTest: number | null;
-  // Displayed data does not match the current (campaignId, cycleId, scope)
-  // — a fetch is in flight and the table is showing the prior slice. Lets
-  // the caller dim or annotate the table without ever blanking it.
   isStale: boolean;
 }
 
@@ -50,28 +35,18 @@ interface CacheEntry {
   slice: ScopeSlice;
 }
 
-const EMPTY_SLICE: ScopeSlice = {
+const EMPTY: DatasetPreviewState = {
+  datasetName: null,
+  splitTest: null,
   items: [],
   measuredCount: 0,
   unmeasuredCount: 0,
   archivePerSample: new Map(),
-};
-
-const EMPTY: DatasetPreviewState = {
-  datasetName: null,
-  splitTest: null,
-  ...EMPTY_SLICE,
   isStale: false,
 };
 
-function cacheKey(campaignId: string, cycleId: string, scope: HardSamplesScope): string {
-  return `${campaignId}::${cycleId}::${scope}`;
-}
-
-// Module-level LRU. ~12 entries is enough to keep recently-visited unit ×
-// scope pairs warm without holding stale data for the lifetime of the tab.
-// Map preserves insertion order; we read-touch by delete+set on every hit
-// and evict the oldest on overflow.
+// Module-level LRU. Map preserves insertion order; we read-touch by
+// delete+set on every hit and evict the oldest on overflow.
 const CACHE_LIMIT = 12;
 const cache = new Map<string, CacheEntry>();
 
@@ -122,35 +97,26 @@ function sliceFrom(
   };
 }
 
-// One hook, one scope at a time. The effect fires on every (unit, scope)
-// change — but cache hits short-circuit synchronously in render so a
-// recently-visited unit never blanks the table.
 export function useDatasetPreview(
   campaignId: string | null,
   cycleId: string | null,
   scope: HardSamplesScope,
 ): DatasetPreviewState {
   const wantKey =
-    campaignId && cycleId ? cacheKey(campaignId, cycleId, scope) : null;
+    campaignId && cycleId ? `${campaignId}::${cycleId}::${scope}` : null;
 
-  // Most-recently-displayed entry. Held independently of the cache so a
-  // cache eviction doesn't suddenly blank the table; only a fresh unit
-  // switch can change what we show, and even then we keep this slot as the
-  // stale-fallback until the new fetch lands.
-  const [shown, setShown] = useState<{ key: string; entry: CacheEntry } | null>(
-    null,
-  );
+  // Last successful fetch — kept across key changes so the table shows the
+  // prior slice (marked stale) while a new fetch is in flight. The effect's
+  // cancel-guard ensures only a fetch for the current wantKey writes here.
+  const [last, setLast] = useState<CacheEntry | null>(null);
 
   // Synchronous cache lookup. On a hit, snap state to it in render — the
   // render-phase guarded reset pattern documented in webapp/CLAUDE.md.
   const hit = wantKey ? cacheGet(wantKey) : null;
-  if (hit && wantKey && (!shown || shown.key !== wantKey)) {
-    setShown({ key: wantKey, entry: hit });
-  }
+  if (hit && last !== hit) setLast(hit);
 
   useEffect(() => {
-    if (!wantKey || !campaignId || !cycleId) return;
-    if (cache.has(wantKey)) return; // render-phase already swapped to it
+    if (!wantKey || !campaignId || !cycleId || cache.has(wantKey)) return;
     let cancelled = false;
     const ac = new AbortController();
     (async () => {
@@ -168,7 +134,7 @@ export function useDatasetPreview(
           slice: sliceFrom(preview.items, series?.items),
         };
         cacheSet(wantKey, entry);
-        setShown({ key: wantKey, entry });
+        setLast(entry);
       } catch {
         /* transient fetch failure — a cycle change re-runs this */
       }
@@ -179,15 +145,10 @@ export function useDatasetPreview(
     };
   }, [wantKey, campaignId, cycleId, scope]);
 
-  // Resolve what to show this frame. Cache hit wins; otherwise fall through
-  // to the stale state slot. Both stale and EMPTY paths report isStale so a
-  // consumer can dim the table or annotate the footer.
-  const entry = hit ?? shown?.entry ?? null;
-  const isStale = !!wantKey && (!hit && (shown?.key ?? null) !== wantKey);
+  const entry = hit ?? last;
+  const isStale = !!wantKey && !hit;
 
-  if (!entry) {
-    return { ...EMPTY, isStale: !!wantKey };
-  }
+  if (!entry) return { ...EMPTY, isStale };
   return {
     datasetName: entry.datasetName,
     splitTest: entry.splitTest,
