@@ -81,6 +81,110 @@ patterns.
   new decision needs a stronger reason than "single caller."
   **Pattern:** single-caller indirection (revisit).
 
+## Frontend modernization + perf opportunities
+
+Lens: deliberate hand-roll or underused framework capability —
+distinct from the vibe-coded-remainder lens of § Active backlog. Each
+item is an independent win, listed cheapest-first. Discovered during
+the `371c476b` dashboard-writer-coalesce arc; none touched in that
+commit.
+
+### Cheap (hours)
+
+- **`CycleStreamContext.Provider` value not memoized** —
+  `webapp/lib/poll.tsx:446`. The provider passes `state` (return of
+  `useCycleStreamSource`), a new object on every poll tick — even on
+  a 304-skipped poll. Every context consumer re-renders. `React.memo`
+  on the four chart components catches the shallow-equal-props case
+  but doesn't help components reading other fields. **Action:** wrap
+  the value in `useMemo` keyed on its component fields; or split into
+  two contexts — steady metadata (`campaignId`, `cycleId`, `unitKey`)
+  vs polling payload (`dash`, `status`). Verify in React DevTools
+  Profiler: chart subtree no longer re-renders on a 304-skipped tick.
+  **Pattern:** unnecessary re-render fanout.
+
+- **Audit `"use client"` for server-component candidates** —
+  `webapp/components/**/*.tsx`. All 65 `.tsx` files declare
+  `"use client"`. App Router's server components are entirely unused.
+  Static-export still benefits: server-component code stays out of
+  the client bundle. **Action:** identify leaves with no browser APIs
+  (no `useState` / `useEffect` / `useRef` / event handlers /
+  `window` / `document`) and remove the directive. Starter candidates:
+  `components/ui/card.tsx`, `components/whatif/icons.tsx`,
+  `components/dashboard/MeasHeatCell.tsx`,
+  `components/whatif/FitnessRankSummary.tsx`,
+  `components/ui/states.tsx`. Verify via bundle-size diff in `out/`.
+  **Pattern:** underused framework capability.
+
+### Medium (half-day to a day)
+
+- **Enable React 19 Compiler** — `webapp/next.config.ts` +
+  `webapp/eslint.config.mjs`. React 19 ships an auto-memoizing
+  compiler (`babel-plugin-react-compiler` +
+  `eslint-plugin-react-compiler`). Would replace most manual
+  `React.memo` / `useMemo` / `useCallback`, including the
+  `l1RoundsKey` fingerprint (`LineageTree.tsx:73`) and the 12
+  `useMemo`s in `HardSamplesTable.tsx`. **Action:** add the plugin
+  pair, enable in Next config (`experimental.reactCompiler = true`),
+  run typecheck + build, then strip redundant manual memos in a
+  follow-up. **Blocker:** verify the compiler is stable on Next
+  16.2.5 (was RC at React 19 launch; check release notes before
+  shipping). **Pattern:** underused framework capability.
+
+- **SSE replaces 2 s polling** —
+  `promptpotter/presentation/api/routers/campaigns/cycles.py` +
+  `webapp/lib/poll.tsx`. Backend pushes a tick event when
+  `CycleEventLog` advances; client refetches `dashboard.json` only on
+  tick. Eliminates 2 s 304 chatter and shortens time-to-update.
+  FastAPI: `EventSourceResponse` via `sse-starlette`. **Action:** add
+  `GET /api/campaigns/{id}/cycles/{cid}/events` returning an SSE
+  stream of `{kind: "tick", last_modified: ...}`; client opens
+  `EventSource` per `unitKey`, refetches dashboard on each event;
+  fall back to interval polling if EventSource fails. **Blocker:**
+  confirm static-export behind FastAPI doesn't buffer the SSE
+  channel. **Pattern:** push-vs-poll modernization.
+
+### Larger (multi-day)
+
+- **Migrate `lib/poll.tsx` to SWR or TanStack Query** —
+  `webapp/lib/{poll.tsx,useFetch.ts,usePoll.ts}`. Both libraries
+  handle conditional polling, dedup, focus revalidation, exponential
+  backoff, and 304 plumbing for free. The hand-roll predates both
+  being viable for this shape. **Action:** SWR is the closer fit for
+  read-only polling. Migration deletes most of `poll.tsx`, all of
+  `useFetch.ts`, all of `usePoll.ts`. **Blocker:** verify SWR
+  revalidation interacts cleanly with the render-phase reset on
+  `unitKey` change. Pairs naturally with the SSE migration (drop
+  interval once the SWR mutator is wired to SSE ticks).
+  **Pattern:** hand-roll → library swap.
+
+- **Virtualize `LineageTree` + `HardSamplesTable`** —
+  `webapp/components/dashboard/{LineageTree.tsx,HardSamplesTable.tsx}`.
+  Render whole list/tree today; fine at current sizes (tens to
+  low-hundreds of rows). Will degrade at BBEH-scale or after long
+  campaigns. **Action:** `react-window` (fixed-height rows) or
+  `@tanstack/react-virtual` (flexible). **Blocker:** profile first —
+  premature below ~300 rows. **Pattern:** preempt-before-scale.
+
+- **Move `LineageTree` layout to a Web Worker** —
+  `webapp/components/dashboard/LineageTree.tsx`. The sort +
+  segment-mutation walk is O(N) per layout. Currently fine after the
+  `l1RoundsKey` fingerprint shipped. If profiler later shows the
+  layout step blocking the main thread on a large tree, move into a
+  Worker via `Comlink` or vanilla `postMessage`. **Blocker:** profile
+  first. **Pattern:** preempt-before-scale.
+
+### Backend perf (parked, verify-first)
+
+- **Dashboard route re-parses on every non-304 hit** —
+  `promptpotter/presentation/api/routers/campaigns/cycles.py::get_cycle_dashboard`.
+  After the 304 short-circuit, hits still `read_text` +
+  `json.loads` on the whole file. Cache the parsed dict in-process
+  keyed on `(path, mtime_ns)`. Sub-millisecond per hit at current
+  ~90 KB; only matters if dashboard grows materially. **Blocker:**
+  measure first; likely below noise floor today. **Pattern:**
+  premature optimization (verify-first).
+
 ## Audit guidance — what to hunt for
 
 The bar for entries here is **high confidence after verification**,

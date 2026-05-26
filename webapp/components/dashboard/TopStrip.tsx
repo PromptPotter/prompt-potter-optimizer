@@ -1,9 +1,5 @@
-/* eslint-disable react-hooks/refs -- qps is poll-driven in a useEffect
-   below; reading the ref during render is the canonical "rolling average
-   across renders" pattern this strip needs. File-level disable matches
-   the prior ProgressCard convention. */
 "use client";
-import { useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { TERMS } from "@/lib/terms";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { cycleStatusLabel } from "@/lib/cycle-status";
@@ -61,7 +57,7 @@ function estimateQps(state: QpsState, dash: DashboardSnapshot | null): number | 
   return state.qps;
 }
 
-export function TopStrip({ dash, dashRound }: Props) {
+export const TopStrip = memo(function TopStrip({ dash, dashRound }: Props) {
   // Sparkline: running-best composite over rounds, read from the
   // dashboard's per-round summary block.
   const spark = useMemo(() => {
@@ -149,4 +145,4 @@ export function TopStrip({ dash, dashRound }: Props) {
       </div>
     </div>
   );
-}
+});

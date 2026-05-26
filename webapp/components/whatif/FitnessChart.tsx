@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { ensureChartRegistered } from "@/lib/chart-config";
 import { cssRgba, getCss } from "@/lib/theme";
@@ -94,7 +94,7 @@ interface Props {
   onSelect: (bar: BarSlot | null) => void;
 }
 
-export function FitnessChart({
+export const FitnessChart = memo(function FitnessChart({
   bars,
   showComposite,
   showWhatIf,
@@ -294,4 +294,4 @@ export function FitnessChart({
       <Bar key={themeKey} data={data} options={options} plugins={CHART_PLUGINS} />
     </div>
   );
-}
+});

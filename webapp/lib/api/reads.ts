@@ -1,6 +1,6 @@
 // Read endpoints — thin GET wrappers over the FastAPI surface.
 
-import { API, jget } from "./client";
+import { API, jget, jgetConditional, type Conditional } from "./client";
 import type {
   ActiveSessionResponse,
   CampaignDetail,
@@ -129,6 +129,25 @@ export function fetchDashboard(
   return jget<Record<string, unknown>>(
     `${API}/campaigns/${encodeURIComponent(campaignId)}` +
       `/cycles/${encodeURIComponent(cycleId)}/dashboard`,
+    signal,
+  );
+}
+
+// Conditional variant for the 2 s poll. Pass the prior response's
+// `Last-Modified` header as `ifModifiedSince`; on unchanged mtime the
+// server returns 304 and the poll loop short-circuits before parsing /
+// re-rendering. The fresh-campaign warming_up payload arrives here as a
+// 200 with `{warming_up: true, ...}` (the route never 404s).
+export function fetchDashboardConditional(
+  campaignId: string,
+  cycleId: string,
+  ifModifiedSince?: string | null,
+  signal?: AbortSignal,
+): Promise<Conditional<Record<string, unknown>>> {
+  return jgetConditional<Record<string, unknown>>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
+      `/cycles/${encodeURIComponent(cycleId)}/dashboard`,
+    ifModifiedSince,
     signal,
   );
 }

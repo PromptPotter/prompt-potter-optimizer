@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { Line } from "react-chartjs-2";
 import { ensureChartRegistered, lineChartDefaults } from "@/lib/chart-config";
 import { cssRgba, getCss } from "@/lib/theme";
@@ -18,7 +18,7 @@ interface Props {
   themeKey: string;
 }
 
-export function TrendChart({ dash, themeKey }: Props) {
+export const TrendChart = memo(function TrendChart({ dash, themeKey }: Props) {
   const points: Point[] = useMemo(() => {
     const out: Point[] = [];
     for (const r of dash?.rounds ?? []) {
@@ -61,4 +61,4 @@ export function TrendChart({ dash, themeKey }: Props) {
       </div>
     </CardFrame>
   );
-}
+});

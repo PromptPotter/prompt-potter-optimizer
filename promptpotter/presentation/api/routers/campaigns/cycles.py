@@ -8,9 +8,12 @@ resolves the session-family root server-side.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+from email.utils import format_datetime, parsedate_to_datetime
 from typing import Any, Literal
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.store import cycle_dir_for, root_cycle_id
@@ -148,17 +151,68 @@ async def get_round(
     return round_data
 
 
+def _http_date(epoch_seconds: float) -> str:
+    """Format an mtime as an HTTP-date (RFC 7231 §7.1.1.1). Second resolution."""
+    return format_datetime(datetime.fromtimestamp(int(epoch_seconds), tz=UTC), usegmt=True)
+
+
+def _client_seen_at_or_after(if_modified_since: str | None, mtime_epoch: float) -> bool:
+    """Return True iff the client's `If-Modified-Since` covers the current mtime.
+    Malformed header → False (serve full body)."""
+    if not if_modified_since:
+        return False
+    try:
+        client_dt = parsedate_to_datetime(if_modified_since)
+    except (TypeError, ValueError):
+        return False
+    if client_dt is None:
+        return False
+    return int(client_dt.timestamp()) >= int(mtime_epoch)
+
+
 @campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
-async def get_cycle_dashboard(store: StoreDep, campaign_id: str, cycle_id: str) -> dict[str, Any]:
+async def get_cycle_dashboard(
+    request: Request, store: StoreDep, campaign_id: str, cycle_id: str
+) -> Response:
     """Live session telemetry — ``cycles/{session_root}/dashboard.json``.
 
     ``dashboard.json`` is written once per session, into the session's
     root cycle dir; the session root and its forks share it. Pass any
     cycle of the session — the session-family root is resolved here.
+
+    Honors ``If-Modified-Since`` and returns ``304 Not Modified`` when the
+    on-disk mtime hasn't advanced — keeps the 2 s webapp poll cheap during
+    quiescent stretches. When ``dashboard.json`` does not yet exist (fresh
+    campaign before origin has flushed its first snapshot), returns a
+    ``warming_up`` payload at 200 instead of 404 so the webapp can render a
+    "campaign initialising" placeholder rather than appear offline.
     """
     session_root = root_cycle_id(cycle_id)
-    path = cycle_dir_for(store.base_dir, campaign_id, session_root) / "dashboard.json"
+    session_dir = cycle_dir_for(store.base_dir, campaign_id, session_root)
+    path = session_dir / "dashboard.json"
+
     if not path.is_file():
-        raise HTTPException(404, f"dashboard.json not present for {campaign_id}/{session_root}")
+        # Fresh-campaign warming_up shape. Last-Modified rides the session
+        # dir's mtime so polling clients still get cheap 304s while waiting.
+        try:
+            mtime_epoch = session_dir.stat().st_mtime
+            headers = {"Last-Modified": _http_date(mtime_epoch)}
+            if _client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
+                return Response(status_code=304, headers=headers)
+        except FileNotFoundError:
+            headers = {}
+        warming: dict[str, Any] = {
+            "warming_up": True,
+            "campaign_id": campaign_id,
+            "cycle_id": session_root,
+            "phase_hint": "origin",
+        }
+        return JSONResponse(warming, headers=headers)
+
+    mtime_epoch = path.stat().st_mtime
+    headers = {"Last-Modified": _http_date(mtime_epoch)}
+    if _client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
+        return Response(status_code=304, headers=headers)
+
     dashboard: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    return dashboard
+    return JSONResponse(dashboard, headers=headers)

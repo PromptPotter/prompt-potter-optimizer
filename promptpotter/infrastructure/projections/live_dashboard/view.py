@@ -19,6 +19,7 @@ Three cohesive concerns share this class — read it in three slices:
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,6 +29,7 @@ from promptpotter.domain.cycle_paths import SessionFamilyDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import (
+    CycleRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
@@ -67,6 +69,13 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
 
 logger = logging.getLogger(__name__)
+
+
+# Coalesce burst writes from the per-sample / per-token / per-LLM-call hot
+# paths onto one debounced disk write. The 2 s webapp poll cadence means
+# sub-second writes are wasted; phase boundaries still flush immediately so
+# `dashboard.json` is current at every round/origin/L1 transition.
+_DASHBOARD_DEBOUNCE_S = 0.25
 
 
 # L1_SCORE absent: driven by sample_started / sample_scored.
@@ -324,6 +333,14 @@ class LiveDashboardView(DerivedView):
             origin_acc=float((self.state.get("origin") or {}).get("accuracy") or 0.0),
             best_acc=float(self.state.get("best") or 0.0),
         )
+        # Debounce coalesces snapshot/token/LLM-call writes onto one disk
+        # flush per ~250 ms (well under the 2 s poll cadence). RLock so the
+        # boundary-flush path can be called from inside a handler that
+        # already holds the lock via `on_record`. The Timer thread acquires
+        # the same lock so it can never race a mutating handler.
+        self._persist_lock: threading.RLock = threading.RLock()
+        self._persist_timer: threading.Timer | None = None
+        self._persist_dirty: bool = False
 
         self._persist()
 
@@ -388,13 +405,65 @@ class LiveDashboardView(DerivedView):
         """Finalize hook — writes terminal state + reason so dashboard tail-readers see it without index.json."""
         self.state["stop_reason"] = reason
         self._set_state("stopped")
-        self._persist()
+        self._flush_pending_persist()
 
     def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:
         """No-op hook — active-cycle identity now lives in `active_session.json`; kept so the
         runner's `_fork_sibling_setup` call site doesn't have to change.
         """
         del old_cycle_id, new_cycle_id, from_round
+
+    # -- Write coalesce -------------------------------------------------------
+    # Snapshot / token / LLM-call handlers fire hundreds of times per round;
+    # serialising 90 KB of JSON on each one buys nothing the 2 s polling
+    # webapp can see. `_schedule_persist` arms a debounced flush; phase
+    # boundaries call `_flush_pending_persist` so round/origin/L1 transitions
+    # land on disk instantly.
+
+    def on_record(self, record: CycleRecord, offset: int) -> None:
+        """Serialise every event under `_persist_lock` so the Timer-thread
+        flush can't observe mid-mutation `state` / `_buffer.candidates`."""
+        with self._persist_lock:
+            super().on_record(record, offset)
+
+    def _schedule_persist(self) -> None:
+        """Mark dirty and arm a 250 ms debounce. Caller must hold `_persist_lock`."""
+        self._persist_dirty = True
+        if self._persist_timer is not None:
+            self._persist_timer.cancel()
+        timer = threading.Timer(_DASHBOARD_DEBOUNCE_S, self._fire_debounced_persist)
+        timer.daemon = True
+        self._persist_timer = timer
+        timer.start()
+
+    def _fire_debounced_persist(self) -> None:
+        """Timer callback — runs on a Timer thread. Swallows exceptions so a
+        torn-down cycle dir (test cleanup, mid-shutdown disk error) can't
+        propagate into the daemon-thread default handler."""
+        try:
+            with self._persist_lock:
+                if not self._persist_dirty:
+                    return
+                self._persist_dirty = False
+                self._persist_timer = None
+                self._persist()
+        except Exception:
+            logger.exception("debounced dashboard persist failed")
+
+    def _flush_pending_persist(self) -> None:
+        """Cancel any pending debounce and write immediately. Called from
+        phase-boundary handlers, `mark_stopped`, and `drain`."""
+        with self._persist_lock:
+            if self._persist_timer is not None:
+                self._persist_timer.cancel()
+                self._persist_timer = None
+            self._persist_dirty = False
+            self._persist()
+
+    def drain(self) -> None:
+        """Teardown hook — flush any pending debounced write so the on-disk
+        snapshot mirrors the final ledger truth before the cycle closes."""
+        self._flush_pending_persist()
 
     # -- Ledger subscription (sole ingress) -----------------------------------
     # Phases → scalars; snapshots → per-round candidate structures. No second dispatch.
@@ -418,7 +487,7 @@ class LiveDashboardView(DerivedView):
             recent: list[dict[str, Any]] = list(self.state.get("recent_backend_warnings") or [])
             recent.append(warning)
             self.state["recent_backend_warnings"] = recent[-10:]
-            self._persist()
+            self._flush_pending_persist()
             return
 
         if record.phase == "round" and record.event == "display":
@@ -436,7 +505,7 @@ class LiveDashboardView(DerivedView):
                 rounds_list.append(summary_dict)
                 rounds_list.sort(key=lambda r: int(r.get("round") or 0))
                 self.state["rounds"] = rounds_list
-                self._persist()
+                self._flush_pending_persist()
             return
 
         # Origin exit: push the live l1_score block to the recorder so `round_0000.json`
@@ -463,7 +532,7 @@ class LiveDashboardView(DerivedView):
         # historical `rounds[]` is untouched.
         if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             self._buffer.reset(int(self.state["round"]))
-        self._persist()
+        self._flush_pending_persist()
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         ev = record.event
@@ -478,13 +547,13 @@ class LiveDashboardView(DerivedView):
             sid = payload.get("sample_id")
             self.state["current_sample_id"] = int(sid) if sid is not None else None
             self._set_state("scoring")
-            self._persist()
+            self._schedule_persist()
         elif ev == "sample_scored":
             result = payload.get("result") or {}
             self._update_sample_markers(ci, ct, qi, qt)
             self._absorb_sample_scored(result, last_in_candidate=(qi + 1 >= qt))
             self._buffer.append_sample(ci, ct, qi, qt, result)
-            self._persist()
+            self._schedule_persist()
         elif ev == "candidate_started":
             self._buffer.seed_candidate(
                 ci,
@@ -506,12 +575,12 @@ class LiveDashboardView(DerivedView):
             # Mirror the latest snapshot into the shared core so LiveDisplay sees
             # the same round-wide P(best) state.
             apply_p_best_update(self._core, current_id, n_samples, p_best)
-            self._persist()
+            self._schedule_persist()
         elif ev == "sample_order_preview":
             order_raw = payload.get("sample_order")
             if isinstance(order_raw, list):
                 self.state["hard_sample_order"] = [int(sid) for sid in order_raw]
-                self._persist()
+                self._schedule_persist()
         elif ev == "pobb_backfill":
             self._append_backfill(
                 int(record.round or 0),
@@ -520,7 +589,7 @@ class LiveDashboardView(DerivedView):
                 int(payload.get("sample_id") or 0),
                 [str(p) for p in (payload.get("prior_ids") or [])],
             )
-            self._persist()
+            self._schedule_persist()
 
     # -- Scalar mutations -----------------------------------------------------
 
@@ -635,7 +704,7 @@ class LiveDashboardView(DerivedView):
             + spend.get("loop", {}).get("used_usd", 0.0),
             6,
         )
-        self._persist()
+        self._schedule_persist()
 
     @property
     def spend_total_used_usd(self) -> float:
@@ -660,7 +729,7 @@ class LiveDashboardView(DerivedView):
             "candidate_idx": record.candidate_idx,
             "started_at_ms": record.started_at_ms,
         }
-        self._persist()
+        self._schedule_persist()
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
         """Mirror the call into the sticky LLM-node store + clear the in-flight slot.
@@ -680,14 +749,14 @@ class LiveDashboardView(DerivedView):
             and in_flight.get("call_id") == record.call_id
         ):
             self.state["in_flight"] = None
-        self._persist()
+        self._schedule_persist()
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
         """Heartbeat → re-persist so `wallclock_serialized_at` stays fresh during 30-90s
         optimizer LLM phases that fire no other records. No state mutation, only the timestamp moves.
         """
         del record
-        self._persist()
+        self._schedule_persist()
 
     def _update_current_acc(self, scores: dict[str, Any]) -> None:
         self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)

@@ -12,7 +12,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { fetchDashboard } from "./api";
+import { fetchDashboardConditional } from "./api";
 import type {
   OriginSummary,
   RoundSummary,
@@ -70,6 +70,11 @@ export interface DashboardSnapshot {
   // by this when the operator's "sync with live sort" tick is on.
   // ``null`` before the first sorter fit lands.
   hard_sample_order?: number[] | null;
+  // Fresh-campaign placeholder — set by the server when `dashboard.json`
+  // hasn't been written yet (origin still running). The companion
+  // `phase_hint` names what's blocking; the rest of the shape is empty.
+  warming_up?: boolean;
+  phase_hint?: string;
   [key: string]: unknown;
 }
 
@@ -246,6 +251,12 @@ function useCycleStreamSource(
   // the polled unit. Once it crosses STAMP_MISMATCH_LIMIT the banner says
   // so — a never-matching stamp can't leave the UI silently on "Connecting…".
   const stampMismatchRef = useRef(0);
+  // Last server-issued `Last-Modified` for this unit's dashboard.json.
+  // Sent back as `If-Modified-Since` next tick so the server can short-
+  // circuit with 304 when the file mtime hasn't advanced. Reset on unit
+  // switch so a stale value from the prior unit can't suppress the
+  // first real fetch of the new unit.
+  const lastModifiedRef = useRef<string | null>(null);
 
   // Change-detect on the COMPOSITE unit identity (campaign + cycle). A
   // cycle_id is unique only within its campaign — switching to another
@@ -259,6 +270,7 @@ function useCycleStreamSource(
     cycleRef.current = cycleId;
     campaignRef.current = campaignId;
     stampMismatchRef.current = 0;
+    lastModifiedRef.current = null;
     // Identity changed — hard-reset every cycle-scoped field so the prior
     // unit's dash snapshot and `● Live` badge can't linger for a frame
     // while the first poll of the new unit is in flight.
@@ -280,7 +292,8 @@ function useCycleStreamSource(
   }, [campaignId, cycleId]);
 
   // The poll tick. `usePoll` owns the interval, the hidden-tab pause, and
-  // the per-tick AbortController; this fetches dashboard.json and guards its
+  // the per-tick AbortController; this fetches dashboard.json (via
+  // If-Modified-Since so unchanged ticks 304 cheaply) and guards its
   // identity stamp. The completed-round summary block rides this same
   // payload (`dash.rounds[]`) — no second fetch path.
   const tick = async (signal: AbortSignal) => {
@@ -291,8 +304,62 @@ function useCycleStreamSource(
       // dashboard.json is per-session — it lives in the session's root
       // cycle dir, shared by that session's forks. The server resolves
       // the session-family root from the viewed cycle id.
-      const dash = (await fetchDashboard(cmp, id, signal)) as DashboardSnapshot;
+      const resp = await fetchDashboardConditional(
+        cmp,
+        id,
+        lastModifiedRef.current,
+        signal,
+      );
       if (signal.aborted) return;
+      if (resp.lastModified) lastModifiedRef.current = resp.lastModified;
+
+      // 304 — file mtime hasn't advanced since the last fetch. Skip the
+      // setState entirely unless the age bucket crossed a threshold
+      // (Live → Stale → Snapshot); a no-op `setState(prev => prev)` is
+      // bailed-out by React, so consumers don't re-render.
+      if (resp.kind === "not_modified") {
+        setState((prev) => {
+          const wall = Date.parse(prev.dash?.wallclock_serialized_at || "");
+          const ageS = Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
+          const bucket = ageBucket(ageS);
+          if (prev.termKey === bucket.termKey) return prev;
+          return {
+            ...prev,
+            status: bucket.status,
+            statusText: bucket.statusText,
+            statusHint: bucket.statusHint,
+            ageS,
+            termKey: bucket.termKey,
+            isLive: bucket.status === "live",
+          };
+        });
+        return;
+      }
+
+      const dash = resp.data as DashboardSnapshot;
+
+      // Fresh-campaign warming_up payload (server returns this at 200 when
+      // dashboard.json doesn't exist yet — typically while origin is
+      // running). Distinct user-visible status; no charts to render until
+      // the first real snapshot lands.
+      if (dash.warming_up === true) {
+        stampMismatchRef.current = 0;
+        setState((prev) => ({
+          ...prev,
+          dash,
+          status: "stale",
+          statusText: "Origin running",
+          statusHint:
+            "First snapshot lands when origin completes — campaign is initialising.",
+          termKey: "status_warming_up",
+          ageS: null,
+          error: null,
+          isLive: false,
+          phase: "warming_up",
+        }));
+        return;
+      }
+
       // Payload-identity guard: dashboard.json self-stamps the
       // session-family it describes. Drop any payload that doesn't match
       // the unit we polled for — a late response from the prior cycle, or

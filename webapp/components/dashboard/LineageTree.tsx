@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { rootCycleId, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
@@ -43,7 +43,12 @@ interface ChildPos {
   labelX: number;
 }
 
-export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props) {
+export const LineageTree = memo(function LineageTree({
+  dash,
+  campaignId,
+  cycleId,
+  onSelectCycle,
+}: Props) {
   const { candidate: selected, setSelectionForCandidate } = useSelection();
 
   // One canonical candidate spine for the whole dashboard. Lineage
@@ -59,6 +64,24 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
   }, [byRound]);
 
   const originRow = byRound.get(0)?.[0] ?? null;
+
+  // Structural fingerprint of `l1Rounds` — captures round + per-row idx +
+  // winner flag, the only `row` fields the layout below reads. Accuracy /
+  // composite updates within a round bypass this key, so the heavy
+  // segment-mutation loop only re-runs when the tree shape actually
+  // changes (new round, new candidate, winner flip).
+  const l1RoundsKey = useMemo(
+    () =>
+      l1Rounds
+        .map(
+          (r) =>
+            `${r.round}:${r.rows
+              .map((row) => `${row.idx}${row.is_winner ? "*" : ""}`)
+              .join(",")}`,
+        )
+        .join("|"),
+    [l1Rounds],
+  );
 
   // Walk rounds in order. Each round's children sit at column N (1-indexed),
   // vertically centered on the parent of round N (origin or prior winner).
@@ -112,7 +135,12 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
       totalW: LEFT_PAD + (l1Rounds[l1Rounds.length - 1]?.round ?? 1) * ROUND_W + 80,
       originY: l1Rounds.length > 0 ? (segs[0]?.py ?? TOP_PAD) : TOP_PAD,
     };
-  }, [l1Rounds]);
+    // Heavy layout — keyed on the structural fingerprint, not `l1Rounds`
+    // identity, so in-round accuracy updates don't re-trigger it. The closure
+    // still reads the latest `l1Rounds` (captured per render) for the actual
+    // row objects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [l1RoundsKey]);
 
   // Pure render: select a row when not selected, deselect when re-clicked.
   // Routed through SelectionContext.setSelectionForCandidate so the round
@@ -305,4 +333,4 @@ export function LineageTree({ dash, campaignId, cycleId, onSelectCycle }: Props)
       </div>
     </CardFrame>
   );
-}
+});
