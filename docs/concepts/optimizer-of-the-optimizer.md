@@ -70,7 +70,7 @@ roughly 360 inner candidate-evaluations. Plan accordingly:
   benchmark — hours.
 
 Outer dashboard's `dashboard.json::spend` block (see
-[`../specs/spend-and-tenancy.md`](../specs/spend-and-tenancy.md))
+[`../adr/0003-spend-and-tenancy.md`](../adr/0003-spend-and-tenancy.md))
 surfaces accumulated cost; check it before extending runs.
 
 ## What stays the same on the outer cycle

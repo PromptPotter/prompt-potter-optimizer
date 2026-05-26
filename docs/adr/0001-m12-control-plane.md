@@ -5,8 +5,8 @@ deciders: [maintainer]
 consulted: [identity-foundation, spend-and-tenancy]
 informed: []
 relates:
-  - docs/specs/identity-foundation.md
-  - docs/specs/spend-and-tenancy.md
+  - docs/adr/0002-identity-foundation.md
+  - docs/adr/0003-spend-and-tenancy.md
 supersedes: []
 superseded-by: []
 tags: [networking, control-plane, wire-contract, m12]
@@ -231,7 +231,7 @@ Chronological log of what's been certified out of this ADR into the docs layer. 
 
 ### Out of scope (forever, or for other documents)
 
-- OIDC client + middleware implementation — Profile C consumes [`identity-foundation.md`](../specs/identity-foundation.md) Stage 1.
+- OIDC client + middleware implementation — Profile C consumes [`0002-identity-foundation.md`](0002-identity-foundation.md) Stage 1.
 - `JobRegistry` internal data model — Profile D names the constraints; implementation lives elsewhere.
 - Webapp redesign (component-level) — design surface in `.impeccable.md`.
 - Multi-user merge / CRDT operations — identity-foundation Stage 2+.
@@ -240,8 +240,8 @@ Chronological log of what's been certified out of this ADR into the docs layer. 
 
 ### Cross-refs
 
-- [`docs/specs/identity-foundation.md`](../specs/identity-foundation.md) — foundation Profile C lights up Stage 1 of.
-- [`docs/specs/spend-and-tenancy.md`](../specs/spend-and-tenancy.md) — the highway template this ADR mirrors verbatim (first consumer of the identity seam).
+- [`0002-identity-foundation.md`](0002-identity-foundation.md) — foundation Profile C lights up Stage 1 of.
+- [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md) — the highway template this ADR mirrors verbatim (first consumer of the identity seam).
 - [`docs/specs/m12-multi-connector.md`](../specs/m12-multi-connector.md) — orthogonal track (L4 self-recursion).
 - [`docs/specs/state-sync-cleanup.md`](../specs/state-sync-cleanup.md) — Phase 1 prerequisite.
 - [`docs/specs/m13-chat-first-user-web.md`](../specs/m13-chat-first-user-web.md) — end-state product surface.

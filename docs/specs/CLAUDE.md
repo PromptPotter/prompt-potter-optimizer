@@ -15,15 +15,15 @@ Permanent specs that stay alive after their target milestone ships. Items don't 
 | Spec | What |
 |---|---|
 | [ADR-0001 m12-control-plane](../adr/0001-m12-control-plane.md) | **Permanent system-networking contract** (MADR format). Defines the Control-remote I/O kind (§0-amended), the closed inbound + outbound sets ([`m12-api-openapi.yaml`](m12-api-openapi.yaml) + [`m12-events-asyncapi.yaml`](m12-events-asyncapi.yaml)), the Profile gradient (A-E), and the 20-item security checklist every M12-onward interactive PR is measured against. Drift detector: [`tests/test_control_plane_drift.py`](../../tests/test_control_plane_drift.py). |
+| [ADR-0002 identity-foundation](../adr/0002-identity-foundation.md) | **Permanent multi-tenancy front door** (MADR format). OIDC wire + PostgreSQL RLS data + SCIM 2.0 internal model; three-stage staging (Stage 0 single-operator shipped → Stage 1 OIDC-client SaaS → Stage 2 OIDC-provider giant); six no-drift gates (`tests/test_identity.py` covers #3/#4/#6 at Stage 0). Every multi-tenant downstream is a consumer. |
+| [ADR-0003 spend-and-tenancy](../adr/0003-spend-and-tenancy.md) | **First payload riding the identity seam** (MADR format). Token + cost telemetry rides the canonical `events.jsonl` ledger as `TokenUsageRecord` via kwargs-only `emit_token_usage` over `_CYCLE_LEDGER` ContextVar; `LiveDashboardView._handle_token_usage` sole writer of `dashboard.json::spend`; halt probe is a clean property accessor. The template every future `emit_*` per-call telemetry follows. |
 
 ## Forward direction
 
 [roadmap.md](roadmap.md) is the front door. Specs below describe direction-of-travel, not chapter-and-verse implementation:
 
-- **[identity foundation](identity-foundation.md)** — **load-bearing front door for the multi-tenancy cluster.** OIDC (wire) + RLS (data) contracts; three-stage staging (single-operator → OIDC-client SaaS → OIDC-provider giant). Every spec below is a consumer.
 - M10: [prompt-iteration framework](m10-prompt-iteration-framework.md) · [operator control loop](m10-operator-control-loop.md)
 - M11: [publication benchmarks](m11-publication-benchmarks.md)
-- [spend tracking](spend-and-tenancy.md) — first consumer of identity-foundation; lands the Stage-0 `IdentityContext` reification with spend as payload
 - M12: [multi-connector](m12-multi-connector.md) (orthogonal to the wire surface; control-plane is a permanent contract above)
 - M13: [chat-first user web](m13-chat-first-user-web.md) (Install / User / Project nouns mapped onto OIDC claims; Stage 2 considered)
 - [state-sync cleanup](state-sync-cleanup.md) (pre-whitelabel foundation; sequence Phase 1 before spend-and-tenancy reification) · [m12+ backlog](m12-plus-backlog.md)

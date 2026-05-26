@@ -2,7 +2,7 @@
 
 **Status:** spec only — no code. Replaces the abandoned `m12-multi-tenant-session-skeleton.md` (sidebar-tree shape mis-targeted product direction). Parent: [`m12-multi-connector.md`](m12-multi-connector.md) (Track 3 webapp Phase 2 unblocks this).
 
-**Depends on:** [`identity-foundation.md`](identity-foundation.md) Stages 1 + 2 — Stage 1 (OIDC client federating to Google / Apple / GitHub) covers casual auth; Stage 2 (becoming an OIDC provider by fronting Zitadel / Ory / Authentik / Keycloak) is considered when self-hosters demand native identity that doesn't depend on third-party providers.
+**Depends on:** [`ADR-0002 identity-foundation`](../adr/0002-identity-foundation.md) Stages 1 + 2 — Stage 1 (OIDC client federating to Google / Apple / GitHub) covers casual auth; Stage 2 (becoming an OIDC provider by fronting Zitadel / Ory / Authentik / Keycloak) is considered when self-hosters demand native identity that doesn't depend on third-party providers.
 
 ## What this covers
 
@@ -13,7 +13,7 @@ End-state product surface: claude.ai-shape. One admin self-hosts the install; en
 The nouns are product-language; the substrate is OIDC (per identity-foundation Contract A). Mapping the nouns onto OIDC claims now means the identity model survives Stage 1 (federated) → Stage 2 (we become the issuer) without renaming anything.
 
 - **Install** — one administrator. Hosts PromptPotter. Brands it (whitelabel slot at `projects/{install_id}/tenant.json`). Onboards web users. **OIDC mapping:** `Install` = the `iss` (issuer) URL of our future Stage-2 provider; in Stage 1 every install federates to upstream IdPs and `install_id` is install-local (the operator's own choice at deploy time).
-- **User** — signs up over the web, casual auth. 1–2 connectors typically. Owns N projects. **OIDC mapping:** `User` = `sub` (subject) within the install's issuer; `user_id = f"{issuer}:{sub}"` per identity-foundation's `IdentityContext`. Stage 1: `sub` comes from Google / Apple / GitHub. Stage 2: from our own issuer. Each `User` record is a SCIM 2.0 Core resource (see [`identity-foundation.md` § Data model](identity-foundation.md#data-model--scim-20-core--enterpriseuser)) carrying the `Install`-scoped `org_id`; user records on disk use SCIM field names verbatim — no custom-named columns.
+- **User** — signs up over the web, casual auth. 1–2 connectors typically. Owns N projects. **OIDC mapping:** `User` = `sub` (subject) within the install's issuer; `user_id = f"{issuer}:{sub}"` per identity-foundation's `IdentityContext`. Stage 1: `sub` comes from Google / Apple / GitHub. Stage 2: from our own issuer. Each `User` record is a SCIM 2.0 Core resource (see [`ADR-0002 § Data model`](../adr/0002-identity-foundation.md#data-model--scim-20-core--enterpriseuser)) carrying the `Install`-scoped `org_id`; user records on disk use SCIM field names verbatim — no custom-named columns.
 - **Project** — the three-drop unit: dataset + `context.md` (task framing) + `pipeline.json`. Today's `datasets/{name}/` is exactly this — just not surfaced as a project. **OIDC mapping:** project scope rides the custom `tenant_id` claim — one user's projects share a `tenant_id`; install-level cross-user measurement sharing happens at the dataset-scoped `archive/`, not in claims.
 - **Campaign** — one optimization run inside a project. Multiple per project; user can compare them. Maps 1:1 to today's cycle.
 

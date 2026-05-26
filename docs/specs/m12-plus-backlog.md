@@ -39,7 +39,7 @@ M12+ is the opportunistic bucket. Items here ship after M12 as user demand, time
 | ~~Self-optimization (L4) — completion~~ | **Promoted to M12** ([`m12-multi-connector.md`](m12-multi-connector.md) Track 4). M10 ships partial (`m10-prompt-iteration-framework.md` + `m10-cleanup.md` §3.5 contract pin + self-optimization fixture); M11 ships the connector ([`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) Track 5); M12 ships the outer-loop closure run. The residual blocker that originally lived here (PromptPotter-as-backend adapter + `pipeline.json`) is now M11 Track 5 work. |
 | Model comparison matrix | Same benchmark across multiple target LLMs |
 | Web scrape ablation | Quality vs cost/latency tradeoff for backends that do web retrieval |
-| Public service deployment | Auth, rate limiting, multi-tenancy hardening, billing. Builds on the [`identity-foundation.md`](identity-foundation.md) Stage 1 / Stage 2 contracts + M12's enforcement |
+| Public service deployment | Auth, rate limiting, multi-tenancy hardening, billing. Builds on the [`ADR-0002 identity-foundation`](../adr/0002-identity-foundation.md) Stage 1 / Stage 2 contracts + M12's enforcement |
 | User-editable `pipeline.json` + initial values in the UI | Operator-flagged 2026-05-07. Today `datasets/{name}/pipeline.json` is filesystem-edited only. Webapp surface for "define your own pipeline" — author the node graph + initial param values directly in the UI. Pairs with the M12 dataset preview view + connector-driven pipeline visualization. Out of M12 scope; logged here so the M12 webapp doesn't accidentally close the door on it |
 
 ### Webapp Perf

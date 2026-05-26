@@ -1,7 +1,7 @@
 """``IdentityContext`` — the sole identity carrier past the resolver seam.
 
-Per `docs/specs/identity-foundation.md` §11 + the Stage-0 framing in
-`docs/specs/spend-and-tenancy.md`. Five fields:
+Per `docs/adr/0002-identity-foundation.md` + the Stage-0 framing in
+`docs/adr/0003-spend-and-tenancy.md`. Five fields:
 
 * :attr:`IdentityContext.user_id` — :class:`~promptpotter.domain.identity.UserId`
 * :attr:`IdentityContext.tenant_id` — :class:`~promptpotter.domain.identity.TenantId`

@@ -1,6 +1,6 @@
 """Identity-foundation Stage-0 invariants — no-drift gates #3, #4, #6.
 
-The gates are spelled out in `docs/specs/identity-foundation.md`. Stage 0 ships
+The gates are spelled out in `docs/adr/0002-identity-foundation.md`. Stage 0 ships
 only what's checkable today (the resolver seam is in-process and the SCIM
 schema isn't vendored yet); gates #1, #2, #5 are deferred until Stage 1 lands
 the OIDC client + middleware.
