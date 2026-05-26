@@ -1,0 +1,69 @@
+# datasets/ — per-dataset configuration
+
+Each subdirectory is a **first-class dataset definition**: the campaign config, pipeline overlay, optimizer prompts, and human-facing description for one optimization target. Configs are the **source of truth** — no parallel default ladders elsewhere in code.
+
+> Architecture entry point: [`../docs/architecture.md`](../docs/architecture.md) §0 + §0.5.
+> Per-dataset prompt store + overlay merge contract: [`../promptpotter/application/CLAUDE.md#backend-overlay`](../promptpotter/application/CLAUDE.md).
+
+## Canonical layout
+
+```
+datasets/{name}/
+├── campaign.json          # CampaignConfig: optimizer LLM, scoring, max_rounds, etc.
+├── pipeline.json          # Backend tunable overlay (nodes.{name}.config)
+├── task_description.md    # L1's framing input — what the task IS
+├── dataset.md             # Human-facing description: source, split, sample shape
+├── prompts/{node}.json    # Per-node PromptTemplate overrides (optional)
+└── cache.json             # Origin score cache (write-managed; don't hand-edit)
+```
+
+Optional:
+
+- `recon_variants.json` — pre-computed L1 sweep variants for recon runs.
+- `sweep/` — sweep-mode sibling cycle outputs.
+
+## Sole route for backend tunable changes
+
+**Backend overlay (`nodes.{name}.config` in `pipeline.json`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
+
+`load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`promptpotter/application/config.py:344`) merges the overlay onto each wire payload. The sibling `llm_defaults` block is the `GET /pipeline` snapshot — keep it accurate, don't repurpose it.
+
+## Registered datasets
+
+| Name | Backend connector | Headline use |
+|---|---|---|
+| `lca-termnorm` | `termnorm` | Production TermNorm benchmark; M11 publication target. |
+| `bbeh` | `termnorm` | BBEH (M11 headline benchmark). |
+| `bbeh/mini`, `bbeh/medium` | `termnorm` | BBEH meta-campaign recon subsets. |
+| `gsm8k` | `termnorm` (llm_only mode) | Reasoning baseline; meta-campaign proxy benchmark. |
+| `hotpotqa` | `termnorm` | Multi-hop QA benchmark. |
+| `aime_2025` | `termnorm` (OpenRouter+Mistral overlay) | AIME competition math; overlay routes off Groq default. |
+| `justlogic` | `termnorm` | Logic reasoning at variable depth. |
+| `promptpotter` | `promptpotter` | Outer cycle whose backend is the optimizer itself (L4 recursion). |
+| `promptpotter-self` | `promptpotter` | Optimizer-of-the-optimizer demo dataset. See [§ L4 below](#l4--promptpotter-self). |
+| `_optimizer/` | n/a | The optimizer's own `pipeline.json` + prompt variants — same shape as a target backend's pipeline.json (per §0 self-optimization commitment). |
+
+## L4 — `promptpotter-self`
+
+`datasets/promptpotter-self/` is the **recursive case**: the outer cycle's mutation surface is the inner cycle's meta-prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`), exposed via `pipeline.json::nodes.{node}.optimizer.param_keys`.
+
+L4 is **not** a 4th `LayerStrategy` inside `promptpotter/application/optimization/`. It is the same PromptPotter applied to itself via the `promptpotter` connector (`../promptpotter/connectors/promptpotter.py`). Conceptually L2 / L3 / L4 are the same family — each mutates a slower-changing surface of the level below (L2 → `task_context`; L3 → `plan`; L4 → meta-prompt templates) — but structurally L4 is a recursion, not a new layer driver.
+
+**Status:** architectural skeleton + dataset landed; inner-cycle execution path (localhost endpoint vs in-process dispatch) is the open follow-up — see [`../promptpotter/connectors/CLAUDE.md`](../promptpotter/connectors/CLAUDE.md) § Inner-cycle execution and [`../docs/specs/m12-multi-connector.md#track-15--promptpotter-as-connector`](../docs/specs/m12-multi-connector.md).
+
+Concept doc: [`../docs/concepts/optimizer-of-the-optimizer.md`](../docs/concepts/optimizer-of-the-optimizer.md).
+
+## Reference points — consult on every dataset question
+
+Source of truth for wire / reject rationale, projection-bias findings, per-dataset model defaults:
+
+- **Adding a dataset + canonical splits** → [`../docs/operations/adding-a-dataset.md`](../docs/operations/adding-a-dataset.md). Research the canonical split; never invent one.
+- **Why X is / isn't wired, trialed-and-rejected list** → [`../docs/operations/dataset-selection-rationale.md`](../docs/operations/dataset-selection-rationale.md). Check first when asked "why didn't we use Y?" or "have we trialed Z?".
+- **Per-dataset model + `reasoning_effort` + `max_tokens`, BBEH output-ceiling traps, Groq daily-volume swap protocol** → [`../docs/operations/dataset-reasoning-matrix.md`](../docs/operations/dataset-reasoning-matrix.md). This — not meta-campaign NOTES.md — is the canonical source for model recommendations.
+
+## Conventions
+
+- **Origin = conservative floor.** Overlay starts at the floor of each tunable (`reasoning_effort: "low"`, low temperature, minimal thinking_budget). L1 expands upward from there when sibling-yield or stall evidence supports it. See [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md).
+- **Don't hand-edit `cache.json`.** It's written by the origin scoring path.
+- **`task_description.md` is L1's framing input** — written for the LLM that will generate candidates, not for human readers (though it should be readable).
+- **`dataset.md` is operator-facing** — describes source, split, sample shape; cite the canonical evaluation protocol.
