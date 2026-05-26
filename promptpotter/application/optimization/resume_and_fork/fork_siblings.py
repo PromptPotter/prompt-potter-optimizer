@@ -1,10 +1,18 @@
 """Unified fork-mint primitive — :func:`_mint_fork` dispatches on trigger.
 
-Wired triggers: ``SCORING_DIVERGENCE``, ``OPERATOR_DIAG``,
-``OPERATOR_SWEEP``. Each differs in inheritance and cycle-id encoding —
-the match arm below owns those mechanics; shared setup lives in
-:func:`_fork_sibling_setup`. A fork is a new *cycle* inside the **same
-campaign** — all cycles land flat under ``campaigns/{campaign_id}/cycles/``.
+All 6 :class:`ForkTrigger` variants wired:
+
+* ``SCORING_DIVERGENCE`` — resume-detected divergence; needs ``surviving_rounds``.
+* ``L2_REBASE`` / ``L3_REBASE`` / ``OPERATOR_REWIND`` — in-loop rebase or
+  operator-initiated rewind; needs ``fork_from_round > 0`` (rounds 0..N-1
+  copied from parent). All three share the same on-disk shape; the
+  ``ForkPayload.trigger`` value is the audit-trail discriminator.
+* ``OPERATOR_DIAG`` — clean offshoot from root (``fork_from_round=0``).
+* ``OPERATOR_SWEEP`` — clean offshoot with sweep metadata
+  (``fork_from_round=0`` + ``sweep_batch_id`` + ``sweep_source_file``).
+
+A fork is a new *cycle* inside the **same campaign** — all cycles land
+flat under ``campaigns/{campaign_id}/cycles/``.
 """
 
 from __future__ import annotations
@@ -119,6 +127,16 @@ def _next_diag_sibling_id(
 # (n_rounds=0). The orchestration layer guards against that via
 # ``cleanup_stub_fork_if_empty`` below — wrapped around every fork run
 # site.
+_REBASE_TRIGGERS = frozenset(
+    {
+        ForkTrigger.SCORING_DIVERGENCE,
+        ForkTrigger.L2_REBASE,
+        ForkTrigger.L3_REBASE,
+        ForkTrigger.OPERATOR_REWIND,
+    }
+)
+
+
 def _mint_fork(
     campaign_store: CampaignStore,
     campaign_id: str,
@@ -135,13 +153,25 @@ def _mint_fork(
     """Single entry point for fork creation. Dispatches on ``payload.trigger``.
 
     The new cycle lands in the same campaign (``campaign_id``).
-    ``SCORING_DIVERGENCE`` requires ``surviving_rounds``. ``OPERATOR_SWEEP``
-    requires ``sweep_batch_id`` + ``sweep_source_file``. ``OPERATOR_DIAG``
-    takes neither.
+    ``SCORING_DIVERGENCE`` requires ``surviving_rounds``.
+    ``L{2,3}_REBASE`` / ``OPERATOR_REWIND`` synthesize ``surviving_rounds``
+    from the parent's persisted rounds if the caller omits them.
+    ``OPERATOR_SWEEP`` requires ``sweep_batch_id`` + ``sweep_source_file``.
+    ``OPERATOR_DIAG`` takes neither.
     """
-    if payload.trigger is ForkTrigger.SCORING_DIVERGENCE:
-        if surviving_rounds is None:
+    if payload.trigger in _REBASE_TRIGGERS:
+        if payload.trigger is ForkTrigger.SCORING_DIVERGENCE and surviving_rounds is None:
             raise ValueError("_mint_fork(SCORING_DIVERGENCE) requires surviving_rounds")
+        if surviving_rounds is None:
+            # L2_REBASE / L3_REBASE / OPERATOR_REWIND: lift rounds 0..fork_from_round-1
+            # from the parent index.json.
+            from promptpotter.infrastructure.store.base import read_json_optional
+
+            parent_index = (
+                read_json_optional(campaign_store._index_path(campaign_id, parent_cycle_id)) or {}
+            )
+            all_rounds = parent_index.get("rounds") or []
+            surviving_rounds = [t for t in all_rounds if int(t.get("round", -1)) < fork_from_round]
         ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         suffix = hashlib.sha256(f"{parent_cycle_id}|{ts}".encode()).hexdigest()[:8]
         new_cycle_id = f"{parent_cycle_id}_fork_{suffix}"
@@ -155,7 +185,7 @@ def _mint_fork(
             from_round=fork_from_round,
             payload=payload,
         )
-        campaign_store.save_divergence_fork(
+        campaign_store.save_rebase_fork(
             campaign_id,
             parent_cycle_id,
             new_cycle_id,
@@ -221,9 +251,6 @@ def _mint_fork(
             sweep_batch_id=sweep_batch_id,
             forked_at=now,
         )
-    else:
-        raise NotImplementedError(f"ForkTrigger.{payload.trigger.name} not wired")
-
     campaign_store.update(campaign_id, new_cycle_id, {"fork": {"trigger": payload.trigger.value}})
     return new_cycle_id
 

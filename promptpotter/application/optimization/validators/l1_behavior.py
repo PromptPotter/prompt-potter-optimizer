@@ -99,14 +99,10 @@ def _variant_text_blob(variant: dict[str, Any]) -> str:
 
     Includes changes_description plus the textual content of every mutation
     slot the schema split exposes: ``prompt_fields_override`` (the six
-    PROMPT_STRING_FIELDS as a flat dict), ``task_context_override`` (the
-    two splice strings as a flat dict), and ``reasoning`` (LLM-side
-    rationale).
+    PROMPT_STRING_FIELDS as a flat dict) and ``task_context_override``
+    (the two splice strings as a flat dict).
     """
-    parts = [
-        str(variant.get("changes_description") or ""),
-        str(variant.get("reasoning") or ""),
-    ]
+    parts = [str(variant.get("changes_description") or "")]
     for value in (variant.get("prompt_fields_override") or {}).values():
         parts.append(str(value or ""))
     for value in (variant.get("task_context_override") or {}).values():
@@ -335,19 +331,18 @@ def _cited_peaked_axis(
     variant: dict[str, Any], citation: str, field_name: str, ctx: ValidatorContext
 ) -> str | None:
     """Return the first peaked axis that this variant's evidence_grounding
-    + target/override fields appear to mutate, or None.
+    + override fields appear to mutate, or None.
 
     The match is intentionally permissive: we look for the peaked-axis
-    name as a substring in the citation OR in ``target_axis`` OR as a key
-    inside ``pipeline_params_override`` (e.g. ``llm_only.temperature`` →
-    matches ``temperature`` keyed under ``llm_only``). The validator
-    only fires when ``field_name == "axis_memory"`` — citations grounded
-    in other panels (sibling_yield, parent_panel, etc.) are independent
-    evidence and not rejected by this rule.
+    name as a substring in the citation OR as a key inside
+    ``pipeline_params_override`` (e.g. ``llm_only.temperature`` matches
+    ``temperature`` keyed under ``llm_only``). The validator only fires
+    when ``field_name == "axis_memory"`` — citations grounded in other
+    panels (sibling_yield, parent_panel, etc.) are independent evidence
+    and not rejected by this rule.
     """
     if not ctx.peaked_axes or field_name != "axis_memory":
         return None
-    target = str(variant.get("target_axis") or "")
     pp = variant.get("pipeline_params_override") or {}
     flat_pp_axes: set[str] = set()
     if isinstance(pp, dict):
@@ -357,26 +352,25 @@ def _cited_peaked_axis(
                     flat_pp_axes.add(f"{node}.{p}")
                     flat_pp_axes.add(str(p))
     for axis in ctx.peaked_axes:
-        if axis in citation or axis in target or axis in flat_pp_axes:
+        if axis in citation or axis in flat_pp_axes:
             return axis
         _, _, leaf = axis.partition(".")
-        if leaf and (leaf in citation or leaf in target or leaf in flat_pp_axes):
+        if leaf and (leaf in citation or leaf in flat_pp_axes):
             return axis
     return None
 
 
 def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: ValidatorContext) -> bool:
-    """True iff the variant's reasoning/citation cites a real rebut for the
-    peaked-axis guard: a sibling_yield row this round, or an explicit
-    wide-exploration budget. Permissive substring match — the prompt
-    instructs L1 to name the rebut verbatim.
+    """True iff the variant's citation/changes_description cites a real
+    rebut for the peaked-axis guard: a sibling_yield row this round, or
+    an explicit wide-exploration budget. Permissive substring match —
+    the prompt instructs L1 to name the rebut verbatim.
     """
     if ctx.exploration_budget == "wide":
         return True
     blob = " ".join(
         [
             citation,
-            str(variant.get("reasoning") or ""),
             str(variant.get("changes_description") or ""),
         ]
     ).lower()

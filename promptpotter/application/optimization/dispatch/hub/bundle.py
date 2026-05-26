@@ -144,6 +144,9 @@ class InjectionBundle:
     trajectory_misses: list[dict[str, Any]] = field(default_factory=list)
     # Mirrors OptimizationConfig.forbidden_axes_strict; gates locked-axis catalogue advertising.
     forbidden_axes_strict: bool = True
+    # Mirrors OptimizationConfig.rebase_capability; gates the rebase_capability
+    # injection so L2/L3 prompts are bit-for-bit identical to a no-rebase ablation run.
+    rebase_capability: bool = True
 
 
 __all__ = [

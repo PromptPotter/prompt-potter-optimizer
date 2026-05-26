@@ -1,4 +1,4 @@
-"""Fork-sibling ``index.json`` writers — divergence / diag / sweep."""
+"""Fork-sibling ``index.json`` writers — rebase / diag / sweep."""
 
 from __future__ import annotations
 
@@ -12,19 +12,39 @@ from promptpotter.infrastructure.store.campaign_store.index_helpers import fresh
 
 
 class ForkMixin(CampaignStoreKernel):
-    """Divergence / diag / sweep fork ``index.json`` writers."""
+    """Rebase / diag / sweep fork ``index.json`` writers."""
 
-    def save_divergence_fork(
+    def save_diag_fork(
         self,
         campaign_id: str,
         parent_cycle_id: str,
         new_cycle_id: str,
         *,
-        surviving_rounds: list[dict[str, Any]],
+        forked_at: str,
+    ) -> Path:
+        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
+        blob = fresh_sibling_index_blob(parent_index, parent_cycle_id, "diag", forked_at)
+        path = self._index_path(campaign_id, new_cycle_id)
+        write_json(path, blob)
+        return path
+
+    def save_rebase_fork(
+        self,
+        campaign_id: str,
+        parent_cycle_id: str,
+        new_cycle_id: str,
+        *,
         forked_at: str,
         forked_from_round: int,
+        surviving_rounds: list[dict[str, Any]],
     ) -> Path:
-        """Divergence-fork ``index.json`` inheriting parent state."""
+        """Mid-cycle fork inheriting parent state up to ``forked_from_round``.
+
+        Single writer for all 4 rebase-shaped triggers
+        (``SCORING_DIVERGENCE``, ``L2_REBASE``, ``L3_REBASE``,
+        ``OPERATOR_REWIND``). The issuer is recorded on the FORK_CUT
+        ledger record via ``ForkPayload.trigger``.
+        """
         parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         best_acc = max(
             (float(t.get("accuracy", 0.0)) for t in surviving_rounds),
@@ -54,20 +74,6 @@ class ForkMixin(CampaignStoreKernel):
         index.pop("cycle_id", None)
         path = self._index_path(campaign_id, new_cycle_id)
         write_json(path, index)
-        return path
-
-    def save_diag_fork(
-        self,
-        campaign_id: str,
-        parent_cycle_id: str,
-        new_cycle_id: str,
-        *,
-        forked_at: str,
-    ) -> Path:
-        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
-        blob = fresh_sibling_index_blob(parent_index, parent_cycle_id, "diag", forked_at)
-        path = self._index_path(campaign_id, new_cycle_id)
-        write_json(path, blob)
         return path
 
     def save_sweep_fork(

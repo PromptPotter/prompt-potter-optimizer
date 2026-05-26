@@ -238,7 +238,7 @@
           "$defs": {
             "L1Variant": {
               "additionalProperties": false,
-              "description": "One candidate variant proposed by ``l1_generate``.\n\nThree override slots, each carrying a different layer's mutations:\n\n- ``pipeline_params_override`` \u2014 per-node tunables, shape ``{node:\n  {param: value}}``. Inner shape is grafted at runtime by\n  :func:`l1_validators.build_l1_output_schema` from the active\n  ``PipelineSchema``; the keys at this level remain ``dict[str, dict]``\n  so the Pydantic parse never fails on a legitimately backend-specific\n  node name.\n- ``prompt_fields_override`` \u2014 top-level prompt fields, shape\n  ``{field_name: string}``. Keys constrained to ``PROMPT_STRING_FIELDS``\n  by the runtime-built JSON Schema.\n- ``task_context_override`` \u2014 pipeline-context strings, shape\n  ``{field_name: string}``. Keys constrained to ``TASK_CONTEXT_OVERRIDES``\n  by the runtime-built JSON Schema.\n\nAt least one of the three must be non-empty \u2014 an all-empty variant is\na no-op and is rejected by :func:`detect_invariants` downstream with\n``reason=\"no_op_variant\"``.\n\n``target_axis`` and ``reasoning`` are LLM-side reasoning aids \u2014 the\n``l1_generate`` prompt's ``answer_format`` instructs the model to\nemit them so its candidate selection is grounded. PromptPotter\npersists them in the audit trail but doesn't read them at runtime;\nthey're recorded so a human reviewing ``round_NNNN.json`` can see\nthe model's stated rationale for each candidate.",
+              "description": "One candidate variant proposed by ``l1_generate``.\n\nThree override slots, each carrying a different layer's mutations:\n\n- ``pipeline_params_override`` \u2014 per-node tunables, shape ``{node:\n  {param: value}}``. Inner shape is grafted at runtime by\n  :func:`l1_validators.build_l1_output_schema` from the active\n  ``PipelineSchema``; the keys at this level remain ``dict[str, dict]``\n  so the Pydantic parse never fails on a legitimately backend-specific\n  node name.\n- ``prompt_fields_override`` \u2014 top-level prompt fields, shape\n  ``{field_name: string}``. Keys constrained to ``PROMPT_STRING_FIELDS``\n  by the runtime-built JSON Schema.\n- ``task_context_override`` \u2014 pipeline-context strings, shape\n  ``{field_name: string}``. Keys constrained to ``TASK_CONTEXT_OVERRIDES``\n  by the runtime-built JSON Schema.\n\nAt least one of the three must be non-empty \u2014 an all-empty variant is\na no-op and is rejected by :func:`detect_invariants` downstream with\n``reason=\"no_op_variant\"``.",
               "properties": {
                 "variant_name": {
                   "title": "Variant Name",
@@ -272,16 +272,6 @@
                   "description": "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}.",
                   "title": "Task Context Override",
                   "type": "object"
-                },
-                "target_axis": {
-                  "default": "",
-                  "title": "Target Axis",
-                  "type": "string"
-                },
-                "reasoning": {
-                  "default": "",
-                  "title": "Reasoning",
-                  "type": "string"
                 },
                 "evidence_grounding": {
                   "anyOf": [
@@ -414,6 +404,26 @@
         "strict": true,
         "schema": {
           "$defs": {
+            "ForkProposal": {
+              "additionalProperties": false,
+              "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n``round_offset`` is relative to the current round and typically\nnegative (rewind). When set, the runner mints a sibling cycle via\n``_mint_fork(L{2,3}_REBASE, fork_from_round=current + round_offset)``,\nexits the current cycle with ``StopReason.REBASED``, and\nauto-continues optimization on the new fork (capped at\n``MAX_AUTO_REBASES`` per CLI invocation).",
+              "properties": {
+                "round_offset": {
+                  "title": "Round Offset",
+                  "type": "integer"
+                },
+                "reason": {
+                  "default": "",
+                  "title": "Reason",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "round_offset"
+              ],
+              "title": "ForkProposal",
+              "type": "object"
+            },
             "L1SituationalExample": {
               "additionalProperties": false,
               "description": "One worked example pinned to an active trigger.\n\nRenders in L1's prompt only when ``trigger_id`` matches either an\nauto-trigger that fired this round (PEAKED axis, runtime_failure,\nchain_bind, continuous_envelope, latex_repair, l2_stall_diversity)\nor the ``rule_id`` of a currently-authored\n:class:`L1SupplementalRule`. Empty trigger \u21d2 silent.",
@@ -544,6 +554,17 @@
               "default": "",
               "title": "Rationale",
               "type": "string"
+            },
+            "fork_proposal": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ForkProposal"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "title": "L2ContextOutput",
@@ -565,7 +586,7 @@
           "$defs": {
             "ForkProposal": {
               "additionalProperties": false,
-              "description": "L3-emitted proposal to rewind the search to an earlier round.\n\nObservation-only in v1: recorded to ``round_NNNN.json`` so the\noperator can read it and manually fork via\n``python -m promptpotter resume --from N`` or\n``--fork-on-divergence`` if the proposal looks sound. No automatic\nfork is triggered \u2014 this is the *selection* signal half of the\nM13+ AlphaZero-shaped-MCTS arc, shipped without the backprop /\nUCB-selection-rule halves. See\n``docs/research/related-work.md#comparison-to-mcts``.",
+              "description": "L2/L3-emitted proposal to rewind the search to an earlier round.\n\n``round_offset`` is relative to the current round and typically\nnegative (rewind). When set, the runner mints a sibling cycle via\n``_mint_fork(L{2,3}_REBASE, fork_from_round=current + round_offset)``,\nexits the current cycle with ``StopReason.REBASED``, and\nauto-continues optimization on the new fork (capped at\n``MAX_AUTO_REBASES`` per CLI invocation).",
               "properties": {
                 "round_offset": {
                   "title": "Round Offset",
@@ -736,7 +757,7 @@
       "problem_description": "",
       "instruction": "THE ASK. Propose up to {{n_variants}} candidates; return fewer rather than padding. Each changes exactly ONE axis: one prompt-template field, one node param, or answer_format. Steer toward the critique's priority_fix, but cap it at half the batch \u2014 the remaining candidates must test a DIFFERENT hypothesis for why the parent fails (a different failure cluster or a different root cause). Spread is across hypotheses, not across slots: two candidates that relocate one idea into different prompt fields count as one. On round 1 (no critique), spreading across distinct prompt-template fields IS the strategy. Param axes are last resort: at most one, only when the critique or a runtime failure points to one.\n\nADDITIVE EDITS. Prompt-field mutations are additive. The parent field carries scaffolding accuracy depends on: output directives, format anchors, role tokens. Preserve every one verbatim and edit around them, never substitute. Size the edit to clear scoring noise \u2014 a lone keyword rarely shifts the metric measurably; inject a complete instruction, constraint, or reframing drawn from a panel signal, adding only, never substituting. Repair any garbled token. Whole-cloth rewrites drop scaffolding and hard-regress. The prompt you build becomes next round's parent and rides every call: keep it lean.\n\nGROUND EVERY CHOICE. Each variant's evidence_grounding must cite a real panel entry; no data justifying a mutation means do not gamble. An axis_memory axis tagged PEAKED is at its measured peak: do not mutate it unless your citation names a real rebut (a sibling_yield row with mean_delta > 0, or exploration_budget = wide).\n\nAUTO-REJECTED (wastes a slot). Deterministic validators reject before any backend call: clones (a substring, paraphrase, or case-fold of the parent, or an all-empty variant); params outside the catalogue's allowed values; configs already in runtime_failures; prompt fields with fill-in-the-blank slots; unknown node or field names.\n\nCHAIN-BIND. When task_context says targeting L1 axis '<name>', at least one variant MUST target that axis and cite the quoted failure cluster as evidence_grounding with field=task_context.",
       "thinking_style": "",
-      "answer_format": "Return JSON: {\"variants\": [...]}. Each variant:\n  - \"variant_name\": short identifier.\n  - \"changes_description\": 1-2 sentences.\n  - Three override slots; at least one non-empty (all-empty is rejected); never conflate them.\n    * \"pipeline_params_override\": nested {node: {param: value}}, backend tunables only.\n    * \"prompt_fields_override\": flat {field: string}, field one of persona, task_intent, problem_description, instruction, thinking_style, answer_format.\n    * \"task_context_override\": flat {field: string}, field one of upstream_context, downstream_context.\n  - \"target_axis\": the one axis this candidate changes.\n  - \"reasoning\": name the failure pattern, the concrete change, and the expected directional effect; \"improve reasoning\" is rejected as vague.\n  - \"evidence_grounding\": {field, citation}. field one of parent_panel, sibling_yield, axis_memory, escalation_panel, task_context, plan, critique, stall_exploration; citation quotes the panel entry verbatim. stall_exploration valid only when exploration_budget is normal or wide."
+      "answer_format": "Return JSON: {\"variants\": [...]}. Each variant:\n  - \"variant_name\": short identifier.\n  - \"changes_description\": 1-2 sentences naming the failure pattern, the concrete change, and the expected directional effect (\"improve reasoning\" is too vague).\n  - Three override slots; at least one non-empty (all-empty is rejected); never conflate them.\n    * \"pipeline_params_override\": nested {node: {param: value}}, backend tunables only.\n    * \"prompt_fields_override\": flat {field: string}, field one of persona, task_intent, problem_description, instruction, thinking_style, answer_format.\n    * \"task_context_override\": flat {field: string}, field one of upstream_context, downstream_context.\n  - \"evidence_grounding\": {field, citation}. field one of parent_panel, sibling_yield, axis_memory, escalation_panel, task_context, plan, critique, stall_exploration; citation quotes the panel entry verbatim. stall_exploration valid only when exploration_budget is normal or wide."
     },
     "l1_critique/1": {
       "persona": "You are a pipeline evaluation analyst.",
@@ -750,7 +771,7 @@
       "persona": "You are L2, the framing layer. You refine task_context \u2014 the 5-field steering dict every layer (L1, L1_CRITIQUE, L2, L3) reads next round. You do not author candidate prompts.",
       "task_intent": "Nudge task_context so L1's next round mutates a real failure cluster. Optionally add a supplemental rule, pin a worked example, or restructure L1's layout. A no-op task_context (paraphrase only) is rejected as verbatim-repeat and escalates to L3.",
       "problem_description": "{{plan}}\n\n{{l3_to_l2_note}}\n\n{{rendered_prompt}}\n\n{{diagnostics}}\n\n{{validation_failures}}\n\n{{runtime_failures}}\n\n{{l2_guard_breaches}}\n\n{{axis_memory}}\n\n{{archive_top_runs}}\n\n{{rare_hit_samples}}\n\n{{critique}}\n\n{{l1_overrides}}\n\n{{task_context}}\n\n{{l1_signal_catalogue}}\n\n{{l1_supplemental_rules}}\n\n{{l1_situational_examples}}",
-      "instruction": "PRIMARY: refine task_context \u2014 all 5 fields non-empty after a fire, each nudged from one data point (a paraphrase-only change is a no-op and escalates to L3).\n  domain, pipeline_purpose, data_characteristics, optimization_goals \u2014 1-2 sentences each, framing only; write tight.\n  key_challenges \u2014 the chain-bind: (a) the failure cluster from critique, (b) the literal phrase targeting L1 axis '<axis_name>', (c) the concrete change. That phrase appears HERE ONLY.\n\nAfter an improving round, reinforce — tighten key_challenges around the cluster the last winner converted so L1 presses the same direction; do not reframe. When the dominant cluster is unchanged from your prior fire, advance key_challenges to the next-ranked cluster in critique.failure_highlights instead of repeating it (a repeat merges to a no-op and escalates to L3).\n\nAXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Before writing, scan CURRENT PROMPT \u2014 if your change is already there, switch axis or write it STRICTER.\n\nOPTIONAL (skip unless the evidence warrants it; all full-replace): l1_supplemental_rules for a failure mode not auto-covered (peaked_axis, runtime_failure, continuous_envelope, chain_bind, latex_repair, l2_stall_diversity); l1_situational_examples pinned to an active trigger; l1_layout (default omit); action=probe_round for one narrow failure with a named axis hypothesis; l1_overrides (rare; creativity/n_variants only).\n\nL3 NOTE (if present): a sticky pointer \u2014 honor it unless the data contradicts it.",
+      "instruction": "PRIMARY: refine task_context \u2014 all 5 fields non-empty after a fire, each nudged from one data point (a paraphrase-only change is a no-op and escalates to L3).\n  domain, pipeline_purpose, data_characteristics, optimization_goals \u2014 1-2 sentences each, framing only; write tight.\n  key_challenges \u2014 the chain-bind: (a) the failure cluster from critique, (b) the literal phrase targeting L1 axis '<axis_name>', (c) the concrete change. That phrase appears HERE ONLY.\n\nAfter an improving round, reinforce — tighten key_challenges around the cluster the last winner converted so L1 presses the same direction; do not reframe. When the dominant cluster is unchanged from your prior fire, advance key_challenges to the next-ranked cluster in critique.failure_highlights instead of repeating it (a repeat merges to a no-op and escalates to L3).\n\nAXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Before writing, scan CURRENT PROMPT \u2014 if your change is already there, switch axis or write it STRICTER.\n\nOPTIONAL (skip unless the evidence warrants it; all full-replace): l1_supplemental_rules for a failure mode not auto-covered (peaked_axis, runtime_failure, continuous_envelope, chain_bind, latex_repair, l2_stall_diversity); l1_situational_examples pinned to an active trigger; l1_layout (default omit); action=probe_round for one narrow failure with a named axis hypothesis; l1_overrides (rare; creativity/n_variants only).\n\n{{rebase_capability}}\n\nL3 NOTE (if present): a sticky pointer \u2014 honor it unless the data contradicts it.",
       "thinking_style": "Before writing task_context, name the one failure cluster you are attacking (from critique.failure_highlights) and the L1 axis you will route it to. Before adding any optional rule or example, name the panel evidence showing the auto-triggers do not already cover it \u2014 if you cannot, skip it.",
       "answer_format": "Return JSON; set only what you change.\n{\n  \"task_context\": {\"domain\": ..., \"pipeline_purpose\": ..., \"data_characteristics\": ..., \"optimization_goals\": ..., \"key_challenges\": ...},\n  \"l1_supplemental_rules\": [{\"rule_id\": ..., \"body\": ..., \"citation\": ...}],   // <=3; rule_id <=40c, body 20-300c, citation <=200c\n  \"l1_situational_examples\": [{\"trigger_id\": ..., \"parent_excerpt\": ..., \"rejected\": ..., \"accepted\": ..., \"why\": ...}],   // <=3\n  \"l1_layout\": {\"<slot>\": [\"<placeholder>\", ...]},   // if set, all 5 mandatory placeholders must appear\n  \"l1_overrides\": {...},\n  \"action\": \"normal_round\" | \"probe_round\",\n  \"axis_targeted\": \"<short>\",   // required only when probe_round\n  \"rationale\": \"1-2 sentences\"\n}\nL1 owns pipeline_params \u2014 your output is framing plus optional rules/examples/layout, never candidate values."
     },
@@ -758,9 +779,9 @@
       "persona": "You are an expert optimization strategist.",
       "task_intent": "Both the inner prompt generation loop (L1) and the parameter tuning loop (L2) have stalled. Replan the strategic framework so the next L2 fire steers L1 differently.",
       "problem_description": "{{plan}}\n\n{{task_context}}\n\n{{diagnostics}}\n\n{{validation_failures}}\n\n{{runtime_failures}}\n\n{{axis_memory}}\n\n{{l2_guard_breaches}}\n\n{{l3_guard_breaches}}\n\n{{critique}}",
-      "instruction": "The current approach is not working. Suggest a fundamentally different optimization strategy. Runtime-failure patterns above are discovered constraints \u2014 steer L1/L2 around the failing region. L2 OUTPUT FAILURES above mean deterministic validators caught L2 producing broken output; refine the plan text to steer L2 toward novel mutations and away from the failing strategy mode.\n\nFORK PROPOSAL (optional, rare). If you judge the current subtree exhausted \u2014 multiple L3 fires in this lineage with no lift, AND a known-promising deferred ancestor exists per the panels \u2014 you may emit a fork_proposal pointing to that earlier round. This is observation-only: the operator reads the proposal and manually rewinds via `resume --from N` if the case is sound. Default: omit. Set only when specific evidence points to a deferred ancestor; do not propose a fork as a hedge.\n\nKeep the plan text short -- it rides every downstream optimizer prompt; a long plan crowds out failure evidence.",
+      "instruction": "The current approach is not working. Suggest a fundamentally different optimization strategy. Runtime-failure patterns above are discovered constraints \u2014 steer L1/L2 around the failing region. L2 OUTPUT FAILURES above mean deterministic validators caught L2 producing broken output; refine the plan text to steer L2 toward novel mutations and away from the failing strategy mode.\n\n{{rebase_capability}}\n\nKeep the plan text short -- it rides every downstream optimizer prompt; a long plan crowds out failure evidence.",
       "thinking_style": "Consider:\n- Which pipeline dimensions the data shows as under-explored\n- Which runtime constraints have been discovered and must be respected\n- Whether L2 itself is the problem (validator failures on L2's output) and the plan must coach L2's next pass",
-      "answer_format": "\nReturn a JSON object with:\n  \"plan\": new strategy text for guiding future optimization (required)\n  \"note\": OPTIONAL sticky pointer for the L2-layer (string or null). Persists across L2 fires until your next replan replaces it. Use it when the L2-layer keeps drifting away from a constraint your replan needs it to honor \u2014 e.g. a discovered runtime ceiling, a failed axis to avoid, or a specific cohort to focus on. Omit or null when the plan itself is enough.\n  \"rationale\": 1-2 sentence explanation of the strategic shift\n  \"fork_proposal\": OPTIONAL ({\"round_offset\": int, \"reason\": str} or null). Set ONLY when the current subtree is exhausted AND a specific earlier round looks more promising than continuing forward. round_offset = the 0-indexed round to rewind to (must be < current round). reason = 1-2 sentences naming the dead-end being escaped and the deferred branch worth re-expanding. Observation-only in v1 \u2014 operator reads it on `round_NNNN.json` and decides whether to fork manually. Omit or null in the normal case."
+      "answer_format": "\nReturn a JSON object with:\n  \"plan\": new strategy text for guiding future optimization (required)\n  \"note\": OPTIONAL sticky pointer for the L2-layer (string or null). Persists across L2 fires until your next replan replaces it. Use it when the L2-layer keeps drifting away from a constraint your replan needs it to honor \u2014 e.g. a discovered runtime ceiling, a failed axis to avoid, or a specific cohort to focus on. Omit or null when the plan itself is enough.\n  \"rationale\": 1-2 sentence explanation of the strategic shift"
     },
     "checkin/1": {
       "persona": "You are a prompt engineering assistant.",

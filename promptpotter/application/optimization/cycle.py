@@ -14,7 +14,7 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import RoundOrigin, RoundResult
-from promptpotter.domain.run_records import ResumeCheckpointRecord
+from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
@@ -204,6 +204,9 @@ class Cycle:
     state_version: int = 1
     last_rasch_posterior: Any = None
     archive_observations: list[Observation] = field(default_factory=list)
+    # Stashed by L2/L3 rebase emission; runner.entry resolves it post-finalize
+    # into _mint_fork + observer rebuild + loop re-entry on the new fork.
+    rebase_request: RebaseRequest | None = None
 
     @classmethod
     def start(

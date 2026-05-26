@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { fetchDashboardConditional } from "./api";
+import { ageTextSeconds } from "./format";
 import type {
   OriginSummary,
   RoundSummary,
@@ -215,7 +216,7 @@ export function ageBucket(ageS: number | null): BucketResult {
   }
   return {
     status: "stale",
-    statusText: `Snapshot · last write ${(ageS / 60).toFixed(0)}m ago`,
+    statusText: `UPDATED · ${ageTextSeconds(ageS)}`,
     statusHint: "No live optimizer — viewing a frozen unit",
     termKey: "status_snapshot",
   };

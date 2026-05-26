@@ -78,12 +78,12 @@ BUILTIN_EXAMPLES: dict[str, dict[str, str]] = {
             "mutate without sibling_yield>0 or exploration_budget=wide rebut)"
         ),
         "rejected": (
-            "target_axis=temperature, pipeline_params_override={llm_only:{temperature:0.5}}, "
+            "pipeline_params_override={llm_only:{temperature:0.5}}, "
             "evidence={field:axis_memory, citation:'temperature effect=0.245'} — "
             "cites the effect number but ignores the PEAKED tag on the same row"
         ),
         "accepted": (
-            "target_axis=persona, prompt_fields_override={persona:'...'}, "
+            "prompt_fields_override={persona:'...'}, "
             "evidence={field:critique, citation:'priority_fix: sharpen verification step'} — "
             "different axis, no peaked conflict"
         ),
@@ -108,11 +108,11 @@ BUILTIN_EXAMPLES: dict[str, dict[str, str]] = {
             "coordinate-setup discipline.'"
         ),
         "rejected": (
-            "Three variants targeting answer_format, thinking_style, instruction. "
-            "No variant targets persona; the chain-bind directive is unaddressed."
+            "Three variants mutating answer_format, thinking_style, instruction. "
+            "No variant mutates persona; the chain-bind directive is unaddressed."
         ),
         "accepted": (
-            "One variant target_axis=persona, evidence={field:task_context, "
+            "One variant prompt_fields_override={persona:'...'}, evidence={field:task_context, "
             "citation:'Coordinate geometry: 3/5 misses on parabola rotation, 3x9 grid'}. "
             "Other variants explore different axes."
         ),

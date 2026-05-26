@@ -80,15 +80,20 @@ export function fmtText(v: unknown): string {
   return String(v);
 }
 
+// Relative age in seconds → "30s ago" / "5m ago" / "2h ago" / "3d ago".
+export function ageTextSeconds(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
 // Relative age of an ISO timestamp — "30s ago" / "5m ago" / "2h ago" /
 // "3d ago". Missing or unparseable input → "—".
 export function ageText(iso: string | null | undefined): string {
   if (!iso) return "—";
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return "—";
-  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
+  return ageTextSeconds((Date.now() - t) / 1000);
 }

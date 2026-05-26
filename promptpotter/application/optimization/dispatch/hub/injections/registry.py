@@ -15,6 +15,7 @@ from promptpotter.application.optimization.dispatch.hub.injections.layer_state i
     _r_critique,
     _r_l1_situational_examples,
     _r_l1_supplemental_rules,
+    _r_rebase_capability,
     _r_task_context,
 )
 from promptpotter.application.optimization.dispatch.hub.injections.panels import (
@@ -183,5 +184,15 @@ INJECTIONS: dict[str, _Injection] = {
         "in auto_rules.py plus L2-authored entries on opt_sp. Examples whose "
         "trigger is not active this round are silently filtered.",
         char_cap=1000,
+    ),
+    "rebase_capability": _Injection(
+        "rebase_capability",
+        InjectionKind.DIRECTIVE,
+        _r_rebase_capability,
+        "Conditional fork_proposal escape-hatch instruction (renders into L2 + "
+        "L3 prompts). Empty when ``OptimizationConfig.rebase_capability`` is "
+        "off — keeps prompt body bit-for-bit identical to a no-rebase "
+        "ablation so the input distribution doesn't drift on prompt text.",
+        char_cap=None,
     ),
 }

@@ -135,13 +135,6 @@ class L1Variant(BaseModel):
     At least one of the three must be non-empty — an all-empty variant is
     a no-op and is rejected by :func:`detect_invariants` downstream with
     ``reason="no_op_variant"``.
-
-    ``target_axis`` and ``reasoning`` are LLM-side reasoning aids — the
-    ``l1_generate`` prompt's ``answer_format`` instructs the model to
-    emit them so its candidate selection is grounded. PromptPotter
-    persists them in the audit trail but doesn't read them at runtime;
-    they're recorded so a human reviewing ``round_NNNN.json`` can see
-    the model's stated rationale for each candidate.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -169,8 +162,6 @@ class L1Variant(BaseModel):
             "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}."
         ),
     )
-    target_axis: str = ""
-    reasoning: str = ""
     # Optional at parse time so providers that omit it on a single variant
     # don't crash the entire round — the ``evidence_grounding_present`` behavior
     # check is the canonical enforcement point and flags missing/malformed
@@ -218,6 +209,28 @@ class L1CritiqueOutput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Fork proposal — emitted by L2 or L3 to rewind the search to an earlier round.
+# ---------------------------------------------------------------------------
+
+
+class ForkProposal(BaseModel):
+    """L2/L3-emitted proposal to rewind the search to an earlier round.
+
+    ``round_offset`` is relative to the current round and typically
+    negative (rewind). When set, the runner mints a sibling cycle via
+    ``_mint_fork(L{2,3}_REBASE, fork_from_round=current + round_offset)``,
+    exits the current cycle with ``StopReason.REBASED``, and
+    auto-continues optimization on the new fork (capped at
+    ``MAX_AUTO_REBASES`` per CLI invocation).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    round_offset: int
+    reason: str = ""
+
+
+# ---------------------------------------------------------------------------
 # l2_context — refine task framing + optional layout/runtime knobs.
 # ---------------------------------------------------------------------------
 
@@ -254,30 +267,12 @@ class L2ContextOutput(BaseModel):
     l1_supplemental_rules: list[L1SupplementalRule] = Field(default_factory=list, max_length=4)
     l1_situational_examples: list[L1SituationalExample] = Field(default_factory=list, max_length=4)
     rationale: str = ""
+    fork_proposal: ForkProposal | None = None
 
 
 # ---------------------------------------------------------------------------
 # l3_plan — strategic replan with optional sticky pointer to L2.
 # ---------------------------------------------------------------------------
-
-
-class ForkProposal(BaseModel):
-    """L3-emitted proposal to rewind the search to an earlier round.
-
-    Observation-only in v1: recorded to ``round_NNNN.json`` so the
-    operator can read it and manually fork via
-    ``python -m promptpotter resume --from N`` or
-    ``--fork-on-divergence`` if the proposal looks sound. No automatic
-    fork is triggered — this is the *selection* signal half of the
-    M13+ AlphaZero-shaped-MCTS arc, shipped without the backprop /
-    UCB-selection-rule halves. See
-    ``docs/research/related-work.md#comparison-to-mcts``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    round_offset: int
-    reason: str = ""
 
 
 class L3PlanOutput(BaseModel):

@@ -210,6 +210,57 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
     session.state.cycle_id = new_cycle_id
 
 
+def _maybe_fork_operator_rewind(
+    args: argparse.Namespace, ctx: SessionCtx, session: Session
+) -> None:
+    """``--rewind N``: mint an OPERATOR_REWIND sibling cycle at round N, preserve
+    the parent intact, retarget the active pointer. Parent's rounds 0..N-1 are
+    copied to the fork; optimization continues on the fork from round N."""
+    rewind_to = getattr(args, "rewind_to_round", None)
+    if rewind_to is None:
+        return
+    if not ctx.cycle_id:
+        raise SystemExit(
+            "ERROR: `resume --rewind N` requires an active cycle on this session.\n"
+            "Run `python -m promptpotter new <dataset>` first."
+        )
+    if rewind_to < 0:
+        raise SystemExit(f"ERROR: --rewind must be >= 0, got {rewind_to}")
+    if rewind_to == 0:
+        raise SystemExit("ERROR: --rewind 0 mints a fork at the cycle root. Use `--diag` instead.")
+
+    from promptpotter.application.optimization.resume_and_fork import _mint_fork
+    from promptpotter.domain.run_records import ForkPayload, ForkTrigger
+
+    reason = (getattr(args, "rewind_reason", "") or "").strip() or (
+        f"operator rewind to round {rewind_to}"
+    )
+    tenant_id = session.identity.tenant_id
+    parent_cycle_id = ctx.cycle_id
+    new_cycle_id = _mint_fork(
+        session.store.campaigns,
+        ctx.campaign_id,
+        tenant_id,
+        ctx.session_id,
+        parent_cycle_id,
+        rewind_to,
+        ForkPayload(
+            trigger=ForkTrigger.OPERATOR_REWIND,
+            reason=reason,
+            issued_by=tenant_id,
+        ),
+    )
+    ctx.cycle_id = new_cycle_id
+    session.state.cycle_id = new_cycle_id
+    logger.info(
+        "Operator rewind: %s → %s at round %d [reason=%s]",
+        parent_cycle_id,
+        new_cycle_id,
+        rewind_to,
+        reason,
+    )
+
+
 async def _drive_optimization(
     args: argparse.Namespace,
     ctx: SessionCtx,
@@ -395,6 +446,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     session.state.cycle_id = ctx.cycle_id
 
     _maybe_fork_diag_sibling(args, ctx, session)
+    _maybe_fork_operator_rewind(args, ctx, session)
 
     log_startup_summary(
         session,

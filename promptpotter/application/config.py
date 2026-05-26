@@ -76,6 +76,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "zero_signal_filter_enabled"): "policy",
     ("optimization", "spend_budget_usd"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
+    ("optimization", "rebase_capability"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
     # OptimizerLLMConfig — provider/model swap changes the L1/L2/L3 candidate distribution → data.
     ("optimizer_llm", "provider"): "data",
@@ -188,6 +189,22 @@ class OptimizationConfig(BaseModel):
             "for ablation experiments that intentionally vary the model. "
             "Soft detection (the ``forbidden_axes_honored`` behavior check) "
             "stays on regardless — strict mode is the spend-saver."
+        ),
+    )
+
+    rebase_capability: bool = Field(
+        True,
+        description=(
+            "L2/L3 fork_proposal emission. When True, the ``rebase_capability`` "
+            "injection renders the rare-escape-hatch instruction into L2 + L3 "
+            "prompts and the runner auto-mints a sibling cycle on each fired "
+            "fork_proposal (capped at ``MAX_AUTO_REBASES`` per session). When "
+            "False, the injection renders empty — L2/L3 prompts contain no "
+            "fork_proposal guidance, the LLM never emits one, the runner's "
+            "rebase loop never fires. Flip to ``false`` for ablation runs "
+            "that need a fixed-trajectory baseline without the rebase prompt "
+            "text distorting the input. The schema field itself is invariant "
+            "(default None) so on-disk audit shape doesn't drift between modes."
         ),
     )
 

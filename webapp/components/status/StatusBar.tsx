@@ -88,15 +88,17 @@ export function StatusBar({
 }: Props) {
   const tip = termKey ? TERMS[termKey] : "";
   const round = roundOf(dash);
-  // One canonical status word — collapses dashboard `state`/`stop_reason`
-  // to the same vocabulary the cycle list (index.json `status`) uses, so a
-  // stopped+interrupted cycle reads "interrupted" here too, not "stopped".
-  const phase = dash?.state
-    ? cycleStatusLabel(
-        dash.state as string,
-        (dash as { stop_reason?: string } | null)?.stop_reason,
-      )
-    : null;
+  // Live phase only — when the FSM is `stopped`, suppress the sub-label so
+  // the round cell doesn't double-print the stop_reason that the surrounding
+  // status line ("No live optimizer — viewing a frozen unit") already conveys.
+  const stateValue = (dash?.state as string | undefined) ?? null;
+  const phase =
+    stateValue && stateValue !== "stopped"
+      ? cycleStatusLabel(
+          stateValue,
+          (dash as { stop_reason?: string } | null)?.stop_reason,
+        )
+      : null;
   const best = typeof dash?.best === "number" ? dash.best : null;
   const origin = typeof dash?.origin?.accuracy === "number" ? dash.origin.accuracy : null;
   const delta = best != null && origin != null ? best - origin : null;

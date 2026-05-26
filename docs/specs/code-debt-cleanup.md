@@ -19,54 +19,20 @@ confidence after verification (call sites traced + bodies read), not
 "I spotted a code smell." See § Audit guidance below for the
 patterns.
 
-- **`L1Variant.target_axis` + `L1Variant.reasoning` dead fields** —
-  `application/optimization/dispatch/schemas.py:172-173`. Declared as
-  LLM-side "reasoning aids" in the docstring (lines 139-144); grep
-  across 234 .py files returns zero reads of `.target_axis` /
-  `.reasoning`. Pure token-cost on every L1-generate response +
-  audit-trail clutter in `round_NNNN.json` for zero runtime benefit.
-  **Action:** delete both fields from `L1Variant`, drop the docstring
-  paragraph, confirm L1 prompts no longer ask the LLM to emit them
-  (`datasets/_optimizer/pipeline.json::l1_generate/*`). **Pattern:**
-  speculative API surface.
-
-- **`ForkTrigger` dead variants + the `NotImplementedError` branch** —
-  `infrastructure/store/fork_siblings.py:224` +
-  `domain/run_records.py:187-195`. The if-elif handles 3 of 6 enum
-  variants (`SCORING_DIVERGENCE`, `OPERATOR_DIAG`, `OPERATOR_SWEEP`);
-  the other three (`L2_REBASE`, `L3_REBASE`, `OPERATOR_REWIND`) fall
-  through to `raise NotImplementedError(f"ForkTrigger.{name} not wired")`.
-  Per `promptpotter/CLAUDE.md` § L3 fork-proposal, L3's fork-proposal
-  is observation-only — operators run `resume --from N` manually, so
-  `L2_REBASE`/`L3_REBASE` are speculative auto-fork scaffolding for a
-  feature that shipped as observation. **Action:** delete the three
-  unwired variants from `ForkTrigger` + the `NotImplementedError`
-  else branch (provably unreachable after the enum prune). If MCTS
-  auto-forking ever lands per [[architecture-l4-is-recursion]],
-  re-add with real wiring. **Pattern:** vibe-coded scaffolding.
-
-- **`AxisIndex._cache_axis_impacts` cache** —
-  `application/intelligence/indexes/axis.py:95, 164-166, 336-348`.
-  Memoizes `AxisImpact` (effect-size + classification) per axis on a
-  per-cycle `AxisIndex` instance; hit ~2-5 times per cycle on
-  sub-millisecond work. The cache field + lookup guard +
-  invalidation in `_recompute_failure_group_correlations` cost more
-  reading-weight than the savings buy back. **Action:** delete the
-  cache field + guard + invalidation; rely on direct computation.
-  Verify: standard CI + manual smoke through a fresh
-  `new <dataset>`. **Pattern:** premature optimization with
-  apologetic docstring.
-
 - **`SampleIndex._cache_records` cache — verify first** —
   `application/intelligence/indexes/sample.py:58, 123, 186-207`.
   Memoizes the `records()` list between digest calls. The real cost
   inside `records()` is the per-sample `_dominant_failure_mode`
   (Counter aggregation), which the list cache doesn't help with.
   Suspected savings: ~2 list rebuilds per cycle (cheap).
-  **Blocker:** instrument hit count + measure recompute cost on a
-  live campaign before acting. If hit-count × per-call-cost <
-  1ms/cycle → delete the cache; if the Counter is the real
-  bottleneck → memoize `_dominant_failure_mode` instead.
+  **Blocker:** instrument before acting. **Recipe:** add transient
+  `print(f"[cache] sample.records hit={cache_hit} cost_us={dt*1e6:.1f}")`
+  inside `records()` around the cache-check + the per-record build
+  loop; capture across one full M10 campaign on a representative
+  dataset. **Decision rule:** if `hit_rate × per_call_cost <
+  1ms/cycle` → delete the cache; if the per-record Counter
+  aggregation dominates → memoize `_dominant_failure_mode`
+  per-sample instead of caching the whole list.
   **Pattern:** premature optimization (verify-first).
 
 - **`live_dashboard/round_summary.py` + `factory.py` consolidation
@@ -182,8 +148,11 @@ commit.
   `json.loads` on the whole file. Cache the parsed dict in-process
   keyed on `(path, mtime_ns)`. Sub-millisecond per hit at current
   ~90 KB; only matters if dashboard grows materially. **Blocker:**
-  measure first; likely below noise floor today. **Pattern:**
-  premature optimization (verify-first).
+  measure first; likely below noise floor today. **Recipe:** add an
+  `X-Parse-Us` response header carrying `(t_after_load - t_before_load) * 1e6`
+  on every non-304 path; capture across one full M10 campaign. **Decision
+  rule:** act only if median crosses ~1ms or p99 crosses ~5ms.
+  **Pattern:** premature optimization (verify-first).
 
 ## Audit guidance — what to hunt for
 
@@ -235,19 +204,25 @@ removal.
 Parameters accepted but never read; optional return types `X | None`
 where every return is non-None; default kwargs no caller overrides;
 Pydantic / dataclass fields declared but never populated. Verify by
-tracing call sites + reading the body. **Precedent (this
-backlog):** `L1Variant.target_axis` + `.reasoning` — LLM emits them,
-no code reads them.
+tracing call sites + reading the body. **Precedent (deleted):**
+`L1Variant.target_axis` + `.reasoning` — the docstring claimed
+"persisted in the audit trail but doesn't read them at runtime,"
+but l1_behavior validators substring-matched them as
+peaked-axis / rebut signals. Resolved by routing both signals
+through `pipeline_params_override` keys + `changes_description` +
+the citation string, then deleting the fields.
 
 ### Pattern: vibe-coded scaffolding
 Half-finished branches behind `raise NotImplementedError`, enum
 variants promising dynamism the system never delivers, comments
 referring to future work the project doesn't plan to build. The
 root `CLAUDE.md` is explicit: "Document current state, not
-half-done plans." Verify the "future" actually isn't on the
-roadmap. **Precedent (this backlog):** `ForkTrigger.L2_REBASE` /
-`L3_REBASE` / `OPERATOR_REWIND` + the unreachable
-`NotImplementedError` branch.
+half-done plans." **Verify the "future" actually isn't on the
+roadmap before flagging** — `ForkTrigger.L2_REBASE` / `L3_REBASE` /
+`OPERATOR_REWIND` looked like vibe-coded scaffolding behind a
+`NotImplementedError` branch, but `m10-prompt-iteration-framework.md`
+explicitly schedules them for wiring. They're now active backlog
+("Wire rebase emission") instead of a delete candidate.
 
 ### Anti-patterns to skip
 These are NOT debt — skip on sight:

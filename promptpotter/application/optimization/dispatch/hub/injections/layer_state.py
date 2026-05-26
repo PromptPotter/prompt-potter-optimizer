@@ -97,6 +97,29 @@ def _r_critique(b: InjectionBundle) -> str:
     return format_l1_critique_for_prompt(b.digest.critique or {}, b.pipeline_schema)
 
 
+_REBASE_CAPABILITY_TEXT = (
+    "FORK PROPOSAL (rare escape hatch). If the current subtree is genuinely "
+    "exhausted — multiple stall rounds in this lineage with no lift, AND the "
+    "panels point to a specific deferred ancestor round worth re-expanding — you "
+    'may emit fork_proposal = {"round_offset": -N, "reason": "<1-2 sentences>"}. '
+    "round_offset MUST be a negative integer (the rewind distance from the "
+    "current round). The runner mints a sibling cycle at current+round_offset and "
+    "auto-continues optimization there. Capped at 10 rebases per session. "
+    "Default: omit. Prefer continuing the current strategy; fork only when "
+    "refining this trajectory cannot recover."
+)
+
+
+def _r_rebase_capability(b: InjectionBundle) -> str:
+    """Render the fork_proposal escape-hatch instruction, gated by
+    ``OptimizationConfig.rebase_capability``. When the capability is off
+    this returns the empty string so the L2/L3 prompt body is bit-for-bit
+    identical to a no-rebase ablation run."""
+    if not b.rebase_capability:
+        return ""
+    return _REBASE_CAPABILITY_TEXT
+
+
 def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
     """Walk auto-trigger conditions in fixed order — also the render order in L1's prompt."""
     triggers: list[str] = []

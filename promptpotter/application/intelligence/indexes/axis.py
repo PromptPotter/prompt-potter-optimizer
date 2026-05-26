@@ -92,7 +92,6 @@ class AxisIndex:
         )
         self._axis_seen_runs: set[str] = set()
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
-        self._cache_axis_impacts: dict[str, AxisImpact | None] = {}
         self._top_runs: list[RunRecord] = []
 
     # ----- axis analytics -----
@@ -313,8 +312,6 @@ class AxisIndex:
                 continue
             self._fold_entry(self._axis_values, entry, touched_axes=touched_axes)
             self._axis_seen_runs.add(run_id)
-        for axis in touched_axes:
-            self._cache_axis_impacts.pop(axis, None)
         self._recompute_failure_group_correlations()
         self._refresh_top_runs(all_entries)
 
@@ -433,18 +430,13 @@ class AxisIndex:
         axis: str,
         values: dict[str, list[float]],
     ) -> AxisImpact | None:
-        if axis in self._cache_axis_impacts:
-            return self._cache_axis_impacts[axis]
-
         records = [ValueRecord(v, sum(a) / len(a), len(a)) for v, a in values.items() if a]
         records.sort(key=lambda r: -r.mean_accuracy)
         means = [r.mean_accuracy for r in records]
         total = sum(r.sample_count for r in records)
 
         if len(means) < 2:
-            impact = AxisImpact(axis, 0.0, 0.0, "dead", sample_count=total)
-            self._cache_axis_impacts[axis] = impact
-            return impact
+            return AxisImpact(axis, 0.0, 0.0, "dead", sample_count=total)
 
         deltas = [abs(a - b) for a, b in combinations(means, 2)]
         effect = sum(deltas) / len(deltas)
@@ -456,7 +448,7 @@ class AxisIndex:
             if consistency >= 0.3
             else "dead"
         )
-        impact = AxisImpact(
+        return AxisImpact(
             axis=axis,
             effect_size=round(effect, 4),
             consistency=round(consistency, 4),
@@ -464,8 +456,6 @@ class AxisIndex:
             top_values=records[:5],
             sample_count=total,
         )
-        self._cache_axis_impacts[axis] = impact
-        return impact
 
 
 __all__ = ["NOISE_THRESHOLD", "AxisImpact", "AxisIndex", "ValueRecord"]

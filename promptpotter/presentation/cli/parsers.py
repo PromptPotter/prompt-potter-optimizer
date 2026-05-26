@@ -168,6 +168,25 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
         help="Diagnostic mode (see `new --diag`). On a previously-completed "
         "diag cycle, branches off a counted sibling.",
     )
+    p_resume.add_argument(
+        "--rewind",
+        dest="rewind_to_round",
+        type=int,
+        default=None,
+        metavar="ROUND",
+        help="Mint a sibling cycle at ROUND (OPERATOR_REWIND trigger), retarget "
+        "the active pointer, and start optimization on the fork. Parent cycle is "
+        "preserved intact. Contrast with `--from N` which rewinds in place.",
+    )
+    p_resume.add_argument(
+        "--rewind-reason",
+        dest="rewind_reason",
+        type=str,
+        default="",
+        metavar="STR",
+        help="One-line audit-trail reason recorded on the OPERATOR_REWIND fork; "
+        "ignored unless `--rewind ROUND` is set.",
+    )
     _add_runtime_halts(p_resume)
 
 

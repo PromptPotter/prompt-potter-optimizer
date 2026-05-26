@@ -42,8 +42,11 @@ class TransitionResult:
     L2 writes ``task_context``/``l1_layout``/``l1_overrides`` + ``action``
     (``normal_round`` default | ``probe_round`` for warned-query re-run on
     the same OSP). L3 writes ``plan``, optional ``l3_note`` (sticky until
-    next L3 fire), and optional ``fork_proposal`` (observation-only — operator
-    reads it from ``round_NNNN.json`` and acts manually). ``axis_targeted``
+    next L3 fire). Both layers may emit ``fork_proposal`` — the
+    ``_run_transition`` post-apply hook stashes it on ``cycle.rebase_request``
+    and raises ``StopLoop(StopReason.REBASED)``; ``runner.entry`` resolves
+    the request post-finalize into an automatic ``_mint_fork`` +
+    observer rebuild + loop re-entry on the new fork. ``axis_targeted``
     is required prose when ``action='probe_round'``.
     """
 

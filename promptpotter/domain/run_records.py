@@ -206,6 +206,20 @@ class ForkPayload(BaseModel):
     l1_layout: dict[str, list[str]] | None = None
 
 
+class RebaseRequest(BaseModel):
+    """In-loop rebase signal stashed by L2/L3 emission on the cycle, resolved
+    post-finalize by ``runner.entry`` into a ``_mint_fork`` call + observer
+    rebuild + loop re-entry on the new fork. ``trigger`` discriminates the
+    audit-trail label (``L2_REBASE`` / ``L3_REBASE`` / ``OPERATOR_REWIND``)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    fork_from_round: int
+    trigger: ForkTrigger
+    reason: str
+    issued_by: str
+
+
 class OperatorSweepFile(BaseModel):
     """Operator JSON under ``datasets/{name}/sweep/``; dispatcher widens to ``ForkPayload(OPERATOR_SWEEP)``."""
 

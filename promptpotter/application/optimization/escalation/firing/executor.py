@@ -34,8 +34,8 @@ from promptpotter.application.optimization.validators.l2_output import run_l2_ou
 from promptpotter.application.optimization.validators.l3_output import run_l3_output_validators
 from promptpotter.domain.l1_layout import L1Layout, coerce_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopReason, emit_phase
-from promptpotter.domain.run_records import ForkPayload
+from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopLoop, StopReason, emit_phase
+from promptpotter.domain.run_records import ForkPayload, ForkTrigger, RebaseRequest
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
@@ -109,6 +109,7 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
         l1_supplemental_rules=new_supplemental,
         l1_situational_examples=new_examples,
         l2_guard_breaches=failures,
+        fork_proposal=raw.fork_proposal,
         debug_prompt=prompt,
         debug_response=raw.model_dump(),
     )
@@ -163,7 +164,7 @@ def _l2_enter(cycle: Cycle) -> dict[str, Any]:
 
 def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
     # ``l2_*_at_entry`` are read by ``EscalationFSM.fold`` on resume (canonical post-fire L2 state from ``record_l2_fired``).
-    return {
+    payload: dict[str, Any] = {
         "l2_round": cycle.escalation.l2_round,
         "l2_stall_count": cycle.escalation.l2_stall_count,
         "l2_best_accuracy_at_entry": cycle.escalation.l2_best_accuracy_at_entry,
@@ -186,6 +187,9 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l2_prompt": result.debug_prompt,
         "l2_response": result.debug_response,
     }
+    if result.fork_proposal is not None:
+        payload["fork_proposal"] = result.fork_proposal.model_dump()
+    return payload
 
 
 L2 = LayerStrategy(
@@ -370,6 +374,37 @@ async def _run_transition(
         "exit",
         round=round_num,
         **transition.exit_payload_fn(cycle, result),
+    )
+
+    if result.fork_proposal is not None:
+        _stash_rebase_request(cycle, transition.layer_id, result.fork_proposal, round_num)
+        raise StopLoop(StopReason.REBASED)
+
+
+def _stash_rebase_request(cycle: Cycle, layer_id: str, proposal: Any, round_num: int) -> None:
+    """Stash an L2/L3 fork_proposal as a Cycle.rebase_request.
+
+    The runner resolves the request post-finalize: ``_mint_fork`` then
+    rebuilds observers around the new fork's ledger and re-enters the
+    optimize loop (capped at ``MAX_AUTO_REBASES`` per CLI invocation).
+    Stashing here keeps the old cycle's finalize using the un-retargeted
+    ``session.state.cycle_id`` — a crash mid-finalize leaves the old
+    cycle clean and the rebase un-minted, which the operator can
+    re-trigger by re-invoking ``resume``.
+    """
+    trigger = ForkTrigger.L2_REBASE if layer_id == "L2" else ForkTrigger.L3_REBASE
+    target_round = max(0, round_num + int(proposal.round_offset))
+    cycle.rebase_request = RebaseRequest(
+        fork_from_round=target_round,
+        trigger=trigger,
+        reason=str(proposal.reason or f"{layer_id} fork_proposal: rewind {proposal.round_offset}"),
+        issued_by=f"{layer_id}/round_{round_num}",
+    )
+    logger.info(
+        "%s emitted fork_proposal: rewind to round %d (offset=%d) — cycle will exit with REBASED",
+        layer_id,
+        target_round,
+        proposal.round_offset,
     )
 
 

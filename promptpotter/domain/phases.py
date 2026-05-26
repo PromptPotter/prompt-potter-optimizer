@@ -61,6 +61,7 @@ class StopReason(enum.StrEnum):
     SPEND_BUDGET = "spend_budget"
     RENDER_ERROR = "render_error"
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
+    REBASED = "rebased_to_fork"
 
 
 class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error

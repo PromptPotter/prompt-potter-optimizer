@@ -19,6 +19,7 @@ from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation import apply_fork_payload_to_osp
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+    _mint_fork,
     cleanup_stub_fork_if_empty,
 )
 from promptpotter.application.origin import (
@@ -41,6 +42,23 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.shared.errors import ResumeDivergenceError
 
 logger = logging.getLogger(__name__)
+
+# Cap on auto-rebases per CLI invocation. L2/L3 emitting fork_proposal
+# every fire would otherwise spiral; after this many in-process rebases
+# we exit with the last cycle's stop_reason and let the operator
+# re-invoke ``resume`` if they want to keep going.
+MAX_AUTO_REBASES = 10
+
+
+def _build_spend_probe(observers: RunObservers, spend_budget_usd: float | None) -> Any:
+    """Return a no-arg callable returning the dashboard's spend rollup, or
+    ``None`` when no budget is set. Binds ``observers`` at definition time
+    so the rebase loop's per-iteration observer rebuild can't poison this
+    closure with a stale reference."""
+    if spend_budget_usd is None:
+        return None
+    dashboard = observers.dashboard
+    return lambda: dashboard.spend_total_used_usd
 
 
 async def run_optimization(
@@ -90,146 +108,208 @@ async def run_optimization(
     else:
         resolved_task_context = TaskDecomposition()
 
-    pre_loop_cycle_id = session.state.cycle_id
+    rebase_count = 0
+    while True:
+        pre_loop_cycle_id = session.state.cycle_id
 
-    # Outer try/except: init-phase crashes (stale OSP rejected by extra="forbid", etc.) land in CRASHED with stashed traceback.
-    cycle: Cycle | None = None
-    try:
-        cycle = await init_optimization_loop(
-            origin,
-            dataset,
-            campaign_config,
-            cb=cb,
-            task_context=resolved_task_context,
-            scoring_formula=scoring_spec.per_sample,
-            scoring_round_formula=scoring_spec.per_round,
-            scorer_id=scoring_spec.scorer_id,
-            no_divergence_check=no_divergence_check,
-            fork_on_divergence=fork_on_divergence,
-            langfuse_session_id=langfuse_session_id,
-            cycle_id=session.state.cycle_id or None,
-            resume_from_round_override=resume_from_round_override,
-            experiment_id=experiment_id or "",
-            session=session,
-            started_at=started_at,
-        )
+        # Outer try/except: init-phase crashes (stale OSP rejected by extra="forbid", etc.) land in CRASHED with stashed traceback.
+        cycle: Cycle | None = None
+        try:
+            cycle = await init_optimization_loop(
+                origin,
+                dataset,
+                campaign_config,
+                cb=cb,
+                task_context=resolved_task_context,
+                scoring_formula=scoring_spec.per_sample,
+                scoring_round_formula=scoring_spec.per_round,
+                scorer_id=scoring_spec.scorer_id,
+                no_divergence_check=no_divergence_check,
+                fork_on_divergence=fork_on_divergence,
+                langfuse_session_id=langfuse_session_id,
+                cycle_id=session.state.cycle_id or None,
+                resume_from_round_override=resume_from_round_override,
+                experiment_id=experiment_id or "",
+                session=session,
+                started_at=started_at,
+            )
 
-        # Operator forks (sweep, rebase) stamp L1-surface deltas; triggers without deltas skip.
-        if fork_payload is not None and fork_payload.l1_layout is not None:
-            apply_fork_payload_to_osp(cycle.opt_sp, fork_payload)
+            # Operator forks (sweep, rebase) stamp L1-surface deltas; triggers without deltas skip.
+            if fork_payload is not None and fork_payload.l1_layout is not None:
+                apply_fork_payload_to_osp(cycle.opt_sp, fork_payload)
 
-        # Fork-on-divergence: rebuild observers around the fork's own ledger.
-        forked = (
+            # Fork-on-divergence: rebuild observers around the fork's own ledger.
+            forked = (
+                pre_loop_cycle_id
+                and session.state.cycle_id
+                and pre_loop_cycle_id != session.state.cycle_id
+            )
+            if forked and pre_loop_cycle_id:
+                # Carry phase_ctx across the rebuild — INIT.enter (max_rounds, patience, formulas)
+                # fired on the parent callbacks and won't re-fire (else RoundStartView reads zeros on every forked round).
+                parent_phase_ctx = observers.callbacks._phase_ctx
+                observers = build_run_observers(
+                    session=session,
+                    campaign_config=campaign_config,
+                    dataset=dataset,
+                    display=observers.display,
+                    resumed_from_round=session.state.resumed_from_round,
+                    origin_accuracy=origin.origin_acc,
+                    fork=ForkInfo(
+                        parent_cycle_id=pre_loop_cycle_id,
+                        parent_dashboard=observers.dashboard,
+                    ),
+                )
+                observers.callbacks._phase_ctx = parent_phase_ctx
+                cb = observers.callbacks
+
+            stop_reason = await run_round_loop(
+                cycle,
+                dataset,
+                campaign_config,
+                session,
+                cb,
+                sweep=sweep,
+                diag=diag,
+                halt_at_accuracy=halt_at_accuracy,
+                spend_budget_usd=spend_budget_usd,
+                # Halt probe reads LiveDashboardView's clean accessor; the dashboard
+                # is the sole owner of the spend rollup, so the probe goes through
+                # the projection that already accumulates the records — not a
+                # parallel reader.
+                # Bind `observers` explicitly so the rebase loop's next-iteration
+                # rebuild can't make this probe read a stale reference.
+                spend_probe=_build_spend_probe(observers, spend_budget_usd),
+            )
+        except (KeyboardInterrupt, asyncio.CancelledError) as exc:
+            cause = (
+                "user-initiated"
+                if isinstance(exc, KeyboardInterrupt)
+                else "programmatic cancellation"
+            )
+            logger.warning("Optimization interrupted before round loop entered (%s).", cause)
+            stop_reason = StopReason.INTERRUPTED
+        except ResumeDivergenceError as exc:
+            # Operator-recoverable; fix is ``--fork-on-divergence``.
+            logger.warning("Resume halted on divergence:\n%s", exc)
+            stop_reason = StopReason.DIVERGED
+        except Exception:
+            session.state.crash_traceback = traceback.format_exc()
+            logger.exception("Optimization crashed before round loop entered.")
+            stop_reason = StopReason.CRASHED
+
+        finished_at = datetime.now(UTC).isoformat()
+        # Init-crash fallback: cycle_id was minted upstream, so mark_finished can still stamp final with traceback.
+        if cycle is not None:
+            best_sp = cycle.tracking.best_sp
+            cycle_result = CycleResult(
+                rounds=cycle.rounds,
+                n_rounds=len(cycle.rounds),
+                best_accuracy=cycle.tracking.best_accuracy,
+                best_round=cycle.tracking.best_round,
+                origin_accuracy=origin.origin_acc,
+                winner_prompt_fields=cycle.opt_sp.prompt_field_dict() if best_sp else {},
+                winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
+                stop_reason=stop_reason,
+                started_at=started_at,
+                finished_at=finished_at,
+                cycle_id=session.state.cycle_id,
+                session_id=session.session_id or None,
+                resumed_from_round=session.state.resumed_from_round,
+            )
+        else:
+            cycle_result = CycleResult(
+                rounds=[],
+                n_rounds=0,
+                best_accuracy=0.0,
+                best_round=0,
+                origin_accuracy=origin.origin_acc,
+                winner_prompt_fields={},
+                winner_pipeline_params=None,
+                stop_reason=stop_reason,
+                started_at=started_at,
+                finished_at=finished_at,
+                cycle_id=session.state.cycle_id,
+                session_id=session.session_id or None,
+                resumed_from_round=session.state.resumed_from_round,
+            )
+        _finalize_run(session, observers, cycle_result, sweep=sweep)
+
+        # Stub-fork cleanup: if this run forked during init but never completed a round, delete the
+        # empty dir so interrupts between fork-mint and round-1 don't accumulate stubs.
+        forked_in_this_run = (
             pre_loop_cycle_id
             and session.state.cycle_id
             and pre_loop_cycle_id != session.state.cycle_id
         )
-        if forked and pre_loop_cycle_id:
-            # Carry phase_ctx across the rebuild — INIT.enter (max_rounds, patience, formulas)
-            # fired on the parent callbacks and won't re-fire (else RoundStartView reads zeros on every forked round).
-            parent_phase_ctx = observers.callbacks._phase_ctx
-            observers = build_run_observers(
-                session=session,
-                campaign_config=campaign_config,
-                dataset=dataset,
-                display=observers.display,
-                resumed_from_round=session.state.resumed_from_round,
-                origin_accuracy=origin.origin_acc,
-                fork=ForkInfo(
-                    parent_cycle_id=pre_loop_cycle_id,
-                    parent_dashboard=observers.dashboard,
-                ),
+        if forked_in_this_run and cycle_result.n_rounds == 0:
+            cleanup_stub_fork_if_empty(
+                campaign_store=session.store.campaigns,
+                campaign_id=session.campaign_id,
+                tenant_id=session.store.tenant_id,
+                session_id=session.session_id or "",
+                cycle_id=session.state.cycle_id,
+                parent_cycle_id=pre_loop_cycle_id,
             )
-            observers.callbacks._phase_ctx = parent_phase_ctx
-            cb = observers.callbacks
 
-        stop_reason = await run_round_loop(
-            cycle,
-            dataset,
-            campaign_config,
-            session,
-            cb,
-            sweep=sweep,
-            diag=diag,
-            halt_at_accuracy=halt_at_accuracy,
-            spend_budget_usd=spend_budget_usd,
-            # Halt probe reads LiveDashboardView's clean accessor; the dashboard
-            # is the sole owner of the spend rollup, so the probe goes through
-            # the projection that already accumulates the records — not a
-            # parallel reader.
-            spend_probe=(
-                (lambda: observers.dashboard.spend_total_used_usd)
-                if spend_budget_usd is not None
-                else None
-            ),
-        )
-    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
-        cause = (
-            "user-initiated" if isinstance(exc, KeyboardInterrupt) else "programmatic cancellation"
-        )
-        logger.warning("Optimization interrupted before round loop entered (%s).", cause)
-        stop_reason = StopReason.INTERRUPTED
-    except ResumeDivergenceError as exc:
-        # Operator-recoverable; fix is ``--fork-on-divergence``.
-        logger.warning("Resume halted on divergence:\n%s", exc)
-        stop_reason = StopReason.DIVERGED
-    except Exception:
-        session.state.crash_traceback = traceback.format_exc()
-        logger.exception("Optimization crashed before round loop entered.")
-        stop_reason = StopReason.CRASHED
+        # Auto-rebase: cycle exited with REBASED + cycle stashed a rebase request →
+        # mint the fork now (old cycle is fully finalized), rebuild observers, loop.
+        rebase_req = cycle.rebase_request if cycle is not None else None
+        if (
+            cycle_result.stop_reason != StopReason.REBASED
+            or rebase_req is None
+            or rebase_count >= MAX_AUTO_REBASES
+            or session.state.cycle_id is None
+        ):
+            if rebase_req is not None and rebase_count >= MAX_AUTO_REBASES:
+                logger.warning(
+                    "Auto-rebase cap %d reached; ignoring further fork_proposals this session.",
+                    MAX_AUTO_REBASES,
+                )
+            return cycle_result
 
-    finished_at = datetime.now(UTC).isoformat()
-    # Init-crash fallback: cycle_id was minted upstream, so mark_finished can still stamp final with traceback.
-    if cycle is not None:
-        best_sp = cycle.tracking.best_sp
-        cycle_result = CycleResult(
-            rounds=cycle.rounds,
-            n_rounds=len(cycle.rounds),
-            best_accuracy=cycle.tracking.best_accuracy,
-            best_round=cycle.tracking.best_round,
-            origin_accuracy=origin.origin_acc,
-            winner_prompt_fields=cycle.opt_sp.prompt_field_dict() if best_sp else {},
-            winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
-            stop_reason=stop_reason,
-            started_at=started_at,
-            finished_at=finished_at,
-            cycle_id=session.state.cycle_id,
-            session_id=session.session_id or None,
-            resumed_from_round=session.state.resumed_from_round,
-        )
-    else:
-        cycle_result = CycleResult(
-            rounds=[],
-            n_rounds=0,
-            best_accuracy=0.0,
-            best_round=0,
-            origin_accuracy=origin.origin_acc,
-            winner_prompt_fields={},
-            winner_pipeline_params=None,
-            stop_reason=stop_reason,
-            started_at=started_at,
-            finished_at=finished_at,
-            cycle_id=session.state.cycle_id,
-            session_id=session.session_id or None,
-            resumed_from_round=session.state.resumed_from_round,
-        )
-    _finalize_run(session, observers, cycle_result, sweep=sweep)
-
-    # Stub-fork cleanup: if this run forked during init but never completed a round, delete the
-    # empty dir so interrupts between fork-mint and round-1 don't accumulate stubs.
-    forked_in_this_run = (
-        pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
-    )
-    if forked_in_this_run and cycle_result.n_rounds == 0:
-        cleanup_stub_fork_if_empty(
+        parent_cycle_id = session.state.cycle_id
+        new_cycle_id = _mint_fork(
             campaign_store=session.store.campaigns,
             campaign_id=session.campaign_id,
             tenant_id=session.store.tenant_id,
             session_id=session.session_id or "",
-            cycle_id=session.state.cycle_id,
-            parent_cycle_id=pre_loop_cycle_id,
+            parent_cycle_id=parent_cycle_id,
+            fork_from_round=rebase_req.fork_from_round,
+            payload=ForkPayload(
+                trigger=rebase_req.trigger,
+                reason=rebase_req.reason,
+                issued_by=rebase_req.issued_by,
+            ),
         )
-    return cycle_result
+        session.state.cycle_id = new_cycle_id
+        session.state.resumed_from_round = rebase_req.fork_from_round
+        parent_phase_ctx = observers.callbacks._phase_ctx
+        observers = build_run_observers(
+            session=session,
+            campaign_config=campaign_config,
+            dataset=dataset,
+            display=observers.display,
+            resumed_from_round=rebase_req.fork_from_round,
+            origin_accuracy=origin.origin_acc,
+            fork=ForkInfo(
+                parent_cycle_id=parent_cycle_id,
+                parent_dashboard=observers.dashboard,
+            ),
+        )
+        observers.callbacks._phase_ctx = parent_phase_ctx
+        cb = observers.callbacks
+        rebase_count += 1
+        logger.info(
+            "Auto-rebase #%d/%d: %s → %s at round %d [trigger=%s, reason=%s]",
+            rebase_count,
+            MAX_AUTO_REBASES,
+            parent_cycle_id,
+            new_cycle_id,
+            rebase_req.fork_from_round,
+            rebase_req.trigger.value,
+            rebase_req.reason,
+        )
 
 
 def _finalize_run(
