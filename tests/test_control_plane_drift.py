@@ -26,15 +26,17 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _OPENAPI_PATH = _REPO_ROOT / "docs" / "specs" / "m12-api-openapi.yaml"
 _ASYNCAPI_PATH = _REPO_ROOT / "docs" / "specs" / "m12-events-asyncapi.yaml"
 _CONTRACT_PATH = _REPO_ROOT / "docs" / "adr" / "0001-m12-control-plane.md"
+_IDENTITY_ADR_PATH = _REPO_ROOT / "docs" / "adr" / "0002-identity-foundation.md"
+_SPEND_ADR_PATH = _REPO_ROOT / "docs" / "adr" / "0003-spend-and-tenancy.md"
 
 # Projection-only event kinds — emitted on the SSE channel but have no
 # underlying record class in `domain/run_records.py`. Synthesized by
 # EventStreamView at Profile A; expand only at profile boundaries.
 #   - `stream_snapshot`: the leading snapshot frame (security box 14).
-#   - `command`, `command_ack`: declared in the AsyncAPI before Profile B
-#     adds the matching record classes; they graduate out of this set
-#     when the record classes land in CycleRecord.
-_PROJECTION_ONLY_KINDS: frozenset[str] = frozenset({"stream_snapshot", "command", "command_ack"})
+# `command` / `command_ack` are NOT projection-only — they ride records
+# in the union (`CommandRecord` / `CommandAckRecord`) and round-trip
+# through the canonical ledger.
+_PROJECTION_ONLY_KINDS: frozenset[str] = frozenset({"stream_snapshot"})
 
 
 def _record_type_literals() -> frozenset[str]:
@@ -131,12 +133,18 @@ def test_control_plane_drift() -> None:
     responses = components.get("responses") or {}
 
     # Mandatory reusable parameters — the trust-boundary headers
-    # (security boxes 8, 9).
+    # (security boxes 8, 9). `Idempotency-Key` is required on every command;
+    # `Expected-Version` is required by the Profile B contract but is
+    # declared `required: false` at the parameter component for the v0
+    # relaxation window (the webapp does not yet thread ledger sequence
+    # through mutations — see the v0-relaxation note inside the YAML).
     for name in ("IdempotencyKey", "ExpectedVersion"):
         param = parameters.get(name)
         assert param is not None, f"OpenAPI components.parameters.{name} missing"
-        assert param.get("required") is True, f"{name} parameter must be required"
         assert param.get("in") == "header", f"{name} must be a header parameter"
+    assert parameters["IdempotencyKey"].get("required") is True, (
+        "Idempotency-Key parameter must be required on every command (security box 8)."
+    )
 
     # Mandatory reusable schemas — the inbound envelope shape
     # (security boxes 5, 6, 17).
@@ -210,6 +218,45 @@ def test_control_plane_drift() -> None:
         f"or add the kind to _PROJECTION_ONLY_KINDS in this test."
     )
 
+    # ----- Profile A: Python ProjectionEnvelope mirrors AsyncAPI shape ----
+    from promptpotter.domain.projection_envelope import (
+        ProjectionEnvelope,
+        ProjectionKind,
+    )
+
+    # The YAML's `required` set is the "always-on-the-wire" contract. Each
+    # such field must exist in the Python model; pydantic defaults guarantee
+    # presence on serialization even when not required at construction time.
+    py_fields = set(ProjectionEnvelope.model_fields)
+    yaml_required = set(envelope.get("required") or [])
+    missing_in_python = yaml_required - py_fields
+    assert not missing_in_python, (
+        f"AsyncAPI ProjectionEnvelope.required names fields the Python model "
+        f"does not declare: {sorted(missing_in_python)}. Update either side."
+    )
+
+    # ProjectionKind Literal arms must match the YAML enum exactly.
+    py_kinds = set(get_args(ProjectionKind))
+    assert py_kinds == declared_kinds, (
+        f"ProjectionKind Literal drifted from YAML enum: "
+        f"py-only={sorted(py_kinds - declared_kinds)}, "
+        f"yaml-only={sorted(declared_kinds - py_kinds)}"
+    )
+
+    # ----- Profile A: SSE handler exists at the declared channel address ----
+    # AsyncAPI declares the channel at .../events:subscribe. Profile A adds the
+    # FastAPI handler; assert the route is registered on `app`.
+    from promptpotter.main import app
+
+    channel_address = cycle_events.get("address") or ""
+    registered_paths = [getattr(r, "path", "") for r in app.routes]
+    expected_route = "/api/v1" + channel_address
+    assert any(channel_address in p for p in registered_paths), (
+        f"AsyncAPI declares channel at {channel_address!r} but no FastAPI route "
+        f"matches; routes registered: {sorted(p for p in registered_paths if 'events' in p)}. "
+        f"Expected something like {expected_route!r}."
+    )
+
     # ----- Anchors table integrity (security box 20) ----
     contract_text = _CONTRACT_PATH.read_text(encoding="utf-8")
     anchor_paths = _anchor_paths(contract_text)
@@ -224,3 +271,22 @@ def test_control_plane_drift() -> None:
 
     # Symbolic placate-mypy use of the import (kept narrow so deptry sees usage).
     _ = Literal["pinned-import"]
+
+
+def test_adr_anchor_files_exist() -> None:
+    """Every Anchors-table file path in ADR-0001 / ADR-0002 / ADR-0003 must
+    exist on disk. ADR-0001 already checks itself inside the bundled drift
+    test (security box 20); this asserts the same shape for the two sibling
+    ADRs whose Anchors tables match the ``| Concern | File |`` format and
+    sit under an ``### Anchors`` heading."""
+    for adr_path in (_CONTRACT_PATH, _IDENTITY_ADR_PATH, _SPEND_ADR_PATH):
+        assert adr_path.is_file(), f"missing {adr_path}"
+        paths = _anchor_paths(adr_path.read_text(encoding="utf-8"))
+        assert paths, f"{adr_path.name}: Anchors table must list at least one path"
+        for raw_path in paths:
+            path_only = raw_path.split("#")[0]
+            candidate = _REPO_ROOT / path_only
+            assert candidate.exists(), (
+                f"{adr_path.name}: Anchors table references {raw_path!r} "
+                f"which does not exist on disk"
+            )

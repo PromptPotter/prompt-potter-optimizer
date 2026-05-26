@@ -28,6 +28,7 @@ from promptpotter.infrastructure.store.paths import (
 )
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.sweep_store import SweepStore
+from promptpotter.infrastructure.store.user_store import UserStore
 from promptpotter.shared.hashing import HASH_TRUNCATE
 from promptpotter.shared.identity import IdentityContext
 
@@ -106,6 +107,7 @@ class Stores:
     archive: MeasurementArchive
     optimizer_calls: OptimizerCallCache
     diagnostic_runs: DiagnosticRunStore
+    users: UserStore
 
     @property
     def tenant_id(self) -> TenantId:
@@ -140,6 +142,7 @@ def build_stores(
         archive=MeasurementArchive(tenant_dir),
         optimizer_calls=OptimizerCallCache(tenant_dir),
         diagnostic_runs=DiagnosticRunStore(tenant_dir),
+        users=UserStore(tenant_dir),
     )
 
 

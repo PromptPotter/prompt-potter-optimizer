@@ -18,7 +18,7 @@ from typing import IO
 
 from pydantic import TypeAdapter
 
-from promptpotter.domain.cycle_paths import CycleDir, Projection
+from promptpotter.domain.cycle_paths import CycleDir, Projection, WorkspaceDir
 from promptpotter.domain.run_records import CycleRecord
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,14 @@ class CycleEventLog:
 
     One ledger per cycle. The on-disk file is the source of truth;
     subscribers are a runtime convenience for live projections.
-    Forks via ``inherit_from(parent, offset)``."""
+    Forks via ``inherit_from(parent, offset)``.
+
+    A workspace-scoped variant (per ``docs/architecture.md`` §0
+    Persistence) lives at ``{workspace_dir}/.workspace/events.jsonl`` and
+    is opened via :meth:`open_workspace`. Workspace ledgers carry
+    workspace-scoped command audit (`register-backend`,
+    `sync-backend-experiments`); per-cycle ledgers remain canonical for
+    cycle-targeted records."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
@@ -49,6 +56,18 @@ class CycleEventLog:
         runtime_dir = Path(cycle_dir) / ".runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
         return cls(runtime_dir / "ledger.jsonl")
+
+    @classmethod
+    def open_workspace(cls, workspace_dir: WorkspaceDir) -> CycleEventLog:
+        """Open the workspace-scoped ledger at ``{workspace_dir}/.workspace/events.jsonl``.
+
+        Same shape as the per-cycle ledger, same single-writer discipline;
+        ``inherit_from`` is not used at this scope (the workspace has no fork
+        tree). Per ``docs/architecture.md`` §0 the workspace ledger is the
+        target for commands without any cycle to address."""
+        workspace_subdir = Path(workspace_dir) / ".workspace"
+        workspace_subdir.mkdir(parents=True, exist_ok=True)
+        return cls(workspace_subdir / "events.jsonl")
 
     @property
     def path(self) -> Path:

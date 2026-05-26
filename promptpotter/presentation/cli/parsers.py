@@ -536,6 +536,23 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
 
+    for verb, summary in (
+        (
+            "archive",
+            "Mark a campaign 'archived' — hides from the default sidebar; data stays on disk.",
+        ),
+        ("delete", "Soft-mark a campaign 'deleted' — measurements still cache-hit for siblings."),
+        ("unarchive", "Restore a campaign to 'active' — reverses archive or delete."),
+    ):
+        p = sub.add_parser(verb, help=summary)
+        p.add_argument("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
+        if verb != "unarchive":
+            p.add_argument(
+                "--reason",
+                default="",
+                help="Optional operator-supplied reason for the transition.",
+            )
+
     return parser
 
 

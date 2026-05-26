@@ -43,15 +43,19 @@ export function FamilyTree({ campaignId, cycleId, onSelectCycle }: Props) {
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
   const [cleaning, setCleaning] = useState(false);
-  const [lastCleanupCount, setLastCleanupCount] = useState<number | null>(null);
+  const [cleanupAcked, setCleanupAcked] = useState(false);
 
   const confirmCleanup = useCallback(async () => {
     if (!campaignId || rootCycleIds.length === 0) return;
     setCleaning(true);
     setCleanupError(null);
     try {
-      const r = await postCleanupEmpty(campaignId, rootCycleIds[0]);
-      setLastCleanupCount(r.deleted_cycle_ids.length);
+      // Command highway: dispatcher inline-applies the batch sweep then
+      // returns a generic CommandAcceptedBody. The before/after delta in
+      // `stubCount` is the operator-facing signal (and the sidebar drops
+      // the cleared cycles on the next workspace tick).
+      await postCleanupEmpty(campaignId, rootCycleIds[0]);
+      setCleanupAcked(true);
       setCleanupOpen(false);
       setTick((t) => t + 1);
       // Re-tick the workspace poll so the sidebar drops the deleted cycles
@@ -123,9 +127,9 @@ export function FamilyTree({ campaignId, cycleId, onSelectCycle }: Props) {
               Clean up {stubCount} stub{stubCount === 1 ? "" : "s"}
             </button>
           )}
-          {lastCleanupCount != null && stubCount === 0 && (
+          {cleanupAcked && stubCount === 0 && (
             <span className="family-cladogram-cleanup-done" title="Last cleanup result">
-              cleaned {lastCleanupCount}
+              cleaned
             </span>
           )}
         </span>

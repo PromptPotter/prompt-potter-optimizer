@@ -28,6 +28,7 @@ dependencies = [
     "filelock>=3.12.0",        # why kept: MeasurementArchive index lock under concurrent writers
     "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
     "json-repair>=0.30,<1.0",  # why kept: structured repair of provider-returned JSON (invalid \X escapes, etc.) at the LLM boundary
+    "cryptography>=42.0",      # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002 — only new Python dep).
 ]
 
 [project.optional-dependencies]

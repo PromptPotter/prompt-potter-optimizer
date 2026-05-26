@@ -5,6 +5,7 @@ import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
 import { buildUnitTree, type SessionGroup } from "./grouping";
 import { UnitBranchRows } from "./UnitBranchRows";
+import { CampaignMenu } from "./CampaignMenu";
 
 // One session row + (when expanded) its fork-tree. Rendered either AS the
 // campaign row (single-session campaign) or as a child session row
@@ -112,6 +113,7 @@ export function SessionSubtree({
             ))}
           </span>
         )}
+        {isCampaignRow && <CampaignMenu campaign={campaign} />}
       </div>
       {open && hasBranches && (
         <ul className="unit-library-children">

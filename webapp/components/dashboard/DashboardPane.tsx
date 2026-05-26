@@ -18,6 +18,7 @@ import { LiveStateCard } from "./LiveStateCard";
 import { RoundTabsStrip } from "./round-samples/RoundTabsStrip";
 import { CyclePicker } from "./CyclePicker";
 import { SelectionProvider } from "./SelectionContext";
+import { NewCampaignModal } from "./NewCampaignModal";
 import { NowTriad } from "./NowTriad";
 import { FilesPane } from "@/components/tree/FilesPane";
 import { VerifyPane } from "@/components/verify/VerifyPane";
@@ -59,6 +60,7 @@ function DashboardPaneInner() {
   // cycleId during the first paint; chat dodges that path. Revisit when
   // we untangle the dashboard first-render sequence.
   const [tab, setTab] = useState<Tab>("chat");
+  const [newCampaignOpen, setNewCampaignOpen] = useState(false);
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<PipelineDoc | null>(null);
@@ -180,7 +182,7 @@ function DashboardPaneInner() {
           selectCycle(cmp, cyc);
           setTab("dashboard");
         }}
-        onNewCycle={() => setTab("chat")}
+        onNewCycle={() => setNewCampaignOpen(true)}
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleSidebar}
       />
@@ -275,6 +277,10 @@ function DashboardPaneInner() {
         )}
         <ConsolePane campaignId={campaignId} cycleId={cycleId} />
       </main>
+      <NewCampaignModal
+        open={newCampaignOpen}
+        onClose={() => setNewCampaignOpen(false)}
+      />
     </div>
     </SelectionProvider>
   );

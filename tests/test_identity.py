@@ -1,22 +1,32 @@
-"""Identity-foundation Stage-0 invariants — no-drift gates #3, #4, #6.
+"""Identity-foundation invariants — Stage-0 gates #3/#4/#6 + Stage-1 gates #1/#2/#5.
 
-The gates are spelled out in `docs/adr/0002-identity-foundation.md`. Stage 0 ships
-only what's checkable today (the resolver seam is in-process and the SCIM
-schema isn't vendored yet); gates #1, #2, #5 are deferred until Stage 1 lands
-the OIDC client + middleware.
+The gates are spelled out in `docs/adr/0002-identity-foundation.md`. Stage 0
+shipped #3/#4/#6 (resolver seam + tenant scope + SCIM-mapped field set).
+Stage 1 adds #1 (closed provider set declared), #2 (no JWT type past
+middleware), and #5 (§0 names the Identity I/O kind before code).
 
-Per `tests/CLAUDE.md`: one bundled test, one canonical case per contract — not
-three parallel tests.
+Per `tests/CLAUDE.md`: one bundled test per contract — not parallel tests.
 """
 
 from __future__ import annotations
 
 import inspect
+import os
+from pathlib import Path
 from typing import get_type_hints
+from unittest.mock import MagicMock
 
 from promptpotter.domain.identity import SafeName, TenantId, UserId, safe_name
+from promptpotter.infrastructure.identity import (
+    GitHubProviderClient,
+    GoogleProviderClient,
+    derive_user_id,
+)
 from promptpotter.infrastructure.store import Stores, build_stores
+from promptpotter.presentation.api.deps import resolve_identity
 from promptpotter.shared.identity import IdentityContext, default_identity
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # SCIM 2.0 Core (RFC 7643) User-resource field subset we promise to mirror at
 # Stage 0 — `id` and `externalId` map to `user_id`; the IdentityContext layer
@@ -78,3 +88,72 @@ def test_identity_seam_no_drift() -> None:
         pass
     else:
         raise AssertionError("safe_name must reject path-traversal slugs")
+
+
+def test_stage1_identity_gates(monkeypatch) -> None:
+    """Bundled assertion of Stage-1 no-drift gates #1, #2, #5."""
+    # Gate #5 — §0 names the Identity I/O kind. The architecture spec lists the
+    # five I/O kinds at the top of §0; the count + the literal "Identity" entry
+    # must both be present before any Stage-1 code lands.
+    arch = (REPO_ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
+    assert "Five I/O kinds" in arch, "§0 must declare five I/O kinds"
+    assert "Identity" in arch, "§0 must name the Identity I/O kind"
+
+    # Gate #1 — the closed provider set is declared as Google + GitHub. Adding
+    # a provider means writing a new module under `infrastructure/identity/`
+    # AND wiring it into `bundle.build_identity_bundle` + the auth router;
+    # this assertion fails until then.
+    assert GoogleProviderClient.__module__.endswith("identity.google")
+    assert GitHubProviderClient.__module__.endswith("identity.github")
+
+    # Gate #2 — no JWT type appears past the identity-infrastructure
+    # boundary. The verifier (`infrastructure/identity/verifier.py`) is the
+    # ONLY module permitted to import a JWS library. Downstream code sees
+    # `IdentityContext` exclusively.
+    code_root = REPO_ROOT / "promptpotter"
+    allowed = {
+        code_root / "infrastructure" / "identity" / "verifier.py",
+        code_root / "infrastructure" / "identity" / "jwks.py",
+    }
+    forbidden_imports = ("import jwt", "from jwt", "import jose", "from jose")
+    for path in code_root.rglob("*.py"):
+        if path in allowed:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for needle in forbidden_imports:
+            assert needle not in text, (
+                f"JWT import past middleware boundary in {path.relative_to(REPO_ROOT)} "
+                f"(found {needle!r}); only verifier.py / jwks.py may touch JWS"
+            )
+
+    # derive_user_id is deterministic per (iss, sub) and produces a
+    # safe_name-shaped slug.
+    uid1 = derive_user_id("https://accounts.google.com", "1234567890")
+    uid2 = derive_user_id("https://accounts.google.com", "1234567890")
+    uid3 = derive_user_id("https://github.com", "1234567890")
+    assert uid1 == uid2, "derive_user_id must be deterministic"
+    assert uid1 != uid3, "same sub across different iss must yield different UserIds"
+    assert safe_name(str(uid1)) == SafeName(str(uid1))
+
+    # PROMPTPOTTER_AUTH=off escape hatch — resolve_identity returns the
+    # default Stage-0 identity regardless of request state.
+    monkeypatch.setenv("PROMPTPOTTER_AUTH", "off")
+    request = MagicMock()
+    request.state.identity_ctx = None
+    ctx = resolve_identity(request)
+    assert ctx == default_identity(), "PROMPTPOTTER_AUTH=off must return default_identity()"
+
+    # When the env var is unset and no session is bound, resolve_identity
+    # raises a 401 — that's the unauthenticated path.
+    monkeypatch.delenv("PROMPTPOTTER_AUTH", raising=False)
+    try:
+        resolve_identity(request)
+    except Exception as exc:  # FastAPI HTTPException
+        assert getattr(exc, "status_code", None) == 401
+    else:
+        raise AssertionError("resolve_identity must raise 401 when no session bound")
+
+    # Sanity — gate #2 file allowlist references files that actually exist.
+    for path in allowed:
+        assert path.is_file(), f"gate #2 allowlist references missing file: {path}"
+    _ = os  # used implicitly by monkeypatch

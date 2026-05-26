@@ -246,23 +246,29 @@ Skip-list (do not adopt):
 - **AWS IAM JSON policies** — vendor-locked to AWS; unsuitable as application-internal authz.
 - **OAuth scopes** — API-gating coarse layer, not app-internal authz; orthogonal concern.
 
-### Code anchors
+### Stage 1 implementation (shipped)
 
-Every claim in this ADR names a file. The drift detector (`tests/test_identity.py::test_identity_seam_no_drift`) covers the Stage-0 gates today; Stage-1 / Stage-2 work extends the same invariant.
+Stage 1 OIDC sign-up landed at `promptpotter/infrastructure/identity/` and `promptpotter/presentation/api/middleware/oidc.py`. The package splits per provider (`google.py`, `github.py`) on top of shared infrastructure (`verifier.py`, `jwks.py`, `session.py`, `bundle.py`, `provider_config.py`, `allowlist.py`, `migration.py`, `paths.py`, `user.py`); `cryptography` is the only new Python dep per the minimal-deps invariant. The middleware at `presentation/api/middleware/oidc.py` verifies the inbound ID Token against the issuer's JWKS, populates `IdentityContext`, and ensures tokens never appear past the boundary (gate #2, CI-checked). `presentation/api/deps.py::resolve_identity` reads the verified context from the session-cookie store; Stage 0 (auth-off) substitutes `default_identity()`. Auto-mint at first sign-in is one-tenant-per-user (`tenant_id = UserId`), encoded by `infrastructure/identity/user.py::derive_user_id`. Sign-up surface lives at `webapp/app/login/page.tsx` over `/auth/login/{provider}` → `/auth/callback/{provider}`; provider list rides `GET /auth/providers`.
 
-| Concern | Stage | File |
-|---|---|---|
-| `IdentityContext` (shipped) | 0+ | `promptpotter/shared/identity.py` |
-| `TenantId` / `UserId` / `Issuer` / `SafeName` newtypes + `safe_name` validator (shipped) | 0+ | `promptpotter/domain/identity.py` |
-| `Session.identity` field (shipped — replaces deleted `Session.tenant: TenantContext | None`) | 0+ | `promptpotter/application/bootstrap/session.py` |
-| Auth-off resolver (shipped) | 0 | `promptpotter/presentation/api/deps.py` |
-| CLI seam (shipped) | 0+ | `promptpotter/presentation/cli/commands/_shared.py` |
-| Store construction (shipped) | 0+ | `promptpotter/infrastructure/store/stores.py` |
-| Invariant test (shipped — gates #3, #4, #6) | 0 | `tests/test_identity.py` |
-| OIDC client (Stage 1) | 1 | `promptpotter/infrastructure/identity/` (new) — `client.py`, `verifier.py`, `jwks.py`, `session.py` |
-| OIDC middleware (Stage 1) | 1 | `promptpotter/presentation/api/middleware/oidc.py` (new) |
-| RLS adapter (Stage 2) | 2 | `promptpotter/infrastructure/store/postgres/` (new) — drop-in for the file-based `stores.py` |
-| §0 I/O kind | 1 | `docs/architecture.md` (§0 — `Identity` ingress; see "§0 amendment" below) |
+### Anchors
+
+Every claim in this ADR names a file. The drift detector (`tests/test_identity.py::test_identity_seam_no_drift`) covers the Stage-0 gates today; Stage-1 / Stage-2 work extends the same invariant. Path existence is asserted by `tests/test_control_plane_drift.py::test_adr_anchor_files_exist` (shared with ADR-0001 / ADR-0003).
+
+| Concern | File |
+|---|---|
+| `IdentityContext` (shipped, Stage 0+) | `promptpotter/shared/identity.py` |
+| `TenantId` / `UserId` / `Issuer` / `SafeName` newtypes + `safe_name` validator (shipped, Stage 0+) | `promptpotter/domain/identity.py` |
+| `Session.identity` field (shipped, Stage 0+ — replaces deleted `Session.tenant: TenantContext | None`) | `promptpotter/application/bootstrap/session.py` |
+| Identity resolver (shipped, Stage 0 auth-off + Stage 1 OIDC) | `promptpotter/presentation/api/deps.py` |
+| CLI seam (shipped, Stage 0+) | `promptpotter/presentation/cli/commands/_shared.py` |
+| Store construction (shipped, Stage 0+) | `promptpotter/infrastructure/store/stores.py` |
+| Invariant test (shipped, Stage 0 — gates #3, #4, #6) | `tests/test_identity.py` |
+| OIDC client package (shipped, Stage 1) | `promptpotter/infrastructure/identity/` |
+| OIDC middleware (shipped, Stage 1) | `promptpotter/presentation/api/middleware/oidc.py` |
+| Auth router — providers / login / callback / logout / me / quota / activity (shipped, Stage 1) | `promptpotter/presentation/api/routers/auth.py` |
+| Login page (shipped, Stage 1) | `webapp/app/login/page.tsx` |
+| RLS adapter (Stage 2 — not yet on disk) | `promptpotter/infrastructure/store/` |
+| §0 I/O kind amendment (shipped, Stage 1) | `docs/architecture.md` |
 
 ### §0 amendment
 

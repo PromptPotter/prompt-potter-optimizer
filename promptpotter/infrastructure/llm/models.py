@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field
 
 from promptpotter.config.settings import settings
-from promptpotter.domain.run_records import TokenUsageRecord
+from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, TokenUsageRecord
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -125,8 +125,66 @@ def emit_token_usage(
         logger.exception("emit_token_usage append failed")
 
 
+def emit_command(
+    *,
+    command_id: str,
+    kind: str,
+    payload: dict[str, Any],
+    idempotency_key: str,
+    expected_version: int | None = None,
+    issued_by_user_id: str = "",
+    client_metadata: dict[str, Any] | None = None,
+) -> int | None:
+    """Append a ``CommandRecord`` to the active cycle ledger.
+
+    Reads ledger from the per-task ``_CYCLE_LEDGER`` ContextVar; the
+    dispatcher binds the target cycle's ledger via ``set_cycle_ledger``
+    around its work. Returns the offset the record was appended at;
+    ``None`` when no ledger is bound (informational — callers above
+    the dispatcher already raised by then)."""
+    ledger = _CYCLE_LEDGER.get()
+    if ledger is None:
+        return None
+    record = CommandRecord(
+        command_id=command_id,
+        kind=kind,
+        payload=dict(payload),
+        idempotency_key=idempotency_key,
+        expected_version=expected_version,
+        issued_by_user_id=issued_by_user_id,
+        client_metadata=dict(client_metadata or {}),
+    )
+    try:
+        return ledger.append(record)
+    except Exception:
+        logger.exception("emit_command append failed")
+        return None
+
+
+def emit_command_ack(
+    *,
+    command_id: str,
+    status: Literal["applied", "rejected"],
+    detail: str = "",
+) -> None:
+    """Append a ``CommandAckRecord`` to the active cycle ledger.
+
+    Same ContextVar surface as ``emit_command``; the actuator that applied
+    (or refused) the command emits this through the same binding."""
+    ledger = _CYCLE_LEDGER.get()
+    if ledger is None:
+        return
+    record = CommandAckRecord(command_id=command_id, status=status, detail=detail)
+    try:
+        ledger.append(record)
+    except Exception:
+        logger.exception("emit_command_ack append failed")
+
+
 __all__ = [
     "LLMResponse",
+    "emit_command",
+    "emit_command_ack",
     "emit_token_usage",
     "reset_current_round",
     "reset_cycle_ledger",

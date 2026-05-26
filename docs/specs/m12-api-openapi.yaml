@@ -6,7 +6,7 @@
 # Drift detection: `tests/test_control_plane_drift.py` + Spectral lint.
 #
 # Permanent contract: docs/adr/0001-m12-control-plane.md
-# §0 definition: docs/architecture.md (§0 "State + persistence" — Four I/O kinds)
+# §0 definition: docs/architecture.md (§0 "State + persistence" — Five I/O kinds)
 #
 # Status: Profile -1 scaffold. paths{} is intentionally empty. Profile B
 # fills it with the migrated 6 sanctioned POSTs + M12-new command kinds.
@@ -57,17 +57,813 @@ tags:
     description: Commands that change halt / spend / round budgets mid-cycle.
   - name: pipeline-params
     description: Commands that mutate pipeline_params on the active cycle.
+  - name: scoring
+    description: Commands that mutate the scoring composite or steer file.
+  - name: operator-feedback
+    description: Operator-authored signals — hard-sample marks, round notes, candidate verdicts.
   - name: backends
     description: Commands that register or sync external backends.
 
-# Profile -1: empty. Profile B populates this with `/commands/{kind}` operations.
-# Each operation MUST:
-#   - declare both `Idempotency-Key` and (for state mutations) `Expected-Version` parameters
-#   - reference `#/components/schemas/CommandEnvelope` for the request body
-#   - reference `#/components/responses/CommandAccepted` for the 202 response
-#   - reference `#/components/responses/VersionConflict` for the 409 response
-#   - declare a `tag` matching one of the tags above
-paths: {}
+# v0 closed inbound command set — DRAFT for operator redline.
+#
+# Sources of this draft:
+#   - 6 sanctioned POSTs migrated off active.py / backends.py (fork, stop,
+#     delete, cleanup-empty, register-backend, sync-backend-experiments).
+#   - 2 CLI verbs hoisted into the wire surface (mint-campaign = `new`,
+#     start-run = `resume` / launcher in m10-operator-control-loop).
+#   - 5 M12-new commands (pause, step, rewind-to-round, change-spend-budget,
+#     change-pipeline-param) — plan-listed v0 candidates.
+#
+# Each operation:
+#   - is `POST /commands/{kebab-kind}` — one literal path per kind, one
+#     operationId per path. Path tail matches `CommandEnvelope.kind`.
+#   - declares `Idempotency-Key` (every command). State-mutating
+#     cycle-scoped commands additionally declare `Expected-Version`.
+#     Workspace-scoped backend commands (register-backend,
+#     sync-backend-experiments) intentionally omit `Expected-Version` —
+#     they do not mutate a specific cycle's ledger offset.
+#   - declares a request body schema that pins `kind` to a const literal
+#     and refers to a per-kind `*Payload` schema in components.schemas.
+#   - declares the closed response set: 202 CommandAccepted +
+#     400 IdempotencyKeyMissing + 403 CapabilityDenied + 422 PayloadInvalid,
+#     plus 409 VersionConflict on cycle-scoped commands.
+paths:
+  /commands/pause-cycle:
+    post:
+      operationId: pauseCycle
+      summary: Set the pause flag on a running cycle.
+      tags: [cycle-control]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: pause-cycle }
+                    payload: { $ref: '#/components/schemas/PauseCyclePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/resume-cycle:
+    post:
+      operationId: resumeCycle
+      summary: Clear the pause flag on a paused cycle.
+      tags: [cycle-control]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: resume-cycle }
+                    payload: { $ref: '#/components/schemas/ResumeCyclePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/stop-cycle:
+    post:
+      operationId: stopCycle
+      summary: Write `.runtime/stop.flag`; the runner exits cleanly at the next checkpoint.
+      description: |
+        Migrated from `POST /api/v1/campaigns/{c}/cycles/{cy}/stop`
+        (active.py:198). Single-shot, idempotent — a second issue is a no-op.
+      tags: [cycle-control]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: stop-cycle }
+                    payload: { $ref: '#/components/schemas/StopCyclePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/step-cycle:
+    post:
+      operationId: stepCycle
+      summary: Advance N rounds then auto-pause (default N=1).
+      tags: [cycle-control]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: step-cycle }
+                    payload: { $ref: '#/components/schemas/StepCyclePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/rewind-to-round:
+    post:
+      operationId: rewindToRound
+      summary: Rewind a cycle in place to round N, dropping later events.
+      description: |
+        Operator-initiated in-place rewind (as opposed to `fork-cycle` which
+        preserves the parent). Destructive on the target cycle's ledger tail
+        beyond round N — `Expected-Version` is the only safety against
+        racing a concurrent writer.
+      tags: [cycle-control]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: rewind-to-round }
+                    payload: { $ref: '#/components/schemas/RewindToRoundPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/fork-cycle:
+    post:
+      operationId: forkCycle
+      summary: Fork from the parent's current ledger offset; retargets active pointer.
+      description: |
+        Migrated from `POST /api/v1/campaigns/{c}/cycles/{cy}/forks`
+        (active.py:120). Rides `CycleEventLog.inherit_from(parent, offset)`;
+        `round` / `candidate_id` go to `index.json::fork` for audit.
+      tags: [cycle-lifecycle]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: fork-cycle }
+                    payload: { $ref: '#/components/schemas/ForkCyclePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/delete-cycle:
+    post:
+      operationId: deleteCycle
+      summary: Delete a stub cycle dir (guarded — n_rounds==0, not root, not active).
+      description: |
+        Migrated from `DELETE /api/v1/campaigns/{c}/cycles/{cy}`
+        (active.py:236). The HTTP verb changes (DELETE -> POST /commands/...)
+        because every Control-remote mutation rides the same dispatcher;
+        guard semantics in `CampaignStore.try_delete_stub_cycle` unchanged.
+      tags: [cycle-lifecycle]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: delete-cycle }
+                    payload: { $ref: '#/components/schemas/DeleteCyclePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/cleanup-empty-cycles:
+    post:
+      operationId: cleanupEmptyCycles
+      summary: Batch-delete every empty-stub sibling under the root.
+      description: |
+        Migrated from `POST /api/v1/campaigns/{c}/cycles/{cy}/cleanup-empty`
+        (active.py:254). Leaves-first via two passes (covers the
+        two-generation stub chains we ship today); active-pointer guard
+        respected per-cycle.
+      tags: [cycle-lifecycle]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: cleanup-empty-cycles }
+                    payload: { $ref: '#/components/schemas/CleanupEmptyCyclesPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/archive-cycle:
+    post:
+      operationId: archiveCycle
+      summary: Mark a non-stub cycle as archived (soft delete; ledger preserved).
+      description: |
+        Counterpart to `delete-cycle` (which only handles empty stubs).
+        Archived cycles remain on disk + queryable in the MeasurementArchive,
+        but are hidden from default operator views. Reversible only via
+        out-of-band file edits in v0 — no `unarchive-cycle` command.
+      tags: [cycle-lifecycle]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: archive-cycle }
+                    payload: { $ref: '#/components/schemas/ArchiveCyclePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/archive-campaign:
+    post:
+      operationId: archiveCampaign
+      summary: Soft-mark a campaign as ``archived`` (hides from default sidebar; data retained).
+      description: |
+        Campaign-scoped lifecycle transition. Campaign-scoped means
+        workspace-level — no `Expected-Version` (the target is a campaign,
+        not a specific cycle's ledger tail). The `CommandRecord` lands on
+        the campaign's root cycle ledger; `mark_campaign_lifecycle` is the
+        inline-apply. Shape pinned in
+        `docs/operations/persistence-and-state.md` § Beta hosting state.
+      tags: [cycle-lifecycle]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: archive-campaign }
+                    payload: { $ref: '#/components/schemas/CampaignLifecyclePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '404': { $ref: '#/components/responses/CommandTargetNotFound' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/delete-campaign:
+    post:
+      operationId: deleteCampaign
+      summary: Soft-mark a campaign as ``deleted`` (hidden + filtered out; data retained for cache hits).
+      description: |
+        Soft-delete — the campaign drops out of the default sidebar AND the
+        ``?lifecycle=archived`` view. Measurements survive per ADR-0002 §0.5
+        so sibling campaigns on the same declaration still cache-hit.
+        Reversible via ``unarchive-campaign`` (which flips back to
+        ``"active"`` regardless of whether it was archived or deleted).
+      tags: [cycle-lifecycle]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: delete-campaign }
+                    payload: { $ref: '#/components/schemas/CampaignLifecyclePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '404': { $ref: '#/components/responses/CommandTargetNotFound' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/unarchive-campaign:
+    post:
+      operationId: unarchiveCampaign
+      summary: Restore a campaign to ``active`` (reverses ``archive`` or ``delete``).
+      description: |
+        Single restoration verb regardless of which soft-mark fired
+        previously. ``reason`` is optional and stored on the lifecycle
+        transition for audit; unset reads as an empty string.
+      tags: [cycle-lifecycle]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: unarchive-campaign }
+                    payload: { $ref: '#/components/schemas/CampaignLifecyclePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '404': { $ref: '#/components/responses/CommandTargetNotFound' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/mint-campaign:
+    post:
+      operationId: mintCampaign
+      summary: Mint a fresh campaign + root cycle (CLI `new <dataset>` equivalent).
+      description: |
+        Workspace-scoped — creates new state, no `Expected-Version` (there
+        is no prior cycle offset to gate against). `Idempotency-Key`
+        prevents double-mint on a retried POST.
+      tags: [cycle-lifecycle]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: mint-campaign }
+                    payload: { $ref: '#/components/schemas/MintCampaignPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/start-run:
+    post:
+      operationId: startRun
+      summary: Launch a runner job (CLI `new` / `resume` equivalent — m10 launcher).
+      description: |
+        Spawns the JobRegistry-tracked runner against an existing cycle.
+        `kind: new` re-mints the root state of a stub cycle; `kind: resume`
+        attaches to the cycle's current ledger tail. Tracked under
+        m10-operator-control-loop Track C.
+      tags: [cycle-lifecycle]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: start-run }
+                    payload: { $ref: '#/components/schemas/StartRunPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/change-spend-budget:
+    post:
+      operationId: changeSpendBudget
+      summary: Raise or lower a cycle's USD spend cap mid-flight.
+      tags: [budget]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: change-spend-budget }
+                    payload: { $ref: '#/components/schemas/ChangeSpendBudgetPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/change-halt-budget:
+    post:
+      operationId: changeHaltBudget
+      summary: Raise or lower a cycle's max-rounds halt cap mid-flight.
+      tags: [budget]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: change-halt-budget }
+                    payload: { $ref: '#/components/schemas/ChangeHaltBudgetPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/change-sample-budget:
+    post:
+      operationId: changeSampleBudget
+      summary: Adjust the per-round PoBB sample budget (`sp_budget_ttest`) mid-flight.
+      tags: [budget]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: change-sample-budget }
+                    payload: { $ref: '#/components/schemas/ChangeSampleBudgetPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/change-pipeline-param:
+    post:
+      operationId: changePipelineParam
+      summary: Overlay a single backend pipeline param on the active cycle.
+      description: |
+        Writes to `datasets/{name}/pipeline.json::nodes.{node}.config` — the
+        per-call overlay, NOT the backend's static config. Bound by the
+        "never edit backend static config" rule (§Backend overlay).
+      tags: [pipeline-params]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: change-pipeline-param }
+                    payload: { $ref: '#/components/schemas/ChangePipelineParamPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/reset-pipeline-overlay:
+    post:
+      operationId: resetPipelineOverlay
+      summary: Drop every `nodes.{name}.config` overlay; revert to dataset defaults.
+      description: |
+        Whole-overlay reset — `change-pipeline-param`'s broom counterpart.
+        Useful when an exploratory branch of overlay edits dead-ends and the
+        operator wants a clean slate before the next experiment branch.
+      tags: [pipeline-params]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: reset-pipeline-overlay }
+                    payload: { $ref: '#/components/schemas/ResetPipelineOverlayPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/change-scoring-composite:
+    post:
+      operationId: changeScoringComposite
+      summary: Hot-swap a cycle's `scoring_steer.json` composite.
+      description: |
+        Wire form of the existing file-edit interface
+        (`campaigns/{c}/cycles/{cy}/scoring_steer.json`). Composite payload
+        validated against ScoringContext; runner picks up at the next
+        scoring boundary without restart.
+      tags: [scoring]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: change-scoring-composite }
+                    payload: { $ref: '#/components/schemas/ChangeScoringCompositePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/mark-hard-sample:
+    post:
+      operationId: markHardSample
+      summary: Promote a sample to the hard-sample queue (operator override).
+      description: |
+        Operator-authored signal; the L1 signal catalogue picks it up at the
+        next round boundary. Overrides the zero-signal filter even if the
+        sample is borderline always-hit / always-miss.
+      tags: [operator-feedback]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: mark-hard-sample }
+                    payload: { $ref: '#/components/schemas/MarkHardSamplePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/unmark-hard-sample:
+    post:
+      operationId: unmarkHardSample
+      summary: Demote a previously marked sample (clear operator override).
+      tags: [operator-feedback]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: unmark-hard-sample }
+                    payload: { $ref: '#/components/schemas/UnmarkHardSamplePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/annotate-round:
+    post:
+      operationId: annotateRound
+      summary: Attach an operator note to a finished round (audit-trail only).
+      description: |
+        Note appends to `round_NNNN.json::operator_notes[]`. Read-only after
+        write — append-only audit, not editable. Multiple notes per round
+        allowed; ordered by `created_at`.
+      tags: [operator-feedback]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: annotate-round }
+                    payload: { $ref: '#/components/schemas/AnnotateRoundPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/endorse-candidate:
+    post:
+      operationId: endorseCandidate
+      summary: Operator verdict on a candidate (endorsed | rejected).
+      description: |
+        Verify-tab action (M11 webapp). Verdict appended to the round's audit
+        trail; L2/L3 may bias future generations toward endorsed candidates
+        in subsequent profiles (no behavior change in v0 — audit only).
+      tags: [operator-feedback]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: endorse-candidate }
+                    payload: { $ref: '#/components/schemas/EndorseCandidatePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/register-backend:
+    post:
+      operationId: registerBackend
+      summary: Register a new backend connection (workspace-scoped).
+      description: |
+        Migrated from `POST /api/v1/backends` (backends.py:58). Workspace-scoped,
+        no `Expected-Version` — the target is the backend registry, not a cycle.
+      tags: [backends]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: register-backend }
+                    payload: { $ref: '#/components/schemas/RegisterBackendPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/sync-backend-experiments:
+    post:
+      operationId: syncBackendExperiments
+      summary: Pull experiments from a registered backend into the local store.
+      description: |
+        Migrated from `POST /api/v1/backends/{backend_id}/sync` (backends.py:112).
+        Workspace-scoped, no `Expected-Version`.
+      tags: [backends]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: sync-backend-experiments }
+                    payload: { $ref: '#/components/schemas/SyncBackendExperimentsPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
 
 components:
   parameters:
@@ -88,12 +884,19 @@ components:
     ExpectedVersion:
       name: Expected-Version
       in: header
-      required: true
+      required: false
       description: |
         The ledger offset (or round number, for round-grained commands) the
         client believes the target cycle is at. The runner rejects the command
         with 409 `version_conflict` if the cycle has advanced past this point.
-        Optimistic-concurrency floor: mandatory on every state-mutating command.
+        Optimistic-concurrency floor.
+
+        **v0 relaxation (Phase 2b):** the header is declared optional in v0
+        because the webapp's mutation surface does not yet thread ledger
+        sequence numbers from the SSE stream through to mutations. The
+        dispatcher validates the version when the header IS present and
+        skips the check otherwise. Phase 2c flips this back to `required:
+        true` once the webapp consumes sequence from `EventStreamView`.
       schema:
         type: integer
         minimum: 0
@@ -172,6 +975,7 @@ components:
             - expected_version_missing
             - capability_denied
             - command_kind_unknown
+            - command_target_not_found
             - payload_invalid
             - tenant_mismatch
         message:
@@ -184,6 +988,347 @@ components:
             Optional per-error structured detail. For `version_conflict`,
             includes `expected_version` (what the client sent) and
             `actual_version` (what the runner observed).
+
+    # ---- Per-kind command payloads (v0 closed set) ----
+    # Each `*Payload` schema is the `payload` field of one command kind.
+    # Naming matches the kind: `pause-cycle` -> `PauseCyclePayload`.
+
+    CycleRef:
+      type: object
+      required: [campaign_id, cycle_id]
+      additionalProperties: false
+      description: |
+        Reusable cycle reference. The trust-boundary identifier — every
+        cycle-scoped command names its target by this pair (never by a
+        cookie-derived pointer or an `active_session.json` lookup).
+      properties:
+        campaign_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[a-z][a-z0-9_-]*$'
+          description: 'Campaign id ({dataset}__{rand6_hex}).'
+        cycle_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^cycle_[0-9a-f_]+$'
+          description: 'Content-addressed cycle id (`cycle_{target_hash[:12]}` + optional sibling suffix).'
+
+    PauseCyclePayload:
+      $ref: '#/components/schemas/CycleRef'
+
+    ResumeCyclePayload:
+      $ref: '#/components/schemas/CycleRef'
+
+    StopCyclePayload:
+      $ref: '#/components/schemas/CycleRef'
+
+    StepCyclePayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          additionalProperties: false
+          properties:
+            rounds:
+              type: integer
+              minimum: 1
+              maximum: 100
+              default: 1
+              description: Rounds to advance before auto-pausing.
+
+    RewindToRoundPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [round]
+          additionalProperties: false
+          properties:
+            round:
+              type: integer
+              minimum: 0
+              description: Target round number (inclusive); events past this round are dropped.
+
+    ForkCyclePayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          additionalProperties: false
+          properties:
+            round:
+              type: integer
+              minimum: 0
+              description: Round the operator endorsed (audit-trail only in v0).
+            candidate_id:
+              type: string
+              maxLength: 128
+              description: Candidate the operator endorsed (audit-trail only in v0).
+
+    DeleteCyclePayload:
+      $ref: '#/components/schemas/CycleRef'
+
+    CleanupEmptyCyclesPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          additionalProperties: false
+          description: |
+            `cycle_id` here names any cycle in the family; the dispatcher
+            resolves it to its root and sweeps every empty stub under that
+            root (matching `cleanup_empty_stubs` semantics).
+
+    MintCampaignPayload:
+      type: object
+      required: [dataset_name]
+      additionalProperties: false
+      properties:
+        dataset_name:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z][a-z0-9_-]*$'
+          description: 'Dataset under `datasets/{dataset_name}/` to mint a campaign for.'
+
+    StartRunPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [kind]
+          additionalProperties: false
+          properties:
+            kind:
+              type: string
+              enum: [new, resume]
+              description: |
+                `new` re-mints root state (stub cycle only). `resume` attaches
+                to the cycle's current ledger tail. Matches CLI `new` /
+                `resume` verbs hoisted onto the wire surface.
+
+    ChangeSpendBudgetPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [max_usd]
+          additionalProperties: false
+          properties:
+            max_usd:
+              type: number
+              minimum: 0
+              description: |
+                New USD spend cap for the cycle. Setting `0` halts the
+                cycle at the next checkpoint; raising above current spend
+                releases the halt.
+
+    ChangePipelineParamPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [node, param, value]
+          additionalProperties: false
+          properties:
+            node:
+              type: string
+              minLength: 1
+              maxLength: 64
+              description: 'Node name in the backend pipeline (key under `nodes.{name}` overlay).'
+            param:
+              type: string
+              minLength: 1
+              maxLength: 64
+              description: 'Param key within the node config (e.g. `model`, `temperature`).'
+            value:
+              description: |
+                New value. Type is per-param — string for `model`, number for
+                `temperature`, etc. Validated against the schema PromptPotter
+                discovers via `GET /pipeline` (zero backend-specific constants).
+              oneOf:
+                - { type: string }
+                - { type: number }
+                - { type: integer }
+                - { type: boolean }
+                - { type: 'null' }
+
+    RegisterBackendPayload:
+      type: object
+      required: [name, backend_type, base_url]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Human-readable backend name.
+        backend_type:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Backend connector type (e.g. `termnorm`, `promptpotter`).
+        base_url:
+          type: string
+          format: uri
+          description: Backend API base URL (trailing slash stripped server-side).
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z][a-z0-9-]*$'
+          description: 'Custom backend id; auto-derived from `name` when omitted.'
+
+    SyncBackendExperimentsPayload:
+      type: object
+      required: [backend_id]
+      additionalProperties: false
+      properties:
+        backend_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z][a-z0-9-]*$'
+
+    # ---- Forward-scope payloads (beyond v0; same closed-set policy) ----
+
+    CampaignRef:
+      type: object
+      required: [campaign_id]
+      additionalProperties: false
+      description: |
+        Workspace-scoped reference (campaign-level, no cycle). Lifecycle
+        commands ride the campaign's root cycle ledger; the dispatcher
+        resolves ``campaign_id -> root_cycle_id`` from ``campaign.json``.
+      properties:
+        campaign_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[a-z][a-z0-9_-]*$'
+          description: 'Campaign id ({dataset}__{rand6_hex}).'
+
+    CampaignLifecyclePayload:
+      allOf:
+        - $ref: '#/components/schemas/CampaignRef'
+        - type: object
+          additionalProperties: false
+          properties:
+            reason:
+              type: string
+              maxLength: 512
+              description: |
+                Optional operator-supplied reason for the lifecycle
+                transition. Stored on ``campaign.json::lifecycle_reason``;
+                empty string is the unset form.
+
+    ArchiveCyclePayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          additionalProperties: false
+          properties:
+            reason:
+              type: string
+              minLength: 1
+              maxLength: 512
+              description: 'Operator-supplied reason; stored on the archive marker for audit.'
+
+    ChangeHaltBudgetPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [max_rounds]
+          additionalProperties: false
+          properties:
+            max_rounds:
+              type: integer
+              minimum: 0
+              description: |
+                New round cap. Setting `0` halts the cycle at the next
+                checkpoint; raising above current round count releases.
+
+    ChangeSampleBudgetPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [sp_budget_ttest]
+          additionalProperties: false
+          properties:
+            sp_budget_ttest:
+              type: integer
+              minimum: 1
+              description: |
+                Per-round PoBB sample budget (the adaptive queue narrows the
+                scoring bank to this many samples each round via
+                `select_round_subset`). Lower = cheaper rounds, weaker signal.
+
+    ResetPipelineOverlayPayload:
+      $ref: '#/components/schemas/CycleRef'
+
+    ChangeScoringCompositePayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [composite]
+          additionalProperties: false
+          properties:
+            composite:
+              type: object
+              additionalProperties: true
+              description: |
+                Full `scoring_steer.json` content. Validated server-side
+                against ScoringContext; reject as 422 `payload_invalid`
+                when the composite references unknown evaluator ids.
+
+    MarkHardSamplePayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [sample_id]
+          additionalProperties: false
+          properties:
+            sample_id:
+              type: string
+              minLength: 1
+              maxLength: 128
+              description: 'Dataset-local sample id (`datasets/{name}/dataset.json` row id).'
+
+    UnmarkHardSamplePayload:
+      $ref: '#/components/schemas/MarkHardSamplePayload'
+
+    AnnotateRoundPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [round, note]
+          additionalProperties: false
+          properties:
+            round:
+              type: integer
+              minimum: 0
+              description: Round number the note is attached to.
+            note:
+              type: string
+              minLength: 1
+              maxLength: 4000
+              description: Free-form operator note; stored verbatim in `round_NNNN.json::operator_notes`.
+
+    EndorseCandidatePayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [round, candidate_id, verdict]
+          additionalProperties: false
+          properties:
+            round:
+              type: integer
+              minimum: 0
+            candidate_id:
+              type: string
+              minLength: 1
+              maxLength: 128
+            verdict:
+              type: string
+              enum: [endorsed, rejected]
+              description: |
+                Operator verdict. Stored on the round's audit trail; L2/L3
+                may consume in later profiles (no behavior change in v0).
 
   responses:
     CommandAccepted:
@@ -235,6 +1380,17 @@ components:
       description: |
         Command body failed schema validation for the declared kind.
         Returned with 422 status.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    CommandTargetNotFound:
+      description: |
+        The command names a target (campaign, cycle, backend) that either
+        does not exist or belongs to a different identity. Existence-leak
+        gate: 404, not 403. Shape pinned in
+        `docs/operations/persistence-and-state.md` § Beta hosting state.
       content:
         application/json:
           schema:

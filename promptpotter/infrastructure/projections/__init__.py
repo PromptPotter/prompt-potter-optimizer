@@ -15,6 +15,13 @@ Each module here owns one view over the ledger's record stream:
 """
 
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
+from promptpotter.infrastructure.projections.event_stream import (
+    EventStreamSubscriber,
+    EventStreamView,
+    deregister_event_stream,
+    get_event_stream,
+    register_event_stream,
+)
 from promptpotter.infrastructure.projections.live_dashboard import LiveDashboardView
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
@@ -27,11 +34,16 @@ from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamView
 
 __all__ = [
     "AuditTrailView",
+    "EventStreamSubscriber",
+    "EventStreamView",
     "LiveDashboardView",
     "LiveStateCore",
     "PoBBStreamView",
     "apply_p_best_update",
     "apply_phase",
+    "deregister_event_stream",
+    "get_event_stream",
+    "register_event_stream",
     "roll_p_best_at_round_complete",
     "top_n_p_best",
 ]

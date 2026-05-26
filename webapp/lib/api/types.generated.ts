@@ -232,43 +232,14 @@ export interface CyclesResponse {
   cycles: CycleListEntry[];
 }
 
-export interface CreateForkRequest {
-  /** Round the operator endorsed (audit-trail only in the MVP) */
-  round: number;
-  /** Candidate the operator endorsed (audit-trail only in the MVP) */
-  candidate_id: string;
-}
-
-export interface CreateForkResponse {
-  campaign_id: string;
-  fork_cycle_id: string;
-  /** Launch the fork; active pointer has been retargeted so bare `resume` picks it
-   * up. */
-  cli_command: string;
-  active_pointer_retargeted: boolean;
-}
-
-export interface StopCycleResponse {
-  campaign_id: string;
-  cycle_id: string;
-  flag_written: boolean;
-}
-
-export interface DeleteCycleResponse {
-  campaign_id: string;
-  cycle_id: string;
-  deleted: boolean;
-  /** Populated only when the delete was a no-op. */
-  reason: string;
-}
-
-export interface CleanupEmptyResponse {
-  campaign_id: string;
-  root_cycle_id: string;
-  /** Removed dirs in deletion order (leaves first). */
-  deleted_cycle_ids: string[];
-  /** Considered but skipped — ``{cycle_id, reason}`` each. */
-  skipped: Record<string, string>[];
+/** The 202 response shape declared in ``m12-api-openapi.yaml``. */
+export interface CommandAcceptedBody {
+  /** Stable id of the appended `CommandRecord`. */
+  command_id: string;
+  /** Echo of the request's `Idempotency-Key`. */
+  correlation_id: string;
+  /** Offset at which the `CommandRecord` was appended. */
+  ledger_sequence: number;
 }
 
 export interface CampaignSummary {
@@ -288,6 +259,15 @@ export interface CampaignSummary {
   backend_id: string;
   /** Number of sessions (re-runs of the declaration) in the campaign */
   session_count: number;
+  /** UserId of the operator who minted the campaign */
+  owner_user_id: string;
+  /** Operator visibility intent: 'active' (default sidebar), 'archived' (hidden),
+   * 'deleted' (soft-marked, data retained) */
+  lifecycle_status: string;
+  /** ISO 8601 timestamp of last lifecycle transition */
+  lifecycle_changed_at: string;
+  /** Optional operator-supplied reason for the last lifecycle transition */
+  lifecycle_reason: string;
 }
 
 export interface CampaignListResponse {

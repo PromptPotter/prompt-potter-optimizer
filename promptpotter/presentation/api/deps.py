@@ -2,24 +2,41 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.store import Stores, build_stores
 from promptpotter.shared.identity import IdentityContext, default_identity
 
+PROMPTPOTTER_AUTH_OFF_ENV = "PROMPTPOTTER_AUTH"
 
-def resolve_identity() -> IdentityContext:
-    """Stage-0: always the auth-off single-operator default.
 
-    Stage 1 (M12) replaces this with OIDC verification — the only code change
-    needed to enable multi-tenant SaaS. Every other API site keeps consuming
+def _auth_off() -> bool:
+    return os.environ.get(PROMPTPOTTER_AUTH_OFF_ENV, "").strip().lower() == "off"
+
+
+def resolve_identity(request: Request) -> IdentityContext:
+    """Stage-1 identity resolver.
+
+    ``PROMPTPOTTER_AUTH=off`` → :func:`default_identity` (single-operator
+    auth-off escape hatch). Otherwise consume the :class:`IdentityContext`
+    populated by :func:`install_oidc_middleware`; missing/expired session
+    raises 401 ``unauthenticated``. Every other API site keeps consuming
     :data:`IdentityDep` / :data:`StoreDep` without modification.
     """
-    return default_identity()
+    if _auth_off():
+        return default_identity()
+    identity_ctx: IdentityContext | None = getattr(request.state, "identity_ctx", None)
+    if identity_ctx is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "unauthenticated", "message": "sign-in required"},
+        )
+    return identity_ctx
 
 
 IdentityDep = Annotated[IdentityContext, Depends(resolve_identity)]

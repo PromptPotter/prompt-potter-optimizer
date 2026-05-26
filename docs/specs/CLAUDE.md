@@ -22,7 +22,7 @@ Permanent specs that stay alive after their target milestone ships. Items don't 
 
 [roadmap.md](roadmap.md) is the front door. Specs below describe direction-of-travel, not chapter-and-verse implementation:
 
-- M10: [prompt-iteration framework](m10-prompt-iteration-framework.md) · [operator control loop](m10-operator-control-loop.md)
+- M10: [prompt-iteration framework](m10-prompt-iteration-framework.md) · [operator control loop](m10-operator-control-loop.md) (the multi-user beta-hosting sibling shipped and decayed into `docs/operations/persistence-and-state.md` + ADR-0002 Stage-1 implementation)
 - M11: [publication benchmarks](m11-publication-benchmarks.md)
 - M12: [multi-connector](m12-multi-connector.md) (orthogonal to the wire surface; control-plane is a permanent contract above)
 - M13: [chat-first user web](m13-chat-first-user-web.md) (Install / User / Project nouns mapped onto OIDC claims; Stage 2 considered)

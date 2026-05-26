@@ -69,6 +69,20 @@ patterns.
   rule:** act only if median crosses ~1ms or p99 crosses ~5ms.
   **Pattern:** premature optimization (verify-first).
 
+- **TermNorm backend reports a provider slug, not a model** — backend
+  `dashboard.json::spend.backend.model = "openrouter"` is the provider,
+  not the actual upstream model (e.g. `mistralai/mistral-7b-instruct`).
+  Without the real model on the wire, $ for backend usage cannot be
+  derived from `shared.spend.lookup_rate(model)` × tokens; the
+  Account modal's Activity pane back-fills $ from
+  `dashboard.json::spend.backend.total_usd` instead. **Action:** wire
+  TermNorm's per-request response to carry the upstream `model` string
+  (cross-repo edit at the sibling backend
+  `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`). Once
+  the wire carries `model`, drop the `_synth_legacy_backend_record`
+  back-fill in `presentation/api/routers/auth.py`.
+  **Pattern:** missing telemetry field at the wire boundary.
+
 <!-- round_summary.py + factory.py revisit (2026-05-26): both KEEP.
   round_summary.py = named Python→Pydantic adapter
   (RoundResult → RoundSummary); inlining would push raw
@@ -195,6 +209,9 @@ scope for any "hide non-functional controls" sweep.
 | ChatPane Extended-thinking / Web-search / Code-execution toggles (`toggle locked`) | `webapp/components/dashboard/ChatPane.tsx:286-322` | M13+ chat-first feature toggles |
 | ChatPane "job-footer" — "Adjust spend / finishing criteria — wired in M12" | `webapp/components/dashboard/ChatPane.tsx:204-206` | M12 control-plane (spend cap + finishing criteria editor) |
 | ConfigMenu — gear icon + frozen-parameters panel | `webapp/components/dashboard/ConfigMenu.tsx` (+ render at `ChatPane.tsx:217`) | M12 control-plane (editable config surface) |
+| AccountModal "Update profile" button (disabled) | `webapp/components/account/AccountModal.tsx:193-200` | M13+ profile-editing surface |
+| AccountModal "Remove account" menu item (disabled) | `webapp/components/account/AccountModal.tsx:251-258` | M13+ multi-provider account management |
+| AccountModal "+ Connect account" button (alerts then no-ops) | `webapp/components/account/AccountModal.tsx:267-278` | M13+ multi-provider account linking |
 
 **Rule:** any future cleanup that touches these surfaces must
 distinguish *intentional placeholder* from *scaffolding text/comment*.

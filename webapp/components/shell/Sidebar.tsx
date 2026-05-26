@@ -46,6 +46,8 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
     cyclesLoaded,
     activeCycleId,
     activeCampaignId,
+    lifecycleFilter,
+    setLifecycleFilter,
   } = useWorkspace();
   // Campaign/session collapse state — nodes expand by default, so we
   // persist the ones the operator explicitly collapsed.
@@ -154,6 +156,27 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
         <div className="unit-library-head">
           <span>Campaigns</span>
         </div>
+        <div className="unit-library-tabs" role="tablist" aria-label="Campaign lifecycle">
+          <button
+            type="button"
+            role="tab"
+            className={`unit-library-tab${lifecycleFilter === "active" ? " active" : ""}`}
+            onClick={() => setLifecycleFilter("active")}
+            aria-selected={lifecycleFilter === "active"}
+          >
+            Active
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={`unit-library-tab${lifecycleFilter === "archived" ? " active" : ""}`}
+            onClick={() => setLifecycleFilter("archived")}
+            aria-selected={lifecycleFilter === "archived"}
+            title="Show archived campaigns. Deleted campaigns are hidden — read them by id from the file tree."
+          >
+            Archived
+          </button>
+        </div>
         {datasetNames.length > 1 && (
           <DatasetFilterBar
             datasets={datasetNames}
@@ -162,7 +185,16 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
           />
         )}
         {!loaded && <div className="unit-library-note">loading…</div>}
-        {loaded && groups.length === 0 && (
+        {loaded && groups.length === 0 && lifecycleFilter === "archived" && (
+          <div className="unit-library-empty">
+            <div className="empty-headline">No archived campaigns</div>
+            <div className="empty-body">
+              Archive a campaign from its <code>⋯</code> menu to declutter the
+              active list. Archives are reversible from this tab.
+            </div>
+          </div>
+        )}
+        {loaded && groups.length === 0 && lifecycleFilter !== "archived" && (
           <div className="unit-library-empty">
             <div className="empty-headline">No campaigns yet</div>
             <div className="empty-body">

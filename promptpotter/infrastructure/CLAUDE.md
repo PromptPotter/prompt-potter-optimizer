@@ -23,13 +23,14 @@ per-step site in `application/scoring/sample_measurement.py`) uses the
 process global, no sink-installation indirection. New per-call surfaces
 follow the same pattern.
 
-**Two newtype-guarded projections** under `projections/`:
+**Newtype-guarded projections** under `projections/`:
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
 | `LiveDashboardView` | session-family root cycle | `dashboard.json`, `output.log` | **Display surface** — origin + completed-round summaries (`dash.rounds[]`) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
 | `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
 | `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
+| `EventStreamView` | per cycle | SSE frames over `GET /campaigns/{c}/cycles/{cy}/events:subscribe` | **Profile A outbound highway** — sole writer of `ProjectionEnvelope` frames (security box 4). Per-cycle ledger subscriber; broadcasts to N HTTP subscribers via per-subscriber asyncio queues bridged from the ledger thread via `loop.call_soon_threadsafe`. Snapshot-then-tail + 15 s heartbeat + sequence-gap detection. Certified contract: [`docs/developer/event-stream.md`](../../docs/developer/event-stream.md). Lookup via process-wide registry (`event_stream/registry.py`); `register_event_stream` at `build_run_observers`, `deregister_event_stream` at `drain_all`. |
 
 `LiveDashboardView` writes into the **session-family root cycle dir**
 (`cycles/{session_root}/dashboard.json`) — a session's forks share their

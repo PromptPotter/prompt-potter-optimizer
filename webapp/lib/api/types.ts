@@ -15,15 +15,12 @@ export type {
   CampaignLineageRound,
   CampaignListResponse,
   CampaignSummary,
-  CleanupEmptyResponse,
-  CreateForkRequest,
-  CreateForkResponse,
+  CommandAcceptedBody,
   CycleListEntry,
   CyclesResponse,
   DatasetItem,
   DatasetPipelineResponse,
   DatasetPreviewResponse,
-  DeleteCycleResponse,
   DiagnosticRunListResponse,
   DiagnosticRunRecord,
   FileContentResponse,
@@ -42,7 +39,6 @@ export type {
   SessionSummary,
   SpendBucket,
   SpendRollup,
-  StopCycleResponse,
 } from "./types.generated";
 
 // Literal-type unions — not derivable from Pydantic; hand-maintained.

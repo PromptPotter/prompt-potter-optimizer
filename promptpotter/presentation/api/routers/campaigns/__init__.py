@@ -20,6 +20,7 @@ campaign-wide cladogram), and ``files`` (file-tree reads).
 
 from promptpotter.presentation.api.routers.campaigns import (
     cycles,
+    events,
     files,
     ledger,
     lineage,
@@ -27,4 +28,12 @@ from promptpotter.presentation.api.routers.campaigns import (
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
-__all__ = ["campaigns_router", "cycles", "files", "ledger", "lineage", "registry"]
+__all__ = [
+    "campaigns_router",
+    "cycles",
+    "events",
+    "files",
+    "ledger",
+    "lineage",
+    "registry",
+]

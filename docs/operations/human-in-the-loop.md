@@ -6,10 +6,10 @@ The operator forks via `resume --fork-on-divergence` (CLI). A webapp "Fork from 
 
 **Stop run.** Webapp's "Stop run" button writes `{cycle_dir}/.runtime/stop.flag`. The running loop's `Session.stop_check` polls the flag at the start of each round and exits cleanly; recorded as a `PhaseRecord` with `stop_reason="hitl_stop"`. CLI equivalent: Ctrl+C (first finishes in-flight, second force-quits).
 
-Every ledger record is already typed; combined with `inherit_from`, "human in the loop" is just "operator chooses where to fork." No dedicated record type, no watched-file ingest, no fourth I/O kind — the existing fork primitive carries the whole semantic.
+Every ledger record is already typed; combined with `inherit_from`, "human in the loop" is just "operator chooses where to fork." No dedicated record type, no watched-file ingest, no new I/O kind — the existing fork primitive (Persistence) carries the whole semantic.
 
 ## See also
 
-- [`../architecture.md`](../architecture.md) §0 — the three I/O kinds
+- [`../architecture.md`](../architecture.md) §0 — the five I/O kinds
 - [`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) — sanctioned mutating endpoints
 - [`persistence-and-state.md`](persistence-and-state.md) — fork workflows + recovery

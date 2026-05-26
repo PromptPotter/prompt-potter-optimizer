@@ -34,6 +34,7 @@ import {
   fetchCycles,
   type CampaignSummary,
   type CycleListEntry,
+  type LifecycleFilter,
 } from "./api";
 import { usePoll } from "./usePoll";
 import { useRevalidation } from "./revalidate";
@@ -57,6 +58,11 @@ export interface WorkspaceState {
   // campaign's display name from here. Last-good list survives a failed tick.
   campaigns: CampaignSummary[];
   activeError: string | null;
+  // Operator's lifecycle filter — drives both the poll's `?lifecycle=`
+  // query and the sidebar's "Active / Archived" tab. Default `active`.
+  // Persisted nowhere; resets per visit (matches dataset filter behaviour).
+  lifecycleFilter: LifecycleFilter;
+  setLifecycleFilter: (f: LifecycleFilter) => void;
   // User pin → following=false. Both ids required: a cycle_id alone is
   // ambiguous across campaigns.
   selectCycle: (campaignId: string, cycleId: string) => void;
@@ -107,6 +113,8 @@ export function WorkspaceProvider({
   const [cyclesLoaded, setCyclesLoaded] = useState(false);
   const [cyclesError, setCyclesError] = useState<string | null>(null);
   const [activeError, setActiveError] = useState<string | null>(null);
+  const [lifecycleFilter, setLifecycleFilter] =
+    useState<LifecycleFilter>("active");
 
   // Tracks the active pointer from the last successful poll. When the
   // server-side pointer transitions to a *different* cycle (CLI ran
@@ -145,7 +153,7 @@ export function WorkspaceProvider({
     const [activeRes, cyclesRes, campaignsRes] = await Promise.allSettled([
       fetchActive(signal),
       fetchCycles(signal),
-      fetchCampaigns(undefined, signal),
+      fetchCampaigns(undefined, signal, lifecycleFilter),
     ]);
     if (signal.aborted) return;
     let nextActiveCycle: string | null = null;
@@ -201,7 +209,7 @@ export function WorkspaceProvider({
       setCampaigns(campaignsRes.value.campaigns);
     }
     setCyclesLoaded(true);
-  }, []);
+  }, [lifecycleFilter]);
   usePoll(tick, { intervalMs, tickOnFocus: true, revalidateOn: useRevalidation() });
 
   // The viewed unit: the server pointer while following, else the pin.
@@ -266,6 +274,8 @@ export function WorkspaceProvider({
     cyclesError,
     campaigns,
     activeError,
+    lifecycleFilter,
+    setLifecycleFilter,
     selectCycle,
     followActive,
   };

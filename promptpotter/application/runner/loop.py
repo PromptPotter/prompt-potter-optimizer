@@ -1,5 +1,14 @@
 """Round loop — generate → score → escalate → stop. Sweep/diag short-circuit after one round;
-``halt_at_accuracy`` + ``spend_budget_usd`` are sweep-toolkit halts checked every clean round."""
+``halt_at_accuracy`` + ``spend_cap_probe`` are sweep-toolkit halts checked every clean round.
+
+Pause cooperation: at each iteration top the loop polls ``session.pause_check``
+(``.runtime/pause.flag`` per cycle dir, written by the ``pause-cycle`` command
+applier) and blocks until the flag clears. ``session.stop_check`` always wins —
+stop-during-pause exits cleanly via ``StopReason.INTERRUPTED``.
+
+Spend cap cooperation: ``spend_cap_probe`` is re-read every clean round so the
+``change-spend-budget`` command can raise / lower the cap mid-flight without
+restarting the loop."""
 
 from __future__ import annotations
 
@@ -56,11 +65,14 @@ async def run_round_loop(
     sweep: bool = False,
     diag: bool = False,
     halt_at_accuracy: float | None = None,
-    spend_budget_usd: float | None = None,
+    spend_cap_probe: Callable[[], float | None] | None = None,
     spend_probe: Callable[[], float] | None = None,
 ) -> StopReason:
     """Round loop. sweep/diag halt after round 2. ``halt_at_accuracy`` → TARGET_HIT;
-    ``spend_budget_usd`` + ``spend_probe`` → SPEND_BUDGET (omit spend_probe ⇒ no spend halt)."""
+    ``spend_cap_probe`` + ``spend_probe`` → SPEND_BUDGET (omit either ⇒ no spend halt).
+
+    The cap probe is re-read every clean round so the ``change-spend-budget``
+    command (``.runtime/spend_cap.json``) can mutate the ceiling mid-flight."""
     opt = config.optimization
     # resumed_from_round = next L1 round (fresh=1); clean_rounds = lifetime L1 completed (origin not counted).
     round_num = session.state.resumed_from_round
@@ -69,6 +81,14 @@ async def run_round_loop(
 
     try:
         while clean_rounds < max_rounds and round_num < HARD_CAP:
+            # Pause cooperation: block at the round boundary while the operator
+            # has the pause flag set. Stop always wins — operator-requested
+            # exit during pause shouldn't hang in this loop.
+            while session.pause_check is not None and session.pause_check():
+                if session.stop_check is not None and session.stop_check():
+                    return StopReason.INTERRUPTED
+                await asyncio.sleep(2.0)
+
             is_probe = cycle.probe_next_round
             if is_probe:
                 round_scoring_data = [s for s in dataset if s.query in cycle.warned_queries]
@@ -152,12 +172,10 @@ async def run_round_loop(
 
             if halt_at_accuracy is not None and cycle.tracking.best_accuracy >= halt_at_accuracy:
                 return StopReason.TARGET_HIT
-            if (
-                spend_budget_usd is not None
-                and spend_probe is not None
-                and spend_probe() >= spend_budget_usd
-            ):
-                return StopReason.SPEND_BUDGET
+            if spend_cap_probe is not None and spend_probe is not None:
+                cap = spend_cap_probe()
+                if cap is not None and spend_probe() >= cap:
+                    return StopReason.SPEND_BUDGET
 
             if sweep and clean_rounds >= 1:
                 await run_sweep_generation_only(cycle, session, cb, round_num)

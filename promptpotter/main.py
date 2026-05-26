@@ -15,9 +15,15 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
+from promptpotter.application.jobs import JobRegistry, default_jobs_dir
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import APP_VERSION, settings
+from promptpotter.infrastructure.identity import (
+    build_identity_bundle,
+    default_identity_paths,
+)
 from promptpotter.presentation import api
+from promptpotter.presentation.api.middleware import install_oidc_middleware
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -28,6 +34,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application startup and shutdown lifecycle."""
     logger.info("Starting %s v%s", app.title, app.version)
     logger.info("Environment: %s", settings.ENVIRONMENT)
+    app.state.identity_bundle = build_identity_bundle(default_identity_paths())
+    app.state.job_registry = JobRegistry(default_jobs_dir())
     logger.info("Webapp available at: /ui/  (root / redirects there)")
     logger.info("API docs available at: /docs")
     yield
@@ -73,6 +81,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# OIDC middleware — populates request.state.identity_ctx from the opaque
+# session cookie. Per ADR-0002 no-drift gate #2: tokens never appear past
+# this boundary; downstream code sees only IdentityContext.
+install_oidc_middleware(app)
+
 
 @app.middleware("http")
 async def no_store_on_api(
@@ -115,6 +128,8 @@ app.include_router(api._active_router, prefix="/api/v1")
 app.include_router(api._datasets_router, prefix="/api/v1", tags=["Datasets"])
 app.include_router(api._measurements_router, prefix="/api/v1")
 app.include_router(api._verify_router, prefix="/api/v1")
+app.include_router(api.commands_router, prefix="/api/v1")
+app.include_router(api.auth_router, prefix="/api/v1")
 
 # Static webapp mount — read-only operator dashboard at /ui (Next.js export
 # from webapp/, built via `npm run build` in that directory).

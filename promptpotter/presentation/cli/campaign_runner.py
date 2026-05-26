@@ -17,11 +17,14 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 from promptpotter.presentation.cli.commands import (
+    cmd_archive,
     cmd_compare,
+    cmd_delete,
     cmd_new,
     cmd_reset,
     cmd_resume,
     cmd_sweep,
+    cmd_unarchive,
     cmd_verify,
 )
 from promptpotter.presentation.cli.commands._shared import _DIVERGENCE_HINT, set_verbose
@@ -37,6 +40,9 @@ COMMANDS = {
     "sweep": cmd_sweep,
     "reset": cmd_reset,
     "verify": cmd_verify,
+    "archive": cmd_archive,
+    "delete": cmd_delete,
+    "unarchive": cmd_unarchive,
 }
 
 

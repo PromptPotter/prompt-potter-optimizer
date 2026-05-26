@@ -24,6 +24,20 @@ class CampaignSummary(BaseModel):
     session_count: int = Field(
         default=1, description="Number of sessions (re-runs of the declaration) in the campaign"
     )
+    owner_user_id: str = Field(
+        default="default", description="UserId of the operator who minted the campaign"
+    )
+    lifecycle_status: str = Field(
+        default="active",
+        description="Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)",
+    )
+    lifecycle_changed_at: str = Field(
+        default="", description="ISO 8601 timestamp of last lifecycle transition"
+    )
+    lifecycle_reason: str = Field(
+        default="",
+        description="Optional operator-supplied reason for the last lifecycle transition",
+    )
 
 
 class CampaignListResponse(BaseModel):
@@ -63,6 +77,10 @@ def _campaign_summary(campaign: Any, session_count: int) -> CampaignSummary:
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
         session_count=session_count,
+        owner_user_id=campaign.owner_user_id,
+        lifecycle_status=campaign.lifecycle_status,
+        lifecycle_changed_at=campaign.lifecycle_changed_at,
+        lifecycle_reason=campaign.lifecycle_reason,
     )
 
 
@@ -87,13 +105,35 @@ def _session_summaries(store: Stores, campaign_id: str) -> list[SessionSummary]:
     return out
 
 
+_LIFECYCLE_FILTERS = ("active", "archived", "deleted", "all")
+
+
 @campaigns_router.get("/campaigns", response_model=CampaignListResponse)
 async def list_campaigns(
     store: StoreDep,
     dataset: str | None = Query(default=None, description="Filter to one dataset"),
+    lifecycle: str = Query(
+        default="active",
+        description="Operator visibility filter — 'active' (default), 'archived', 'deleted', or 'all'",
+    ),
 ) -> CampaignListResponse:
-    """Every campaign on disk, newest first, optionally filtered by dataset."""
-    campaigns = store.campaigns.list_campaigns(dataset)
+    """Every campaign on disk owned by the caller, newest first.
+
+    Filters: optional ``?dataset=`` for one dataset, ``?lifecycle=`` for the
+    visibility intent (defaults to ``active``; ``archived`` and ``deleted``
+    drop out of the default surface). Cross-user campaigns are invisible —
+    the ``owner_user_id`` gate filters on ``store.identity.user_id``.
+    """
+    if lifecycle not in _LIFECYCLE_FILTERS:
+        raise HTTPException(
+            422,
+            f"Invalid lifecycle filter: {lifecycle!r}. Expected one of {_LIFECYCLE_FILTERS}.",
+        )
+    campaigns = store.campaigns.list_campaigns(
+        dataset,
+        lifecycle=lifecycle,
+        owner_user_id=str(store.identity.user_id),
+    )
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
     return CampaignListResponse(
         campaigns=[
@@ -106,9 +146,11 @@ async def list_campaigns(
 
 @campaigns_router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
 async def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
-    """Campaign manifest detail + its session forest."""
+    """Campaign manifest detail + its session forest. 404 on cross-user reads."""
     campaign = store.campaigns.load_campaign(campaign_id)
-    if campaign is None:
+    # Cross-user reads return 404 (not 403) — existence leakage is itself a
+    # violation.
+    if campaign is None or campaign.owner_user_id != str(store.identity.user_id):
         raise HTTPException(404, f"Campaign not found: {campaign_id}")
     sessions = _session_summaries(store, campaign_id)
     return CampaignDetailResponse(
@@ -120,6 +162,10 @@ async def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailRespo
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
         session_count=len(sessions) or 1,
+        owner_user_id=campaign.owner_user_id,
+        lifecycle_status=campaign.lifecycle_status,
+        lifecycle_changed_at=campaign.lifecycle_changed_at,
+        lifecycle_reason=campaign.lifecycle_reason,
         root_content_hash=campaign.root_content_hash,
         config=campaign.config,
         sessions=sessions,

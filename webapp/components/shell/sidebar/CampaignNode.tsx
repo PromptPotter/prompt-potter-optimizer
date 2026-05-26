@@ -4,6 +4,7 @@ import { campaignDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
 import { sessKey, type CampaignGroup } from "./grouping";
 import { SessionSubtree } from "./SessionSubtree";
+import { CampaignMenu } from "./CampaignMenu";
 
 // One campaign in the flat list. A single-session campaign collapses: the
 // campaign row IS that session and opens it directly (its twist, if any,
@@ -93,6 +94,7 @@ export function CampaignNode({
             </span>
           </span>
         </button>
+        <CampaignMenu campaign={group.campaign} />
       </div>
       {cmpOpen && (
         <ul className="unit-library-children">

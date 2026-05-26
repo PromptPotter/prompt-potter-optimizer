@@ -14,6 +14,8 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
+    "CommandAckRecord",
+    "CommandRecord",
     "CycleRecord",
     "ForkPayload",
     "ForkTrigger",
@@ -171,9 +173,59 @@ class LLMCallRecord(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
+class CommandRecord(BaseModel):
+    """Inbound HTTP command appended to the canonical ledger.
+
+    Sole writer at the API seam: `CommandDispatcher`. Three target ledgers:
+
+    - Cycle-scoped commands (fork / stop / delete / cleanup-empty) ride the
+      target cycle's ledger.
+    - Campaign-lifecycle commands (archive / delete / unarchive) ride the
+      campaign's root cycle ledger.
+    - Workspace-scoped backend commands (register-backend /
+      sync-backend-experiments) ride the workspace ledger at
+      ``projects/{tenant}/.workspace/events.jsonl`` per the §0 Persistence
+      sibling amendment.
+
+    The runner (cycle-scoped, async) or the dispatcher (inline-apply
+    workspace-scoped) emits a paired `CommandAckRecord` once applied.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["command"] = "command"
+    command_id: str
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str
+    expected_version: int | None = None
+    issued_by_user_id: str = ""
+    client_metadata: dict[str, Any] = Field(default_factory=dict)
+    timestamp: str = Field(default_factory=_utcnow_iso)
+
+
+class CommandAckRecord(BaseModel):
+    """Ack of a `CommandRecord` — emitted by the actuator that applied it.
+
+    `status="applied"` ⇒ the mutation landed; `"rejected"` ⇒ the actuator
+    refused (capability denied, target gone, etc.). `detail` is operator-
+    readable explanation, never load-bearing for clients.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["command_ack"] = "command_ack"
+    command_id: str
+    status: Literal["applied", "rejected"]
+    detail: str = ""
+    timestamp: str = Field(default_factory=_utcnow_iso)
+
+
 # Discriminated union by `record_type`; keep order alphabetical — hash-keyed snapshots go stale otherwise.
 CycleRecord = Annotated[
     ResumeCheckpointRecord
+    | CommandAckRecord
+    | CommandRecord
     | LLMCallProgressRecord
     | LLMCallRecord
     | LLMCallStartRecord

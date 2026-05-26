@@ -22,7 +22,7 @@ How do we constrain the M12 interactivity envelope so that the wire surface is a
 
 ## Decision Drivers
 
-* **§0 backbone is already CQRS + event-sourcing.** The per-cycle `events.jsonl` ledger is the spine; projections are the read side; the four I/O kinds taxonomy names the seams. The wire surface must ride existing infrastructure, not add a sidecar.
+* **§0 backbone is already CQRS + event-sourcing.** The per-cycle `events.jsonl` ledger is the spine; projections are the read side; the §0 I/O kinds taxonomy names the seams. The wire surface must ride existing infrastructure, not add a sidecar.
 * **Identity seam is already shipped.** Stage-0 `IdentityContext` (`shared/identity.py`) carries the trust boundary through to `Stores`; M12 commands consume the same seam.
 * **Drift detection must be CI-checkable.** A contract that humans-only review is not a contract.
 * **The contract must outlive M12.** Subsequent milestones (M13 chat-first user web, M14+ multi-user) inherit the wire surface unchanged.
@@ -145,9 +145,11 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 | `DELETE /campaigns/{c}/cycles/{cy}` | `delete-cycle` |
 | `POST /campaigns/{c}/cycles/{cy}/cleanup-empty` | `cleanup-empty-cycles` |
 | `POST /backends` | `register-backend` |
-| `POST /backends/{id}/sync` | `sync-backend` |
+| `POST /backends/{id}/sync` | `sync-backend-experiments` |
 
-M12-new command kinds (v0 draft — to be redlined): `pause-cycle`, `resume-cycle`, `step-cycle`, `rewind-to-round`, `change-spend-budget`, `change-pipeline-param`. First end-to-end command: **`pause-cycle`**. On certification, the dispatcher + runner contracts promote to `docs/developer/command-dispatch.md`; boxes 1–10, 17 flip.
+**Closed inbound set draft (23 commands).** The full enumeration lives in `docs/specs/m12-api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / resume / stop / step / rewind), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (spend / halt / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register / sync-experiments). All v0 — operator-redline cycle precedes any handler.
+
+First end-to-end command: **`pause-cycle`**. On certification, the dispatcher + runner contracts promote to `docs/developer/command-dispatch.md`; boxes 1–10, 17 flip.
 
 **Profile C** — Stage 1 of identity-foundation. `resolve_identity` swaps from Stage-0 default to OIDC verification. `presentation/api/middleware/oidc.py` populates `IdentityContext` from a verified ID Token. Session cookies are opaque server-side ids, NOT JWTs (identity-foundation no-drift gate #2). On certification, the capability matrix promotes to `docs/operations/auth-and-capabilities.md`; box 10 flips with OIDC-aware semantics.
 
@@ -165,7 +167,7 @@ Wire-contract integrity:
 3. ☐ Canonical ledger only — commands and acks are `*Record` entries on `events.jsonl`.
 
 Sole writer / single emitter:
-4. ☐ ONE `CommandDispatcher` writes `CommandRecord`. ONE `EventStreamView` writes SSE frames. ONE `RunnerCommandSubscriber` writes `CommandAckRecord`.
+4. ☑ ONE `CommandDispatcher` writes `CommandRecord`. ONE `EventStreamView` writes SSE frames. ONE `RunnerCommandSubscriber` writes `CommandAckRecord`. *(Outbound half certified Profile A — `EventStreamView` is sole SSE writer; inbound halves land at Profile B.)*
 5. ☐ `emit_command(*, kind, payload, idempotency_key, expected_version)` is the sole inbound helper. `emit_command_ack(*, command_id, status, detail)` is the sole outbound helper. Kwargs-only.
 6. ☐ Runner is the sole actuator. No API handler mutates optimizer state directly.
 
@@ -180,9 +182,9 @@ Trust boundary:
 12. ☐ Per-tenant request scoping verified — Profile D drift test asserts cross-tenant rejection.
 
 Outbound envelope:
-13. ☐ Every SSE frame is `ProjectionEnvelope{kind, version, cycle_id, sequence, payload}`. No raw payload variants.
-14. ☐ Snapshot-then-tail. Subscribers receive a snapshot frame, then live tail with strictly-increasing sequence; missed frames detectable via gap.
-15. ☐ Heartbeat frame every 15 s during idle.
+13. ☑ Every SSE frame is `ProjectionEnvelope{kind, version, cycle_id, sequence, payload}`. No raw payload variants. *(Profile A — closed envelope shipped; drift test asserts Python `ProjectionKind` Literal matches AsyncAPI enum exactly.)*
+14. ☑ Snapshot-then-tail. Subscribers receive a snapshot frame, then live tail with strictly-increasing sequence; missed frames detectable via gap. *(Profile A — `stream_snapshot` frame carries `snapshot_at_offset`; live tail strictly greater.)*
+15. ☑ Heartbeat frame every 15 s during idle. *(Profile A — SSE comment line every 15 s when subscriber queue is idle.)*
 
 Client contract:
 16. ☐ URL-as-truth: every view state reachable via URL.
@@ -212,7 +214,7 @@ Every claim in this ADR names a file. The drift detector test reads this table a
 
 | Concern | File |
 |---|---|
-| §0 Control-remote definition | `docs/architecture.md` (§0 "State + persistence" — four I/O kinds) |
+| §0 Control-remote definition | `docs/architecture.md` (§0 "State + persistence" — I/O kinds taxonomy) |
 | §0.5 Control-remote load-bearing-surface entry | `docs/architecture.md` (§0.5 load-bearing surface) |
 | Closed inbound command set | `docs/specs/m12-api-openapi.yaml` |
 | Closed outbound event set | `docs/specs/m12-events-asyncapi.yaml` |
@@ -221,6 +223,12 @@ Every claim in this ADR names a file. The drift detector test reads this table a
 | `emit_token_usage` template (mirrored by `emit_command`) | `promptpotter/infrastructure/llm/models.py::emit_token_usage` |
 | Sole-writer template (mirrored by `EventStreamView`) | `promptpotter/infrastructure/projections/live_dashboard/view.py::LiveDashboardView._handle_token_usage` |
 | `CycleRecord` discriminated union (closed outbound record set) | `promptpotter/domain/run_records.py::CycleRecord` |
+| `ProjectionEnvelope` Python wire type (Profile A) | `promptpotter/domain/projection_envelope.py` |
+| Outbound highway sole writer (Profile A) | `promptpotter/infrastructure/projections/event_stream/view.py::EventStreamView` |
+| SSE endpoint handler (Profile A) | `promptpotter/presentation/api/routers/campaigns/events.py::stream_cycle_events` |
+| EventStream registry (cycle → view lookup) | `promptpotter/infrastructure/projections/event_stream/registry.py` |
+| Certified Profile A contract | `docs/developer/event-stream.md` |
+| Profile A invariant test | `tests/test_event_stream.py::test_event_stream_view_contract` |
 
 ### Promotion log
 
@@ -228,6 +236,7 @@ Chronological log of what's been certified out of this ADR into the docs layer. 
 
 | Date | Profile | Boxes flipped | Target doc | PR |
 |---|---|---|---|---|
+| 2026-05-26 | A — outbound highway | 4 (sole writer, SSE half), 13 (envelope), 14 (snapshot-then-tail), 15 (heartbeat) | `docs/developer/event-stream.md` | (this commit) |
 
 ### Out of scope (forever, or for other documents)
 

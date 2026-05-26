@@ -1195,8 +1195,12 @@ def test_run_round_loop_continue_paths_route_through_close_round() -> None:
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "run_round_loop"
     )
 
+    # The outermost while is the round-iteration loop. A nested while may
+    # exist for pause cooperation (`session.pause_check` wait-loop) — that
+    # one has no ``continue`` of its own, so the round-iteration invariant
+    # below still only applies to the outer loop's direct branches.
     while_nodes = [n for n in ast.walk(fn) if isinstance(n, ast.While)]
-    assert len(while_nodes) == 1
+    assert while_nodes, "expected a round-iteration while in run_round_loop"
     round_loop = while_nodes[0]
 
     sanctioned = {"close_round", "post_round"}

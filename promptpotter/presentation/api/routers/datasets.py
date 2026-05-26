@@ -31,6 +31,45 @@ _datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
 
 
+class DatasetIndexEntry(BaseModel):
+    """One row in the dataset registry — backs the ConfigMenu dropdown."""
+
+    name: str = Field(description="Slug used as the path segment under `datasets/`.")
+    title: str | None = Field(default=None, description="Display title (from `dataset.md`).")
+
+
+class DatasetIndexResponse(BaseModel):
+    datasets: list[DatasetIndexEntry]
+
+
+@_datasets_router.get("", response_model=DatasetIndexResponse)
+async def list_datasets() -> DatasetIndexResponse:
+    """Walk `datasets/` and return every wired dataset (each dir with a `pipeline.json`)."""
+    out: list[DatasetIndexEntry] = []
+    if DEFAULT_DATASETS_ROOT.is_dir():
+        for entry in sorted(DEFAULT_DATASETS_ROOT.iterdir()):
+            if not entry.is_dir() or not (entry / "pipeline.json").is_file():
+                continue
+            try:
+                validate_dataset_name(entry.name)
+            except ValueError:
+                continue
+            title = _read_dataset_title(entry)
+            out.append(DatasetIndexEntry(name=entry.name, title=title))
+    return DatasetIndexResponse(datasets=out)
+
+
+def _read_dataset_title(dataset_dir: Any) -> str | None:
+    md = dataset_dir / "dataset.md"
+    if not md.is_file():
+        return None
+    for line in md.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            return stripped[2:].strip() or None
+    return None
+
+
 def _check_dataset_name(name: str) -> None:
     """Translate ``validate_dataset_name``'s ``ValueError`` to ``HTTPException(400)``."""
     try:

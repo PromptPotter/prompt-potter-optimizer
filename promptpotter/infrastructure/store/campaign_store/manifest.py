@@ -37,13 +37,34 @@ class CampaignManifestMixin(CampaignStoreKernel):
             if p.is_dir() and (p / "campaign.json").is_file()
         )
 
-    def list_campaigns(self, dataset_name: str | None = None) -> list[Campaign]:
+    def list_campaigns(
+        self,
+        dataset_name: str | None = None,
+        *,
+        lifecycle: str = "active",
+        owner_user_id: str | None = None,
+    ) -> list[Campaign]:
+        """Campaigns matching the filter.
+
+        *lifecycle* — one of ``"active"`` / ``"archived"`` / ``"deleted"`` /
+        ``"all"``; defaults to ``"active"`` so archived + deleted campaigns
+        drop out of the default sidebar. The store is the sole filter
+        gateway; API + CLI pass through.
+
+        *owner_user_id* — when set, only campaigns owned by this user are
+        returned. Unset means no owner filter (the in-process tenant scope
+        is still enforced by ``Stores.identity``).
+        """
         out: list[Campaign] = []
         for cid in self.list_campaign_ids():
             campaign = self.load_campaign(cid)
             if campaign is None:
                 continue
             if dataset_name and campaign.dataset_name != dataset_name:
+                continue
+            if lifecycle != "all" and campaign.lifecycle_status != lifecycle:
+                continue
+            if owner_user_id is not None and campaign.owner_user_id != owner_user_id:
                 continue
             out.append(campaign)
         return out
@@ -52,6 +73,31 @@ class CampaignManifestMixin(CampaignStoreKernel):
         if self.load_campaign(campaign_id) is None:
             return
         self.update_campaign(campaign_id, {"status": status, "finished_at": finished_at})
+
+    def mark_campaign_lifecycle(
+        self,
+        campaign_id: str,
+        *,
+        lifecycle_status: str,
+        lifecycle_changed_at: str,
+        lifecycle_reason: str = "",
+    ) -> None:
+        """Soft-mark a campaign as ``archived`` / ``deleted`` / ``active``.
+
+        Never physically removes data — measurements survive so siblings
+        still cache-hit per ADR-0002 §0.5. ``unarchive`` flips back to
+        ``"active"``.
+        """
+        if self.load_campaign(campaign_id) is None:
+            return
+        self.update_campaign(
+            campaign_id,
+            {
+                "lifecycle_status": lifecycle_status,
+                "lifecycle_changed_at": lifecycle_changed_at,
+                "lifecycle_reason": lifecycle_reason,
+            },
+        )
 
     def list_sessions(self, campaign_id: str) -> list[str]:
         """Session-root cycle ids in the campaign tree, ordered by ``session_index``."""

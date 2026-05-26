@@ -29,7 +29,7 @@ export function ScoringInspector({
   // inspector reaches for the round file only when the operator opens it.
   const { doc } = useRoundFile(campaignId, cycleId, selected?.round ?? null);
   const [forkPending, setForkPending] = useState(false);
-  const [forkResult, setForkResult] = useState<{ id: string; cli: string } | null>(null);
+  const [forkDone, setForkDone] = useState(false);
   const [forkErr, setForkErr] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
@@ -54,15 +54,17 @@ export function ScoringInspector({
         // cleanly instead of racing the still-running loop.
         await postStopCycle(campaignId, cycleId);
       }
-      const r = await postCreateFork(
+      await postCreateFork(
         campaignId,
         cycleId,
         selected.round,
         selected.candidate_id,
       );
-      setForkResult({ id: r.fork_cycle_id, cli: r.cli_command });
+      setForkDone(true);
       // Force the workspace poll to re-tick now — the new fork (and the
       // stop, if any) show up at once instead of a poll-interval later.
+      // The active pointer is server-side retargeted to the new fork; the
+      // re-tick surfaces both the new cycle and the updated active id.
       bumpRevalidation();
     } catch (e) {
       setForkErr((e as Error).message);
@@ -135,7 +137,7 @@ export function ScoringInspector({
           </div>
         )}
       </div>
-      {!forkResult && (
+      {!forkDone && (
         <div className="inspector-actions">
           <button
             type="button"
@@ -165,17 +167,13 @@ export function ScoringInspector({
         actions={forkActions}
         onClose={() => setConfirming(false)}
       />
-      {forkResult && (
+      {forkDone && (
         <div className="inspector-fork-result">
-          <div>
-            Forked → <code>{forkResult.id}</code>
-          </div>
-          <div className="fork-cli">
-            <span>Run:</span>
-            <code>{forkResult.cli}</code>
-          </div>
+          <div>Fork minted.</div>
           <div className="inspector-note">
-            Active pointer retargeted to the new fork.
+            Active pointer retargeted to the new fork; bare{" "}
+            <code>python -m promptpotter resume</code> picks it up. The
+            sidebar will surface the new cycle on the next workspace tick.
           </div>
         </div>
       )}

@@ -30,15 +30,13 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     SpendBucket,
     SpendRollup,
 )
+from promptpotter.presentation.api.middleware.command_dispatcher import (
+    CommandAcceptedBody,
+)
 from promptpotter.presentation.api.routers.active import (
     ActiveSessionResponse,
-    CleanupEmptyResponse,
-    CreateForkRequest,
-    CreateForkResponse,
     CycleListEntry,
     CyclesResponse,
-    DeleteCycleResponse,
-    StopCycleResponse,
 )
 from promptpotter.presentation.api.routers.campaigns.files import (
     FileContentResponse,
@@ -94,11 +92,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     ActiveSessionResponse,
     CycleListEntry,
     CyclesResponse,
-    CreateForkRequest,
-    CreateForkResponse,
-    StopCycleResponse,
-    DeleteCycleResponse,
-    CleanupEmptyResponse,
+    # --- commands middleware ---
+    CommandAcceptedBody,
     # --- campaigns/registry router ---
     CampaignSummary,
     CampaignListResponse,

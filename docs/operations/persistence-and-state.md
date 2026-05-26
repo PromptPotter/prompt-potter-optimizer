@@ -309,3 +309,58 @@ formula:  0.65*acc + 0.15*H + 0.10*lat + 0.05*R + 0.05*pc
 - Composite computation: `promptpotter/application/scoring/metrics.py::compute_composite_score`
 - Hot-swap module: `promptpotter/application/scoring/formula/`
 - Per-round trajectory: in-memory `Cycle.rounds` (transient); persistent trajectory derives from ledger events.
+
+---
+
+## Beta hosting state
+
+Single-operator (auth-off) and hosted-beta (OIDC sign-up) share the same on-disk shape. The hosted beta adds three operator-visible state surfaces, plus three CLI verbs, all under `projects/{tenant_id}/`.
+
+### Per-user quota knobs (`user.json`)
+
+`projects/{tenant_id}/user.json` carries the per-user abuse-limit knobs the launcher gates against. One file per tenant directory (beta is one-tenant-per-user). Missing file ⇒ defaults via `UserStore.get_or_create()`.
+
+```json
+{
+  "user_id": "...",
+  "tenant_id": "...",
+  "email": "you@example.com",
+  "spend_budget_usd_daily": null,
+  "max_concurrent_cycles": 2,
+  "max_campaigns_per_day": 10,
+  "created_at": "2026-05-26T..."
+}
+```
+
+Operators hand-edit `user.json` to lift / lower caps. `check_launch_quotas` reads it on every `mint-campaign` and `start-run`; `effective_spend_cap_usd` composes the per-cycle `spend_budget_usd` with the daily cap as `min(requested, daily_cap - daily_spent)`. Code: `promptpotter/infrastructure/store/user_store.py` + `promptpotter/application/jobs/quota.py`.
+
+### Campaign ownership + lifecycle (`campaign.json`)
+
+Every campaign carries two operator-facing fields on its manifest:
+
+- `owner_user_id: UserId` — populated from `IdentityContext.user_id` at mint (`presentation/cli/commands/_shared.py::_mint_session_and_cycle`). `CampaignStore.list_campaigns(identity)` filters to the caller's user; cross-user reads return **404, not 403** (existence leakage is itself a violation).
+- `lifecycle_status: "active" | "archived" | "deleted"` plus `lifecycle_changed_at: datetime` and `lifecycle_reason: str | None`. **Campaigns are never physically removed** — only marked. Measurements under `archive/measurements/` stay cross-campaign per ADR-0002 §0.5, so a deleted campaign's measurements still cache-hit for siblings. `try_delete_stub_cycle` is the only physical-delete site (empty stub cycles, unchanged).
+
+`CampaignStore.list_campaigns(status="active")` is the default. The webapp sidebar Active/Archived tab and the `?status=archived | deleted | all` query parameter on `GET /campaigns` route through this single store gateway. `deleted` is hidden from the default UI — recover by id from the file tree.
+
+### Lifecycle CLI verbs
+
+Three verbs ride the command highway under the same `CommandDispatcher` the webapp action calls:
+
+```bash
+python -m promptpotter archive   <campaign_id> [--reason TEXT]
+python -m promptpotter delete    <campaign_id> [--reason TEXT]
+python -m promptpotter unarchive <campaign_id>
+```
+
+Each writes a `CommandRecord` to the campaign's root-cycle ledger and inline-applies the manifest mark. Idempotent — re-running `archive` on an already-archived campaign is a no-op.
+
+### Running jobs (`.runtime/jobs/`)
+
+The browser-launched runner is tracked by an in-memory `JobRegistry` persisted to `projects/{tenant_id}/.runtime/jobs/{job_id}.json` (one file per job). Each `Job` carries `(campaign_id, cycle_id, user_id, status, created_at, …)`. The process-wide registry is stashed on `app.state.job_registry`; reads filter by `user_id`. Concurrent campaigns are safe via the `_CYCLE_LEDGER` ContextVar isolation already in place (`promptpotter/infrastructure/llm/models.py`).
+
+The Account modal's Security pane (`GET /auth/quota-status`) surfaces the live counts: spend used today, concurrent cycles running, campaigns minted today — each paired with its `user.json` cap.
+
+### Identity I/O kind
+
+The fifth I/O kind (Identity) is named in §0 of `docs/architecture.md`. OIDC verification at the API trust boundary (`presentation/api/middleware/oidc.py`) populates `IdentityContext` for the downstream resolver; tokens never appear past the middleware (ADR-0002 gate #2, CI-checked). Stage 0 (auth-off, single operator) substitutes `default_identity()` for the middleware. Permanent contract: `docs/adr/0002-identity-foundation.md`.

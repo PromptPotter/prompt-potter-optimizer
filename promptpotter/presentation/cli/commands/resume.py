@@ -281,6 +281,7 @@ async def _drive_optimization(
 
     cycle_dir = session.store.campaigns.cycle_dir(ctx.campaign_id, ctx.cycle_id)
     session.stop_check = (cycle_dir / ".runtime" / "stop.flag").is_file
+    session.pause_check = (cycle_dir / ".runtime" / "pause.flag").is_file
 
     cycle_result = await _orch_run_optimization(
         train_data,

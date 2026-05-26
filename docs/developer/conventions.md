@@ -1,7 +1,7 @@
 # Conventions
 
 Rules contributors follow that aren't derivable from reading the code.
-Non-negotiables (the no-backward-compat pledge, three I/O kinds, vocabulary
+Non-negotiables (the no-backward-compat pledge, five I/O kinds, vocabulary
 discipline) live in the root [`CLAUDE.md`](../../CLAUDE.md); this page
 collects everything else.
 

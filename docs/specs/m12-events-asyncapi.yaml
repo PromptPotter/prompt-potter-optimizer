@@ -9,7 +9,7 @@
 # Drift detection: `tests/test_control_plane_drift.py` + AsyncAPI Studio CLI lint.
 #
 # Permanent contract: docs/adr/0001-m12-control-plane.md
-# §0 definition: docs/architecture.md (§0 "State + persistence" — Four I/O kinds)
+# §0 definition: docs/architecture.md (§0 "State + persistence" — Five I/O kinds)
 #
 # Status: Profile -1 scaffold. The closed outbound set is the seven existing
 # CycleRecord kinds; Profile B adds CommandRecord + CommandAckRecord. No SSE
@@ -62,14 +62,19 @@ channels:
     description: |
       Subscription contract (security boxes 13-15):
         1. Snapshot frame first. The first message on the stream is a
-           `snapshot` envelope whose payload matches the current
-           `dashboard.json` state for this cycle.
+           `stream_snapshot` envelope whose payload mirrors the current
+           `dashboard.json` content plus `snapshot_at_offset` indicating
+           the ledger high-water mark the snapshot reflects.
         2. Then the live tail. Subsequent messages are individual record
-           projections with strictly-increasing `sequence`.
+           projections with strictly-increasing `sequence` (starting at
+           `snapshot_at_offset + 1`).
         3. Heartbeat every 15 s during idle so proxies and clients can
            distinguish "no events" from "stream broken."
         4. Missed frames are detectable via `sequence` gap. Clients SHOULD
            re-subscribe to receive a fresh snapshot if a gap is observed.
+        5. Cycle not running -> 404. The endpoint requires an active
+           `EventStreamView` in the process-wide registry; idle cycles
+           have no live stream to attach to.
     parameters:
       campaign_id:
         description: Target campaign id (matches `campaigns/{campaign_id}/`).
@@ -185,30 +190,291 @@ components:
             NOT advance sequence.
         payload:
           description: |
-            Per-kind payload. Each kind's schema is the corresponding record
-            class in `promptpotter/domain/run_records.py`. The schemas below
-            are the source of truth; record classes mirror them.
+            Per-kind payload. The envelope's `kind` field discriminates
+            which payload schema applies. Each per-kind schema below
+            mirrors the corresponding record class in
+            `promptpotter/domain/run_records.py`; the AsyncAPI spec is the
+            source of truth, the Python classes mirror it.
           oneOf:
             - $ref: '#/components/schemas/StreamSnapshotPayload'
-            - $ref: '#/components/schemas/RecordProjectionPayload'
+            - $ref: '#/components/schemas/DecisionPayload'
+            - $ref: '#/components/schemas/PhasePayload'
+            - $ref: '#/components/schemas/SnapshotPayload'
+            - $ref: '#/components/schemas/TokenUsagePayload'
+            - $ref: '#/components/schemas/LlmCallStartPayload'
+            - $ref: '#/components/schemas/LlmCallProgressPayload'
+            - $ref: '#/components/schemas/LlmCallPayload'
+            - $ref: '#/components/schemas/CommandPayload'
+            - $ref: '#/components/schemas/CommandAckPayload'
+        emitted_at:
+          type: string
+          format: date-time
+          description: |
+            Server-side wall-clock at envelope mint time. Debugging only —
+            never load-bearing for ordering. Ordering is by `sequence`.
+
+    # ---- Profile A: projection-synthesized payload ----
 
     StreamSnapshotPayload:
       type: object
       description: |
-        Payload of the `stream_snapshot` frame - the first message on the
+        Payload of the `stream_snapshot` frame — the first message on the
         stream. Mirrors the current `dashboard.json` content for the cycle
-        at the moment of subscription. Detailed schema fills in at Profile A.
+        at subscribe time. The `snapshot_at_offset` field carries the
+        ledger high-water mark the snapshot reflects; subsequent live-tail
+        frames carry strictly-greater `sequence` values.
+      required: [snapshot_at_offset]
       additionalProperties: true
+      properties:
+        snapshot_at_offset:
+          type: integer
+          minimum: 0
+          description: |
+            Ledger offset the snapshot reflects. Equals the envelope's
+            `sequence` for the snapshot frame; live tail starts at
+            `snapshot_at_offset + 1`.
+        warming_up:
+          type: boolean
+          description: |
+            Set to `true` when `dashboard.json` does not yet exist (fresh
+            campaign before origin's first flush). Other fields are then
+            absent; clients should render a "campaign initialising"
+            placeholder.
 
-    RecordProjectionPayload:
+    # ---- Profile A: record-derived payloads ----
+    # Each mirrors a `*Record` class in `promptpotter/domain/run_records.py`.
+    # The envelope's `kind` field strips the record's `record_type` discriminator;
+    # these schemas describe the rest.
+
+    DecisionPayload:
+      type: object
+      description: ResumeCheckpointRecord — one recorded loop decision.
+      required: [kind, inputs_ref, outcome, data, timestamp]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum:
+            - round_winner
+            - elimination_cut
+            - leader_lock_in
+            - l2_escalation_trigger
+            - l3_escalation_trigger
+            - probe_round_commitment
+            - fork_cut
+        inputs_ref:
+          type: object
+          additionalProperties: true
+        outcome: {}
+        data:
+          type: object
+          additionalProperties: true
+        round:
+          type: [integer, 'null']
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+
+    PhasePayload:
+      type: object
+      description: PhaseRecord — a campaign-phase boundary event.
+      required: [phase, event, payload, timestamp]
+      additionalProperties: false
+      properties:
+        phase: { type: string, minLength: 1 }
+        event: { type: string, minLength: 1 }
+        round:
+          type: [integer, 'null']
+          minimum: 0
+        payload:
+          type: object
+          additionalProperties: true
+          description: '`{view, data}` — typed View envelope + raw event data.'
+        timestamp:
+          type: string
+          format: date-time
+
+    SnapshotPayload:
+      type: object
+      description: SnapshotRecord — in-flight live-state snapshot.
+      required: [event, round, payload, timestamp]
+      additionalProperties: false
+      properties:
+        event: { type: string, minLength: 1 }
+        round:
+          type: integer
+          minimum: 0
+        candidate_idx:
+          type: [integer, 'null']
+          minimum: 0
+        candidate_total:
+          type: [integer, 'null']
+          minimum: 0
+        sample_idx:
+          type: [integer, 'null']
+          minimum: 0
+        sample_total:
+          type: [integer, 'null']
+          minimum: 0
+        payload:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+
+    TokenUsagePayload:
+      type: object
+      description: TokenUsageRecord — LLM token + cost telemetry.
+      required: [kind, node, input_tokens, output_tokens, timestamp]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [optimizer, backend]
+        node: { type: string, minLength: 1 }
+        model: { type: [string, 'null'] }
+        input_tokens:
+          type: integer
+          minimum: 0
+        output_tokens:
+          type: integer
+          minimum: 0
+        duration_s:
+          type: number
+          minimum: 0
+        cost_usd:
+          type: [number, 'null']
+          minimum: 0
+        round:
+          type: [integer, 'null']
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+
+    LlmCallStartPayload:
+      type: object
+      description: LLMCallStartRecord — in-flight marker (paired with LLMCall via call_id).
+      required: [call_id, node, started_at_ms, timestamp]
+      additionalProperties: false
+      properties:
+        call_id: { type: string, minLength: 1 }
+        node: { type: string, minLength: 1 }
+        round:
+          type: [integer, 'null']
+          minimum: 0
+        candidate_idx:
+          type: [integer, 'null']
+          minimum: 0
+        model: { type: [string, 'null'] }
+        started_at_ms:
+          type: integer
+          minimum: 0
+        prompt_chars:
+          type: integer
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+
+    LlmCallProgressPayload:
+      type: object
+      description: LLMCallProgressRecord — heartbeat while an LLM call is blocked.
+      required: [call_id, node, elapsed_s, timestamp]
+      additionalProperties: false
+      properties:
+        call_id: { type: string, minLength: 1 }
+        node: { type: string, minLength: 1 }
+        round:
+          type: [integer, 'null']
+          minimum: 0
+        elapsed_s:
+          type: number
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+
+    LlmCallPayload:
+      type: object
+      description: LLMCallRecord — full I/O of one optimizer LLM call.
+      required: [node, payload_kind, payload, timestamp]
+      additionalProperties: false
+      properties:
+        node: { type: string, minLength: 1 }
+        round:
+          type: [integer, 'null']
+          minimum: 0
+        candidate_idx:
+          type: [integer, 'null']
+          minimum: 0
+        payload_kind:
+          type: string
+          enum: [llm_call, synthesized]
+        call_id: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+          description: Opaque action-dict consumed by AuditTrailView.
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---- Profile B Phase 2a — graduated record classes ----
+
+    CommandPayload:
       type: object
       description: |
-        Payload for any non-snapshot record kind. The detailed per-kind
-        schemas fill in as records ship through Profile A (existing seven)
-        + Profile B (command + command_ack). At Profile -1 this is an
-        open object; drift test asserts each declared `kind` has a tight
-        schema before its handler lands.
-      additionalProperties: true
+        Projection of `CommandRecord` (Profile B Phase 2a). Carries the
+        inbound command kind, payload, and the trust-boundary headers the
+        dispatcher captured (`idempotency_key`, optional `expected_version`)
+        plus identity context.
+      required: [command_id, kind, payload, idempotency_key, timestamp]
+      additionalProperties: false
+      properties:
+        command_id: { type: string, minLength: 1 }
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z][a-z0-9-]*$'
+        payload:
+          type: object
+          additionalProperties: true
+        idempotency_key:
+          type: string
+          minLength: 8
+          maxLength: 128
+        expected_version:
+          type: [integer, 'null']
+          minimum: 0
+        issued_by_user_id: { type: string }
+        client_metadata:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+
+    CommandAckPayload:
+      type: object
+      description: |
+        Projection of `CommandAckRecord` (Profile B Phase 2a). Echoes the
+        originating `command_id` + status (`applied` | `rejected`) +
+        optional human-readable detail (never load-bearing for clients).
+      required: [command_id, status, timestamp]
+      additionalProperties: false
+      properties:
+        command_id: { type: string, minLength: 1 }
+        status:
+          type: string
+          enum: [applied, rejected]
+        detail: { type: string }
+        timestamp:
+          type: string
+          format: date-time
 
     HeartbeatPayload:
       type: object

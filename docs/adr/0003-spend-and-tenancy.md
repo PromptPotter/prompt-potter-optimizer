@@ -174,7 +174,9 @@ On first upgrade: the on-disk layout is already `projects/{tenant}/` with `tenan
 
 **No — this ADR.** The Stage-0 `IdentityContext` reification is a refinement of the existing **Persistence** I/O kind (tenant-prefix on every store key); the seam itself rides existing wiring (bootstrap → Session). The §0 amendment for the new `Identity` I/O kind lands with **Stage 1 of [`0002-identity-foundation.md`](0002-identity-foundation.md)** (OIDC ingress at the API boundary) — see that ADR's "§0 amendment" section.
 
-### Anchors (every claim names a file)
+### Anchors
+
+Every claim names a file. Path existence asserted by `tests/test_control_plane_drift.py::test_adr_anchor_files_exist`.
 
 | Concern | File |
 |---|---|

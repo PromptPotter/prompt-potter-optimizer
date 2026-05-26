@@ -8,9 +8,12 @@ parent's max_rounds + patience scalars."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import traceback
+from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from promptpotter.application.bootstrap import init_optimization_loop
@@ -59,6 +62,33 @@ def _build_spend_probe(observers: RunObservers, spend_budget_usd: float | None) 
         return None
     dashboard = observers.dashboard
     return lambda: dashboard.spend_total_used_usd
+
+
+def _build_spend_cap_probe(cycle_dir: Path, initial: float | None) -> Callable[[], float | None]:
+    """Return a callable resolving the current spend cap.
+
+    Reads ``.runtime/spend_cap.json::max_usd`` per cycle dir (written by the
+    ``change-spend-budget`` command applier); falls back to *initial* (the
+    CLI / campaign-config starting cap) when the file is absent or malformed.
+    The round loop polls every clean round so the cap can be raised / lowered
+    mid-flight without restarting the loop."""
+    cap_path = cycle_dir / ".runtime" / "spend_cap.json"
+
+    def probe() -> float | None:
+        if cap_path.is_file():
+            try:
+                data = json.loads(cap_path.read_text(encoding="utf-8"))
+                value = data.get("max_usd")
+                if isinstance(value, int | float):
+                    return float(value)
+            except Exception:
+                logger.warning(
+                    "spend_cap.json at %s unreadable; falling back to initial cap",
+                    cap_path,
+                )
+        return initial
+
+    return probe
 
 
 async def run_optimization(
@@ -163,6 +193,18 @@ async def run_optimization(
                 observers.callbacks._phase_ctx = parent_phase_ctx
                 cb = observers.callbacks
 
+            # Halt probe reads LiveDashboardView's clean accessor; the dashboard
+            # is the sole owner of the spend rollup, so the probe goes through
+            # the projection that already accumulates the records — not a
+            # parallel reader. Bind `observers` explicitly so the rebase loop's
+            # next-iteration rebuild can't make this probe read a stale ref.
+            # Cap probe re-reads `.runtime/spend_cap.json` each tick so the
+            # `change-spend-budget` command can mutate the ceiling mid-flight.
+            cycle_dir_for_probe = (
+                session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
+                if session.state.cycle_id
+                else Path()
+            )
             stop_reason = await run_round_loop(
                 cycle,
                 dataset,
@@ -172,14 +214,8 @@ async def run_optimization(
                 sweep=sweep,
                 diag=diag,
                 halt_at_accuracy=halt_at_accuracy,
-                spend_budget_usd=spend_budget_usd,
-                # Halt probe reads LiveDashboardView's clean accessor; the dashboard
-                # is the sole owner of the spend rollup, so the probe goes through
-                # the projection that already accumulates the records — not a
-                # parallel reader.
-                # Bind `observers` explicitly so the rebase loop's next-iteration
-                # rebuild can't make this probe read a stale reference.
                 spend_probe=_build_spend_probe(observers, spend_budget_usd),
+                spend_cap_probe=_build_spend_cap_probe(cycle_dir_for_probe, spend_budget_usd),
             )
         except (KeyboardInterrupt, asyncio.CancelledError) as exc:
             cause = (

@@ -206,14 +206,20 @@ dataset" vs "everything" identically.
 
 **State + persistence.** Three entry points (CLI, notebook, webapp)
 share **one** orchestration layer and **one** set of data types — no
-per-entry-point copies. **Four I/O kinds** the orchestrator reads or
+per-entry-point copies. **Five I/O kinds** the orchestrator reads or
 writes through, each with its own ingress: (1) **Persistence** — the
 sole writer is per-cycle `CycleEventLog.append`. Operator-initiated
 HITL collapses into this ingress: `inherit_from(parent, offset)` mints
 a fork at any chosen ledger offset (the operator picks the offset
 through the webapp's lineage inspector; pre-M12 forks endorse the
 parent's typed state unchanged, the substitute-typed-edit path is M12
-work). (2) **Display** — ledger subscribers (`LiveDisplay`,
+work). Workspace-scoped commands without any cycle target
+(`register-backend`, `sync-backend-experiments`) write to a sibling
+**workspace `CycleEventLog`** at `projects/{tenant}/.workspace/events.jsonl`
+— same shape, same single-writer discipline, identity-bound by the
+tenant prefix. Per-cycle ledgers stay canonical for any command that
+targets a campaign or cycle; campaign lifecycle commands ride the
+campaign's root-cycle ledger. (2) **Display** — ledger subscribers (`LiveDisplay`,
 `LiveDashboardView`, `AuditTrailView`); read-only, never write
 campaign artifacts. (3) **Control-local** — `stop_check` on
 `Session`; signals the loop to exit, writes nothing. The webapp's
@@ -238,7 +244,17 @@ outbound event set is declared in
 `docs/specs/m12-events-asyncapi.yaml` (AsyncAPI 3.0); adding a
 command or event kind requires updating the YAML first, in its own
 PR. The permanent system-networking contract is
-`docs/adr/0001-m12-control-plane.md`. Adding a new I/O kind requires
+`docs/adr/0001-m12-control-plane.md`. (5) **Identity** — OIDC
+verification at the API trust boundary. `presentation/api/middleware/oidc.py`
+(Stage 1) verifies an inbound ID Token against the issuer's JWKS and
+populates `IdentityContext` for the downstream resolver. Mutates no
+campaign state, is not a ledger subscriber, does not signal the loop
+— it is the gate establishing who the subsequent Control-remote call
+is *from*. Tokens are verified at this boundary and never appear past
+it (ADR-0002 gate #2, CI-checked). Stage 0 (auth-off, single
+operator) is the degenerate case: `default_identity()` substitutes
+for the middleware. Permanent contract:
+`docs/adr/0002-identity-foundation.md`. Adding a new I/O kind requires
 amending §0 first; the pre-flight gate (CLAUDE.md Q4 sub-rule)
 blocks code that introduces one without §0 backing. Hexagonal layer
 separation is enforced by

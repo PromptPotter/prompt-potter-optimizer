@@ -80,6 +80,11 @@ class Session:
     source: str = ""
 
     stop_check: Callable[[], bool] | None = None
+    # `pause_check` follows the same shape: returns True while the operator
+    # has requested a pause (`.runtime/pause.flag` present). The round loop
+    # blocks at round boundaries until the flag clears. `stop_check` always
+    # wins — stop-during-pause exits the wait loop cleanly.
+    pause_check: Callable[[], bool] | None = None
 
 
 def new_session_state(
@@ -181,6 +186,9 @@ def auto_mint_session(
             root_content_hash=target_hash,
             optimizer_prompt_hash=optimizer_hash,
             backend_id=session.backend_id,
+            owner_user_id=str(session.identity.user_id),
+            lifecycle_status="active",
+            lifecycle_changed_at=now.isoformat(),
             config=campaign_config.model_dump(mode="json"),
         )
     )

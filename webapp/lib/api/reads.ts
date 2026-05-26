@@ -20,6 +20,100 @@ export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse
   return jget<ActiveSessionResponse>(`${API}/active`, signal);
 }
 
+// Current identity envelope — drives the account modal (Profile + Security).
+// 401 when no session; the caller should treat that as "redirect to /ui/login".
+export interface ConnectedAccount {
+  provider: string;
+  email: string | null;
+}
+export interface MeResponse {
+  user_id: string;
+  tenant_id: string;
+  issuer: string | null;
+  email: string | null;
+  name: string | null;
+  provider: string | null;
+  connected_accounts: ConnectedAccount[];
+  available_providers: string[];
+}
+export function fetchMe(signal?: AbortSignal): Promise<MeResponse> {
+  return jget<MeResponse>(`${API}/auth/me`, signal);
+}
+
+// Security pane quota card — spend used today, concurrent cycles,
+// campaigns today, each paired with its cap from `user.json`.
+export interface QuotaStatus {
+  spend_used_today_usd: number;
+  spend_budget_usd_daily: number | null;
+  concurrent_running: number;
+  max_concurrent_cycles: number;
+  campaigns_today: number;
+  max_campaigns_per_day: number;
+}
+export function fetchQuotaStatus(signal?: AbortSignal): Promise<QuotaStatus> {
+  return jget<QuotaStatus>(`${API}/auth/quota-status`, signal);
+}
+
+// Activity pane bar charts — per-user token usage projected into 30
+// evenly-spaced buckets over the selected window.
+// ``window``: closed set per the backend (15m / 30m / 1h / 3h / 1d / 2d / 1w / 1mo / 1y).
+// ``group_by``: "model" = exact model strings; "api_key" = derived provider slug.
+export type ActivityWindow =
+  | "15m"
+  | "30m"
+  | "1h"
+  | "3h"
+  | "1d"
+  | "2d"
+  | "1w"
+  | "1mo"
+  | "1y";
+export type ActivityGroupBy = "model" | "api_key";
+export interface ActivityBucket {
+  ts: number;
+  spend_usd: number;
+  tokens: number;
+  requests: number;
+  series_spend: Record<string, number>;
+  series_tokens: Record<string, number>;
+  series_requests: Record<string, number>;
+}
+export interface ActivityResponse {
+  window: ActivityWindow;
+  group_by: ActivityGroupBy;
+  since: number;
+  until: number;
+  buckets: ActivityBucket[];
+  series_labels: string[];
+  total_spend_usd: number;
+  total_tokens: number;
+  total_requests: number;
+}
+export function fetchActivity(
+  window: ActivityWindow,
+  groupBy: ActivityGroupBy = "model",
+  signal?: AbortSignal,
+): Promise<ActivityResponse> {
+  return jget<ActivityResponse>(
+    `${API}/auth/activity?window=${encodeURIComponent(window)}&group_by=${encodeURIComponent(groupBy)}`,
+    signal,
+  );
+}
+
+// Dataset registry — minimal index backing the NewCampaignModal dropdown.
+// Walks `datasets/` server-side and returns one entry per dir with a
+// `pipeline.json` (i.e. the wired-dataset set).
+export interface DatasetIndexEntry {
+  name: string;
+  title: string | null;
+}
+export interface DatasetIndexResponse {
+  datasets: DatasetIndexEntry[];
+}
+export function fetchDatasetIndex(signal?: AbortSignal): Promise<DatasetIndexResponse> {
+  return jget<DatasetIndexResponse>(`${API}/datasets`, signal);
+}
+
 export function fetchPipeline(signal?: AbortSignal): Promise<unknown> {
   return jget(`${API}/optimizer/pipeline`, signal);
 }
@@ -166,12 +260,21 @@ export async function fetchActiveDatasetName(
   return parsed.header?.dataset_name ?? parsed.dataset_name ?? null;
 }
 
+// `lifecycle` mirrors the server's `?lifecycle=` filter — defaults to
+// "active" server-side; pass "archived" to surface the archived set
+// (deleted stays out of the default UI). "all" returns every status.
+export type LifecycleFilter = "active" | "archived" | "deleted" | "all";
+
 export function fetchCampaigns(
   dataset?: string,
   signal?: AbortSignal,
+  lifecycle?: LifecycleFilter,
 ): Promise<CampaignListResponse> {
-  const qs = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
-  return jget<CampaignListResponse>(`${API}/campaigns${qs}`, signal);
+  const params = new URLSearchParams();
+  if (dataset) params.set("dataset", dataset);
+  if (lifecycle && lifecycle !== "active") params.set("lifecycle", lifecycle);
+  const qs = params.toString();
+  return jget<CampaignListResponse>(`${API}/campaigns${qs ? `?${qs}` : ""}`, signal);
 }
 
 export function fetchCycles(signal?: AbortSignal): Promise<CyclesResponse> {

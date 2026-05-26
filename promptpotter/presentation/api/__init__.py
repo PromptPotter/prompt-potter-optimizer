@@ -25,13 +25,21 @@ Six router objects mounted at ``/api/v1`` from ``main.py``:
 6. **Verify** (``_verify_router``) — workspace-scope diagnostic-run records
    produced by ``cmd_verify``; feeds the Verify tab.
 
+7. **Auth** (``auth_router``) — Stage-1 OIDC sign-in surface (Google +
+   GitHub). ``/auth/providers``, ``/auth/login/{provider}``,
+   ``/auth/callback/{provider}``, ``/auth/logout``, ``/auth/me``.
+   Runs pre-auth; populates the opaque session cookie consumed by the
+   OIDC middleware.
+
 ``main.py`` imports the router names directly; this ``__init__.py``
 re-exports them.
 """
 
 from promptpotter.presentation.api.routers.active import _active_router
+from promptpotter.presentation.api.routers.auth import auth_router
 from promptpotter.presentation.api.routers.backends import backends_router
 from promptpotter.presentation.api.routers.campaigns import campaigns_router
+from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.datasets import _datasets_router
 from promptpotter.presentation.api.routers.measurements import _measurements_router
 from promptpotter.presentation.api.routers.verify import _verify_router
@@ -41,6 +49,8 @@ __all__ = [
     "_datasets_router",
     "_measurements_router",
     "_verify_router",
+    "auth_router",
     "backends_router",
     "campaigns_router",
+    "commands_router",
 ]

@@ -1,0 +1,642 @@
+"""``/auth/*`` — OIDC sign-in surface.
+
+Seven routes:
+
+* ``GET /auth/providers`` — list configured providers (drives the login page).
+* ``GET /auth/login/{provider}`` — issue a state token, redirect to the provider's consent screen.
+* ``GET /auth/callback/{provider}`` — verify the auth code, mint a server-side session, set the opaque cookie, redirect to ``/ui/``.
+* ``POST /auth/logout`` — delete the session + clear the cookie.
+* ``GET /auth/me`` — current identity envelope (401 when no session).
+* ``GET /auth/quota-status`` — Security pane: live quota knobs + today's usage.
+* ``GET /auth/activity`` — Activity pane: time-bucketed spend / requests / tokens.
+
+The auth router intentionally does NOT use ``IdentityDep`` for the
+login / callback / providers / logout routes — those run pre-auth. Only
+``/auth/me`` uses the dep, and 401 is the expected pre-sign-in answer.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import secrets
+from datetime import UTC, datetime
+from pathlib import Path as FsPath
+from typing import Annotated, Any, cast
+
+from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel
+
+from promptpotter.application.jobs import JobRegistry
+from promptpotter.application.jobs.quota import effective_spend_cap_usd
+from promptpotter.infrastructure.identity.allowlist import check_allowlist
+from promptpotter.infrastructure.identity.bundle import IdentityBundle
+from promptpotter.infrastructure.identity.github import (
+    GitHubTokenExchangeError,
+)
+from promptpotter.infrastructure.identity.google import (
+    GoogleTokenExchangeError,
+    ProviderIdentity,
+)
+from promptpotter.infrastructure.identity.migration import maybe_claim_default
+from promptpotter.infrastructure.identity.user import derive_user_id
+from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
+from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.presentation.api.deps import IdentityDep, StoreDep
+from promptpotter.presentation.api.middleware import SESSION_COOKIE_NAME
+from promptpotter.presentation.api.middleware.oidc import (
+    _identity_context_from_session,
+)
+
+logger = logging.getLogger(__name__)
+
+auth_router = APIRouter(prefix="/auth", tags=["Auth"])
+
+_SUPPORTED_PROVIDERS = frozenset({"google", "github"})
+
+
+class ProvidersResponse(BaseModel):
+    """Which providers the operator has configured. Drives the login page."""
+
+    providers: list[str]
+
+
+class ConnectedAccount(BaseModel):
+    """One OIDC provider currently bound to the active session.
+
+    Stage-1 beta is single-account-per-user — the list is always length 1.
+    The Clerk-style "connected accounts" surface in the webapp displays this
+    list; multi-account linking ships post-M13.
+    """
+
+    provider: str
+    email: str | None
+
+
+class QuotaStatus(BaseModel):
+    """Live snapshot of the abuse-limit knobs vs. today's usage.
+
+    Drives the Security pane's quota card. ``*_max`` mirrors `user.json`
+    so the operator can hand-edit limits; ``*_used`` is the live count
+    that ``check_launch_quotas`` would gate against on the next launch.
+    """
+
+    spend_used_today_usd: float
+    spend_budget_usd_daily: float | None
+    concurrent_running: int
+    max_concurrent_cycles: int
+    campaigns_today: int
+    max_campaigns_per_day: int
+
+
+class ActivityBucket(BaseModel):
+    """One bucket of the Activity pane's three stacked bar charts.
+
+    ``series`` maps each colour-axis label (model name or provider slug)
+    to its per-metric value in this bucket; the frontend uses it to draw
+    stacked bars. ``spend_usd`` / ``tokens`` / ``requests`` are the
+    bucket totals (= sum of series values), kept for empty-state checks.
+    """
+
+    ts: float  # epoch seconds at the bucket's leading edge
+    spend_usd: float
+    tokens: int
+    requests: int
+    series_spend: dict[str, float] = {}
+    series_tokens: dict[str, int] = {}
+    series_requests: dict[str, int] = {}
+
+
+class ActivityResponse(BaseModel):
+    """Time-bucketed spend / requests / tokens over the requested window."""
+
+    window: str
+    group_by: str  # "model" | "api_key"
+    since: float
+    until: float
+    buckets: list[ActivityBucket]
+    # Stable label set in display order — frontend uses it to assign one
+    # colour per label and iterate in the same order across all buckets.
+    series_labels: list[str]
+    total_spend_usd: float
+    total_tokens: int
+    total_requests: int
+
+
+class MeResponse(BaseModel):
+    """Current identity envelope. Returned by ``GET /auth/me`` only."""
+
+    user_id: str
+    tenant_id: str
+    issuer: str | None
+    email: str | None
+    name: str | None
+    provider: str | None
+    connected_accounts: list[ConnectedAccount]
+    available_providers: list[str]
+
+
+def _require_bundle(request: Request) -> IdentityBundle:
+    bundle: IdentityBundle | None = getattr(request.app.state, "identity_bundle", None)
+    if bundle is None:
+        raise HTTPException(503, {"error": "identity_not_initialised"})
+    return bundle
+
+
+def _require_provider_client(bundle: IdentityBundle, provider: str) -> Any:
+    if provider == "google":
+        if bundle.google is None:
+            raise HTTPException(404, {"error": "provider_not_configured", "provider": provider})
+        return bundle.google
+    if provider == "github":
+        if bundle.github is None:
+            raise HTTPException(404, {"error": "provider_not_configured", "provider": provider})
+        return bundle.github
+    raise HTTPException(404, {"error": "provider_unknown", "provider": provider})
+
+
+@auth_router.get("/providers", response_model=ProvidersResponse)
+async def list_providers(request: Request) -> ProvidersResponse:
+    bundle = _require_bundle(request)
+    return ProvidersResponse(providers=list(bundle.config.configured))
+
+
+@auth_router.get("/login/{provider}")
+async def login(
+    request: Request,
+    provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
+) -> RedirectResponse:
+    if provider not in _SUPPORTED_PROVIDERS:
+        raise HTTPException(404, {"error": "provider_unknown", "provider": provider})
+    bundle = _require_bundle(request)
+    client = _require_provider_client(bundle, provider)
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    bundle.register_state(state, provider, nonce)
+    if provider == "google":
+        url = client.authorize_url(state=state, nonce=nonce)
+    else:
+        url = client.authorize_url(state=state)
+    return RedirectResponse(url=url, status_code=307)
+
+
+@auth_router.get("/callback/{provider}")
+async def callback(
+    request: Request,
+    provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
+) -> RedirectResponse:
+    if provider not in _SUPPORTED_PROVIDERS:
+        raise HTTPException(404, {"error": "provider_unknown", "provider": provider})
+    bundle = _require_bundle(request)
+
+    error = request.query_params.get("error")
+    if error:
+        logger.warning("OIDC callback error for %s: %s", provider, error)
+        raise HTTPException(400, {"error": "provider_returned_error", "detail": error})
+
+    state = request.query_params.get("state")
+    code = request.query_params.get("code")
+    if not state or not code:
+        raise HTTPException(400, {"error": "callback_missing_params"})
+
+    pending = bundle.consume_state(state)
+    if pending is None or pending.provider != provider:
+        raise HTTPException(400, {"error": "state_invalid_or_expired"})
+
+    try:
+        if provider == "google":
+            identity: ProviderIdentity = await bundle.google.exchange_code(  # type: ignore[union-attr]
+                code=code, expected_nonce=pending.nonce
+            )
+        else:
+            identity = await bundle.github.exchange_code(code=code)  # type: ignore[union-attr]
+    except (GoogleTokenExchangeError, GitHubTokenExchangeError, IDTokenInvalidError) as exc:
+        logger.warning("OIDC code exchange failed for %s: %s", provider, exc)
+        raise HTTPException(401, {"error": "code_exchange_failed", "detail": str(exc)}) from exc
+
+    decision = check_allowlist(bundle.paths.allowlist, identity.email)
+    if not decision.allowed:
+        logger.info("Allowlist rejected %s (%s): %s", identity.email, provider, decision.reason)
+        raise HTTPException(
+            403,
+            {"error": "not_allowlisted", "reason": decision.reason, "email": identity.email},
+        )
+
+    user_id = derive_user_id(identity.issuer, identity.subject)
+    maybe_claim_default(
+        projects_root=DEFAULT_PROJECTS_ROOT,
+        user_id=str(user_id),
+        marker_path=bundle.paths.default_claim_marker,
+    )
+
+    session_id, _data = bundle.session_store.create(
+        user_id=str(user_id),
+        tenant_id=str(user_id),
+        issuer=identity.issuer,
+        subject=identity.subject,
+        email=identity.email,
+        provider=identity.provider,
+    )
+
+    response = RedirectResponse(url="/ui/", status_code=303)
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=session_id,
+        max_age=60 * 60 * 24 * 7,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@auth_router.post("/logout")
+async def logout(request: Request) -> JSONResponse:
+    bundle = _require_bundle(request)
+    session_id = request.cookies.get(SESSION_COOKIE_NAME)
+    if session_id:
+        bundle.session_store.delete(session_id)
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return response
+
+
+@auth_router.get("/me", response_model=MeResponse)
+async def me(request: Request, identity: IdentityDep) -> MeResponse:
+    """Identity envelope + the data the account modal needs.
+
+    `connected_accounts` is a single-entry list at Stage 1 (one provider
+    per session). `available_providers` is configured-minus-connected so
+    the "+ Connect account" affordance only surfaces real targets.
+    """
+    bundle = _require_bundle(request)
+    claims = cast(dict[str, Any], identity.claims)
+    email = cast(str | None, claims.get("email"))
+    provider = cast(str | None, claims.get("provider"))
+    name = _display_name_from(email)
+    connected = [ConnectedAccount(provider=provider, email=email)] if provider else []
+    configured = set(bundle.config.configured)
+    available = sorted(configured - {provider}) if provider else sorted(configured)
+    return MeResponse(
+        user_id=str(identity.user_id),
+        tenant_id=str(identity.tenant_id),
+        issuer=str(identity.issuer) if identity.issuer else None,
+        email=email,
+        name=name,
+        provider=provider,
+        connected_accounts=connected,
+        available_providers=available,
+    )
+
+
+def _display_name_from(email: str | None) -> str | None:
+    """Stage-1 fallback — session schema doesn't persist the OIDC ``name``
+    claim yet, so the modal uses the email local-part as a placeholder."""
+    if not email or "@" not in email:
+        return None
+    local = email.split("@", 1)[0]
+    return local.replace(".", " ").replace("_", " ").title() or None
+
+
+_WINDOW_SECONDS: dict[str, int] = {
+    "15m": 15 * 60,
+    "30m": 30 * 60,
+    "1h": 60 * 60,
+    "3h": 3 * 60 * 60,
+    "1d": 24 * 60 * 60,
+    "2d": 2 * 24 * 60 * 60,
+    "1w": 7 * 24 * 60 * 60,
+    "1mo": 30 * 24 * 60 * 60,
+    "1y": 365 * 24 * 60 * 60,
+}
+_N_BUCKETS = 30
+
+
+@auth_router.get("/quota-status", response_model=QuotaStatus)
+async def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
+    """Live quota snapshot for the Security pane.
+
+    Reuses ``effective_spend_cap_usd``-style accounting: today's spend
+    sums ``dashboard.json::spend.total_used_usd`` across the user's jobs
+    created since UTC midnight; concurrent + daily counts ride the
+    `JobRegistry`.
+    """
+    user = store.users.get_or_create(
+        user_id=str(store.identity.user_id),
+        tenant_id=str(store.identity.tenant_id),
+        email=_claim_email(store),
+    )
+    job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
+    if job_registry is None:
+        raise HTTPException(503, {"error": "job_registry_unavailable"})
+    running = job_registry.list_running(user_id=user.user_id)
+    today = job_registry.list_created_today(user_id=user.user_id)
+
+    # The composer subtracts daily-spent from `daily_cap`; reuse it to
+    # avoid duplicating the dashboard-walk logic, then derive used = cap - remaining.
+    if user.spend_budget_usd_daily is not None:
+        remaining = effective_spend_cap_usd(
+            requested_cap_usd=user.spend_budget_usd_daily,
+            user=user,
+            job_registry=job_registry,
+            stores=store,
+        )
+        spent = max(0.0, user.spend_budget_usd_daily - float(remaining or 0.0))
+    else:
+        # No daily cap → still surface today's spend by walking dashboards directly.
+        spent = _sum_user_spend_today(store=store, job_registry=job_registry, user_id=user.user_id)
+
+    return QuotaStatus(
+        spend_used_today_usd=round(spent, 6),
+        spend_budget_usd_daily=user.spend_budget_usd_daily,
+        concurrent_running=len(running),
+        max_concurrent_cycles=user.max_concurrent_cycles,
+        campaigns_today=len(today),
+        max_campaigns_per_day=user.max_campaigns_per_day,
+    )
+
+
+@auth_router.get("/activity", response_model=ActivityResponse)
+async def activity(
+    store: StoreDep,
+    window: Annotated[str, Query(pattern=r"^(15m|30m|1h|3h|1d|2d|1w|1mo|1y)$")] = "1d",
+    group_by: Annotated[str, Query(pattern=r"^(model|api_key)$")] = "model",
+) -> ActivityResponse:
+    """Time-bucketed spend / requests / tokens over the requested window.
+
+    Walks every per-cycle ``.runtime/ledger.jsonl`` under the user's
+    `campaigns/*/cycles/*/` and projects ``TokenUsageRecord`` rows whose
+    `timestamp` lands in the window onto ``_N_BUCKETS`` evenly-spaced
+    bins. ``cost_usd`` may be null on disk (Groq doesn't return wire
+    cost); we fall back to ``shared.spend.lookup_rate`` × tokens so
+    historical spend isn't silently zero.
+
+    ``group_by`` selects the colour axis: ``model`` = exact model string,
+    ``api_key`` = derived provider slug (``openai`` / ``groq`` /
+    ``anthropic`` / ``openrouter``).
+    """
+    from promptpotter.shared.spend import lookup_rate
+
+    span_s = _WINDOW_SECONDS[window]
+    until = datetime.now(UTC).timestamp()
+    since = until - span_s
+    bucket_width = span_s / _N_BUCKETS
+
+    buckets: list[ActivityBucket] = [
+        ActivityBucket(
+            ts=since + i * bucket_width,
+            spend_usd=0.0,
+            tokens=0,
+            requests=0,
+            series_spend={},
+            series_tokens={},
+            series_requests={},
+        )
+        for i in range(_N_BUCKETS)
+    ]
+    total_spend = 0.0
+    total_tokens = 0
+    total_requests = 0
+    label_order: dict[str, int] = {}  # insertion-order set
+
+    for rec in _iter_user_token_usage(store=store, since=since, until=until):
+        idx = min(_N_BUCKETS - 1, max(0, int((rec["ts"] - since) / bucket_width)))
+        b = buckets[idx]
+        tokens = rec["tokens"]
+        model = rec.get("model") or "unknown"
+        kind = rec.get("kind") or "optimizer"
+        cost = rec["cost_usd"]
+        if cost is None:
+            rate = lookup_rate(model if model != "unknown" else None)
+            if rate is not None:
+                input_t = rec.get("input_tokens", 0)
+                output_t = rec.get("output_tokens", 0)
+                cost = input_t * rate[0] + output_t * rate[1]
+            else:
+                cost = 0.0
+        # Tag backend rows so optimizer + backend never collide in the legend
+        # even when they share a provider slug (Groq-hosted openai/gpt-oss-* +
+        # OpenRouter-backed TermNorm both prefix with provider names).
+        if group_by == "model":
+            label = f"{model} (backend)" if kind == "backend" else model
+        else:
+            base = _provider_from_model(model)
+            label = f"{base} (backend)" if kind == "backend" else base
+        if label not in label_order:
+            label_order[label] = len(label_order)
+        b.series_spend[label] = b.series_spend.get(label, 0.0) + cost
+        b.series_tokens[label] = b.series_tokens.get(label, 0) + tokens
+        b.series_requests[label] = b.series_requests.get(label, 0) + 1
+        buckets[idx] = ActivityBucket(
+            ts=b.ts,
+            spend_usd=b.spend_usd + cost,
+            tokens=b.tokens + tokens,
+            requests=b.requests + 1,
+            series_spend=b.series_spend,
+            series_tokens=b.series_tokens,
+            series_requests=b.series_requests,
+        )
+        total_spend += cost
+        total_tokens += tokens
+        total_requests += 1
+
+    return ActivityResponse(
+        window=window,
+        group_by=group_by,
+        since=since,
+        until=until,
+        buckets=buckets,
+        series_labels=list(label_order.keys()),
+        total_spend_usd=round(total_spend, 6),
+        total_tokens=total_tokens,
+        total_requests=total_requests,
+    )
+
+
+def _provider_from_model(model: str) -> str:
+    """Derive the API-key axis from a model string.
+
+    Convention: most rate-keyed model strings here are ``"<provider>/<model>"``
+    (e.g. ``openai/gpt-oss-120b``, ``anthropic/claude-3-5-sonnet``). A
+    string with no slash falls back to ``"unknown"``.
+    """
+    if "/" in model:
+        return model.split("/", 1)[0]
+    if ":" in model:  # e.g. "groq:openai/gpt-oss-120b"
+        return model.split(":", 1)[0]
+    return "unknown"
+
+
+def _claim_email(store: Stores) -> str | None:
+    raw = store.identity.claims.get("email")
+    return raw if isinstance(raw, str) else None
+
+
+def _sum_user_spend_today(*, store: Stores, job_registry: JobRegistry, user_id: str) -> float:
+    """Fallback used when no daily-cap is set: sum dashboards directly.
+
+    Mirrors `quota._sum_daily_spend` but lives here because the no-cap
+    code path can't call `effective_spend_cap_usd` (which returns None).
+    """
+    total = 0.0
+    for job in job_registry.list_created_today(user_id=user_id):
+        try:
+            cycle_dir = store.campaigns.cycle_dir(job.campaign_id, job.cycle_id)
+        except Exception:
+            continue
+        dash = cycle_dir / "dashboard.json"
+        if not dash.is_file():
+            continue
+        try:
+            data = json.loads(dash.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        raw = (data.get("spend") or {}).get("total_used_usd")
+        if isinstance(raw, int | float):
+            total += float(raw)
+    return total
+
+
+def _iter_user_token_usage(*, store: Stores, since: float, until: float) -> list[dict[str, Any]]:
+    """Walk every per-cycle ledger under the user's workspace.
+
+    The canonical per-cycle ledger lives at
+    ``{cycle_dir}/.runtime/ledger.jsonl`` (the name ``events.jsonl`` is
+    used only by the workspace-scoped sibling). Filters to
+    ``TokenUsageRecord`` rows whose ``timestamp`` lands in
+    ``[since, until)``. JSON-decodes each line; cheaper than running the
+    full ledger ``iter`` (no pydantic validation per record). Beta-scale
+    only — fine for a few campaigns × a few cycles each.
+
+    Returns ``cost_usd`` as ``None`` when the record didn't carry one;
+    the caller falls back to the rate table for retro spend.
+
+    Legacy backfill: per-cycle ``dashboard.json::spend.backend`` is
+    cumulative for the cycle. Campaigns that ran before
+    ``sample_measurement.emit_token_usage(kind="backend", …)`` shipped
+    have backend tokens in the dashboard bucket but not on the ledger.
+    For each cycle whose ledger has no backend token-usage rows, we
+    synthesise ONE record stamped at the cycle's ``index.json::created_at``
+    so the backend spend is visible in the Activity pane even for old
+    campaigns. Cycles that already emit backend records via the ledger
+    don't double-count (the synthesis is gated by the per-cycle flag).
+    """
+    out: list[dict[str, Any]] = []
+    campaigns_root = store.base_dir / "campaigns"
+    if not campaigns_root.is_dir():
+        return out
+    for ledger_path in campaigns_root.glob("*/cycles/*/.runtime/ledger.jsonl"):
+        cycle_dir = ledger_path.parent.parent
+        has_backend = False
+        try:
+            with ledger_path.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or '"token_usage"' not in line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if rec.get("record_type") != "token_usage":
+                        continue
+                    ts_str = rec.get("timestamp", "")
+                    try:
+                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
+                    except (ValueError, TypeError):
+                        continue
+                    kind = rec.get("kind")
+                    if kind == "backend":
+                        has_backend = True
+                    if not (since <= ts < until):
+                        continue
+                    raw_cost = rec.get("cost_usd")
+                    input_t = int(rec.get("input_tokens", 0))
+                    output_t = int(rec.get("output_tokens", 0))
+                    out.append(
+                        {
+                            "ts": ts,
+                            "cost_usd": float(raw_cost)
+                            if isinstance(raw_cost, int | float)
+                            else None,
+                            "input_tokens": input_t,
+                            "output_tokens": output_t,
+                            "tokens": input_t + output_t,
+                            "model": rec.get("model"),
+                            "kind": kind,
+                        }
+                    )
+        except OSError:
+            continue
+        if not has_backend:
+            synth = _synth_legacy_backend_record(cycle_dir, since, until)
+            if synth is not None:
+                out.append(synth)
+    return out
+
+
+def _synth_legacy_backend_record(
+    cycle_dir: FsPath, since: float, until: float
+) -> dict[str, Any] | None:
+    """Synthesise one backend token-usage row from a cycle's dashboard.
+
+    Used for campaigns that pre-date the ledger-side backend emission.
+    Reads ``dashboard.json::spend.backend`` for the totals + ``index.json::created_at``
+    for the timestamp. Returns ``None`` when there's no backend usage or
+    the timestamp falls outside the window.
+    """
+    try:
+        idx_raw = (cycle_dir / "index.json").read_text(encoding="utf-8")
+        dash_raw = (cycle_dir / "dashboard.json").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        idx = json.loads(idx_raw)
+        dash = json.loads(dash_raw)
+    except json.JSONDecodeError:
+        return None
+    backend = (dash.get("spend") or {}).get("backend") or {}
+    input_t = int(backend.get("input_tokens", 0) or 0)
+    output_t = int(backend.get("output_tokens", 0) or 0)
+    if input_t == 0 and output_t == 0:
+        return None
+    ts_str = idx.get("created_at") or idx.get("updated_at") or ""
+    try:
+        ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return None
+    if not (since <= ts < until):
+        return None
+    raw_cost = backend.get("used_usd")
+    raw_model = backend.get("model")
+    model = str(raw_model) if isinstance(raw_model, str) and raw_model else "backend"
+    return {
+        "ts": ts,
+        "cost_usd": float(raw_cost) if isinstance(raw_cost, int | float) and raw_cost > 0 else None,
+        "input_tokens": input_t,
+        "output_tokens": output_t,
+        "tokens": input_t + output_t,
+        "model": model,
+        "kind": "backend",
+    }
+
+
+def _refresh_identity(bundle: IdentityBundle, session_id: str | None) -> Any:
+    """Test seam — exposed so tests can simulate a refreshed identity lookup."""
+    if not session_id:
+        return None
+    return _identity_context_from_session(session_id, bundle)
+
+
+__all__ = [
+    "ActivityBucket",
+    "ActivityResponse",
+    "ConnectedAccount",
+    "MeResponse",
+    "ProvidersResponse",
+    "QuotaStatus",
+    "auth_router",
+]

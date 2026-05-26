@@ -1,9 +1,17 @@
-"""Backend storage router — backends, sync, experiments, pipeline discovery."""
+"""Backend storage router — GET-only reads over registered backends.
+
+Mutations (``register-backend``, ``sync-backend-experiments``) ride the
+command highway: ``POST /commands/{kind}`` per
+``docs/specs/m12-api-openapi.yaml``. The dispatcher writes a
+``CommandRecord`` to the workspace ledger
+(``projects/{tenant}/.workspace/events.jsonl``) and inline-applies
+through ``CommandDispatcher._apply_register_backend`` /
+``_apply_sync_backend_experiments``.
+"""
 
 from __future__ import annotations
 
 import logging
-import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -12,7 +20,6 @@ from pydantic import BaseModel, Field
 
 from promptpotter import connectors
 from promptpotter.config.settings import settings
-from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient
@@ -23,28 +30,12 @@ logger = logging.getLogger(__name__)
 backends_router = APIRouter(prefix="/backends", tags=["Backends"])
 
 
-class RegisterBackendRequest(BaseModel):
-    name: str = Field(..., description="Human-readable name")
-    backend_type: str = Field(..., description="Backend type, e.g. 'default'")
-    base_url: str = Field(..., description="Backend API base URL")
-    id: str | None = Field(
-        None,
-        description="Custom ID (auto-generated from name if omitted)",
-    )
-
-
-class RegisterBackendResponse(BaseModel):
+class BackendResponse(BaseModel):
     id: str = Field(description="Backend identifier")
     name: str = Field(description="Human-readable backend name")
     backend_type: str = Field(description="Backend type (e.g. 'default')")
     base_url: str = Field(description="Backend API base URL")
     created_at: str = Field(description="ISO 8601 creation timestamp")
-
-
-class SyncResponse(BaseModel):
-    backend_id: str = Field(description="Backend identifier")
-    experiments_synced: int = Field(description="Number of experiments synced from backend")
-    synced_at: str = Field(description="ISO 8601 sync timestamp")
 
 
 class PipelineViewResponse(BaseModel):
@@ -55,37 +46,11 @@ class PipelineViewResponse(BaseModel):
     source: str = Field(description="Pipeline source: 'live', 'cached', or 'default'")
 
 
-@backends_router.post("", response_model=RegisterBackendResponse, status_code=201)
-async def register_backend(
-    request: RegisterBackendRequest, store: StoreDep
-) -> RegisterBackendResponse:
-    """Register a new backend connection."""
-    backend_id = request.id or re.sub(r"[^a-z0-9]+", "-", request.name.lower().strip()).strip("-")
-    if store.backends.get(backend_id):
-        raise HTTPException(status_code=409, detail=f"Backend '{backend_id}' already exists")
-
-    backend = BackendConnection(
-        id=backend_id,
-        name=request.name,
-        backend_type=request.backend_type,
-        base_url=request.base_url.rstrip("/"),
-    )
-    store.backends.register(backend)
-
-    return RegisterBackendResponse(
-        id=backend.id,
-        name=backend.name,
-        backend_type=backend.backend_type,
-        base_url=backend.base_url,
-        created_at=backend.created_at,
-    )
-
-
-@backends_router.get("", response_model=list[RegisterBackendResponse])
-async def list_backends(store: StoreDep) -> list[RegisterBackendResponse]:
+@backends_router.get("", response_model=list[BackendResponse])
+async def list_backends(store: StoreDep) -> list[BackendResponse]:
     """List all registered backends."""
     return [
-        RegisterBackendResponse(
+        BackendResponse(
             id=b.id,
             name=b.name,
             backend_type=b.backend_type,
@@ -96,47 +61,16 @@ async def list_backends(store: StoreDep) -> list[RegisterBackendResponse]:
     ]
 
 
-@backends_router.get("/{backend_id}", response_model=RegisterBackendResponse)
-async def get_backend(backend_id: str, store: StoreDep) -> RegisterBackendResponse:
+@backends_router.get("/{backend_id}", response_model=BackendResponse)
+async def get_backend(backend_id: str, store: StoreDep) -> BackendResponse:
     """Get backend details."""
     b = get_backend_or_404(backend_id, store)
-    return RegisterBackendResponse(
+    return BackendResponse(
         id=b.id,
         name=b.name,
         backend_type=b.backend_type,
         base_url=b.base_url,
         created_at=b.created_at,
-    )
-
-
-@backends_router.post("/{backend_id}/sync", response_model=SyncResponse)
-async def sync_experiments(backend_id: str, store: StoreDep) -> SyncResponse:
-    """Sync experiments from backend API into project store (verbatim)."""
-    backend = get_backend_or_404(backend_id, store)
-    connector = connectors.get(backend.backend_type)
-    client = BackendClient(
-        backend.base_url,
-        wire_adapter=connector.wire_adapter,
-        session=connector.session_factory(),
-        auth_token=settings.TERMNORM_TOKEN or None,
-    )
-
-    try:
-        count = await client.sync_experiments(store, backend_id)
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to sync from {backend.base_url}: {e}",
-        ) from e
-
-    now = datetime.now(UTC).isoformat()
-    backend.last_synced_at = now
-    store.backends.update(backend)
-
-    return SyncResponse(
-        backend_id=backend_id,
-        experiments_synced=count,
-        synced_at=now,
     )
 
 
@@ -155,7 +89,7 @@ async def list_experiments(backend_id: str, store: StoreDep) -> dict[str, Any]:
     if not experiments:
         raise HTTPException(
             status_code=404,
-            detail="No synced experiments. Run POST /sync first.",
+            detail="No synced experiments. Run POST /commands/sync-backend-experiments first.",
         )
     return {"experiments": experiments}
 
@@ -170,7 +104,7 @@ async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep) -
     if not data:
         raise HTTPException(
             status_code=404,
-            detail=f"Experiment '{experiment_id}' not synced. Run POST /sync first.",
+            detail=f"Experiment '{experiment_id}' not synced. Run POST /commands/sync-backend-experiments first.",
         )
     return data
 
@@ -207,9 +141,7 @@ async def get_pipeline(backend_id: str, store: StoreDep) -> PipelineViewResponse
 
 
 __all__ = [
+    "BackendResponse",
     "PipelineViewResponse",
-    "RegisterBackendRequest",
-    "RegisterBackendResponse",
-    "SyncResponse",
     "backends_router",
 ]
