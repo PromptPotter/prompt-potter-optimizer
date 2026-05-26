@@ -1,12 +1,21 @@
 # Code-Debt Cleanup — Backlog
 
-Dump location for new debt as it's found. Add a bullet under **Active
-backlog** with enough detail that a future session can pick it up cold:
+**Scope is literal: code debt only.** Dead code, redundant guards,
+single-caller indirections, premature optimizations that no longer
+earn their keep, vibe-coded scaffolding. The default action on every
+entry is **delete** (or inline, or strip) — verify-first when the
+evidence isn't on disk.
+
+**Not debt — goes elsewhere:**
+- Forward-looking webapp perf / feature work → [`m12-plus-backlog.md` § Webapp Perf](m12-plus-backlog.md)
+- New milestones / specs → `docs/specs/`, indexed at [`CLAUDE.md`](CLAUDE.md)
+- Architectural decisions → `docs/architecture.md`
+
+This file is the dump location for new debt as it's found. Add a bullet under **Active backlog** with enough detail that a future session can pick it up cold:
 - file + line range (or symbol)
 - one sentence on *why* it's debt (not "what" — the code shows what)
 - proposed action (delete / inline / extract / replace / verify)
-- any blockers (needs telemetry, needs a mini-spec, depends on another
-  item)
+- any blockers (needs telemetry, needs a mini-spec, depends on another item)
 
 When an item ships, delete it from the file. The file is the live
 backlog, not a history log — `git log` is the history layer.
@@ -35,114 +44,20 @@ patterns.
   per-sample instead of caching the whole list.
   **Pattern:** premature optimization (verify-first).
 
-- **`live_dashboard/round_summary.py` + `factory.py` consolidation
-  revisit** —
-  `infrastructure/projections/live_dashboard/round_summary.py` (57L)
-  and `factory.py` (71L). Spared from audit-1.C because of
-  deliberate seams (`round_summary` = the `dash.rounds[]` shape
-  transform; `factory` = resume-state healing). Both seams have
-  stabilized over subsequent arcs. **Action:** re-read each + their
-  sole caller (`view.py`); decide whether still load-bearing or
-  ready to inline. Not a forced yes — kept intentionally last time;
-  new decision needs a stronger reason than "single caller."
-  **Pattern:** single-caller indirection (revisit).
-
-## Frontend modernization + perf opportunities
-
-Lens: deliberate hand-roll or underused framework capability —
-distinct from the vibe-coded-remainder lens of § Active backlog. Each
-item is an independent win, listed cheapest-first. Discovered during
-the `371c476b` dashboard-writer-coalesce arc; none touched in that
-commit.
-
-### Cheap (hours)
-
-- **`CycleStreamContext.Provider` value not memoized** —
-  `webapp/lib/poll.tsx:446`. The provider passes `state` (return of
-  `useCycleStreamSource`), a new object on every poll tick — even on
-  a 304-skipped poll. Every context consumer re-renders. `React.memo`
-  on the four chart components catches the shallow-equal-props case
-  but doesn't help components reading other fields. **Action:** wrap
-  the value in `useMemo` keyed on its component fields; or split into
-  two contexts — steady metadata (`campaignId`, `cycleId`, `unitKey`)
-  vs polling payload (`dash`, `status`). Verify in React DevTools
-  Profiler: chart subtree no longer re-renders on a 304-skipped tick.
-  **Pattern:** unnecessary re-render fanout.
-
-- **Audit `"use client"` for server-component candidates** —
-  `webapp/components/**/*.tsx`. All 65 `.tsx` files declare
-  `"use client"`. App Router's server components are entirely unused.
-  Static-export still benefits: server-component code stays out of
-  the client bundle. **Action:** identify leaves with no browser APIs
-  (no `useState` / `useEffect` / `useRef` / event handlers /
-  `window` / `document`) and remove the directive. Starter candidates:
-  `components/ui/card.tsx`, `components/whatif/icons.tsx`,
-  `components/dashboard/MeasHeatCell.tsx`,
-  `components/whatif/FitnessRankSummary.tsx`,
-  `components/ui/states.tsx`. Verify via bundle-size diff in `out/`.
+- **`"use client"` audit — continue the sweep** —
+  `webapp/components/**/*.tsx`. App Router server components are
+  unused; stripping the directive on browser-API-free leaves keeps
+  that code out of the client bundle. First sweep done 2026-05-26
+  (`card.tsx`, `FitnessRankSummary.tsx`, `states.tsx` stripped;
+  `icons.tsx` was already clean; `MeasHeatCell.tsx` kept —
+  `useState`/`useEffect`/`useRef`/`PointerEvent`). **Action:** continue
+  leaf-by-leaf across the other ~60 `.tsx` files. **Note:** bundle-
+  size impact is zero when every consumer is itself client (the leaf
+  gets pulled into a client subtree anyway) — the win is correctness-
+  of-declaration, not bundle bytes.
   **Pattern:** underused framework capability.
 
-### Medium (half-day to a day)
-
-- **Enable React 19 Compiler** — `webapp/next.config.ts` +
-  `webapp/eslint.config.mjs`. React 19 ships an auto-memoizing
-  compiler (`babel-plugin-react-compiler` +
-  `eslint-plugin-react-compiler`). Would replace most manual
-  `React.memo` / `useMemo` / `useCallback`, including the
-  `l1RoundsKey` fingerprint (`LineageTree.tsx:73`) and the 12
-  `useMemo`s in `HardSamplesTable.tsx`. **Action:** add the plugin
-  pair, enable in Next config (`experimental.reactCompiler = true`),
-  run typecheck + build, then strip redundant manual memos in a
-  follow-up. **Blocker:** verify the compiler is stable on Next
-  16.2.5 (was RC at React 19 launch; check release notes before
-  shipping). **Pattern:** underused framework capability.
-
-- **SSE replaces 2 s polling** —
-  `promptpotter/presentation/api/routers/campaigns/cycles.py` +
-  `webapp/lib/poll.tsx`. Backend pushes a tick event when
-  `CycleEventLog` advances; client refetches `dashboard.json` only on
-  tick. Eliminates 2 s 304 chatter and shortens time-to-update.
-  FastAPI: `EventSourceResponse` via `sse-starlette`. **Action:** add
-  `GET /api/campaigns/{id}/cycles/{cid}/events` returning an SSE
-  stream of `{kind: "tick", last_modified: ...}`; client opens
-  `EventSource` per `unitKey`, refetches dashboard on each event;
-  fall back to interval polling if EventSource fails. **Blocker:**
-  confirm static-export behind FastAPI doesn't buffer the SSE
-  channel. **Pattern:** push-vs-poll modernization.
-
-### Larger (multi-day)
-
-- **Migrate `lib/poll.tsx` to SWR or TanStack Query** —
-  `webapp/lib/{poll.tsx,useFetch.ts,usePoll.ts}`. Both libraries
-  handle conditional polling, dedup, focus revalidation, exponential
-  backoff, and 304 plumbing for free. The hand-roll predates both
-  being viable for this shape. **Action:** SWR is the closer fit for
-  read-only polling. Migration deletes most of `poll.tsx`, all of
-  `useFetch.ts`, all of `usePoll.ts`. **Blocker:** verify SWR
-  revalidation interacts cleanly with the render-phase reset on
-  `unitKey` change. Pairs naturally with the SSE migration (drop
-  interval once the SWR mutator is wired to SSE ticks).
-  **Pattern:** hand-roll → library swap.
-
-- **Virtualize `LineageTree` + `HardSamplesTable`** —
-  `webapp/components/dashboard/{LineageTree.tsx,HardSamplesTable.tsx}`.
-  Render whole list/tree today; fine at current sizes (tens to
-  low-hundreds of rows). Will degrade at BBEH-scale or after long
-  campaigns. **Action:** `react-window` (fixed-height rows) or
-  `@tanstack/react-virtual` (flexible). **Blocker:** profile first —
-  premature below ~300 rows. **Pattern:** preempt-before-scale.
-
-- **Move `LineageTree` layout to a Web Worker** —
-  `webapp/components/dashboard/LineageTree.tsx`. The sort +
-  segment-mutation walk is O(N) per layout. Currently fine after the
-  `l1RoundsKey` fingerprint shipped. If profiler later shows the
-  layout step blocking the main thread on a large tree, move into a
-  Worker via `Comlink` or vanilla `postMessage`. **Blocker:** profile
-  first. **Pattern:** preempt-before-scale.
-
-### Backend perf (parked, verify-first)
-
-- **Dashboard route re-parses on every non-304 hit** —
+- **Dashboard route re-parses on every non-304 hit — verify first** —
   `promptpotter/presentation/api/routers/campaigns/cycles.py::get_cycle_dashboard`.
   After the 304 short-circuit, hits still `read_text` +
   `json.loads` on the whole file. Cache the parsed dict in-process
@@ -153,6 +68,16 @@ commit.
   on every non-304 path; capture across one full M10 campaign. **Decision
   rule:** act only if median crosses ~1ms or p99 crosses ~5ms.
   **Pattern:** premature optimization (verify-first).
+
+<!-- round_summary.py + factory.py revisit (2026-05-26): both KEEP.
+  round_summary.py = named Python→Pydantic adapter
+  (RoundResult → RoundSummary); inlining would push raw
+  RoundSummaryCandidate(...) constructor calls into _handle_phase
+  (wrong abstraction layer in a 920-line projection class).
+  factory.py = resume-time disk-reconciliation; for_session docstring
+  explicitly commits the classmethod to "thin assembly", and
+  resolve_resume_state's stale-pointer healing (_max_round_on_disk +
+  prior-state merge) is a named concern that earns its own file. -->
 
 ## Audit guidance — what to hunt for
 

@@ -1,4 +1,3 @@
-"use client";
 // Shared placeholder states — the muted "nothing here yet" note and the red
 // "something failed" note a panel shows before (or instead of) its data.
 // Styled inline so they render correctly even if component CSS hasn't loaded;

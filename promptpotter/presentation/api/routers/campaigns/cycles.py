@@ -7,13 +7,15 @@ resolves the session-family root server-side.
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 from typing import Any, Literal
 
 from fastapi import HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.store import cycle_dir_for, root_cycle_id
@@ -216,3 +218,70 @@ async def get_cycle_dashboard(
 
     dashboard: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     return JSONResponse(dashboard, headers=headers)
+
+
+_SSE_WATCH_INTERVAL_S = 0.25
+_SSE_HEARTBEAT_INTERVAL_S = 15.0
+
+
+async def _dashboard_tick_stream(request: Request, path) -> AsyncIterator[bytes]:  # type: ignore[no-untyped-def]
+    """Emit one SSE `tick` event per `dashboard.json` mtime change.
+
+    Centralises mtime-polling in the API process so multi-viewer setups
+    don't fan out ``GET /dashboard`` requests every 2 s. Single viewer:
+    same wall-clock work as the current poll; sub-second update latency
+    when the writer flushes between client polls.
+
+    Initial event carries the current mtime (or ``0`` if the file does
+    not exist yet — fresh campaign). Heartbeat comment fires every 15 s
+    to defeat dumb proxies that idle-close long-lived connections.
+    """
+    last_mtime: float = -1.0
+    last_heartbeat = asyncio.get_event_loop().time()
+    while True:
+        if await request.is_disconnected():
+            return
+        try:
+            mtime = path.stat().st_mtime if path.is_file() else 0.0
+        except FileNotFoundError:
+            mtime = 0.0
+        if mtime != last_mtime:
+            last_mtime = mtime
+            payload = json.dumps({"kind": "tick", "mtime": mtime})
+            yield f"data: {payload}\n\n".encode()
+            last_heartbeat = asyncio.get_event_loop().time()
+        elif asyncio.get_event_loop().time() - last_heartbeat >= _SSE_HEARTBEAT_INTERVAL_S:
+            yield b": keepalive\n\n"
+            last_heartbeat = asyncio.get_event_loop().time()
+        await asyncio.sleep(_SSE_WATCH_INTERVAL_S)
+
+
+@campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/events")
+async def stream_cycle_events(
+    request: Request, store: StoreDep, campaign_id: str, cycle_id: str
+) -> StreamingResponse:
+    """SSE channel — emits a ``tick`` event each time ``dashboard.json`` advances.
+
+    Client opens an ``EventSource`` per ``unitKey`` and refetches the
+    dashboard on every tick. The webapp still uses 2 s polling today;
+    this endpoint is the backend half of the push-vs-poll migration
+    captured in ``docs/specs/code-debt-cleanup.md``. Operators can
+    smoke-test buffering behaviour behind their actual deployment with
+    ``curl -N http://localhost:8001/api/campaigns/{id}/cycles/{cid}/events``
+    before the client side flips over.
+
+    Headers set ``Cache-Control: no-cache`` and ``X-Accel-Buffering: no``
+    so nginx / similar proxies don't buffer the stream into oblivion.
+    """
+    session_root = root_cycle_id(cycle_id)
+    session_dir = cycle_dir_for(store.base_dir, campaign_id, session_root)
+    path = session_dir / "dashboard.json"
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(
+        _dashboard_tick_stream(request, path),
+        media_type="text/event-stream",
+        headers=headers,
+    )

@@ -42,6 +42,17 @@ M12+ is the opportunistic bucket. Items here ship after M12 as user demand, time
 | Public service deployment | Auth, rate limiting, multi-tenancy hardening, billing. Builds on the [`identity-foundation.md`](identity-foundation.md) Stage 1 / Stage 2 contracts + M12's enforcement |
 | User-editable `pipeline.json` + initial values in the UI | Operator-flagged 2026-05-07. Today `datasets/{name}/pipeline.json` is filesystem-edited only. Webapp surface for "define your own pipeline" — author the node graph + initial param values directly in the UI. Pairs with the M12 dataset preview view + connector-driven pipeline visualization. Out of M12 scope; logged here so the M12 webapp doesn't accidentally close the door on it |
 
+### Webapp Perf
+
+Discovered during the 2026-05-26 code-debt-cleanup drain. Not debt — forward-looking perf/feature work. Each lifts to its own spec when picked up.
+
+| Item | Notes |
+|------|-------|
+| SSE client wire-up | Backend `GET /api/campaigns/{id}/cycles/{cid}/events` shipped (`cycles.py::stream_cycle_events`) — streams `{kind:"tick", mtime}` on every `dashboard.json` advance. Client still on 2 s polling. Smoke-test buffering with `curl -N` behind the actual deployment first, then `EventSource` per `unitKey` with polling fallback on `onerror`. Pairs with SWR migration |
+| SWR / TanStack Query migration | Replace hand-rolled `webapp/lib/{poll.tsx,useFetch.ts,usePoll.ts}` with library-native conditional polling + 304 plumbing + dedup. **Blocker:** no `vitest` harness over `lib/` today (webapp/CLAUDE.md "Testing posture"); smoke-only migration of polling logic is risky. Land the harness first |
+| Virtualize `HardSamplesTable` | Workspace-scope `hard_samples_workspace*.json` files on disk hold 294–451 candidates today (3-4.5k cells per render). Gate is met for `@tanstack/react-virtual`. Capture a Chrome devtools Performance trace on a workspace-scope view first — React Compiler may have closed the practical gap |
+| Strip redundant manual memos | React Compiler enabled (`reactCompiler: true`). `React.memo` / `useMemo` / `useCallback` wrappers are now mostly redundant. Keep the structural-fingerprint patterns (`l1RoundsKey`) — those encode domain knowledge the compiler can't infer. 65-file audit; benefits from runtime profiling under compiler |
+
 ### Research Extensions
 
 | Item | Notes |

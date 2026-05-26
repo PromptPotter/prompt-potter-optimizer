@@ -1,4 +1,3 @@
-"use client";
 // The dashboard's card shell — a `.card` box with a `.card-title` header.
 // `title` is the heading content, `actions` the right-aligned badge or
 // button group; both sit inside `.card-title` (its flex layout pushes the

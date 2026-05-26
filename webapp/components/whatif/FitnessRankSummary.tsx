@@ -1,4 +1,3 @@
-"use client";
 import { type BarSlot } from "./FitnessChart";
 
 // 1-based rank of each line by value descending; lines with a null value

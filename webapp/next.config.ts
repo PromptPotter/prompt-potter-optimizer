@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "export",
+  // Auto-memoize components + hooks. Lets us drop the manual React.memo /
+  // useMemo / useCallback wrappers in a follow-up audit; the FitnessChart /
+  // TrendChart / TopStrip / LineageTree render-cost guards still hold.
+  reactCompiler: true,
   // Served from FastAPI's /ui StaticFiles mount in production. basePath
   // makes Next emit /ui-prefixed asset URLs in the exported HTML.
   basePath: "/ui",
