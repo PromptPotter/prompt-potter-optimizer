@@ -8,7 +8,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from promptpotter.application.intelligence.adaptive_picker import marginal_hit_probability
+from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
 from promptpotter.application.intelligence.measurement_series import (
     campaign_measurement_series,
     cycle_measurement_series,
@@ -138,9 +138,9 @@ class DatasetItem(BaseModel):
     pick_score: float | None = Field(
         default=None,
         description=(
-            "Picker's blended objective on this sample for a brand-new candidate (prior "
-            "N(0, sigma_theta**2)) vs the best fitted candidate. Live picker re-evaluates "
-            "per step. None when unmeasured."
+            "Queue-mechanism's blended objective on this sample for a brand-new candidate (prior "
+            "N(0, sigma_theta**2)) vs the best fitted candidate. The live adaptive queue "
+            "mechanism re-evaluates per step. None when unmeasured."
         ),
     )
     delta: float | None = Field(
@@ -155,7 +155,7 @@ class DatasetItem(BaseModel):
         default=None,
         description=(
             "Marginal hit prob the seed-centred decision-IG reads — see "
-            "``adaptive_picker.marginal_hit_probability``. Near 0.5 = contested at seed; "
+            "``adaptive_queue_mechanism.marginal_hit_probability``. Near 0.5 = contested at seed; "
             "near 0/1 = predictable. None when unmeasured."
         ),
     )
@@ -224,11 +224,11 @@ async def get_dataset_preview(
     n_obs_map: dict[int, int] = {
         int(k): int(v) for k, v in rasch.get("n_obs_per_sample", {}).items()
     }
-    # Picker's blended objective for a brand-new candidate — populated in both per-cycle + archive artifacts.
+    # Queue-mechanism's blended objective for a brand-new candidate — populated in both per-cycle + archive artifacts.
     pick_score_block = artifact.get("pick_score", {}).get("per_sample", {})
     pick_score_map: dict[int, float] = {int(k): float(v) for k, v in pick_score_block.items()}
 
-    # Seed-centred marginal hit prob — see `adaptive_picker.marginal_hit_probability`.
+    # Seed-centred marginal hit prob — see `adaptive_queue_mechanism.marginal_hit_probability`.
     sigma_theta = float(rasch.get("sigma_theta", 0.0))
     theta_map: dict[str, float] = {str(k): float(v) for k, v in rasch.get("theta", {}).items()}
     candidate_order_raw = artifact.get("candidate_order") or []

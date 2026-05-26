@@ -8,11 +8,12 @@ posterior probability of being the best falls below ε. The original
 formulation assumes every arm is observed on an i.i.d. sample of the same
 underlying distribution.
 
-PromptPotter's adaptive picker intentionally violates that assumption.
-The picker reorders each candidate's evaluation so the most diagnostic
-samples land first — that lets a clearly inferior candidate be abandoned
-within a handful of queries instead of burning the full sample budget.
-Online adaptive ordering is the whole point of cheap loser elimination.
+PromptPotter's adaptive queue mechanism intentionally violates that
+assumption. The queue mechanism reorders each candidate's evaluation so
+the most diagnostic samples land first — that lets a clearly inferior
+candidate be abandoned within a handful of queries instead of burning
+the full sample budget. Online adaptive ordering is the whole point of
+cheap loser elimination.
 
 This document explains the failure mode the asymmetric ordering creates,
 the paired-sample mechanism that fixes it without giving up the sorter's
@@ -239,18 +240,18 @@ priors will surface as divergence via the candidate side).
 | File | Role |
 |---|---|
 | `promptpotter/application/optimization/pobb/elimination/checks.py::PoBBCheck` | Sample-keyed priors, `backfill_for_sample`, paired `check()`, `snapshot_priors`, `set_sample_universe` (budget for the dominance gate) |
-| `promptpotter/application/intelligence/adaptive_picker.py` | Online picker: `update_theta_posterior`, `decision_information_gain`, `model_information_gain`, `pick_value`, `next_sample`, `expected_order` |
+| `promptpotter/application/intelligence/adaptive_queue_mechanism.py` | Online adaptive queue mechanism: `update_theta_posterior`, `decision_information_gain`, `model_information_gain`, `pick_value`, `next_sample`, `expected_order` |
 | `promptpotter/application/optimization/l1/score.py::score_population` | Builds the `backfill_fn` closure + the `_next_sample(scored_outcomes)` closure; injects both into PoBB / the query loop |
 | `promptpotter/application/optimization/l1/score/candidate.py::score_one_candidate` | Builds `_backfill_for_sample(sample_id)` closure and passes it as `on_sample_pre_check` — reactive per-sample backfill, no upfront wall |
 | `promptpotter/application/scoring/query_loop.py::run_query_loop` | Per-step `next_sample(scored_outcomes)` + fires `on_sample_pre_check(sample.id)` after each sample lands, before degradation checks read prior coverage |
 | `promptpotter/application/optimization/l1/population.py::pobb_decision_data` | Embeds `candidate_sample_ids` + `prior_histories` into the decision record |
 | `promptpotter/application/optimization/resume_and_fork/replayers.py::_pobb_replay_snapshot` | Reads paired snapshot from `data`; no cross-round resolver |
 
-## Sample-selection: online adaptive picker
+## Sample-selection: online adaptive queue mechanism
 
 Backfill makes the paired comparison statistically valid; the per-candidate
-**iteration order** is what makes it cheap. The picker
-(`promptpotter/application/intelligence/adaptive_picker.py`) is a 1PL
+**iteration order** is what makes it cheap. The adaptive queue mechanism
+(`promptpotter/application/intelligence/adaptive_queue_mechanism.py`) is a 1PL
 Item Response Theory online sequential selector — at each step it folds
 the candidate's measured `(δ_s, se_δ_s, hit)` outcomes into a Gaussian
 Laplace-approximation posterior on `θ_c`, then picks the next sample by
@@ -274,30 +275,31 @@ two terms in nats:
 `pick_value = decision_information_gain + explore_weight ·
 model_information_gain`. Both terms are in nats, so `explore_weight`
 (`ExplorationConfig`, default 0.15) is dimensionless; kept well below 1
-the picker stays decision-dominated — PoBB *is* a keep/abort decision and
-that's what the evaluation budget should buy down.
+the queue mechanism stays decision-dominated — PoBB *is* a keep/abort
+decision and that's what the evaluation budget should buy down.
 
 The heatmap's hardest-first `sample_order` (the spec's `|δ_s|` sort)
 lives on the per-cycle artifact for display; the artifact's
 `pick_score.per_sample` is the blended pick-value for a fresh mutation of
 the seed — ability prior centred on the seed's ability `θ_seed`, not the
 population-mean anchor 0 — a descriptive snapshot of "how informative is
-this sample on a brand-new candidate." The **live** picker uses its own
-per-candidate posterior, so the artifact's order and the candidate's
-actual measurement order can diverge — the artifact is what the operator
-sees in the webapp, the live order is what the candidate ran against on
-disk.
+this sample on a brand-new candidate." The **live** adaptive queue
+mechanism uses its own per-candidate posterior, so the artifact's order
+and the candidate's actual measurement order can diverge — the artifact
+is what the operator sees in the webapp, the live order is what the
+candidate ran against on disk.
 
 Why this beats a static "hardest first" iteration: hardest-first treats
-the picker as a property of the *dataset* (Rasch δ alone). The adaptive
-picker treats it as a property of the *candidate-vs-seed comparison*,
-which is what PoBB actually tests. The decision term gives zero score to
-samples where the seed and candidate are predicted to agree (both
-unanimous-HIT or both unanimous-MISS) regardless of how hard they look on
-the δ axis; samples in the gap between `μ̂_c` and `μ_s` carry maximum
-info — and the picker re-evaluates that gap after every measurement, so
-the order is *responsive* to the candidate's running evidence rather than
-frozen at candidate-start.
+the queue mechanism as a property of the *dataset* (Rasch δ alone). The
+adaptive queue mechanism treats it as a property of the
+*candidate-vs-seed comparison*, which is what PoBB actually tests. The
+decision term gives zero score to samples where the seed and candidate
+are predicted to agree (both unanimous-HIT or both unanimous-MISS)
+regardless of how hard they look on the δ axis; samples in the gap
+between `μ̂_c` and `μ_s` carry maximum info — and the queue mechanism
+re-evaluates that gap after every measurement, so the order is
+*responsive* to the candidate's running evidence rather than frozen at
+candidate-start.
 
 ## Elimination ladder: dominance before posterior
 
@@ -337,5 +339,6 @@ approximating it via a tunable multiplier.
 * `docs/specs/archive/hard-sample-sorter.md` — the artifact contract carrying
   the heatmap's `sample_order` (δ_s desc) and the descriptive
   `pick_score.per_sample` blended-pick-value snapshot.
-* `promptpotter/application/intelligence/adaptive_picker.py` — the
-  live online picker (one blended decision-led objective).
+* `promptpotter/application/intelligence/adaptive_queue_mechanism.py` —
+  the live online adaptive queue mechanism (one blended decision-led
+  objective).

@@ -237,8 +237,8 @@ class CampaignConfig(BaseModel):
         20,
         description="Per-round eval budget — how many samples each candidate is "
         "scored on per round. The full train split is the bank; each round the "
-        "CAT picker (`select_round_subset`) selects this many informative "
-        "samples from it. Not the dataset/pool size.",
+        "adaptive queue mechanism (`select_round_subset`) selects this many "
+        "informative samples from it. Not the dataset/pool size.",
     )
     exclude_nodes: list[str] = Field(default_factory=list)
     pipeline_overrides: dict[str, Any] = Field(default_factory=dict)
@@ -306,7 +306,7 @@ def _check_sp_budget_vs_dataset(
             detail=(
                 f"The bank (full train split) has only {m} samples, so each round "
                 f"scores on all {m}. Lower sp_budget_ttest to {m} or below, or grow "
-                f"the dataset, to give the CAT picker a bank to select from."
+                f"the dataset, to give the adaptive queue mechanism a bank to select from."
             ),
         )
     return None

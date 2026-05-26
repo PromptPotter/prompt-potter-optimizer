@@ -387,9 +387,9 @@ def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
         dest="samples",
         type=int,
         default=20,
-        help="Number of additional samples to score (default 20). The picker "
-        "skips samples this candidate has already been measured on across "
-        "the cross-cycle archive.",
+        help="Number of additional samples to score (default 20). The adaptive "
+        "queue mechanism skips samples this candidate has already been measured "
+        "on across the cross-cycle archive.",
     )
     p_verify.add_argument(
         "--seed",

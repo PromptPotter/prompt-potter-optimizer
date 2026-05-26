@@ -18,14 +18,38 @@ from promptpotter.domain.results import (
 )
 
 
+def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
+    # Factual order samples were measured against this round's candidates.
+    # Each candidate's results list preserves the order the adaptive queue
+    # mechanism presented samples to it; the longest list survived farthest
+    # under elimination and therefore carries the full sequence. Ties on
+    # length break on candidate_id for deterministic projection.
+    if not acr:
+        return []
+    longest_cid = max(acr, key=lambda k: (len(acr[k]), k))
+    out: list[int] = []
+    seen: set[int] = set()
+    for r in acr[longest_cid]:
+        sid = r.get("sample_id")
+        if sid is None:
+            continue
+        sid_int = int(sid)
+        if sid_int in seen:
+            continue
+        seen.add(sid_int)
+        out.append(sid_int)
+    return out
+
+
 def build_round_summary(rr: RoundResult) -> RoundSummary:
     """One :class:`RoundSummary` from a closed-round :class:`RoundResult`.
 
     Winner detection follows ``_build_scoreboard`` in
     ``application/optimization/cycle.py``: the candidate whose
     ``changes_description`` matches the round's elected label is the
-    winner. The round label is set by the picker; this builder is the
-    sole writer of the persisted ``is_winner`` flag on the summary row.
+    winner. The round label is set by the elected candidate's diff
+    description; this builder is the sole writer of the persisted
+    ``is_winner`` flag on the summary row.
     """
     winner_label = rr.label
     candidates: list[RoundSummaryCandidate] = []
@@ -45,11 +69,13 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
                 changes_description=changes,
             )
         )
+    selection = _measurement_order(rr.all_candidate_results or {})
     return RoundSummary(
         round=rr.round,
         accuracy=float(rr.accuracy),
         composite_fitness=float(rr.composite_fitness),
         candidates=candidates,
+        selection=selection,
     )
 
 

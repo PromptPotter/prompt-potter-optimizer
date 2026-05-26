@@ -74,7 +74,7 @@ async def run_round_loop(
                 round_scoring_data = [s for s in dataset if s.query in cycle.warned_queries]
                 round_checks = None
             else:
-                # Full bank — execute_round's CAT picker narrows it to sp_budget_ttest per round.
+                # Full bank — execute_round's adaptive queue mechanism narrows it to sp_budget_ttest per round.
                 round_scoring_data = session.scoring.scoring_set
                 round_checks = session.scoring.degradation_checks
 

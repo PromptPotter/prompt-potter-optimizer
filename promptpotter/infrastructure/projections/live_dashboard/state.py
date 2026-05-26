@@ -165,7 +165,7 @@ class LiveDashboardState(BaseModel):
     current_query_payload: str | None = None
     current_sample_id: int | None = None
 
-    # Adaptive picker's expected next-sample order at candidate-start.
+    # Adaptive queue mechanism's expected next-sample order at candidate-start.
     hard_sample_order: list[int] | None = None
 
     last_query_elapsed_s: float = 0.0

@@ -313,7 +313,7 @@ class LiveDisplay(DerivedView):
             )
 
     def on_sample_order_preview(self, preview: list[tuple[int, float]], n_priors: int) -> None:
-        """Adaptive picker's expected-information-gain preview (1PL Rasch CAT)."""
+        """Adaptive queue mechanism's expected-information-gain preview (1PL Rasch CAT)."""
         if not preview:
             return
         prior_s = "" if n_priors == 1 else "s"

@@ -263,6 +263,10 @@ class RoundSummary(BaseModel):
     accuracy: float
     composite_fitness: float
     candidates: list[RoundSummaryCandidate] = Field(default_factory=list)
+    # Per-round selection from the adaptive queue mechanism — sample ids
+    # in measurement order (longest candidate sequence carries the full
+    # series since PoBB truncates losers, not the queue mechanism itself).
+    selection: list[int] = Field(default_factory=list)
 
 
 class OriginSummary(BaseModel):

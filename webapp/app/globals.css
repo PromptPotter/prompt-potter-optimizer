@@ -1159,7 +1159,28 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    on either axis to resize — tiles keep their size, the grid reflows how
    many show. The grip fades in on hover. Click to expand HardSamplesTable. */
 .hs-heat-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;margin-top:24px;padding:0 8px}
-.hs-heat-mini-btn{position:relative;display:block;margin:0 auto;padding:3px;cursor:pointer;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;resize:both;width:57px;height:22px;min-width:30px;min-height:14px;max-width:90%;max-height:50vh;transition:border-color .12s,box-shadow .12s}
+/* Two-button control row: heat-map mini on the left, sample-trajectory
+   mini on the right. Each owns an independent expand state; their
+   expanded panels stack below (trajectory above the hard-samples table). */
+.hs-controls-row{display:flex;align-items:center;justify-content:center;gap:8px;width:100%}
+/* Sample-trajectory mini button — fixed dimensions mirroring `.hs-heat-mini-btn`
+   (57x22px, non-draggable). Inner `.st-mini` renders a miniature Series view
+   (4px tiles) — same shape as the heat-map's mini, different palette. */
+.st-mini-btn{position:relative;display:block;margin:0;padding:3px;cursor:pointer;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;width:57px;height:22px;transition:border-color .12s,box-shadow .12s,background .12s}
+.st-mini-btn:hover{border-color:var(--color-accent)}
+.st-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.st-mini-btn[aria-expanded="true"]{border-color:var(--color-accent);background:var(--color-background-tertiary,var(--color-background-secondary))}
+/* 4px tiles; auto-fill so the round x sample matrix flows without ever
+   changing tile size. */
+.st-mini{display:grid;grid-template-columns:repeat(auto-fill,4px);grid-auto-rows:4px;gap:1px;align-content:start}
+.st-mini-cell{width:4px;height:4px;border-radius:1px;background:var(--color-background-tertiary)}
+.st-mini-cell.new{background:#3b82f6}
+.st-mini-cell.gained{background:var(--color-success)}
+.st-mini-cell.lost{background:var(--color-warn)}
+.st-mini-cell.kept{background:var(--color-text-tertiary);opacity:.5}
+.st-mini-cell.absent{background:var(--color-background-tertiary)}
+.hs-heat-mini-btn{position:relative;display:block;margin:0;padding:3px;cursor:pointer;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;resize:both;width:57px;height:22px;min-width:30px;min-height:14px;max-width:90%;max-height:50vh;transition:border-color .12s,box-shadow .12s,background .12s}
+.hs-heat-mini-btn[aria-expanded="true"]{border-color:var(--color-accent);background:var(--color-background-tertiary,var(--color-background-secondary))}
 .hs-heat-mini-btn:hover{border-color:var(--color-accent)}
 .hs-heat-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 /* Native resizer glyph hidden; a diagonal-line grip fades in on hover. */

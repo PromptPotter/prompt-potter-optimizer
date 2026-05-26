@@ -1,7 +1,7 @@
 """Per-sample query loop — the inner loop ``score_search_point`` drives.
 
 :func:`run_query_loop` walks a dataset sample by sample (online adaptive
-picker or insertion order), reusing prior-cache results where available,
+queue mechanism or insertion order), reusing prior-cache results where available,
 running the stale-data recovery protocol on degraded results, and
 classifying client/pipeline errors into an abort reason. It returns a
 :class:`QueryLoopResult` — the gateway turns that into the archived run.
@@ -273,7 +273,7 @@ async def run_query_loop(
 ) -> QueryLoopResult:
     """Score dataset samples, reusing prior results where available.
 
-    ``next_sample`` is the online adaptive picker (1PL Rasch CAT).
+    ``next_sample`` is the online adaptive queue mechanism (1PL Rasch CAT).
     When supplied, the loop calls it before each iteration with the
     candidate's accumulated ``scored_outcomes`` (sample_id → hit) and
     receives the next sample id to measure. Returning ``None`` from
@@ -307,7 +307,7 @@ async def run_query_loop(
 
     # Per-step adaptive picking when ``next_sample`` is supplied;
     # otherwise iterate the dataset as-given. ``scored_outcomes`` is the
-    # full (sample_id → hit) map the picker folds its posterior over.
+    # full (sample_id → hit) map the queue mechanism folds its posterior over.
     by_id: dict[int, Sample] = {s.id: s for s in dataset}
     fallback_order: list[int] = [s.id for s in dataset]
     scored_outcomes: dict[int, bool] = {}
@@ -370,10 +370,10 @@ async def run_query_loop(
                     state.results, completed=False, stop_reason=outcome.abort_reason
                 )
 
-            # Record the outcome (hit / non-hit) so the picker's
+            # Record the outcome (hit / non-hit) so the queue mechanism's
             # posterior fold sees it on the next iteration. Errored
             # results carry no ``hit`` field — treat them as miss for
-            # the posterior since the picker is about *capability*,
+            # the posterior since the queue mechanism is about *capability*,
             # not infrastructure; PoBB and DegradationCheck already
             # gate elimination on the error class itself.
             latest_hit: bool = bool(state.results[-1].get("hit")) if state.results else False

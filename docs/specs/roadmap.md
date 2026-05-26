@@ -1,10 +1,10 @@
 # Roadmap
 
-The codebase is approaching final form. The only spec under active implementation is [`verdict-resolution-picker.md`](verdict-resolution-picker.md). Everything else is forward direction (kept thin) or completed milestones (one-line summary + archived spec pointer).
+The codebase is approaching final form. The only spec under active implementation is [`verdict-resolution.md`](verdict-resolution.md). Everything else is forward direction (kept thin) or completed milestones (one-line summary + archived spec pointer).
 
 ## Active
 
-- **Verdict-resolution picker** — single statistical model behind both the live sample-picker and the persisted `hard_samples_*.json` ranking. Drops `explore_weight`. Phase 2 outlines origin-relative observation weighting. → [`verdict-resolution-picker.md`](verdict-resolution-picker.md)
+- **Verdict resolution** — single statistical model behind both the live adaptive queue mechanism and the persisted `hard_samples_*.json` ranking. Drops `explore_weight`. Phase 2 outlines origin-relative observation weighting. → [`verdict-resolution.md`](verdict-resolution.md)
 
 ## Forward direction
 

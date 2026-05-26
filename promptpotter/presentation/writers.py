@@ -138,7 +138,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         write_json(campaign_dir / "hard_samples.json", campaign_artifact)
 
     # Dataset-scope snapshot is per-(backend, dataset) — cross-dataset
-    # pooling would corrupt Rasch + PoBB picker (sample_id collides).
+    # pooling would corrupt Rasch + PoBB queue mechanism (sample_id collides).
     dataset_tag = session.dataset_name or "unknown"
     tenant_path = (
         session.store.base_dir

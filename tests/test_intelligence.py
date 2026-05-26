@@ -375,7 +375,7 @@ def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
 
 def test_update_theta_posterior_hits_raise_mean_misses_lower_it() -> None:
     """HIT raises μ, MISS lowers it; large se_δ damps the update."""
-    from promptpotter.application.intelligence.adaptive_picker import (
+    from promptpotter.application.intelligence.adaptive_queue_mechanism import (
         update_theta_posterior,
     )
 
@@ -394,7 +394,7 @@ def test_update_theta_posterior_hits_raise_mean_misses_lower_it() -> None:
 
 def test_decision_information_gain_peaks_at_candidate_ability() -> None:
     """The most decision-informative sample sits near the candidate's own ability — not the flanks."""
-    from promptpotter.application.intelligence.adaptive_picker import (
+    from promptpotter.application.intelligence.adaptive_queue_mechanism import (
         decision_information_gain,
     )
 

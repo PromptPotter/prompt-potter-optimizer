@@ -158,12 +158,12 @@ The persisted world is a four-entity containment hierarchy
   term — NEVER call this "query ranking."
 - **Rasch sort** — two-axis ordering of (sample-difficulty rank,
   candidate-ability rank). `application/intelligence/hard_sample_sorter.py`.
-- **Adaptive picker** — the live per-step sample selector
+- **Adaptive queue mechanism** — the live per-step sample selector
   inside the PoBB loop. Maintains a Gaussian posterior on the
   candidate's latent ability `θ_c` and re-picks every measurement
   by the blended pick-value objective.
-  `application/intelligence/adaptive_picker.py`.
-- **pick-value** — the adaptive picker's single one-step-greedy
+  `application/intelligence/adaptive_queue_mechanism.py`.
+- **pick-value** — the adaptive queue mechanism's single one-step-greedy
   objective: `decision_information_gain + explore_weight ·
   model_information_gain`, both terms in nats. Drives the
   per-step pick and the `pick_score` snapshot.
@@ -177,16 +177,16 @@ The persisted world is a four-entity containment hierarchy
   the decision term where the model is already sharp.
 - **explore_weight** — `ExplorationConfig` knob (default 0.15):
   the small, dimensionless weight on pick-value's explore term.
-  Kept well below 1 so the picker stays decision-dominated.
+  Kept well below 1 so the queue mechanism stays decision-dominated.
 - **pick_score snapshot** — descriptive per-sample
   `pick_score.per_sample` on the hard-samples artifact: the
   blended pick-value for a fresh mutation of the seed, ability
   prior `N(θ_seed, σ_θ²)` (centred on the parent, not the
   population-mean anchor 0). Consumed by the webapp dataset table;
-  the live picker uses its own per-candidate posterior, not this
-  snapshot.
+  the live adaptive queue mechanism uses its own per-candidate
+  posterior, not this snapshot.
 - **llm_ranking** — a backend node that orders ranked_items per
-  sample. Distinct from PoBB, Rasch, and the adaptive picker.
+  sample. Distinct from PoBB, Rasch, and the adaptive queue mechanism.
   Currently broken on TermNorm (see CLAUDE.md known issues).
 
 ## Escalation + healing

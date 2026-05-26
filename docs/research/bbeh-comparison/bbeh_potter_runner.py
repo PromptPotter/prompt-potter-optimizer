@@ -67,7 +67,7 @@ def build_campaign_config(
 
     # Rasch-validation run scaffolding (docs/specs/archive/rasch-validation-plan.md):
     # large l1_patience defers L2/L3 firing for the run window so the
-    # per-round CAT picker has time to accumulate δ evidence.
+    # per-round adaptive queue mechanism has time to accumulate δ evidence.
     cfg["optimization"] = {
         **cfg.get("optimization", {}),
         "max_rounds": 5,

@@ -2,7 +2,7 @@
 
 **Status:** Phase 1 (seed) shipped. Phases 2 + 3 unscheduled.
 
-> **`pick_score` contract is changing.** [`verdict-resolution-picker.md`](verdict-resolution-picker.md) drops the exploration term in the blended objective and unifies the persisted ranking with the live picker — one model, written to this same artifact whenever conditioning updates. The Phase 1 contract below describes today's behaviour; semantics change when that spec lands.
+> **`pick_score` contract is changing.** [`verdict-resolution.md`](../verdict-resolution.md) drops the exploration term in the blended objective and unifies the persisted ranking with the live adaptive queue mechanism — one model, written to this same artifact whenever conditioning updates. The Phase 1 contract below describes today's behaviour; semantics change when that spec lands.
 
 ## What this is
 
@@ -23,7 +23,7 @@ artifact["pick_score"]["per_sample"]       # dict[str, float]
 
 Persisted at every round-end finalize as `campaigns/{cycle_id}/hard_samples_campaign.json` (this cycle's rounds) + `hard_samples_workspace.json` (cycle + archive observations). Read by the webapp via `/datasets/{name}/preview` and rendered inline into `log.md`.
 
-**Two consumers, two sorts.** Heatmap (`sample_order`, `δ_s` desc) — hardest first. Live picker (`adaptive_picker.next_sample`) — per-step against the candidate's running θ̂_c posterior; does NOT consume the persisted snapshot.
+**Two consumers, two sorts.** Heatmap (`sample_order`, `δ_s` desc) — hardest first. Live adaptive queue mechanism (`adaptive_queue_mechanism.next_sample`) — per-step against the candidate's running θ̂_c posterior; does NOT consume the persisted snapshot.
 
 **Axis-sort contract** (renderers must honour): candidates Y-axis = `θ_c` desc, tie → mean hit-rate over measured cells desc, then lex; samples X-axis = `δ_s` desc, tie → miss-rate desc, then sample_id asc. Cells are tri-state: measured & hit · measured & miss · absent.
 

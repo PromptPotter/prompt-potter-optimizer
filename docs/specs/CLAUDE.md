@@ -6,7 +6,7 @@
 
 | Spec | What |
 |---|---|
-| [verdict-resolution-picker](verdict-resolution-picker.md) | The single statistical model behind both the live sample-picker and the persisted `hard_samples_*.json` ranking. Drops `explore_weight`. Bayesian sample picker (its predecessor) lives at [`archive/bayesian-sample-picker.md`](archive/bayesian-sample-picker.md). |
+| [verdict-resolution](verdict-resolution.md) | The single statistical model behind both the live adaptive queue mechanism and the persisted `hard_samples_*.json` ranking. Drops `explore_weight`. Its predecessor lives at [`archive/bayesian-sample-picker.md`](archive/bayesian-sample-picker.md). |
 
 ## Forward direction
 

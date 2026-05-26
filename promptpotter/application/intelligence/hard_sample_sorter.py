@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.intelligence.adaptive_picker import pick_value
+from promptpotter.application.intelligence.adaptive_queue_mechanism import pick_value
 from promptpotter.application.intelligence.exploration import build_observations, fit_rasch
 
 if TYPE_CHECKING:
@@ -56,7 +56,7 @@ def _pick_score_under_prior(
 ) -> dict[int, float]:
     """Per-sample pick-value for a fresh mutation centred at θ_seed (not population-mean 0).
 
-    Round-boundary snapshot of the same ``pick_value`` the live picker calls.
+    Round-boundary snapshot of the same ``pick_value`` the live adaptive queue mechanism calls.
     """
     var_theta = sigma_theta * sigma_theta
     return {
@@ -88,7 +88,7 @@ def _resolve_sample_order(
 
 
 def _resolve_pick_order(pick_score: dict[int, float]) -> list[int]:
-    """Desc pick-value, asc sid; snapshot only — ``adaptive_picker`` re-ranks live."""
+    """Desc pick-value, asc sid; snapshot only — ``adaptive_queue_mechanism`` re-ranks live."""
     return sorted(pick_score.keys(), key=lambda sid: (-pick_score[sid], sid))
 
 

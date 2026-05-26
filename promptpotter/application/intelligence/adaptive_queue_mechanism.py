@@ -1,4 +1,4 @@
-"""Online adaptive sample picker — 1PL Rasch CAT.
+"""Adaptive queue mechanism — 1PL Rasch CAT.
 
 ``score(s) = decision_information_gain(s)`` = MI between next outcome and verdict ``θ_c > θ_s``;
 means-known limit recovers Bernoulli Chernoff information (Garivier-Kaufmann 2016 Track-and-Stop).
@@ -128,7 +128,7 @@ def pick_value(
     delta_s: float,
     se_delta_s: float,
 ) -> float:
-    """Picker's score for one sample (nats) — alias over :func:`decision_information_gain`."""
+    """Queue-mechanism score for one sample (nats) — alias over :func:`decision_information_gain`."""
     return decision_information_gain(mu_c, var_c, mu_s, var_s, delta_s, se_delta_s)
 
 

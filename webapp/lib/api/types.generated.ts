@@ -27,6 +27,7 @@ export interface RoundSummary {
   accuracy: number;
   composite_fitness: number;
   candidates: RoundSummaryCandidate[];
+  selection: number[];
 }
 
 /** One on-demand candidate verification → webapp Verify tab. */
@@ -48,7 +49,7 @@ export interface DiagnosticRunRecord {
   source_campaign_n: number;
 }
 
-/** One spend sub-bucket (backend or optimizer-loop). Mutated only via */
+/** One spend sub-bucket (backend or optimizer-loop). Mutated only by */
 export interface SpendBucket {
   used_usd: number;
   input_tokens: number;
@@ -140,17 +141,17 @@ export interface DatasetItem {
   task: string | null;
   /** Times this sample has been tried */
   n_obs: number;
-  /** Picker's blended objective on this sample for a brand-new candidate (prior
-   * N(0, sigma_theta**2)) vs the best fitted candidate. Live picker re-
-   * evaluates per step. None when unmeasured. */
+  /** Queue-mechanism's blended objective on this sample for a brand-new candidate
+   * (prior N(0, sigma_theta**2)) vs the best fitted candidate. The live
+   * adaptive queue mechanism re-evaluates per step. None when unmeasured. */
   pick_score: number | null;
   /** Rasch difficulty delta_s (higher = harder). None when unmeasured. */
   delta: number | null;
   /** SE of delta_s (large = barely measured). None when unmeasured. */
   delta_se: number | null;
   /** Marginal hit prob the seed-centred decision-IG reads — see
-   * ``adaptive_picker.marginal_hit_probability``. Near 0.5 = contested at
-   * seed; near 0/1 = predictable. None when unmeasured. */
+   * ``adaptive_queue_mechanism.marginal_hit_probability``. Near 0.5 =
+   * contested at seed; near 0/1 = predictable. None when unmeasured. */
   p_hat: number | null;
 }
 

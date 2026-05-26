@@ -181,7 +181,7 @@ class RunCallbacks:
         n_priors: int,
         sample_order: list[int],
     ) -> None:
-        """Adaptive-picker preview at candidate start — top-3 next samples + full
+        """Adaptive-queue-mechanism preview at candidate start — top-3 next samples + full
         expected-info-gain order under the prior (1PL Rasch CAT) so the webapp
         table can re-sort live. Distinct from the heatmap's hardest-first
         ``sample_order`` (absolute difficulty vs expected info value here).

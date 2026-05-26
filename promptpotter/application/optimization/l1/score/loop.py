@@ -1,11 +1,11 @@
-"""Per-population scoring loop. Owns the candidate loop, accumulators, online Rasch CAT picker, and ESCALATED break."""
+"""Per-population scoring loop. Owns the candidate loop, accumulators, online Rasch adaptive queue mechanism, and ESCALATED break."""
 
 from __future__ import annotations
 
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.intelligence.adaptive_picker import (
+from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     expected_order,
     next_sample,
     pick_value,
@@ -97,9 +97,9 @@ async def score_population(
             cast("list[QueryMeasurement]", seed_results), candidate_id=seed_id, sp=seed_sp
         )
 
-    # Picker plumbing. Undermeasured filter: PoBB-aborted candidates (<n/2 measurements) only sit
-    # on the picker's discriminating samples and would bias the Rasch fit — drop them. The seed
-    # prior is registered separately and full.
+    # Queue-mechanism plumbing. Undermeasured filter: PoBB-aborted candidates (<n/2 measurements)
+    # only sit on the queue mechanism's discriminating samples and would bias the Rasch fit — drop
+    # them. The seed prior is registered separately and full.
     pop_min_obs = max(1, len(dataset) // 2)
 
     def _filtered_obs(
@@ -128,7 +128,7 @@ async def score_population(
 
     dataset_sample_ids = [int(s.id) for s in dataset]
 
-    def _picker_maps(
+    def _queue_mechanism_maps(
         posterior: RaschPosterior,
     ) -> tuple[dict[int, float], dict[int, float]]:
         """Full (δ̂_s, se_δ_s) maps. Unmeasured samples fall back to (μ_δ, σ_δ) — maximally
@@ -145,7 +145,7 @@ async def score_population(
     def _seed_posterior(
         d_map: dict[int, float], d_se_map: dict[int, float], p_var: float
     ) -> tuple[float, float]:
-        """Fold seed outcomes into a θ_s posterior — anchors the picker's decision IG
+        """Fold seed outcomes into a θ_s posterior — anchors the queue mechanism's decision IG
         against `θ_c > θ_s`. Returns centred prior `(0, σ_θ²)` when seed is unmeasured.
         """
         if not seed_results:
@@ -161,18 +161,19 @@ async def score_population(
         ]
         return posterior_from_outcomes(0.0, p_var, outcomes)
 
-    # Live picker observations — δ leaderboard re-fits on EVERY measurement (archive + priors +
-    # this round's completed + in-flight outcomes) so picker + webapp track in real time.
+    # Live queue-mechanism observations — δ leaderboard re-fits on EVERY measurement (archive +
+    # priors + this round's completed + in-flight outcomes) so queue mechanism + webapp track in
+    # real time.
     round_live_obs: list[Observation] = []
 
-    def _fit_picker(
+    def _fit_queue_mechanism(
         extra_obs: list[Observation],
     ) -> tuple[dict[int, float], dict[int, float], float, float, float]:
         """Re-fit Rasch over all observations so far. *extra_obs* is the in-flight outcomes,
         not yet folded into `round_live_obs`. Returns (delta_map, delta_se_map, prior_var, seed_mu, seed_var).
         """
         posterior = fit_rasch(round_boundary_obs + round_live_obs + extra_obs)
-        d_map, d_se_map = _picker_maps(posterior)
+        d_map, d_se_map = _queue_mechanism_maps(posterior)
         p_var = posterior.sigma_theta**2
         s_mu, s_var = _seed_posterior(d_map, d_se_map, p_var)
         return d_map, d_se_map, p_var, s_mu, s_var
@@ -188,9 +189,10 @@ async def score_population(
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
 
-        # Online 1PL Rasch CAT picker — re-fits δ on every measurement, folds outcomes into a
-        # running θ̂_c, picks argmax of decision-IG. Fold is from-scratch each step (no (μ_c, var_c)
-        # persistence). Re-emits `hard_sample_order` so the webapp reorders on every score.
+        # Online 1PL Rasch adaptive queue mechanism — re-fits δ on every measurement, folds
+        # outcomes into a running θ̂_c, picks argmax of decision-IG. Fold is from-scratch each step
+        # (no (μ_c, var_c) persistence). Re-emits `hard_sample_order` so the webapp reorders on
+        # every score.
         def _next_sample(
             scored_outcomes: dict[int, bool],
             _cid: str = osp_c.lineage.id,
@@ -200,7 +202,7 @@ async def score_population(
                 Observation(candidate_id=_cid, sample_id=sid, hit=hit)
                 for sid, hit in scored_outcomes.items()
             ]
-            d_map, d_se_map, p_var, s_mu, s_var = _fit_picker(extra)
+            d_map, d_se_map, p_var, s_mu, s_var = _fit_queue_mechanism(extra)
             # Fresh-mutation prior is seed θ_s, not 0. A centred-at-0 prior flattens decision-IG
             # and lets the explore term walk unmeasured blocks in sample-id order — folding from
             # θ_s gives the decision term real signal from pick 1.
@@ -255,7 +257,7 @@ async def score_population(
             next_sample=_next_sample,
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
-        # Fold outcomes into live obs so next candidate's picker + leaderboard see them.
+        # Fold outcomes into live obs so next candidate's queue mechanism + leaderboard see them.
         round_live_obs.extend(_filtered_obs({osp_c.lineage.id: cr_result.results}))
         if cr_result.runtime_failure is not None:
             osp_c.memory.wounds.runtime_failures = [

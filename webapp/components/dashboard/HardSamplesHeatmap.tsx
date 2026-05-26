@@ -8,6 +8,7 @@ import {
 import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { HardSamplesTable } from "./HardSamplesTable";
+import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { type MeasurementDot } from "./hard-samples/columns";
 
 interface Props {
@@ -87,7 +88,8 @@ export function HardSamplesHeatmap({
   hardSamplesScope,
   onHardSamplesScopeChange,
 }: Props) {
-  const [expanded, setExpanded] = useState(false);
+  const [heatExpanded, setHeatExpanded] = useState(false);
+  const [bankExpanded, setBankExpanded] = useState(false);
 
   // Merge archive series (scope-aware, server-sourced) with the live
   // mid-round samples (client-only, current cycle). De-dupe on (ord, hit)
@@ -151,42 +153,14 @@ export function HardSamplesHeatmap({
 
   return (
     <div className="hs-heat-wrap">
-      {expanded ? (
-        <div className="hs-expand-wrap">
-          <button
-            type="button"
-            className="hs-heat-shrink-fab"
-            onClick={() => setExpanded(false)}
-            aria-expanded={true}
-            title="Shrink"
-            aria-label="Shrink heat-map"
-          >
-            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-              <path d="M3 3 L9 9 M9 3 L3 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
-            </svg>
-          </button>
-          <HardSamplesTable
-            dash={dash}
-            isLive={isLive}
-            themeKey={themeKey}
-            perSample={perSample}
-            datasetName={datasetName}
-            datasetItems={datasetItems}
-            datasetMeasuredCount={datasetMeasuredCount}
-            datasetUnmeasuredCount={datasetUnmeasuredCount}
-            datasetSplitTest={datasetSplitTest}
-            scope={hardSamplesScope}
-            onScopeChange={onHardSamplesScopeChange}
-          />
-        </div>
-      ) : (
+      <div className="hs-controls-row">
         <button
           type="button"
           className="hs-heat-mini-btn"
-          onClick={() => setExpanded(true)}
-          aria-expanded={false}
-          aria-label={`Expand sample heat-map. ${summary}.`}
-          title={`${summary} — click to expand · drag the bottom edge to resize`}
+          onClick={() => setHeatExpanded((e) => !e)}
+          aria-expanded={heatExpanded}
+          aria-label={heatExpanded ? "Collapse sample heat-map" : `Expand sample heat-map. ${summary}.`}
+          title={`${summary} — click to ${heatExpanded ? "collapse" : "expand"} · drag to resize`}
         >
           <span className="hs-heat-mini" aria-hidden="true">
             {sortedItems.map((it) => {
@@ -205,6 +179,29 @@ export function HardSamplesHeatmap({
             })}
           </span>
         </button>
+        <SampleTrajectoryMiniButton
+          expanded={bankExpanded}
+          rounds={dash?.rounds ?? []}
+          onToggle={() => setBankExpanded((e) => !e)}
+        />
+      </div>
+      {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
+      {heatExpanded && (
+        <div className="hs-expand-wrap">
+          <HardSamplesTable
+            dash={dash}
+            isLive={isLive}
+            themeKey={themeKey}
+            perSample={perSample}
+            datasetName={datasetName}
+            datasetItems={datasetItems}
+            datasetMeasuredCount={datasetMeasuredCount}
+            datasetUnmeasuredCount={datasetUnmeasuredCount}
+            datasetSplitTest={datasetSplitTest}
+            scope={hardSamplesScope}
+            onScopeChange={onHardSamplesScopeChange}
+          />
+        </div>
       )}
     </div>
   );

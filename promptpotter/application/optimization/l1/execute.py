@@ -72,7 +72,7 @@ async def execute_round(
 
     # Probe rounds use their warned-query set as-is; non-probe rounds narrow
     # the train-split bank to ``sp_budget_ttest`` contested samples via the
-    # CAT picker. Origin + every candidate share this subset so PoBB compares
+    # adaptive queue mechanism. Origin + every candidate share this subset so PoBB compares
     # like-for-like.
     if cycle.probe_next_round:
         scoring_set = scoring_pool

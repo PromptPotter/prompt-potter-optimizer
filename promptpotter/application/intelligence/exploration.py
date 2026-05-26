@@ -1,4 +1,4 @@
-"""Rasch IRT primitives + per-round scoring-subset selection via CAT picker."""
+"""Rasch IRT primitives + per-round scoring-subset selection via the adaptive queue mechanism."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
-from promptpotter.application.intelligence.adaptive_picker import expected_order
+from promptpotter.application.intelligence.adaptive_queue_mechanism import expected_order
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
@@ -227,7 +227,7 @@ def select_round_subset(
     observations: list[Observation],
     budget: int,
 ) -> list[Sample]:
-    """Pick ``budget`` most-informative samples via the CAT picker.
+    """Pick ``budget`` most-informative samples via the adaptive queue mechanism.
 
     Prior ``N(θ_leader, σ_θ²)``; peaks on the contested band (δ ≈ leader θ).
     Cold start → bank-order prefix.

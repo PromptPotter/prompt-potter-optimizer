@@ -64,8 +64,8 @@ export interface DashboardSnapshot {
   // table pulses the row whose ``sample_id`` matches; ``null`` between
   // samples (no row pulses).
   current_sample_id?: number | null;
-  // The adaptive picker's expected sample order under the active
-  // ``picker_objective`` — descending expected information gain
+  // The adaptive queue mechanism's expected sample order under the
+  // active objective — descending expected information gain
   // (``model``) or decision-verdict mutual information (``decision``),
   // refreshed per candidate at candidate-start. The dataset table sorts
   // by this when the operator's "sync with live sort" tick is on.

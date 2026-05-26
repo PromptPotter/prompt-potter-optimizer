@@ -281,7 +281,7 @@ def _finalize_loop_state(
         if session.state.ledger is None:
             session.state.ledger = _open_cycle_ledger(session, resolved_cycle_id)
     session.state.tracing_campaign_id = tracing_campaign_id
-    # Full train split = bank; per-round CAT picker narrows to ``sp_budget_ttest``.
+    # Full train split = bank; per-round adaptive queue mechanism narrows to ``sp_budget_ttest``.
     session.scoring.scoring_set = list(dataset)
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round

@@ -1,4 +1,4 @@
-# Spec: Verdict-Resolution Sample Picker
+# Spec: Verdict-Resolution Adaptive Queue Mechanism
 
 **Status:** Draft. Supersedes [`bayesian-sample-picker.md`](archive/bayesian-sample-picker.md).
 
@@ -6,9 +6,9 @@
 
 ## What this is for
 
-For the candidate we're currently evaluating, pick samples that let us decide as early as possible whether to keep it or abort it against the seed. Most candidates are dead; the picker's job is to discover that fact in the fewest measurements possible — ideally 3 to 6 — by always selecting the sample whose outcome would resolve the keep/abort question the most.
+For the candidate we're currently evaluating, pick samples that let us decide as early as possible whether to keep it or abort it against the seed. Most candidates are dead; the adaptive queue mechanism's job is to discover that fact in the fewest measurements possible — ideally 3 to 6 — by always selecting the sample whose outcome would resolve the keep/abort question the most.
 
-This is a sequential-testing problem with a statistical model behind it. The model is what gives us provable efficiency: if the model's prediction for a sample is genuinely uncertain, measuring is informative; if its prediction is confident, measuring is wasted. The picker maximizes that information per measurement.
+This is a sequential-testing problem with a statistical model behind it. The model is what gives us provable efficiency: if the model's prediction for a sample is genuinely uncertain, measuring is informative; if its prediction is confident, measuring is wasted. The adaptive queue mechanism maximizes that information per measurement.
 
 ---
 
@@ -21,7 +21,7 @@ There is one statistical model. It produces one ranking. The ranking is updated 
 - All historical observations on that sample, across the entire dataset-scoped archive — every measurement every candidate has ever made on it.
 - The current candidate's own measurements so far in this run.
 
-In Phase 1, every historical observation counts equally — the population's behaviour on a sample is the prior, regardless of which candidate produced each measurement. As we measure the current candidate, those measurements sharpen the prediction further. The mechanism is the same one already running in the live picker: a per-candidate ability estimate that folds in observations as they arrive.
+In Phase 1, every historical observation counts equally — the population's behaviour on a sample is the prior, regardless of which candidate produced each measurement. As we measure the current candidate, those measurements sharpen the prediction further. The mechanism is the same one already running in the live adaptive queue mechanism: a per-candidate ability estimate that folds in observations as they arrive.
 
 **The verdict layer.** Independently, the model tracks our current belief about whether the candidate will beat the seed. Every measurement updates that belief.
 
@@ -44,19 +44,19 @@ The ranking is alive. It updates whenever the conditioning changes:
 - When the current candidate's evaluation starts, the ranking is computed against the candidate's prior (a mutation of the seed inherits the seed's ability prior).
 - Every time we measure the current candidate on a sample, its ability estimate updates, the prediction over every other sample shifts accordingly, and the ranking re-sorts.
 
-The ranking is written to `hard_samples_*.json` after each round boundary. That file is the webapp's read target. Reading it gives the latest serialized state of the same model — not a separate concept, not a frozen snapshot, just the current ranking. The webapp polls it; the live picker writes it.
+The ranking is written to `hard_samples_*.json` after each round boundary. That file is the webapp's read target. Reading it gives the latest serialized state of the same model — not a separate concept, not a frozen snapshot, just the current ranking. The webapp polls it; the live adaptive queue mechanism writes it.
 
 ---
 
 ## What's already correct and stays
 
-The math for "expected information about the verdict" is in the code. `decision_information_gain` (`adaptive_picker.py:137-162`) computes the mutual information between a Bernoulli outcome and the keep/abort verdict, conditioned on the candidate's current ability posterior. The hierarchical-EB Rasch fit (`exploration.py::fit_rasch`) supplies the per-sample population profile. The per-candidate posterior fold (`loop.py:240-296`) updates the ability estimate after each measurement. All of this is sound.
+The math for "expected information about the verdict" is in the code. `decision_information_gain` (`adaptive_queue_mechanism.py:137-162`) computes the mutual information between a Bernoulli outcome and the keep/abort verdict, conditioned on the candidate's current ability posterior. The hierarchical-EB Rasch fit (`exploration.py::fit_rasch`) supplies the per-sample population profile. The per-candidate posterior fold (`loop.py:240-296`) updates the ability estimate after each measurement. All of this is sound.
 
 ---
 
 ## What's broken
 
-The current picker adds a second term to the score — an "exploration bonus" weighted at 0.05 — that rewards samples we have *less* data on. The intent was to keep some pull toward sharpening the population model; the effect is that at step 0 (where the verdict information is small for every sample because no candidate measurements exist yet) the exploration bonus dominates the ranking and promotes stranded, poorly-measured, always-miss samples to the top. This is the exact opposite of what we want: the table looks dumb because the tiebreaker is dumb.
+The current adaptive queue mechanism adds a second term to the score — an "exploration bonus" weighted at 0.05 — that rewards samples we have *less* data on. The intent was to keep some pull toward sharpening the population model; the effect is that at step 0 (where the verdict information is small for every sample because no candidate measurements exist yet) the exploration bonus dominates the ranking and promotes stranded, poorly-measured, always-miss samples to the top. This is the exact opposite of what we want: the table looks dumb because the tiebreaker is dumb.
 
 There is also one degeneracy at the call site that has nothing to do with the formula: when ranking samples for a candidate at step 0, the current code evaluates the verdict at `μ_c = μ_seed` exactly, which makes the keep-or-abort prior 50/50 by construction. That's correct for a fresh mutation (its prior over ability genuinely is centred on the parent), so the prior probability is 50/50 — but the math for *expected* information still varies across samples through the prediction layer. Removing the exploration bonus is what restores that variation; the call site does not need changing beyond that.
 
@@ -66,9 +66,9 @@ There is also one degeneracy at the call site that has nothing to do with the fo
 
 One model, one score, one call site. No knobs.
 
-- Remove the exploration bonus term entirely. Drop `model_information_gain`, `predictive_hit_prob`, and the `explore_weight` argument from `pick_value` / `expected_order` / `next_sample` in `adaptive_picker.py`. Drop `ExplorationConfig.explore_weight` from `application/config.py`.
+- Remove the exploration bonus term entirely. Drop `model_information_gain`, `predictive_hit_prob`, and the `explore_weight` argument from `pick_value` / `expected_order` / `next_sample` in `adaptive_queue_mechanism.py`. Drop `ExplorationConfig.explore_weight` from `application/config.py`.
 - The single per-sample score is mutual information between the sample's outcome and the keep/abort verdict (`decision_information_gain`, unchanged math).
-- The call site that writes the persisted ranking (`hard_sample_sorter.py::_pick_score_under_prior`) calls the same scoring path the live picker calls. One function, two trigger points.
+- The call site that writes the persisted ranking (`hard_sample_sorter.py::_pick_score_under_prior`) calls the same scoring path the live adaptive queue mechanism calls. One function, two trigger points.
 - Everything else stays: `RaschPosterior`, the hierarchical-EB fit, the candidate posterior fold, the heatmap axis sorts, PoBB.
 
 ---
@@ -86,15 +86,15 @@ In Phase 1, every archive observation contributes equally to the population prof
 Three checks; each one fails against the current behaviour.
 
 1. **Ranking quality.** Open the operator's hard-samples table after the change. Samples where the population almost always hits or almost always misses sink toward the bottom. Genuinely contested samples (mixed hit/miss in the archive) sit at the top, ordered by how much they could shift the current candidate's verdict. Manual eyeball on any populated campaign.
-2. **Convergence speed.** Replay a recorded round where a candidate should die in 3–6 measurements against the seed. New picker should match or beat the current picker's measurement count on the same `(cycle_id, candidate_id, sample seed)`. New fixture: `tests/test_picker_convergence.py`.
+2. **Convergence speed.** Replay a recorded round where a candidate should die in 3–6 measurements against the seed. New adaptive queue mechanism should match or beat the current adaptive queue mechanism's measurement count on the same `(cycle_id, candidate_id, sample seed)`. New fixture: `tests/test_adaptive_queue_mechanism_convergence.py`.
 3. **PoBB integration unchanged.** `tests/test_pobb_check_*.py` must pass without modification — the verdict gate is unchanged; only the sample order changes.
 
 ---
 
 ## What gets deleted (Phase 1)
 
-- `adaptive_picker.py::model_information_gain`
-- `adaptive_picker.py::predictive_hit_prob`
+- `adaptive_queue_mechanism.py::model_information_gain`
+- `adaptive_queue_mechanism.py::predictive_hit_prob`
 - `explore_weight` argument from `pick_value`, `expected_order`, `next_sample`
 - `ExplorationConfig.explore_weight` field
 - All call-site references to `explore_weight` in `loop.py` and `hard_sample_sorter.py`
@@ -112,7 +112,7 @@ Three checks; each one fails against the current behaviour.
 5. **Rides existing infra:** yes — no new persisted state.
 6. **AI-readable:** the artifact's `pick_score.per_sample` and `pick_score.sample_order` shapes are unchanged; semantics are what the table behaviour already says they should be.
 7. **§0 update:** none required.
-8. **Langfuse:** picker is pure math, untraced.
+8. **Langfuse:** adaptive queue mechanism is pure math, untraced.
 
 ---
 
@@ -131,7 +131,7 @@ p̄       = E[Bernoulli outcome] marginalized over candidate posterior
 score(s) = H(p0) − [ p̄ · H(p⁺) + (1 − p̄) · H(p⁻) ]            # mutual info, in nats
 ```
 
-Exactly what `decision_information_gain` already computes (`adaptive_picker.py:137-162`). The math is correct; the spec only removes the exploration term that was added on top.
+Exactly what `decision_information_gain` already computes (`adaptive_queue_mechanism.py:137-162`). The math is correct; the spec only removes the exploration term that was added on top.
 
 ---
 
@@ -146,7 +146,7 @@ To be answered with the operator before implementation:
 
 ## References
 
-- Picker math: `promptpotter/application/intelligence/adaptive_picker.py::decision_information_gain`
+- Adaptive queue mechanism math: `promptpotter/application/intelligence/adaptive_queue_mechanism.py::decision_information_gain`
 - Per-candidate posterior fold: `promptpotter/application/optimization/l1/score/loop.py:240-296`
 - Population profile fit: `promptpotter/application/intelligence/exploration.py::fit_rasch`
 - Observation: `promptpotter/application/intelligence/exploration.py:38-44`
