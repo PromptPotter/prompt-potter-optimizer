@@ -272,7 +272,7 @@ def cleanup_stub_fork_if_empty(
     (n_rounds=0, no descendants, not root); this helper layers
     active-pointer policy on top.
     """
-    _, _, _, active_cid = read_active_pointer()
+    _, _, active_cid = read_active_pointer(tenant_id)
     was_active = active_cid == cycle_id
     if was_active:
         save_active_pointer(tenant_id, session_id, campaign_id, parent_cycle_id)

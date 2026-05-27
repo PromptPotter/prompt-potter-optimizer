@@ -34,13 +34,20 @@ class ActiveSessionResponse(BaseModel):
 
 
 @_active_router.get("/active", response_model=ActiveSessionResponse)
-async def get_active_session() -> ActiveSessionResponse:
-    """Return the active-session pointer; 404 when no session is active."""
-    tenant_id, session_id, campaign_id, cycle_id = read_active_pointer()
-    if not tenant_id:
+async def get_active_session(store: StoreDep) -> ActiveSessionResponse:
+    """Return the caller-tenant's active-session pointer; 404 when none exists.
+
+    Pointers are per-tenant on disk; the API never reads another tenant's
+    state. Unauthed callers are rejected by ``resolve_identity`` before
+    ``StoreDep`` resolves.
+    """
+    session_id, campaign_id, cycle_id = read_active_pointer(
+        store.tenant_id, projects_root=store.base_dir.parent
+    )
+    if not session_id:
         raise HTTPException(404, "No active session")
     return ActiveSessionResponse(
-        tenant_id=tenant_id,
+        tenant_id=store.tenant_id,
         session_id=session_id,
         campaign_id=campaign_id,
         cycle_id=cycle_id,
@@ -82,7 +89,9 @@ class CyclesResponse(BaseModel):
 @_active_router.get("/cycles", response_model=CyclesResponse)
 async def get_cycles(store: StoreDep) -> CyclesResponse:
     """Every cycle on disk for the tenant + active pointer (one round-trip for the picker)."""
-    _, _, active_cmp, active_cid = read_active_pointer()
+    _, active_cmp, active_cid = read_active_pointer(
+        store.tenant_id, projects_root=store.base_dir.parent
+    )
     entries = store.campaigns.enumerate_cycles()
     return CyclesResponse(
         tenant_id=store.tenant_id,

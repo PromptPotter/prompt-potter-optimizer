@@ -227,8 +227,10 @@ class CommandDispatcher:
     ) -> CommandAcceptedBody:
         """delete-cycle writes its audit trail on the campaign's root cycle
         ledger — the target cycle's own ledger goes away as part of the apply."""
-        active = read_active_pointer()
-        if active[2] == campaign_id and active[3] == cycle_id:
+        _, active_campaign, active_cycle = read_active_pointer(
+            self._store.tenant_id, projects_root=self._store.base_dir.parent
+        )
+        if active_campaign == campaign_id and active_cycle == cycle_id:
             raise HTTPException(
                 409,
                 {
@@ -555,7 +557,13 @@ class CommandDispatcher:
         fork_log.inherit_from(parent_log, parent_log.next_offset)
 
         if parent_session_id:
-            save_active_pointer(self._store.tenant_id, parent_session_id, campaign_id, fork_id)
+            save_active_pointer(
+                self._store.tenant_id,
+                parent_session_id,
+                campaign_id,
+                fork_id,
+                projects_root=self._store.base_dir.parent,
+            )
 
     def _apply_stop_cycle(self, campaign_id: str, cycle_id: str) -> None:
         """Write ``.runtime/stop.flag``; ``Session.stop_check`` polls at the
@@ -659,8 +667,9 @@ class CommandDispatcher:
         leaves-first via two passes. Reasons for skipped entries surface via
         the audit ack detail string."""
         root_id = root_cycle_id(cycle_id)
-        active = read_active_pointer()
-        active_cmp, active_cid = active[2], active[3]
+        _, active_cmp, active_cid = read_active_pointer(
+            self._store.tenant_id, projects_root=self._store.base_dir.parent
+        )
         deleted_ids: list[str] = []
         for _pass in range(2):
             progress = False

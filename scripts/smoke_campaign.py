@@ -36,7 +36,6 @@ from promptpotter.presentation.views.notebook_run import (  # noqa: E402
     prepare_scoring_context_notebook,
     run_optimization_notebook,
 )
-from promptpotter.shared.errors import ActiveSessionMismatchError  # noqa: E402
 
 
 def _build_config(
@@ -115,20 +114,11 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"[smoke] campaigns:    {project_dir / 'campaigns'}", flush=True)
     print(f"[smoke] dataset runs: {project_dir / 'dataset_runs'}", flush=True)
 
-    try:
-        session = await init_notebook_session(
-            backend_url=args.backend_url,
-            backend_id=args.dataset,
-            dataset_name=args.dataset,
-            take_over=args.take_over,
-        )
-    except ActiveSessionMismatchError as exc:
-        print(f"[smoke] ERROR: {exc}", file=sys.stderr)
-        print(
-            "[smoke] Rerun with --take-over to clear the pointer and proceed.",
-            file=sys.stderr,
-        )
-        return 5
+    session = await init_notebook_session(
+        backend_url=args.backend_url,
+        backend_id=args.dataset,
+        dataset_name=args.dataset,
+    )
 
     schema = session.pipeline_schema
     if schema is None or not schema.available_models:
@@ -224,11 +214,6 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--rounds", type=int, default=1, help="max_rounds")
     p.add_argument("--patience", type=int, default=1, help="l1_patience (consecutive stalls)")
     p.add_argument("--backend-url", default="http://127.0.0.1:8000")
-    p.add_argument(
-        "--take-over",
-        action="store_true",
-        help="Clear the active-session pointer if it names a different dataset",
-    )
     p.add_argument(
         "--task-context",
         default="Solve the following problem. Provide only the final answer, nothing else.",

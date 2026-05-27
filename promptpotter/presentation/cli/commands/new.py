@@ -115,7 +115,6 @@ async def _mint_fresh_session(
         backend_id=args.backend_id,
         experiment_id=args.experiment_id,
         dataset_name=dataset_name,
-        take_over=True,
         identity=identity_from_args(args),
     )
     backend_id = session.backend_id

@@ -10,7 +10,6 @@ calling them out-of-order leaves the session under-wired.
 │    ├─ resolve identity     (default_identity() at Stage-0;          │
 │    │                        Stage-1 swaps in OIDC verification)     │
 │    ├─ build_stores(identity, projects_root=…)                       │
-│    ├─ tenant guard         (refuse drift unless take_over=True)     │
 │    ├─ connector resolve    (datasets/{name}/pipeline.json)          │
 │    ├─ BackendClient        (wire + session adapter from connector)  │
 │    ├─ GET /pipeline        (merged with dataset overlay)            │
@@ -78,8 +77,6 @@ separation is enforced by
 
 ## When the chain breaks
 
-- **`init_services` raises `ActiveSessionMismatchError`** → another tenant
-  holds the pointer. Pass `take_over=True` or clear `.promptpotter/active_session.json`.
 - **`populate_session_scoring` raises** → bad scoring formula in
   `campaign.json`. Diagnostic is in the exception; check the formula DSL
   at [`/developer/stable-api.md`](stable-api.md) §2.

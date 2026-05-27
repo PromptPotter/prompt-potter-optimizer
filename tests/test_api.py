@@ -210,39 +210,29 @@ def test_dashboard_resolves_at_session_family_root(
 
 def test_active_returns_404_when_pointer_missing(
     seeded_tenant: tuple[TestClient, str, str],
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
+    """No pointer file under the tenant's workspace dir → 404."""
     client, _, _ = seeded_tenant
-    monkeypatch.setattr(
-        "promptpotter.infrastructure.store._ACTIVE_SESSION_PATH",
-        tmp_path / "missing_active.json",
-    )
     resp = client.get("/api/v1/active")
     assert resp.status_code == 404
 
 
 def test_active_returns_pointer_when_present(
     seeded_tenant: tuple[TestClient, str, str],
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
+    """Pointer written through the per-tenant API surfaces on /active."""
+    from promptpotter.infrastructure.store import save_active_pointer
+
     client, campaign_id, cycle_id = seeded_tenant
-    pointer_path = tmp_path / "active.json"
-    pointer_path.write_text(
-        json.dumps(
-            {
-                "tenant_id": "default",
-                "session_id": "s_abc",
-                "campaign_id": campaign_id,
-                "cycle_id": cycle_id,
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        "promptpotter.infrastructure.store._ACTIVE_SESSION_PATH",
-        pointer_path,
+    # The seeded_tenant fixture overrides build_stores_from_identity to a
+    # Stores rooted at tmp_path/projects/default; save through the same root.
+    stores = app.dependency_overrides[build_stores_from_identity]()
+    save_active_pointer(
+        stores.tenant_id,
+        "s_abc",
+        campaign_id,
+        cycle_id,
+        projects_root=stores.base_dir.parent,
     )
     resp = client.get("/api/v1/active")
     assert resp.status_code == 200

@@ -13,7 +13,11 @@ import shutil
 import sys
 from pathlib import Path
 
-from promptpotter.infrastructure.store import clear_active_pointer, read_active_pointer
+from promptpotter.domain.identity import TenantId
+from promptpotter.infrastructure.store import (
+    active_pointer_exists,
+    clear_active_pointer,
+)
 from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.presentation.cli.commands._shared import CommandResult
 
@@ -23,7 +27,8 @@ __all__ = ["cmd_reset"]
 
 
 # Top-level names ``reset`` removes; everything else (notably ``archive/``) is preserved by default.
-# ``.promptpotter/active_session.json`` is handled separately (cleared iff it points at a tenant being reset).
+# Each tenant's active-session pointer lives at ``{tenant}/.workspace/active_session.json``
+# and is cleared in lockstep with the campaigns/ + sessions/ trees it points into.
 _DROP_NAMES = ("campaigns", "sessions")
 
 # Preserved names — listed separately so the confirm prompt can name what survives.
@@ -113,12 +118,13 @@ def _remove(path: Path) -> None:
         path.unlink()
 
 
-def _active_pointer_in_scope(tenant_dirs: list[Path]) -> bool:
-    """True iff the global active-session pointer points at a tenant we're resetting."""
-    tenant_id, _, _, _ = read_active_pointer()
-    if not tenant_id:
-        return False
-    return any(td.name == tenant_id for td in tenant_dirs)
+def _tenants_with_pointers(tenant_dirs: list[Path]) -> list[str]:
+    """Return the slugs of tenants in scope that currently hold an active-session pointer."""
+    return [
+        td.name
+        for td in tenant_dirs
+        if active_pointer_exists(TenantId(td.name), projects_root=td.parent)
+    ]
 
 
 async def cmd_reset(args: argparse.Namespace) -> CommandResult:
@@ -133,14 +139,16 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
     projects_root = DEFAULT_PROJECTS_ROOT
     tenant_dirs = _resolve_tenant_dirs(args, projects_root)
     classified = [(td, *_classify(td)) for td in tenant_dirs]
-    pointer_in_scope = _active_pointer_in_scope(tenant_dirs)
+    tenants_with_pointers = _tenants_with_pointers(tenant_dirs)
 
-    has_anything_to_drop = any(drop for _td, drop, _p, _s in classified) or pointer_in_scope
+    has_anything_to_drop = any(drop for _td, drop, _p, _s in classified) or bool(
+        tenants_with_pointers
+    )
     summary = _render_summary(classified)
-    if pointer_in_scope:
-        summary += (
-            "\n\nglobal:\n    - .promptpotter/active_session.json (points to a tenant in scope)"
-        )
+    if tenants_with_pointers:
+        summary += "\n\npointers:"
+        for tid in tenants_with_pointers:
+            summary += f"\n    - projects/{tid}/.workspace/active_session.json"
 
     if getattr(args, "dry_run", False):
         if not has_anything_to_drop:
@@ -149,8 +157,8 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
                 human="reset --dry-run:\n" + summary + "\n\n(nothing to drop)",
             )
         would_drop = [str(p) for _td, drop, _p, _s in classified for p in drop]
-        if pointer_in_scope:
-            would_drop.append(".promptpotter/active_session.json")
+        for tid in tenants_with_pointers:
+            would_drop.append(f"projects/{tid}/.workspace/active_session.json")
         return CommandResult(
             data={
                 "tenants": [str(td) for td in tenant_dirs],
@@ -183,10 +191,11 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
             _remove(p)
             dropped.append(str(p))
             logger.info("reset: removed %s", p)
-    if pointer_in_scope:
-        clear_active_pointer()
-        dropped.append(".promptpotter/active_session.json")
-        logger.info("reset: cleared active-session pointer")
+    for tid in tenants_with_pointers:
+        clear_active_pointer(TenantId(tid), projects_root=projects_root)
+        rel = f"projects/{tid}/.workspace/active_session.json"
+        dropped.append(rel)
+        logger.info("reset: cleared active-session pointer for %s", tid)
 
     return CommandResult(
         data={"tenants": [str(td) for td in tenant_dirs], "dropped": dropped},

@@ -78,13 +78,14 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
     """Load active session from disk."""
     from promptpotter.infrastructure.store import active_pointer_exists, read_active_pointer
 
-    if not active_pointer_exists():
+    identity = default_identity(tenant_id=getattr(args, "tenant", None) or "default")
+    if not active_pointer_exists(identity.tenant_id):
         raise SystemExit(
             "ERROR: No active session.\n\n"
             "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint()
         )
-    store = build_stores(default_identity(tenant_id=getattr(args, "tenant", None) or "default"))
-    _tid, pointer_sid, pointer_cid, pointer_cyid = read_active_pointer()
+    store = build_stores(identity)
+    pointer_sid, pointer_cid, pointer_cyid = read_active_pointer(identity.tenant_id)
     session_id = getattr(args, "session", None) or pointer_sid
     if not session_id:
         raise SystemExit("ERROR: No active session_id in pointer.")

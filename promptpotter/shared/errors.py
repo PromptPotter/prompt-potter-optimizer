@@ -25,37 +25,6 @@ class ErrorCategory(enum.StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
-class ActiveSessionMismatchError(RuntimeError):
-    """Raised when a caller requests a tenant different from the active pointer.
-
-    ``.promptpotter/active_session.json`` is the "currently active tab" of the
-    campaign workspace. Any entry point (CLI, notebook, smoke tool) that asks
-    :func:`init_services` for a different ``tenant_id`` without explicitly
-    passing ``take_over=True`` hits this error instead of silently drifting to
-    a different workspace. Pass ``take_over=True`` to clear the pointer and
-    proceed, or run ``python -m promptpotter new <dataset>`` for the new
-    dataset first (which rewrites the pointer as part of fresh root creation).
-    """
-
-    def __init__(
-        self,
-        *,
-        active_tenant_id: str,
-        active_session_id: str,
-        requested_tenant_id: str,
-    ) -> None:
-        self.active_tenant_id = active_tenant_id
-        self.active_session_id = active_session_id
-        self.requested_tenant_id = requested_tenant_id
-        super().__init__(
-            f"Active session points at tenant {active_tenant_id!r} "
-            f"(session {active_session_id!r}), but this call requested "
-            f"tenant {requested_tenant_id!r}. "
-            f"Pass take_over=True to clear the pointer and proceed, or run "
-            f"`python -m promptpotter new <dataset>` for the new dataset first."
-        )
-
-
 class RequestTooLargeError(RuntimeError):
     """Raised when a single LLM request exceeds the provider's per-minute token cap.
 
@@ -178,7 +147,6 @@ def error_category(error: str | None) -> ErrorCategory | None:
 
 
 __all__ = [
-    "ActiveSessionMismatchError",
     "ErrorCategory",
     "RequestTooLargeError",
     "ResumeDivergenceError",

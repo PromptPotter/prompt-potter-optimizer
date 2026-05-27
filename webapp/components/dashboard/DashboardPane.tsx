@@ -185,17 +185,19 @@ function DashboardPaneInner() {
       />
       <main className="main">
         <Topbar tab={tab} onTabChange={setTab} />
-        <StatusBar
-          status={bannerStatus}
-          statusText={bannerText}
-          statusHint={bannerHint}
-          termKey={dashState.termKey}
-          campaignId={campaignId}
-          cycleId={cycleId}
-          dash={dash}
-          isLive={isLive}
-          onOpenFiles={() => setTab("files")}
-        />
+        {cycleId ? (
+          <StatusBar
+            status={bannerStatus}
+            statusText={bannerText}
+            statusHint={bannerHint}
+            termKey={dashState.termKey}
+            campaignId={campaignId}
+            cycleId={cycleId}
+            dash={dash}
+            isLive={isLive}
+            onOpenFiles={() => setTab("files")}
+          />
+        ) : null}
         {tab === "chat" ? (
           <ChatPane
             cycleId={cycleId}

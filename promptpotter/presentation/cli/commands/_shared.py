@@ -3,7 +3,7 @@
 * ``CommandResult`` — the typed return shape every subcommand emits.
 * ``set_verbose`` / ``get_verbose`` — module-level verbose flag,
   flipped once from :func:`main` before dispatch.
-* ``init_services_cli`` — CLI-style service init (logging style + take_over).
+* ``init_services_cli`` — CLI-style service init (logging style).
 * ``log_startup_summary`` — one-line pipeline/backend/dataset summary.
 * ``_prepare_cycle`` / ``_mint_session_and_cycle`` — pipeline+origin
   application; used by both fresh-init and divergence-detect paths.
@@ -102,7 +102,6 @@ async def init_services_cli(
     backend_id: str = DEFAULT_BACKEND_ID,
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     dataset_name: str | None = None,
-    take_over: bool = False,
     identity: IdentityContext | None = None,
 ) -> Session:
     """Initialize services for a CLI command (logging style + service init).
@@ -122,7 +121,6 @@ async def init_services_cli(
         project_root=project_root,
         dataset_name=dataset_name,
         on_status=lambda msg: logger.info(msg) if _VERBOSE else None,
-        take_over=take_over,
         identity=identity if identity is not None else default_identity(),
     )
 

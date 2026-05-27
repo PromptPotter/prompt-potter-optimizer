@@ -59,8 +59,9 @@ def main() -> None:
     # instead of letting resume fail with a confusing error.
     if args.command is None:
         from promptpotter.infrastructure.store import active_pointer_exists
+        from promptpotter.presentation.cli.commands._shared import identity_from_args
 
-        if not active_pointer_exists():
+        if not active_pointer_exists(identity_from_args(args).tenant_id):
             print(
                 "Welcome to PromptPotter.\n\n"
                 "Pick a verb to get started:\n"

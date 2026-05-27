@@ -179,11 +179,9 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     source_campaign_n = int(cand_score.get("scored_samples") or 0)
     source_candidate_id = str(cand_score.get("candidate_id") or "")
 
-    # Read-only session; ``take_over=False`` leaves the operator's active pointer untouched.
     session = await init_services_cli(
         backend_id=campaign.backend_id or campaign.dataset_name,
         dataset_name=campaign.dataset_name,
-        take_over=False,
         identity=identity_from_args(args),
     )
     session.campaign_id = campaign_id

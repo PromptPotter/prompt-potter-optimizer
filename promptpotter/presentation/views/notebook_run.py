@@ -143,7 +143,6 @@ async def init_notebook_session(
     backend_id: str = DEFAULT_BACKEND_ID,
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     dataset_name: str | None = None,
-    take_over: bool = False,
 ) -> Session:
     """Init store, client, pipeline schema, scoring data — with notebook-friendly logging."""
     setup_logging()
@@ -156,7 +155,6 @@ async def init_notebook_session(
         project_root=project_root,
         dataset_name=dataset_name,
         on_status=print,
-        take_over=take_over,
     )
 
     if dataset_name and session.samples:

@@ -27,37 +27,14 @@ from promptpotter.config.settings import (
     settings,
 )
 from promptpotter.domain.backend import BackendConnection
-from promptpotter.domain.identity import TenantId
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient
-from promptpotter.infrastructure.store import (
-    build_stores,
-    clear_active_pointer,
-    read_active_pointer,
-)
+from promptpotter.infrastructure.store import build_stores
 from promptpotter.infrastructure.store.base import read_json_optional
-from promptpotter.shared.errors import ActiveSessionMismatchError
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 logger = logging.getLogger(__name__)
-
-
-def _apply_tenant_guard(
-    tenant_id: TenantId, take_over: bool, status: Callable[[str], None]
-) -> None:
-    """Refuse tenant drift unless take_over=True; on take-over, clear the pointer."""
-    active_tid, active_sid, _, _ = read_active_pointer()
-    if not (active_tid and active_tid != tenant_id):
-        return
-    if not take_over:
-        raise ActiveSessionMismatchError(
-            active_tenant_id=active_tid,
-            active_session_id=active_sid,
-            requested_tenant_id=tenant_id,
-        )
-    clear_active_pointer()
-    status(f"Took over active session: cleared pointer (was tenant {active_tid!r})")
 
 
 def _apply_dataset_overlay(
@@ -227,15 +204,15 @@ async def init_services(
     project_root: Path | None = None,
     dataset_name: str | None = None,
     on_status: Callable[[str], None] | None = None,
-    take_over: bool = False,
     identity: IdentityContext | None = None,
 ) -> Session:
     """Init store, client, pipeline schema, scoring data — step 1 of bootstrap.
 
     Preconditions: ``.promptpotter/`` tree + ``datasets/{dataset_name}/pipeline.json``
     declaring ``backend_type``. Returns a wired ``Session`` (no scoring yet).
-    Refuses tenant drift unless ``take_over=True``. ``identity`` defaults to the
-    Stage-0 single-operator :func:`default_identity`."""
+    ``identity`` defaults to the Stage-0 single-operator :func:`default_identity`.
+    Active-session pointers are per-tenant on disk, so two operators on the
+    same machine cannot collide."""
 
     def status(msg: str) -> None:
         if on_status:
@@ -253,7 +230,6 @@ async def init_services(
     store = build_stores(
         resolved_identity, projects_root=project_root / ".promptpotter" / "projects"
     )
-    _apply_tenant_guard(resolved_identity.tenant_id, take_over, status)
 
     backend_type = _read_backend_type(project_root, dataset_name)
     connector = connectors.get(backend_type)

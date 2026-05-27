@@ -139,6 +139,7 @@ export function ChatPane({
 
   return (
     <div className="content chat-content" id="content-chat">
+      {cycleId ? (
       <div className={`chat-job-bar${jobOpen ? " open" : ""}`}>
         <div className="chat-job-head">
           <svg className="grid" width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
@@ -198,6 +199,7 @@ export function ChatPane({
           </div>
         )}
       </div>
+      ) : null}
 
       <div className="wf-hero">
         <div className="wf-hero-status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

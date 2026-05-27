@@ -134,9 +134,16 @@ def _seed_cycle(projects_root: Path, tenant: str, cycle_id: str, n_rounds: int) 
 
 
 def _patch_pointer(monkeypatch, tmp_path: Path) -> Path:
-    ptr = tmp_path / ".promptpotter" / "active_session.json"
-    monkeypatch.setattr("promptpotter.infrastructure.store._ACTIVE_SESSION_PATH", ptr)
-    return ptr
+    """Redirect the per-tenant pointer root into tmp_path.
+
+    The pointer lives at ``{projects_root}/{tenant}/.workspace/active_session.json``;
+    tests use tenant ``default`` and pass ``projects_root=tmp_path`` to
+    ``build_stores`` already. Monkey-patching the module-level default keeps
+    bare ``save_active_pointer`` calls (deep inside fork machinery) inside the
+    temp tree too.
+    """
+    monkeypatch.setattr("promptpotter.infrastructure.store.DEFAULT_PROJECTS_ROOT", tmp_path)
+    return tmp_path / "default" / ".workspace" / "active_session.json"
 
 
 def _div_payload() -> ForkPayload:
