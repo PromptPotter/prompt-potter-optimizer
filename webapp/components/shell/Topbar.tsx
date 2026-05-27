@@ -2,6 +2,8 @@
 import { useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 import { AccountModal } from "@/components/account/AccountModal";
+import { WelcomeLockoutModal } from "@/components/onboarding/WelcomeLockoutModal";
+import { useAuth } from "@/lib/auth-context";
 
 // Per-cycle sub-tabs (Replit-style): the sidebar carries the campaign
 // library; the topbar carries the views over the *currently-selected*
@@ -22,6 +24,9 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function Topbar({ tab, onTabChange }: Props) {
   const [accountOpen, setAccountOpen] = useState(false);
+  const [authPromptOpen, setAuthPromptOpen] = useState(false);
+  const { status } = useAuth();
+
   return (
     <header className="topbar">
       <input className="search" placeholder="Search analytics..." disabled aria-label="Search analytics" />
@@ -39,18 +44,44 @@ export function Topbar({ tab, onTabChange }: Props) {
         ))}
       </div>
       <ThemeToggle />
-      <button
-        type="button"
-        className="account-trigger"
-        aria-label="Open account"
-        onClick={() => setAccountOpen(true)}
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
-          <circle cx="8" cy="5.5" r="2.5" />
-          <path d="M2.5 14c.8-2.5 3-4 5.5-4s4.7 1.5 5.5 4" />
-        </svg>
-      </button>
-      <AccountModal open={accountOpen} onClose={() => setAccountOpen(false)} />
+      {status === "authed" ? (
+        <>
+          <button
+            type="button"
+            className="account-trigger"
+            aria-label="Open account"
+            onClick={() => setAccountOpen(true)}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+              <circle cx="8" cy="5.5" r="2.5" />
+              <path d="M2.5 14c.8-2.5 3-4 5.5-4s4.7 1.5 5.5 4" />
+            </svg>
+          </button>
+          <AccountModal open={accountOpen} onClose={() => setAccountOpen(false)} />
+        </>
+      ) : null}
+      {status === "unauthed" ? (
+        <>
+          <button
+            type="button"
+            className="auth-chip auth-chip-gold"
+            onClick={() => setAuthPromptOpen(true)}
+          >
+            Log in
+          </button>
+          <button
+            type="button"
+            className="auth-chip auth-chip-rust"
+            onClick={() => setAuthPromptOpen(true)}
+          >
+            Sign up for free
+          </button>
+          <WelcomeLockoutModal
+            open={authPromptOpen}
+            onClose={() => setAuthPromptOpen(false)}
+          />
+        </>
+      ) : null}
     </header>
   );
 }

@@ -156,8 +156,11 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   // One-shot seed: when the cycle binds applicable evaluators for the first
   // time (or the cycle changes), seed `selected` from the formula's inActive
   // set so the operator opens to "what's actually scored" as the default.
+  // Bail when `cycleId == null` (no active campaign yet) — otherwise
+  // `seededForCycle` would be written as `null`, `seeded` stays `false`, and
+  // the effect re-fires every render (React #185 on production tunnel).
   useEffect(() => {
-    if (seeded || viewApplicable.size === 0) return;
+    if (seeded || viewApplicable.size === 0 || !cycleId) return;
     const seed = new Set<string>();
     for (const r of rows) {
       if (r.applicable && inActive.has(r.displayName)) seed.add(r.displayName);

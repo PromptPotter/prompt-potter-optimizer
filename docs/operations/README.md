@@ -9,5 +9,6 @@ Running, integrating, and operating PromptPotter.
 | [Persistence and state](persistence-and-state.md) | The `.promptpotter/` tree, active session, cycle directory, resume / rewind / fork / sweep, scoring steer |
 | [Observability](observability.md) | What gets traced, Langfuse integration, P(best) stream, display conventions |
 | [Human in the loop](human-in-the-loop.md) | HITL mode — operator as L2-equivalent; four modes; planned CLI flow |
+| [Linux deploy](../../deploy-linux/README.md) | systemd + Cloudflare Tunnel + OIDC + allowlist |
 
 New to PromptPotter? Start in [`../manual/`](../manual/README.md).

@@ -87,7 +87,7 @@ Non-negotiables only — full style, code-shape, tests, CLI, git rules in [`docs
 
 ## Roadmap
 
-**M12 is the headline** — multi-connector, competitor head-to-head, webapp Phase 2. **M10 active** — prompt-iteration framework + L1-generate tuning; **targeting** ≥95% in ≤5 rounds (cleanup arc closed pass-2; framework + benchmark hit are the open M10 half). **M11** — BBEH benchmarks, ablation, webapp read-only (Slice 1 vanilla shipped + cut over to Next.js port — see `docs/specs/archive/m11-webapp-react-port.md`). M0–M9 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+Multi-user hosted beta at `https://app.promptpotter.dev` (Cloudflare Tunnel + systemd, see [`deploy-linux/`](deploy-linux/); OIDC + allowlist + quotas). **In flight** — M10 prompt-iteration framework + L1 tuning, M11 BBEH benchmarks + ablation, M12 multi-connector + L4 closure + composite fitness, M13 onboarding lockout shipped. M0–M9 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
 ## Pointers
 
@@ -95,7 +95,7 @@ Non-negotiables only — full style, code-shape, tests, CLI, git rules in [`docs
 
 **Index files** (AI-readable maps of subtrees): [`datasets/CLAUDE.md`](datasets/CLAUDE.md) (per-dataset layout + reference points + `promptpotter-self` L4 case) · [`docs/CLAUDE.md`](docs/CLAUDE.md) (docs-tree map + hot-question anchors).
 
-**Topical docs:** `docs/manual/` install→first run→reading→troubleshooting · `docs/concepts/` how it works · `docs/operations/` CLI/env/persistence/rewind-and-fork/observability · `docs/developer/README.md` architecture brief (prompt structure, dispatch, scoring node, cross-run memory) · [`docs/developer/conventions.md`](docs/developer/conventions.md) full style + code-shape rules · [`docs/developer/stable-api.md`](docs/developer/stable-api.md) v1 fork-readiness surface · [`docs/glossary.md`](docs/glossary.md) domain vocabulary + canonical file pointers · `tests/CLAUDE.md` test charter.
+**Topical docs:** `docs/manual/` install→first run→reading→troubleshooting · `docs/concepts/` how it works · `docs/operations/` CLI/env/persistence/rewind-and-fork/observability · `docs/developer/README.md` architecture brief (prompt structure, dispatch, scoring node, cross-run memory) · [`docs/developer/conventions.md`](docs/developer/conventions.md) full style + code-shape rules · [`docs/developer/stable-api.md`](docs/developer/stable-api.md) v1 fork-readiness surface · [`docs/glossary.md`](docs/glossary.md) domain vocabulary + canonical file pointers · [`deploy-linux/README.md`](deploy-linux/README.md) Linux deploy (Tunnel + OIDC + allowlist) · `tests/CLAUDE.md` test charter.
 
 **Design surface:** [`.impeccable.md`](.impeccable.md) — design context (theme-is-audience: dark=operator, light=buyer; the Potter is force-multiplier not friendly-wizard; accessibility is a positioning feature). Loaded by `frontend-design`, `critique`, `polish`, etc.
 

@@ -55,10 +55,7 @@ function DashboardPaneInner() {
   // currently-selected cycle. Files is reachable only via the StatusBar's
   // "Open files" link — not exposed on the topbar. Default = chat: that's
   // where new cycles get conceived and where the conversational interface
-  // lives. Flipping the default to "dashboard" on initial mount tripped
-  // React #185 — the hero/fitness chain doesn't handle null→non-null
-  // cycleId during the first paint; chat dodges that path. Revisit when
-  // we untangle the dashboard first-render sequence.
+  // lives.
   const [tab, setTab] = useState<Tab>("chat");
   const [newCampaignOpen, setNewCampaignOpen] = useState(false);
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
