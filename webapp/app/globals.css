@@ -1595,3 +1595,107 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .auth-link{color:#3b82f6;text-decoration:underline}
 .auth-link:hover{color:#60a5fa}
 .auth-legal-row{display:flex;justify-content:center;align-items:center;gap:8px;font-size:12px;color:var(--color-text-tertiary)}
+
+/* ─── Mobile (≤640px) ────────────────────────────────────────────
+   Chat tab doubles as the public landing surface at
+   app.promptpotter.dev. Every desktop rule above was written for an
+   operator viewport (≥980px). This block adapts the chat-tab tree
+   (Topbar + ChatPane + WelcomeLockoutModal) for a 375px phone.
+   Other tabs (Dashboard / Verify / Files) remain desktop-shaped — a
+   phone visitor who reaches them is an edge case for another day. */
+@media (max-width:640px){
+  /* The shell pins min-height:700px desktop-wide; on mobile the
+     viewport height itself bounds the layout. Drop the floor so a
+     phone in landscape (~375h) doesn't get a vertical scrollbar
+     forced by the shell itself. */
+  .shell{min-height:0}
+
+  /* Topbar — drop the disabled placeholder search (M13+ scope,
+     not interactive), let the tab row scroll horizontally rather
+     than crush each tab to two characters, tighten everything. */
+  .topbar{padding:0 10px;gap:8px}
+  .search{display:none}
+  .tabs{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{padding:0 10px;font-size:13px;height:52px}
+
+  /* Theme toggle + account/auth chips — keep them touch-sized but
+     compact. ThemeToggle is already 34×30; auth chips at 30h are
+     just under the 44px touch target so bump padding to compensate. */
+  .auth-chip{height:32px;padding:0 12px;font-size:12px}
+
+  /* Chat job bar — only rendered for authed-with-cycle, but when it
+     IS rendered the chip-row is absolute-centered which guarantees
+     overlap at narrow widths. Re-flow inline, allow wrap, drop the
+     chevron from `margin-left:auto` collapse. */
+  .chat-job-bar{padding:6px 10px 8px}
+  .chat-job-head{flex-wrap:wrap;gap:6px}
+  .chat-job-toggle{flex-wrap:wrap;min-height:0;padding:8px 10px;gap:6px}
+  .chat-job-toggle .chip-row{position:static;transform:none;flex-wrap:wrap;gap:6px;justify-content:flex-start}
+  .chat-job-toggle .chip{padding:3px 10px;font-size:13px}
+
+  /* Pipeline hero — let the horizontal pipeline overflow-scroll
+     instead of fighting flex shrink. The status badge was absolute-
+     positioned at top:-50px; on mobile that lands above the topbar.
+     Pull it back into the flow as a static badge above the row. */
+  .wf-hero{padding:12px 10px 18px;max-width:none}
+  .wf-hero-status{position:static;display:inline-flex;font-size:11px;padding:3px 8px;margin-bottom:10px;width:auto;align-self:flex-start}
+  .wf-hero-flow{overflow-x:auto;overflow-y:hidden;justify-content:flex-start;padding:14px 4px 6px;scrollbar-width:none;flex-wrap:nowrap}
+  .wf-hero-flow::-webkit-scrollbar{display:none}
+  .wf-hero-node{min-width:120px;padding:10px 14px}
+  .wf-hero-node.llm{min-width:180px;padding:10px 14px}
+  .wf-hero-node.llm.wf-hero-node-multi{min-width:240px;max-width:340px;padding:8px 12px 6px}
+  .wf-hero-node .val,.wf-hero-node.llm .val{max-width:160px}
+  .wf-hero-arrow{flex:0 0 auto;min-width:36px;max-width:60px}
+
+  /* Chat grid — the 980px breakpoint already collapses to 1fr, but
+     desktop padding + pinned 620px panel-height create overflow on a
+     phone. Slim padding, set a phone-sized floor so the message stack
+     is readable in flow (desktop 620px is too tall here; <300px would
+     show only the first bubble + input). */
+  .chat-grid{padding:0 12px;gap:14px}
+  .chat-panel{min-height:420px}
+  .chat-panel-header{padding:12px 14px}
+  .chat-messages{padding:14px;gap:10px}
+  .chat-msg{max-width:88%;font-size:13px;padding:9px 12px}
+  .chat-input-row{padding:10px 12px;gap:6px}
+  .chat-attach{width:38px;height:38px;flex-shrink:0}
+  .chat-input{font-size:14px;min-height:38px}
+  .chat-send{padding:10px 14px;font-size:13px}
+
+  /* Settings card — wand-row has `margin:0 -12px` for its overhang
+     glow; on a narrow card that pushes content past the panel edge.
+     Tighten + let the desc line wrap instead of clipping. */
+  .chat-settings-card{padding:14px}
+  .toggle-row{padding:6px 0;gap:10px}
+  .toggle-row .name{font-size:13px}
+  .toggle-row.wand-row{margin:0 -6px;padding:10px 10px}
+  .toggle-row.wand-row .name{white-space:normal}
+  .toggle-row.wand-row .desc{max-width:none}
+
+  /* Welcome lockout modal — sets maxWidth:380 / width:100% inline, so
+     CSS overrides need !important. Drop the overlay padding (24px
+     eats 48px of viewport width on 375), let the modal claim the
+     full screen comfortably. account-modal is shared with
+     AccountModal which is authed-only and operator-facing; if a
+     phone operator opens it the same compact layout applies, which
+     is the right call. */
+  .account-overlay{padding:8px;align-items:flex-start;padding-top:24px}
+  .account-modal{max-width:none !important;width:100% !important;height:auto !important;min-height:0 !important;max-height:calc(100vh - 32px) !important}
+  .account-pane-body{padding:18px 16px 14px !important;gap:12px !important}
+  .login-button{padding:14px 16px;min-height:44px;font-size:14px}
+}
+
+/* Tighter band for iPhone-SE-class screens (≤380px). Only the
+   handful of cases where 640px already wraps to two rows. */
+@media (max-width:380px){
+  /* Drop the trailing chips in the chat-job-bar (Δ/$ + ETA — the
+     stalest numbers); Best + Budget are the headline. Only fires
+     for the authed-with-cycle code path where the bar is rendered. */
+  .chat-job-toggle .chip-row .chip:nth-child(n+3){display:none}
+  /* Tighter pipeline nodes — the 120/180 from the 640 band can
+     still be wider than the visible viewport when stacked with the
+     arrow gutter. */
+  .wf-hero-node{min-width:108px;padding:8px 12px}
+  .wf-hero-node.llm{min-width:160px}
+}
