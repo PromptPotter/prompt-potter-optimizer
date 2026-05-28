@@ -536,8 +536,8 @@ def _iter_user_token_usage(*, store: Stores, since: float, until: float) -> list
     Returns ``cost_usd`` as ``None`` when the record didn't carry one;
     the caller falls back to the rate table for retro spend.
 
-    Legacy backfill: per-cycle ``dashboard.json::spend.backend`` is
-    cumulative for the cycle. Campaigns that ran before
+    Pre-emit_token_usage backfill: per-cycle ``dashboard.json::spend.backend``
+    is cumulative for the cycle. Campaigns that ran before
     ``sample_measurement.emit_token_usage(kind="backend", …)`` shipped
     have backend tokens in the dashboard bucket but not on the ledger.
     For each cycle whose ledger has no backend token-usage rows, we

@@ -407,10 +407,38 @@ def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:
     return checks
 
 
+def build_elimination_check(
+    config: PoBBConfig,
+    *,
+    n_samples: int,
+    round_num: int,
+    backfill_fn: BackfillFn | None,
+) -> PoBBCheck:
+    """Build the round's leader-elimination check. Today: paired-sample PoBB.
+
+    **Swap point for alternative elimination strategies.** The mid-round
+    contract is the ``StopRule`` Protocol (``domain/validators.py``), but
+    PoBBCheck also exposes the per-candidate lifecycle the round loop drives
+    (``register_completed``, ``set_current``, ``set_sample_universe``,
+    ``backfill_for_sample``, ``snapshot_priors``, ``priors_by_sample``).
+    A fundamentally different strategy may not match that lifecycle shape;
+    when one ships, this builder branches on config and the round loop gains
+    the per-strategy consumer split. Today there's one strategy so the body
+    + return type are direct.
+    """
+    return PoBBCheck(
+        config,
+        n_samples=n_samples,
+        round_num=round_num,
+        backfill_fn=backfill_fn,
+    )
+
+
 __all__ = [
     "DegradationCheck",
     "PoBBCheck",
     "PoBBConfig",
     "PoBBSnapshot",
     "build_degradation_checks",
+    "build_elimination_check",
 ]

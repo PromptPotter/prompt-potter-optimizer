@@ -84,7 +84,7 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 
 
 def _exact_match(predicted: str, ground_truth: str) -> float:
-    """Exact match after bold-strip + lowercase. BBEH bold markers stripped both sides."""
+    """Exact match after bold-strip + lowercase. Markdown bold markers stripped both sides."""
     p = _extract_bold(predicted or "").strip().lower()
     g = _extract_bold(ground_truth or "").strip().lower()
     return 1.0 if p == g else 0.0

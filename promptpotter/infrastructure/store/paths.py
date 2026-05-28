@@ -6,7 +6,7 @@ mint ``campaign_id = {dataset}__{rand6_hex}`` per ``new``; root cycle is
 ``cycle_{target_hash[:12]}``. Sibling kind + sweep batch id live in
 ``cycles/{cycle_id}/index.json``, not the path.
 
-**Legacy shape (readers parse, writers don't emit).** Pre-existing campaigns from
+**Pre-existing shape (readers parse, writers don't emit).** Campaigns from
 the ``{dataset}__{declaration_hash}`` scheme carry a session forest with
 ``_s{N}`` suffixes on session-root cycle ids. The suffix only disambiguates the
 session root; :func:`session_index` parses it, :func:`root_cycle_id` /

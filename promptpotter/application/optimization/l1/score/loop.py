@@ -18,7 +18,10 @@ from promptpotter.application.intelligence.exploration import (
 )
 from promptpotter.application.optimization.l1.score.candidate import score_one_candidate
 from promptpotter.application.optimization.l1.score.signal_effect import CandidateOutcome
-from promptpotter.application.optimization.pobb.elimination import PoBBCheck, PoBBConfig
+from promptpotter.application.optimization.pobb.elimination import (
+    PoBBConfig,
+    build_elimination_check,
+)
 from promptpotter.application.optimization.resume_and_fork import ResumeCheckpointRecord
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.escalation_signals import EscalationSignal
@@ -79,7 +82,7 @@ async def score_population(
         )
         return bf_results
 
-    elim_check = PoBBCheck(
+    elim_check = build_elimination_check(
         pobb_config,
         n_samples=len(dataset),
         round_num=round_num,

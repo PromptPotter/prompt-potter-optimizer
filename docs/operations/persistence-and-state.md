@@ -16,7 +16,7 @@ PromptPotter's persisted world is a strict containment hierarchy:
 - **Workspace** — the tenant-level container and queryable datastore (`projects/{tenant}/`): every dataset, every campaign, the shared `archive/`.
 - **Dataset** — the optimization target plus its config (`datasets/{name}/`).
 - **Campaign** — one declared optimization effort: a dataset, a pipeline origin, and context text. A first-class entity with its own directory and `campaign.json` manifest. `campaign_id = {dataset}__{rand6_hex}` — minted fresh per `new` call by `mint_campaign_id`, so each `new` produces a distinct campaign. The declaration (target hash + optimizer-prompt hash) is recorded as `root_content_hash` + `optimizer_prompt_hash` properties on `campaign.json` for drift detection on resume, not as the id. The dataset is embedded so "campaigns for dataset X" is a prefix scan.
-- **Session** — one run of `new` on a campaign. A campaign holds one session — the `new` invocation that minted it. `resume` extends that session; `resume --fork-on-divergence` adds sibling cycles within it. A session's identity is its `session_id` (`s_xxxx`). Each session is a tree: a root cycle (bare `cycle_<target_hash>`) plus its fork descendants. Legacy on-disk shape (multi-session forest with `_s{N}` suffixes): see `promptpotter/infrastructure/store/paths.py`.
+- **Session** — one run of `new` on a campaign. A campaign holds one session — the `new` invocation that minted it. `resume` extends that session; `resume --fork-on-divergence` adds sibling cycles within it. A session's identity is its `session_id` (`s_xxxx`). Each session is a tree: a root cycle (bare `cycle_<target_hash>`) plus its fork descendants. Pre-existing on-disk shape (multi-session forest with `_s{N}` suffixes): see `promptpotter/infrastructure/store/paths.py`.
 - **Cycle** — one node in a session's lineage tree: root | fork | diag | sweep. Identity is `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_` for branches); `cycle_id` is campaign-scoped, so path resolution is always `(campaign_id, cycle_id)`.
 
 The **Session** is a unit of a campaign — its identity is the `session_id`. `active_session.json` is your active pointer/lens into the Workspace: which tenant, session, campaign, and cycle are live.
@@ -117,6 +117,29 @@ Prior evaluation results replay without backend calls when a new config shares a
 | `.runtime/cache/candidates/round_NNNN.json` | per cycle | each round's pre-scoring | Generated candidate checkpoint — overwritten next round. |
 | `.runtime/archived/resumed_at_{ts}/` | per cycle | `--from` runs | Mid-cycle rewind sweepup. |
 | `.runtime/inner/{outer_round}/{sample_idx}/` | per cycle | PromptPotter-as-connector only | Isolated inner-cycle sub-tree (own `sessions/`, `campaigns/`, `archive/`). Each outer "sample" gets its own root; pruned at outer cycle finalize unless `optimization.retain_inner_cycles: true`. See `docs/specs/m12-multi-connector.md`. |
+
+### Schema + writer sources
+
+For each on-disk artifact, the canonical schema source and writer module. Most artifact bodies are untyped JSON dicts written by their projection or store — the writer module IS the schema source (read its handler/serializer to learn the shape). Pydantic-typed artifacts are flagged.
+
+| Artifact | Schema source | Writer |
+|---|---|---|
+| `campaign.json` | `domain/campaign.py::Campaign` (Pydantic) | `infrastructure/store/campaign_store/manifest.py::CampaignManifestMixin` |
+| `dashboard.json` | `infrastructure/projections/live_dashboard/state.py` (untyped dict; field map in source) | `infrastructure/projections/live_dashboard/view.py::LiveDashboardView` |
+| `index.json` | `infrastructure/store/campaign_store/cycles.py::CycleIndexMixin` (untyped dict) | same |
+| `log.md` (cycle + campaign) | `presentation/writers.py` (markdown) | `presentation/writers.py::write_log_md` + `write_review_md` |
+| `review.md` | `presentation/writers.py` (markdown) | `presentation/writers.py::write_review_md` |
+| `rounds/round_NNNN.json` | `domain/opt_search_point.py::OptSearchPoint` (Pydantic, `model_dump()`) | `infrastructure/store/campaign_store/rounds.py::RoundMixin`; read on resume by `application/optimization/resume_and_fork/replayers.py` |
+| `hard_samples.json` (cycle + campaign) | `presentation/writers.py::write_hard_samples_artifacts` (untyped dict from `application/intelligence/hard_sample_sorter.py`) | same |
+| `.runtime/ledger.jsonl` | `domain/run_records.py::CycleRecord` discriminated union (Pydantic) | `infrastructure/ledger.py::CycleEventLog` |
+| `.runtime/streams/round_NNNN_p_best.jsonl` | `infrastructure/projections/pobb_stream.py` (untyped per-snapshot dict) | same `PoBBStreamView` |
+| `.runtime/cache/rounds/round_NNNN.json` | `infrastructure/projections/audit_trail.py::AuditTrailView` (untyped dict) | same |
+| Sweep operator files (`datasets/{name}/sweep/*.json`) | `domain/run_records.py::OperatorSweepFile` (Pydantic, `extra='forbid'`) | operator-authored, parsed by `application/sweep/sweep_runner.py` |
+| `scoring_steer.json` + `.applied.{ts}.json` | shape-validated inline (JSON object with non-empty `per_round` string) | operator-authored, applied by the round-boundary scoring-steer handler |
+| `active_session.json` | untyped `{session_id, campaign_id, cycle_id}` dict (tenant scope from path, not the body) | `infrastructure/store/__init__.py::save_active_pointer` / `clear_active_pointer` (workspace-scoped, called by bootstrap + command dispatchers) |
+| Commands (`POST /commands/{kind}`) | `m12-api-openapi.yaml` (envelope schemas) + `presentation/api/routers/commands.py` (server-side validators) | clients post; `presentation/api/middleware/command_dispatcher.py::CommandDispatcher` lands a `CommandRecord` on the target ledger |
+
+The convention: **typed at the edges, dict-shaped in the middle**. Domain primitives (`Campaign`, `OptSearchPoint`, `CycleRecord`, `OperatorSweepFile`) carry Pydantic schemas because they cross persistence + replay boundaries. Display + telemetry artifacts (`dashboard.json`, the round-NNNN cache, `index.json`) are untyped dicts owned by one writer — that writer is the schema. Forkers extending the framework follow the same rule.
 
 ### `campaign.json`
 

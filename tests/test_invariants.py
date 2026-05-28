@@ -328,12 +328,12 @@ def test_legacy_session_suffix_still_parses() -> None:
     assert root_cycle_id(base) == base
     assert sibling_kind(base) == "root"
 
-    # Legacy _s{N} on-disk shape still parses: own root, kind "root", index N.
+    # Pre-existing _s{N} on-disk shape still parses: own root, kind "root", index N.
     s3 = "cycle_2451d3cf6ebc_s3"
     assert session_index(s3) == 3
     assert root_cycle_id(s3) == s3
     assert sibling_kind(s3) == "root"
-    # A fork of a legacy session root still roots back at that session.
+    # A fork of a pre-existing session root still roots back at that session.
     s2_fork = "cycle_2451d3cf6ebc_s2_fork_abc123"
     assert root_cycle_id(s2_fork) == "cycle_2451d3cf6ebc_s2"
     assert sibling_kind(s2_fork) == "fork"

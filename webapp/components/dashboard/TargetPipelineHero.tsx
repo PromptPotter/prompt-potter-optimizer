@@ -125,8 +125,7 @@ function MultiNodeStrip({
 
   // Ribbon between adjacent interior dots. Cubic Bézier with control
   // points pulled toward the midpoint vertically so the curve has a soft
-  // sag rather than a straight tube — matches the TermNorm Excel ribbon
-  // referenced in the issue.
+  // sag rather than a straight tube.
   const edgePath = (i: number) => {
     const x1 = cxFor(i) + RADIUS;
     const x2 = cxFor(i + 1) - RADIUS;

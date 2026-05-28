@@ -181,7 +181,7 @@ world is a strict containment hierarchy:
   for branches) — the *target* content hash, content-addressed. It keeps
   two jobs: archive cache-reuse keying and target-drift detection.
   `cycle_id` is campaign-scoped — all path resolution is
-  `(campaign_id, cycle_id)`. Legacy on-disk shape (multi-session forest
+  `(campaign_id, cycle_id)`. Pre-existing on-disk shape (multi-session forest
   with `_s{N}` suffixes under one `campaign_id`): see
   `promptpotter/infrastructure/store/paths.py`.
 

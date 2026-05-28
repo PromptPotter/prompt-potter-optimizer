@@ -1,12 +1,13 @@
 """Optimizer-pipeline manifest loading — schemas + meta-prompt templates.
 
 Single source of truth for optimizer nodes, schemas, and prompts is
-``datasets/_optimizer/pipeline.json``. It mirrors TermNorm's
-``GET /pipeline`` response shape: ``nodes`` reference
+``datasets/_optimizer/pipeline.json``. It follows the same shape as a
+backend's ``GET /pipeline`` response: ``nodes`` reference
 ``schema_family``/``schema_version`` + ``prompt_family``/``prompt_version``,
 and the bodies live in the top-level ``resolved_schemas`` /
-``resolved_prompts`` registries. Prompt loading prefers a Langfuse
-``production`` label and falls back to the local manifest registry.
+``resolved_prompts`` registries. The optimizer is itself a pipeline.
+Prompt loading prefers a Langfuse ``production`` label and falls back to
+the local manifest registry.
 """
 
 from __future__ import annotations
@@ -40,8 +41,8 @@ _PIPELINE_PATH = _REPO_ROOT / "datasets" / "_optimizer" / "pipeline.json"
 def _load_optimizer_manifest() -> dict[str, Any]:
     """Read the on-disk optimizer-pipeline manifest (cached).
 
-    Single source of truth for nodes, schemas, and prompts. Mirrors
-    TermNorm's ``GET /pipeline`` response shape: ``nodes`` reference
+    Single source of truth for nodes, schemas, and prompts. Same shape as
+    a backend's ``GET /pipeline`` response: ``nodes`` reference
     ``schema_family``/``schema_version`` + ``prompt_family``/``prompt_version``,
     and the bodies live in the top-level ``resolved_schemas`` /
     ``resolved_prompts`` registries.
@@ -58,8 +59,8 @@ def _resolved_key(family: str, version: Any) -> str:
 def get_optimizer_schema() -> PipelineSchema:
     """Load optimizer_pipeline.json as PipelineSchema (cached).
 
-    Mirrors TermNorm's pipeline-schema convention: each node's structured
-    output schema is referenced via ``config.schema_family`` /
+    Follows the same pipeline-schema convention as a backend: each node's
+    structured output schema is referenced via ``config.schema_family`` /
     ``config.schema_version`` and resolved against the top-level
     ``resolved_schemas`` registry — same shape ``parse_pipeline_response``
     uses for backend pipelines, so the optimizer is itself a pipeline that
@@ -100,8 +101,8 @@ def _resolved_prompt_for_node(name: str) -> dict[str, Any] | None:
     """Look up a node's prompt body in ``resolved_prompts``.
 
     Joins the node's ``config.prompt_family``/``prompt_version`` against
-    the manifest's ``resolved_prompts`` registry — same TermNorm-style
-    indirection used for backend pipelines.
+    the manifest's ``resolved_prompts`` registry — same family/version
+    indirection backend pipelines use.
     """
     data = _load_optimizer_manifest()
     node_cfg = data.get("nodes", {}).get(name, {}).get("config", {})

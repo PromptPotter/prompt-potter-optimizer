@@ -79,7 +79,7 @@ The persisted world is a four-entity containment hierarchy
   session — the `new` invocation that minted it. `resume` extends that
   session. Identity is the `session_id` (`s_xxxx`). Each session is a
   tree: a root cycle (bare `cycle_<target_hash>`) plus its fork
-  descendants. `application/bootstrap/session.py`. Legacy on-disk shape
+  descendants. `application/bootstrap/session.py`. Pre-existing on-disk shape
   (multi-session forest with `_s{N}` suffixes): see
   `promptpotter/infrastructure/store/paths.py`.
 - **Unit** — one continuous-parameter run inside a session. A session

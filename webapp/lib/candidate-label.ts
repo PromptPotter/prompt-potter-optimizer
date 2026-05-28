@@ -10,7 +10,7 @@
 // rare in-flight candidate slot that hasn't been seeded with a label yet.
 //
 // Defensive: round 0 SHOULD only ever have a single origin candidate
-// ("C0"). If we see idx>0 for round 0, the contract is broken (legacy
+// ("C0"). If we see idx>0 for round 0, the contract is broken (stale
 // data from before the canonical-numbering refactor, or a future bug).
 // Emit a disambiguated label rather than silently collapsing all bars
 // to "C0" — a colliding fallback hides the data-integrity issue.

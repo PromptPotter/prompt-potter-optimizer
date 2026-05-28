@@ -38,9 +38,9 @@ __all__ = [
 def strip_lone_surrogates(obj: Any) -> Any:
     """Recursively replace unpaired surrogate codepoints with ``?``.
 
-    Some dataset overlays (notably ``lca-termnorm/pipeline.json``) carry
-    description strings whose JSON escape sequences point at lone low
-    surrogates (e.g. ``\\udc9d``). Those codepoints are valid Python strings
+    Some dataset overlays carry description strings whose JSON escape
+    sequences point at lone low surrogates (e.g. ``\\udc9d``). Those
+    codepoints are valid Python strings
     but cannot encode to UTF-8 when a downstream serializer (FastAPI,
     ``json.dumps`` without ``ensure_ascii``) tries to send them — they
     raise ``UnicodeEncodeError`` at the wire. Scrubbing at parse time so

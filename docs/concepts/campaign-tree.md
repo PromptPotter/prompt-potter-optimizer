@@ -8,7 +8,7 @@ A **Campaign** is one declared optimization effort — a **dataset**, a **pipeli
 
 A **Session** is one `new` invocation. A campaign holds one session — the `new` that minted it. `resume` extends it; `resume --fork-on-divergence` adds sibling cycles. Each session is itself a tree: a root cycle (`cycle_<target_hash>`) plus its fork descendants. The four-entity hierarchy: **Workspace → Dataset → Campaign → Cycle**, with **Session** a unit of a campaign.
 
-> **Legacy on-disk shape.** Pre-existing campaigns minted under the previous content-addressed scheme (`{dataset}__{declaration_hash}`, find-or-create on duplicate) carry multiple session roots — `cycle_<hash>` for session 1, `cycle_<hash>_s{N}` for session N — under one `campaign_id`. Readers still parse them; the `_s{N}` suffix is no longer written. See `promptpotter/infrastructure/store/paths.py` for the canonical reader.
+> **Pre-existing on-disk shape.** Campaigns minted under the previous content-addressed scheme (`{dataset}__{declaration_hash}`, find-or-create on duplicate) carry multiple session roots — `cycle_<hash>` for session 1, `cycle_<hash>_s{N}` for session N — under one `campaign_id`. Readers still parse them; the `_s{N}` suffix is no longer written. See `promptpotter/infrastructure/store/paths.py` for the canonical reader.
 
 ## Primitive
 
