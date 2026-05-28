@@ -38,10 +38,15 @@ export function StatusAssistant({
   // Reset the collapse state whenever the displayed status changes — a
   // live → offline flip should re-pop the chip even if it had auto-hidden
   // a moment ago. statusHint changes alone don't re-pop (the dot already
-  // carries the salient signal).
-  useEffect(() => {
+  // carries the salient signal). Render-phase guarded reset — the
+  // sanctioned recipe (see webapp/CLAUDE.md § State reset on prop change).
+  const [prevStatus, setPrevStatus] = useState(status);
+  const [prevStatusText, setPrevStatusText] = useState(statusText);
+  if (status !== prevStatus || statusText !== prevStatusText) {
+    setPrevStatus(status);
+    setPrevStatusText(statusText);
     setCollapsed(false);
-  }, [status, statusText]);
+  }
 
   // Auto-collapse timer. Skipped while already collapsed or while the
   // operator is hovering / has focus inside the chip — toast-pattern UX.

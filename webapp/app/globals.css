@@ -396,6 +396,28 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .run-telemetry-delta.up{color:var(--color-success);background:var(--color-success-bg)}
 .run-telemetry-delta.down{color:var(--color-danger);background:var(--color-danger-bg)}
 
+/* RunErrorBanner — surfaces dashboard.json::error when the runner crashed.
+   Sits above the TopStrip in the "Now" lane so the operator sees the cause
+   before scanning anything else. */
+.run-error-banner{
+  background:var(--color-danger-bg);
+  border:1px solid var(--color-danger-border);
+  border-radius:4px;
+  padding:10px 14px;
+  margin-bottom:12px;
+  color:var(--color-text-primary);
+  font-size:12px;
+}
+.run-error-banner-head{
+  display:flex;gap:10px;align-items:baseline;
+  font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--color-danger);font-weight:700;margin-bottom:4px;
+}
+.run-error-banner-stop{color:var(--color-text-tertiary);font-weight:500;letter-spacing:0;text-transform:none}
+.run-error-banner-msg{margin:0;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-word}
+.run-error-banner-list{margin:6px 0 0 0;padding-left:18px;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:11px}
+.run-error-banner-list li{margin:2px 0}
+
 /* Hero zone — title block + KPIs in one row, progress bars beneath them. */
 .dash-hero{display:flex;flex-direction:column;gap:14px}
 .dash-hero .page-header{margin-bottom:0}
@@ -1603,7 +1625,19 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .new-campaign-cancel:hover{background:var(--color-background-hover)}
 .new-campaign-submit{background:var(--color-accent);border-color:var(--color-accent);color:white;font-weight:500}
 .new-campaign-submit:disabled{opacity:0.55;cursor:not-allowed}
-/* Sweep-Group-B: lift NewCampaignModal inputs to the iOS-safe size on
+.new-campaign-field textarea{padding:8px 10px;border:0.5px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:13px;font-family:inherit;resize:vertical}
+.new-campaign-field button{align-self:flex-end;padding:6px 12px;border-radius:5px;border:0.5px solid var(--color-border-tertiary);background:transparent;color:var(--color-text-secondary);font-size:12px;cursor:pointer}
+.new-campaign-field button:hover:not(:disabled){background:var(--color-background-hover)}
+.new-campaign-field button:disabled{opacity:0.45;cursor:not-allowed}
+.new-campaign-dropzone{border:1.5px dashed var(--color-border-tertiary);border-radius:6px;padding:24px;text-align:center;color:var(--color-text-tertiary);cursor:pointer;font-size:13px;transition:border-color 120ms,background 120ms}
+.new-campaign-dropzone:hover,.new-campaign-dropzone--active{border-color:var(--color-accent);background:var(--color-background-hover);color:var(--color-text-primary)}
+.new-campaign-preview-list{margin:8px 0 0 0;padding-left:18px;font-size:12px;color:var(--color-text-secondary);max-height:160px;overflow-y:auto}
+.new-campaign-preview-list code{font-size:11px}
+.new-campaign-benchmark-list{list-style:none;margin:6px 0 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
+.new-campaign-benchmark-list button{width:100%;text-align:left;padding:6px 10px;border-radius:5px;border:0.5px solid var(--color-border-tertiary);background:transparent;color:var(--color-text-primary);font-size:12px;cursor:pointer}
+.new-campaign-benchmark-list button:hover:not(:disabled){background:var(--color-background-hover)}
+.new-campaign-benchmark-list button:disabled{opacity:0.5;cursor:not-allowed}
+/* Sweep-Group-B: lift IngestPane inputs to the iOS-safe size on
    small phones, drop overlay padding, full-width modal. The Phase 0
    pointer-coarse rule covers buttons + non-select inputs; select needs
    the explicit font-size bump since the project-local selector is more

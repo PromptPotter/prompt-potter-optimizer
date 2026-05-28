@@ -100,12 +100,18 @@ export function fetchActivity(
   );
 }
 
-// Dataset registry — minimal index backing the NewCampaignModal dropdown.
-// Walks `datasets/` server-side and returns one entry per dir with a
-// `pipeline.json` (i.e. the wired-dataset set).
+// Dataset registry — backs the Dashboard "New campaign" entry. Identity-
+// scoped server-side: every tenant sees their own user-uploaded Origins
+// (`tier: "yours"`); install-global benchmarks (`tier: "benchmark"`) ride
+// the `datasets.benchmarks.read` capability and are hidden from web
+// tenants by default. Wire shape pinned in
+// `docs/specs/m12-api-openapi.yaml::DatasetIndexEntry`.
+export type DatasetTier = "yours" | "benchmark";
 export interface DatasetIndexEntry {
   name: string;
   title: string | null;
+  tier: DatasetTier;
+  n_samples: number;
 }
 export interface DatasetIndexResponse {
   datasets: DatasetIndexEntry[];
@@ -116,6 +122,25 @@ export function fetchDatasetIndex(signal?: AbortSignal): Promise<DatasetIndexRes
 
 export function fetchPipeline(signal?: AbortSignal): Promise<unknown> {
   return jget(`${API}/optimizer/pipeline`, signal);
+}
+
+/** One curated entry from ``GET /api/v1/llm/providers``. ``available`` is
+ * gated on the env-var being non-empty server-side — the picker dims
+ * providers whose API key isn't configured rather than letting the operator
+ * pick a provider that would fail at first call. */
+export interface LLMProvider {
+  name: string;
+  display_name: string;
+  available: boolean;
+  env_var: string;
+  models: string[];
+  note: string;
+}
+export interface LLMProvidersResponse {
+  providers: LLMProvider[];
+}
+export function fetchLLMProviders(signal?: AbortSignal): Promise<LLMProvidersResponse> {
+  return jget<LLMProvidersResponse>(`${API}/llm/providers`, signal);
 }
 
 // Target connector pipeline for a dataset. One-shot — topology is bound at

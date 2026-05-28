@@ -116,6 +116,65 @@ async def get_evaluators_meta() -> list[dict[str, Any]]:
     return evaluators_meta()
 
 
+@_active_router.get("/llm/providers")
+async def get_llm_providers() -> dict[str, Any]:
+    """Available optimizer-LLM providers + a starter model list per provider.
+
+    "Available" means the relevant API key is set in ``.env`` — the
+    chat-first ingest UI uses this to surface a provider picker the
+    operator can actually use, instead of letting them pick a provider
+    that will fail at first call.
+
+    The model list per provider is a curated starter set, not the full
+    catalogue — provider model catalogues are huge and change weekly;
+    operators who want a model not in the starter list can type it in
+    directly.
+    """
+    from promptpotter.config.settings import settings
+
+    providers = [
+        {
+            "name": "groq",
+            "display_name": "Groq",
+            "available": bool(settings.GROQ_API_KEY),
+            "env_var": "GROQ_API_KEY",
+            "models": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "moonshotai/kimi-k2-instruct"],
+            "note": "Free tier capped at 8000 TPM — L1 meta-prompt is ~20k tokens; "
+            "use a paid Groq tier or pick OpenRouter/OpenAI for headroom.",
+        },
+        {
+            "name": "openai",
+            "display_name": "OpenAI",
+            "available": bool(settings.OPENAI_API_KEY),
+            "env_var": "OPENAI_API_KEY",
+            "models": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"],
+            "note": "",
+        },
+        {
+            "name": "openrouter",
+            "display_name": "OpenRouter",
+            "available": bool(settings.OPENROUTER_API_KEY),
+            "env_var": "OPENROUTER_API_KEY",
+            "models": [
+                "openai/gpt-oss-120b",
+                "openai/gpt-oss-20b",
+                "anthropic/claude-sonnet-4.5",
+                "mistralai/mistral-small-3.2-24b-instruct",
+            ],
+            "note": "Recommended for first-time tenants — broad model catalogue, high TPM headroom.",
+        },
+        {
+            "name": "anthropic",
+            "display_name": "Anthropic",
+            "available": bool(settings.ANTHROPIC_API_KEY),
+            "env_var": "ANTHROPIC_API_KEY",
+            "models": ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
+            "note": "",
+        },
+    ]
+    return {"providers": providers}
+
+
 __all__ = [
     "ActiveSessionResponse",
     "CycleListEntry",

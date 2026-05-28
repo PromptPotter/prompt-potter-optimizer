@@ -52,6 +52,10 @@ class CycleSnapshot:
     obs: ObservabilityBridge | None = None
     audit_projection: AuditTrailView | None = None
     ledger: CycleEventLog | None = None
+    # Forensic traceback for ``index.json::crash_traceback`` written by
+    # ``mark_finished``. Operator-facing summary (kind + message) is owned by
+    # the canonical ``ErrorRecord`` on the ledger; this field is the in-process
+    # conduit between the runner's ``except`` block and ``_finalize_run`` only.
     crash_traceback: str | None = None
 
 

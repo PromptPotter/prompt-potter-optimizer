@@ -17,6 +17,7 @@ __all__ = [
     "CommandAckRecord",
     "CommandRecord",
     "CycleRecord",
+    "ErrorRecord",
     "ForkPayload",
     "ForkTrigger",
     "LLMCallProgressRecord",
@@ -221,11 +222,44 @@ class CommandAckRecord(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
+class ErrorRecord(BaseModel):
+    """Structured runner failure on ``CRASHED`` / ``RENDER_ERROR`` / ``DIVERGED``.
+
+    Emitted from the runner's three ``except`` sites in
+    ``application/runner/{entry,loop}.py`` via the kwargs-only
+    :func:`emit_error_record` helper over the ``_CYCLE_LEDGER`` ContextVar.
+    Mirrors the ``emit_token_usage`` pattern from ADR-0003.
+
+    Sole writer of ``dashboard.json::error``:
+    :class:`~promptpotter.infrastructure.projections.live_dashboard.view.LiveDashboardView._handle_error_record`.
+    The launcher reads the trailing record from :class:`CycleResult.error` to
+    populate :class:`JobRegistry` ``stop_reason`` / ``status`` without reaching
+    into projection state.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["error"] = "error"
+    # Exception class name — operator-facing diagnostic, never load-bearing for routing.
+    kind: str
+    # Operator-readable message picked at the throw site so no downstream
+    # layer maps raw ``httpx``/Pydantic exception strings.
+    message: str
+    # Full Python traceback; set on ``CRASHED`` / ``RENDER_ERROR``, elided
+    # on ``DIVERGED`` (resume-divergence is operator-recoverable, the message
+    # alone carries the full diagnostic).
+    traceback: str | None = None
+    stop_reason: Literal["CRASHED", "RENDER_ERROR", "DIVERGED"]
+    round: int | None = None
+    timestamp: str = Field(default_factory=_utcnow_iso)
+
+
 # Discriminated union by `record_type`; keep order alphabetical — hash-keyed snapshots go stale otherwise.
 CycleRecord = Annotated[
     ResumeCheckpointRecord
     | CommandAckRecord
     | CommandRecord
+    | ErrorRecord
     | LLMCallProgressRecord
     | LLMCallRecord
     | LLMCallStartRecord

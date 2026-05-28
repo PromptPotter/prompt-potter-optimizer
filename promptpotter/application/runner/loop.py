@@ -35,8 +35,10 @@ from promptpotter.domain.phases import (
     StopReason,
     emit_phase,
 )
+from promptpotter.domain.results import CycleError
 from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.domain.sample import Sample
+from promptpotter.infrastructure.llm.models import emit_error_record
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +69,17 @@ async def run_round_loop(
     halt_at_accuracy: float | None = None,
     spend_cap_probe: Callable[[], float | None] | None = None,
     spend_probe: Callable[[], float] | None = None,
-) -> StopReason:
+) -> tuple[StopReason, CycleError | None]:
     """Round loop. sweep/diag halt after round 2. ``halt_at_accuracy`` → TARGET_HIT;
     ``spend_cap_probe`` + ``spend_probe`` → SPEND_BUDGET (omit either ⇒ no spend halt).
 
     The cap probe is re-read every clean round so the ``change-spend-budget``
-    command (``.runtime/spend_cap.json``) can mutate the ceiling mid-flight."""
+    command (``.runtime/spend_cap.json``) can mutate the ceiling mid-flight.
+
+    Returns ``(stop_reason, error)`` — ``error`` is set on ``RENDER_ERROR`` /
+    ``CRASHED`` so the caller can populate ``CycleResult.error`` without
+    re-reading the ledger. The ``ErrorRecord`` is appended to the canonical
+    ledger via ``emit_error_record`` at the same time."""
     opt = config.optimization
     # resumed_from_round = next L1 round (fresh=1); clean_rounds = lifetime L1 completed (origin not counted).
     round_num = session.state.resumed_from_round
@@ -86,7 +93,7 @@ async def run_round_loop(
             # exit during pause shouldn't hang in this loop.
             while session.pause_check is not None and session.pause_check():
                 if session.stop_check is not None and session.stop_check():
-                    return StopReason.INTERRUPTED
+                    return StopReason.INTERRUPTED, None
                 await asyncio.sleep(2.0)
 
             is_probe = cycle.probe_next_round
@@ -171,15 +178,15 @@ async def run_round_loop(
             clean_rounds += 1
 
             if halt_at_accuracy is not None and cycle.tracking.best_accuracy >= halt_at_accuracy:
-                return StopReason.TARGET_HIT
+                return StopReason.TARGET_HIT, None
             if spend_cap_probe is not None and spend_probe is not None:
                 cap = spend_cap_probe()
                 if cap is not None and spend_probe() >= cap:
-                    return StopReason.SPEND_BUDGET
+                    return StopReason.SPEND_BUDGET, None
 
             if sweep and clean_rounds >= 1:
                 await run_sweep_generation_only(cycle, session, cb, round_num)
-                return StopReason.SWEEP_COMPLETE
+                return StopReason.SWEEP_COMPLETE, None
 
             if diag and clean_rounds >= 1:
                 # Force L2 on R1 evidence; peek R2 with L2 overrides.
@@ -187,12 +194,12 @@ async def run_round_loop(
                 await run_sweep_generation_only(
                     cycle, session, cb, round_num, label="diag_gen_only"
                 )
-                return StopReason.DIAG_COMPLETE
+                return StopReason.DIAG_COMPLETE, None
 
-        return StopReason.HARD_CAP if round_num >= HARD_CAP else StopReason.MAX_ROUNDS
+        return (StopReason.HARD_CAP if round_num >= HARD_CAP else StopReason.MAX_ROUNDS), None
 
     except StopLoop as sl:
-        return sl.reason
+        return sl.reason, None
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
         # Distinguish Ctrl+C from programmatic cancellation; same outcome, operator wants to know which fired.
         cause = (
@@ -201,16 +208,20 @@ async def run_round_loop(
             else ("programmatic cancellation")
         )
         logger.warning("Optimization interrupted at round %d (%s).", round_num, cause)
-        return StopReason.INTERRUPTED
-    except InjectionRenderError:
+        return StopReason.INTERRUPTED, None
+    except InjectionRenderError as exc:
         # Renderer raised (code drift) — distinct from CRASHED so the operator can pinpoint a broken renderer.
-        session.state.crash_traceback = traceback.format_exc()
+        tb = traceback.format_exc()
+        session.state.crash_traceback = tb
+        message = str(exc) or type(exc).__name__
+        kind = type(exc).__name__
+        emit_error_record(kind=kind, message=message, stop_reason="RENDER_ERROR", traceback=tb)
         logger.exception(
             "Optimization halted at round %d — an injection renderer failed. "
             "Fix the renderer and resume.",
             round_num,
         )
-        return StopReason.RENDER_ERROR
+        return StopReason.RENDER_ERROR, CycleError(kind=kind, message=message, traceback=tb)
     except TimeoutError:
         # Optimizer LLM blew deadline twice (provider stalled mid-stream); plain ``resume`` re-fires.
         logger.warning(
@@ -218,12 +229,16 @@ async def run_round_loop(
             "its deadline twice. Resume to retry.",
             round_num,
         )
-        return StopReason.OPTIMIZER_TIMEOUT
-    except Exception:
+        return StopReason.OPTIMIZER_TIMEOUT, None
+    except Exception as exc:
         # Escalation flows via return value, not exception; stash traceback for ``_finalize_run`` (sys.exc_info dead by then).
-        session.state.crash_traceback = traceback.format_exc()
+        tb = traceback.format_exc()
+        session.state.crash_traceback = tb
+        message = str(exc) or type(exc).__name__
+        kind = type(exc).__name__
+        emit_error_record(kind=kind, message=message, stop_reason="CRASHED", traceback=tb)
         logger.exception("Optimization crashed at round %d.", round_num)
-        return StopReason.CRASHED
+        return StopReason.CRASHED, CycleError(kind=kind, message=message, traceback=tb)
 
 
 __all__ = ["HARD_CAP", "run_round_loop"]

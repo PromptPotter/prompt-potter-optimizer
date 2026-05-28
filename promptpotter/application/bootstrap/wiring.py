@@ -30,7 +30,7 @@ from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient
-from promptpotter.infrastructure.store import build_stores
+from promptpotter.infrastructure.store import Stores, build_stores
 from promptpotter.infrastructure.store.base import read_json_optional
 from promptpotter.shared.identity import IdentityContext, default_identity
 
@@ -97,15 +97,30 @@ async def _verify_connector_revision(
         )
 
 
+def resolve_dataset_config_dir(store: Stores, project_root: Path, dataset_name: str) -> Path:
+    """Return the dataset's config dir — tenant Origin first, then repo benchmark.
+
+    Tenant uploads land at ``{tenant_root}/datasets/{slug}/`` (the chat-first
+    ingest path); repo ``datasets/{name}/`` holds install-global benchmarks
+    (`aime_2025`, `bbeh`, `gsm8k`, `justlogic`, `lca-termnorm`,
+    `promptpotter-self`, ...). On collision the tenant copy wins, so a user
+    can override a benchmark by ingesting their own slug of the same name.
+    """
+    tenant_dir = store.tenant_datasets.dataset_dir(dataset_name)
+    if (tenant_dir / "pipeline.json").is_file() or (tenant_dir / "cache.json").is_file():
+        return tenant_dir
+    return project_root / "datasets" / dataset_name
+
+
 async def _resolve_pipeline_schema(
     client: BackendClient,
-    project_root: Path,
-    dataset_name: str | None,
+    dataset_config_dir: Path | None,
     status: Callable[[str], None],
 ) -> PipelineSchema | None:
     """Backend ``GET /pipeline`` is authoritative for runtime defaults; local
-    ``datasets/{name}/pipeline.json`` is the operator overlay. Merged here before
-    parsing — backend underneath, dataset on top. Backend unreachable → local file alone (offline mode)."""
+    ``{dataset_config_dir}/pipeline.json`` is the operator overlay. Merged
+    here before parsing — backend underneath, dataset on top. Backend
+    unreachable → local file alone (offline mode)."""
     backend_resp: dict[str, Any] | None = None
     try:
         backend_resp = await client.fetch_pipeline()
@@ -115,8 +130,8 @@ async def _resolve_pipeline_schema(
         logger.info("Could not fetch pipeline schema from backend: %s", exc)
 
     local_raw: dict[str, Any] | None = None
-    if dataset_name:
-        local_raw = read_json_optional(project_root / "datasets" / dataset_name / "pipeline.json")
+    if dataset_config_dir is not None:
+        local_raw = read_json_optional(dataset_config_dir / "pipeline.json")
 
     if backend_resp:
         merged = _apply_dataset_overlay(backend_resp, local_raw or {})
@@ -139,24 +154,32 @@ async def _resolve_pipeline_schema(
     return None
 
 
-def _read_backend_type(project_root: Path, dataset_name: str | None) -> str:
-    """Resolve backend_type from datasets/{name}/pipeline.json. Required field."""
-    if not dataset_name:
+def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None) -> str:
+    """Resolve backend_type from ``{dataset_config_dir}/pipeline.json``. Required field."""
+    if not dataset_name or dataset_config_dir is None:
         raise ValueError("dataset_name required to resolve backend_type for connector lookup")
-    raw = read_json_optional(project_root / "datasets" / dataset_name / "pipeline.json")
+    raw = read_json_optional(dataset_config_dir / "pipeline.json")
     bt = (raw or {}).get("backend_type")
     if not isinstance(bt, str) or not bt:
-        raise ValueError(f"backend_type missing or empty in datasets/{dataset_name}/pipeline.json")
+        raise ValueError(f"backend_type missing or empty in {dataset_config_dir}/pipeline.json")
     return bt.lower()
 
 
 def _load_dataset_into_session(
     session: Session, dataset_name: str, status: Callable[[str], None]
 ) -> None:
-    """Populate session.samples + index_terms from DatasetStore or DATASET_LOADERS."""
+    """Populate session.samples + index_terms.
+
+    Precedence: tenant Origin (``projects/{tenant}/datasets/{slug}/``) →
+    repo benchmark (``datasets/{name}/``) → ``DATASET_LOADERS`` registry
+    one-shot download into the benchmark tree. Tenant uploads never
+    cross-contaminate the install-global benchmark slot.
+    """
     from promptpotter.domain.sample import Sample
 
-    ds = session.store.backends.load_dataset(dataset_name)
+    ds: dict[str, Any] | None = session.store.tenant_datasets.load_dataset(dataset_name)
+    if not (ds and ds.get("items")):
+        ds = session.store.backends.load_dataset(dataset_name)
     if not (ds and ds.get("items")) and dataset_name in DATASET_LOADERS:
         status(f"Loading dataset '{dataset_name}' from registry ...")
         loader_items = DATASET_LOADERS[dataset_name]()
@@ -166,8 +189,8 @@ def _load_dataset_into_session(
     if not (ds and ds.get("items")):
         status(f"Dataset '{dataset_name}' not available")
         raise ValueError(
-            f"Dataset {dataset_name!r} not found in DatasetStore or DATASET_LOADERS. "
-            f"Add a loader to DATASET_LOADERS in dataset_builder.py."
+            f"Dataset {dataset_name!r} not found in tenant uploads, repo benchmarks, "
+            f"or DATASET_LOADERS. Add a loader to DATASET_LOADERS in dataset_builder.py."
         )
 
     items = [it.model_dump() if isinstance(it, Sample) else it for it in ds["items"]]
@@ -271,7 +294,10 @@ async def init_services(
         resolved_identity, projects_root=project_root / ".promptpotter" / "projects"
     )
 
-    backend_type = _read_backend_type(project_root, dataset_name)
+    dataset_config_dir = (
+        resolve_dataset_config_dir(store, project_root, dataset_name) if dataset_name else None
+    )
+    backend_type = _read_backend_type(dataset_config_dir, dataset_name)
     connector = connectors.get(backend_type)
     client = BackendClient(
         backend_url,
@@ -281,7 +307,7 @@ async def init_services(
     )
     status(f"Backend: {backend_url}")
 
-    pipeline_schema = await _resolve_pipeline_schema(client, project_root, dataset_name, status)
+    pipeline_schema = await _resolve_pipeline_schema(client, dataset_config_dir, status)
     await _verify_connector_revision(client, connector)
 
     if not store.backends.get(backend_id):
@@ -315,4 +341,4 @@ async def init_services(
     return session
 
 
-__all__ = ["init_services"]
+__all__ = ["init_services", "resolve_dataset_config_dir"]

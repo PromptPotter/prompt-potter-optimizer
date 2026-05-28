@@ -76,6 +76,14 @@ export interface DashboardSnapshot {
   // `phase_hint` names what's blocking; the rest of the shape is empty.
   warming_up?: boolean;
   phase_hint?: string;
+  // Structured crash summary projected from the canonical ``ErrorRecord``
+  // ledger entry. Sole writer: ``LiveDashboardView._handle_error``. Absent
+  // on normal stops; ``RunErrorBanner`` surfaces this above the TopStrip.
+  error?: {
+    kind: string;
+    message: string;
+    stop_reason: string;
+  };
   [key: string]: unknown;
 }
 

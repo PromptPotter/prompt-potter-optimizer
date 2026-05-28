@@ -38,10 +38,11 @@ from promptpotter.application.run_observers import (
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.results import CycleResult
+from promptpotter.domain.results import CycleError, CycleResult
 from promptpotter.domain.run_records import ForkPayload
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.llm.models import emit_error_record
 from promptpotter.shared.errors import ResumeDivergenceError
 
 logger = logging.getLogger(__name__)
@@ -205,7 +206,7 @@ async def run_optimization(
                 if session.state.cycle_id
                 else Path()
             )
-            stop_reason = await run_round_loop(
+            stop_reason, cycle_error = await run_round_loop(
                 cycle,
                 dataset,
                 campaign_config,
@@ -225,14 +226,24 @@ async def run_optimization(
             )
             logger.warning("Optimization interrupted before round loop entered (%s).", cause)
             stop_reason = StopReason.INTERRUPTED
+            cycle_error = None
         except ResumeDivergenceError as exc:
             # Operator-recoverable; fix is ``--fork-on-divergence``.
+            message = str(exc) or type(exc).__name__
+            kind = type(exc).__name__
+            emit_error_record(kind=kind, message=message, stop_reason="DIVERGED")
             logger.warning("Resume halted on divergence:\n%s", exc)
             stop_reason = StopReason.DIVERGED
-        except Exception:
-            session.state.crash_traceback = traceback.format_exc()
+            cycle_error = CycleError(kind=kind, message=message)
+        except Exception as exc:
+            tb = traceback.format_exc()
+            session.state.crash_traceback = tb
+            message = str(exc) or type(exc).__name__
+            kind = type(exc).__name__
+            emit_error_record(kind=kind, message=message, stop_reason="CRASHED", traceback=tb)
             logger.exception("Optimization crashed before round loop entered.")
             stop_reason = StopReason.CRASHED
+            cycle_error = CycleError(kind=kind, message=message, traceback=tb)
 
         finished_at = datetime.now(UTC).isoformat()
         # Init-crash fallback: cycle_id was minted upstream, so mark_finished can still stamp final with traceback.
@@ -252,6 +263,7 @@ async def run_optimization(
                 cycle_id=session.state.cycle_id,
                 session_id=session.session_id or None,
                 resumed_from_round=session.state.resumed_from_round,
+                error=cycle_error,
             )
         else:
             cycle_result = CycleResult(
@@ -268,6 +280,7 @@ async def run_optimization(
                 cycle_id=session.state.cycle_id,
                 session_id=session.session_id or None,
                 resumed_from_round=session.state.resumed_from_round,
+                error=cycle_error,
             )
         _finalize_run(session, observers, cycle_result, sweep=sweep)
 
@@ -419,7 +432,9 @@ def _finalize_run(
             )
     # Drain AFTER mark_stopped so dashboard.json's stopped state is in place before audit settles.
     # `_cycle_was_interrupted` threads `"interrupted": true` into partial round_NNNN.json — true
-    # for both Ctrl+C and uncaught-exception teardowns.
+    # for both Ctrl+C and uncaught-exception teardowns. The operator-facing
+    # ``dashboard.json::error`` block is owned by ``_handle_error_record`` (sole
+    # writer) and was already populated at the ``emit_error_record`` site.
     if emitter is not None:
         emitter.mark_stopped(str(stop_reason or ""))
     observers.audit._cycle_was_interrupted = halted_mid_round

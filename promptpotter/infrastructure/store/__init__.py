@@ -37,6 +37,7 @@ from promptpotter.infrastructure.store.paths import (
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.stores import OptimizerCallCache, Stores, build_stores
 from promptpotter.infrastructure.store.sweep_store import SweepStore
+from promptpotter.infrastructure.store.tenant_dataset_store import TenantDatasetStore
 from promptpotter.infrastructure.store.user_store import User, UserStore
 
 
@@ -143,6 +144,7 @@ __all__ = [
     "SessionStore",
     "Stores",
     "SweepStore",
+    "TenantDatasetStore",
     "User",
     "UserStore",
     "active_pointer_exists",

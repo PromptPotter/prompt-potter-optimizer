@@ -45,6 +45,7 @@ from pydantic import BaseModel, Field
 
 from promptpotter import connectors
 from promptpotter.config.settings import settings
+from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.run_records import CommandRecord
@@ -335,6 +336,23 @@ class CommandDispatcher:
             except _DeleteCycleRejectedError as exc:
                 ack_status = "rejected"
                 ack_detail = exc.reason
+            except BackendUnreachableError as exc:
+                # Central 503 mapping for any applier whose preflight reported
+                # the backend down. Per CLAUDE.md root-fix: one site, not one
+                # per applier. The ``ErrorEnvelope`` shape is declared in
+                # ``docs/specs/m12-api-openapi.yaml::components.responses.BackendUnreachable``.
+                emit_command_ack(command_id=command_id, status="rejected", detail=str(exc))
+                raise HTTPException(
+                    503,
+                    {
+                        "error": "backend_unreachable",
+                        "message": str(exc),
+                        "details": {
+                            "backend_type": exc.backend_type,
+                            "backend_url": exc.backend_url,
+                        },
+                    },
+                ) from exc
             except HTTPException:
                 # Apply-time guards that should bubble (e.g. fork dir conflict,
                 # backend-already-exists, backend-not-found, upstream 502)
@@ -606,6 +624,9 @@ class CommandDispatcher:
         The 202 returns as soon as ``auto_mint_session`` writes the campaign
         manifest + root cycle index; the run proceeds via JobRegistry. The
         webapp discovers the new ids by polling ``/api/v1/active``.
+
+        ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
+        for the central 503 mapping (R2).
         """
         from promptpotter.application.jobs import (
             LaunchError,
@@ -638,7 +659,11 @@ class CommandDispatcher:
         halt_at_accuracy: float | None,
         spend_budget_usd: float | None,
     ) -> None:
-        """Spawn the runner against an existing cycle. ``kind`` ∈ {new, resume}."""
+        """Spawn the runner against an existing cycle. ``kind`` ∈ {new, resume}.
+
+        ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
+        for the central 503 mapping (R2).
+        """
         from promptpotter.application.jobs import (
             LaunchError,
             QuotaExceededError,

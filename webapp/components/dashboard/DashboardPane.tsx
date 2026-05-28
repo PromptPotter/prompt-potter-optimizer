@@ -19,8 +19,9 @@ import { LiveStateCard } from "./LiveStateCard";
 import { RoundTabsStrip } from "./round-samples/RoundTabsStrip";
 import { CyclePicker } from "./CyclePicker";
 import { SelectionProvider } from "./SelectionContext";
-import { NewCampaignModal } from "./NewCampaignModal";
+import { IngestPane } from "./IngestPane";
 import { NowTriad } from "./NowTriad";
+import { RunErrorBanner } from "./RunErrorBanner";
 import { FilesPane } from "@/components/tree/FilesPane";
 import { VerifyPane } from "@/components/verify/VerifyPane";
 
@@ -266,6 +267,7 @@ function DashboardPaneInner() {
             </div>
             <Lane id="now" title="Now" subtitle="What's running right now" defaultOpen>
               <div className="dash-spine-narrow">
+                <RunErrorBanner dash={dash} />
                 {/* TopStrip + RoundTabsStrip share one row so the round
                     axis (LIVE pill + completed-round circles) sits beside
                     the headline KPIs the operator scans first. */}
@@ -313,7 +315,7 @@ function DashboardPaneInner() {
           }
         />
       </main>
-      <NewCampaignModal
+      <IngestPane
         open={newCampaignOpen}
         onClose={() => setNewCampaignOpen(false)}
       />

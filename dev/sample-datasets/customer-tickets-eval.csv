@@ -1,0 +1,6 @@
+query,ground_truth
+My order arrived broken,refund
+I forgot my account password,password_reset
+The app keeps crashing when I open it,bug_report
+When will my package be delivered,shipping_status
+Can I get a copy of my last invoice,billing_inquiry

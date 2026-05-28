@@ -143,10 +143,20 @@ renderer, period.** No sidecar paths, no out-of-band state mounting.
 world is a strict containment hierarchy:
 
 - **Workspace** — the tenant-level container and **queryable
-  datastore**: every dataset, every campaign, and the shared
-  `archive/` measurement store. On disk it is `projects/{tenant}/`.
-- **Dataset** — the optimization target plus its config
-  (`datasets/{name}/`).
+  datastore**: every user-uploaded dataset, every campaign, and the
+  shared `archive/` measurement store. On disk it is
+  `projects/{tenant}/`.
+- **Dataset** — the optimization target plus its config. Two
+  first-class tiers, served by one read path: (a) **user-uploaded**
+  datasets at `projects/{tenant}/datasets/{slug}/` — the
+  Workspace ⊃ Dataset containment, identity-scoped, tenant-private;
+  (b) **install-global benchmarks** at repo-root `datasets/{name}/`
+  (today's `aime_2025`, `bbeh`, `gsm8k`, `hotpotqa`, `justlogic`,
+  `lca-termnorm`, `promptpotter-self`, `_optimizer`) — install-scoped,
+  read-only, admin-visible only via the `GET /datasets` list endpoint
+  identity filter. The two tiers serve different purposes (operator
+  benchmarking vs tenant work); both share the `pipeline.json` /
+  `campaign.json` / `task_description.md` shape.
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, **and the optimizer meta-prompts it
   runs under**. A **first-class entity** and a **cycle tree** — root

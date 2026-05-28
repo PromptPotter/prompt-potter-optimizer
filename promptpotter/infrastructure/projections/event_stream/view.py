@@ -182,13 +182,21 @@ class EventStreamView:
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
         """Sole writer of outbound SSE frames for this cycle. Called sync
-        from ``CycleEventLog.append``."""
+        from ``CycleEventLog.append``.
+
+        ``model_dump(mode="json")`` MUST succeed — any live runtime references
+        in record payloads are stripped upstream (``RunCallbacks.on_phase``
+        drops ``env=session`` and similar non-serializable keys before
+        building the ``PhaseRecord``). A serialization failure here is a
+        contract violation, not a recoverable case.
+        """
         kind: ProjectionKind = record.record_type
+        payload = record.model_dump(mode="json")
         envelope = ProjectionEnvelope(
             kind=kind,
             cycle_id=self._cycle_id,
             sequence=offset,
-            payload=record.model_dump(mode="json"),
+            payload=payload,
         )
         with self._lock:
             self._next_offset = max(self._next_offset, offset + 1)

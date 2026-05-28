@@ -132,6 +132,20 @@ export interface LiveDashboardState {
   in_flight: InFlightCall | null;
   backfill_log: BackfillLogEntry[];
   current_round: Record<string, unknown>;
+  /** Populated when the runner crashed — operator-facing message + exception
+   * class. Absent on normal stops (interrupted / completed). */
+  error?: DashboardError;
+}
+
+/** Structured crash summary written by ``LiveDashboardView.mark_stopped`` when
+ * the runner exits via CRASHED / RENDER_ERROR. ``message`` is the operator-
+ * actionable text (``str(exc)``); ``kind`` is the exception class name for
+ * categorization. ``stop_reason`` echoes the ledger's ``StopReason`` for
+ * cross-reference with ``index.json::final``. */
+export interface DashboardError {
+  kind: string;
+  message: string;
+  stop_reason: string;
 }
 
 export interface DatasetItem {

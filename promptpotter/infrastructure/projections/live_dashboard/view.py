@@ -30,6 +30,7 @@ from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import (
     CycleRecord,
+    ErrorRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
@@ -402,7 +403,12 @@ class LiveDashboardView(DerivedView):
         self.state["state_since"] = datetime.now(UTC).isoformat()
 
     def mark_stopped(self, reason: str) -> None:
-        """Finalize hook — writes terminal state + reason so dashboard tail-readers see it without index.json."""
+        """Finalize hook — writes terminal state + reason so dashboard tail-readers see it without index.json.
+
+        The operator-facing ``error`` block (``kind`` + ``message``) is owned
+        by :meth:`_handle_error` which subscribes to ``ErrorRecord`` on the
+        canonical ledger; ``mark_stopped`` only flips the liveness state.
+        """
         self.state["stop_reason"] = reason
         self._set_state("stopped")
         self._flush_pending_persist()
@@ -615,10 +621,9 @@ class LiveDashboardView(DerivedView):
                     self.short_formula_template = short
         elif phase == CampaignPhase.INIT and event.event == "exit":
             cycle = data["state"]
-            loop_env = data["env"]
             config = data["config"]
-            # Identity stamp (campaign/cycle/session) is set once at construction.
-            del loop_env
+            # Identity stamp (campaign/cycle/session) is set once at construction;
+            # ``env`` was stripped by ``RunCallbacks.on_phase`` (R3) so don't read it.
             s["origin"] = {
                 "accuracy": float(cycle.tracking.current_accuracy),
                 "samples": len(cycle.tracking.origin_per_sample_results),
@@ -756,6 +761,22 @@ class LiveDashboardView(DerivedView):
         optimizer LLM phases that fire no other records. No state mutation, only the timestamp moves.
         """
         del record
+        self._schedule_persist()
+
+    def _handle_error(self, record: ErrorRecord) -> None:
+        """Sole writer of ``dashboard.json::error``.
+
+        Subscribed to the ledger ``ErrorRecord`` emitted by the runner's
+        three ``except`` sites in ``application/runner/{entry,loop}.py``;
+        nothing else writes this block. The webapp reads it to render the
+        operator-facing crash summary without parsing the traceback out
+        of ``index.json``.
+        """
+        self.state["error"] = {
+            "kind": record.kind,
+            "message": record.message,
+            "stop_reason": record.stop_reason,
+        }
         self._schedule_persist()
 
     def _update_current_acc(self, scores: dict[str, Any]) -> None:

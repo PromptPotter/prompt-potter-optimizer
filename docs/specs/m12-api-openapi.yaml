@@ -63,6 +63,12 @@ tags:
     description: Operator-authored signals — hard-sample marks, round notes, candidate verdicts.
   - name: backends
     description: Commands that register or sync external backends.
+  - name: datasets
+    description: |
+      Workspace-scoped dataset ingest. Not a Control-remote command — these
+      endpoints create or mutate a server-held `DraftCampaign` before any
+      ledger event is emitted; the eventual mint-from-draft IS a command
+      (`/commands/mint-campaign-from-draft`) declared above.
 
 # v0 closed inbound command set — DRAFT for operator redline.
 #
@@ -481,6 +487,7 @@ paths:
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
         '403': { $ref: '#/components/responses/CapabilityDenied' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
+        '503': { $ref: '#/components/responses/BackendUnreachable' }
 
   /commands/start-run:
     post:
@@ -513,6 +520,7 @@ paths:
         '403': { $ref: '#/components/responses/CapabilityDenied' }
         '409': { $ref: '#/components/responses/VersionConflict' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
+        '503': { $ref: '#/components/responses/BackendUnreachable' }
 
   /commands/change-spend-budget:
     post:
@@ -865,6 +873,248 @@ paths:
         '403': { $ref: '#/components/responses/CapabilityDenied' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/edit-draft-campaign:
+    post:
+      operationId: editDraftCampaign
+      summary: Patch a sparse subset of mutable `DraftCampaign` fields.
+      description: |
+        Drives the chat ↔ panel dual-surface mutation path (see
+        `docs/specs/m13-chat-first-user-web.md § State binding`). Both the
+        assistant tool-call surface and the panel "Apply" button ride this
+        same verb. Workspace-scoped — the draft is server-held state, not
+        yet a ledger-bearing cycle, so no `Expected-Version`.
+
+        `patch` is a sparse object — only declared field names are accepted,
+        omitted fields are unchanged. Slug edits go through the same slug
+        collision detection as `/datasets/ingest` (409 on conflict).
+      tags: [datasets]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: edit-draft-campaign }
+                    payload: { $ref: '#/components/schemas/EditDraftCampaignPayload' }
+      responses:
+        '200':
+          description: Post-mutation `DraftCampaign` (full shape, not a partial diff).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftCampaign'
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '401':
+          description: Unauthenticated (no `IdentityContext` resolved at the middleware).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: |
+            `draft_id` does not exist, or exists under a different
+            `IdentityContext.tenant_id`. Existence-leak gate: 404, not 403.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
+  /commands/mint-campaign-from-draft:
+    post:
+      operationId: mintCampaignFromDraft
+      summary: Commit a `DraftCampaign` — write the Origin files + `campaign.json`, then mint.
+      description: |
+        Terminal verb in the draft lifecycle. Server:
+        1. Looks up the draft by `draft_id`, tenant-scoped.
+        2. Atomic-renames `projects/{tenant}/datasets/.drafts/{draft_id}/` to
+           `projects/{tenant}/datasets/{slug}/`.
+        3. Writes the four Origin files (`cache.json`, `pipeline.json`,
+           `task_description.md`, `prompts/default.json`) per the slot table
+           in `docs/specs/m13-chat-first-user-web.md § Commit path`.
+        4. Writes the sibling `campaign.json` (default-campaign config; not
+           part of the Origin's `JobSearchPoint.content_hash(dataset)`).
+        5. Falls through to the existing mint-campaign path.
+
+        Workspace-scoped — no `Expected-Version` (no prior cycle to gate
+        against). `Idempotency-Key` prevents double-mint on retry.
+      tags: [datasets]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: mint-campaign-from-draft }
+                    payload: { $ref: '#/components/schemas/MintCampaignFromDraftPayload' }
+      responses:
+        '200':
+          description: |
+            Canonical mint-campaign response — `campaign_id`, `cycle_id`,
+            `job_id`. Matches the shape returned by `/commands/mint-campaign`
+            once it commits asynchronously (this endpoint is synchronous
+            because the commit is a single atomic rename + mint, not an
+            event-stream-tracked runner spawn).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MintCampaignFromDraftResponse'
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '401':
+          description: Unauthenticated (no `IdentityContext` resolved at the middleware).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: |
+            `draft_id` does not exist, or exists under a different
+            `IdentityContext.tenant_id`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: |
+            Slug now collides with an existing user-uploaded dataset (the
+            draft's slug edit raced another commit). `details.suggested_slug`
+            carries the smallest free `{slug}-{n}`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+        '503': { $ref: '#/components/responses/BackendUnreachable' }
+
+  /datasets/ingest:
+    post:
+      operationId: ingestDataset
+      summary: Upload a CSV; receive a server-held `DraftCampaign` with parsed preview + smart defaults.
+      description: |
+        Slice 1 ingest path for the M13 chat-first user web (see
+        `docs/specs/m13-chat-first-user-web.md § Ingest`). Workspace-scoped,
+        identity-bound by `IdentityContext.tenant_id` — the resulting draft
+        (and on commit, the dataset directory) lands at
+        `projects/{tenant}/datasets/{slug}/`.
+
+        NOT a Control-remote command — no `CommandRecord` lands on a ledger;
+        the draft lives in the server's draft-campaign store until the operator
+        commits via the separate `/commands/mint-campaign-from-draft` verb.
+        File type in slice 1: CSV with two required columns `query`,
+        `ground_truth`. Future slices add XLSX (first sheet only), Parquet,
+        JSON-lines — declared in this file before each handler lands.
+      tags: [datasets]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: CSV blob; two required columns `query`, `ground_truth`.
+                slug:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                  pattern: '^[a-z][a-z0-9_-]*$'
+                  description: |
+                    Optional slug override. Defaults to `SafeName(filename_without_ext)`.
+                    Must pass `SafeName` (lowercase, alphanumerics + `_-`).
+      responses:
+        '200':
+          description: |
+            Draft created. Body is a `DraftCampaign` with `sample_preview`
+            (first 10 rows), `n_samples`, smart-defaulted `connector` /
+            `scoring_composite` / `max_rounds`, and a server-minted `draft_id`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftCampaign'
+        '401':
+          description: Unauthenticated (no `IdentityContext` resolved at the middleware).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Authenticated but not permitted to ingest in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: |
+            Slug collides with an existing user-uploaded dataset under
+            `projects/{tenant}/datasets/`. `details.suggested_slug` carries
+            the smallest free `{slug}-{n}`; the operator picks or edits.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: |
+            CSV parse / shape failure — malformed CSV, missing required
+            columns `query` / `ground_truth`, zero data rows. `details.reason`
+            carries the specific failure (`missing_column`, `bad_csv`,
+            `empty`, ...).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /llm/providers:
+    get:
+      operationId: listLlmProviders
+      summary: List optimizer LLM providers + curated starter models, gated on installed API keys.
+      description: |
+        Read-only surface backing the draft-campaign panel's
+        `optimizer_provider` / `optimizer_model` pickers. Each entry carries
+        an `available` flag computed from whether the install's environment
+        holds the required API key (e.g. `GROQ_API_KEY` for `groq`). The
+        curated `models` list mirrors the per-provider recommendations in
+        `docs/operations/dataset-reasoning-matrix.md`; the operator can
+        still hand-edit `optimizer_model` on `DraftCampaign` to any model
+        string the provider accepts.
+
+        Pure read; no `Idempotency-Key`, no `Expected-Version`.
+      tags: [config]
+      responses:
+        '200':
+          description: Installed provider list with availability + curated models.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [providers]
+                additionalProperties: false
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LLMProvider'
+        '401':
+          description: Unauthenticated (no `IdentityContext` resolved at the middleware).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
 components:
   parameters:
     IdempotencyKey:
@@ -968,7 +1218,9 @@ components:
             Stable error code. Closed set includes `version_conflict` (409),
             `idempotency_key_missing` (400), `expected_version_missing` (400),
             `capability_denied` (403), `command_kind_unknown` (404),
-            `payload_invalid` (422). New codes require a YAML update first.
+            `payload_invalid` (422), `slug_collision` (409),
+            `backend_unreachable` (503), `ingest_failed` (422). New codes
+            require a YAML update first.
           enum:
             - version_conflict
             - idempotency_key_missing
@@ -978,6 +1230,9 @@ components:
             - command_target_not_found
             - payload_invalid
             - tenant_mismatch
+            - slug_collision
+            - backend_unreachable
+            - ingest_failed
         message:
           type: string
           description: Human-readable explanation; never load-bearing for clients.
@@ -985,9 +1240,22 @@ components:
           type: object
           additionalProperties: true
           description: |
-            Optional per-error structured detail. For `version_conflict`,
-            includes `expected_version` (what the client sent) and
-            `actual_version` (what the runner observed).
+            Optional per-error structured detail.
+
+            * `version_conflict` — `expected_version` (client sent) +
+              `actual_version` (runner observed).
+            * `slug_collision` (409 on `/datasets/ingest` and
+              `/commands/mint-campaign-from-draft`) — `suggested_slug`
+              carrying the smallest free `{slug}-{n}`, and `draft_id`
+              when collision detection runs against an existing draft.
+            * `backend_unreachable` (503 on any command that needs the
+              backend reachable) — `backend_type` (connector name) and
+              `backend_url` (configured URL). Used by the frontend to
+              compose the "Start the backend and try again" message
+              without re-parsing the `message` field.
+            * `ingest_failed` (422 on `/datasets/ingest`) — `reason`
+              ∈ `missing_column` | `bad_csv` | `empty` | `too_large` |
+              `bad_slug`.
 
     # ---- Per-kind command payloads (v0 closed set) ----
     # Each `*Payload` schema is the `payload` field of one command kind.
@@ -1330,6 +1598,308 @@ components:
                 Operator verdict. Stored on the round's audit trail; L2/L3
                 may consume in later profiles (no behavior change in v0).
 
+    DraftCampaign:
+      type: object
+      required:
+        - draft_id
+        - slug
+        - sample_preview
+        - n_samples
+        - connector
+        - scoring_composite
+        - max_rounds
+        - task_description
+        - pipeline_overlay
+        - optimizer_provider
+        - optimizer_model
+        - created_at
+        - updated_at
+      additionalProperties: false
+      description: |
+        Server-held canonical state for an in-progress dataset ingest. Mutated
+        by both the chat surface and the parameter panel (both ride
+        `POST /commands/{kind}` once that verb lands) until the operator
+        commits via `/commands/mint-campaign-from-draft`. Identity scope rides
+        the existing tenant prefix; the draft never carries a per-record
+        `tenant_id` on the wire (see ADR-0002 no-drift gate #3).
+      properties:
+        draft_id:
+          type: string
+          minLength: 8
+          maxLength: 64
+          description: Server-minted ULID; idempotent re-ingest of the same file returns the same draft.
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z][a-z0-9_-]*$'
+          description: |
+            Tentative dataset directory name under
+            `projects/{tenant}/datasets/{slug}/` after commit. `SafeName`-validated.
+        sample_preview:
+          type: array
+          minItems: 0
+          maxItems: 10
+          description: First 10 parsed rows; read-only.
+          items:
+            type: object
+            required: [query, ground_truth]
+            additionalProperties: false
+            properties:
+              query: { type: string }
+              ground_truth: { type: string }
+        n_samples:
+          type: integer
+          minimum: 0
+          description: Total parsed row count (preview is a head; this is the bank size).
+        connector:
+          type: string
+          minLength: 1
+          maxLength: 64
+          default: termnorm
+          description: |
+            Smart-default `termnorm` (only registered connector today, per
+            root CLAUDE.md). Operator-editable via panel or chat.
+        scoring_composite:
+          type: string
+          minLength: 1
+          maxLength: 64
+          default: exact_match
+          description: |
+            Smart-default `exact_match` (only universally-applicable scorer
+            for `(query, ground_truth)`). Operator-editable.
+        max_rounds:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 5
+          description: |
+            Smart-default `5` (matches the M10 prompt-iteration framework
+            default). Operator-editable.
+        task_description:
+          type: string
+          maxLength: 16384
+          description: Free-form framing; chat negotiates content. Empty string on first ingest.
+        pipeline_overlay:
+          type: object
+          additionalProperties: true
+          description: |
+            Initial `nodes.*.config` overlay for the future `pipeline.json`.
+            Empty `{}` on first ingest; the operator (or chat) populates per-node
+            model / `reasoning_effort` from
+            `docs/operations/dataset-reasoning-matrix.md` before commit.
+        optimizer_provider:
+          type: string
+          minLength: 1
+          maxLength: 32
+          default: groq
+          description: |
+            Optimizer LLM provider name (`groq`, `openai`, `anthropic`,
+            `openrouter`). Smart-default `groq` (free tier, fastest startup).
+            Operator-editable via panel; the resolved list of providers
+            available in this install — gated on whether the corresponding
+            API key is set — is served by `GET /llm/providers`.
+        optimizer_model:
+          type: string
+          maxLength: 128
+          default: ''
+          description: |
+            Optimizer LLM model id (e.g. `openai/gpt-oss-120b`,
+            `claude-sonnet-4-6`). Empty string means "use the connector's
+            recommended default for this provider"; the curated per-provider
+            model list is exposed by `GET /llm/providers`.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    EditDraftCampaignPayload:
+      type: object
+      required: [draft_id, patch]
+      additionalProperties: false
+      description: |
+        Sparse mutation of an existing `DraftCampaign`. Only declared fields
+        in `patch` are accepted; omitted fields are unchanged. Tenant-scoped
+        — the dispatcher rejects `draft_id`s that resolve to a different
+        `IdentityContext.tenant_id` with 404 (existence-leak gate).
+      properties:
+        draft_id:
+          type: string
+          minLength: 8
+          maxLength: 64
+          description: Server-minted ULID returned by `/datasets/ingest`.
+        patch:
+          type: object
+          additionalProperties: false
+          description: |
+            Sparse subset of mutable `DraftCampaign` fields. Slug edits run
+            the same collision check as ingest (409 on conflict).
+          properties:
+            slug:
+              type: string
+              minLength: 1
+              maxLength: 64
+              pattern: '^[a-z][a-z0-9_-]*$'
+            connector:
+              type: string
+              minLength: 1
+              maxLength: 64
+            scoring_composite:
+              type: string
+              minLength: 1
+              maxLength: 64
+            max_rounds:
+              type: integer
+              minimum: 1
+              maximum: 100
+            task_description:
+              type: string
+              maxLength: 16384
+            pipeline_overlay:
+              type: object
+              additionalProperties: true
+              description: 'Replaces (not deep-merges) the prior `nodes.*.config` overlay.'
+            optimizer_provider:
+              type: string
+              minLength: 1
+              maxLength: 32
+            optimizer_model:
+              type: string
+              maxLength: 128
+
+    MintCampaignFromDraftPayload:
+      type: object
+      required: [draft_id]
+      additionalProperties: false
+      description: |
+        Terminal-verb payload — no field overrides accepted at commit time;
+        the draft is the canonical source of truth. Tenant-scoped; 404 on
+        cross-tenant `draft_id`.
+      properties:
+        draft_id:
+          type: string
+          minLength: 8
+          maxLength: 64
+          description: Server-minted ULID returned by `/datasets/ingest`.
+
+    MintCampaignFromDraftResponse:
+      type: object
+      required: [campaign_id, cycle_id, job_id]
+      additionalProperties: false
+      description: |
+        Canonical mint-campaign response. Matches the eventual
+        `CommandAckRecord` payload for `/commands/mint-campaign` once that
+        verb's async ack lands, but returned synchronously here because the
+        commit is a single atomic rename + mint.
+      properties:
+        campaign_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[a-z][a-z0-9_-]*$'
+          description: 'Newly-minted campaign id ({slug}__{rand6_hex}).'
+        cycle_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^cycle_[0-9a-f_]+$'
+          description: 'Root cycle id, content-addressed on the Origin (`cycle_{target_hash[:12]}`).'
+        job_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: |
+            JobRegistry handle for the runner spawned against the new
+            campaign. Clients use this to subscribe to the SSE stream.
+
+    LLMProvider:
+      type: object
+      required: [name, display_name, available, env_var, models]
+      additionalProperties: false
+      description: |
+        One entry in the `GET /llm/providers` response. The `available` flag
+        is computed from whether the install's environment carries the
+        `env_var` API key. `models` is a curated starter list sourced from
+        `docs/operations/dataset-reasoning-matrix.md`; the operator can
+        still hand-edit `optimizer_model` to any model string the provider
+        accepts.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 32
+          description: 'Stable provider id (`groq`, `openai`, `anthropic`, `openrouter`).'
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Human-readable label for the picker UI.
+        available:
+          type: boolean
+          description: |
+            `true` when the install's environment holds the required API
+            key (`env_var`). Drives the picker dimming; the API still
+            accepts unavailable providers on `DraftCampaign` so the
+            operator can pre-configure before adding the key.
+        env_var:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: 'Environment-variable name carrying the API key (e.g. `GROQ_API_KEY`).'
+        models:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+          description: |
+            Curated starter models for this provider. The first entry is
+            the recommended default when `DraftCampaign.optimizer_model`
+            is the empty string.
+        note:
+          type: string
+          maxLength: 256
+          description: Optional one-line picker hint (e.g. "free tier; 8k TPM").
+
+    DatasetIndexEntry:
+      type: object
+      required: [slug, tier, n_samples]
+      additionalProperties: false
+      description: |
+        One entry in the `GET /datasets` response (endpoint declaration
+        deferred to the read-surface PR — pinned here so the wire shape is
+        fixed before the read handler lands). Flat list with a `tier`
+        discriminator; no two-section UI per
+        `docs/specs/m13-chat-first-user-web.md § Collection`.
+      properties:
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z][a-z0-9_-]*$'
+          description: |
+            Dataset directory name. For `tier: "yours"` this is the
+            tenant-scoped slug under `projects/{tenant}/datasets/{slug}/`.
+            For `tier: "benchmark"` this is the repo-root `datasets/{slug}/`
+            name (e.g. `aime_2025`, `bbeh`).
+        tier:
+          type: string
+          enum: [yours, benchmark]
+          description: |
+            `"yours"` — user-owned Origin under `projects/{tenant}/datasets/`.
+            `"benchmark"` — install-global read-only Origin; visible only when
+            the identity holds the `datasets.benchmarks.read` capability.
+        n_samples:
+          type: integer
+          minimum: 0
+          description: Sample bank size (from `cache.json`).
+        task_description:
+          type: string
+          maxLength: 16384
+          description: First line of `task_description.md`; UI list preview.
+
   responses:
     CommandAccepted:
       description: |
@@ -1391,6 +1961,20 @@ components:
         does not exist or belongs to a different identity. Existence-leak
         gate: 404, not 403. Shape pinned in
         `docs/operations/persistence-and-state.md` § Beta hosting state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+    BackendUnreachable:
+      description: |
+        Configured backend (TermNorm or another `Connector`) did not respond
+        to the dispatcher's preflight probe. The operator-facing fix is
+        "start the backend and retry"; the dispatcher does not retry
+        internally. `details.backend_type` + `details.backend_url` identify
+        which backend failed so the frontend can render a specific message.
+        Returned with 503 status. Sole source: `Connector.preflight(...)`
+        invoked from `CommandDispatcher` before any applier runs.
       content:
         application/json:
           schema:

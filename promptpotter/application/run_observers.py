@@ -49,6 +49,13 @@ if TYPE_CHECKING:
 __all__ = ["ForkInfo", "RunCallbacks", "RunObservers", "build_run_observers"]
 
 
+# Keys in ``PhaseEvent.data`` that carry live runtime references the JSON
+# serializer can't walk (BackendStore + LangfuseLogger inside ``env=session``).
+# View derivation in ``RunCallbacks.on_phase`` consumes them before they're
+# stripped; nothing reads them off the ledger.
+_DATA_KEYS_RUNTIME_ONLY = frozenset({"env"})
+
+
 @dataclass
 class RunCallbacks:
     """Single ingress: callbacks → typed CycleRecord → ``CycleEventLog.append``.
@@ -74,12 +81,21 @@ class RunCallbacks:
 
     def on_phase(self, event: Any) -> None:
         view = view_to_wire_dict(from_phase_event(event, self._phase_ctx))
+        # View derivation has already consumed any live runtime references
+        # carried in ``event.data`` (the most opaque one is ``env=session``
+        # which holds the BackendStore + LangfuseLogger handles those classes
+        # can't serialize). Strip them before the dict lands on the ledger so
+        # ``EventStreamView.on_record`` can ``model_dump(mode="json")``
+        # without a fallback. Replay reads ``payload["view"]`` (built above);
+        # ``payload["data"]`` is only consumed live, in-memory, where the
+        # caller still holds the originals.
+        safe_data = {k: v for k, v in event.data.items() if k not in _DATA_KEYS_RUNTIME_ONLY}
         self._emit(
             PhaseRecord(
                 phase=str(event.phase),
                 event=str(event.event),
                 round=event.round,
-                payload={"view": view, "data": event.data},
+                payload={"view": view, "data": safe_data},
             )
         )
 

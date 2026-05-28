@@ -12,6 +12,12 @@ Three concerns, one per submodule:
   self-optimization).
 """
 
+from promptpotter.application.datasets.csv_ingest import (
+    MAX_SAMPLES,
+    REQUIRED_COLUMNS,
+    IngestError,
+    parse_csv_to_samples,
+)
 from promptpotter.application.datasets.loaders import (
     DATASET_LOADERS,
     SHEET_COLUMN_MAP,
@@ -38,7 +44,10 @@ from promptpotter.application.datasets.traces import load_potter_traces
 
 __all__ = [
     "DATASET_LOADERS",
+    "MAX_SAMPLES",
+    "REQUIRED_COLUMNS",
     "SHEET_COLUMN_MAP",
+    "IngestError",
     "build_dataset_run_data",
     "dataset_prompt_dir",
     "has_dataset_prompts",
@@ -53,6 +62,7 @@ __all__ = [
     "load_justlogic",
     "load_node_prompt",
     "load_potter_traces",
+    "parse_csv_to_samples",
     "sample_dataset",
     "samples_from_dicts",
     "split_train_test",

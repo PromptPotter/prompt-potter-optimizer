@@ -189,6 +189,24 @@ class RoundResult(RoundMetadata, RoundPayload):
     critique: dict[str, Any] | None = None
 
 
+class CycleError(BaseModel):
+    """Structured error carried on :class:`CycleResult` when the runner exited
+    on ``CRASHED`` / ``RENDER_ERROR`` / ``DIVERGED``.
+
+    Mirrors the trailing ``ErrorRecord`` on the canonical ledger; carried as a
+    typed field so :class:`~promptpotter.application.jobs.registry.JobRegistry`
+    and the post-run teardown read crash detail from one place without
+    coupling to projection state. The runner's ``except`` sites build this
+    instance and call ``emit_error_record`` from the same kwargs.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: str
+    message: str
+    traceback: str | None = None
+
+
 class CycleResult(BaseModel):
     """Final result of the feedback cycling process."""
 
@@ -206,6 +224,10 @@ class CycleResult(BaseModel):
     cycle_id: str | None = None
     session_id: str | None = None
     resumed_from_round: int = 1
+    # Set when ``stop_reason`` ∈ ``{CRASHED, RENDER_ERROR, DIVERGED}``;
+    # ``None`` on clean completions. The runner's ``except`` sites populate
+    # this in lockstep with the ``emit_error_record`` ledger append.
+    error: CycleError | None = None
 
 
 class DiagnosticRunRecord(BaseModel):

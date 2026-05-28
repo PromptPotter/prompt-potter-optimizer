@@ -21,9 +21,137 @@ The nouns are product-language; the substrate is OIDC (per identity-foundation C
 
 Chat is the **constant control surface**, not an onboarding wizard. Through it the user drops a project, configures a campaign (chat negotiates `campaign.json`), interrupts mid-cycle, steers mid-cycle, queries results, asks the optimizer about its own state. The dashboard survives as the **live-view companion** to chat — chat is where you talk to it, dashboard is where you watch it work.
 
+## Ingest
+
+The drop-three-things upload (dataset + framing + pipeline) is the user's entry into a Project. **Slice 1 = CSV-only ingest** — two required columns `query,ground_truth`. Later slices: XLSX (first sheet only), Parquet, JSON-lines.
+
+### The committed artifact is an Origin
+
+On commit the ingest produces an **Origin** in the tenant's collection — not just "a dataset". Origin is the existing PromptPotter domain word: per [`architecture.md §0`](../architecture.md), `cycle_{target_hash[:12]}` is content-addressed from `JobSearchPoint.content_hash(dataset)`, which is the rendered target prompt + dataset + target `pipeline_params`. The four committed files at `projects/{tenant}/datasets/{slug}/` compose into exactly that hash:
+
+| File | Origin component |
+|---|---|
+| `cache.json` | dataset rows (the sample bank) |
+| `pipeline.json` | target `pipeline_params` (initial `nodes.*.config` overlay) |
+| `task_description.md` | rendered target prompt's framing |
+| `prompts/default.json` | rendered target prompt template |
+
+The co-located `campaign.json` is **not** part of the Origin — it is the default campaign config that ships alongside (connector, scoring composite, max-rounds, optimizer-prompt hash). Two tenants who ingest structurally-identical Origins produce identical `cycle_{target_hash[:12]}` ids by construction.
+
+### Collection — `GET /datasets`
+
+A tenant's Origins are listed under `projects/{tenant}/datasets/` and exposed via the existing identity-scoped `GET /datasets`. Each returned entry carries a `tier` field:
+
+- `tier: "yours"` — user-owned Origins under `projects/{tenant}/datasets/{slug}/`. Always visible to the owning identity.
+- `tier: "benchmark"` — repo-root `datasets/` (today's `aime_2025`, `bbeh`, `gsm8k`, `hotpotqa`, `justlogic`, `lca-termnorm`, `promptpotter-self`, `_optimizer`). Visible only when the identity holds the capability `datasets.benchmarks.read`.
+
+Stage-0 capability grant: env var `PROMPTPOTTER_ADMIN=1` consumed by `default_identity()` (`shared/identity.py`) augments the default identity's capability set with `datasets.benchmarks.read`. Stage-1 OIDC grants the capability per-claim. The list endpoint is one read path; the surface is a flat list with a `tier` discriminator, not a two-section UI.
+
+### Dashboard "New campaign" entry
+
+The Dashboard's **New campaign** button is a two-mode entry against `GET /datasets`:
+
+- **Empty collection** (no `tier: "yours"` entries) → routes into the chat-ingest flow below. This is the onboarding ritual that produces the first Origin.
+- **Non-empty collection** → renders the collection as a list; the operator picks an Origin, then mints a campaign against it (the standard mint-campaign path, post-Origin). List-then-mint UX.
+
+After onboarding, campaign launches are always list-then-mint against the existing collection. The chat-ingest flow is reachable from the list as a secondary "Add an Origin" action.
+
+### Draft-campaign object
+
+The server holds a canonical **draft-campaign** per ingest, mutated by both chat and the parameter panel until the operator commits. The name stays `DraftCampaign` (not `DraftOrigin`) because the chat surface negotiates BOTH the Origin components (slug, task_description, pipeline_overlay) AND the default campaign config (connector, scoring_composite, max_rounds). On commit, the Origin-shaped subset becomes the four content-hashed files; the campaign-config subset becomes `campaign.json`. Lifecycle:
+
+1. **Created** on file drop (CSV uploaded → parsed → preview returned).
+2. **Mutated** by chat (assistant proposes edits via the existing `POST /commands/{kind}` highway) or by direct panel edits (operator clicks **Apply** in the panel; the panel-edit command rides the same highway).
+3. **Committed** on explicit operator action (chat "mint" verb or panel "Create campaign" button) — server writes the dataset dir + mints the campaign.
+4. **Discarded** by TTL or explicit discard.
+
+Shape (`DraftCampaign`):
+
+| Field | Source | Lands as |
+|---|---|---|
+| `draft_id` | server-minted ULID | (not committed) |
+| `tenant_id` | from `IdentityContext` | dir prefix |
+| `slug` | `SafeName(filename_without_ext)` initially; operator-editable | dir name |
+| `sample_preview` | first 10 parsed rows (read-only after ingest; full set persisted alongside) | `cache.json` (full set) |
+| `n_samples` | parsed row count | (derived from `cache.json`) |
+| `connector` | default `termnorm` (smart-default; operator-editable) | `campaign.json` |
+| `scoring_composite` | default `exact_match` (smart-default; operator-editable) | `campaign.json` |
+| `max_rounds` | default `5` (smart-default; operator-editable) | `campaign.json` |
+| `task_description` | default empty string; chat negotiates content | `task_description.md` + `prompts/default.json` |
+| `pipeline_overlay` | default `{}` (empty `nodes.*.config` overlay) | `pipeline.json` |
+| `created_at`, `updated_at` | server timestamps | (not committed) |
+
+Smart-default rationale: connector `termnorm` is the only registered connector today (per root CLAUDE.md); `exact_match` is the only universally-applicable scorer for `(query, ground_truth)` shape; `max_rounds=5` matches the M10 prompt-iteration framework default. Per-dataset model + `reasoning_effort` defaults are sourced from [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md) at commit time — the draft does not pin model identity (the matrix is the source of truth).
+
+### Draft-campaign object
+
+The server holds a canonical **draft-campaign** per ingest, mutated by both chat and the parameter panel until the operator commits. Lifecycle:
+
+1. **Created** on file drop (CSV uploaded → parsed → preview returned).
+2. **Mutated** by chat (assistant proposes edits via the existing `POST /commands/{kind}` highway) or by direct panel edits (operator clicks **Apply** in the panel; the panel-edit command rides the same highway).
+3. **Committed** on explicit operator action (chat "mint" verb or panel "Create campaign" button) — server writes the dataset dir + mints the campaign.
+4. **Discarded** by TTL or explicit discard.
+
+Shape (`DraftCampaign`):
+
+| Field | Source |
+|---|---|
+| `draft_id` | server-minted ULID |
+| `tenant_id` | from `IdentityContext` |
+| `slug` | `SafeName(filename_without_ext)` initially; operator-editable |
+| `sample_preview` | first 10 parsed rows (read-only after ingest; full set persisted alongside) |
+| `n_samples` | parsed row count |
+| `connector` | default `termnorm` (smart-default; operator-editable) |
+| `scoring_composite` | default `exact_match` (smart-default; operator-editable) |
+| `max_rounds` | default `5` (smart-default; operator-editable) |
+| `task_description` | default empty string; chat negotiates content |
+| `pipeline_overlay` | default `{}` (empty `nodes.*.config` overlay) |
+| `created_at`, `updated_at` | server timestamps |
+
+Smart-default rationale: connector `termnorm` is the only registered connector today (per root CLAUDE.md); `exact_match` is the only universally-applicable scorer for `(query, ground_truth)` shape; `max_rounds=5` matches the M10 prompt-iteration framework default. Per-dataset model + `reasoning_effort` defaults are sourced from [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md) at commit time — the draft does not pin model identity (the matrix is the source of truth).
+
+### State binding
+
+The chat and panel are **two views over the same `DraftCampaign`**. Mutations propagate via:
+
+- **Panel → server → chat:** operator edits a field, clicks **Apply** → `POST /commands/edit-draft-campaign` (M13 wire addition, declared in `m12-api-openapi.yaml` separately from the slice 1 spec) → server updates the draft → SSE `DraftUpdatedRecord` reaches the chat surface so the assistant sees current state on its next turn.
+- **Chat → server → panel:** assistant proposes edits via tool-call → same `POST /commands/edit-draft-campaign` → SSE `DraftUpdatedRecord` → panel re-renders.
+
+Canonical state lives server-side. Neither surface holds the source of truth; both are reflections. The "Apply" button in the panel is the **explicit commit point for panel-local edits** — the panel is allowed to be temporarily out of sync with the server until Apply fires, so the operator can compose multi-field edits without round-tripping.
+
+### `POST /datasets/ingest`
+
+Slice 1's one new endpoint. Workspace-scoped mutation (creates a draft, not yet a dataset).
+
+- **Request:** `multipart/form-data` with `file` (CSV blob) + optional `slug` (defaults to `SafeName(filename_without_ext)`).
+- **200:** `DraftCampaign` JSON (shape above) + `sample_preview` (first 10 rows).
+- **401:** unauthenticated (no `IdentityContext`).
+- **409:** slug collision — server suggests `{slug}-{n}` (smallest free `n`) in `details.suggested_slug`.
+- **422:** parse failure (CSV malformed, missing required columns `query` / `ground_truth`, zero rows, …) — `details.reason` carries the specific failure.
+
+Slug derivation: `SafeName` on the filename's basename minus extension; collisions resolved by operator picking the suggested `{slug}-{n}` or editing.
+
+### Commit path
+
+On operator commit (chat verb or panel button → `POST /commands/mint-campaign-from-draft`, declared in `m12-api-openapi.yaml`), the server writes — atomically, single-writer per `architecture.md §0` — to `projects/{tenant}/datasets/{slug}/`. The four Origin files compose into `JobSearchPoint.content_hash(dataset)`; `campaign.json` is the sibling default-config:
+
+| File | Content | Origin? |
+|---|---|---|
+| `cache.json` | full parsed sample bank (the dataset rows) | yes |
+| `pipeline.json` | initial overlay (empty `nodes.*.config` if operator did not override) | yes |
+| `task_description.md` | chat-negotiated framing | yes |
+| `prompts/default.json` | rendered target prompt template | yes |
+| `campaign.json` | default-campaign config — `connector`, `scoring_composite`, `max_rounds`, `root_content_hash`, `optimizer_prompt_hash` | no (sibling) |
+
+After commit, the standard mint-campaign path runs against the new Origin slug. The frontend chat+panel surface replaces today's placeholder `NewCampaignModal`.
+
+**Open:** SSE event name (`DraftUpdatedRecord`) needs declaration in `m12-events-asyncapi.yaml` before a handler lands — out of slice 1 scope but on-deck for the wire-up PR.
+
+Demo CSV: `dev/sample-datasets/customer-tickets-eval.csv` (5 rows, two columns; precedent — `dev/oidc-local/` Dex harness). Matches the placeholder chip text at `webapp/components/dashboard/ChatPane.tsx:248`. Allowlisted under `dev/` in `.gitignore`.
+
 ## Cross-user data leverage
 
-Already works at the data layer: `archive/measurements/{content_hash}/` is content-addressed on `JobSearchPoint.content_hash(dataset)`. What's missing is **surface** — the chat / project view doesn't show "this query was measured 14× by other users on this install." One read panel; no new persistence.
+Already works at the data layer: `archive/measurements/{content_hash}/` is content-addressed on `JobSearchPoint.content_hash(dataset)`. Two tenants who ingest structurally-identical Origins (same dataset rows + same target prompt + same `pipeline_params`) hash-collide into the same archive entries by construction — cross-tenant evidence pooling for free, no per-tenant duplication. What's missing is **surface** — the chat / project view doesn't show "this query was measured 14× by other users on this install." One read panel; no new persistence.
 
 ## Non-goals
 
@@ -32,7 +160,7 @@ Cross-install sharing (install is a hard isolation boundary; the RLS adapter fro
 ## Sequencing (not scheduled)
 
 1. **Identity-foundation Stage 1** lands first (OIDC client + middleware in M12). `Install` / `User` are real, federated to upstream IdPs. `IdentityContext` carries the verified claims. **§0 `Identity` I/O kind amendment lands in this step.**
-2. Project as first-class noun on disk (`projects/{install}/users/{uid}/projects/{pid}/`; `datasets/{name}/` migrates here). Identity-scoped per `IdentityContext`.
+2. Project as first-class noun on disk (`projects/{tenant}/datasets/{slug}/` — `tenant_id` already collapses install + user per ADR-0002 no-drift gate #3; no extra `users/{uid}/projects/{pid}/` nesting). Identity-scoped per `IdentityContext`.
 3. Webapp project view (drop-three-things upload; campaign comparison rides existing per-cycle data).
 4. Chat shell, read-only (query optimizer state).
 5. Chat write-path (steer / interrupt / fork; reuses M12 Track 3 control-plane endpoints).

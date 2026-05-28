@@ -189,8 +189,14 @@ class JobRegistry:
 
 
 def _coerce_status(raw: object) -> JobStatus:
-    if raw in ("pending", "running", "completed", "failed", "stopped"):
-        return raw  # type: ignore[return-value]
+    if raw == "pending":
+        return "pending"
+    if raw == "running":
+        return "running"
+    if raw == "completed":
+        return "completed"
+    if raw == "failed":
+        return "failed"
     return "stopped"
 
 

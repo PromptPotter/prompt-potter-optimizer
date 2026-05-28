@@ -16,10 +16,20 @@ this type.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from promptpotter.domain.identity import Issuer, TenantId, UserId, safe_name
+
+# Capability gate for repo-root ``datasets/`` (install-global benchmarks).
+# Granted to Stage-0 callers when ``PROMPTPOTTER_ADMIN=1``; granted at
+# Stage 1 per OIDC claim. Web tenants never receive it by default — that
+# is why ``/api/v1/datasets`` no longer leaks the developer's locally
+# cached benchmarks to first-time signups.
+BENCHMARKS_READ_CAP = "datasets.benchmarks.read"
+
+PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
 
 
 @dataclass(frozen=True)
@@ -33,10 +43,19 @@ class IdentityContext:
     capabilities: frozenset[str] = field(default_factory=frozenset)
 
 
+def _admin_caps_from_env() -> frozenset[str]:
+    """Return Stage-0 admin capabilities when ``PROMPTPOTTER_ADMIN=1`` is set."""
+    if os.environ.get(PROMPTPOTTER_ADMIN_ENV, "").strip() == "1":
+        return frozenset({BENCHMARKS_READ_CAP})
+    return frozenset()
+
+
 def default_identity(tenant_id: str = "default") -> IdentityContext:
     """Stage-0 single-operator identity. ``--tenant`` CLI flag overrides ``tenant_id``.
 
-    Stage 1 (M12 OIDC client) replaces this factory at the resolver seam
+    ``PROMPTPOTTER_ADMIN=1`` in the environment augments the returned
+    identity's capabilities with :data:`BENCHMARKS_READ_CAP`. Stage 1 (M12
+    OIDC client) replaces this factory at the resolver seam
     (`presentation/api/deps.py::resolve_identity`); no other call site changes.
     """
     return IdentityContext(
@@ -44,8 +63,13 @@ def default_identity(tenant_id: str = "default") -> IdentityContext:
         tenant_id=TenantId(safe_name(tenant_id)),
         issuer=None,
         claims={},
-        capabilities=frozenset(),
+        capabilities=_admin_caps_from_env(),
     )
 
 
-__all__ = ["IdentityContext", "default_identity"]
+__all__ = [
+    "BENCHMARKS_READ_CAP",
+    "PROMPTPOTTER_ADMIN_ENV",
+    "IdentityContext",
+    "default_identity",
+]

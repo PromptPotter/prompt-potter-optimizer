@@ -17,7 +17,12 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field
 
 from promptpotter.config.settings import settings
-from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, TokenUsageRecord
+from promptpotter.domain.run_records import (
+    CommandAckRecord,
+    CommandRecord,
+    ErrorRecord,
+    TokenUsageRecord,
+)
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -181,10 +186,41 @@ def emit_command_ack(
         logger.exception("emit_command_ack append failed")
 
 
+def emit_error_record(
+    *,
+    kind: str,
+    message: str,
+    stop_reason: Literal["CRASHED", "RENDER_ERROR", "DIVERGED"],
+    traceback: str | None = None,
+) -> None:
+    """Append an ``ErrorRecord`` to the active cycle ledger.
+
+    Same ContextVar surface as ``emit_token_usage``. The runner's three
+    ``except`` sites call this from
+    ``application/runner/{entry,loop}.py``; ``LiveDashboardView`` is the
+    sole subscriber writing ``dashboard.json::error``. Errors emitted
+    before the round loop entered carry ``round=None``."""
+    ledger = _CYCLE_LEDGER.get()
+    if ledger is None:
+        return
+    record = ErrorRecord(
+        kind=kind,
+        message=message,
+        traceback=traceback,
+        stop_reason=stop_reason,
+        round=_CURRENT_ROUND.get(),
+    )
+    try:
+        ledger.append(record)
+    except Exception:
+        logger.exception("emit_error_record append failed")
+
+
 __all__ = [
     "LLMResponse",
     "emit_command",
     "emit_command_ack",
+    "emit_error_record",
     "emit_token_usage",
     "reset_current_round",
     "reset_cycle_ledger",

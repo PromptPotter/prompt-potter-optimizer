@@ -19,12 +19,18 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from promptpotter import connectors
 from promptpotter.application.bootstrap import init_services
 from promptpotter.application.bootstrap.session import Session, auto_mint_session
+from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
 from promptpotter.application.config import (
     CampaignConfig,
     configure_and_apply_pipeline,
     load_campaign_config,
+)
+from promptpotter.application.datasets.draft_campaign import (
+    DraftCampaign,
+    DraftCampaignRegistry,
 )
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
@@ -45,6 +51,21 @@ class LaunchError(RuntimeError):
     """Raised on mint-time failures (missing dataset, malformed config, …)."""
 
 
+async def _run_preflight(backend_type: str, backend_url: str) -> None:
+    """Resolve the connector and run its reachability probe.
+
+    Connectors opt out of preflight by leaving ``Connector.preflight = None``
+    (the ``promptpotter`` in-process connector does this — nothing to probe).
+    Probe raises :class:`~promptpotter.connectors.BackendUnreachableError`
+    on failure; the dispatcher's central catch in ``_record_and_apply`` maps
+    it to HTTP 503 with ``details.backend_type`` + ``details.backend_url``.
+    """
+    connector = connectors.get(backend_type)
+    if connector.preflight is None:
+        return
+    await connector.preflight(backend_url)
+
+
 async def mint_campaign_command(
     *,
     stores: Stores,
@@ -60,9 +81,12 @@ async def mint_campaign_command(
     the caller's 202 response goes out the moment this returns. Background
     progress shows up via the canonical ledger + `dashboard.json` stream.
     """
-    dataset_root = _datasets_root() / dataset_name
+    dataset_root = resolve_dataset_config_dir(stores, _repo_root(), dataset_name)
     if not dataset_root.is_dir():
         raise LaunchError(f"dataset not found: {dataset_name!r} (no {dataset_root}/)")
+
+    backend_type = _read_backend_type_from_dataset(dataset_root, dataset_name)
+    await _run_preflight(backend_type, backend_url)
 
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
@@ -141,6 +165,119 @@ async def mint_campaign_command(
     return campaign_id, cycle_id, job
 
 
+async def mint_campaign_from_draft_command(
+    *,
+    stores: Stores,
+    draft: DraftCampaign,
+    draft_registry: DraftCampaignRegistry,
+    job_registry: JobRegistry,
+    halt_at_accuracy: float | None = None,
+    spend_budget_usd: float | None = None,
+    backend_url: str = DEFAULT_BACKEND_URL,
+) -> tuple[str, str, Job]:
+    """Commit a draft to disk + mint a campaign + spawn the runner.
+
+    Wraps :func:`mint_campaign_command` after materializing the four Origin
+    files (`cache.json`, `pipeline.json`, `task_description.md`,
+    `prompts/default.json`) and the sibling `campaign.json` per
+    ``docs/specs/m13-chat-first-user-web.md § Commit path``.
+    """
+    if stores.tenant_datasets.slug_exists(draft.slug):
+        raise LaunchError(
+            f"slug collision at commit: {draft.slug!r} already exists in this tenant's collection"
+        )
+
+    # Preflight BEFORE commit_draft so a backend-down failure preserves the
+    # draft — the operator can fix the backend and retry without re-uploading.
+    await _run_preflight(draft.connector, backend_url)
+
+    pipeline_json = _build_origin_pipeline_json(draft)
+    campaign_json = _build_default_campaign_json(draft)
+    prompt_default = _build_default_prompt(draft)
+
+    stores.tenant_datasets.commit_draft(
+        draft.draft_id,
+        slug=draft.slug,
+        pipeline_json=pipeline_json,
+        campaign_json=campaign_json,
+        task_description=draft.task_description,
+        prompt_default=prompt_default,
+    )
+    draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)
+
+    return await mint_campaign_command(
+        stores=stores,
+        dataset_name=draft.slug,
+        job_registry=job_registry,
+        halt_at_accuracy=halt_at_accuracy,
+        spend_budget_usd=spend_budget_usd,
+        backend_url=backend_url,
+    )
+
+
+def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
+    """Slice-1 pipeline overlay seeded from the connector's first-tenant default.
+
+    The committed file is the dataset's ``pipeline.json`` overlay; the
+    backend's live ``GET /pipeline`` response is the actual schema.
+    ``backend_type`` is mandatory for connector resolution
+    (``_read_backend_type`` reads it on bootstrap); ``pipelines.default``
+    overrides the backend's pipeline order per the merge contract in
+    ``application/bootstrap/wiring.py::_apply_dataset_overlay``.
+
+    Per R4 the step list comes from :attr:`Connector.default_pipeline` —
+    the launcher carries no hard-coded ``["llm_only"]``. Connectors that
+    leave the field empty inherit the backend's own default.
+    """
+    pipeline: dict[str, Any] = {
+        "name": draft.slug,
+        "backend_type": draft.connector,
+        "backend_name": draft.connector,
+    }
+    connector = connectors.get(draft.connector)
+    if connector.default_pipeline:
+        pipeline["pipelines"] = {"default": list(connector.default_pipeline)}
+    if draft.pipeline_overlay:
+        pipeline["nodes"] = draft.pipeline_overlay
+    return pipeline
+
+
+def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
+    """Default-campaign sibling — valid :class:`CampaignConfig` wrapped in the
+    on-disk ``campaign_config`` outer key per the repo convention
+    (see ``datasets/{benchmark}/campaign.json``).
+
+    Per R4, ``exclude_nodes`` and the ``optimization`` knob overrides come
+    from the connector (:attr:`Connector.default_exclude_nodes` +
+    :attr:`Connector.default_optimization`) — the launcher no longer
+    hard-codes ``["llm_ranking"]`` or ``n_variants=3``. Connectors that
+    leave the fields empty get the schema defaults.
+    """
+    optimizer_llm: dict[str, Any] = {"provider": draft.optimizer_provider}
+    if draft.optimizer_model:
+        optimizer_llm["model"] = draft.optimizer_model
+    connector = connectors.get(draft.connector)
+    optimization: dict[str, Any] = {"max_rounds": draft.max_rounds}
+    optimization.update(dict(connector.default_optimization))
+    return {
+        "campaign_config": {
+            "dataset_name": draft.slug,
+            "scoring": f"{draft.scoring_composite}(predicted, ground_truth)",
+            "exclude_nodes": list(connector.default_exclude_nodes),
+            "optimization": optimization,
+            "optimizer_llm": optimizer_llm,
+        },
+    }
+
+
+def _build_default_prompt(draft: DraftCampaign) -> dict[str, Any]:
+    """Slice-1 starter prompt — wraps the task description, no per-node tuning yet."""
+    return {
+        "task_description": draft.task_description,
+        "instructions": draft.task_description,
+    }
+
+
 async def start_run_command(
     *,
     stores: Stores,
@@ -164,6 +301,10 @@ async def start_run_command(
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
         raise LaunchError(f"campaign not found or not owned: {campaign_id}")
 
+    dataset_root = resolve_dataset_config_dir(stores, _repo_root(), campaign.dataset_name)
+    backend_type = _read_backend_type_from_dataset(dataset_root, campaign.dataset_name)
+    await _run_preflight(backend_type, backend_url)
+
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
         tenant_id=str(stores.identity.tenant_id),
@@ -184,7 +325,9 @@ async def start_run_command(
         identity=stores.identity,
     )
 
-    file_config = _load_dataset_campaign_config(_datasets_root() / dataset_name)
+    file_config = _load_dataset_campaign_config(
+        resolve_dataset_config_dir(stores, _repo_root(), dataset_name)
+    )
     profile = session.store.backends.load_connector_profile(session.backend_id) or {}
     campaign_config = load_campaign_config({**profile, **file_config})
 
@@ -248,25 +391,70 @@ async def _run_in_background(
             spend_budget_usd=spend_budget_usd,
         )
         stop_reason = getattr(result, "stop_reason", None)
-        status = "completed"
-        if stop_reason and str(stop_reason).upper() == "INTERRUPTED":
+        reason_upper = str(stop_reason).upper() if stop_reason else ""
+        # crashed / render_error / diverged are operator-visible failures, not
+        # successful completions. ``result.error.message`` is the operator-
+        # facing string the runner picked at the throw site — the same string
+        # written to ``dashboard.json::error.message`` via the canonical
+        # ``ErrorRecord``; reading it here keeps JobRegistry and dashboard in
+        # lockstep without coupling to projection state.
+        failure_reasons = {"CRASHED", "RENDER_ERROR", "DIVERGED"}
+        if reason_upper in failure_reasons:
+            status: str = "failed"
+            persisted_reason = (
+                result.error.message if result.error is not None else str(stop_reason)
+            )
+        elif reason_upper == "INTERRUPTED":
             status = "stopped"
+            persisted_reason = str(stop_reason)
+        else:
+            status = "completed"
+            persisted_reason = str(stop_reason) if stop_reason else None  # type: ignore[assignment]
         job_registry.mark_finished(
             job_id,
             status=status,  # type: ignore[arg-type]
-            stop_reason=str(stop_reason) if stop_reason else None,
+            stop_reason=persisted_reason,
         )
     except asyncio.CancelledError:
         job_registry.mark_finished(job_id, status="stopped", stop_reason="task_cancelled")
         raise
     except Exception as exc:
+        # Anything reaching here fired BEFORE / OUTSIDE the runner's own
+        # try/except (e.g. ``build_run_observers`` blew up) — no
+        # ``ErrorRecord`` was emitted, so the exception's own message is
+        # the most informative thing we have. Preserve ``ClassName: message``
+        # shape for the audit trail; backend-unreachable cases are caught at
+        # the dispatcher boundary (R2) before they get this deep.
         logger.exception("job %s failed", job_id)
-        job_registry.mark_finished(job_id, status="failed", stop_reason=str(exc))
+        job_registry.mark_finished(
+            job_id,
+            status="failed",
+            stop_reason=f"{type(exc).__name__}: {exc}",
+        )
 
 
-def _datasets_root() -> Path:
-    """Resolve the datasets/ root from this module's location."""
-    return Path(__file__).resolve().parents[3] / "datasets"
+def _repo_root() -> Path:
+    """Resolve the repo root from this module's location (parent of ``datasets/``)."""
+    return Path(__file__).resolve().parents[3]
+
+
+def _read_backend_type_from_dataset(dataset_root: Path, dataset_name: str) -> str:
+    """Resolve ``backend_type`` from ``{dataset_root}/pipeline.json`` for the preflight.
+
+    Raises :class:`LaunchError` when the field is missing — the launch can't
+    proceed without it, and the dispatcher catches LaunchError into a 422.
+    """
+    raw_path = dataset_root / "pipeline.json"
+    if not raw_path.is_file():
+        raise LaunchError(f"dataset {dataset_name!r} has no pipeline.json — cannot resolve backend")
+    try:
+        raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise LaunchError(f"dataset {dataset_name!r} pipeline.json is malformed: {exc}") from exc
+    bt = raw.get("backend_type")
+    if not isinstance(bt, str) or not bt:
+        raise LaunchError(f"dataset {dataset_name!r} pipeline.json is missing 'backend_type'")
+    return bt.lower()
 
 
 def _claim_email(stores: Stores) -> str | None:
@@ -276,14 +464,24 @@ def _claim_email(stores: Stores) -> str | None:
 
 
 def _load_dataset_campaign_config(dataset_root: Path) -> dict[str, Any]:
-    """Read ``datasets/{name}/campaign.json``; return empty dict when absent."""
+    """Read ``datasets/{name}/campaign.json``; unwrap the optional outer
+    ``campaign_config`` key (the repo on-disk convention). Mirrors the CLI
+    loader at ``presentation/cli/session.py:load_campaign_config``."""
     path = dataset_root / "campaign.json"
     if not path.is_file():
         return {}
     raw = path.read_text(encoding="utf-8").strip()
     if not raw:
         return {}
-    return json.loads(raw)  # type: ignore[no-any-return]
+    data = json.loads(raw)
+    result: dict[str, Any] = data.get("campaign_config", data) or {}
+    return result
 
 
-__all__ = ["LaunchError", "QuotaExceededError", "mint_campaign_command", "start_run_command"]
+__all__ = [
+    "LaunchError",
+    "QuotaExceededError",
+    "mint_campaign_command",
+    "mint_campaign_from_draft_command",
+    "start_run_command",
+]

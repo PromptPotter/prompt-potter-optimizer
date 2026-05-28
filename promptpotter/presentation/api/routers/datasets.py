@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from pathlib import Path
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
+from promptpotter.application.datasets.csv_ingest import (
+    MAX_SAMPLES,
+    IngestError,
+    parse_csv_to_samples,
+)
+from promptpotter.application.datasets.draft_campaign import (
+    DraftCampaignRegistry,
+    default_slug_from_filename,
+)
 from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
 from promptpotter.application.intelligence.measurement_series import (
     campaign_measurement_series,
@@ -23,6 +33,13 @@ from promptpotter.infrastructure.store.paths import (
     validate_dataset_name,
 )
 from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.shared.identity import BENCHMARKS_READ_CAP
+
+# Per-file upload cap. 25 MB is the smallest size that comfortably holds
+# ``MAX_SAMPLES`` 500-byte rows + headroom; rejects the obvious DOS shapes
+# (multi-hundred-MB CSVs) before we even decode UTF-8. Wire-level limit
+# (FastAPI / Starlette do not enforce one by default).
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 _datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
@@ -32,10 +49,24 @@ HeatmapScope = Literal["cycle", "campaign", "dataset"]
 
 
 class DatasetIndexEntry(BaseModel):
-    """One row in the dataset registry — backs the ConfigMenu dropdown."""
+    """One row in the dataset registry — backs the Dashboard ``New campaign`` view.
+
+    Wire shape pinned in ``docs/specs/m12-api-openapi.yaml::DatasetIndexEntry``.
+    """
 
     name: str = Field(description="Slug used as the path segment under `datasets/`.")
     title: str | None = Field(default=None, description="Display title (from `dataset.md`).")
+    tier: Literal["yours", "benchmark"] = Field(
+        description=(
+            "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. "
+            "``benchmark`` = install-global ``datasets/{slug}/``; visible only to identities "
+            "holding the ``datasets.benchmarks.read`` capability."
+        ),
+    )
+    n_samples: int = Field(
+        default=0,
+        description="Sample bank size from ``cache.json``; ``0`` when the cache hasn't been materialized yet.",
+    )
 
 
 class DatasetIndexResponse(BaseModel):
@@ -43,10 +74,28 @@ class DatasetIndexResponse(BaseModel):
 
 
 @_datasets_router.get("", response_model=DatasetIndexResponse)
-async def list_datasets() -> DatasetIndexResponse:
-    """Walk `datasets/` and return every wired dataset (each dir with a `pipeline.json`)."""
+async def list_datasets(store: StoreDep) -> DatasetIndexResponse:
+    """Tenant Origins + (if the identity holds ``datasets.benchmarks.read``) benchmarks.
+
+    Identity-scoped: web tenants only see their own collection. The bleed-
+    through bug (every signup seeing the developer's locally cached
+    ``aime_2025`` / ``bbeh`` / ... benchmarks) is closed by gating
+    ``tier: "benchmark"`` rows on :data:`BENCHMARKS_READ_CAP`.
+    """
     out: list[DatasetIndexEntry] = []
-    if DEFAULT_DATASETS_ROOT.is_dir():
+
+    for slug in store.tenant_datasets.list_slugs():
+        dataset_dir = store.tenant_datasets.dataset_dir(slug)
+        out.append(
+            DatasetIndexEntry(
+                name=slug,
+                title=_read_dataset_title(dataset_dir),
+                tier="yours",
+                n_samples=_read_n_samples(dataset_dir),
+            )
+        )
+
+    if BENCHMARKS_READ_CAP in store.identity.capabilities and DEFAULT_DATASETS_ROOT.is_dir():
         for entry in sorted(DEFAULT_DATASETS_ROOT.iterdir()):
             if not entry.is_dir() or not (entry / "pipeline.json").is_file():
                 continue
@@ -54,12 +103,107 @@ async def list_datasets() -> DatasetIndexResponse:
                 validate_dataset_name(entry.name)
             except ValueError:
                 continue
-            title = _read_dataset_title(entry)
-            out.append(DatasetIndexEntry(name=entry.name, title=title))
+            out.append(
+                DatasetIndexEntry(
+                    name=entry.name,
+                    title=_read_dataset_title(entry),
+                    tier="benchmark",
+                    n_samples=_read_n_samples(entry),
+                )
+            )
     return DatasetIndexResponse(datasets=out)
 
 
-def _read_dataset_title(dataset_dir: Any) -> str | None:
+@_datasets_router.post("/ingest")
+async def ingest_dataset(
+    request: Request,
+    store: StoreDep,
+    file: Annotated[
+        UploadFile,
+        File(description="CSV blob with `query` + `ground_truth` columns."),
+    ],
+    slug: Annotated[str | None, Form(description="Optional slug override.")] = None,
+) -> dict[str, Any]:
+    """Parse an uploaded CSV; return a server-held :class:`DraftCampaign`.
+
+    Wire contract pinned in ``docs/specs/m12-api-openapi.yaml::POST /datasets/ingest``.
+    NOT a Control-remote command — no ``CommandRecord`` lands until the
+    operator commits via ``/commands/mint-campaign-from-draft``.
+    """
+    registry = _draft_registry(request)
+
+    blob = await file.read()
+    if len(blob) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "error": "payload_invalid",
+                "message": (
+                    f"Upload {len(blob)} bytes exceeds the per-file cap of "
+                    f"{MAX_UPLOAD_BYTES} bytes."
+                ),
+            },
+        )
+
+    try:
+        samples = parse_csv_to_samples(blob, source_file=file.filename or "")
+    except IngestError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "payload_invalid",
+                "message": exc.message,
+                "details": {"reason": exc.reason, "max_samples": MAX_SAMPLES},
+            },
+        ) from None
+
+    base_slug = (slug or default_slug_from_filename(file.filename or "upload")).lower()
+    try:
+        validate_dataset_name(base_slug)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "payload_invalid",
+                "message": str(exc),
+                "details": {"reason": "bad_slug"},
+            },
+        ) from None
+
+    if store.tenant_datasets.slug_exists(base_slug):
+        suggested = store.tenant_datasets.suggest_free_slug(base_slug)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "payload_invalid",
+                "message": f"Slug '{base_slug}' already exists in your collection.",
+                "details": {"suggested_slug": suggested},
+            },
+        )
+
+    preview = [{"query": s.query, "ground_truth": s.ground_truth} for s in samples[:10]]
+    draft = registry.create(
+        tenant_id=store.identity.tenant_id,
+        slug=base_slug,
+        n_samples=len(samples),
+        sample_preview=preview,
+        source_file=file.filename or "",
+    )
+    store.tenant_datasets.write_draft_cache(
+        draft.draft_id, samples, source_file=file.filename or ""
+    )
+    return draft.to_wire()
+
+
+def _draft_registry(request: Request) -> DraftCampaignRegistry:
+    """Pull the registry off ``app.state``; missing registry is a programmer error."""
+    registry: DraftCampaignRegistry | None = getattr(request.app.state, "draft_campaigns", None)
+    if registry is None:
+        raise HTTPException(500, "draft-campaign registry not initialised")
+    return registry
+
+
+def _read_dataset_title(dataset_dir: Path) -> str | None:
     md = dataset_dir / "dataset.md"
     if not md.is_file():
         return None
@@ -68,6 +212,22 @@ def _read_dataset_title(dataset_dir: Any) -> str | None:
         if stripped.startswith("# "):
             return stripped[2:].strip() or None
     return None
+
+
+def _read_n_samples(dataset_dir: Path) -> int:
+    """Cheap read of ``cache.json::row_count`` (falls back to ``items`` length)."""
+    cache = dataset_dir / "cache.json"
+    if not cache.is_file():
+        return 0
+    try:
+        raw = json.loads(cache.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    row_count = raw.get("row_count")
+    if isinstance(row_count, int):
+        return row_count
+    items = raw.get("items")
+    return len(items) if isinstance(items, list) else 0
 
 
 def _check_dataset_name(name: str) -> None:

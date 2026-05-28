@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
+from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
 from promptpotter.application.jobs import JobRegistry, default_jobs_dir
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import APP_VERSION, settings
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Environment: %s", settings.ENVIRONMENT)
     app.state.identity_bundle = build_identity_bundle(default_identity_paths())
     app.state.job_registry = JobRegistry(default_jobs_dir())
+    app.state.draft_campaigns = DraftCampaignRegistry()
     logger.info("Webapp available at: /ui/  (root / redirects there)")
     logger.info("API docs available at: /docs")
     yield

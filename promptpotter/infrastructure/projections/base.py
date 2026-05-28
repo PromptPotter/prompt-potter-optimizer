@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from promptpotter.domain.run_records import (
     CycleRecord,
+    ErrorRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
@@ -37,6 +38,8 @@ class DerivedView:
             self._handle_llm_call_progress(record)
         elif isinstance(record, LLMCallRecord):
             self._handle_llm_call(record)
+        elif isinstance(record, ErrorRecord):
+            self._handle_error(record)
 
     def _handle_phase(self, record: PhaseRecord) -> None: ...
     def _handle_snapshot(self, record: SnapshotRecord) -> None: ...
@@ -45,6 +48,7 @@ class DerivedView:
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None: ...
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None: ...
     def _handle_llm_call(self, record: LLMCallRecord) -> None: ...
+    def _handle_error(self, record: ErrorRecord) -> None: ...
 
     def drain(self) -> None:
         """Settle buffered state to disk on cycle teardown so the ledger's

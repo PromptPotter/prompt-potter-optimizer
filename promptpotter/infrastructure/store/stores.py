@@ -28,6 +28,7 @@ from promptpotter.infrastructure.store.paths import (
 )
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.sweep_store import SweepStore
+from promptpotter.infrastructure.store.tenant_dataset_store import TenantDatasetStore
 from promptpotter.infrastructure.store.user_store import UserStore
 from promptpotter.shared.hashing import HASH_TRUNCATE
 from promptpotter.shared.identity import IdentityContext
@@ -106,6 +107,7 @@ class Stores:
     projects_root: Path
     identity: IdentityContext
     backends: BackendStore
+    tenant_datasets: TenantDatasetStore
     sessions: SessionStore
     campaigns: CampaignStore
     sweeps: SweepStore
@@ -142,6 +144,7 @@ def build_stores(
         projects_root=root,
         identity=identity,
         backends=BackendStore(tenant_dir, ds_root),
+        tenant_datasets=TenantDatasetStore(tenant_dir),
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),
         sweeps=SweepStore(tenant_dir),

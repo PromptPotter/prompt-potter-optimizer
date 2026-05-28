@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from promptpotter.connectors.protocol import Connector
+from promptpotter.connectors.protocol import BackendUnreachableError, Connector
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +211,40 @@ def _resolve_ground_truth(experiment_data: dict[str, Any], query: str) -> str | 
 
 
 # ---------------------------------------------------------------------------
+# Reachability probe
+# ---------------------------------------------------------------------------
+
+
+async def _termnorm_preflight(backend_url: str) -> None:
+    """Ping ``GET /status`` before the launcher accepts a write command.
+
+    Raises :class:`BackendUnreachableError` on TCP-level connect failure
+    (``httpx.ConnectError`` / ``ConnectTimeout``). Other shapes
+    (``not_implemented`` / ``error`` for a partial response, HTTP 5xx, etc.)
+    pass through silently — the runner will surface them via the canonical
+    ``ErrorRecord`` if they recur mid-run.
+    """
+    async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=3.0)) as http:
+        try:
+            resp = await http.get(f"{backend_url}/status")
+        except httpx.ConnectError as exc:
+            raise BackendUnreachableError(
+                backend_type="termnorm",
+                backend_url=backend_url,
+                detail=str(exc).strip() or "connection refused",
+            ) from exc
+        except httpx.ConnectTimeout as exc:
+            raise BackendUnreachableError(
+                backend_type="termnorm",
+                backend_url=backend_url,
+                detail="connect timeout",
+            ) from exc
+        # 5xx responses past the connect are operator-visible later via the
+        # ledger; preflight is concerned with reachability, not health.
+        del resp
+
+
+# ---------------------------------------------------------------------------
 # Revision check
 # ---------------------------------------------------------------------------
 
@@ -251,6 +285,24 @@ CONNECTOR = Connector(
     resolve_ground_truth=_resolve_ground_truth,
     expected_revision=_EXPECTED_REVISION,
     version_check=_termnorm_version_check,
+    preflight=_termnorm_preflight,
+    # First-tenant default — skip the heavy retrieval/scoring nodes (R4).
+    # The production-benchmark pipeline includes them; a fresh CSV upload
+    # should not pay Brave Search billing + multi-second latency on round 1.
+    default_pipeline=("llm_only",),
+    # ``llm_ranking`` is broken (~50% json_validate_failed) — known issue
+    # in root CLAUDE.md; pre-exclude it on every new tenant cycle.
+    default_exclude_nodes=("llm_ranking",),
+    # R4: connector-owned seed for ``campaign.json::optimization``. Pinned to
+    # ``n_variants=3`` so first-time Groq-tier tenants stay under the 8k TPM
+    # cap on the L1 meta-prompt (the system's own ``RequestTooLargeError``
+    # remediation advice says "n_variants: 5 -> 3"). The required thresholds
+    # mirror ``datasets/gsm8k/campaign.json``.
+    default_optimization=(
+        ("n_variants", 3),
+        ("improvement_threshold", 0.01),
+        ("degradation_threshold", 0.4),
+    ),
 )
 
 

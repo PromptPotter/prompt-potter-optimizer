@@ -8,10 +8,10 @@ an import + dict entry below. No import-side-effects.
 from __future__ import annotations
 
 from promptpotter.connectors.promptpotter import CONNECTOR as _PROMPTPOTTER
-from promptpotter.connectors.protocol import Connector
+from promptpotter.connectors.protocol import BackendUnreachableError, Connector
 from promptpotter.connectors.termnorm import CONNECTOR as _TERMNORM
 
-__all__ = ["CONNECTORS", "Connector", "get"]
+__all__ = ["CONNECTORS", "BackendUnreachableError", "Connector", "get"]
 
 CONNECTORS: dict[str, Connector] = {
     "termnorm": _TERMNORM,

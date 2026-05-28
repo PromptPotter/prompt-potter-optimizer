@@ -312,6 +312,151 @@ def test_file_oversize_returns_null_content(
     assert body["content_type"] == "text"
 
 
+def test_dataset_ingest_flows_through_draft_and_tenant_scope(
+    seeded_tenant: tuple[TestClient, str, str],
+) -> None:
+    """``POST /datasets/ingest`` mints a tenant-scoped draft; sparse-edit lands
+    on the same draft; cross-tenant lookup is 404 (existence-leak gate)."""
+    from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
+    from promptpotter.domain.identity import TenantId
+
+    client, *_ = seeded_tenant
+    # The seeded_tenant fixture's stores ride on a tmp_path; TestClient runs
+    # lifespan via __enter__, so use the context manager to seed the registry.
+    with client:
+        r = client.post(
+            "/api/v1/datasets/ingest",
+            files={
+                "file": (
+                    "tickets.csv",
+                    b"query,ground_truth\nq1,refund\nq2,bug_report\n",
+                    "text/csv",
+                ),
+            },
+        )
+        assert r.status_code == 200, r.text
+        draft = r.json()
+        assert draft["n_samples"] == 2
+        assert draft["slug"] == "tickets"
+        assert draft["connector"] == "termnorm"
+        assert draft["max_rounds"] == 5
+        # Sparse edit lands a mutation; response is the full post-mutation shape.
+        edit = client.post(
+            "/api/v1/commands/edit-draft-campaign",
+            headers={"Idempotency-Key": "test-k1"},
+            json={
+                "kind": "edit-draft-campaign",
+                "payload": {
+                    "draft_id": draft["draft_id"],
+                    "patch": {"task_description": "label tickets", "max_rounds": 3},
+                },
+            },
+        )
+        assert edit.status_code == 200
+        assert edit.json()["task_description"] == "label tickets"
+        assert edit.json()["max_rounds"] == 3
+        # Cross-tenant lookup: same draft_id, different tenant → 404, not 403.
+        registry: DraftCampaignRegistry = client.app.state.draft_campaigns  # type: ignore[attr-defined]
+        assert registry.get(draft["draft_id"], tenant_id=TenantId("other-tenant")) is None
+        # Missing-column 422 with structured reason for the wire layer.
+        bad = client.post(
+            "/api/v1/datasets/ingest",
+            files={"file": ("bad.csv", b"foo,bar\n1,2\n", "text/csv")},
+        )
+        assert bad.status_code == 422
+        assert bad.json()["detail"]["details"]["reason"] == "missing_column"
+
+
+def test_mint_from_draft_503_preserves_draft_when_backend_unreachable(
+    seeded_tenant: tuple[TestClient, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backend-down preflight on ``mint-campaign-from-draft`` must fail BEFORE
+    ``commit_draft`` runs — so the operator can fix the backend and retry
+    without re-uploading. Surfaces as HTTP 503 with the structured
+    ``backend_unreachable`` error code (not 422 ``payload_invalid``).
+
+    Post-R2: preflight is a ``Connector`` contract. We swap the registered
+    termnorm connector for a sibling whose ``preflight`` raises
+    :class:`BackendUnreachableError`, exercising the same code path the
+    real probe would hit on a TCP failure."""
+    from dataclasses import replace
+
+    from promptpotter import connectors
+    from promptpotter.connectors import BackendUnreachableError
+
+    async def _unreachable(backend_url: str) -> None:
+        raise BackendUnreachableError(
+            backend_type="termnorm",
+            backend_url=backend_url,
+            detail="connection refused",
+        )
+
+    failing = replace(connectors.CONNECTORS["termnorm"], preflight=_unreachable)
+    monkeypatch.setitem(connectors.CONNECTORS, "termnorm", failing)
+
+    client, *_ = seeded_tenant
+    with client:
+        r = client.post(
+            "/api/v1/datasets/ingest",
+            files={
+                "file": (
+                    "tickets.csv",
+                    b"query,ground_truth\nq1,refund\nq2,bug_report\n",
+                    "text/csv",
+                ),
+            },
+        )
+        assert r.status_code == 200, r.text
+        draft = r.json()
+
+        # First mint: backend down → 503 with the structured code, NOT a 422.
+        mint = client.post(
+            "/api/v1/commands/mint-campaign-from-draft",
+            headers={"Idempotency-Key": "test-mint-1"},
+            json={
+                "kind": "mint-campaign-from-draft",
+                "payload": {"draft_id": draft["draft_id"]},
+            },
+        )
+        assert mint.status_code == 503, mint.text
+        detail = mint.json()["detail"]
+        assert detail["error"] == "backend_unreachable"
+        assert detail["details"]["backend_type"] == "termnorm"
+        assert detail["details"]["draft_id"] == draft["draft_id"]
+
+        # Retry: draft is preserved (not 404 "draft not found") — operator can
+        # fix the backend and retry without re-uploading. Still 503 here
+        # because the patch keeps the backend unreachable, but the draft
+        # lookup succeeded.
+        retry = client.post(
+            "/api/v1/commands/mint-campaign-from-draft",
+            headers={"Idempotency-Key": "test-mint-2"},
+            json={
+                "kind": "mint-campaign-from-draft",
+                "payload": {"draft_id": draft["draft_id"]},
+            },
+        )
+        assert retry.status_code == 503, retry.text
+        assert retry.json()["detail"]["error"] == "backend_unreachable"
+
+
+def test_dataset_listing_gates_benchmarks_on_capability(
+    seeded_tenant: tuple[TestClient, str, str],
+) -> None:
+    """``GET /datasets`` is identity-scoped — web tenants (no
+    ``datasets.benchmarks.read`` capability) MUST NOT see the install's
+    repo-root benchmarks. The bleed-through fix the M13 ingest arc closes."""
+    client, *_ = seeded_tenant
+    r = client.get("/api/v1/datasets")
+    assert r.status_code == 200
+    entries = r.json()["datasets"]
+    tiers = {e["tier"] for e in entries}
+    assert "benchmark" not in tiers, (
+        "default identity must not see benchmarks unless PROMPTPOTTER_ADMIN=1"
+    )
+
+
 def test_optimizer_pipeline_returns_view_topology() -> None:
     """``/optimizer/pipeline`` must expose the bundled ``view`` block (nodes +
     edges) — what the webapp renders the workflow from."""

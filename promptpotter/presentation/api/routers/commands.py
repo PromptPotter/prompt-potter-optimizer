@@ -36,7 +36,19 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Header, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from promptpotter.application.datasets.draft_campaign import (
+    DEFAULT_CONNECTOR,
+    DEFAULT_MAX_ROUNDS,
+    DEFAULT_SCORING_COMPOSITE,
+    DraftCampaign,
+    DraftCampaignRegistry,
+)
 from promptpotter.application.jobs import JobRegistry
+from promptpotter.application.jobs.launcher import (
+    LaunchError,
+    mint_campaign_from_draft_command,
+)
+from promptpotter.connectors import BackendUnreachableError
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.middleware import CommandAcceptedBody, CommandDispatcher
 from promptpotter.presentation.api.middleware.command_dispatcher import (
@@ -185,6 +197,182 @@ def _build_workspace_payload(kind: str, payload: dict[str, Any]) -> dict[str, An
         return mint_out
     # sync-backend-experiments
     return {"backend_id": _require_slug(payload, "backend_id", max_len=64)}
+
+
+class _EditDraftPatch(BaseModel):
+    """Sparse mutation payload — only declared fields ride through."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    slug: str | None = Field(
+        default=None, min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$"
+    )
+    connector: str | None = Field(default=None, min_length=1, max_length=64)
+    scoring_composite: str | None = Field(default=None, min_length=1, max_length=64)
+    max_rounds: int | None = Field(default=None, ge=1, le=100)
+    task_description: str | None = Field(default=None, max_length=16384)
+    pipeline_overlay: dict[str, Any] | None = None
+    optimizer_provider: str | None = Field(default=None, min_length=1, max_length=32)
+    optimizer_model: str | None = Field(default=None, max_length=128)
+
+
+class _EditDraftEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(pattern=r"^edit-draft-campaign$")
+    payload: dict[str, Any] = Field(default_factory=dict)
+    client_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class _MintFromDraftEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(pattern=r"^mint-campaign-from-draft$")
+    payload: dict[str, Any] = Field(default_factory=dict)
+    client_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def _draft_registry(request: Request) -> DraftCampaignRegistry:
+    registry: DraftCampaignRegistry | None = getattr(request.app.state, "draft_campaigns", None)
+    if registry is None:
+        raise HTTPException(500, "draft-campaign registry not initialised")
+    return registry
+
+
+def _require_draft_id(payload: dict[str, Any]) -> str:
+    raw = payload.get("draft_id")
+    if not isinstance(raw, str) or not raw or len(raw) > 64 or len(raw) < 8:
+        raise HTTPException(
+            422,
+            {
+                "error": "payload_invalid",
+                "message": "payload.draft_id is required (8-64 chars).",
+            },
+        )
+    return raw
+
+
+@commands_router.post("/edit-draft-campaign")
+async def edit_draft_campaign(
+    request: Request,
+    store: StoreDep,
+    envelope: _EditDraftEnvelope,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> dict[str, Any]:
+    """Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.
+
+    Per ``docs/specs/m12-api-openapi.yaml::editDraftCampaign`` — declared
+    here as a typed endpoint (not via the generic dispatcher) because the
+    response is a `DraftCampaign`, not a `CommandAcceptedBody`.
+    """
+    _ensure_idempotency_key(idempotency_key)
+    registry = _draft_registry(request)
+
+    raw_payload = envelope.payload
+    draft_id = _require_draft_id(raw_payload)
+    patch_raw = raw_payload.get("patch", {})
+    if not isinstance(patch_raw, dict):
+        raise HTTPException(
+            422,
+            {"error": "payload_invalid", "message": "payload.patch must be an object."},
+        )
+    patch = _EditDraftPatch.model_validate(patch_raw)
+
+    draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
+    if draft is None:
+        raise HTTPException(
+            404,
+            {"error": "command_target_not_found", "message": f"draft {draft_id!r} not found."},
+        )
+
+    changes: dict[str, Any] = {}
+    if patch.slug is not None and patch.slug != draft.slug:
+        if store.tenant_datasets.slug_exists(patch.slug):
+            suggested = store.tenant_datasets.suggest_free_slug(patch.slug)
+            raise HTTPException(
+                409,
+                {
+                    "error": "payload_invalid",
+                    "message": f"Slug '{patch.slug}' already exists in your collection.",
+                    "details": {"suggested_slug": suggested},
+                },
+            )
+        changes["slug"] = patch.slug
+    if patch.connector is not None:
+        changes["connector"] = patch.connector
+    if patch.scoring_composite is not None:
+        changes["scoring_composite"] = patch.scoring_composite
+    if patch.max_rounds is not None:
+        changes["max_rounds"] = patch.max_rounds
+    if patch.task_description is not None:
+        changes["task_description"] = patch.task_description
+    if patch.pipeline_overlay is not None:
+        changes["pipeline_overlay"] = patch.pipeline_overlay
+
+    updated = registry.update(draft.patch(**changes))
+    return updated.to_wire()
+
+
+@commands_router.post("/mint-campaign-from-draft")
+async def mint_campaign_from_draft(
+    request: Request,
+    store: StoreDep,
+    envelope: _MintFromDraftEnvelope,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> dict[str, Any]:
+    """Commit a draft + mint the campaign. Synchronous; returns ``{campaign_id, cycle_id, job_id}``.
+
+    Per ``docs/specs/m12-api-openapi.yaml::mintCampaignFromDraft``.
+    """
+    _ensure_idempotency_key(idempotency_key)
+    registry = _draft_registry(request)
+    draft_id = _require_draft_id(envelope.payload)
+    draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
+    if draft is None:
+        raise HTTPException(
+            404,
+            {"error": "command_target_not_found", "message": f"draft {draft_id!r} not found."},
+        )
+
+    job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
+    if job_registry is None:
+        raise HTTPException(500, "job registry not initialised")
+
+    try:
+        campaign_id, cycle_id, job = await mint_campaign_from_draft_command(
+            stores=store,
+            draft=draft,
+            draft_registry=registry,
+            job_registry=job_registry,
+        )
+    except BackendUnreachableError as exc:
+        # Preflight ran before commit_draft → draft is preserved; the operator
+        # can fix the backend and retry without re-uploading.
+        raise HTTPException(
+            503,
+            {
+                "error": "backend_unreachable",
+                "message": str(exc),
+                "details": {
+                    "backend_type": exc.backend_type,
+                    "backend_url": exc.backend_url,
+                    "draft_id": draft.draft_id,
+                },
+            },
+        ) from exc
+    except LaunchError as exc:
+        suggested = store.tenant_datasets.suggest_free_slug(draft.slug)
+        raise HTTPException(
+            409,
+            {
+                "error": "payload_invalid",
+                "message": str(exc),
+                "details": {"suggested_slug": suggested},
+            },
+        ) from exc
+    # Quiet the unused-default lint while documenting our smart-default trio.
+    _ = (DEFAULT_CONNECTOR, DEFAULT_SCORING_COMPOSITE, DEFAULT_MAX_ROUNDS, DraftCampaign)
+    return {"campaign_id": campaign_id, "cycle_id": cycle_id, "job_id": job.job_id}
 
 
 @commands_router.post("/{kind}", response_model=CommandAcceptedBody, status_code=202)

@@ -168,6 +168,12 @@ components:
             # union when Profile B handlers land).
             - command
             - command_ack
+            # R1: structured runner failure record. Emitted by the runner's
+            # three ``except`` sites in ``application/runner/{entry,loop}.py``
+            # via the kwargs-only ``emit_error_record(...)`` helper over the
+            # ``_CYCLE_LEDGER`` ContextVar; ``LiveDashboardView._handle_error``
+            # is the sole writer of ``dashboard.json::error``.
+            - error
         version:
           type: integer
           minimum: 1
@@ -206,6 +212,7 @@ components:
             - $ref: '#/components/schemas/LlmCallPayload'
             - $ref: '#/components/schemas/CommandPayload'
             - $ref: '#/components/schemas/CommandAckPayload'
+            - $ref: '#/components/schemas/ErrorPayload'
         emitted_at:
           type: string
           format: date-time
@@ -320,6 +327,63 @@ components:
         payload:
           type: object
           additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorPayload:
+      type: object
+      description: |
+        ErrorRecord — structured runner failure on `StopReason.CRASHED`,
+        `RENDER_ERROR`, or `DIVERGED`. Emitted from the runner's three
+        `except` sites in `promptpotter/application/runner/{entry,loop}.py`
+        via the kwargs-only `emit_error_record(...)` helper over the
+        `_CYCLE_LEDGER` ContextVar (mirrors the `emit_token_usage` pattern
+        from ADR-0003).
+
+        Subscribers:
+          * `LiveDashboardView._handle_error` — sole writer of
+            `dashboard.json::error`. The presentation layer reads this
+            block; nothing else writes it.
+          * `EventStreamView` — fans this record to SSE subscribers.
+          * `JobRegistry.mark_finished` — reads `CycleResult.error.message`
+            (the in-process companion of this record) to populate
+            `status` + `stop_reason` (replaces the prior
+            `session.state.crash_*` side-channel).
+      required: [kind, message, stop_reason, timestamp]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          minLength: 1
+          description: |
+            Python exception class name (`ConnectError`, `RenderError`,
+            `DivergenceError`, etc.). Operator-facing diagnostic — never
+            load-bearing for routing.
+        message:
+          type: string
+          description: |
+            Operator-readable error message. The throw site picks the
+            phrasing (e.g. `"backend at http://localhost:5544 unreachable
+            (connection refused)"`) so no downstream layer has to map
+            raw `httpx` exception strings.
+        traceback:
+          type: [string, 'null']
+          description: |
+            Full Python traceback. Optional — set on `CRASHED` (forensic
+            value) and elided on `DIVERGED` where the message alone is
+            the full diagnostic.
+        stop_reason:
+          type: string
+          enum: [CRASHED, RENDER_ERROR, DIVERGED]
+          description: Which terminal stop_reason this record corresponds to.
+        round:
+          type: [integer, 'null']
+          minimum: 0
+          description: |
+            Round number when the error fired. `null` for crashes that
+            happened before the round loop entered (e.g. bootstrap
+            failure).
         timestamp:
           type: string
           format: date-time
