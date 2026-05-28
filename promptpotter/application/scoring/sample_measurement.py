@@ -340,7 +340,9 @@ async def measure_sample(
             # rides — one TokenUsageRecord per pipeline node per uncached
             # sample. measure_sample only reaches here for fresh backend
             # calls (cache hits return early), so this never double-counts.
-            backend_model = data.get("llm_provider")
+            # Prefer the per-node upstream model (TermNorm 1.0.7+); fall
+            # back to the top-level provider slug on older backends.
+            fallback_model = data.get("llm_provider")
             step_timings = data.get("step_timings") or {}
             for node_name, entry in step_tokens.items():
                 in_tok = int(entry.get("input", 0) or 0)
@@ -353,13 +355,15 @@ async def measure_sample(
                 raw_dur = step_timings.get(node_name)
                 duration_s: float
                 duration_s = float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0
+                raw_model = entry.get("model") if isinstance(entry, dict) else None
+                node_model = str(raw_model) if isinstance(raw_model, str) else None
                 emit_token_usage(
                     node=str(node_name),
                     kind="backend",
                     input_tokens=in_tok,
                     output_tokens=out_tok,
                     duration_s=duration_s,
-                    model=backend_model,
+                    model=node_model or fallback_model,
                     cost_usd=cost_usd,
                 )
 

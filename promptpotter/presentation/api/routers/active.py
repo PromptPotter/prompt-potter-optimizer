@@ -42,7 +42,7 @@ async def get_active_session(store: StoreDep) -> ActiveSessionResponse:
     ``StoreDep`` resolves.
     """
     session_id, campaign_id, cycle_id = read_active_pointer(
-        store.tenant_id, projects_root=store.base_dir.parent
+        store.tenant_id, projects_root=store.projects_root
     )
     if not session_id:
         raise HTTPException(404, "No active session")
@@ -90,7 +90,7 @@ class CyclesResponse(BaseModel):
 async def get_cycles(store: StoreDep) -> CyclesResponse:
     """Every cycle on disk for the tenant + active pointer (one round-trip for the picker)."""
     _, active_cmp, active_cid = read_active_pointer(
-        store.tenant_id, projects_root=store.base_dir.parent
+        store.tenant_id, projects_root=store.projects_root
     )
     entries = store.campaigns.enumerate_cycles()
     return CyclesResponse(

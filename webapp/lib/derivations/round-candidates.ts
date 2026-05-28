@@ -82,6 +82,12 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
   const historicalRounds = new Set<number>();
   const history = (dash?.rounds ?? []).slice().sort((a, b) => a.round - b.round);
   for (const r of history) {
+    // Skip empty historical entries. When a round closes mid-L2/L3 — no
+    // l1_score ever fired — the round-display projection materializes a
+    // `rounds[]` row with no candidates. Adding it to `historicalRounds`
+    // would suppress the in-flight L1_SCORE branch for the same round
+    // number, even though there's no historical data to double-count.
+    if (r.candidates.length === 0) continue;
     historicalRounds.add(r.round);
     r.candidates.forEach((c, i) => {
       out.push({

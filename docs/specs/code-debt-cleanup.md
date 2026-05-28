@@ -28,46 +28,40 @@ confidence after verification (call sites traced + bodies read), not
 "I spotted a code smell." See § Audit guidance below for the
 patterns.
 
-- **`SampleIndex._cache_records` cache — verify first** —
-  `application/intelligence/indexes/sample.py:58, 123, 186-207`.
-  Memoizes the `records()` list between digest calls. The real cost
-  inside `records()` is the per-sample `_dominant_failure_mode`
-  (Counter aggregation), which the list cache doesn't help with.
-  Suspected savings: ~2 list rebuilds per cycle (cheap).
-  **Blocker:** instrument before acting. **Recipe:** add transient
-  `print(f"[cache] sample.records hit={cache_hit} cost_us={dt*1e6:.1f}")`
-  inside `records()` around the cache-check + the per-record build
-  loop; capture across one full M10 campaign on a representative
-  dataset. **Decision rule:** if `hit_rate × per_call_cost <
-  1ms/cycle` → delete the cache; if the per-record Counter
-  aggregation dominates → memoize `_dominant_failure_mode`
-  per-sample instead of caching the whole list.
-  **Pattern:** premature optimization (verify-first).
+### This week (execution slate)
 
-- **`"use client"` audit — continue the sweep** —
-  `webapp/components/**/*.tsx`. App Router server components are
-  unused; stripping the directive on browser-API-free leaves keeps
-  that code out of the client bundle. First sweep done 2026-05-26
-  (`card.tsx`, `FitnessRankSummary.tsx`, `states.tsx` stripped;
-  `icons.tsx` was already clean; `MeasHeatCell.tsx` kept —
-  `useState`/`useEffect`/`useRef`/`PointerEvent`). **Action:** continue
-  leaf-by-leaf across the other ~60 `.tsx` files. **Note:** bundle-
-  size impact is zero when every consumer is itself client (the leaf
-  gets pulled into a client subtree anyway) — the win is correctness-
-  of-declaration, not bundle bytes.
-  **Pattern:** underused framework capability.
+Remaining after the 2026-05-28 unblocker arc (shipped: webapp source maps, connector revision pinning, local Dex OIDC harness at `dev/oidc-local/`, cycle fixtures + Vitest harness at `tests/fixtures/cycles/` and `webapp/lib/**/__tests__/`, React #185 render-phase fix, L2/L3-terminal empty-historical fix):
 
-- **Dashboard route re-parses on every non-304 hit — verify first** —
-  `promptpotter/presentation/api/routers/campaigns/cycles.py::get_cycle_dashboard`.
-  After the 304 short-circuit, hits still `read_text` +
-  `json.loads` on the whole file. Cache the parsed dict in-process
-  keyed on `(path, mtime_ns)`. Sub-millisecond per hit at current
-  ~90 KB; only matters if dashboard grows materially. **Blocker:**
-  measure first; likely below noise floor today. **Recipe:** add an
-  `X-Parse-Us` response header carrying `(t_after_load - t_before_load) * 1e6`
-  on every non-304 path; capture across one full M10 campaign. **Decision
-  rule:** act only if median crosses ~1ms or p99 crosses ~5ms.
-  **Pattern:** premature optimization (verify-first).
+1. **TermNorm wire `model`** — cross-repo edit at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`. With the connector revision-pin landed (`promptpotter/connectors/protocol.py::Connector.{expected_revision, version_check}`), the TermNorm-side PR adds `model` to the per-request response + a `/version` endpoint; this repo bumps `termnorm.py::_EXPECTED_REVISION` to the new SHA and deletes the `_synth_legacy_backend_record` back-fill in `presentation/api/routers/auth.py`.
+
+### Entries
+
+### Deep indirection — scoped, not slated
+
+The three below are architectural collapses, not sittings. Each is multi-file, has plausibly load-bearing constraints worth verifying before committing, and is sized for spec-buddy to draft a mini-spec ahead of the work. Read the entry's *load-bearing check* before assuming the collapse is free.
+
+- **Typed-view roundtrip on every `PhaseRecord` is a back-compat shim against a constraint this project doesn't have** —
+  `presentation/views/view_models.py` (404) + `presentation/views/view_ingress.py` (523) carry a 4-stage transform: `PhaseEvent` → `from_phase_event(event, ctx)` → typed `AnyView` dataclass → `view_to_wire_dict(view)` → JSON dict → embedded in `PhaseRecord.payload['view']` on the ledger → subscriber reads it back through `view_from_record(record)` (with paired `_pure_reconstruct` + `_custom_reconstruct` registries) → typed `AnyView` again. The roundtrip's purpose is to persist a typed view through JSON so future readers see the same shape — i.e. ledger-format compatibility across View-shape changes. CLAUDE.md says no back-compat: there is nothing on disk to be compatible with, and no released versions. Every View field today must be updated in three places (dataclass + `from_phase_event` arm + `_*_from_dict` reconstructor) to keep the roundtrip honest.
+  **Action:** stop embedding the view in `PhaseRecord.payload['view']`. `RunCallbacks.on_phase` emits just `PhaseRecord(phase, event, round, payload={"data": event.data})`. Subscribers (`live/display.py`, `webapp` SSE) compute the rendered shape on demand from `payload["data"]` + the phase/event key — same code path, no roundtrip. Drop `view_to_wire_dict`, `view_from_record`, both reconstructor registries, the corresponding `_*_from_dict` helpers, and `from_phase_event`'s view-construction branches (keep only its `ViewContext` side effects if any survive scrutiny).
+  **Load-bearing check:** confirm no subscriber today reads `payload['view']` from a *historical* record — i.e. one written by a prior version. If `EventStreamView` SSE replay leans on the embedded view, the collapse needs the subscriber to gain a render path first. Grep: `payload.get("view"` + `record["view"`.
+  **Estimated delta:** ~500 LOC removed across `view_ingress.py` (most of it) + `view_models.py` (per-event dataclasses; keep the small renderer-input shapes like `ScoreEntry` if `live/display.py` still consumes them) + ~5 lines in `run_observers.py`.
+  **Pattern:** serialization roundtrip whose only purpose is shape-compat — eliminated by the no-back-compat rule.
+
+- **Two writer APIs over the canonical ledger (`RunCallbacks` ↔ `emit_*`)** —
+  `application/run_observers.py::RunCallbacks` is the typed-event constructor over `CycleEventLog.append` (one method per event class, ledger held as instance state). `infrastructure/llm/models.py::emit_*` (per-call telemetry like `emit_token_usage`, `emit_command`, `emit_command_ack`) is the kwargs-only helper that reads the active ledger from `_CYCLE_LEDGER` ContextVar and appends. Both write the same `CycleRecord` discriminated union to the same `events.jsonl`. CLAUDE.md (application/CLAUDE.md "Per-call telemetry from deep async chains uses the `emit_*` shape") frames them as different *use cases* (high-frequency runner-driven vs deep-async per-call), but mechanically they're two ingresses for one channel — the ContextVar makes the instance-held ledger redundant.
+  **Action:** fold `RunCallbacks` methods into `emit_*` helpers reading `_CYCLE_LEDGER`. `on_phase` becomes `emit_phase(phase, event, round, data)`; `on_round_complete` becomes `emit_round_display(...)`; etc. `build_run_observers` sets the ContextVar at runner startup (it already does, for the existing `emit_*` callers — `set_cycle_ledger`); every callsite stops carrying a `RunCallbacks` reference. The `ViewContext`-stateful pieces (round tracking, origin rolling, prompt-flat memo) either move into projection state or become explicit ContextVars alongside `_CYCLE_LEDGER` / `_CURRENT_ROUND`.
+  **Load-bearing check:** the stateful `_phase_ctx: ViewContext` on `RunCallbacks` is the real architectural question — if any of its fields are *write-then-read* across phase events within the same cycle (not just stamping records with current state), the collapse needs a named home for that state. Best candidate: a `PhaseContextView` projection that subscribes to the ledger and exposes the same fields the live display reads.
+  **Estimated delta:** ~80 LOC removed from `run_observers.py` (the class + its methods); ~30 LOC added across `infrastructure/llm/models.py` for the new `emit_phase` / `emit_round_display` / `emit_snapshot` helpers. Net negative ~50 LOC and one fewer ingress to reason about. Compounds with item above (the typed-view roundtrip is what `on_phase` exists to do).
+  **Pattern:** two ingresses for one channel; the older one is now indistinguishable from the newer except by method-vs-function shape.
+
+- **`from_disk_round` / `from_disk_log` rebuild the same shapes the live ingress already emits** —
+  `presentation/writers.py:162-204` (`from_disk_round`) + `:234+` (`from_disk_log`) read `round_NNNN.json` + `index.json` from disk and reconstruct `RoundCompleteView` / `LogMdView`. The live path (`from_phase_event`) builds the *same* views from `PhaseEvent`. So a View's field set must be reachable from both the event stream AND from the persisted JSON — every new field needs both producers. `round_NNNN.json` is itself an `AuditTrailView` projection of the ledger, so this is: ledger → projection → JSON → reverse-projection → View. Two of those four hops exist only because the writer doesn't subscribe to the ledger itself.
+  **Action:** have `write_log_md` / `write_review_md` subscribe to the ledger like other projections (or accept a streaming view from the existing audit projection), instead of reading the on-disk JSON back and reconstructing. Eliminates the disk-replay reconstructors entirely.
+  **Load-bearing check:** post-cycle markdown writes today happen at runner milestones (not from a live subscriber) because the writer wants the *complete* round set, not in-flight events. Verify whether the live `AuditTrailView` already exposes a "drain to final shape on cycle end" hook — it does (`DerivedView.drain()`); the writer should be able to receive the drained snapshot directly. The only real question is whether `from_disk_log` / `from_disk_round` are also called from post-mortem analysis paths (operator opens an old cycle dir and re-renders) — `grep` says no external callers, but worth a second pass.
+  **Estimated delta:** ~250 LOC removed across `writers.py` (the two reconstructors + their helpers). Largely dependent on item 1 above landing first — if the typed-view roundtrip stays, the writer either keeps the disk-replay or grows a different ledger subscription.
+  **Pattern:** parallel reconstruction paths for the same shape — collapses once the writer reads the canonical source instead of its on-disk projection.
+
+### Standing entries
 
 - **TermNorm backend reports a provider slug, not a model** — backend
   `dashboard.json::spend.backend.model = "openrouter"` is the provider,
@@ -150,6 +144,27 @@ but l1_behavior validators substring-matched them as
 peaked-axis / rebut signals. Resolved by routing both signals
 through `pipeline_params_override` keys + `changes_description` +
 the citation string, then deleting the fields.
+
+### Pattern: bug blocked on operator-local context
+Bug repro requires an environment, fixture, or sibling repo not in the
+tree (auth-on tunnel deploy, a specific cycle dir on the maintainer's
+laptop, a co-owned backend repo). Default action: **promote the
+unblocker before the fix.** Build a local mock harness, check a frozen
+fixture into `tests/fixtures/`, or pin the cross-repo dependency — so
+the bug becomes reproducible from a clean `git clone` by any
+collaborator. Then ship the fix on top.
+**Precedents (this arc, 2026-05-28):**
+- React #185 → local Dex OIDC harness (`dev/oidc-local/`) + production
+  source maps (`webapp/next.config.ts`); the fix at
+  `FitnessPanel.tsx::seededHere` then landed against the harness.
+- L2/L3-terminal hang → checked-in `tests/fixtures/cycles/l2_terminal/`
+  + Vitest harness at `webapp/lib/derivations/__tests__/`; the
+  empty-historical fix landed against the fixture, not against the
+  operator's laptop.
+- TermNorm wire `model` → `Connector.expected_revision` +
+  `version_check` (still pending the actual cross-repo edit, but the
+  drift detector is in place so the next mismatch is caught at session
+  start instead of weeks later in spend accounting).
 
 ### Pattern: vibe-coded scaffolding
 Half-finished branches behind `raise NotImplementedError`, enum

@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
   // useMemo / useCallback wrappers in a follow-up audit; the FitnessChart /
   // TrendChart / TopStrip / LineageTree render-cost guards still hold.
   reactCompiler: true,
+  // Emit .map files alongside minified .js in the static export so a live
+  // DevTools session on a deployed dashboard resolves React errors to
+  // component + line. Without this, production stacks read like
+  // "Minified React error #185" with no actionable frame.
+  productionBrowserSourceMaps: true,
   // Served from FastAPI's /ui StaticFiles mount in production. basePath
   // makes Next emit /ui-prefixed asset URLs in the exported HTML.
   basePath: "/ui",

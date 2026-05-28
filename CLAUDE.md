@@ -23,6 +23,10 @@ The user is the operator. The project file tree IS the dashboard, plus a **read-
 
 The word `legacy` in a comment or docstring is a code smell — either the path is dead (delete it) or the word is wrong (delete the word). The only sanctioned uses of `deprecated` are the fatal-warning sample lifecycle (`is_deprecated`, `deprecated_samples`, `retry_of_deprecated_cache`, `RoundResult.deprecated`).
 
+<root-fix>
+When a fix would compensate for something an upstream layer should already have made true, the fix belongs upstream — not at the site where the symptom shows up. Name the structural cause and propose the upstream fix <em>before</em> touching the visible surface. The operator can still pick the patch, but they pick it knowingly. Default to root, not to symptom.
+</root-fix>
+
 ## Backbone
 
 **Backbone primitives — see [`docs/architecture.md` §0.5](docs/architecture.md).** An inline table here has drifted before; that section is the source of truth. Extend primitives in place; if you genuinely need to change a shape, change the primitive itself. The wrong shape is meant to be hard to express, not policed by a test.
@@ -132,6 +136,15 @@ field, dict, file), the PR description answers these eight questions.
    stdout, only via in-memory state, or only via "ask me to re-run
    with --verbose," it violates the AI-accessibility principle.
    Material facts land on disk in human-readable form.
+   - **Sub-rule: debug-state too.** If a bug requires an
+     operator-only environment, fixture, or sibling repo to
+     reproduce (auth-on tunnel, a saved cycle dir on the
+     maintainer's laptop, a co-owned backend repo), the unblocker
+     (mock harness / checked-in fixture / version pin) is a
+     separate PR landing first. Precedent: `dev/oidc-local/`
+     (Dex harness), `tests/fixtures/cycles/` (frozen
+     dashboard.json snapshots), `Connector.expected_revision`
+     (drift WARN at session start).
 7. **Does §0 (`docs/architecture.md`) need updating to mention
    this?** If yes, that's a separate PR landing first. Code that
    requires §0 to drift cannot land before §0 has been updated.

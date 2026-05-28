@@ -40,6 +40,8 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | What datasets do we use? Why didn't we use Y? | [`operations/dataset-selection-rationale.md`](operations/dataset-selection-rationale.md) |
 | What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT meta-campaign NOTES.md) |
 | What's the canonical split for this benchmark? | [`operations/adding-a-dataset.md`](operations/adding-a-dataset.md) |
+| How do I run the auth-on dashboard locally? | [`developer/local-oidc.md`](developer/local-oidc.md) (Dex harness at `dev/oidc-local/`) |
+| How do I freeze a buggy cycle as a test fixture? | [`developer/cycle-fixtures.md`](developer/cycle-fixtures.md) (`tests/fixtures/cycles/`) |
 
 ## L4 — the recursion case
 

@@ -1,0 +1,32 @@
+# Dex config for the local dev harness — see dev/oidc-local/README.md.
+# Mirrors a Google-shaped OIDC provider so PromptPotter's `google` slot
+# can point at this instance via `oidc.json` discovery overrides.
+
+issuer: http://localhost:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+  alwaysShowLoginScreen: false
+
+staticClients:
+  - id: promptpotter-dev
+    redirectURIs:
+      - "http://localhost:8001/api/v1/auth/callback/google"
+    name: "PromptPotter Dev"
+    secret: dev-secret
+
+enablePasswordDB: true
+
+staticPasswords:
+  # Hash is bcrypt("password") — published Dex example value, safe for
+  # local-only use. Credentials: dev@promptpotter.local / password.
+  - email: "dev@promptpotter.local"
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: "dev"
+    userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"

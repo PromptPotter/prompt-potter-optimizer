@@ -1,4 +1,3 @@
-"use client";
 import type { DashboardSnapshot } from "@/lib/poll";
 
 interface Props {

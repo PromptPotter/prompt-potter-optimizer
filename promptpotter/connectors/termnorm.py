@@ -210,12 +210,47 @@ def _resolve_ground_truth(experiment_data: dict[str, Any], query: str) -> str | 
     return _extract_ground_truth_map(experiment_data).get(_split_query(query)[0])
 
 
+# ---------------------------------------------------------------------------
+# Revision check
+# ---------------------------------------------------------------------------
+
+
+async def _termnorm_version_check(
+    http: httpx.AsyncClient,
+    base_url: str,
+) -> str | None:
+    """Read TermNorm's self-reported version from ``GET /status``.
+
+    Returns the ``version`` field (or ``revision``/``git_sha`` as fallbacks)
+    or ``None`` when the field is absent / the call fails. Bootstrap WARNs
+    on mismatch with :data:`CONNECTOR.expected_revision`.
+    """
+    try:
+        resp = await http.get(f"{base_url}/status")
+        resp.raise_for_status()
+        data: dict[str, Any] = resp.json()
+    except Exception:
+        return None
+    for key in ("version", "revision", "git_sha"):
+        val = data.get(key)
+        if val:
+            return str(val)
+    return None
+
+
+# Pin once TermNorm exposes a stable ``version``/``revision``/``git_sha`` in
+# ``GET /status``. ``None`` opts out of the drift WARN until then.
+_EXPECTED_REVISION: str | None = None
+
+
 CONNECTOR = Connector(
     name="termnorm",
     wire_adapter=termnorm_wire_adapter,
     session_factory=TermNormSession,
     extract_experiment=_extract_experiment,
     resolve_ground_truth=_resolve_ground_truth,
+    expected_revision=_EXPECTED_REVISION,
+    version_check=_termnorm_version_check,
 )
 
 

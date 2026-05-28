@@ -42,7 +42,7 @@ Persistent configs decide behavior — the skill does not carry a parallel defau
 - `datasets/{name}/campaign.json` — hyperparameters (max_rounds, n_variants, sp_budget_ttest, patiences)
 - `datasets/{name}/pipeline.json` — pipeline + model + caps
 - BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows `campaign.json`; notebook wins
-- Active session: `.promptpotter/active_session.json` → `campaigns/{campaign_id}/dashboard.json` + `cycles/{cycle_id}/index.json`
+- Active session: `projects/{tenant}/.workspace/active_session.json` → `campaigns/{campaign_id}/dashboard.json` + `cycles/{cycle_id}/index.json`
 
 Per-dataset reasoning defaults (model + `reasoning_effort` + `max_tokens`) live in [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md). **Groq daily-volume swap:** `openai/gpt-oss-120b` is the canonical model; during dev the operator may flip the `pipeline.json` `model` field to `openai/gpt-oss-20b` when 120b daily volume is exhausted. Treat the field as a live operator knob, not a fixed default. `max_tokens` is never set numerically in node configs — provider ceiling applies; operators override per-cycle via `campaign.json::pipeline_overrides`.
 
@@ -86,7 +86,6 @@ If the user's intent is genuinely ambiguous ("should I resume or start over?"), 
 - `llm_ranking` in active_nodes on TermNorm
 - Active-session pointer points at a different dataset than requested
 - Recent `dataset_runs/*.json` show empty `predicted` strings (BBEH regression)
-- `ActiveSessionMismatchError` on `init_services()`
 
 Surface anomalies as a one-line flag at the top, then the normal outlook. Never warn about documented config (notebook-driven datasets, `campaign.json` ↔ notebook drift, BBEH inline `task_context`, data volume) — that's expected state.
 
@@ -114,7 +113,7 @@ CRITIQUE: {2-4 key lines — what failed, what to try next}
 NEXT:     {continue L1 / escalate to L2 / etc.}
 ```
 
-**Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{campaign_id}/dashboard.json` (active campaign + cycle ids in `.promptpotter/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/ui/> — polls `dashboard.json` every 2 s; reload the page after a fresh `new <name>` mint. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-sample HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `resume` to continue.
+**Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{campaign_id}/dashboard.json` (active campaign + cycle ids in `projects/{tenant_id}/.workspace/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/ui/> — polls `dashboard.json` every 2 s; reload the page after a fresh `new <name>` mint. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-sample HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `resume` to continue.
 
 **Incremental persistence.** Every query lands in `archive/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 

@@ -63,14 +63,15 @@ Any new chart that consumes `dash` follows the same pattern: `React.memo` wrap, 
 
 ## Testing posture
 
-The webapp has no unit-test harness, by deliberate choice. It is a read-only dashboard that polls `dashboard.json` — display code, which the project's test charter (`tests/CLAUDE.md`) says earns no test. The gate is **compile-time + smoke**, enforced by CI (`.github/workflows/ci.yml`, `webapp` job):
+The webapp gate is **compile-time + smoke + a small Vitest scope**, enforced by CI (`.github/workflows/ci.yml`, `webapp` job):
 
 - `npm run lint` — ESLint.
 - `npx tsc --noEmit` — full strict typecheck (`next build` alone does not hard-fail on every type error, so this line is what makes `strict` real).
+- `npm run test` — Vitest, scoped to `lib/**/__tests__/` + `components/**/__tests__/` per `webapp/vitest.config.ts`. Reader-side derivations only (pure data → data helpers); display components stay covered by smoke. Cycle fixtures live at `tests/fixtures/cycles/` — recipe at [`docs/developer/cycle-fixtures.md`](../docs/developer/cycle-fixtures.md).
 - `npm run build` — the static export must succeed.
-- Manual smoke at `http://localhost:8001/ui/` after a behavioural change.
+- Manual smoke at `http://localhost:8001/ui/` after a behavioural change. Auth-on smoke uses the local Dex harness at [`dev/oidc-local/`](../dev/oidc-local/) — see [`docs/developer/local-oidc.md`](../docs/developer/local-oidc.md).
 
-A `vitest` harness scoped to `lib/` (the polling + render-phase state-reset logic — genuine non-display code) is the right move once the M12 control plane adds webapp write paths (launch / stop / resume / fork). Until then, a test harness for a read-only view is not worth its upkeep.
+When to reach for a component-render test (`@testing-library/react`): pick a regression class that compile + smoke + the derivation tests can't catch — today's bug classes are reader-side and ride the existing Vitest scope.
 
 ## Build + run
 

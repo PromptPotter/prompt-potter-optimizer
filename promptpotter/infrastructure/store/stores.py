@@ -96,9 +96,14 @@ class Stores:
     ``identity.tenant_id`` for the tenant slug. There is no ``Stores.tenant_id``
     field (per identity-foundation no-drift gate #4: ``IdentityContext.tenant_id``
     is the only source of tenant scope).
+
+    ``projects_root`` is the parent-of-all-tenant-dirs (the workspace root).
+    The relation is fixed: ``base_dir = projects_root / identity.tenant_id``.
+    Use ``projects_root`` directly — do not re-walk ``base_dir.parent``.
     """
 
     base_dir: Path
+    projects_root: Path
     identity: IdentityContext
     backends: BackendStore
     sessions: SessionStore
@@ -134,6 +139,7 @@ def build_stores(
     ds_root = Path(datasets_root) if datasets_root else DEFAULT_DATASETS_ROOT
     return Stores(
         base_dir=tenant_dir,
+        projects_root=root,
         identity=identity,
         backends=BackendStore(tenant_dir, ds_root),
         sessions=SessionStore(tenant_dir),

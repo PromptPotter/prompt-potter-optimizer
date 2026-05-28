@@ -1,4 +1,3 @@
-"use client";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { fmtNum, fmtClock } from "@/lib/format";
 import { CardFrame } from "@/components/ui/card";

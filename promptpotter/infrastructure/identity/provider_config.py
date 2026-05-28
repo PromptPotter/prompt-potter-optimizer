@@ -21,6 +21,14 @@ Loaded from `.promptpotter/identity/oidc.json`. Schema:
 middleware verifies the inbound `state` token but the provider verifies
 the redirect URI matches what was registered. Either provider may be
 omitted — the login page hides buttons for unconfigured providers.
+
+**Discovery overrides (Google slot only).** The Google slot accepts
+four optional fields (`issuer`, `authorize_url`, `token_url`,
+`jwks_url`) so any OIDC-conformant IdP — Dex, Keycloak, Auth0, Okta —
+can ride the Google client. When unset, the production Google URLs
+apply. This is the local-dev harness path (`dev/oidc-local/`) and the
+forward seam for swapping the corporate IdP without a code change.
+GitHub is OAuth-2.0-only and ignores these fields if set.
 """
 
 from __future__ import annotations
@@ -37,12 +45,22 @@ _SUPPORTED_PROVIDERS = frozenset({"google", "github"})
 
 @dataclass(frozen=True)
 class OIDCProviderConfig:
-    """Per-provider OAuth/OIDC client config."""
+    """Per-provider OAuth/OIDC client config.
+
+    The discovery overrides (``issuer`` / ``authorize_url`` / ``token_url`` /
+    ``jwks_url``) are read by :class:`GoogleProviderClient` to point at any
+    OIDC-conformant IdP. ``None`` on all four → production Google URLs (the
+    common case). GitHub is OAuth-2.0 and ignores these fields.
+    """
 
     name: str
     client_id: str
     client_secret: str
     redirect_uri: str
+    issuer: str | None = None
+    authorize_url: str | None = None
+    token_url: str | None = None
+    jwks_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +126,10 @@ def _parse_provider(name: str, raw: object) -> OIDCProviderConfig | None:
         client_id=str(raw["client_id"]),
         client_secret=str(raw["client_secret"]),
         redirect_uri=str(raw["redirect_uri"]),
+        issuer=str(raw["issuer"]) if raw.get("issuer") else None,
+        authorize_url=str(raw["authorize_url"]) if raw.get("authorize_url") else None,
+        token_url=str(raw["token_url"]) if raw.get("token_url") else None,
+        jwks_url=str(raw["jwks_url"]) if raw.get("jwks_url") else None,
     )
 
 

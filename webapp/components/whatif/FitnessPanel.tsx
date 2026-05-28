@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { WHATIF_INLINE_META, buildRows, whatifIdentifiersInFormula, type Row } from "./meta";
 import { FitnessChart } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
@@ -153,20 +153,29 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
     return built.slice().sort((a, b) => bucketOf(a) - bucketOf(b));
   }, [meta, realApplicable, inActive, selected, isPrestaging]);
 
-  // One-shot seed: when the cycle binds applicable evaluators for the first
-  // time (or the cycle changes), seed `selected` from the formula's inActive
-  // set so the operator opens to "what's actually scored" as the default.
-  // Bail when `cycleId == null` (no active campaign yet) — otherwise
-  // `seededForCycle` would be written as `null`, `seeded` stays `false`, and
-  // the effect re-fires every render (React #185 on production tunnel).
-  useEffect(() => {
-    if (seeded || viewApplicable.size === 0 || !cycleId) return;
+  // Render-phase seed: when the cycle binds applicable evaluators for the
+  // first time (or the cycle changes), seed `selected` from the formula's
+  // inActive set so the operator opens to "what's actually scored" as the
+  // default. Local `seededHere` is the canonical render-phase reset guard
+  // (see `webapp/CLAUDE.md::State reset on prop change` and the precedent
+  // at `AccountModal.tsx:56-62`) — `setSeededHere` commits before React
+  // re-checks the condition, so no cross-render closure window exists
+  // for the post-OIDC `cycleId` flip to loop through (React #185).
+  // Bail when `cycleId == null` (no active campaign yet).
+  const [seededHere, setSeededHere] = useState<string | null>(null);
+  if (
+    cycleId &&
+    seededHere !== cycleId &&
+    viewApplicable.size > 0 &&
+    !seeded
+  ) {
+    setSeededHere(cycleId);
     const seed = new Set<string>();
     for (const r of rows) {
       if (r.applicable && inActive.has(r.displayName)) seed.add(r.displayName);
     }
     setFitnessState({ selected: seed, seededForCycle: cycleId });
-  }, [seeded, viewApplicable, rows, inActive, cycleId]);
+  }
 
   // Prune: when the applicable evaluator set shrinks (e.g. a node was
   // disabled and its evaluators dropped out), remove selections that fell

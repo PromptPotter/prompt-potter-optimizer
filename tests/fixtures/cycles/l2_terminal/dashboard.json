@@ -1,0 +1,162 @@
+{
+  "campaign_id": "fixture__l2term",
+  "cycle_id": "cycle_l2terminal01",
+  "session_id": "fixture-session-l2terminal",
+  "state": "stopped",
+  "stop_reason": "max_rounds",
+  "round": 5,
+  "candidate": null,
+  "best": 0.62,
+  "current_acc": 0.58,
+  "composite_fitness_formula": "accuracy",
+  "total_queries_scored": 600,
+  "total_backend_calls": 612,
+  "current_round": {
+    "round": 5,
+    "nodes": {
+      "l1_generate": {
+        "status": "complete",
+        "output": {"variants": ["candidate description 1", "candidate description 2"]}
+      },
+      "l1_critique": {
+        "status": "complete",
+        "output": {"summary": "two candidates, neither dominates"}
+      },
+      "l2_context": {
+        "status": "running",
+        "output": {}
+      }
+    },
+    "pobb": null
+  },
+  "origin": {"accuracy": 0.22, "samples": 200},
+  "rounds": [
+    {
+      "round": 1,
+      "accuracy": 0.34,
+      "composite_fitness": 0.34,
+      "candidates": [
+        {
+          "candidate_id": "r1_0",
+          "label": "C1.1",
+          "accuracy": 0.30,
+          "composite_fitness": 0.30,
+          "scored_samples": 200,
+          "expected_samples": 200,
+          "is_winner": false,
+          "evaluators": {"exact_match": 0.30},
+          "changes_description": "shorten preamble"
+        },
+        {
+          "candidate_id": "r1_1",
+          "label": "C1.2",
+          "accuracy": 0.34,
+          "composite_fitness": 0.34,
+          "scored_samples": 200,
+          "expected_samples": 200,
+          "is_winner": true,
+          "evaluators": {"exact_match": 0.34},
+          "changes_description": "add worked example"
+        }
+      ],
+      "selection": [1]
+    },
+    {
+      "round": 2,
+      "accuracy": 0.48,
+      "composite_fitness": 0.48,
+      "candidates": [
+        {
+          "candidate_id": "r2_0",
+          "label": "C2.1",
+          "accuracy": 0.42,
+          "composite_fitness": 0.42,
+          "scored_samples": 200,
+          "expected_samples": 200,
+          "is_winner": false,
+          "evaluators": {"exact_match": 0.42},
+          "changes_description": "tighten constraint phrasing"
+        },
+        {
+          "candidate_id": "r2_1",
+          "label": "C2.2",
+          "accuracy": 0.48,
+          "composite_fitness": 0.48,
+          "scored_samples": 200,
+          "expected_samples": 200,
+          "is_winner": true,
+          "evaluators": {"exact_match": 0.48},
+          "changes_description": "re-order steps"
+        }
+      ],
+      "selection": [1]
+    },
+    {
+      "round": 3,
+      "accuracy": 0.55,
+      "composite_fitness": 0.55,
+      "candidates": [
+        {
+          "candidate_id": "r3_0",
+          "label": "C3.1",
+          "accuracy": 0.51,
+          "composite_fitness": 0.51,
+          "scored_samples": 200,
+          "expected_samples": 200,
+          "is_winner": false,
+          "evaluators": {"exact_match": 0.51},
+          "changes_description": "swap example"
+        },
+        {
+          "candidate_id": "r3_1",
+          "label": "C3.2",
+          "accuracy": 0.55,
+          "composite_fitness": 0.55,
+          "scored_samples": 200,
+          "expected_samples": 200,
+          "is_winner": true,
+          "evaluators": {"exact_match": 0.55},
+          "changes_description": "rewrite intro"
+        }
+      ],
+      "selection": [1]
+    },
+    {
+      "round": 4,
+      "accuracy": 0.62,
+      "composite_fitness": 0.62,
+      "candidates": [
+        {
+          "candidate_id": "r4_0",
+          "label": "C4.1",
+          "accuracy": 0.58,
+          "composite_fitness": 0.58,
+          "scored_samples": 200,
+          "expected_samples": 200,
+          "is_winner": false,
+          "evaluators": {"exact_match": 0.58},
+          "changes_description": "trim worked example"
+        },
+        {
+          "candidate_id": "r4_1",
+          "label": "C4.2",
+          "accuracy": 0.62,
+          "composite_fitness": 0.62,
+          "scored_samples": 200,
+          "expected_samples": 200,
+          "is_winner": true,
+          "evaluators": {"exact_match": 0.62},
+          "changes_description": "add explicit count step"
+        }
+      ],
+      "selection": [1]
+    },
+    {
+      "round": 5,
+      "accuracy": 0.59,
+      "composite_fitness": 0.59,
+      "candidates": [],
+      "selection": []
+    }
+  ]
+}

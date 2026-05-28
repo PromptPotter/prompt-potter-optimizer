@@ -63,6 +63,12 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # Vitest covers reader-side derivations (lib/derivations/...) against
+      # frozen cycle fixtures at tests/fixtures/cycles/. Scope + recipe at
+      # docs/developer/cycle-fixtures.md.
+      - name: Tests
+        run: npm run test
+
       # Candidate-list construction in components is banned. The spine is
       # `roundCandidates(dash)` (sole consumer of `liveL1Candidates`) +
       # the `useRoundCandidates` hook. Two surfaces re-deriving the same

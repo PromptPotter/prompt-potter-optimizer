@@ -57,6 +57,46 @@ def _apply_dataset_overlay(
     return out
 
 
+async def _verify_connector_revision(
+    client: BackendClient,
+    connector: connectors.Connector,
+) -> None:
+    """Compare ``connector.expected_revision`` to the live backend's reported
+    revision; WARN on drift. No-op when either field is ``None`` — opt-in
+    per connector. Network errors are swallowed (the WARN says
+    "could not verify", not "mismatch")."""
+    expected = connector.expected_revision
+    check = connector.version_check
+    if not expected or check is None:
+        return
+    try:
+        actual = await check(client.http, client.base_url)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
+    except Exception as exc:
+        logger.warning(
+            "connector[%s]: could not verify backend revision (%s) — expected %s",
+            connector.name,
+            exc,
+            expected,
+        )
+        return
+    if actual is None:
+        logger.warning(
+            "connector[%s]: backend did not report a revision — expected %s",
+            connector.name,
+            expected,
+        )
+        return
+    if actual != expected:
+        logger.warning(
+            "connector[%s]: backend revision drift — expected %s, got %s",
+            connector.name,
+            expected,
+            actual,
+        )
+
+
 async def _resolve_pipeline_schema(
     client: BackendClient,
     project_root: Path,
@@ -242,6 +282,7 @@ async def init_services(
     status(f"Backend: {backend_url}")
 
     pipeline_schema = await _resolve_pipeline_schema(client, project_root, dataset_name, status)
+    await _verify_connector_revision(client, connector)
 
     if not store.backends.get(backend_id):
         store.backends.register(

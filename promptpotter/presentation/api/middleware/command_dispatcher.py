@@ -228,7 +228,7 @@ class CommandDispatcher:
         """delete-cycle writes its audit trail on the campaign's root cycle
         ledger — the target cycle's own ledger goes away as part of the apply."""
         _, active_campaign, active_cycle = read_active_pointer(
-            self._store.tenant_id, projects_root=self._store.base_dir.parent
+            self._store.tenant_id, projects_root=self._store.projects_root
         )
         if active_campaign == campaign_id and active_cycle == cycle_id:
             raise HTTPException(
@@ -562,7 +562,7 @@ class CommandDispatcher:
                 parent_session_id,
                 campaign_id,
                 fork_id,
-                projects_root=self._store.base_dir.parent,
+                projects_root=self._store.projects_root,
             )
 
     def _apply_stop_cycle(self, campaign_id: str, cycle_id: str) -> None:
@@ -668,7 +668,7 @@ class CommandDispatcher:
         the audit ack detail string."""
         root_id = root_cycle_id(cycle_id)
         _, active_cmp, active_cid = read_active_pointer(
-            self._store.tenant_id, projects_root=self._store.base_dir.parent
+            self._store.tenant_id, projects_root=self._store.projects_root
         )
         deleted_ids: list[str] = []
         for _pass in range(2):

@@ -1,4 +1,3 @@
-"use client";
 // Connector-state inspector — small dot button + hover popover sitting
 // over the Input→LLM arrow. Presentational; receives one `view:
 // ConnectorView` prop. The data join (registered backends + dataset

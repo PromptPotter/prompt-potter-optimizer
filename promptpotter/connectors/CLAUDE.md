@@ -63,3 +63,12 @@ Decision deferred until after the architectural skeleton is reviewed.
   list may be empty for connectors with no retrieval index.
 - `resolve_ground_truth(experiment_data, query)` returns `str | None` —
   used by trace-ingestion flows; safe to return `None`.
+- **Revision pinning is opt-in.** A connector can set
+  `Connector.expected_revision` (the backend SHA/version this rev was
+  developed against) and a `Connector.version_check(http, base_url) -> str | None`
+  hook reading the backend's self-reported revision. Bootstrap
+  (`application/bootstrap/wiring.py::_verify_connector_revision`)
+  WARNs on drift; no-op when either field is `None`. Pattern motive:
+  pre-flight gate Q6 extended to debug state — cross-repo dependency
+  drift becomes visible at session start, not weeks later in spend
+  accounting. The same shape works for any future connector.

@@ -40,14 +40,25 @@ class ProviderIdentity:
 
 
 class GoogleProviderClient:
-    """Google OIDC client — Authorization Code → ID Token verification."""
+    """OIDC client — Authorization Code → ID Token verification.
+
+    Defaults to Google's production endpoints. Any URL may be overridden
+    in ``oidc.json`` (``issuer`` / ``authorize_url`` / ``token_url`` /
+    ``jwks_url``) so any OIDC-conformant IdP — Dex, Keycloak, Auth0,
+    Okta — rides the same client. The local dev harness in
+    ``dev/oidc-local/`` points all four at Dex.
+    """
 
     def __init__(self, config: OIDCProviderConfig, jwks_cache: JWKSCache) -> None:
         self._config = config
         self._jwks = jwks_cache
+        self._issuer = config.issuer or GOOGLE_ISSUER
+        self._authorize_url = config.authorize_url or GOOGLE_AUTH_URL
+        self._token_url = config.token_url or GOOGLE_TOKEN_URL
+        self._jwks_url = config.jwks_url or GOOGLE_JWKS_URL
 
     def authorize_url(self, *, state: str, nonce: str) -> str:
-        """Build the user-facing redirect URL to Google's consent screen."""
+        """Build the user-facing redirect URL to the IdP's consent screen."""
         params = {
             "response_type": "code",
             "client_id": self._config.client_id,
@@ -58,13 +69,13 @@ class GoogleProviderClient:
             "access_type": "online",
             "prompt": "select_account",
         }
-        return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+        return f"{self._authorize_url}?{urlencode(params)}"
 
     async def exchange_code(self, *, code: str, expected_nonce: str) -> ProviderIdentity:
         """Exchange the auth code for an ID token, verify, return identity."""
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
-                GOOGLE_TOKEN_URL,
+                self._token_url,
                 data={
                     "code": code,
                     "client_id": self._config.client_id,
@@ -76,18 +87,18 @@ class GoogleProviderClient:
             )
         if response.status_code != 200:
             raise GoogleTokenExchangeError(
-                f"Google token endpoint returned {response.status_code}: {response.text[:200]}"
+                f"token endpoint returned {response.status_code}: {response.text[:200]}"
             )
         body = response.json()
         id_token_raw = body.get("id_token")
         if not isinstance(id_token_raw, str):
-            raise GoogleTokenExchangeError("Google token response missing id_token")
+            raise GoogleTokenExchangeError("token response missing id_token")
 
         verified: VerifiedIDToken = await verify_id_token(
             id_token_raw,
-            expected_issuer=GOOGLE_ISSUER,
+            expected_issuer=self._issuer,
             expected_audience=self._config.client_id,
-            jwks_uri=GOOGLE_JWKS_URL,
+            jwks_uri=self._jwks_url,
             jwks_cache=self._jwks,
         )
 

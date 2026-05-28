@@ -87,6 +87,16 @@ class BackendClient:
             self._http = httpx.AsyncClient(timeout=self.timeout, headers=headers)
         return self._http
 
+    @property
+    def http(self) -> httpx.AsyncClient:
+        """Public accessor for the shared httpx client.
+
+        Used by bootstrap-side helpers (e.g. connector revision check) that
+        need the same authenticated client without round-tripping through
+        ``BackendClient``'s own methods.
+        """
+        return self._get_http()
+
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         """GET ``{base_url}{path}`` and return parsed JSON."""
         kwargs: dict[str, Any] = {"params": params} if params else {}

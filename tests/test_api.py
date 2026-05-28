@@ -232,7 +232,7 @@ def test_active_returns_pointer_when_present(
         "s_abc",
         campaign_id,
         cycle_id,
-        projects_root=stores.base_dir.parent,
+        projects_root=stores.projects_root,
     )
     resp = client.get("/api/v1/active")
     assert resp.status_code == 200
