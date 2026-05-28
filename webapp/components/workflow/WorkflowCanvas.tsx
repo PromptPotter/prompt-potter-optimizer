@@ -6,6 +6,7 @@ import { getCss } from "@/lib/theme";
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 import { useSelection } from "@/components/dashboard/SelectionContext";
 import type { NodeDataLike, PipelineDoc } from "./types";
+import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 // Edge variants — collapses three parallel switches (stroke colour key,
 // dasharray, arrowhead marker id) into one row per kind. Add a kind:
@@ -78,13 +79,15 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
 
   if (!view) {
     return (
-      <div className="workflow-card">
-        <div className="workflow-toolbar">
-          <span style={{ flex: 1 }}>Optimizer</span>
-          <span id="wf-status" style={{ color: "var(--color-text-tertiary)" }}>● topology pending</span>
+      <RotatePrompt surfaceName="The optimizer canvas" skipRender>
+        <div className="workflow-card">
+          <div className="workflow-toolbar">
+            <span style={{ flex: 1 }}>Optimizer</span>
+            <span id="wf-status" style={{ color: "var(--color-text-tertiary)" }}>● topology pending</span>
+          </div>
+          <div className="workflow-canvas-bg" style={{ minHeight: 200 }} />
         </div>
-        <div className="workflow-canvas-bg" style={{ minHeight: 200 }} />
-      </div>
+      </RotatePrompt>
     );
   }
 
@@ -98,6 +101,7 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
   };
 
   return (
+    <RotatePrompt surfaceName="The optimizer canvas" skipRender>
     <div className="workflow-card">
       <div className="workflow-toolbar">
         <span style={{ flex: 1 }}>Optimizer</span>
@@ -232,6 +236,7 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
         </div>
       </div>
     </div>
+    </RotatePrompt>
   );
 }
 

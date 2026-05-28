@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { CardFrame } from "@/components/ui/card";
+import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface ScoreboardEntry {
   rank?: number;
@@ -73,6 +74,7 @@ export function RoundFileView({ doc, raw }: Props) {
   const total = doc.total ?? results.length;
 
   return (
+    <RotatePrompt surfaceName="The round file view">
     <div className="round-file-view">
       <div className="round-file-summary">
         <div className="round-file-summary-row">
@@ -174,5 +176,6 @@ export function RoundFileView({ doc, raw }: Props) {
         </pre>
       </details>
     </div>
+    </RotatePrompt>
   );
 }

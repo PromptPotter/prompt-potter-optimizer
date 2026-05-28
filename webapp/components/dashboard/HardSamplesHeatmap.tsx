@@ -10,6 +10,7 @@ import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { type MeasurementDot } from "./hard-samples/columns";
+import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -152,6 +153,7 @@ export function HardSamplesHeatmap({
   }`;
 
   return (
+    <RotatePrompt surfaceName="The sample heat-map" skipRender>
     <div className="hs-heat-wrap">
       <div className="hs-controls-row">
         <button
@@ -204,5 +206,6 @@ export function HardSamplesHeatmap({
         </div>
       )}
     </div>
+    </RotatePrompt>
   );
 }

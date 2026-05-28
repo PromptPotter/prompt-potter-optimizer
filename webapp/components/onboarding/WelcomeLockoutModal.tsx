@@ -45,16 +45,7 @@ export function WelcomeLockoutModal({ open, onClose }: Props) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div
-        className="account-modal"
-        style={{
-          flexDirection: "column",
-          maxWidth: 380,
-          width: "100%",
-          height: "min(720px, 92vh)",
-          minHeight: 0,
-        }}
-      >
+      <div className="account-modal account-modal-auth">
         <header className="account-pane-head">
           <h3 id="auth-prompt-title">Log in or sign up</h3>
           <button
@@ -67,10 +58,7 @@ export function WelcomeLockoutModal({ open, onClose }: Props) {
           </button>
         </header>
 
-        <div
-          className="account-pane-body"
-          style={{ gap: 14, padding: "22px 24px 18px", flex: "1 1 auto" }}
-        >
+        <div className="account-pane-body account-pane-body-auth">
           <p
             style={{
               margin: 0,
@@ -127,11 +115,10 @@ export function WelcomeLockoutModal({ open, onClose }: Props) {
           <input
             id="auth-email"
             type="email"
-            className="chat-input"
+            className="chat-input auth-email-input"
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={{ minHeight: 0, height: 40, resize: "none" }}
           />
           <a
             className="login-button"

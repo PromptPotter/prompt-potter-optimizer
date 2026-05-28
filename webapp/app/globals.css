@@ -22,6 +22,51 @@
   --dash-narrow-max:980px;
   --dash-wide-max:1400px;
   --dash-zone-gap:18px;
+
+  /* ── Responsive tokens (mobile-first foundation) ─────────────────
+     Content-driven breakpoints — derived from the points where existing
+     desktop layouts already break (commit b1f35923 chose 640/380; the
+     dashboard's container queries break at 760/780/880/960). Five tiers
+     plus an orientation-rotation threshold for dense visualisations
+     that cannot meaningfully fit portrait phone.
+
+     Note: CSS @media queries cannot read CSS custom properties (per
+     spec — media queries resolve before custom-property substitution).
+     The numbers must literal in @media rules; these tokens are the
+     canonical source the sweep references when authoring new rules
+     and the lint test pins to a single list of allowed breakpoints. */
+  --bp-xs:380px;          /* iPhone SE-class portrait */
+  --bp-sm:640px;          /* large phone */
+  --bp-rotate:768px;      /* below this, portrait dense surfaces show rotate prompt */
+  --bp-md:880px;          /* small tablet / landscape phone */
+  --bp-lg:1024px;         /* small laptop — matches existing dash-narrow-max-adjacent break */
+  --bp-xl:1400px;         /* full desktop — matches existing dash-wide-max */
+
+  /* Touch-target floor — Apple HIG 44pt, Material 48dp, WCAG 2.5.8 AA
+     24px (with adequate spacing). Design to the strictest applicable.
+     Applied via @media (pointer:coarse) so a touchscreen laptop also
+     gets the larger targets. */
+  --touch-target-min:44px;
+  --touch-target-spacing:8px;
+
+  /* Safe-area insets — iOS notch + home indicator. Always pair with a
+     fallback (0px) so non-iOS chrome stays unaffected. WebKit primary
+     source: webkit.org/blog/7929/designing-websites-for-iphone-x/ */
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-right:env(safe-area-inset-right,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+  --safe-left:env(safe-area-inset-left,0px);
+
+  /* Fluid type base. ≥16px floor is load-bearing: iOS Safari auto-zooms
+     on input focus when the input font-size is <16px. The clamp keeps
+     dense desktop legibility while preventing that zoom on phones. */
+  --font-size-base:clamp(14px,calc(13px + 0.25vw),16px);
+
+  /* Dynamic viewport height. `dvh` follows iOS Safari's address-bar
+     resize without layout shift; `vh` fallback declared first so old
+     browsers get the static-height behaviour. */
+  --vh-full:100vh;
+  --vh-full:100dvh;
   --color-success:#10b981; --color-success-rgb:16,185,129;
   --color-success-bg:rgba(var(--color-success-rgb),0.12); --color-success-border:rgba(var(--color-success-rgb),0.35);
   --color-danger:#f87171;  --color-danger-rgb:248,113,113;
@@ -96,7 +141,7 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
    viewport-centering compensation on .dash-spine-narrow below.
    Toggle the .sidebar-collapsed class on .shell to switch widths;
    CSS transitions handle the animation. */
-.shell{--sidebar-width:200px;display:flex;height:100vh;min-height:700px}
+.shell{--sidebar-width:200px;display:flex;height:var(--vh-full);min-height:700px}
 .shell.sidebar-collapsed{--sidebar-width:36px}
 .shell.sidebar-hidden{--sidebar-width:0px}
 .shell.sidebar-hidden > .sidebar{display:none}
@@ -229,8 +274,8 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 /* Modal — used by Fork and Stop confirmations. Backdrop covers the
    whole viewport; card sits centered. Action buttons render in given
    order (rightmost = primary by convention). */
-.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:100}
-.modal-card{background:var(--color-background-primary,#fff);color:var(--color-text-primary);border:1px solid var(--color-border);border-radius:10px;padding:18px 20px 14px;max-width:480px;width:calc(100% - 32px);box-shadow:0 10px 40px rgba(0,0,0,0.3)}
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px;padding-top:max(16px,var(--safe-top));padding-bottom:max(16px,var(--safe-bottom))}
+.modal-card{background:var(--color-background-primary,#fff);color:var(--color-text-primary);border:1px solid var(--color-border);border-radius:10px;padding:18px 20px 14px;max-width:480px;width:calc(100% - 32px);max-height:calc(var(--vh-full) - 32px);overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,0.3)}
 .modal-title{margin:0 0 8px;font-size:15px;font-weight:600}
 .modal-message{margin:0 0 16px;font-size:13px;color:var(--color-text-secondary);line-height:1.5;white-space:pre-line}
 .modal-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
@@ -244,6 +289,15 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 .topbar{background:var(--color-background-primary);border-bottom:0.5px solid var(--color-border-tertiary);padding:0 20px;display:flex;align-items:center;gap:16px;height:52px;flex-shrink:0}
 .search{flex:0 0 200px;height:30px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:0 10px;font-size:14px;background:var(--color-background-secondary);color:var(--color-text-tertiary)}
+/* Mobile-only topbar affordances. Desktop hides both (sidebar is always
+   open, search input is always visible). Sweep-Group-A additions.
+   Hamburger appears at ≤bp-md (matches drawer-mode breakpoint), search
+   collapse only at ≤bp-sm (640) where the input runs out of room. */
+.topbar-menu,.topbar-search-icon{display:none}
+@media (max-width:880px){
+  .topbar-menu{display:inline-flex;align-items:center;justify-content:center;width:var(--touch-target-min);height:var(--touch-target-min);background:transparent;border:0;cursor:pointer;color:var(--color-text-secondary);border-radius:var(--border-radius-md);font-family:inherit}
+  .topbar-menu:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
+}
 .tabs{display:flex}
 .tab{padding:0 14px;height:52px;display:flex;align-items:center;font-size:14px;cursor:default;color:var(--color-text-tertiary);border-bottom:2px solid transparent;white-space:nowrap;opacity:.6;background:none;border-top:0;border-left:0;border-right:0;font-family:inherit}
 .tab.active{color:var(--color-accent);border-bottom-color:var(--color-accent);font-weight:500;opacity:1}
@@ -270,6 +324,19 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
    exact in a single frame. */
 .dash-spine-narrow{max-width:var(--dash-narrow-max);transform:translateX(calc(var(--sidebar-width, 0px) / -2))}
 .dash-spine-wide{max-width:var(--dash-wide-max)}
+/* Sweep-Group-B: tighten content padding + drop the sidebar-offset
+   transform when the sidebar is a fixed drawer (≤bp-md). The spine
+   centers itself by translating left half the sidebar width — but in
+   drawer mode the sidebar is out of flow, so that offset just pushes
+   content off-screen left. Zero it. Source-order matters: this block
+   sits AFTER the unconditional transform so the cascade resolves
+   correctly at equal specificity. */
+@media (max-width:880px){
+  .content{padding:12px}
+  .dash-spine-narrow{transform:none}
+  .dash-row-triad{gap:12px}
+  .dash-top-row{gap:10px}
+}
 .dash-spine-narrow:last-child,.dash-spine-wide:last-child{margin-bottom:0}
 /* Sticky status strip stays glued to the scroll top even though it sits
    inside a narrow spine. */
@@ -860,6 +927,16 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .tree-collapsed > .tree-children{display:none}
 .tree-arrow{display:inline-block;width:10px;font-size:11px;color:var(--color-text-tertiary)}
 
+/* Sweep-Group-B: files pane stacks on phone — 320px tree + viewer flow
+   on a 375px viewport leaves the viewer ~30px wide, unusable. Stack
+   vertically with a reasonable tree height (40% viewport, scrollable). */
+@media (max-width:880px){
+  .files-pane{flex-direction:column;gap:10px}
+  .tree-pane{width:100%;max-height:40vh}
+  .viewer-pane{min-height:200px}
+  .tree-row,.tree-dir{padding-top:6px;padding-bottom:6px}
+}
+
 /* Chat / New-Job pane — wf-hero pipeline, chat panel, settings card.
    Lifted from vanilla webapp/index.html (chat-content section). */
 .chat-content{padding:0 0 20px;display:flex;flex-direction:column}
@@ -1037,6 +1114,12 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .chat-send{background:var(--color-accent);color:var(--color-text-on-accent);border:none;border-radius:8px;padding:10px 18px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s,color .15s}
 .chat-send:hover:not(:disabled){background:var(--color-accent-strong);color:#fff}
 .chat-send:disabled{opacity:.55;cursor:not-allowed}
+/* Touch-pointer overrides on chat surface — fires on touch tablets at
+   desktop widths (the existing 640px band only kicks below 640). */
+@media (pointer:coarse){
+  .chat-input{font-size:16px;min-height:44px}
+  .chat-attach,.chat-send{min-height:44px}
+}
 .chat-msg.user-file{padding:7px}
 .chat-msg.user-file .file-chip{
   display:flex;align-items:center;gap:8px;
@@ -1499,6 +1582,17 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .new-campaign-cancel:hover{background:var(--color-background-hover)}
 .new-campaign-submit{background:var(--color-accent);border-color:var(--color-accent);color:white;font-weight:500}
 .new-campaign-submit:disabled{opacity:0.55;cursor:not-allowed}
+/* Sweep-Group-B: lift NewCampaignModal inputs to the iOS-safe size on
+   small phones, drop overlay padding, full-width modal. The Phase 0
+   pointer-coarse rule covers buttons + non-select inputs; select needs
+   the explicit font-size bump since the project-local selector is more
+   specific than the generic Phase 0 selector. */
+@media (max-width:640px){
+  .new-campaign-overlay{padding:8px;align-items:flex-start;padding-top:24px}
+  .new-campaign-modal{max-width:none;max-height:calc(var(--vh-full) - 32px)}
+  .new-campaign-field select,.new-campaign-field input{font-size:16px;min-height:44px}
+  .new-campaign-cancel,.new-campaign-submit{min-height:44px;padding:10px 16px;font-size:14px}
+}
 
 /* Account modal (Phase 6 — Clerk-style profile + security) */
 .account-trigger{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);cursor:pointer;margin-left:6px;transition:background 120ms,color 120ms}
@@ -1580,6 +1674,14 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .activity-chart-svg{width:100%;height:90px;display:block}
 .activity-chart-empty{margin:6px 0 4px 0;font-size:12px;color:var(--color-text-tertiary);font-style:italic}
 
+/* WelcomeLockoutModal-specific account-modal variant. The auth prompt is
+   narrower than the operator AccountModal (380 vs 820) and shape-shifts
+   on phone (.account-overlay mobile rules below override max-width).
+   These classes replace the inline styles formerly on the component. */
+.account-modal-auth{flex-direction:column;max-width:380px;width:100%;height:min(720px,92vh);min-height:0}
+.account-pane-body-auth{gap:14px;padding:22px 24px 18px;flex:1 1 auto}
+.auth-email-input{height:40px}
+
 /* Unauthed Topbar chips — Log in (yellow-gold) + Sign up for free (rust/burnt-orange).
    Same shape, two color variants drawn straight from the accent palette. */
 .auth-chip{display:inline-flex;align-items:center;height:30px;padding:0 14px;border-radius:999px;border:0.5px solid transparent;font:inherit;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer;transition:filter 120ms,transform 60ms}
@@ -1610,11 +1712,17 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
      forced by the shell itself. */
   .shell{min-height:0}
 
-  /* Topbar — drop the disabled placeholder search (M13+ scope,
-     not interactive), let the tab row scroll horizontally rather
-     than crush each tab to two characters, tighten everything. */
-  .topbar{padding:0 10px;gap:8px}
+  /* Topbar — surface the search icon (sidebar hamburger already
+     visible from the ≤bp-md band above). The disabled search input
+     itself stays in the DOM (M13+ placeholder rule) — collapses to
+     an icon; tapping the icon expands it inline by hiding the tabs
+     and letting the input span the row. */
+  .topbar{padding:0 8px;gap:6px}
+  .topbar-search-icon{display:inline-flex;align-items:center;justify-content:center;width:var(--touch-target-min);height:var(--touch-target-min);background:transparent;border:0;cursor:pointer;color:var(--color-text-secondary);border-radius:var(--border-radius-md);font-family:inherit}
+  .topbar-search-icon:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
   .search{display:none}
+  .topbar.topbar-search-open .search{display:block;flex:1 1 auto;height:36px;font-size:16px}
+  .topbar.topbar-search-open .tabs{display:none}
   .tabs{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
   .tabs::-webkit-scrollbar{display:none}
   .tab{padding:0 10px;font-size:13px;height:52px}
@@ -1659,9 +1767,15 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
   .chat-messages{padding:14px;gap:10px}
   .chat-msg{max-width:88%;font-size:13px;padding:9px 12px}
   .chat-input-row{padding:10px 12px;gap:6px}
-  .chat-attach{width:38px;height:38px;flex-shrink:0}
-  .chat-input{font-size:14px;min-height:38px}
-  .chat-send{padding:10px 14px;font-size:13px}
+  /* 44×44 minimum on touch — Apple HIG floor. Bumped from 38×38 to
+     honor the foundation tokens; row-height grows by 12px which is
+     well within the chat-panel min-height budget. */
+  .chat-attach{width:44px;height:44px;flex-shrink:0}
+  /* 16px font-size is the iOS Safari focus-zoom suppressor — anything
+     under 16px triggers an auto-zoom on tap, which permanently scales
+     the layout until the operator manually pinches back. */
+  .chat-input{font-size:16px;min-height:44px}
+  .chat-send{padding:10px 18px;font-size:14px;min-height:44px}
 
   /* Settings card — wand-row has `margin:0 -12px` for its overhang
      glow; on a narrow card that pushes content past the panel edge.
@@ -1673,16 +1787,18 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
   .toggle-row.wand-row .name{white-space:normal}
   .toggle-row.wand-row .desc{max-width:none}
 
-  /* Welcome lockout modal — sets maxWidth:380 / width:100% inline, so
-     CSS overrides need !important. Drop the overlay padding (24px
-     eats 48px of viewport width on 375), let the modal claim the
-     full screen comfortably. account-modal is shared with
-     AccountModal which is authed-only and operator-facing; if a
-     phone operator opens it the same compact layout applies, which
-     is the right call. */
+  /* Welcome lockout modal — now class-driven (no inline overrides),
+     so !important is unnecessary. Drop overlay padding (24px eats
+     48px of viewport width on 375) and let the modal claim the full
+     screen comfortably. account-modal is shared with AccountModal
+     (operator-facing); if a phone operator opens it the same compact
+     layout applies, which is the right call. */
   .account-overlay{padding:8px;align-items:flex-start;padding-top:24px}
-  .account-modal{max-width:none !important;width:100% !important;height:auto !important;min-height:0 !important;max-height:calc(100vh - 32px) !important}
-  .account-pane-body{padding:18px 16px 14px !important;gap:12px !important}
+  .account-modal{max-width:none;width:100%;height:auto;min-height:0;max-height:calc(var(--vh-full) - 32px)}
+  .account-modal-auth{height:auto;max-height:calc(var(--vh-full) - 32px)}
+  .account-pane-body{padding:18px 16px 14px;gap:12px}
+  .account-pane-body-auth{padding:18px 16px 14px;gap:12px}
+  .auth-email-input{height:auto}
   .login-button{padding:14px 16px;min-height:44px;font-size:14px}
 }
 
@@ -1698,4 +1814,92 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
      arrow gutter. */
   .wf-hero-node{min-width:108px;padding:8px 12px}
   .wf-hero-node.llm{min-width:160px}
+}
+
+/* ── Sidebar mobile drawer (Sweep-Group-A) ─────────────────────────
+   Below --bp-md the 200px fixed-flex sidebar becomes an overlay drawer
+   triggered by the topbar hamburger. The sidebar leaves the flex flow
+   (position:fixed) so main reclaims the full width; the backdrop sits
+   between sidebar and main z-axis-wise and catches a tap to close.
+   Chat-mode keeps the existing `sidebar-hidden` behaviour — drawer
+   doesn't apply there. */
+.sidebar-backdrop{display:none}
+@media (max-width:880px){
+  .shell:not(.chat-mode) > .sidebar{position:fixed;top:0;left:0;bottom:0;width:min(280px,86vw);max-width:280px;transform:translateX(-100%);transition:transform 220ms ease;z-index:200;box-shadow:0 0 24px rgba(0,0,0,0.4);padding-top:max(8px,var(--safe-top))}
+  .shell.sidebar-mobile-open > .sidebar{transform:translateX(0)}
+  .sidebar-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:199;opacity:0;pointer-events:none;transition:opacity 180ms ease}
+  .shell.sidebar-mobile-open > .sidebar-backdrop{opacity:1;pointer-events:auto}
+  /* The on-sidebar collapse toggle is desktop-only — operator hides the
+     full sidebar from the topbar hamburger in mobile mode instead. */
+  .sidebar > .sidebar-toggle{display:none}
+}
+@media (max-width:880px) and (prefers-reduced-motion:reduce){
+  .shell:not(.chat-mode) > .sidebar,
+  .sidebar-backdrop{transition:none}
+}
+
+/* ── Touch hover-affordance reveal (Sweep-Group-B/C) ──────────────
+   A few CSS classes hide controls behind `:hover` to keep the desktop
+   surface clean (header tool icons, resize grips). On touch there's
+   no hover — these controls become permanently invisible. Make them
+   always-visible on coarse pointers. */
+@media (pointer:coarse){
+  .hs-header-tools{opacity:1}
+  .hs-heat-mini-btn::after{opacity:1}
+}
+
+/* ── Touch-pointer floor (Phase 0 foundation) ─────────────────────
+   Apple HIG / Material 3 / WCAG 2.5.8 — every interactive element on a
+   touch device must hit the 44px floor. Gated on (pointer:coarse) not
+   on viewport width so a touchscreen laptop also gets the larger
+   targets; a desktop with a mouse stays at the existing dense sizes.
+   The sweep tunes individual components; this is the safety net.
+
+   Inputs additionally need ≥16px font-size to prevent iOS Safari's
+   focus-zoom — the sweep applies that per-input, this block keeps the
+   touch region honest in the meantime. */
+@media (pointer:coarse){
+  button:not(.btn-tight):not(.unit-library-chip):not(.account-menu-item):not(.account-nav-item),
+  a[role="button"],
+  input[type="submit"],
+  input[type="button"],
+  select{
+    min-height:var(--touch-target-min);
+  }
+  /* Inputs (text, number, etc.) at touch density. Text fields specifically
+     need the font-size floor to suppress iOS focus-zoom; the sweep then
+     tunes per-field. */
+  input:not([type]),
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="search"],
+  textarea{
+    min-height:var(--touch-target-min);
+    font-size:max(16px,1em);
+  }
+}
+
+/* ── Rotate-to-landscape prompt (Phase 0 foundation) ──────────────
+   Dense visualisations (FamilyTree, WhatIfGrid, WorkflowCanvas,
+   HardSamplesHeatmap, RoundFileView, etc.) wrap in <RotatePrompt>.
+   On portrait phone (orientation:portrait + width<bp-rotate) the
+   wrapper renders the rotate card and hides children via CSS. On
+   landscape or ≥bp-rotate the children render at full density.
+   Pure CSS — no JS reflow on rotation. */
+.rotate-prompt-card{display:none}
+@media (orientation:portrait) and (max-width:767px){
+  .rotate-prompt-host > .rotate-prompt-children{display:none}
+  .rotate-prompt-host > .rotate-prompt-card{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:40px 24px;min-height:60vh;text-align:center;color:var(--color-text-secondary)}
+  .rotate-prompt-card .rotate-icon{width:48px;height:48px;color:var(--color-accent);animation:rotate-hint 2.4s ease-in-out infinite}
+  .rotate-prompt-card .rotate-title{font-size:16px;font-weight:600;color:var(--color-text-primary)}
+  .rotate-prompt-card .rotate-body{font-size:14px;max-width:280px;line-height:1.5}
+}
+@keyframes rotate-hint{
+  0%,100%{transform:rotate(0deg)}
+  45%,55%{transform:rotate(90deg)}
+}
+@media (prefers-reduced-motion:reduce){
+  .rotate-prompt-card .rotate-icon{animation:none}
 }

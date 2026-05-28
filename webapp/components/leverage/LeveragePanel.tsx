@@ -7,6 +7,7 @@ import { fetchLeverage, type PerQueryRow } from "@/lib/api";
 import { fmtPct0, fmtFitness, ageText } from "@/lib/format";
 import { useFetch } from "@/lib/useFetch";
 import { Loading, ErrorNote } from "@/components/ui/states";
+import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 const ROW_LIMIT = 200;
 
@@ -51,6 +52,7 @@ export function LeveragePanel() {
   const reusedQueries = data.per_query.filter((r) => r.n_measurements >= 2).length;
 
   return (
+    <RotatePrompt surfaceName="The leverage view">
     <div className="leverage-pane">
       <header className="leverage-header">
         <h2>Accumulated measurements</h2>
@@ -104,6 +106,7 @@ export function LeveragePanel() {
         )}
       </div>
     </div>
+    </RotatePrompt>
   );
 }
 

@@ -16,6 +16,7 @@ import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useFetch } from "@/lib/useFetch";
 import { useWorkspace } from "@/lib/workspace";
 import { useFitnessBars } from "./useFitnessBars";
+import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -205,6 +206,7 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   const bars = useFitnessBars(selected, inActive, rows, diagByLabel);
 
   return (
+    <RotatePrompt surfaceName="The fitness chart">
     <CardFrame
       className={`fitness-card${showWhatIf ? " whatif-open" : ""}`}
       title={
@@ -291,5 +293,6 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
         )}
       </div>
     </CardFrame>
+    </RotatePrompt>
   );
 }

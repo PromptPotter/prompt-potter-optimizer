@@ -20,6 +20,7 @@ import {
 import { fetchCycleFile } from "@/lib/api";
 import { useLocalStorage } from "@/lib/useLocalStorage";
 import { usePoll } from "@/lib/usePoll";
+import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 const KEY = "promptpotter.console.open";
 const MAX_LINES = 200;
@@ -51,7 +52,11 @@ export function ConsolePane({ campaignId, cycleId }: Props) {
         <span className="console-title">Console</span>
         <span className="console-subtitle">output.log — live tail</span>
       </button>
-      {open ? <ConsoleBody campaignId={campaignId} cycleId={cycleId} /> : null}
+      {open ? (
+        <RotatePrompt surfaceName="The console" skipRender>
+          <ConsoleBody campaignId={campaignId} cycleId={cycleId} />
+        </RotatePrompt>
+      ) : null}
     </section>
   );
 }

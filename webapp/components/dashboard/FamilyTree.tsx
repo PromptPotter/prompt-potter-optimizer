@@ -7,6 +7,7 @@ import { useFetch } from "@/lib/useFetch";
 import { buildTree, countDescendants, type CycleNode } from "./family-tree/layout";
 import { Forest } from "./family-tree/Forest";
 import { CleanupConfirmModal } from "./family-tree/CleanupConfirmModal";
+import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface Props {
   // The campaign whose lineage to render. A campaign is a FOREST: it holds
@@ -107,57 +108,59 @@ export function FamilyTree({ campaignId, cycleId, onSelectCycle }: Props) {
   const multiSession = rootCycleIds.length > 1;
 
   return (
-    <section className="family-cladogram" aria-label="Campaign lineage tree">
-      <div className="family-cladogram-head">
-        <span>Campaign lineage</span>
-        <span className="family-cladogram-head-meta">
-          <span className="badge">
-            {totalDesc} {totalDesc === 1 ? "descendant" : "descendants"}
-          </span>
-          {stubCount > 0 && (
-            <button
-              type="button"
-              className="family-cladogram-cleanup-btn"
-              onClick={() => {
-                setCleanupError(null);
-                setCleanupOpen(true);
-              }}
-              title="Delete every empty-stub fork in this campaign from disk"
-            >
-              Clean up {stubCount} stub{stubCount === 1 ? "" : "s"}
-            </button>
-          )}
-          {cleanupAcked && stubCount === 0 && (
-            <span className="family-cladogram-cleanup-done" title="Last cleanup result">
-              cleaned
+    <RotatePrompt surfaceName="The lineage tree" skipRender>
+      <section className="family-cladogram" aria-label="Campaign lineage tree">
+        <div className="family-cladogram-head">
+          <span>Campaign lineage</span>
+          <span className="family-cladogram-head-meta">
+            <span className="badge">
+              {totalDesc} {totalDesc === 1 ? "descendant" : "descendants"}
             </span>
-          )}
-        </span>
-      </div>
-      {forests.map((f) => (
-        <Forest
-          key={f.rootId}
-          tree={f.tree}
-          campaignId={campaignId}
-          cycleId={cycleId}
-          onSelectCycle={onSelectCycle}
-          sessionLabel={
-            multiSession ? `Session ${sessionIndexOf(f.rootId)}` : null
-          }
-        />
-      ))}
-      {cleanupOpen && (
-        <CleanupConfirmModal
-          stubCount={stubCount}
-          cleaning={cleaning}
-          error={cleanupError}
-          onCancel={() => {
-            setCleanupOpen(false);
-            setCleanupError(null);
-          }}
-          onConfirm={confirmCleanup}
-        />
-      )}
-    </section>
+            {stubCount > 0 && (
+              <button
+                type="button"
+                className="family-cladogram-cleanup-btn"
+                onClick={() => {
+                  setCleanupError(null);
+                  setCleanupOpen(true);
+                }}
+                title="Delete every empty-stub fork in this campaign from disk"
+              >
+                Clean up {stubCount} stub{stubCount === 1 ? "" : "s"}
+              </button>
+            )}
+            {cleanupAcked && stubCount === 0 && (
+              <span className="family-cladogram-cleanup-done" title="Last cleanup result">
+                cleaned
+              </span>
+            )}
+          </span>
+        </div>
+        {forests.map((f) => (
+          <Forest
+            key={f.rootId}
+            tree={f.tree}
+            campaignId={campaignId}
+            cycleId={cycleId}
+            onSelectCycle={onSelectCycle}
+            sessionLabel={
+              multiSession ? `Session ${sessionIndexOf(f.rootId)}` : null
+            }
+          />
+        ))}
+        {cleanupOpen && (
+          <CleanupConfirmModal
+            stubCount={stubCount}
+            cleaning={cleaning}
+            error={cleanupError}
+            onCancel={() => {
+              setCleanupOpen(false);
+              setCleanupError(null);
+            }}
+            onConfirm={confirmCleanup}
+          />
+        )}
+      </section>
+    </RotatePrompt>
   );
 }

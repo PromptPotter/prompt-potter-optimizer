@@ -99,6 +99,18 @@ function DashboardPaneInner() {
     () => setSidebarCollapsed((prev) => !prev),
     [setSidebarCollapsed],
   );
+  // Mobile-only drawer state. Below --bp-md the sidebar is hidden by
+  // default and the topbar shows a hamburger; tapping the hamburger
+  // (or the backdrop) toggles this. Resets on tab switch via the
+  // render-phase guarded reset (webapp/CLAUDE.md "State reset on prop
+  // change") — running during render avoids the post-paint flash of
+  // the prior-tab drawer state.
+  const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false);
+  const [prevTab, setPrevTab] = useState(tab);
+  if (tab !== prevTab) {
+    setPrevTab(tab);
+    setSidebarMobileOpen(false);
+  }
 
   // Single-ingress dashboard read. `useDashboard` wraps `useCycleStream`
   // and exposes the derived round number — no component re-runs `roundOf`
@@ -173,7 +185,9 @@ function DashboardPaneInner() {
 
   return (
     <SelectionProvider cycleId={cycleId}>
-    <div className={`shell${tab === "chat" ? " chat-mode sidebar-hidden" : sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+    <div
+      className={`shell${tab === "chat" ? " chat-mode sidebar-hidden" : sidebarCollapsed ? " sidebar-collapsed" : ""}${sidebarMobileOpen ? " sidebar-mobile-open" : ""}`}
+    >
       <Sidebar
         onSelectCycle={(cmp, cyc) => {
           selectCycle(cmp, cyc);
@@ -183,8 +197,21 @@ function DashboardPaneInner() {
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleSidebar}
       />
+      {/* Mobile drawer backdrop — only rendered on mobile via CSS. Tap
+          dismisses the open drawer. */}
+      {tab !== "chat" ? (
+        <div
+          className="sidebar-backdrop"
+          aria-hidden="true"
+          onClick={() => setSidebarMobileOpen(false)}
+        />
+      ) : null}
       <main className="main">
-        <Topbar tab={tab} onTabChange={setTab} />
+        <Topbar
+          tab={tab}
+          onTabChange={setTab}
+          onMenuToggle={tab !== "chat" ? () => setSidebarMobileOpen((v) => !v) : undefined}
+        />
         {cycleId ? (
           <StatusBar
             status={bannerStatus}

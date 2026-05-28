@@ -7,6 +7,7 @@ import { Modal, type ModalAction } from "@/components/shell/Modal";
 import { fmtPct1 } from "@/lib/format";
 import type { SelectedCandidate } from "@/lib/types/selection";
 import type { ScoreboardEntry } from "@/lib/types/round";
+import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface Props {
   campaignId: string | null;
@@ -92,6 +93,7 @@ export function ScoringInspector({
     : `Endorses R${selected.round}.${selected.candidate_id}. The new fork inherits the parent's ledger and runs L1 generation fresh from this point. The active pointer retargets to the fork — your next \`resume\` picks it up.`;
 
   return (
+    <RotatePrompt surfaceName="The scoring inspector">
     <section className="scoring-inspector" aria-label="Scoring inspector">
       <div className="inspector-head">
         <span>Scoring · R{selected.round}.{selected.candidate_id}</span>
@@ -178,5 +180,6 @@ export function ScoringInspector({
         </div>
       )}
     </section>
+    </RotatePrompt>
   );
 }

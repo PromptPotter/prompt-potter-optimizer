@@ -9,6 +9,7 @@ import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { ageText, fmtFitness, fmtPct0 } from "@/lib/format";
 import { useFetch } from "@/lib/useFetch";
 import { ErrorNote, Loading } from "@/components/ui/states";
+import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 export function VerifyPane() {
   const { data, error } = useFetch((s) => fetchDiagnosticRuns(undefined, s), []);
@@ -49,6 +50,7 @@ export function VerifyPane() {
   }
 
   return (
+    <RotatePrompt surfaceName="The verify view">
     <div className="verify-pane">
       <header className="verify-header">
         <h2>Workspace verification</h2>
@@ -82,6 +84,7 @@ export function VerifyPane() {
         </table>
       </div>
     </div>
+    </RotatePrompt>
   );
 }
 

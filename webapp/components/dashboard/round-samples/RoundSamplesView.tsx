@@ -13,6 +13,7 @@ import {
   historicalSamplesFor,
   liveSamplesFor,
 } from "@/lib/derivations/round-samples";
+import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import type { SampleRow } from "@/lib/types/sample";
 import type { CandidateRow } from "@/lib/types/candidate";
 
@@ -120,6 +121,7 @@ export function RoundSamplesView({ dash, status, campaignId, cycleId }: Props) {
     );
 
   return (
+    <RotatePrompt surfaceName="The round samples view">
     <CardFrame
       className="round-samples-view"
       headingTag="h2"
@@ -234,6 +236,7 @@ export function RoundSamplesView({ dash, status, campaignId, cycleId }: Props) {
         </>
       )}
     </CardFrame>
+    </RotatePrompt>
   );
 }
 
