@@ -23,6 +23,7 @@ import secrets
 from datetime import UTC, datetime
 from pathlib import Path as FsPath
 from typing import Annotated, Any, cast
+from urllib.parse import quote_plus
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -157,6 +158,20 @@ def _require_provider_client(bundle: IdentityBundle, provider: str) -> Any:
     raise HTTPException(404, {"error": "provider_unknown", "provider": provider})
 
 
+def _redirect_with_error(code: str, *, email: str | None = None) -> RedirectResponse:
+    """Bounce a failed callback to the sign-in surface with a query-param error.
+
+    Google's consent screen browser-navigates straight to /auth/callback/...;
+    raising HTTPException there dumps raw JSON to the tab. Industry-standard
+    fix: 303 to the login surface (`/ui/`) with `?auth_error=<code>` so the
+    React modal can render a friendly inline banner.
+    """
+    qs = f"auth_error={code}"
+    if email:
+        qs += f"&email={quote_plus(email)}"
+    return RedirectResponse(url=f"/ui/?{qs}", status_code=303)
+
+
 @auth_router.get("/providers", response_model=ProvidersResponse)
 async def list_providers(request: Request) -> ProvidersResponse:
     bundle = _require_bundle(request)
@@ -187,23 +202,33 @@ async def callback(
     request: Request,
     provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
 ) -> RedirectResponse:
+    # All failure paths in this handler redirect to /ui/?auth_error=<code>
+    # instead of raising HTTPException — this route is browser-navigated by
+    # the provider's consent screen, so a JSON 4xx renders as raw text in the
+    # tab. The sibling routes (/login, /providers, /me, /logout) keep raising
+    # since they're called by fetch() and want JSON.
     if provider not in _SUPPORTED_PROVIDERS:
-        raise HTTPException(404, {"error": "provider_unknown", "provider": provider})
-    bundle = _require_bundle(request)
+        return _redirect_with_error("signin_unavailable")
+    bundle: IdentityBundle | None = getattr(request.app.state, "identity_bundle", None)
+    if bundle is None:
+        return _redirect_with_error("signin_unavailable")
+    provider_client = bundle.google if provider == "google" else bundle.github
+    if provider_client is None:
+        return _redirect_with_error("signin_unavailable")
 
     error = request.query_params.get("error")
     if error:
         logger.warning("OIDC callback error for %s: %s", provider, error)
-        raise HTTPException(400, {"error": "provider_returned_error", "detail": error})
+        return _redirect_with_error("provider_returned_error")
 
     state = request.query_params.get("state")
     code = request.query_params.get("code")
     if not state or not code:
-        raise HTTPException(400, {"error": "callback_missing_params"})
+        return _redirect_with_error("callback_missing_params")
 
     pending = bundle.consume_state(state)
     if pending is None or pending.provider != provider:
-        raise HTTPException(400, {"error": "state_invalid_or_expired"})
+        return _redirect_with_error("state_invalid_or_expired")
 
     try:
         if provider == "google":
@@ -214,15 +239,12 @@ async def callback(
             identity = await bundle.github.exchange_code(code=code)  # type: ignore[union-attr]
     except (GoogleTokenExchangeError, GitHubTokenExchangeError, IDTokenInvalidError) as exc:
         logger.warning("OIDC code exchange failed for %s: %s", provider, exc)
-        raise HTTPException(401, {"error": "code_exchange_failed", "detail": str(exc)}) from exc
+        return _redirect_with_error("code_exchange_failed")
 
     decision = check_allowlist(bundle.paths.allowlist, identity.email)
     if not decision.allowed:
         logger.info("Allowlist rejected %s (%s): %s", identity.email, provider, decision.reason)
-        raise HTTPException(
-            403,
-            {"error": "not_allowlisted", "reason": decision.reason, "email": identity.email},
-        )
+        return _redirect_with_error("not_allowlisted", email=identity.email)
 
     user_id = derive_user_id(identity.issuer, identity.subject)
     maybe_claim_default(

@@ -68,7 +68,7 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
   void themeTick;
   const colors =
     typeof window === "undefined"
-      ? { txt: "#9ca3af", ok: "#10b981", acc: "#f59e0b", esc: "#ea580c", bg: "#0d0d0d" }
+      ? { txt: "#525252", ok: "#1a8265", acc: "#090C9B", esc: "#060888", bg: "#F5F1EA" }
       : {
           txt: getCss("--color-text-secondary"),
           ok: getCss("--color-success"),

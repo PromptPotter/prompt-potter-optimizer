@@ -9,7 +9,8 @@ import { useLocalStorage } from "@/lib/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
-import { StatusBar } from "@/components/status/StatusBar";
+import { StatusAssistant } from "@/components/status/StatusAssistant";
+import { RunTelemetry } from "@/components/status/RunTelemetry";
 import { ConsolePane } from "@/components/console/ConsolePane";
 import { TopStrip } from "./TopStrip";
 import { ChatPane } from "./ChatPane";
@@ -52,7 +53,7 @@ function DashboardPaneInner() {
     selectCycle,
   } = useWorkspace();
   // Replit-style sub-tabs (Chat / Dashboard / Verify) scoped to the
-  // currently-selected cycle. Files is reachable only via the StatusBar's
+  // currently-selected cycle. Files is reachable only via StatusAssistant's
   // "Open files" link — not exposed on the topbar. Default = chat: that's
   // where new cycles get conceived and where the conversational interface
   // lives.
@@ -213,15 +214,11 @@ function DashboardPaneInner() {
           onMenuToggle={tab !== "chat" ? () => setSidebarMobileOpen((v) => !v) : undefined}
         />
         {cycleId ? (
-          <StatusBar
+          <StatusAssistant
             status={bannerStatus}
             statusText={bannerText}
             statusHint={bannerHint}
             termKey={dashState.termKey}
-            campaignId={campaignId}
-            cycleId={cycleId}
-            dash={dash}
-            isLive={isLive}
             onOpenFiles={() => setTab("files")}
           />
         ) : null}
@@ -301,7 +298,20 @@ function DashboardPaneInner() {
         ) : (
           <VerifyPane />
         )}
-        <ConsolePane campaignId={campaignId} cycleId={cycleId} />
+        <ConsolePane
+          campaignId={campaignId}
+          cycleId={cycleId}
+          headSlot={
+            cycleId ? (
+              <RunTelemetry
+                campaignId={campaignId}
+                cycleId={cycleId}
+                dash={dash}
+                isLive={isLive}
+              />
+            ) : null
+          }
+        />
       </main>
       <NewCampaignModal
         open={newCampaignOpen}

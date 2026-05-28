@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 import { AccountModal } from "@/components/account/AccountModal";
 import { WelcomeLockoutModal } from "@/components/onboarding/WelcomeLockoutModal";
@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 // Per-cycle sub-tabs (Replit-style): the sidebar carries the campaign
 // library; the topbar carries the views over the *currently-selected*
 // campaign. `files` is part of the type but not rendered here — the
-// StatusBar's "Open files" link is the sole entry point into FilesPane.
+// StatusAssistant's "Open files" link is the sole entry point into FilesPane.
 export type Tab = "chat" | "dashboard" | "files" | "verify";
 
 interface Props {
@@ -28,8 +28,32 @@ const TABS: { id: Tab; label: string }[] = [
 export function Topbar({ tab, onTabChange, onMenuToggle }: Props) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [authPromptOpen, setAuthPromptOpen] = useState(false);
+  const [authErrorCode, setAuthErrorCode] = useState<string | null>(null);
+  const [authErrorEmail, setAuthErrorEmail] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const { status } = useAuth();
+
+  // OIDC callback bounce-back: /auth/callback/{provider} 303s to
+  // /ui/?auth_error=<code>(&email=<addr>) on failure. Auto-open the
+  // sign-in modal with the error banner, then strip the params from the
+  // visible URL so a refresh doesn't replay. Read window.location
+  // directly (not useSearchParams) to avoid the Suspense requirement
+  // that breaks static export. Same sanctioned set-state-in-effect
+  // pattern as `lib/workspace.tsx` deep-link hydration: SSR renders
+  // empty, client effect corrects post-hydration.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("auth_error");
+    if (!code) return;
+    setAuthErrorCode(code);
+    setAuthErrorEmail(url.searchParams.get("email"));
+    setAuthPromptOpen(true);
+    url.searchParams.delete("auth_error");
+    url.searchParams.delete("email");
+    window.history.replaceState({}, "", url.toString());
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return (
     <header className={`topbar${searchOpen ? " topbar-search-open" : ""}`}>
@@ -122,7 +146,13 @@ export function Topbar({ tab, onTabChange, onMenuToggle }: Props) {
           </button>
           <WelcomeLockoutModal
             open={authPromptOpen}
-            onClose={() => setAuthPromptOpen(false)}
+            onClose={() => {
+              setAuthPromptOpen(false);
+              setAuthErrorCode(null);
+              setAuthErrorEmail(null);
+            }}
+            errorCode={authErrorCode}
+            errorEmail={authErrorEmail}
           />
         </>
       ) : null}

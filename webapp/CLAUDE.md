@@ -2,6 +2,12 @@
 
 Next.js 16.2.5 + React 19.2.4 + TypeScript, static export at `out/` mounted at `/ui` by FastAPI. Read-only dashboard: polls `dashboard.json` every 2 s, lazy-fetches `round_NNNN.json` on drill-in.
 
+## Design — single source of truth
+
+**Brand, palette, theme framing, copy register live in [`../.impeccable.md`](../.impeccable.md).** Read it before touching styles, brand assets, or any user-visible copy. It is the spec; `app/globals.css` is the canonical token implementation (light + dark blocks); every component reads `var(--…)`. Do not introduce a parallel design spec, design-tokens file, or theme-decision doc — extend `.impeccable.md` in place if direction changes.
+
+The central register is **light / editorial-cobalt** (cobalt `#090C9B` accent, oxblood `#55251D` depth, taupe `#C5AFA4` tint, olive `#696047` muted, warm-bone `#F5F1EA` paper — no orange). The webapp loads in light by default (`app/layout.tsx` pre-paint script, `var t = s || 'light'`). Dark is **DOOM/lava**, opt-in for deep operator work — a distinct register, not a recolor; orange lives only there. Theme change swaps palette + density + framing together via `[data-theme="…"]` on `<html>`.
+
 ## Stack-drift warning
 
 Next.js 16 has breaking changes from prior versions — APIs, file conventions, and config differ from earlier training data. Before touching framework-level code (config, routing, build, async-component shapes), read the relevant section of `node_modules/next/dist/docs/` and heed deprecation notices in the CLI output. React 19 likewise: `use()`, `Actions`, ref-as-prop, removed `forwardRef` boilerplate.

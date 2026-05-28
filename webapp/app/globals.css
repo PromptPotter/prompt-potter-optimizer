@@ -93,41 +93,44 @@
 *::-webkit-scrollbar-thumb:active{background:var(--scrollbar-thumb-active)}
 *::-webkit-scrollbar-corner{background:transparent}
 
-/* Bright theme — sky-blue surfaces with earthy-brown accent and warm sandy
-   tints. Largest areas (page + cards) sit in the *middle* of the lightness
-   range, not near-white, so the UI reads as calm rather than glaring; deep
-   navy text keeps WCAG-AA contrast against those mid-tones. */
+/* Light theme — editorial-cobalt register. Warm-bone paper, taupe surface
+   tints, cobalt accent, oxblood depth, olive muted. The buyer-facing side
+   of the brand — research-grade publication, not marketing brochure.
+   No orange anywhere on this surface (orange belongs to the dark/operator
+   DOOM-lava register, intentionally a different framing). Source of truth:
+   .impeccable.md. */
 [data-theme="light"]{
-  --color-background-tertiary:#b6c5d4;
-  --color-background-primary:#c8d4df;
-  --color-background-secondary:#a8b6c4;
-  --color-background-hover:#cfdae3;
-  --color-background-tint-active:#e6d4a8;
-  --color-background-tint-icon:#c5a679;
-  --color-background-tint-soft:#dccfb6;
-  --color-text-primary:#1a2530;
-  --color-text-secondary:#3d4a58;
-  --color-text-tertiary:#5a6878;
+  --color-background-tertiary:#F5F1EA;       /* page paper — warm bone */
+  --color-background-primary:#ECE7DC;        /* card/panel surface */
+  --color-background-secondary:#E1DBCC;      /* sidebar / secondary surface */
+  --color-background-hover:#E7E1D2;
+  --color-background-tint-active:#C5AFA4;    /* taupe — active tint */
+  --color-background-tint-icon:#696047;      /* olive — icon tint */
+  --color-background-tint-soft:#D8D1BE;      /* subtle warm neutral */
+  --color-text-primary:#0a0a0a;              /* near-black ink */
+  --color-text-secondary:#525252;
+  --color-text-tertiary:#737373;
   --color-text-on-accent:#ffffff;
-  --color-border-tertiary:#8898a8;
-  --color-accent:#8b5a2b;
-  --color-accent-strong:#6e4520;
-  --color-accent-rgb:139,90,43;
-  --color-accent-glow:rgba(var(--color-accent-rgb),0.30);
-  --color-success:#0d8765;
-  --color-success-rgb:13,135,101;
+  --color-border-tertiary:#A89E8A;           /* olive-derived border */
+  --color-accent:#090C9B;                    /* cobalt — primary accent */
+  --color-accent-strong:#060888;             /* cobalt hover/active */
+  --color-accent-rgb:9,12,155;
+  --color-accent-glow:rgba(var(--color-accent-rgb),0.28);
+  --color-selection:#55251D;                 /* oxblood — cross-panel selection stroke */
+  --color-success:#1a8265;
+  --color-success-rgb:26,130,101;
   --color-success-bg:rgba(var(--color-success-rgb),0.18);
   --color-success-border:rgba(var(--color-success-rgb),0.45);
   --color-danger:#b03d3d;
   --color-danger-rgb:176,61,61;
   --color-danger-bg:rgba(var(--color-danger-rgb),0.16);
   --color-danger-border:rgba(var(--color-danger-rgb),0.45);
-  --color-warn:#8b5a2b;
-  --color-warn-bg:rgba(var(--color-accent-rgb),0.16);
-  --color-warn-border:rgba(var(--color-accent-rgb),0.45);
-  --scrollbar-thumb:rgba(100,100,100,.4);
-  --scrollbar-thumb-hover:rgba(100,100,100,.7);
-  --scrollbar-thumb-active:rgba(0,0,0,.6);
+  --color-warn:#55251D;                      /* oxblood — warn (no orange in light) */
+  --color-warn-bg:rgba(85,37,29,0.14);
+  --color-warn-border:rgba(85,37,29,0.40);
+  --scrollbar-thumb:rgba(85,37,29,0.30);     /* oxblood-tinted scrollbar */
+  --scrollbar-thumb-hover:rgba(85,37,29,0.55);
+  --scrollbar-thumb-active:rgba(9,12,155,0.65);
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
@@ -338,42 +341,60 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
   .dash-top-row{gap:10px}
 }
 .dash-spine-narrow:last-child,.dash-spine-wide:last-child{margin-bottom:0}
-/* Sticky status strip stays glued to the scroll top even though it sits
-   inside a narrow spine. */
-#content-dashboard > .dash-strip{max-width:var(--dash-narrow-max);margin-left:auto;margin-right:auto}
 
-/* Sticky status strip — one-line synopsis pinned to the top of the scroll
-   container. Reuses .status-bar's color tokens (live/stale/offline) so the
-   palette stays linked, but lays the row out as a flex strip with named
-   cells instead of a single text run. */
-/* flex-wrap:wrap — the strip is global chrome (rendered in <main>, outside
-   the `content` container), so the container-query relief below never
-   fires for it. Wrapping lets cells drop to a second line instead of
-   overlapping into each other on a mid-width viewport. */
-.dash-strip{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;
-  padding:8px 14px;margin:0 0 14px;border-radius:0;border-left:0;border-right:0;
+/* Status assistant — Clippy-style floating chip pinned to the
+   bottom-right corner of the viewport, just above the Console pane.
+   Expanded form carries the contextual framing (dot + statusText +
+   statusHint) plus the operator's one jump into FilesPane and a manual
+   collapse affordance. After 10s of idle time it shrinks to a circular
+   button (see StatusAssistant.tsx). Run-state telemetry lives in the
+   Console head — see .run-telemetry. */
+.status-assistant{position:fixed;right:16px;bottom:56px;z-index:30;
+  display:inline-flex;align-items:center;gap:10px;
   background:var(--color-background-primary);
-  border-top:0.5px solid var(--color-border-tertiary);
-  border-bottom:0.5px solid var(--color-border-tertiary)}
-.dash-strip.live{box-shadow:inset 3px 0 0 var(--color-success)}
-.dash-strip.stale{box-shadow:inset 3px 0 0 var(--color-warn)}
-.dash-strip.offline{box-shadow:inset 3px 0 0 var(--color-danger)}
-.dash-strip-text{display:inline-flex;align-items:baseline;gap:8px;min-width:0;max-width:36%;
+  border:0.5px solid var(--color-border-tertiary);
+  border-radius:var(--border-radius-md);
+  box-shadow:0 4px 14px rgba(0,0,0,0.14);
+  font-size:13px;
+  max-width:calc(100vw - 32px);
+  transition:box-shadow .15s ease,transform .15s ease}
+.status-assistant.expanded{padding:8px 10px 8px 14px;min-width:260px;max-width:420px}
+.status-assistant.expanded.live{background:var(--color-success-bg);color:var(--color-success);border-color:var(--color-success-border);box-shadow:0 4px 14px rgba(0,0,0,0.14),inset 3px 0 0 var(--color-success)}
+.status-assistant.expanded.stale{background:var(--color-warn-bg);color:var(--color-warn);border-color:var(--color-warn-border);box-shadow:0 4px 14px rgba(0,0,0,0.14),inset 3px 0 0 var(--color-warn)}
+.status-assistant.expanded.offline{background:var(--color-danger-bg);color:var(--color-danger);border-color:var(--color-danger-border);box-shadow:0 4px 14px rgba(0,0,0,0.14),inset 3px 0 0 var(--color-danger)}
+.status-assistant.collapsed{width:44px;height:44px;padding:0;border-radius:50%;justify-content:center;cursor:pointer}
+.status-assistant.collapsed:hover{transform:scale(1.06);box-shadow:0 6px 18px rgba(0,0,0,0.18)}
+.status-assistant.collapsed:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.status-assistant.collapsed.live{color:var(--color-success);border-color:var(--color-success-border)}
+.status-assistant.collapsed.stale{color:var(--color-warn);border-color:var(--color-warn-border)}
+.status-assistant.collapsed.offline{color:var(--color-danger);border-color:var(--color-danger-border)}
+.status-assistant.collapsed .status-dot{width:14px;height:14px}
+.status-assistant-text{display:inline-flex;align-items:baseline;gap:8px;min-width:0;flex:1;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dash-strip-text strong{color:currentColor}
-.dash-strip-hint{color:var(--color-text-tertiary);font-weight:400;overflow:hidden;text-overflow:ellipsis}
-.dash-strip-sep{color:var(--color-text-tertiary);opacity:.6}
-.dash-strip-cell{display:inline-flex;align-items:baseline;gap:6px;font-size:12px;color:var(--color-text-secondary);white-space:nowrap;min-width:0}
-.dash-strip-cell code{font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:3px;padding:1px 6px;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
-.dash-strip-cell strong{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
-.dash-strip-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600}
-.dash-strip-sub{color:var(--color-text-tertiary);font-size:11px}
-.dash-strip-delta{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary);padding:0 4px;border-radius:3px}
-.dash-strip-delta.up{color:var(--color-success);background:var(--color-success-bg)}
-.dash-strip-delta.down{color:var(--color-danger);background:var(--color-danger-bg)}
-.dash-strip-jump{margin-left:auto;font-family:inherit;font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:4px 10px;cursor:pointer;transition:color .15s,border-color .15s,background .15s;flex-shrink:0}
-.dash-strip-jump:hover{color:var(--color-accent);border-color:var(--color-accent);background:var(--color-background-hover)}
-.dash-strip-jump:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.status-assistant-text strong{color:currentColor}
+.status-assistant-hint{color:var(--color-text-tertiary);font-weight:400;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.status-assistant-jump{font-family:inherit;font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:4px 10px;cursor:pointer;transition:color .15s,border-color .15s,background .15s;flex-shrink:0}
+.status-assistant-jump:hover{color:var(--color-accent);border-color:var(--color-accent);background:var(--color-background-hover)}
+.status-assistant-jump:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.status-assistant-close{background:transparent;border:0;color:currentColor;opacity:.6;font-size:18px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:4px;flex-shrink:0}
+.status-assistant-close:hover{opacity:1;background:var(--color-background-hover)}
+.status-assistant-close:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+
+/* Run telemetry — flex row of value cells (unit/round/best/spend/last/
+   updated) plus the Stop affordance. Mounted into the Console head row
+   by DashboardPane as the `headSlot` prop so persistent run state sits
+   at the chrome edge alongside the live tail. No sticky behaviour of its
+   own — the parent .console-pane is already pinned to the bottom of
+   <main>. `margin-left:auto` pushes it to the right of the toggle. */
+.run-telemetry{display:inline-flex;align-items:baseline;gap:6px 14px;flex-wrap:wrap;margin-left:auto;min-width:0}
+.run-telemetry-cell{display:inline-flex;align-items:baseline;gap:6px;font-size:12px;color:var(--color-text-secondary);white-space:nowrap;min-width:0}
+.run-telemetry-cell code{font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:3px;padding:1px 6px;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
+.run-telemetry-cell strong{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
+.run-telemetry-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600}
+.run-telemetry-sub{color:var(--color-text-tertiary);font-size:11px}
+.run-telemetry-delta{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary);padding:0 4px;border-radius:3px}
+.run-telemetry-delta.up{color:var(--color-success);background:var(--color-success-bg)}
+.run-telemetry-delta.down{color:var(--color-danger);background:var(--color-danger-bg)}
 
 /* Hero zone — title block + KPIs in one row, progress bars beneath them. */
 .dash-hero{display:flex;flex-direction:column;gap:14px}
@@ -518,17 +539,14 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
   .dash-hero .page-header{flex-direction:column;align-items:flex-start}
   .hero-summary{margin-left:0}
 }
-/* Status strip — drop low-priority cells when the strip can't fit them. */
-@container content (max-width:980px){
-  .dash-strip-hint{display:none}
-}
+/* Telemetry sheds the phase sub-label and the delta chip on narrow
+   viewports. The status assistant is position:fixed and lives outside
+   the .content container, so the existing @container queries don't
+   reach it — the hint already truncates via overflow on the expanded
+   form, and the collapsed form has no text at all. */
 @container content (max-width:760px){
-  .dash-strip-cell .dash-strip-sub{display:none}
-  .dash-strip-delta{display:none}
-}
-@container content (max-width:620px){
-  .dash-strip{flex-wrap:wrap;gap:8px}
-  .dash-strip-text{max-width:100%}
+  .run-telemetry-cell .run-telemetry-sub{display:none}
+  .run-telemetry-delta{display:none}
 }
 
 .page-header{display:flex;align-items:center;margin-bottom:0;gap:20px;flex-wrap:wrap}
@@ -673,21 +691,19 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 /* Progress bars — width-capped so the card doesn't span the full 980 column.
    Sits beneath the hero, left-aligned, ~520px wide. */
 
-/* Status banner */
-.status-bar{padding:8px 14px;border-radius:var(--border-radius-md);font-size:13px;margin-bottom:14px;display:flex;align-items:center;gap:10px;border:0.5px solid transparent}
-.status-bar.live{background:var(--color-success-bg);color:var(--color-success);border-color:var(--color-success-border)}
-.status-bar.stale{background:var(--color-warn-bg);color:var(--color-warn);border-color:var(--color-warn-border)}
-.status-bar.offline{background:var(--color-danger-bg);color:var(--color-danger);border-color:var(--color-danger-border)}
-/* Shape carries state in addition to color (CVD safety): live=filled,
-   stale=hollow ring, offline=×. Slow pulse on live reinforces "alive". */
+/* Status dot — drawn by .status-assistant in both expanded and collapsed
+   forms. Shape carries state in addition to color (CVD safety): live =
+   filled disc, stale = hollow ring, offline = ×. Slow pulse on live
+   reinforces "alive". The dot inherits `currentColor` from the parent's
+   status colour rules. */
 .status-dot{width:10px;height:10px;border-radius:50%;background:currentColor;flex-shrink:0;position:relative}
-.status-bar.live .status-dot{animation:status-breathe 1.6s ease-in-out infinite}
-.status-bar.stale .status-dot{background:transparent;border:1.5px solid currentColor}
-.status-bar.offline .status-dot{background:transparent}
-.status-bar.offline .status-dot::before,
-.status-bar.offline .status-dot::after{content:'';position:absolute;top:50%;left:0;width:100%;height:2px;background:currentColor;border-radius:1px}
-.status-bar.offline .status-dot::before{transform:translateY(-50%) rotate(45deg)}
-.status-bar.offline .status-dot::after{transform:translateY(-50%) rotate(-45deg)}
+.status-assistant.live .status-dot{animation:status-breathe 1.6s ease-in-out infinite}
+.status-assistant.stale .status-dot{background:transparent;border:1.5px solid currentColor}
+.status-assistant.offline .status-dot{background:transparent}
+.status-assistant.offline .status-dot::before,
+.status-assistant.offline .status-dot::after{content:'';position:absolute;top:50%;left:0;width:100%;height:2px;background:currentColor;border-radius:1px}
+.status-assistant.offline .status-dot::before{transform:translateY(-50%) rotate(45deg)}
+.status-assistant.offline .status-dot::after{transform:translateY(-50%) rotate(-45deg)}
 @keyframes status-breathe{0%,100%{opacity:.6}50%{opacity:1}}
 
 .stub-badge{display:inline-block;background:var(--color-danger-bg);color:var(--color-danger);border:0.5px solid var(--color-danger-border);border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;letter-spacing:.06em;margin-left:6px;text-transform:uppercase;font-family:var(--font-sans)}
@@ -1415,8 +1431,13 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    from the LiveDashboardView projection carry the optimizer's narrative
    highlights into the colors below. */
 .console-pane{flex-shrink:0;background:var(--color-background-primary);border-top:0.5px solid var(--color-border-tertiary)}
-.console-head{display:flex;align-items:baseline;gap:10px;width:100%;padding:6px 12px;background:transparent;border:0;cursor:pointer;color:inherit;text-align:left;font:inherit}
-.console-head:hover{background:var(--color-background-secondary)}
+/* Console head — flex row carrying the toggle button on the left and the
+   RunTelemetry strip (mounted by DashboardPane as `headSlot`) on the right.
+   The toggle is the only click target that expand/collapses the body; the
+   telemetry strip is a sibling, never wraps the button. */
+.console-head{display:flex;align-items:center;gap:8px 16px;width:100%;padding:6px 12px;background:transparent;flex-wrap:wrap}
+.console-toggle{display:inline-flex;align-items:baseline;gap:10px;padding:0;background:transparent;border:0;cursor:pointer;color:inherit;text-align:left;font:inherit;flex-shrink:0}
+.console-toggle:hover{color:var(--color-text-primary)}
 .console-caret{color:var(--color-text-tertiary);font-size:12px;width:14px;flex:none}
 .console-title{font-size:13px;font-weight:600;color:var(--color-text-secondary);letter-spacing:0.04em;text-transform:uppercase}
 .console-subtitle{color:var(--color-text-tertiary);font-size:12px;font-weight:400}

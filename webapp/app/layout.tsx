@@ -17,7 +17,7 @@ export const viewport: Viewport = {
   // to the body background each theme uses.
   themeColor: [
     { media: "(prefers-color-scheme: dark)", color: "#0d0d0d" },
-    { media: "(prefers-color-scheme: light)", color: "#b6c5d4" },
+    { media: "(prefers-color-scheme: light)", color: "#F5F1EA" },
   ],
 };
 

@@ -14,6 +14,12 @@ import { instance } from "@/lib/instance";
 interface Props {
   open: boolean;
   onClose: () => void;
+  // OIDC callback bounce-back: the FastAPI /auth/callback/{provider} route
+  // 303-redirects to /ui/?auth_error=<code>(&email=<addr>) on every failure
+  // path. Topbar parses those params and passes them in here; we render a
+  // one-line .account-error banner above the Continue-with-Google button.
+  errorCode?: string | null;
+  errorEmail?: string | null;
 }
 
 const LINKEDIN_URL = instance.owner.linkedin;
@@ -21,7 +27,30 @@ const TERMS_URL = `${instance.marketing_url}/terms`;
 const PRIVACY_URL = `${instance.marketing_url}/privacy`;
 const IMPRINT_URL = `${instance.marketing_url}/imprint`;
 
-export function WelcomeLockoutModal({ open, onClose }: Props) {
+const AUTH_ERROR_COPY: Record<string, (email: string | null) => string> = {
+  not_allowlisted: (email) =>
+    email
+      ? `${email} isn't on the beta list yet. Use the email/LinkedIn button below to request an invite.`
+      : "That Google account isn't on the beta list yet. Use the email/LinkedIn button below to request an invite.",
+  state_invalid_or_expired: () =>
+    "That sign-in took too long and expired. Try Continue with Google again.",
+  code_exchange_failed: () =>
+    "We couldn't verify your sign-in with Google. Try again.",
+  provider_returned_error: () =>
+    "Google sign-in was cancelled. Try again when you're ready.",
+  callback_missing_params: () =>
+    "That sign-in link was incomplete. Try again.",
+  signin_unavailable: () =>
+    "Sign-in is temporarily unavailable. Ping us on LinkedIn and we'll fix it.",
+  _default: () => "Something went wrong during sign-in. Try again.",
+};
+
+function authErrorMessage(code: string, email: string | null): string {
+  const fn = AUTH_ERROR_COPY[code] ?? AUTH_ERROR_COPY._default;
+  return fn(email);
+}
+
+export function WelcomeLockoutModal({ open, onClose, errorCode, errorEmail }: Props) {
   const [email, setEmail] = useState("");
 
   useEffect(() => {
@@ -70,6 +99,12 @@ export function WelcomeLockoutModal({ open, onClose }: Props) {
           >
             Sign up to evolve your prompts with real data &mdash; not guesses.
           </p>
+
+          {errorCode ? (
+            <p className="account-error" role="alert" style={{ margin: 0 }}>
+              {authErrorMessage(errorCode, errorEmail ?? null)}
+            </p>
+          ) : null}
 
           <p
             style={{

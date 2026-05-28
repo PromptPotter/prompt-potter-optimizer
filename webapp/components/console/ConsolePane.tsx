@@ -29,9 +29,15 @@ const POLL_MS = 1000;
 interface Props {
   campaignId: string | null;
   cycleId: string | null;
+  // Right-aligned slot inside the head row. The dashboard mounts the
+  // RunTelemetry strip here so persistent run state sits at the chrome edge
+  // alongside the live tail, IDE-status-bar style. The slot is layout-only
+  // chrome — it must not capture the head's expand/collapse click. The
+  // toggle is its own button; this slot renders as a sibling element.
+  headSlot?: ReactNode;
 }
 
-export function ConsolePane({ campaignId, cycleId }: Props) {
+export function ConsolePane({ campaignId, cycleId, headSlot }: Props) {
   const [open, setOpen] = useLocalStorage<boolean>(KEY, false, {
     serialize: (v) => (v ? "1" : "0"),
     deserialize: (raw) => raw === "1",
@@ -39,19 +45,22 @@ export function ConsolePane({ campaignId, cycleId }: Props) {
   const toggle = () => setOpen((o) => !o);
   return (
     <section className={`console-pane${open ? " open" : " closed"}`} aria-label="Optimizer console">
-      <button
-        type="button"
-        className="console-head"
-        onClick={toggle}
-        aria-expanded={open}
-        aria-controls="console-body"
-      >
-        <span className="console-caret" aria-hidden="true">
-          {open ? "▾" : "▸"}
-        </span>
-        <span className="console-title">Console</span>
-        <span className="console-subtitle">output.log — live tail</span>
-      </button>
+      <div className="console-head">
+        <button
+          type="button"
+          className="console-toggle"
+          onClick={toggle}
+          aria-expanded={open}
+          aria-controls="console-body"
+        >
+          <span className="console-caret" aria-hidden="true">
+            {open ? "▾" : "▸"}
+          </span>
+          <span className="console-title">Console</span>
+          <span className="console-subtitle">output.log — live tail</span>
+        </button>
+        {headSlot}
+      </div>
       {open ? (
         <RotatePrompt surfaceName="The console" skipRender>
           <ConsoleBody campaignId={campaignId} cycleId={cycleId} />
