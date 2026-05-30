@@ -25,8 +25,10 @@ from promptpotter.domain.results import (
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
     BackfillLogEntry,
+    DashboardError,
     InFlightCall,
     LiveDashboardState,
+    LoopWarning,
     SpendBucket,
     SpendRollup,
 )
@@ -78,8 +80,10 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     SpendBucket,
     SpendRollup,
     BackendWarning,
+    LoopWarning,
     BackfillLogEntry,
     InFlightCall,
+    DashboardError,
     LiveDashboardState,
     # --- datasets router ---
     DatasetItem,

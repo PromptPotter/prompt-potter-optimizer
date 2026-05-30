@@ -83,6 +83,19 @@ export interface DashboardSnapshot {
     message: string;
     stop_reason: string;
   };
+  // Optimizer-loop degradations the self-healing rails recovered from
+  // (zero-candidate round, L2 framing soft-reject, injection truncation),
+  // projected from the canonical ``RoundWarningRecord``. Sole writer:
+  // ``LiveDashboardView._handle_round_warning``. Rolling + capped; surfaced
+  // by ``RunWarningsBanner`` below the crash banner.
+  recent_loop_warnings?: {
+    ts: string;
+    kind: string;
+    severity: "warning" | "error";
+    message: string;
+    round?: number | null;
+    detail?: Record<string, unknown>;
+  }[];
   [key: string]: unknown;
 }
 

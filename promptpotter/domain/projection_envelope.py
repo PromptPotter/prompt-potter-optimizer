@@ -23,11 +23,11 @@ __all__ = ["ProjectionEnvelope", "ProjectionKind"]
 
 
 # Closed enum mirroring ``ProjectionEnvelope.kind`` in
-# ``docs/specs/m12-events-asyncapi.yaml``. Ten entries match
+# ``docs/specs/m12-events-asyncapi.yaml``. Eleven entries match
 # ``record_type`` literals on ``CycleRecord``; one is projection-only.
 # ``tests/test_control_plane_drift.py`` enforces this set stays in sync.
 ProjectionKind = Literal[
-    # record_type literals (10)
+    # record_type literals (11)
     "decision",
     "command",
     "command_ack",
@@ -36,6 +36,7 @@ ProjectionKind = Literal[
     "llm_call",
     "llm_call_start",
     "phase",
+    "round_warning",
     "snapshot",
     "token_usage",
     # projection-only (1) — synthesized by ``EventStreamView``

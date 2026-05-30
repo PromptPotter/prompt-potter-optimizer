@@ -174,6 +174,13 @@ components:
             # ``_CYCLE_LEDGER`` ContextVar; ``LiveDashboardView._handle_error``
             # is the sole writer of ``dashboard.json::error``.
             - error
+            # Non-fatal round-scoped degradation (zero-candidate round, L2
+            # framing soft-reject, injection budget truncation) — emitted via
+            # ``emit_round_warning(...)`` over the ``_CYCLE_LEDGER`` ContextVar.
+            # Previously log-only; now visible on every channel. Sole dashboard
+            # writer ``LiveDashboardView._handle_round_warning``
+            # (``dashboard.json::recent_loop_warnings``).
+            - round_warning
         version:
           type: integer
           minimum: 1
@@ -213,6 +220,7 @@ components:
             - $ref: '#/components/schemas/CommandPayload'
             - $ref: '#/components/schemas/CommandAckPayload'
             - $ref: '#/components/schemas/ErrorPayload'
+            - $ref: '#/components/schemas/RoundWarningPayload'
         emitted_at:
           type: string
           format: date-time
@@ -384,6 +392,54 @@ components:
             Round number when the error fired. `null` for crashes that
             happened before the round loop entered (e.g. bootstrap
             failure).
+        timestamp:
+          type: string
+          format: date-time
+
+    RoundWarningPayload:
+      type: object
+      description: |
+        RoundWarningRecord — a non-fatal, round-scoped degradation the
+        self-healing rails recovered from. Previously logged only to the
+        server's stdout; now rides the ledger so it is visible on every
+        channel. Emitted via `emit_round_warning(...)` over the
+        `_CYCLE_LEDGER` ContextVar (mirrors `emit_error_record`).
+
+        Subscribers:
+          * `LiveDashboardView._handle_round_warning` — sole writer of
+            `dashboard.json::recent_loop_warnings` (rolling, capped).
+          * `AuditTrailView` — accumulates into `round_NNNN.json::warnings`.
+          * `LiveDisplay` — prints a one-line CLI/notebook marker.
+          * `EventStreamView` — fans this record to SSE subscribers.
+      required: [kind, severity, message, timestamp]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [l1_zero_candidates, l2_validator_soft_reject, injection_budget_overrun]
+          description: Which degradation class this record reports.
+        severity:
+          type: string
+          enum: [warning, error]
+          description: |
+            `error` = the round produced nothing usable (zero candidates);
+            `warning` = degraded but the round still progressed.
+        message:
+          type: string
+          description: |
+            Operator-readable one-liner composed at the emit site, so no
+            downstream layer reformats it.
+        round:
+          type: [integer, 'null']
+          minimum: 0
+          description: Round the degradation fired in; `null` outside the round loop.
+        detail:
+          type: object
+          additionalProperties: true
+          description: |
+            Per-kind structured context (e.g. `reason` + `model` for
+            `l1_zero_candidates`, `validator_ids` for the L2 soft-reject,
+            `injection`/`rendered_chars`/`cap` for the budget overrun).
         timestamp:
           type: string
           format: date-time

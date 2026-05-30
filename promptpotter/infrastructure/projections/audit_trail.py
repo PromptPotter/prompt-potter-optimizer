@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord
+from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord, RoundWarningRecord
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.store.base import write_json
 
@@ -159,6 +159,9 @@ class AuditTrailView(DerivedView):
         self._current_round: int = 0
         self._nodes: dict[str, dict[str, Any]] = {}
         self._l1_score: dict[str, Any] | None = None
+        # Round-scoped degradations (zero candidates, L2 soft-rejects, injection
+        # truncations) accumulated for the round_NNNN.json::warnings audit block.
+        self._warnings: list[dict[str, Any]] = []
         # Boundary timestamps from `PhaseRecord.timestamp` — no wall-clock observation here.
         self._started_at: str = ""
         self._finished_at: str = ""
@@ -175,11 +178,12 @@ class AuditTrailView(DerivedView):
         """Start a new round; flush pending state first so L2/L3 calls that arrived between
         `round:complete` and `round:enter` merge into the just-closed round's file (not discarded).
         """
-        if self._nodes or self._l1_score:
+        if self._nodes or self._l1_score or self._warnings:
             self.flush()
         self._current_round = round_num
         self._nodes = {}
         self._l1_score = None
+        self._warnings = []
         self._started_at = started_at
         self._finished_at = ""
 
@@ -206,11 +210,23 @@ class AuditTrailView(DerivedView):
         """
         self._nodes[record.node] = build_node_block(record)
 
+    def _handle_round_warning(self, record: RoundWarningRecord) -> None:
+        """Accumulate round degradations into the ``round_NNNN.json::warnings`` block."""
+        self._warnings.append(
+            {
+                "kind": record.kind,
+                "severity": record.severity,
+                "message": record.message,
+                "detail": dict(record.detail),
+                "timestamp": record.timestamp,
+            }
+        )
+
     def flush(self) -> Path | None:
         """Write `round_NNNN.json` and reset. Idempotent — second flush merges new nodes into the
         existing file rather than overwriting (so late L2/L3 records aren't lost).
         """
-        if not self._nodes and self._l1_score is None:
+        if not self._nodes and self._l1_score is None and not self._warnings:
             return None
 
         self.rounds_dir.mkdir(parents=True, exist_ok=True)
@@ -218,11 +234,13 @@ class AuditTrailView(DerivedView):
 
         existing_nodes: dict[str, Any] = {}
         existing_started_at = self._started_at
+        existing_warnings: list[dict[str, Any]] = []
         if path.exists():
             try:
                 prior = json.loads(path.read_text(encoding="utf-8"))
                 existing_nodes = dict(prior.get("nodes") or {})
                 existing_started_at = prior.get("started_at") or existing_started_at
+                existing_warnings = list(prior.get("warnings") or [])
             except (OSError, json.JSONDecodeError):
                 pass
 
@@ -248,6 +266,9 @@ class AuditTrailView(DerivedView):
             "finished_at": self._finished_at,
             "nodes": nodes_ordered,
         }
+        merged_warnings = existing_warnings + self._warnings
+        if merged_warnings:
+            payload["warnings"] = merged_warnings
         if self._cycle_was_interrupted:
             payload["interrupted"] = True
 
@@ -261,11 +282,12 @@ class AuditTrailView(DerivedView):
 
         self._nodes = {}
         self._l1_score = None
+        self._warnings = []
         return path
 
     def drain(self) -> None:
         """Runner's teardown seam — flush buffered state since a mid-candidate interrupt never
         emits `round:complete`. `_cycle_was_interrupted` threads `"interrupted": true` on the partial.
         """
-        if self._nodes or self._l1_score is not None:
+        if self._nodes or self._l1_score is not None or self._warnings:
             self.flush()

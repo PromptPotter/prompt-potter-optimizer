@@ -105,3 +105,32 @@ def test_low_confidence_proposal_blocks_until_confirmed() -> None:
     # Operator confirms → complete.
     confirmed = proposed.apply_resolution(provenance={"task_description": Provenance.CONFIRMED})
     assert origin_readiness(confirmed).complete
+
+
+def test_optimizer_locks_surface_connector_clamp() -> None:
+    """The draft wire exposes TermNorm's reasoning clamp + forbidden axes pre-commit.
+
+    A draft's `pipeline_overlay` is empty until commit, so the new-campaign UI
+    can only show "the optimizer is locked out of medium/high thinking" if the
+    wire carries the connector's seed. `draft_wire_with_locks` is that surface.
+    """
+    from promptpotter.application.jobs.launcher import draft_wire_with_locks
+
+    registry = DraftCampaignRegistry()
+    draft = registry.create(
+        tenant_id=TenantId("t1"),
+        slug="d4",
+        n_samples=1,
+        sample_preview=[{"query": "q", "ground_truth": "a"}],
+        headers=["query", "ground_truth"],
+    )
+    locks = draft_wire_with_locks(draft)["optimizer_locks"]
+
+    assert locks["pipeline"] == ["llm_only"]
+    # Model/provider are pinned campaign-wide by forbidden_axes_strict (default on).
+    assert locks["forbidden_axes"] == ["model", "provider"]
+    node = locks["nodes"]["llm_only"]
+    assert node["config"]["reasoning_effort"] == "low"
+    # `medium` / `high` are absent from the allowed set → crossed out in the UI.
+    allowed = node["param_allowed_values"]["reasoning_effort"]
+    assert "low" in allowed and "medium" not in allowed and "high" not in allowed

@@ -83,6 +83,15 @@ export interface QuotaStatus {
   campaigns_today: number;
   max_campaigns_per_day: number;
 }
+// Account → Preferences. `demo_mode_enabled` surfaces the built-in
+// try-and-learn demo dataset in the collection.
+export interface UserSettings {
+  demo_mode_enabled: boolean;
+}
+export function fetchUserSettings(signal?: AbortSignal): Promise<UserSettings> {
+  return jget<UserSettings>(`${API}/auth/user-settings`, signal);
+}
+
 export function fetchQuotaStatus(signal?: AbortSignal): Promise<QuotaStatus> {
   return jget<QuotaStatus>(`${API}/auth/quota-status`, signal);
 }
@@ -139,7 +148,7 @@ export function fetchActivity(
 // the `datasets.benchmarks.read` capability and are hidden from web
 // tenants by default. Wire shape pinned in
 // `docs/specs/m12-api-openapi.yaml::DatasetIndexEntry`.
-export type DatasetTier = "yours" | "benchmark";
+export type DatasetTier = "yours" | "benchmark" | "demo";
 export interface DatasetIndexEntry {
   name: string;
   title: string | null;

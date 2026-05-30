@@ -27,6 +27,7 @@ __all__ = [
     "PhaseRecord",
     "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
+    "RoundWarningRecord",
     "SnapshotRecord",
     "TokenUsageRecord",
 ]
@@ -254,6 +255,44 @@ class ErrorRecord(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
+class RoundWarningRecord(BaseModel):
+    """Non-fatal, round-scoped degradation the operator must see on every channel.
+
+    Distinct from :class:`ErrorRecord` (a fatal run halt) and from
+    ``RoundDiagnostics`` (post-scoring analytics): these are mid-round
+    self-heal events that previously logged ONLY to the server's stdout —
+    the optimizer LLM returning empty/truncated output and the round
+    recording zero candidates, an L2 framing-output validator soft-reject,
+    an over-budget injection truncation. The self-healing rails recover and
+    the run continues, but the operator never saw it on the dashboard, the
+    round file, or the CLI.
+
+    Rides the canonical ledger via :func:`emit_round_warning` over the
+    ``_CYCLE_LEDGER`` ContextVar — the same shape as :func:`emit_error_record`
+    /:func:`emit_token_usage`. Surfaced by ``LiveDashboardView`` (sole writer
+    of ``dashboard.json::recent_loop_warnings``), ``AuditTrailView``
+    (``round_NNNN.json::warnings``), and ``LiveDisplay`` (CLI/notebook line).
+    ``message`` is composed operator-readable at the emit site so no
+    downstream layer reformats it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["round_warning"] = "round_warning"
+    kind: Literal[
+        "l1_zero_candidates",
+        "l2_validator_soft_reject",
+        "injection_budget_overrun",
+    ]
+    # `error` = the round produced nothing usable (zero candidates); `warning`
+    # = degraded but the round still progressed. Drives dashboard styling.
+    severity: Literal["warning", "error"] = "warning"
+    message: str
+    round: int | None = None
+    detail: dict[str, Any] = Field(default_factory=dict)
+    timestamp: str = Field(default_factory=_utcnow_iso)
+
+
 # Discriminated union by `record_type`; keep order alphabetical — hash-keyed snapshots go stale otherwise.
 CycleRecord = Annotated[
     ResumeCheckpointRecord
@@ -264,6 +303,7 @@ CycleRecord = Annotated[
     | LLMCallRecord
     | LLMCallStartRecord
     | PhaseRecord
+    | RoundWarningRecord
     | SnapshotRecord
     | TokenUsageRecord,
     Field(discriminator="record_type"),

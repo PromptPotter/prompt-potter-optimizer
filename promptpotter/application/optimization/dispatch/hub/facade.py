@@ -25,6 +25,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
 from promptpotter.application.optimization.dispatch.hub.injections.registry import INJECTIONS
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, L1Layout
 from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.infrastructure.llm.models import emit_round_warning
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -89,6 +90,15 @@ class DispatchHub:
                 name,
                 len(text),
                 cap,
+            )
+            emit_round_warning(
+                kind="injection_budget_overrun",
+                severity="warning",
+                message=(
+                    f"Optimizer prompt section {name!r} ran {len(text)} chars over its "
+                    f"{cap}-char budget and was truncated — some context didn't reach the LLM."
+                ),
+                detail={"injection": name, "rendered_chars": len(text), "cap": cap},
             )
             text = text[:cap] + "…"
         return text

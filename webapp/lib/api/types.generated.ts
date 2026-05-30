@@ -79,6 +79,16 @@ export interface BackendWarning {
   query: string | null;
 }
 
+/** One entry in ``recent_loop_warnings`` — an optimizer-loop degradation the */
+export interface LoopWarning {
+  ts: string;
+  kind: string;
+  severity: string;
+  message: string;
+  round: number | null;
+  detail: Record<string, unknown>;
+}
+
 /** One paired-PoBB backfill event appended by ``candidate_block.append_backfill``. */
 export interface BackfillLogEntry {
   round: number;
@@ -96,6 +106,13 @@ export interface InFlightCall {
   round: number | null;
   candidate_idx: number | null;
   started_at_ms: number;
+}
+
+/** ``dashboard.json::error`` — structured crash summary written by */
+export interface DashboardError {
+  kind: string;
+  message: string;
+  stop_reason: string;
 }
 
 /** ``dashboard.json`` — operator-facing snapshot, polled by the webapp. */
@@ -119,6 +136,7 @@ export interface LiveDashboardState {
   error_count: number;
   backend_retry_count: number;
   recent_backend_warnings: BackendWarning[];
+  recent_loop_warnings: LoopWarning[];
   total_queries_scored: number;
   total_backend_calls: number;
   current_query_payload: string | null;
@@ -132,20 +150,7 @@ export interface LiveDashboardState {
   in_flight: InFlightCall | null;
   backfill_log: BackfillLogEntry[];
   current_round: Record<string, unknown>;
-  /** Populated when the runner crashed — operator-facing message + exception
-   * class. Absent on normal stops (interrupted / completed). */
-  error?: DashboardError;
-}
-
-/** Structured crash summary written by ``LiveDashboardView.mark_stopped`` when
- * the runner exits via CRASHED / RENDER_ERROR. ``message`` is the operator-
- * actionable text (``str(exc)``); ``kind`` is the exception class name for
- * categorization. ``stop_reason`` echoes the ledger's ``StopReason`` for
- * cross-reference with ``index.json::final``. */
-export interface DashboardError {
-  kind: string;
-  message: string;
-  stop_reason: string;
+  error: DashboardError | null;
 }
 
 export interface DatasetItem {

@@ -38,6 +38,7 @@ from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopLoop, Stop
 from promptpotter.domain.run_records import ForkPayload, ForkTrigger, RebaseRequest
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure import llm as _llm_client
+from promptpotter.infrastructure.llm.models import emit_round_warning
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
 from promptpotter.shared import truncate
 from promptpotter.shared.errors import graceful
@@ -94,10 +95,20 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
     )
     failures.extend(layout_outcomes)
     if failures:
+        failed_ids = ", ".join(o.validator_id for o in failures)
         logger.warning(
             "L2 output failed %d validator(s): %s",
             len(failures),
-            ", ".join(o.validator_id for o in failures),
+            failed_ids,
+        )
+        emit_round_warning(
+            kind="l2_validator_soft_reject",
+            severity="warning",
+            message=(
+                f"L2 framing update soft-rejected by {len(failures)} check(s) "
+                f"({failed_ids}) — the prior task_context was kept and L1 continues."
+            ),
+            detail={"validator_ids": [o.validator_id for o in failures]},
         )
 
     return TransitionResult(

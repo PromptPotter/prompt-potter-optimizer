@@ -23,6 +23,7 @@ from promptpotter.domain.opt_search_point import EvidenceGrounding
 from promptpotter.domain.results import CandidateProposal, candidate_label
 from promptpotter.infrastructure.llm import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
+from promptpotter.infrastructure.llm.models import emit_round_warning
 from promptpotter.infrastructure.tracing import CandidateCreated
 from promptpotter.shared.errors import graceful
 
@@ -142,6 +143,20 @@ async def l1_generate(
                 reason=reason,
             )
         )
+        emit_round_warning(
+            kind="l1_zero_candidates",
+            severity="error",
+            message=(
+                "Optimizer produced 0 candidates this round — "
+                + (
+                    "the optimizer LLM returned empty/truncated output"
+                    if is_empty
+                    else "the optimizer LLM's response failed schema validation after a repair retry"
+                )
+                + f" (model {model})."
+            ),
+            detail={"reason": reason, "raw_chars": len(raw), "model": model},
+        )
         return []
     slot_sizes = sorted(
         (
@@ -175,6 +190,16 @@ async def l1_generate(
                 allowed=[],
                 reason="meta_prompt_unexpected_type",
             )
+        )
+        emit_round_warning(
+            kind="l1_zero_candidates",
+            severity="error",
+            message=(
+                "Optimizer produced 0 candidates this round — the optimizer LLM's "
+                f"response decoded as {type(generated).__name__} instead of the expected "
+                f"schema (model {model})."
+            ),
+            detail={"reason": "meta_prompt_unexpected_type", "model": model},
         )
         return []
 

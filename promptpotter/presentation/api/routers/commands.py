@@ -50,6 +50,7 @@ from promptpotter.application.jobs import JobRegistry
 from promptpotter.application.jobs.launcher import (
     LaunchError,
     OriginIncompleteError,
+    draft_wire_with_locks,
     mint_campaign_from_draft_command,
 )
 from promptpotter.connectors import BackendUnreachableError
@@ -362,7 +363,7 @@ async def edit_draft_campaign(
         )
     registry.update(updated)
     store.tenant_datasets.write_draft_resolution(updated.draft_id, resolution_block(updated))
-    return updated.to_wire()
+    return draft_wire_with_locks(updated)
 
 
 @commands_router.post("/resolve-origin")
@@ -399,7 +400,7 @@ async def resolve_origin(
             {"error": "resolver_failed", "message": f"origin resolver turn failed: {exc}"},
         ) from exc
 
-    return {"resolution": result.resolution, "draft": result.draft.to_wire()}
+    return {"resolution": result.resolution, "draft": draft_wire_with_locks(result.draft)}
 
 
 @commands_router.post("/mint-campaign-from-draft")

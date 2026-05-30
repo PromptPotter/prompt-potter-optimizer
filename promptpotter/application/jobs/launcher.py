@@ -45,6 +45,7 @@ from promptpotter.application.origin import load_origin_prompt
 from promptpotter.application.runner import build_origin_cycle_id
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
@@ -301,10 +302,22 @@ def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     if connector.default_pipeline:
         pipeline["pipelines"] = {"default": list(connector.default_pipeline)}
 
-    # Connector node-config seed (e.g. TermNorm's reasoning clamp) underneath,
-    # operator draft edits on top. Sub-blocks (``config`` / ``optimizer``)
-    # shallow-merge per node so an operator override narrows the seed rather
-    # than replacing the whole node.
+    nodes = _merged_backend_nodes(draft)
+    if nodes:
+        pipeline["nodes"] = nodes
+    return pipeline
+
+
+def _merged_backend_nodes(draft: DraftCampaign) -> dict[str, Any]:
+    """Connector node-config seed (e.g. TermNorm's reasoning clamp) underneath,
+    operator draft edits on top — the effective ``pipeline.json::nodes`` block.
+
+    Sub-blocks (``config`` / ``optimizer``) shallow-merge per node so an operator
+    override narrows the seed rather than replacing the whole node. Shared by the
+    committed pipeline.json builder and the wire-side optimizer-locks block so
+    the two never drift.
+    """
+    connector = connectors.get(draft.connector)
     nodes: dict[str, Any] = copy.deepcopy(dict(connector.default_node_config))
     for node_name, node_overlay in (draft.pipeline_overlay or {}).items():
         dst = nodes.setdefault(node_name, {})
@@ -313,9 +326,45 @@ def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
                 dst[key].update(val)
             else:
                 dst[key] = val
-    if nodes:
-        pipeline["nodes"] = nodes
-    return pipeline
+    return nodes
+
+
+def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
+    """The backend-pipeline permission surface the new-campaign UI renders.
+
+    Makes the otherwise-hidden connector defaults visible *before* commit: the
+    default pipeline, the per-node config floor + the ``param_allowed_values``
+    the optimizer may permute, and the campaign-wide forbidden axes
+    (``model``/``provider`` under ``forbidden_axes_strict``). A draft's
+    ``pipeline_overlay`` is empty until commit, so without this the UI couldn't
+    show that the optimizer is *locked out* of escalating these — not merely
+    that ``low`` is a default. Mirrors the commit-time merge via
+    :func:`_merged_backend_nodes`.
+    """
+    connector = connectors.get(draft.connector)
+    forbidden_strict = bool(dict(connector.default_optimization).get("forbidden_axes_strict", True))
+    node_locks: dict[str, Any] = {}
+    for node_name, overlay in _merged_backend_nodes(draft).items():
+        optimizer = overlay.get("optimizer", {})
+        node_locks[node_name] = {
+            "config": dict(overlay.get("config", {})),
+            "param_allowed_values": dict(optimizer.get("param_allowed_values", {})),
+        }
+    return {
+        "pipeline": list(connector.default_pipeline),
+        "forbidden_axes": sorted(PARAM_FORBIDDEN_KEYS) if forbidden_strict else [],
+        "nodes": node_locks,
+    }
+
+
+def draft_wire_with_locks(draft: DraftCampaign) -> dict[str, Any]:
+    """``DraftCampaign.to_wire()`` plus the connector-derived ``optimizer_locks``.
+
+    The single wire shape every draft-returning endpoint emits — keeps
+    :meth:`DraftCampaign.to_wire` pure (no connector import) and adds the
+    permission block once at the I/O boundary.
+    """
+    return {**draft.to_wire(), "optimizer_locks": derive_optimizer_locks(draft)}
 
 
 def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:

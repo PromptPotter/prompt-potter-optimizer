@@ -23,8 +23,10 @@ from promptpotter.domain.results import OriginSummary, RoundSummary
 __all__ = [
     "BackendWarning",
     "BackfillLogEntry",
+    "DashboardError",
     "InFlightCall",
     "LiveDashboardState",
+    "LoopWarning",
     "SpendBucket",
     "SpendRollup",
 ]
@@ -87,6 +89,39 @@ class BackendWarning(BaseModel):
     status_code: int | None = None
     final: bool = False
     query: str | None = None
+
+
+class LoopWarning(BaseModel):
+    """One entry in ``recent_loop_warnings`` — an optimizer-loop degradation the
+    self-healing rails recovered from (zero-candidate round, L2 framing
+    soft-reject, injection budget truncation). Projected from the canonical
+    :class:`~promptpotter.domain.run_records.RoundWarningRecord`. Previously
+    log-only; now visible on the dashboard / file-tree alongside
+    ``recent_backend_warnings``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ts: str
+    kind: str
+    severity: str
+    message: str
+    round: int | None = None
+    detail: dict[str, Any] = Field(default_factory=dict)
+
+
+class DashboardError(BaseModel):
+    """``dashboard.json::error`` — structured crash summary written by
+    :meth:`LiveDashboardView._handle_error` from the canonical ``ErrorRecord``
+    when the runner exits via ``CRASHED`` / ``RENDER_ERROR`` / ``DIVERGED``.
+    ``message`` is the operator-actionable text; ``kind`` is the exception
+    class name; ``stop_reason`` echoes the ledger ``StopReason``. Absent on
+    normal stops (interrupted / completed)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    message: str
+    stop_reason: str
 
 
 class InFlightCall(BaseModel):
@@ -157,6 +192,8 @@ class LiveDashboardState(BaseModel):
     # Backend retry / warning visibility.
     backend_retry_count: int = 0
     recent_backend_warnings: list[BackendWarning] = Field(default_factory=list)
+    # Optimizer-loop degradation visibility — sibling to recent_backend_warnings.
+    recent_loop_warnings: list[LoopWarning] = Field(default_factory=list)
 
     total_queries_scored: int = 0
     total_backend_calls: int = 0
@@ -183,3 +220,8 @@ class LiveDashboardState(BaseModel):
 
     # Deep current-round node block (rebuilt every persist).
     current_round: dict[str, Any] = Field(default_factory=dict)
+
+    # Populated only when the runner crashed — operator-facing message +
+    # exception class. Absent on normal stops; sole writer is
+    # ``LiveDashboardView._handle_error``.
+    error: DashboardError | None = None

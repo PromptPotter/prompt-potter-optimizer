@@ -21,6 +21,7 @@ from promptpotter.domain.run_records import (
     CommandAckRecord,
     CommandRecord,
     ErrorRecord,
+    RoundWarningRecord,
     TokenUsageRecord,
 )
 
@@ -216,11 +217,42 @@ def emit_error_record(
         logger.exception("emit_error_record append failed")
 
 
+def emit_round_warning(
+    *,
+    kind: Literal["l1_zero_candidates", "l2_validator_soft_reject", "injection_budget_overrun"],
+    message: str,
+    severity: Literal["warning", "error"] = "warning",
+    detail: dict[str, Any] | None = None,
+) -> None:
+    """Append a ``RoundWarningRecord`` to the active cycle ledger.
+
+    Same ContextVar surface as :func:`emit_error_record` — reads the ledger +
+    round from ``_CYCLE_LEDGER`` / ``_CURRENT_ROUND``. Makes a non-fatal,
+    self-healed degradation visible on every channel (dashboard, round file,
+    CLI) instead of only the server log. No-ops when no ledger is bound, so
+    pure/test call paths stay side-effect-free."""
+    ledger = _CYCLE_LEDGER.get()
+    if ledger is None:
+        return
+    record = RoundWarningRecord(
+        kind=kind,
+        severity=severity,
+        message=message,
+        round=_CURRENT_ROUND.get(),
+        detail=dict(detail or {}),
+    )
+    try:
+        ledger.append(record)
+    except Exception:
+        logger.exception("emit_round_warning append failed")
+
+
 __all__ = [
     "LLMResponse",
     "emit_command",
     "emit_command_ack",
     "emit_error_record",
+    "emit_round_warning",
     "emit_token_usage",
     "reset_current_round",
     "reset_cycle_ledger",

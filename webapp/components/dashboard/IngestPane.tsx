@@ -42,6 +42,12 @@ import {
   questionOptions,
   questionPatch,
 } from "@/lib/origin-readiness";
+import {
+  lockedParams,
+  primaryNode,
+  thinkingLadder,
+  type ParamLock,
+} from "@/lib/optimizer-locks";
 
 interface Props {
   open: boolean;
@@ -88,8 +94,11 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
 
   const ownedEntries =
     list.kind === "ready" ? list.entries.filter((d) => d.tier === "yours") : [];
+  // The try-and-learn demo rides the same "ready-to-run" bucket as benchmarks.
   const benchmarkEntries =
-    list.kind === "ready" ? list.entries.filter((d) => d.tier === "benchmark") : [];
+    list.kind === "ready"
+      ? list.entries.filter((d) => d.tier === "benchmark" || d.tier === "demo")
+      : [];
 
   return (
     <div
@@ -396,69 +405,171 @@ function DraftCommitFlow({
     }
   };
 
+  // Two phases over one server-held draft: the origin setup (map columns + AI
+  // check-in) gates on `readiness.complete`; once ready, the permission step
+  // (pipeline + optimizer locks) is the "another window" before mint.
+  if (!readiness.complete) {
+    return (
+      <div className="new-campaign-body">
+        <p>
+          Parsed <strong>{draft.n_samples}</strong> rows from{" "}
+          <code>{draft.slug}</code>. First, map your columns — then let the
+          check-in finish the setup.
+        </p>
+
+        {/* Required tier — the column mapping the mint gate blocks on. */}
+        <ColumnMappingPicker draft={draft} onApply={applyPatch} />
+
+        {/* Origin setup-in-progress — the closed-set fields with provenance, and
+            the AI resolver that proposes the task framing + refinements. */}
+        <OriginCheckinPanel
+          draft={draft}
+          resolving={resolving}
+          lastResolution={lastResolution}
+          onResolve={handleResolve}
+          onApply={applyPatch}
+        />
+
+        {/* Task framing is the one required field with no default — let the
+            operator type it directly, not only via "Set up with AI". */}
+        <TextField
+          label="Describe what the prompt should do"
+          value={draft.task_description}
+          placeholder="e.g. Classify each support ticket into one category."
+          onApply={(task_description) => applyPatch({ task_description })}
+        />
+
+        <GapList gaps={readiness.gaps} tone="pending" />
+
+        {error ? <p className="new-campaign-error">{error}</p> : null}
+        <footer className="new-campaign-footer">
+          <button type="button" className="new-campaign-cancel" onClick={onClose}>
+            Cancel
+          </button>
+        </footer>
+      </div>
+    );
+  }
+
+  return (
+    <PermissionReviewStep
+      draft={draft}
+      recapText={lastResolution?.recap || plainLanguageRecap(draft)}
+      submitting={submitting}
+      serverGaps={serverGaps}
+      error={error}
+      onApply={applyPatch}
+      onStart={handleCommit}
+      onClose={onClose}
+    />
+  );
+}
+
+// ----- Phase 2: pipeline & optimizer-permission review (pre-mint) -----------
+
+// The "another window" before mint. Setup is ready; this surfaces what the
+// optimizer may and may NOT permute on the backend pipeline — the locked model,
+// the thinking floor (`low`) with `medium`/`high` crossed out — so the operator
+// starts knowing the rails, or opens "Review hyperparameters" to see the full
+// per-node lock list (+ the optional settings) inline.
+function PermissionReviewStep({
+  draft,
+  recapText,
+  submitting,
+  serverGaps,
+  error,
+  onApply,
+  onStart,
+  onClose,
+}: {
+  draft: DraftCampaignWire;
+  recapText: string;
+  submitting: boolean;
+  serverGaps: OriginGap[] | null;
+  error: string | null;
+  onApply: (patch: DraftPatch) => void;
+  onStart: () => void;
+  onClose: () => void;
+}) {
+  const [reviewing, setReviewing] = useState(false);
+  const locks = draft.optimizer_locks;
+  const node = primaryNode(locks);
+  const thinking = thinkingLadder(locks, node);
+  const modelLocked = locks.forbidden_axes.includes("model");
+
   return (
     <div className="new-campaign-body">
-      <p>
-        Parsed <strong>{draft.n_samples}</strong> rows from{" "}
-        <code>{draft.slug}</code>. First, map your columns — then tune the
-        optional settings.
-      </p>
+      <RecapCard text={recapText} />
 
-      {/* Required tier — the column mapping the mint gate blocks on. */}
-      <ColumnMappingPicker draft={draft} onApply={applyPatch} />
+      <section className="opt-locks">
+        <header className="origin-columns-head">Pipeline &amp; optimizer permissions</header>
+        <p className="opt-locks-lead">
+          The optimizer evolves your prompt — but it can&rsquo;t touch these. They
+          stay fixed for the whole campaign.
+        </p>
 
-      {/* Origin setup-in-progress — the closed-set fields with provenance, and
-          the AI resolver that proposes the task framing + refinements. */}
-      <OriginCheckinPanel
-        draft={draft}
-        resolving={resolving}
-        lastResolution={lastResolution}
-        onResolve={handleResolve}
-        onApply={applyPatch}
-      />
+        <div className="opt-locks-row">
+          <span className="opt-locks-label">Pipeline</span>
+          <span className="opt-locks-pipeline">
+            {locks.pipeline.length > 0
+              ? locks.pipeline.map((step) => (
+                  <span key={step} className="opt-locks-chip">
+                    {step}
+                  </span>
+                ))
+              : "backend default"}
+          </span>
+        </div>
 
-      {readiness.complete ? (
-        <RecapCard text={lastResolution?.recap || plainLanguageRecap(draft)} />
-      ) : (
-        <GapList gaps={readiness.gaps} tone="pending" />
-      )}
+        {modelLocked ? (
+          <div className="opt-locks-row">
+            <span className="opt-locks-label">Model</span>
+            <span className="opt-locks-locked">
+              <span className="opt-locks-lock" aria-hidden="true">
+                🔒
+              </span>
+              Locked — the optimizer can&rsquo;t change the model.
+            </span>
+          </div>
+        ) : null}
 
-      {/* Optional tier — refine but never block. Collapsed so the required
-          path stays short (origin-resolution spec § Operator surface). */}
-      <details className="new-campaign-optional">
-        <summary>Optional settings</summary>
+        <div className="opt-locks-row">
+          <span className="opt-locks-label">Thinking</span>
+          <span className="opt-locks-ladder">
+            {thinking.options.map((opt) => (
+              <span
+                key={opt.key}
+                className={`opt-locks-level${opt.active ? " is-active" : ""}${
+                  opt.allowed ? "" : " is-crossed"
+                }`}
+                title={
+                  opt.allowed
+                    ? opt.active
+                      ? "Current level"
+                      : "Allowed"
+                    : "Optimizer locked out of this level"
+                }
+              >
+                {opt.key}
+              </span>
+            ))}
+          </span>
+        </div>
+        <small className="opt-locks-hint">
+          Crossed-out levels are off-limits to the optimizer — it can&rsquo;t
+          escalate thinking beyond <strong>{thinking.value ?? "the floor"}</strong>.
+        </small>
+      </section>
+
+      <details
+        className="new-campaign-optional"
+        open={reviewing}
+        onToggle={(e) => setReviewing((e.target as HTMLDetailsElement).open)}
+      >
+        <summary>Review hyperparameters</summary>
         <div className="new-campaign-optional-body">
-          <SlugField slug={draft.slug} onApply={(slug) => applyPatch({ slug })} />
-          <TextField
-            label="Task description"
-            value={draft.task_description}
-            placeholder="What is the model supposed to do with each row?"
-            onApply={(task_description) => applyPatch({ task_description })}
-          />
-          <NumberField
-            label="Max rounds"
-            value={draft.max_rounds}
-            min={1}
-            max={100}
-            onApply={(max_rounds) => applyPatch({ max_rounds })}
-          />
-          <OptimizerLLMField
-            provider={draft.optimizer_provider}
-            model={draft.optimizer_model}
-            onApply={(optimizer_provider, optimizer_model) =>
-              applyPatch({ optimizer_provider, optimizer_model })
-            }
-          />
-          <details>
-            <summary>Sample preview ({draft.sample_preview.length})</summary>
-            <ul className="new-campaign-preview-list">
-              {draft.sample_preview.map((row, i) => (
-                <li key={i}>
-                  <code>{row.query}</code> → <code>{row.ground_truth}</code>
-                </li>
-              ))}
-            </ul>
-          </details>
+          <LockTable params={lockedParams(locks)} />
+          <OptionalSettings draft={draft} onApply={onApply} />
         </div>
       </details>
 
@@ -471,13 +582,93 @@ function DraftCommitFlow({
         <button
           type="button"
           className="new-campaign-submit"
-          disabled={submitting || !readiness.complete}
-          onClick={handleCommit}
+          disabled={submitting}
+          onClick={onStart}
         >
-          {submitting ? "Creating…" : "Create campaign"}
+          {submitting ? "Starting…" : "Start campaign"}
         </button>
       </footer>
     </div>
+  );
+}
+
+// The full per-node lock list shown under "Review hyperparameters" — every
+// param tagged locked (model/provider; constrained allow-sets) vs optimizer-free.
+function LockTable({ params }: { params: ParamLock[] }) {
+  if (params.length === 0) return null;
+  const REASON_LABEL: Record<ParamLock["reason"], string> = {
+    forbidden: "optimizer can't change this",
+    constrained: "limited to an allowed set",
+    free: "optimizer-free",
+  };
+  return (
+    <ul className="opt-locks-table">
+      {params.map((p) => (
+        <li key={`${p.node}.${p.param}`} className="opt-locks-param">
+          <span className="opt-locks-param-name">
+            {p.node}.{p.param}
+          </span>
+          {p.value !== undefined ? (
+            <code className="opt-locks-param-value">{String(p.value)}</code>
+          ) : (
+            <span className="opt-locks-param-value opt-locks-param-value--empty">—</span>
+          )}
+          <span
+            className={`opt-locks-tag${p.locked ? " is-locked" : " is-free"}`}
+            title={REASON_LABEL[p.reason]}
+          >
+            {p.locked ? "🔒 locked" : "✎ free"}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// The optional, never-blocking refinements — slug, task framing, max rounds,
+// optimizer LLM, sample preview. Folded under the Review-hyperparameters
+// expander so the start path stays short.
+function OptionalSettings({
+  draft,
+  onApply,
+}: {
+  draft: DraftCampaignWire;
+  onApply: (patch: DraftPatch) => void;
+}) {
+  return (
+    <>
+      <SlugField slug={draft.slug} onApply={(slug) => onApply({ slug })} />
+      <TextField
+        label="Task description"
+        value={draft.task_description}
+        placeholder="What is the model supposed to do with each row?"
+        onApply={(task_description) => onApply({ task_description })}
+      />
+      <NumberField
+        label="Max rounds"
+        value={draft.max_rounds}
+        min={1}
+        max={100}
+        onApply={(max_rounds) => onApply({ max_rounds })}
+      />
+      <OptimizerLLMField
+        provider={draft.optimizer_provider}
+        model={draft.optimizer_model}
+        onApply={(optimizer_provider, optimizer_model) =>
+          onApply({ optimizer_provider, optimizer_model })
+        }
+      />
+      <details>
+        <summary>Sample preview ({draft.sample_preview.length})</summary>
+        <ul className="new-campaign-preview-list">
+          {draft.sample_preview.map((row, i) => (
+            <li key={i}>
+              <code>{row.query}</code> → <code>{row.ground_truth}</code>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </>
   );
 }
 

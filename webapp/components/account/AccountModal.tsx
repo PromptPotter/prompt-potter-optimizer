@@ -13,6 +13,8 @@ import {
   fetchActivity,
   fetchMe,
   fetchQuotaStatus,
+  fetchUserSettings,
+  patchUserSettings,
   postLogout,
   type ActivityBucket,
   type ActivityGroupBy,
@@ -27,7 +29,7 @@ interface Props {
   onClose: () => void;
 }
 
-type AccountTab = "profile" | "security" | "activity";
+type AccountTab = "profile" | "security" | "activity" | "preferences";
 
 const PROVIDER_LABEL: Record<string, string> = {
   google: "Google",
@@ -132,6 +134,15 @@ export function AccountModal({ open, onClose }: Props) {
                 Activity
               </button>
             </li>
+            <li>
+              <button
+                type="button"
+                className={`account-nav-item${tab === "preferences" ? " active" : ""}`}
+                onClick={() => setTab("preferences")}
+              >
+                Preferences
+              </button>
+            </li>
           </ul>
         </nav>
         <section className="account-pane">
@@ -141,7 +152,9 @@ export function AccountModal({ open, onClose }: Props) {
                 ? "Profile details"
                 : tab === "security"
                   ? "Security"
-                  : "Activity"}
+                  : tab === "preferences"
+                    ? "Preferences"
+                    : "Activity"}
             </h3>
             <button
               type="button"
@@ -158,8 +171,64 @@ export function AccountModal({ open, onClose }: Props) {
             {me && tab === "profile" ? <ProfileTab me={me} /> : null}
             {me && tab === "security" ? <SecurityTab me={me} /> : null}
             {open && tab === "activity" ? <ActivityTab /> : null}
+            {open && tab === "preferences" ? <PreferencesTab /> : null}
           </div>
         </section>
+      </div>
+    </div>
+  );
+}
+
+function PreferencesTab() {
+  const [demo, setDemo] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchUserSettings()
+      .then((s) => {
+        if (!cancelled) setDemo(s.demo_mode_enabled);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const s = await patchUserSettings({ demo_mode_enabled: next });
+      setDemo(s.demo_mode_enabled);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="account-row">
+      <span className="account-label">Try &amp; learn</span>
+      <div className="account-row-main">
+        <label className="account-pref-toggle">
+          <input
+            type="checkbox"
+            checked={demo ?? false}
+            disabled={demo === null || busy}
+            onChange={(e) => void toggle(e.target.checked)}
+          />
+          <span>Show the try-and-learn demo dataset</span>
+        </label>
+        <p className="account-muted">
+          A small support-ticket dataset, ready to optimize, in your collection.
+          Turn it off once you&rsquo;re set up.
+        </p>
+        {error ? <p className="account-error">{error}</p> : null}
       </div>
     </div>
   );

@@ -14,6 +14,7 @@ from promptpotter.domain.run_records import (
     LLMCallRecord,
     LLMCallStartRecord,
     PhaseRecord,
+    RoundWarningRecord,
     SnapshotRecord,
 )
 from promptpotter.infrastructure.projections.base import DerivedView
@@ -142,6 +143,18 @@ class LiveDisplay(DerivedView):
             bits.append(f"{record.prompt_chars:,}c prompt")
         color = YELLOW if oversize else DIM
         self._write(f"  {color}{' · '.join(bits)}{RESET}")
+
+    def _handle_round_warning(self, record: RoundWarningRecord) -> None:
+        """Surface a self-healed round degradation as a one-line CLI/notebook marker.
+
+        Parity with the dashboard's ``recent_loop_warnings`` + the round file's
+        ``warnings`` block — the same fact on every channel. ``message`` is
+        composed operator-readable at the emit site, so this just prints it.
+        """
+        round_tag = f"r{record.round}" if record.round is not None else ""
+        glyph = "✗" if record.severity == "error" else "⚠"
+        prefix = f"{glyph} {round_tag} ".rstrip() if round_tag else f"{glyph} "
+        self._write(f"  {YELLOW}{prefix}{record.message}{RESET}")
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
         """Heartbeat tick (``HEARTBEAT_INTERVAL_S``); cached replays skip this path."""

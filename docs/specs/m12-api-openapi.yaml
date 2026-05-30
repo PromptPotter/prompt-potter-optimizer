@@ -1700,6 +1700,7 @@ components:
         - sources
         - created_at
         - updated_at
+        - optimizer_locks
       additionalProperties: false
       description: |
         Server-held canonical state for an in-progress dataset ingest. Mutated
@@ -1853,6 +1854,63 @@ components:
         updated_at:
           type: string
           format: date-time
+        optimizer_locks:
+          type: object
+          required: [pipeline, forbidden_axes, nodes]
+          additionalProperties: false
+          description: |
+            The backend-pipeline permission surface the new-campaign UI renders
+            *before* commit — the connector's node-config seed (which a draft's
+            empty `pipeline_overlay` otherwise hides) merged with any operator
+            overlay edit, plus the campaign-wide forbidden axes. Read-only,
+            server-derived per request; it exists to show that the optimizer is
+            *locked out* of escalating certain params (model/provider campaign-
+            wide; `reasoning_effort` above the connector floor), not merely that
+            a value is the default. Mirrors the commit-time
+            `pipeline.json::nodes` merge so the two never drift.
+          properties:
+            pipeline:
+              type: array
+              items: { type: string }
+              description: |
+                The connector's first-tenant default pipeline step list
+                (`Connector.default_pipeline`) — e.g. `["llm_only"]` for a fresh
+                TermNorm CSV. Empty means "no override; the backend's
+                `GET /pipeline` default stands."
+            forbidden_axes:
+              type: array
+              items: { type: string }
+              description: |
+                Params the optimizer may never permute on any node when
+                `forbidden_axes_strict` is on (the default) — `["model",
+                "provider"]`. Empty when strict mode is off.
+            nodes:
+              type: object
+              additionalProperties:
+                type: object
+                required: [config, param_allowed_values]
+                additionalProperties: false
+                properties:
+                  config:
+                    type: object
+                    additionalProperties: true
+                    description: |
+                      The effective per-node config floor (connector seed +
+                      overlay) — e.g. `{ "reasoning_effort": "low",
+                      "temperature": 0.0 }`. The active value of each control.
+                  param_allowed_values:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items: { type: string }
+                    description: |
+                      The closed set of values the optimizer may permute per
+                      param — e.g. `{ "reasoning_effort": ["none","default",
+                      "low"] }`. Any ladder value absent here renders crossed-out
+                      (optimizer locked out).
+              description: |
+                Per-node permission block, keyed by node name. Mirrors the merged
+                `pipeline.json::nodes` the commit step writes.
 
     ResolveOriginPayload:
       type: object
@@ -2120,11 +2178,13 @@ components:
             name (e.g. `aime_2025`, `bbeh`).
         tier:
           type: string
-          enum: [yours, benchmark]
+          enum: [yours, benchmark, demo]
           description: |
             `"yours"` — user-owned Origin under `projects/{tenant}/datasets/`.
             `"benchmark"` — install-global read-only Origin; visible only when
             the identity holds the `datasets.benchmarks.read` capability.
+            `"demo"` — the built-in try-and-learn dataset, surfaced while
+            `User.demo_mode_enabled` is on (independent of the benchmark cap).
         n_samples:
           type: integer
           minimum: 0

@@ -195,7 +195,12 @@ function DashboardPaneInner() {
           selectCycle(cmp, cyc);
           setTab("dashboard");
         }}
-        onNewCycle={() => setNewCampaignOpen(true)}
+        onNewCycle={() => {
+          // New campaigns are conceived on the Chat page — jump there first so
+          // the ingest popup appears in context, not as a detached window.
+          setTab("chat");
+          setNewCampaignOpen(true);
+        }}
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleSidebar}
       />
@@ -319,6 +324,12 @@ function DashboardPaneInner() {
       <IngestPane
         open={newCampaignOpen}
         onClose={() => setNewCampaignOpen(false)}
+        onMinted={(cmp, cyc) => {
+          // Fresh-CSV mint returns the new (campaign, cycle) — select it now
+          // rather than waiting on the 2 s workspace poll. The existing-Origin
+          // and benchmark paths pass empty ids (the poll snaps to them).
+          if (cmp && cyc) selectCycle(cmp, cyc);
+        }}
       />
     </div>
     </SelectionProvider>

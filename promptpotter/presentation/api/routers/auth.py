@@ -92,6 +92,12 @@ class QuotaStatus(BaseModel):
     max_campaigns_per_day: int
 
 
+class UserSettings(BaseModel):
+    """Per-user preferences surfaced in Account → Preferences."""
+
+    demo_mode_enabled: bool
+
+
 class ActivityBucket(BaseModel):
     """One bucket of the Activity pane's three stacked bar charts.
 
@@ -379,6 +385,31 @@ async def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
         campaigns_today=len(today),
         max_campaigns_per_day=user.max_campaigns_per_day,
     )
+
+
+@auth_router.get("/user-settings", response_model=UserSettings)
+async def get_user_settings(store: StoreDep) -> UserSettings:
+    """Read the current user's preferences (Account → Preferences)."""
+    user = store.users.get_or_create(
+        user_id=str(store.identity.user_id),
+        tenant_id=str(store.identity.tenant_id),
+        email=_claim_email(store),
+    )
+    return UserSettings(demo_mode_enabled=user.demo_mode_enabled)
+
+
+@auth_router.patch("/user-settings", response_model=UserSettings)
+async def patch_user_settings(body: UserSettings, store: StoreDep) -> UserSettings:
+    """Persist a preference change. A user-account mutation (not a campaign
+    command), so it rides the auth router alongside session writes rather than
+    the ``/commands`` highway."""
+    user = store.users.get_or_create(
+        user_id=str(store.identity.user_id),
+        tenant_id=str(store.identity.tenant_id),
+        email=_claim_email(store),
+    )
+    store.users.save(user.model_copy(update={"demo_mode_enabled": body.demo_mode_enabled}))
+    return UserSettings(demo_mode_enabled=body.demo_mode_enabled)
 
 
 @auth_router.get("/activity", response_model=ActivityResponse)

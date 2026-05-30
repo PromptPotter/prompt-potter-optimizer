@@ -35,6 +35,7 @@ from promptpotter.domain.run_records import (
     LLMCallRecord,
     LLMCallStartRecord,
     PhaseRecord,
+    RoundWarningRecord,
     SnapshotRecord,
     TokenUsageRecord,
 )
@@ -310,6 +311,10 @@ class LiveDashboardView(DerivedView):
             "error_count": 0,
             "backend_retry_count": 0,
             "recent_backend_warnings": [],
+            # Optimizer-loop degradations (zero-candidate rounds, L2 soft-rejects,
+            # injection truncations) — previously log-only. Rolling, capped like
+            # recent_backend_warnings. Sole writer: _handle_round_warning.
+            "recent_loop_warnings": [],
             "total_queries_scored": r.get("total_queries_scored", 0),
             "total_backend_calls": r.get("total_backend_calls", 0),
             "current_query_payload": None,
@@ -784,6 +789,28 @@ class LiveDashboardView(DerivedView):
             "stop_reason": record.stop_reason,
         }
         self._schedule_persist()
+
+    def _handle_round_warning(self, record: RoundWarningRecord) -> None:
+        """Sole writer of ``dashboard.json::recent_loop_warnings``.
+
+        Mirrors ``recent_backend_warnings`` — a rolling, capped list of the
+        optimizer-loop degradations that previously logged only to stdout.
+        Flushed immediately: a zero-candidate round is a material fact the
+        operator (or the file-tree reader) must see without waiting on the
+        debounce.
+        """
+        warning = {
+            "ts": record.timestamp,
+            "kind": record.kind,
+            "severity": record.severity,
+            "message": record.message,
+            "round": record.round,
+            "detail": dict(record.detail),
+        }
+        recent: list[dict[str, Any]] = list(self.state.get("recent_loop_warnings") or [])
+        recent.append(warning)
+        self.state["recent_loop_warnings"] = recent[-10:]
+        self._flush_pending_persist()
 
     def _update_current_acc(self, scores: dict[str, Any]) -> None:
         self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)

@@ -26,6 +26,7 @@ from promptpotter.application.intelligence.measurement_series import (
     campaign_measurement_series,
     cycle_measurement_series,
 )
+from promptpotter.application.jobs.launcher import draft_wire_with_locks
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.infrastructure.store import campaign_root_dir_for, cycle_dir_for
 from promptpotter.infrastructure.store.archive_views import (
@@ -40,6 +41,11 @@ from promptpotter.shared.identity import BENCHMARKS_READ_CAP
 
 _datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
+# Built-in try-and-learn demo datasets (repo `datasets/{slug}/`). Surfaced in the
+# collection only while `User.demo_mode_enabled` is on; kept out of the benchmark
+# tier so the flag is the single control over their visibility.
+DEMO_DATASET_SLUGS: tuple[str, ...] = ("demo-tickets",)
+
 # `cycle` (one cycle's Rasch fit) / `campaign` (pooled) / `dataset` (cross-campaign archive).
 # Workspace scope would be meaningless (samples differ per dataset), so the tier stops at dataset.
 HeatmapScope = Literal["cycle", "campaign", "dataset"]
@@ -53,11 +59,13 @@ class DatasetIndexEntry(BaseModel):
 
     name: str = Field(description="Slug used as the path segment under `datasets/`.")
     title: str | None = Field(default=None, description="Display title (from `dataset.md`).")
-    tier: Literal["yours", "benchmark"] = Field(
+    tier: Literal["yours", "benchmark", "demo"] = Field(
         description=(
             "``yours`` = user-owned Origin under ``projects/{tenant}/datasets/{slug}/``. "
             "``benchmark`` = install-global ``datasets/{slug}/``; visible only to identities "
-            "holding the ``datasets.benchmarks.read`` capability."
+            "holding the ``datasets.benchmarks.read`` capability. "
+            "``demo`` = the built-in try-and-learn dataset, surfaced while "
+            "``User.demo_mode_enabled`` is on (independent of the benchmark capability)."
         ),
     )
     n_samples: int = Field(
@@ -94,6 +102,8 @@ async def list_datasets(store: StoreDep) -> DatasetIndexResponse:
 
     if BENCHMARKS_READ_CAP in store.identity.capabilities and DEFAULT_DATASETS_ROOT.is_dir():
         for entry in sorted(DEFAULT_DATASETS_ROOT.iterdir()):
+            if entry.name in DEMO_DATASET_SLUGS:
+                continue  # demo datasets surface via the flag below, not the benchmark tier
             if not entry.is_dir() or not (entry / "pipeline.json").is_file():
                 continue
             try:
@@ -108,6 +118,26 @@ async def list_datasets(store: StoreDep) -> DatasetIndexResponse:
                     n_samples=_read_n_samples(entry),
                 )
             )
+
+    # Try-and-learn demo origin(s) — surfaced while the user keeps demo mode on
+    # (default). Repo datasets, minted in place; the flag is the sole control,
+    # so they never appear via the benchmark tier above.
+    user = store.users.get_or_create(
+        user_id=str(store.identity.user_id),
+        tenant_id=str(store.identity.tenant_id),
+    )
+    if user.demo_mode_enabled:
+        for slug in DEMO_DATASET_SLUGS:
+            demo_dir = DEFAULT_DATASETS_ROOT / slug
+            if (demo_dir / "pipeline.json").is_file():
+                out.append(
+                    DatasetIndexEntry(
+                        name=slug,
+                        title=_read_dataset_title(demo_dir),
+                        tier="demo",
+                        n_samples=_read_n_samples(demo_dir),
+                    )
+                )
     return DatasetIndexResponse(datasets=out)
 
 
@@ -180,7 +210,7 @@ async def ingest_dataset(
                 "details": {"suggested_slug": exc.suggested},
             },
         ) from None
-    return draft.to_wire()
+    return draft_wire_with_locks(draft)
 
 
 def _draft_registry(request: Request) -> DraftCampaignRegistry:

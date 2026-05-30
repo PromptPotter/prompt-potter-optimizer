@@ -13,7 +13,21 @@
 // the workspace poll picking up the new on-disk state.
 
 import { API } from "./client";
+import type { UserSettings } from "./reads";
 import type { CommandAcceptedBody } from "./types";
+
+// Account → Preferences write. A user-account mutation (not a campaign
+// command), so it PATCHes the auth router directly rather than `/commands`.
+export async function patchUserSettings(settings: UserSettings): Promise<UserSettings> {
+  const r = await fetch(`${API}/auth/user-settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+    cache: "no-store",
+  });
+  if (!r.ok) throw new Error(`user-settings PATCH failed (${r.status})`);
+  return (await r.json()) as UserSettings;
+}
 
 function _mintIdempotencyKey(): string {
   // crypto.randomUUID is in every browser Next.js 16 supports + Node 18+.
@@ -205,6 +219,30 @@ export type ProvenanceTag = "unset" | "proposed" | "confirmed";
 // Only valued fields carry a source. Audit-only — the gate reads `resolved`.
 export type ProvenanceSource = "auto" | "stated";
 
+// The backend-pipeline permission surface the new-campaign UI renders before
+// commit. A draft's `pipeline_overlay` is empty until commit, so the connector
+// node-config seed (TermNorm's reasoning clamp) is otherwise invisible — this
+// block carries it so the UI can show the optimizer is *locked out* of certain
+// params (model/provider campaign-wide; thinking above the connector floor),
+// not merely that a value is the default. Server-derived per request.
+export interface OptimizerLocks {
+  // Connector default pipeline step list (e.g. `["llm_only"]`).
+  pipeline: string[];
+  // Params the optimizer may never permute on any node under
+  // `forbidden_axes_strict` (`["model","provider"]`); empty when strict is off.
+  forbidden_axes: string[];
+  nodes: Record<string, OptimizerNodeLocks>;
+}
+
+export interface OptimizerNodeLocks {
+  // Effective per-node config floor (connector seed + overlay) — the active
+  // value of each control, e.g. `{ reasoning_effort: "low", temperature: 0 }`.
+  config: Record<string, unknown>;
+  // Closed set the optimizer may permute per param. A ladder value absent here
+  // renders crossed-out (optimizer locked out).
+  param_allowed_values: Record<string, string[]>;
+}
+
 export interface DraftCampaignWire {
   draft_id: string;
   slug: string;
@@ -232,6 +270,8 @@ export interface DraftCampaignWire {
   sources: Record<string, ProvenanceSource>;
   created_at: string;
   updated_at: string;
+  // Connector-derived backend-pipeline permission surface; see `OptimizerLocks`.
+  optimizer_locks: OptimizerLocks;
 }
 
 // One origin field still blocking mint, as returned by the server's
