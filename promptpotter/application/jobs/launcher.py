@@ -14,6 +14,7 @@ without leaking ledger state across asyncio tasks.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 from pathlib import Path
@@ -135,7 +136,7 @@ async def mint_campaign_command(
     origin = load_origin_prompt(
         session.experiment_extract,
         prompt_node_names=schema.prompt_node_names() if schema else [],
-        dataset_name=session.dataset_name,
+        dataset_dir=session.dataset_config_dir,
     )
     cycle_id = build_origin_cycle_id(origin, schema, train_data)
 
@@ -181,22 +182,22 @@ async def mint_campaign_command(
     return campaign_id, cycle_id, job
 
 
-async def mint_campaign_from_draft_command(
+async def commit_draft_to_dataset(
     *,
     stores: Stores,
     draft: DraftCampaign,
     draft_registry: DraftCampaignRegistry,
-    job_registry: JobRegistry,
-    halt_at_accuracy: float | None = None,
-    spend_budget_usd: float | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
-) -> tuple[str, str, Job]:
-    """Commit a draft to disk + mint a campaign + spawn the runner.
+) -> str:
+    """Gate + commit a draft to an on-disk tenant dataset; return its slug.
 
-    Wraps :func:`mint_campaign_command` after materializing the four Origin
-    files (`cache.json`, `pipeline.json`, `task_description.md`,
-    `prompts/default.json`) and the sibling `campaign.json` per
-    ``docs/specs/m13-chat-first-user-web.md § Commit path``.
+    Materializes the four Origin files (`cache.json`, `pipeline.json`,
+    `task_description.md`, `prompts/default.json`) and the sibling
+    `campaign.json` per ``docs/specs/m13-chat-first-user-web.md § Commit path``.
+    Once this returns, ``projects/{tenant}/datasets/{slug}/`` is a first-class
+    dataset that ``mint_campaign_command`` (web, detached) or CLI ``new``
+    (inline) can mint + run identically. Shared by both entry points — the
+    commit logic lives here, not duplicated per surface.
     """
     if stores.tenant_datasets.slug_exists(draft.slug):
         raise LaunchError(
@@ -241,10 +242,35 @@ async def mint_campaign_from_draft_command(
         prompt_default=prompt_default,
     )
     draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)
+    return draft.slug
 
+
+async def mint_campaign_from_draft_command(
+    *,
+    stores: Stores,
+    draft: DraftCampaign,
+    draft_registry: DraftCampaignRegistry,
+    job_registry: JobRegistry,
+    halt_at_accuracy: float | None = None,
+    spend_budget_usd: float | None = None,
+    backend_url: str = DEFAULT_BACKEND_URL,
+) -> tuple[str, str, Job]:
+    """Commit a draft to disk + mint a campaign + spawn the runner (detached).
+
+    The web ``/commands/mint-campaign-from-draft`` entry: commits via
+    :func:`commit_draft_to_dataset`, then spawns a background run via
+    :func:`mint_campaign_command`. CLI ``new <file>`` shares the commit step but
+    runs the loop inline instead of detaching.
+    """
+    slug = await commit_draft_to_dataset(
+        stores=stores,
+        draft=draft,
+        draft_registry=draft_registry,
+        backend_url=backend_url,
+    )
     return await mint_campaign_command(
         stores=stores,
-        dataset_name=draft.slug,
+        dataset_name=slug,
         job_registry=job_registry,
         halt_at_accuracy=halt_at_accuracy,
         spend_budget_usd=spend_budget_usd,
@@ -274,8 +300,21 @@ def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     connector = connectors.get(draft.connector)
     if connector.default_pipeline:
         pipeline["pipelines"] = {"default": list(connector.default_pipeline)}
-    if draft.pipeline_overlay:
-        pipeline["nodes"] = draft.pipeline_overlay
+
+    # Connector node-config seed (e.g. TermNorm's reasoning clamp) underneath,
+    # operator draft edits on top. Sub-blocks (``config`` / ``optimizer``)
+    # shallow-merge per node so an operator override narrows the seed rather
+    # than replacing the whole node.
+    nodes: dict[str, Any] = copy.deepcopy(dict(connector.default_node_config))
+    for node_name, node_overlay in (draft.pipeline_overlay or {}).items():
+        dst = nodes.setdefault(node_name, {})
+        for key, val in node_overlay.items():
+            if isinstance(val, dict) and isinstance(dst.get(key), dict):
+                dst[key].update(val)
+            else:
+                dst[key] = val
+    if nodes:
+        pipeline["nodes"] = nodes
     return pipeline
 
 
@@ -519,6 +558,7 @@ __all__ = [
     "LaunchError",
     "OriginIncompleteError",
     "QuotaExceededError",
+    "commit_draft_to_dataset",
     "mint_campaign_command",
     "mint_campaign_from_draft_command",
     "start_run_command",

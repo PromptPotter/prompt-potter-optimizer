@@ -5,8 +5,8 @@ Two named invariants:
      on ``RoundCompleteView`` — the named correctness guarantee of the
      two-factories-onto-one-View unification. Holds for the improvement
      case AND the no-improvement case (delta=0, p_value=None).
-  2. Projection routing: ``LiveDashboardView`` binds to a ``SessionFamilyDir``
-     (one ``dashboard.json`` per session); ``AuditTrailView`` accepts only
+  2. Projection routing: ``LiveDashboardView`` binds to a ``CycleDir``
+     (one ``dashboard.json`` per cycle); ``AuditTrailView`` accepts only
      a ``rounds_dir`` ending in ``.runtime/cache/rounds`` (or a CycleDir via
      ``from_cycle_dir`` that derives the subpath); the ``on_record`` ledger
      hook drives ``begin_round`` / ``flush`` on PhaseRecord('round',
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from promptpotter.domain.cycle_paths import CycleDir, SessionFamilyDir
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import PhaseEvent
 from promptpotter.infrastructure.projections import (
     AuditTrailView,
@@ -250,15 +250,15 @@ def test_round_complete_view_no_improvement() -> None:
 # ===========================================================================
 
 
-def test_live_dashboard_binds_to_session_family_dir(tmp_path: Path) -> None:
-    """The live dashboard binds to the session-family root cycle dir — one
-    ``dashboard.json`` per session."""
-    family_dir = tmp_path / "campaigns" / "ds__abc123abc123" / "cycles" / "cycle_abc123abc123"
-    family_dir.mkdir(parents=True)
+def test_live_dashboard_binds_to_cycle_dir(tmp_path: Path) -> None:
+    """The live dashboard binds to the cycle's own dir — one
+    ``dashboard.json`` per cycle (root, fork, sweep, diag)."""
+    cycle_dir = tmp_path / "campaigns" / "ds__abc123abc123" / "cycles" / "cycle_abc123abc123"
+    cycle_dir.mkdir(parents=True)
     session_dir = tmp_path / "sessions" / "s_test"
 
     proj = LiveDashboardView(
-        SessionFamilyDir(family_dir),
+        CycleDir(cycle_dir),
         session_dir,
         campaign_id="ds__abc123abc123",
         cycle_id="cycle_abc123abc123",
@@ -267,7 +267,7 @@ def test_live_dashboard_binds_to_session_family_dir(tmp_path: Path) -> None:
         n_variants=5,
         sp_budget_ttest=20,
     )
-    assert proj.state_path == family_dir / "dashboard.json"
+    assert proj.state_path == cycle_dir / "dashboard.json"
 
 
 def test_live_dashboard_for_session_recovers_round_after_interrupt(

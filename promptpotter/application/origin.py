@@ -41,8 +41,14 @@ def build_campaign_emitter(
     origin_accuracy: float,
     resumed_from_round: int | None = None,
     recorder: Any | None = None,
+    seed_from_cycle_id: str | None = None,
 ) -> Any:
-    """Live dashboard projection from session + config (shared by CLI + runner)."""
+    """Live dashboard projection from session + config (shared by CLI + runner).
+
+    ``seed_from_cycle_id`` (set when building a fork's dashboard) names the
+    parent cycle to seed prior trajectory from; ``None`` seeds from the cycle's
+    own dir.
+    """
     from promptpotter.infrastructure.projections import LiveDashboardView
 
     opt = campaign_config.optimization
@@ -57,6 +63,7 @@ def build_campaign_emitter(
         sp_budget_ttest=campaign_config.sp_budget_ttest,
         resumed_from_round=resumed_from_round,
         recorder=recorder,
+        seed_from_cycle_id=seed_from_cycle_id,
     )
 
 
@@ -104,9 +111,13 @@ def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOr
 def load_origin_prompt(
     experiment_extract: dict[str, Any],
     prompt_node_names: list[str] | None = None,
-    dataset_name: str | None = None,
+    dataset_dir: Path | None = None,
 ) -> OptSearchPoint:
-    """Resolve origin OptSearchPoint: experiment prompts → datasets/{name}/prompts → empty."""
+    """Resolve origin OptSearchPoint: experiment prompts → {dataset_dir}/prompts → empty.
+
+    *dataset_dir* is the resolved config dir (``Session.dataset_config_dir``,
+    tenant-first), so an ingested dataset's authored prompts are found the same
+    way a repo benchmark's are."""
     dependencies = experiment_extract.get("dependencies", {})
     prompts = dependencies.get("prompts", {})
     names = prompt_node_names or []
@@ -135,24 +146,22 @@ def load_origin_prompt(
             ),
         )
 
-    if dataset_name and names:
+    if dataset_dir is not None and names:
         from promptpotter.application.datasets import (
             has_dataset_prompts,
             load_node_prompt,
         )
 
-        if has_dataset_prompts(dataset_name):
+        if has_dataset_prompts(dataset_dir):
             for node_name in names:
                 try:
-                    template = load_node_prompt(dataset_name, node_name, "default")
+                    template = load_node_prompt(dataset_dir, node_name, "default")
                 except FileNotFoundError:
                     continue
                 return OptSearchPoint.from_prompt_fields(
                     template.prompt_field_dict(),
                     lineage=IndividualLineage(
-                        changes_description=(
-                            f"Origin from datasets/{dataset_name}/prompts/ ({node_name})"
-                        ),
+                        changes_description=(f"Origin from {dataset_dir}/prompts/ ({node_name})"),
                         source="origin",
                     ),
                 )
@@ -181,11 +190,10 @@ async def prepare_scoring_context(
     from promptpotter.application.datasets import sample_dataset
 
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
-    dataset_name = campaign_config.dataset_name if campaign_config else None
     origin = load_origin_prompt(
         experiment_extract or {},
         prompt_node_names=prompt_nodes,
-        dataset_name=dataset_name,
+        dataset_dir=getattr(svc, "dataset_config_dir", None),
     )
     dataset = train_data or []
 

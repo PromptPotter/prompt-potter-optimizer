@@ -305,9 +305,78 @@ class CheckinTaskContext(BaseModel):
     downstream_context: str = ""
 
 
+class OriginFinding(BaseModel):
+    """One origin-readiness field the resolver proposes a value for.
+
+    ``evidence`` is mandatory in spirit — a finding citing nothing from the
+    input (a header name, a sample value, an operator statement) is rejected by
+    the apply loop, mirroring the ``evidence_grounding`` contract on
+    ``l1_generate``. Only ``confidence == "high"`` auto-confirms; ``"low"``
+    lands the field PROPOSED and waits for an operator click."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str = Field(
+        default="", description="Checklist field id, e.g. 'task_description', 'column.query'."
+    )
+    proposed_value: str = Field(default="", description="The value proposed for this field.")
+    confidence: str = Field(
+        default="low", description="'high' or 'low'. Only 'high' auto-confirms."
+    )
+    evidence: str = Field(
+        default="",
+        description="What in the input supports this — a header name, a sample value, or a stated operator preference. Findings with no evidence are rejected.",
+    )
+
+
+class OriginQuestion(BaseModel):
+    """One operator-facing question on a ``kind='ask'`` turn.
+
+    ``field`` names the checklist field the answer resolves so the panel can
+    apply it as a confirmed patch directly (closing the resolver→operator
+    loop), rather than the operator hunting for the matching control.
+    ``options``, when non-empty, is a closed set the answer must come from
+    (rendered as a picker); empty means free text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str = Field(
+        default="", description="Checklist field id the answer resolves, e.g. 'column.query'."
+    )
+    prompt: str = Field(default="", description="Short operator-facing question.")
+    options: list[str] = Field(
+        default_factory=list,
+        description="Optional closed set of acceptable answers; empty = free text.",
+    )
+
+
+class OriginNextAction(BaseModel):
+    """What the resolver wants to happen next. The deterministic checklist —
+    not this field — decides completeness; a false ``ready`` is re-checked and
+    rejected."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(
+        default="propose",
+        description="'ask' (need operator input), 'propose' (findings applied), or 'ready' (resolver believes origin complete — re-checked).",
+    )
+    questions: list[OriginQuestion] = Field(
+        default_factory=list,
+        description="For kind='ask': operator-facing questions, each naming the field it resolves so the answer applies directly.",
+    )
+
+
 class CheckinOutput(BaseModel):
-    """Output of the one-shot checkin prompt — Layer-1 prompt fields
-    plus a domain-context sub-object."""
+    """Output of the checkin prompt. Two modes share one shape:
+
+    * **Task decomposition** (CLI ``new``) — raw context → the Layer-1 prompt
+      fields + ``task_context`` sub-object. The origin block stays empty.
+    * **Origin resolution** (web ingest check-in) — a draft-campaign origin →
+      ``assessment`` + ``findings`` (proposed field values, each evidence-cited)
+      + ``next_action``, plus a ``task_description`` framing carried on the
+      relevant finding. The Layer-1 fields may stay empty.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -319,6 +388,14 @@ class CheckinOutput(BaseModel):
     answer_format: str = ""
     task_context: CheckinTaskContext = Field(default_factory=CheckinTaskContext)
     consultation: str = ""
+    # Origin-resolution block — populated only on the web ingest check-in path.
+    assessment: str = Field(default="", description="One-line read of the current origin state.")
+    findings: list[OriginFinding] = Field(default_factory=list)
+    next_action: OriginNextAction = Field(default_factory=OriginNextAction)
+    recap: str = Field(
+        default="",
+        description="On a 'ready' turn: a jargon-free paragraph restating what the campaign will do, for the operator to confirm intent.",
+    )
 
 
 # ---------------------------------------------------------------------------

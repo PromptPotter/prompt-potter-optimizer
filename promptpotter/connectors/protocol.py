@@ -22,8 +22,8 @@ edits to ``application/config.py`` or ``infrastructure/backend.py``.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.connector import SessionProtocol, WireAdapter
@@ -118,13 +118,25 @@ class Connector:
     default_optimization: tuple[tuple[str, Any], ...] = ()
     """Frozen ``(key, value)`` overrides slotted into the seed
     ``campaign.json::optimization`` block. Lets a connector ship
-    domain-specific defaults (e.g. TermNorm pins ``n_variants=3`` to keep
-    first-time Groq-tier tenants under the 8k TPM cap on the L1 meta-prompt)
-    without the launcher hard-coding the values. Empty tuple means "use
+    domain-specific defaults (e.g. TermNorm pins ``n_variants=3``) without
+    the launcher hard-coding the values. Empty mapping means "use
     :class:`OptimizationConfig` schema defaults verbatim." The required
     fields (``improvement_threshold`` / ``degradation_threshold``) MUST be
     present here when the connector intends to seed them — there is no
     silent schema default."""
+
+    default_node_config: Mapping[str, Any] = field(default_factory=dict)
+    """Per-node ``pipeline.json::nodes.{name}`` overlay the chat-first ingest
+    seeds into a fresh dataset's committed ``pipeline.json``. Keyed by node
+    name; each value is a node overlay (``config`` floor + ``optimizer``
+    constraints) merged onto the backend's live ``GET /pipeline`` schema (the
+    overlay's ``config``/``optimizer`` sub-blocks shallow-merge, so a partial
+    clamp narrows the backend schema rather than clobbering it). TermNorm uses
+    this to clamp ``llm_only.reasoning_effort`` — origin floor ``low`` plus a
+    ``param_allowed_values`` set with ``medium``/``high`` crossed out, so the
+    optimizer can never escalate reasoning campaign-wide (a cost rail, not just
+    an origin). Empty mapping means "no seed; the backend schema stands."
+    Draft ``pipeline_overlay`` (operator edits) layers on top of this."""
 
     def to_dict(self) -> dict[str, Any]:
         """Identity projection — ``name`` only; callables are not JSON-able."""

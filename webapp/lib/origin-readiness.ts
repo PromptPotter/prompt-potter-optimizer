@@ -9,7 +9,7 @@
 // exactly as `_check_column` decides server-side. The `422 origin_incomplete`
 // gaps remain authoritative; this only drives the proactive UI.
 
-import type { DraftCampaignWire, OriginGap, ProvenanceTag } from "./api";
+import type { DraftCampaignWire, DraftPatch, OriginGap, ProvenanceTag } from "./api";
 
 export interface OriginReadiness {
   complete: boolean;
@@ -42,9 +42,38 @@ function checkColumn(draft: DraftCampaignWire, check: ColumnCheck): OriginGap | 
   };
 }
 
-// The column mapping is the only gated field today. The remaining closed-set
-// fields (task framing, connector/scorer/round-cap/model provenance) join the
-// gate when the LLM resolver (origin-resolution steps 3-4) lands.
+// The closed-set config knobs (beyond the column mapping). Each is satisfied by
+// `confirmed` provenance alone — its value seeds from a template default and
+// auto-confirms at ingest, so the operator overrides rather than fills them.
+// `task_description` is the one that lands `unset` (no default framing), so it
+// gates until the operator (or the resolver, high-confidence) states it. Mirror
+// of `_CONFIG_FIELDS` in `origin_readiness.py`.
+const CONFIG_FIELDS: Array<{ fieldKey: string; hint: string }> = [
+  { fieldKey: "task_description", hint: "Describe what the prompt should do." },
+  { fieldKey: "connector", hint: "Confirm which backend runs the pipeline." },
+  { fieldKey: "scoring_composite", hint: "Confirm how a prediction is scored." },
+  { fieldKey: "max_rounds", hint: "Confirm the optimization round cap." },
+  { fieldKey: "optimizer.provider", hint: "Confirm the optimizer LLM provider." },
+  { fieldKey: "optimizer.model", hint: "Confirm the optimizer LLM model." },
+  { fieldKey: "backend.node_config", hint: "Confirm the backend node overlay." },
+];
+
+function checkConfirmed(
+  draft: DraftCampaignWire,
+  field: { fieldKey: string; hint: string },
+): OriginGap | null {
+  const provenance: ProvenanceTag = draft.resolved[field.fieldKey] ?? "unset";
+  if (provenance === "confirmed") return null;
+  return {
+    field: field.fieldKey,
+    reason: provenance === "proposed" ? "proposed_unconfirmed" : "unset",
+    hint: field.hint,
+  };
+}
+
+// The full closed set: the column mapping (header-membership-checked) plus the
+// once-hidden config defaults. A faithful projection of the shipped wire fields;
+// the `422 origin_incomplete` gaps remain authoritative.
 export function originReadiness(draft: DraftCampaignWire): OriginReadiness {
   const gaps: OriginGap[] = [];
   for (const check of [
@@ -54,7 +83,54 @@ export function originReadiness(draft: DraftCampaignWire): OriginReadiness {
     const gap = checkColumn(draft, check);
     if (gap) gaps.push(gap);
   }
+  for (const field of CONFIG_FIELDS) {
+    const gap = checkConfirmed(draft, field);
+    if (gap) gaps.push(gap);
+  }
   return { complete: gaps.length === 0, gaps };
+}
+
+// Map a resolver question's checklist `field` id + the operator's answer onto
+// an `edit-draft-campaign` patch — the answer-back half of the resolver loop
+// (spec § The loop step 2: an `ask` answer applies as a confirmed patch).
+// Returns null for a field that can't be set from a string answer
+// (`backend.node_config`) or a malformed numeric answer, so the caller skips
+// it rather than sending a bad patch. The server flips the field CONFIRMED +
+// STATED on apply.
+export function questionPatch(field: string, answer: string): DraftPatch | null {
+  const value = answer.trim();
+  if (!value) return null;
+  switch (field) {
+    case "column.query":
+      return { column_query: value };
+    case "column.ground_truth":
+      return { column_ground_truth: value };
+    case "task_description":
+      return { task_description: value };
+    case "connector":
+      return { connector: value };
+    case "scoring_composite":
+      return { scoring_composite: value };
+    case "optimizer.provider":
+      return { optimizer_provider: value };
+    case "optimizer.model":
+      return { optimizer_model: value };
+    case "max_rounds": {
+      const n = Number(value);
+      return Number.isInteger(n) && n >= 1 && n <= 100 ? { max_rounds: n } : null;
+    }
+    default:
+      return null; // backend.node_config + unknown fields aren't string-applicable here
+  }
+}
+
+// The answer set for a question: the resolver's own `options` when it supplied
+// them, else the uploaded headers for a column-mapping question (so the picker
+// is always grounded in real columns), else empty → free-text input.
+export function questionOptions(field: string, options: string[], headers: string[]): string[] {
+  if (options.length > 0) return options;
+  if (field === "column.query" || field === "column.ground_truth") return headers;
+  return [];
 }
 
 // Friendly names for the registered connector / scorer slugs. Anything not in

@@ -156,7 +156,14 @@ world is a strict containment hierarchy:
   read-only, admin-visible only via the `GET /datasets` list endpoint
   identity filter. The two tiers serve different purposes (operator
   benchmarking vs tenant work); both share the `pipeline.json` /
-  `campaign.json` / `task_description.md` shape.
+  `campaign.json` / `task_description.md` shape. **One resolution
+  seam:** `resolve_dataset_config_dir` picks the dir (tenant slug first,
+  repo benchmark second) once at bootstrap and stamps it on
+  `Session.dataset_config_dir`; every downstream dataset-file loader
+  (node overlay, starting prompts, origin prompt, sweep dir) reads that
+  resolved dir — none recompute a repo-relative `datasets/{name}/` path.
+  So an ingested tenant dataset is first-class to the whole loop, not
+  just to the mint that created it.
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, **and the optimizer meta-prompts it
   runs under**. A **first-class entity** and a **cycle tree** — root
@@ -327,16 +334,16 @@ holding **every** cycle — all N session roots and every fork, diag, and
 sweep — **all flat** — sibling kind and sweep batch id are `index.json`
 metadata, not directory nesting. A flat `cycles/` store keyed by
 `parent_cycle_id` scales as the fork tree grows; nested fork-of-fork
-directories do not. `dashboard.json` is **per-session**: it lives in the
-session's root cycle dir (`cycles/{session_root}/dashboard.json`) and is
-shared by that session's forks (a fork's family root is its session
-root). A campaign therefore carries N independent live `dashboard.json`
-streams — one per session — never one shared stream. Each `dashboard.json`
-self-stamps its own `(campaign_id, cycle_id, session_id)`; the webapp drops
-a polled payload whose stamp doesn't match the unit it asked for, so a
-freshly minted session never renders the prior one's data. Each campaign is a
+directories do not. `dashboard.json` is **per-cycle**: every cycle (root,
+fork, diag, sweep) owns its live file in its own dir
+(`cycles/{cycle_id}/dashboard.json`), stamped with its own `cycle_id`. A
+fork's view never surfaces the parent's id; a fork seeds its prior
+trajectory from the parent's on-disk file (state-sync Phase 2). Each
+`dashboard.json` self-stamps its own `(campaign_id, cycle_id, session_id)`;
+the webapp drops a polled payload whose stamp doesn't match the unit it asked
+for, so a freshly minted cycle never renders another's data. Each campaign is a
 standalone dashboard: the operator understands a campaign from
-`campaign.json` + `log.md` plus the per-session `dashboard.json`
+`campaign.json` + `log.md` plus the per-cycle `dashboard.json`
 streams, without descending into per-cycle round detail.
 `archive/` stays a peer of `campaigns/` — dataset-scoped,
 cross-campaign by design (see "Measurement archive" below).
@@ -456,8 +463,8 @@ the PR description.
   per `new` invocation by `mint_campaign_id`; the declaration is
   recorded as `root_content_hash` + `optimizer_prompt_hash` properties
   on `campaign.json` and used by resume to warn on drift, not to derive
-  the id. `dashboard.json` is per-session, at
-  `cycles/{session_root}/dashboard.json`. Cross-campaign evidence
+  the id. `dashboard.json` is per-cycle, at
+  `cycles/{cycle_id}/dashboard.json`. Cross-campaign evidence
   pooling on the same declaration rides the dataset-scoped
   `archive/measurements/` layer, so two `new` calls on an unchanged
   declaration get distinct `campaign_id`s, share their root cycle id

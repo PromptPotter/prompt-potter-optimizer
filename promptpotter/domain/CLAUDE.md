@@ -31,8 +31,9 @@ back-compat shims. The word `legacy` is **never** sanctioned.
 - `campaign.py` — `Campaign` frozen manifest (`campaign.json`); the
   first-class optimization-effort entity, single owner of the frozen
   `CampaignConfig` snapshot.
-- `cycle_paths.py` — `CycleDir`, `SessionFamilyDir` newtypes (used by stores +
-  projections; passed through, never reconstructed from `str`).
+- `cycle_paths.py` — `CycleDir`, `WorkspaceDir` newtypes (used by stores +
+  projections; passed through, never reconstructed from `str`). `dashboard.json`
+  is per-cycle — projections bind to `CycleDir`.
 - `pipeline_parsing.py` — pure dict → `PipelineSchema` parser.
 - `validators.py`, `phases.py`, `escalation_signals.py`, `round_diagnostics.py`,
   `scoring.py`, `connector.py`, `backend.py`, `sample.py`, `l1_layout.py` —

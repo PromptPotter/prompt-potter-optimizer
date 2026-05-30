@@ -76,12 +76,12 @@ def test_artifact_sets_are_disjoint_and_well_formed() -> None:
 def test_emitter_produces_all_artifacts(
     session_campaign_cycle_dirs: tuple[Path, Path, Path],
 ) -> None:
-    """Emitter produces per-session telemetry in the root cycle dir; runner mirror produces operator artifacts."""
+    """Emitter produces per-cycle telemetry in the cycle's own dir; runner mirror produces operator artifacts."""
     from types import SimpleNamespace
 
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle, CycleRoundState
-    from promptpotter.domain.cycle_paths import SessionFamilyDir
+    from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import CycleResult, RoundResult
     from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
@@ -102,7 +102,7 @@ def test_emitter_produces_all_artifacts(
         }
     )
     emitter = LiveDashboardView(
-        SessionFamilyDir(cycle_dir),
+        CycleDir(cycle_dir),
         session_dir,
         campaign_id=campaign_dir.name,
         cycle_id=cycle_dir.name,

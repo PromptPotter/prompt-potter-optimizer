@@ -20,15 +20,16 @@ campaigns/justlogic__a1b2c3/        # one Campaign
   log.md                            # campaign digest
   cycles/
     cycle_abc123/                   # session root (no parent_cycle_id)
-      dashboard.json                # live telemetry for the session-family
+      dashboard.json                # this cycle's own live telemetry
       index.json                    # sibling_kind: root
       ledger (events.jsonl)         # …, FORK_CUT → fork_x, …
     cycle_abc123_fork_x/            # branch — flat alongside the root
+      dashboard.json                # the fork's OWN telemetry (seeded from parent at the cut)
       index.json                    # parent_cycle_id: cycle_abc123, sibling_kind: fork
       ledger                        # inherit_from(parent, offset_at_cut)
 ```
 
-Forks land flat under `cycles/`. The tree is reconstructed from `parent_cycle_id` metadata, not directory nesting. `dashboard.json` lives in the session-family root cycle, shared by its forks.
+Forks land flat under `cycles/`. The tree is reconstructed from `parent_cycle_id` metadata, not directory nesting. `dashboard.json` is per-cycle — every cycle owns its own, stamped with its own `cycle_id`.
 
 **`unit_kind` (webapp sidebar label):** `session` (root, `resume`-extended) · `divergent_resume` (a `resume --fork-on-divergence` branch) · `user_fork` (HITL fork / diagnostic / sweep, all one kind) · `l3_fork` (reserved for L3 auto-forking, not emitted yet).
 

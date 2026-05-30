@@ -298,10 +298,10 @@ class RunObservers:
 
 @dataclass(frozen=True)
 class ForkInfo:
-    """Forked-cycle wiring: parent cycle id + family-root dashboard."""
+    """Forked-cycle wiring: the parent cycle id to seed the fork's own
+    dashboard from (the fork gets a fresh per-cycle ``dashboard.json``)."""
 
     parent_cycle_id: str
-    parent_dashboard: LiveDashboardView
 
 
 def _ensure_session_minted(
@@ -322,7 +322,7 @@ def _ensure_session_minted(
     origin_osp = load_origin_prompt(
         session.experiment_extract or {},
         prompt_node_names=prompt_nodes,
-        dataset_name=campaign_config.dataset_name,
+        dataset_dir=session.dataset_config_dir,
     )
     auto_mint_session(
         session,
@@ -348,10 +348,12 @@ def build_run_observers(
 ) -> RunObservers:
     """Mint session if needed; open ledger; build + bind every observer.
 
-    ``fork=None`` ⇒ fresh cycle (new dashboard anchored at family root).
-    ``fork=ForkInfo(...)`` ⇒ reattach parent's dashboard, inherit ledger from
-    parent's current offset. ``origin_accuracy`` is a seed; real value lands
-    on the next ``INIT/exit`` event.
+    ``fork=None`` ⇒ fresh cycle (new dashboard in its own cycle dir).
+    ``fork=ForkInfo(...)`` ⇒ fresh per-cycle dashboard for the fork, seeded
+    from the parent's on-disk ``dashboard.json`` (drained by ``_finalize_run``
+    before this call), and inherit ledger from parent's current offset.
+    ``origin_accuracy`` is a seed; real value lands on the next ``INIT/exit``
+    event.
     """
     if fork is None:
         _ensure_session_minted(
@@ -382,12 +384,13 @@ def build_run_observers(
             recorder=audit,
         )
     else:
-        dashboard = fork.parent_dashboard
-        dashboard._recorder = audit
-        dashboard.log_fork(
-            old_cycle_id=fork.parent_cycle_id,
-            new_cycle_id=session.state.cycle_id,
-            from_round=resumed_from_round or 0,
+        dashboard = build_campaign_emitter(
+            session,
+            campaign_config,
+            origin_accuracy=origin_accuracy,
+            resumed_from_round=resumed_from_round,
+            recorder=audit,
+            seed_from_cycle_id=fork.parent_cycle_id,
         )
         parent_dir = CycleDir(
             session.store.campaigns.cycle_dir(session.campaign_id, fork.parent_cycle_id)

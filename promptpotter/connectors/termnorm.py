@@ -293,16 +293,27 @@ CONNECTOR = Connector(
     # ``llm_ranking`` is broken (~50% json_validate_failed) — known issue
     # in root CLAUDE.md; pre-exclude it on every new tenant cycle.
     default_exclude_nodes=("llm_ranking",),
-    # R4: connector-owned seed for ``campaign.json::optimization``. Pinned to
-    # ``n_variants=3`` so first-time Groq-tier tenants stay under the 8k TPM
-    # cap on the L1 meta-prompt (the system's own ``RequestTooLargeError``
-    # remediation advice says "n_variants: 5 -> 3"). The required thresholds
-    # mirror ``datasets/gsm8k/campaign.json``.
+    # R4: connector-owned seed for ``campaign.json::optimization``. The required
+    # thresholds mirror ``datasets/gsm8k/campaign.json``. (``n_variants`` is the
+    # round candidate count, NOT a single-request size lever — the optimizer-LLM
+    # TPM relief comes from the OpenRouter optimizer default, not from this.)
     default_optimization=(
         ("n_variants", 3),
         ("improvement_threshold", 0.01),
         ("degradation_threshold", 0.4),
     ),
+    # Conservative reasoning rail seeded into a fresh dataset's pipeline.json:
+    # origin floor ``low`` + an allowed set with ``medium``/``high`` crossed out,
+    # so the optimizer can never escalate ``reasoning_effort`` campaign-wide on a
+    # tenant's untuned first run. Operator widens it via the check-in's
+    # ``backend.node_config`` if their task genuinely needs deeper reasoning.
+    # (Model/provider are already pinned by ``forbidden_axes_strict``.)
+    default_node_config={
+        "llm_only": {
+            "config": {"reasoning_effort": "low", "temperature": 0.0},
+            "optimizer": {"param_allowed_values": {"reasoning_effort": ["none", "default", "low"]}},
+        },
+    },
 )
 
 

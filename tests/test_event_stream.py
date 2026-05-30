@@ -31,9 +31,7 @@ def test_event_stream_view_contract() -> None:
             cycle_root = Path(tmp) / "cycle_abc123"
             cycle_root.mkdir()
             # Pre-seed dashboard.json so the snapshot frame has real content;
-            # the view resolves to the session root via root_cycle_id, which
-            # strips fork suffixes — for a root-shaped id the resolved path
-            # is the cycle dir itself.
+            # the view reads its own cycle dir's dashboard.json (per-cycle).
             (cycle_root / "dashboard.json").write_text(
                 json.dumps({"campaign_id": "x", "rounds": []}),
                 encoding="utf-8",

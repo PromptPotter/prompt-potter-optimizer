@@ -245,7 +245,7 @@ class EventStreamView:
     # ---- Snapshot reads ----
 
     def snapshot_payload(self) -> dict[str, Any]:
-        """Read the session's ``dashboard.json`` for the leading
+        """Read this cycle's ``dashboard.json`` for the leading
         ``stream_snapshot`` frame's payload.
 
         Returns a ``warming_up`` shape when the file isn't there yet (fresh
@@ -253,33 +253,20 @@ class EventStreamView:
         so clients know the high-water mark of records reflected in this
         snapshot.
         """
-        # dashboard.json lives in the session-family root cycle dir, NOT
-        # the per-cycle dir. Resolving the session root from cycle_id is
-        # the caller's job — this method walks up from the cycle dir to
-        # find any sibling root with a dashboard.
-        root_dashboard = self._resolve_session_dashboard_path()
+        # dashboard.json is per-cycle — it lives in this cycle's own dir,
+        # so a fork's stream snapshots its own trajectory, not the root's.
+        dashboard = self._cycle_dir / "dashboard.json"
         body: dict[str, Any]
-        if root_dashboard is not None and root_dashboard.is_file():
+        if dashboard.is_file():
             try:
-                body = json.loads(root_dashboard.read_text(encoding="utf-8"))
+                body = json.loads(dashboard.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 logger.warning(
                     "dashboard.json malformed at %s; emitting warming_up snapshot",
-                    root_dashboard,
+                    dashboard,
                 )
                 body = {"warming_up": True, "reason": "dashboard_unreadable"}
         else:
             body = {"warming_up": True}
         body["snapshot_at_offset"] = self._next_offset
         return body
-
-    def _resolve_session_dashboard_path(self) -> Path | None:
-        """The session root carries ``dashboard.json``. Per ``root_cycle_id``
-        convention, the root is found by stripping ``_fork_*`` / ``_sweep_*``
-        / ``_diag_*`` suffixes from ``cycle_id`` and resolving the sibling.
-        We import lazily to dodge a circular dependency."""
-        from promptpotter.infrastructure.store.paths import root_cycle_id
-
-        root_id = root_cycle_id(self._cycle_id)
-        root_dir = self._cycle_dir.parent / root_id
-        return root_dir / "dashboard.json"

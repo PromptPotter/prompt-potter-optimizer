@@ -1,23 +1,16 @@
 """Typed paths + projection protocol for the run ledger.
 
-Three newtype guards for ledger / projection write targets:
+Two newtype guards for ledger / projection write targets:
 
-* ``SessionFamilyDir`` — a session-family root cycle dir. Telemetry
-  projections bind here: one ``dashboard.json`` per session (the session
-  root + its forks share it). It is itself a cycle dir — the root cycle's
-  — so it is constructed from ``cycle_dir_for(...)`` against the session
-  root id (``root_cycle_id(cycle_id)``).
 * ``CycleDir`` — the per-cycle dir (``campaigns/{campaign_id}/cycles/{cycle_id}``).
-  Audit projections bind here. Constructed from ``cycle_dir_for(...)``.
+  Every cycle (root, fork, sweep, diag) owns its own ``dashboard.json`` +
+  audit tree here; telemetry and audit projections both bind to it.
+  Constructed from ``cycle_dir_for(...)``.
 * ``WorkspaceDir`` — the tenant root (``projects/{tenant}/``). Used by
   the workspace-scoped ``CycleEventLog`` (the Persistence sibling at
   ``projects/{tenant}/.workspace/events.jsonl`` per ``docs/architecture.md``
   §0) — the ledger backend-scoped commands (``register-backend``,
   ``sync-backend-experiments``) ride. Construct from ``Stores.base_dir``.
-
-A projection that takes ``SessionFamilyDir`` cannot accidentally write
-per-cycle audit data — its constructor refuses the wrong newtype (mypy)
-and asserts at construction time (runtime).
 
 These types live in :mod:`promptpotter.domain` so both ``application``
 (``CycleEventLog``-side) and ``infrastructure`` (projection-side) can import
@@ -31,10 +24,9 @@ from typing import NewType, Protocol
 
 from promptpotter.domain.run_records import CycleRecord
 
-__all__ = ["CycleDir", "Projection", "SessionFamilyDir", "WorkspaceDir"]
+__all__ = ["CycleDir", "Projection", "WorkspaceDir"]
 
 
-SessionFamilyDir = NewType("SessionFamilyDir", Path)
 CycleDir = NewType("CycleDir", Path)
 WorkspaceDir = NewType("WorkspaceDir", Path)
 

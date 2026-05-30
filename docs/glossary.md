@@ -111,9 +111,11 @@ The persisted world is a four-entity containment hierarchy
 - **Sibling kind** — `root | fork | diag | sweep`. Recorded in the
   cycle's `index.json` metadata, not derived from a directory path.
   See `infrastructure/store/paths.py::sibling_kind`.
-- **SessionFamilyDir** — the domain newtype for the dashboard's write
-  target: a session's root cycle dir, where `dashboard.json` lives and
-  is shared by that session's forks. `domain/cycle_paths.py`.
+- **CycleDir** — the domain newtype for a cycle's own dir
+  (`campaigns/{campaign_id}/cycles/{cycle_id}`). Both the per-cycle
+  `dashboard.json` and the audit tree bind here — every cycle (root, fork,
+  sweep, diag) owns its own live file, stamped with its own `cycle_id`.
+  `domain/cycle_paths.py`.
 
 ## Round-level vocabulary
 

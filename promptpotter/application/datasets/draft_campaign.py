@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from promptpotter.domain.identity import TenantId, safe_name
-from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
 
 DEFAULT_CONNECTOR = "termnorm"
 """Only registered connector today (per root CLAUDE.md); operator-editable."""
@@ -41,10 +41,17 @@ DEFAULT_SCORING_COMPOSITE = "exact_match"
 DEFAULT_MAX_ROUNDS = 5
 """Matches the M10 prompt-iteration framework default."""
 
-DEFAULT_OPTIMIZER_PROVIDER = "groq"
-"""Mirrors :class:`OptimizerLLMConfig` so first ingest matches existing benchmark behaviour."""
+DEFAULT_OPTIMIZER_PROVIDER = "openrouter"
+"""Ingest default for the L1/L2/L3 optimizer LLM. OpenRouter, not Groq: the
+optimizer meta-prompt is ~20k+ tokens, which blows Groq's free ``on_demand``
+tier (8k TPM) on round 1 — the same reason every wired benchmark (justlogic,
+…) runs the optimizer on OpenRouter. Operator-overridable via the check-in's
+``optimizer.provider`` field. Distinct from the *backend* model, which
+``forbidden_axes_strict`` already pins."""
 
-DEFAULT_OPTIMIZER_MODEL = ""
+DEFAULT_OPTIMIZER_MODEL = "openai/gpt-oss-120b"
+"""Pinned (not env-default) so the committed campaign.json is reproducible and
+valid on the OpenRouter default above — matches justlogic's optimizer LLM."""
 """Empty = fall back to ``settings.LLM_MODEL`` (currently ``openai/gpt-oss-120b``)."""
 
 PREVIEW_ROWS = 10
@@ -78,6 +85,11 @@ class DraftCampaign:
     # (`column.query`, `column.ground_truth`, …). The deterministic checklist
     # gates on it; no field reaches mint while UNSET or PROPOSED.
     resolved: dict[str, Provenance] = field(default_factory=dict)
+    # Per-field source — `auto` (template default / column auto-detect /
+    # resolver finding) vs `stated` (operator edit). Orthogonal to `resolved`;
+    # only fields that have a value (PROPOSED/CONFIRMED) carry a source. The
+    # audit sub-tag the spec's auto-confirm trail requires.
+    sources: dict[str, ProvenanceSource] = field(default_factory=dict)
     source_file: str = ""
     # Per-draft optimizer LLM config — what model runs the L1/L2/L3
     # meta-prompts. Distinct from the backend pipeline node's own LLM
@@ -108,6 +120,7 @@ class DraftCampaign:
             "column_query": self.column_query,
             "column_ground_truth": self.column_ground_truth,
             "resolved": {field_name: prov.value for field_name, prov in self.resolved.items()},
+            "sources": {field_name: src.value for field_name, src in self.sources.items()},
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -123,16 +136,43 @@ class DraftCampaign:
 
         Membership of each header in :attr:`headers` is the caller's
         wire-validation concern (422); this only records the confirmed value.
+        An operator-picked column is STATED (the only caller is the
+        ``edit-draft-campaign`` operator path).
         """
         resolved = dict(self.resolved)
+        sources = dict(self.sources)
         changes: dict[str, Any] = {}
         if query_col is not None:
             changes["column_query"] = query_col
             resolved["column.query"] = Provenance.CONFIRMED
+            sources["column.query"] = ProvenanceSource.STATED
         if ground_truth_col is not None:
             changes["column_ground_truth"] = ground_truth_col
             resolved["column.ground_truth"] = Provenance.CONFIRMED
-        return self.patch(resolved=resolved, **changes)
+            sources["column.ground_truth"] = ProvenanceSource.STATED
+        return self.patch(resolved=resolved, sources=sources, **changes)
+
+    def apply_resolution(
+        self,
+        *,
+        values: dict[str, Any] | None = None,
+        provenance: dict[str, Provenance] | None = None,
+        sources: dict[str, ProvenanceSource] | None = None,
+    ) -> DraftCampaign:
+        """Apply resolver/operator field changes + their per-field provenance.
+
+        ``values`` are draft-attribute kwargs (``task_description=...``);
+        ``provenance`` merges checklist field-id → tag onto :attr:`resolved`;
+        ``sources`` merges field-id → ``auto``/``stated`` onto :attr:`sources`.
+        The single mutation route the origin-resolution loop drives.
+        """
+        resolved = dict(self.resolved)
+        if provenance:
+            resolved.update(provenance)
+        merged_sources = dict(self.sources)
+        if sources:
+            merged_sources.update(sources)
+        return self.patch(resolved=resolved, sources=merged_sources, **(values or {}))
 
 
 @dataclass
@@ -163,11 +203,14 @@ class DraftCampaignRegistry:
         The input/target column mapping is **not** silently assumed: it
         auto-confirms only when a header is literally named ``query`` /
         ``ground_truth`` (the unambiguous, deterministic case), and otherwise
-        lands ``UNSET`` for the operator to confirm. The other config knobs
-        keep their working operator-editable defaults this slice.
+        lands ``UNSET`` for the operator to confirm. The config knobs seed from
+        our template defaults and auto-confirm (one sane default each, so the
+        operator overrides rather than fills them); ``task_description`` is the
+        one knob with no default framing, so it lands ``UNSET`` — the operator
+        (or the resolver, high-confidence) must state what the prompt does.
         """
         now = _now_iso()
-        column_query, column_ground_truth, resolved = _auto_detect_columns(headers)
+        column_query, column_ground_truth, resolved, sources = _seed_resolved(headers)
         draft = DraftCampaign(
             draft_id=_mint_draft_id(),
             tenant_id=tenant_id,
@@ -183,6 +226,7 @@ class DraftCampaignRegistry:
             column_query=column_query,
             column_ground_truth=column_ground_truth,
             resolved=resolved,
+            sources=sources,
             optimizer_provider=DEFAULT_OPTIMIZER_PROVIDER,
             optimizer_model=DEFAULT_OPTIMIZER_MODEL,
             created_at=now,
@@ -219,6 +263,40 @@ class DraftCampaignRegistry:
                 return False
             del self._by_id[draft_id]
             return True
+
+
+# Config knobs that seed from our ``pipeline.json`` / ``campaign.json`` template
+# defaults and auto-confirm at create() — one sane default each, so the operator
+# overrides rather than fills them. ``task_description`` is deliberately absent:
+# it has no default framing (lands UNSET, the one operator-stated config gap).
+_AUTO_CONFIRMED_FIELDS: tuple[str, ...] = (
+    "connector",
+    "scoring_composite",
+    "max_rounds",
+    "optimizer.provider",
+    "optimizer.model",
+    "backend.node_config",
+)
+
+
+def _seed_resolved(
+    headers: list[str],
+) -> tuple[str, str, dict[str, Provenance], dict[str, ProvenanceSource]]:
+    """Seed the full closed-set provenance + source at mint: columns
+    auto-detected, config knobs auto-confirmed from template defaults,
+    ``task_description`` UNSET. Every seeded value is ``AUTO`` (machine-set);
+    UNSET fields carry no source.
+    """
+    query_col, ground_truth_col, resolved = _auto_detect_columns(headers)
+    sources: dict[str, ProvenanceSource] = {}
+    for column_key in ("column.query", "column.ground_truth"):
+        if resolved[column_key] is Provenance.CONFIRMED:
+            sources[column_key] = ProvenanceSource.AUTO
+    for field_key in _AUTO_CONFIRMED_FIELDS:
+        resolved[field_key] = Provenance.CONFIRMED
+        sources[field_key] = ProvenanceSource.AUTO
+    resolved["task_description"] = Provenance.UNSET
+    return query_col, ground_truth_col, resolved, sources
 
 
 def _auto_detect_columns(

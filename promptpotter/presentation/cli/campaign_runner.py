@@ -1,8 +1,11 @@
 """CLI entry-point facade — COMMANDS dispatch + ``main()``. Per-command bodies in ``commands/``.
 
-Two write verbs: ``new [DATASET]`` mints a fresh campaign; ``resume`` continues
-the active session. Reads = open the on-disk artifact tree
-(``dashboard.json`` / ``log.md`` / ``cycles/{cycle_id}/index.json``). Ctrl+C stops; no mid-run pause.
+Two write verbs: ``new [DATASET|FILE]`` mints a fresh campaign — from an authored
+``datasets/<name>/`` *or* from a raw file (which it ingests → resolves the origin
+check-in → commits as a tenant dataset → runs, the headless twin of the web
+onboarding); ``resume`` continues the active session. Reads = open the on-disk
+artifact tree (``dashboard.json`` / ``log.md`` / ``cycles/{cycle_id}/index.json``).
+Ctrl+C stops; no mid-run pause.
 """
 
 from __future__ import annotations
@@ -66,6 +69,7 @@ def main() -> None:
                 "Welcome to PromptPotter.\n\n"
                 "Pick a verb to get started:\n"
                 "  promptpotter new <dataset>   mint a fresh campaign on the named dataset\n"
+                "  promptpotter new <file.csv>  ingest a raw file → resolve origin → mint + run\n"
                 "  promptpotter resume          continue the active campaign\n"
                 "  promptpotter verify          re-score a candidate on more samples\n"
                 "  promptpotter sweep           cheap A/B of optimizer meta-prompt edits\n"

@@ -14,7 +14,7 @@ The rest of this page covers the four-entity model, the active-session pointer, 
 PromptPotter's persisted world is a strict containment hierarchy:
 
 - **Workspace** — the tenant-level container and queryable datastore (`projects/{tenant}/`): every dataset, every campaign, the shared `archive/`.
-- **Dataset** — the optimization target plus its config (`datasets/{name}/`).
+- **Dataset** — the optimization target plus its config. Resolved tenant-first by `resolve_dataset_config_dir`: a tenant upload at `projects/{tenant}/datasets/{slug}/` (the chat-first / `new <file>` ingest path) wins over a repo benchmark at `datasets/{name}/`. The chosen dir rides `Session.dataset_config_dir`; every dataset-file loader reads it, so an ingested slug is first-class to `new <slug>` and `resume`, not just the mint that created it.
 - **Campaign** — one declared optimization effort: a dataset, a pipeline origin, and context text. A first-class entity with its own directory and `campaign.json` manifest. `campaign_id = {dataset}__{rand6_hex}` — minted fresh per `new` call by `mint_campaign_id`, so each `new` produces a distinct campaign. The declaration (target hash + optimizer-prompt hash) is recorded as `root_content_hash` + `optimizer_prompt_hash` properties on `campaign.json` for drift detection on resume, not as the id. The dataset is embedded so "campaigns for dataset X" is a prefix scan.
 - **Session** — one run of `new` on a campaign. A campaign holds one session — the `new` invocation that minted it. `resume` extends that session; `resume --fork-on-divergence` adds sibling cycles within it. A session's identity is its `session_id` (`s_xxxx`). Each session is a tree: a root cycle (bare `cycle_<target_hash>`) plus its fork descendants. Pre-existing on-disk shape (multi-session forest with `_s{N}` suffixes): see `promptpotter/infrastructure/store/paths.py`.
 - **Cycle** — one node in a session's lineage tree: root | fork | diag | sweep. Identity is `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_` for branches); `cycle_id` is campaign-scoped, so path resolution is always `(campaign_id, cycle_id)`.
@@ -60,7 +60,7 @@ Sessions and campaigns are separate. The Session is a pointer/lens; the Campaign
       hard_samples.json                # campaign-scope hard-sample artifact (all the campaign's cycles)
       # ── Cycles — session root + forks + diag + sweeps, ALL FLAT ──
       cycles/{session_root_cycle_id}/   # session root: cycle_{target_hash}
-        dashboard.json                 # live PER-SESSION telemetry; shared by this session's forks
+        dashboard.json                 # live PER-CYCLE telemetry (this cycle's own; forks carry their own)
         index.json                     # phase, trial index, final block, sibling_kind: root
         log.md                         # per-cycle narrative digest
         review.md                      # per-cycle review (markdown digest)
@@ -76,8 +76,9 @@ Sessions and campaigns are separate. The Session is a pointer/lens; the Campaign
             candidates/round_NNNN.json # pre-scoring candidate checkpoint
           archived/resumed_at_{ts}/    # mid-cycle rewind sweepup (--from)
       cycles/{fork_cycle_id}/           # a fork — flat alongside its session root
+        dashboard.json                 # the fork's OWN live telemetry (seeded from parent at the cut)
         index.json                     # parent_cycle_id, sibling_kind, sweep_batch_id?
-        rounds/ langfuse/ prompts/ .runtime/   # (no dashboard.json — shared from the session root)
+        rounds/ langfuse/ prompts/ .runtime/
     archive/                            # the measurement archive (peer of campaigns/)
       measurements/{run_id}.json
       measurements.json                # archive index
@@ -101,7 +102,7 @@ Prior evaluation results replay without backend calls when a new config shares a
 | File | Lives at | Updated | Content |
 |------|----------|---------|---------|
 | `campaign.json` | campaign dir | mint + finalize | Manifest: `dataset_name`, `label`, `created_at`, `status`, `root_cycle_id`, `root_content_hash`, `backend_id`, `config` (the frozen `CampaignConfig` snapshot — single owner). |
-| `dashboard.json` | session-root cycle dir | every event | Live PER-SESSION state: round, origin, best, candidates, counters. `cycle_id` field names the active cycle. One stream per session; a session's forks share their session root's `dashboard.json`. |
+| `dashboard.json` | the cycle's own dir | every event | Live PER-CYCLE state: round, origin, best, candidates, counters. `cycle_id` field stamps this cycle. One stream per cycle; every fork/sweep/diag carries its own (seeded from its parent at the cut). |
 | `log.md` (campaign) | campaign dir | round-complete + finalize | Campaign digest: status, best cycle, every session + its forks + rounds, campaign-scoped heatmap. |
 | `hard_samples.json` (campaign) | campaign dir | round-complete + finalize | Campaign-scope hard-sample artifact — aggregated across all the campaign's cycles. |
 | `index.json` | per cycle | phase / finalize | `pipeline_params`, `cycle_id`, `parent_cycle_id` (forks), `sibling_kind`, `sweep_batch_id` (sweeps), `best_accuracy`, `trials[]`, `final` block (winner + stop_reason on completion). The frozen config lives in `campaign.json`, not here. |
@@ -214,10 +215,10 @@ Mints a new `cycle_id` **inside the same session**, rooted at the divergence poi
 
 **Layout after a fork:**
 
-- **Live telemetry** (`dashboard.json`, `output.log`) **stays at the session's root cycle dir** (`cycles/{session_root}/`). One stream covers the whole session, forks included — a fork's family root is its session root. `output.log` gets a `=== FORK <id> from round N (parent: …) ===` banner; `dashboard.json::cycle_id` always names the active cycle.
+- **Live telemetry** (`dashboard.json`, `output.log`) **lives in the fork's own cycle dir** (`cycles/{fork_cycle_id}/`). The fork gets its own stream, stamped with its own `cycle_id` and seeded from the parent's on-disk `dashboard.json` at the cut point. `output.log` gets a `=== FORK <id> from round N (parent: …) ===` banner.
 - **Per-cycle audit** (`index.json`, `log.md`, `rounds/`, `langfuse/`, `prompts/`, `.runtime/`) **lives in the fork's own dir** under `campaigns/{campaign_id}/cycles/{cycle_id}/` — flat alongside the session root cycle. The fork's `index.json` carries `parent_cycle_id` and `sibling_kind: "fork"`. The parent's audit stays frozen as the historical record.
 
-To monitor a forked run: tail the session root's `dashboard.json`, not the fork. To inspect a specific fork's history: open the fork's `index.json` / `log.md` / `rounds/` under `cycles/{cycle_id}/`.
+To monitor a forked run: tail the fork's own `dashboard.json` under `cycles/{fork_cycle_id}/`. To inspect a specific fork's history: open the fork's `index.json` / `log.md` / `rounds/` under the same dir.
 
 **Why rewind is not enough:** rewind restarts under the same policy; fork restarts under a different policy. If scoring changed, rewind would re-run decisions the recorded history expects to match, and halt again on the same divergence. Fork cuts the cord. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
 

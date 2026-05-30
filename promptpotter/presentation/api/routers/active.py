@@ -20,7 +20,6 @@ from promptpotter.infrastructure.runtime_flags import is_paused, read_spend_cap
 from promptpotter.infrastructure.store import (
     cycle_dir_for,
     read_active_pointer,
-    root_cycle_id,
 )
 from promptpotter.presentation.api.deps import StoreDep
 
@@ -64,12 +63,12 @@ async def get_live_state(store: StoreDep) -> dict[str, Any]:
     """Live state of the caller-tenant's **active** session — the stable
     surface every new web panel / chat state-read codes against.
 
-    Resolves the active pointer, then returns the session-family root's
-    live telemetry (the same shape the per-cycle dashboard route serves).
-    Keying on the active pointer means a consumer needs no campaign/cycle
-    ids and no file path; it is insulated from how that telemetry is
-    produced or persisted, so the eventual state-sync Phase 2/3 internals
-    swap (derive-from-ledger) changes nothing here.
+    Resolves the active pointer, then returns the active cycle's own live
+    telemetry (the same shape the per-cycle dashboard route serves). Each
+    cycle owns its ``dashboard.json``, so a fork's active view shows the
+    fork's trajectory under the fork's id — not the session root's. Keying
+    on the active pointer means a consumer needs no campaign/cycle ids and no
+    file path; it is insulated from how that telemetry is produced.
 
     404 when no session is active. While a fresh campaign's origin is still
     running (no telemetry flushed yet) returns a ``warming_up`` payload at
@@ -89,22 +88,22 @@ async def get_live_state(store: StoreDep) -> dict[str, Any]:
     )
     if not session_id:
         raise HTTPException(404, "No active session")
-    # Runtime flags live on the *active* cycle dir (where the runner writes
-    # them + polls them), which may be a fork — distinct from the session
-    # root that owns the shared dashboard.json. Shared readers in
+    # Both the dashboard.json and the runtime flags live on the active cycle
+    # dir (which may be a fork): each cycle owns its own live file, and the
+    # runner writes + polls its flags there. Shared readers in
     # ``infrastructure.runtime_flags`` so this matches the per-cycle /runstate.
-    runtime_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id) / ".runtime"
+    cycle_path = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+    runtime_dir = cycle_path / ".runtime"
     paused = is_paused(runtime_dir)
     current_spend_cap_usd = read_spend_cap(runtime_dir)
 
-    session_root = root_cycle_id(cycle_id)
-    path = cycle_dir_for(store.base_dir, campaign_id, session_root) / "dashboard.json"
+    path = cycle_path / "dashboard.json"
     if not path.is_file():
         return {
             "warming_up": True,
             "session_id": session_id,
             "campaign_id": campaign_id,
-            "cycle_id": session_root,
+            "cycle_id": cycle_id,
             "phase_hint": "origin",
             "is_paused": paused,
             "current_spend_cap_usd": current_spend_cap_usd,

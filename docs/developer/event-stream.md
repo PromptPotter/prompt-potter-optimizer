@@ -40,7 +40,7 @@ Adding a new kind requires updating [`m12-events-asyncapi.yaml`](../specs/m12-ev
 
 The runtime guarantees, in order:
 
-1. **Snapshot frame first.** The first message is a `stream_snapshot` envelope whose `payload` is the session's current `dashboard.json` content plus `snapshot_at_offset` — the ledger offset the snapshot reflects. The envelope's `sequence` equals `snapshot_at_offset`.
+1. **Snapshot frame first.** The first message is a `stream_snapshot` envelope whose `payload` is the subscribed cycle's current `dashboard.json` content plus `snapshot_at_offset` — the ledger offset the snapshot reflects. The envelope's `sequence` equals `snapshot_at_offset`.
 
    When `dashboard.json` doesn't exist yet (fresh campaign before origin's first flush), the payload is `{"warming_up": true, "snapshot_at_offset": N}` and the client renders a "campaign initialising" placeholder.
 

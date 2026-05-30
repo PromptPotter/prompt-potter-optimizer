@@ -30,6 +30,7 @@ Wired kinds, by scope:
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Annotated, Any
 
@@ -52,6 +53,7 @@ from promptpotter.application.jobs.launcher import (
     mint_campaign_from_draft_command,
 )
 from promptpotter.connectors import BackendUnreachableError
+from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.middleware import CommandAcceptedBody, CommandDispatcher
 from promptpotter.presentation.api.middleware.command_dispatcher import (
@@ -59,6 +61,8 @@ from promptpotter.presentation.api.middleware.command_dispatcher import (
     LifecycleKind,
     WorkspaceBackendKind,
 )
+
+logger = logging.getLogger(__name__)
 
 commands_router = APIRouter(prefix="/commands", tags=["Commands"])
 
@@ -237,6 +241,14 @@ class _MintFromDraftEnvelope(BaseModel):
     client_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class _ResolveOriginEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(pattern=r"^resolve-origin$")
+    payload: dict[str, Any] = Field(default_factory=dict)
+    client_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 def _draft_registry(request: Request) -> DraftCampaignRegistry:
     registry: DraftCampaignRegistry | None = getattr(request.app.state, "draft_campaigns", None)
     if registry is None:
@@ -291,6 +303,12 @@ async def edit_draft_campaign(
         )
 
     changes: dict[str, Any] = {}
+    # An operator edit is an operator-stated value → CONFIRMED provenance + a
+    # STATED source (it overrides whatever auto-confirmed default sat there).
+    # CONFIRMED is what opens the origin-readiness gate for a field the resolver
+    # left PROPOSED or `task_description` left UNSET.
+    provenance: dict[str, Provenance] = {}
+    sources: dict[str, ProvenanceSource] = {}
     if patch.slug is not None and patch.slug != draft.slug:
         if store.tenant_datasets.slug_exists(patch.slug):
             suggested = store.tenant_datasets.suggest_free_slug(patch.slug)
@@ -303,20 +321,20 @@ async def edit_draft_campaign(
                 },
             )
         changes["slug"] = patch.slug
-    if patch.connector is not None:
-        changes["connector"] = patch.connector
-    if patch.scoring_composite is not None:
-        changes["scoring_composite"] = patch.scoring_composite
-    if patch.max_rounds is not None:
-        changes["max_rounds"] = patch.max_rounds
-    if patch.task_description is not None:
-        changes["task_description"] = patch.task_description
-    if patch.pipeline_overlay is not None:
-        changes["pipeline_overlay"] = patch.pipeline_overlay
-    if patch.optimizer_provider is not None:
-        changes["optimizer_provider"] = patch.optimizer_provider
-    if patch.optimizer_model is not None:
-        changes["optimizer_model"] = patch.optimizer_model
+    # (patch attr, draft attr, checklist field id)
+    for patch_val, draft_attr, field_key in (
+        (patch.connector, "connector", "connector"),
+        (patch.scoring_composite, "scoring_composite", "scoring_composite"),
+        (patch.max_rounds, "max_rounds", "max_rounds"),
+        (patch.task_description, "task_description", "task_description"),
+        (patch.pipeline_overlay, "pipeline_overlay", "backend.node_config"),
+        (patch.optimizer_provider, "optimizer_provider", "optimizer.provider"),
+        (patch.optimizer_model, "optimizer_model", "optimizer.model"),
+    ):
+        if patch_val is not None:
+            changes[draft_attr] = patch_val
+            provenance[field_key] = Provenance.CONFIRMED
+            sources[field_key] = ProvenanceSource.STATED
 
     # Column mapping confirms the input/target headers — each must be a member
     # of the uploaded headers (422 otherwise), and confirming flips the
@@ -337,7 +355,7 @@ async def edit_draft_campaign(
                 },
             )
 
-    updated = draft.patch(**changes)
+    updated = draft.apply_resolution(values=changes, provenance=provenance, sources=sources)
     if patch.column_query is not None or patch.column_ground_truth is not None:
         updated = updated.confirm_columns(
             query_col=patch.column_query, ground_truth_col=patch.column_ground_truth
@@ -345,6 +363,43 @@ async def edit_draft_campaign(
     registry.update(updated)
     store.tenant_datasets.write_draft_resolution(updated.draft_id, resolution_block(updated))
     return updated.to_wire()
+
+
+@commands_router.post("/resolve-origin")
+async def resolve_origin(
+    request: Request,
+    store: StoreDep,
+    envelope: _ResolveOriginEnvelope,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> dict[str, Any]:
+    """Run one origin-resolver turn against a draft. Returns ``{resolution, draft}``.
+
+    Per ``docs/specs/m12-api-openapi.yaml::resolveOrigin``. Synchronous, like
+    ``edit-draft-campaign`` — the resolver's findings apply in-line and the
+    deterministic checklist re-gates before the response.
+    """
+    _ensure_idempotency_key(idempotency_key)
+    registry = _draft_registry(request)
+    draft_id = _require_draft_id(envelope.payload)
+    draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
+    if draft is None:
+        raise HTTPException(
+            404,
+            {"error": "command_target_not_found", "message": f"draft {draft_id!r} not found."},
+        )
+
+    from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
+
+    try:
+        result = await resolve_origin_turn(stores=store, draft=draft, draft_registry=registry)
+    except Exception as exc:  # external LLM boundary; surface a clean 502
+        logger.exception("resolve-origin turn failed for draft %s", draft_id)
+        raise HTTPException(
+            502,
+            {"error": "resolver_failed", "message": f"origin resolver turn failed: {exc}"},
+        ) from exc
+
+    return {"resolution": result.resolution, "draft": result.draft.to_wire()}
 
 
 @commands_router.post("/mint-campaign-from-draft")

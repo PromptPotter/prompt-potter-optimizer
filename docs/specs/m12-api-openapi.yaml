@@ -999,15 +999,75 @@ paths:
           description: |
             Either `payload_invalid` (malformed envelope) or
             `origin_incomplete` — the deterministic origin-readiness checklist
-            still has gaps (e.g. the input/target column mapping is unset or
-            unconfirmed). `details.gaps` lists each blocking field as
-            `{field, reason, hint}`. The draft is preserved; the operator
-            resolves the gaps (via `edit-draft-campaign`) and retries.
+            still has gaps (the column mapping unset/unconfirmed, an empty
+            `task_description`, or any config knob still `proposed`).
+            `details.gaps` lists each blocking field as `{field, reason, hint}`.
+            The draft is preserved; the operator resolves the gaps (via
+            `resolve-origin` or `edit-draft-campaign`) and retries.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '503': { $ref: '#/components/responses/BackendUnreachable' }
+
+  /commands/resolve-origin:
+    post:
+      operationId: resolveOrigin
+      summary: Run one origin-resolver turn against a `DraftCampaign`.
+      description: |
+        The proposer half of the origin proposer/gate split (see
+        `docs/specs/m10-origin-resolution-checkin.md`). One turn: the
+        origin-aware `checkin` node inspects the draft (headers, sample rows,
+        current per-field provenance, open gaps) plus the operator's latest
+        framing and proposes evidence-cited values for the unresolved
+        origin-readiness fields. High-confidence findings auto-confirm
+        (`confirmed`); low-confidence land `proposed` and wait for an operator
+        click. The deterministic checklist — not the resolver — decides
+        completeness; a false `ready` is re-checked and rejected.
+
+        Synchronous (mirrors `edit-draft-campaign`): returns the resolver
+        output + the post-apply `DraftCampaign`. Workspace-scoped — no
+        `Expected-Version`; the LLM call's token/cost ride the tenant
+        workspace ledger. Drives subsequent turns from the UI; bounded by
+        operator interaction.
+      tags: [datasets]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: resolve-origin }
+                    payload: { $ref: '#/components/schemas/ResolveOriginPayload' }
+      responses:
+        '200':
+          description: The resolver turn output + the post-apply `DraftCampaign`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolveOriginResponse'
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '401':
+          description: Unauthenticated (no `IdentityContext` resolved at the middleware).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: |
+            `draft_id` does not exist, or exists under a different
+            `IdentityContext.tenant_id`. Existence-leak gate: 404, not 403.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
 
   /datasets/ingest:
     post:
@@ -1637,6 +1697,7 @@ components:
         - column_query
         - column_ground_truth
         - resolved
+        - sources
         - created_at
         - updated_at
       additionalProperties: false
@@ -1761,18 +1822,118 @@ components:
             enum: [unset, proposed, confirmed]
           description: |
             Per-field provenance for the origin-readiness checklist. Keys are
-            dotted field names (`column.query`, `column.ground_truth`, …);
-            values are `unset` (no value), `proposed` (an inference awaiting
-            confirmation), or `confirmed` (operator-stated or auto-confirmed
-            high-confidence). No field reaches mint while `unset` or
-            `proposed`. The deterministic checklist gates; see
+            dotted field names spanning the closed set: the column mapping
+            (`column.query`, `column.ground_truth`), `task_description`, and the
+            config knobs (`connector`, `scoring_composite`, `max_rounds`,
+            `optimizer.provider`, `optimizer.model`, `backend.node_config`).
+            Values are `unset` (no value), `proposed` (an inference awaiting
+            confirmation), or `confirmed` (operator-stated or auto-confirmed).
+            The config knobs auto-confirm from template defaults at ingest;
+            `task_description` lands `unset` (no default framing). No field
+            reaches mint while `unset` or `proposed`. The deterministic
+            checklist gates; see
             `docs/specs/m10-origin-resolution-checkin.md`.
+        sources:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [auto, stated]
+          description: |
+            Per-field source — orthogonal to `resolved`. `auto` = the value was
+            machine-set (a template default auto-confirmed at ingest, a literal
+            column auto-detect, or a resolver finding); `stated` = the operator
+            set it explicitly via `edit-draft-campaign`. Only fields that have a
+            value (`proposed` / `confirmed`) appear here; `unset` fields carry no
+            source. A `confirmed + auto` entry is a once-hidden default now made
+            visible; `confirmed + stated` is an operator choice. Audit-only — the
+            gate verdict reads `resolved`, never this.
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    ResolveOriginPayload:
+      type: object
+      required: [draft_id]
+      additionalProperties: false
+      description: |
+        One resolver turn against an existing `DraftCampaign`. Tenant-scoped —
+        a `draft_id` resolving to a different `IdentityContext.tenant_id`
+        returns 404 (existence-leak gate). The operator's latest framing is
+        read off the draft's `task_description`; no separate message field this
+        slice.
+      properties:
+        draft_id:
+          type: string
+          minLength: 8
+          maxLength: 64
+          description: Server-minted draft id returned by `/datasets/ingest`.
+
+    OriginResolution:
+      type: object
+      required: [complete, provenance, sources, values, gaps]
+      additionalProperties: true
+      description: |
+        The draft's checklist state after a resolver turn, mirroring the
+        on-disk `cache.json::resolution` block. `last_resolution` carries the
+        resolver's own output (assessment + evidence-cited findings +
+        next_action + recap) for the panel and the AI.
+      properties:
+        complete:
+          type: boolean
+          description: True iff no field still blocks mint (the deterministic gate's verdict).
+        provenance:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [unset, proposed, confirmed]
+          description: Per-field provenance for every closed-set checklist field.
+        sources:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [auto, stated]
+          description: |
+            Per-field source (`auto` / `stated`) — the audit sub-tag mirroring
+            `DraftCampaign.sources`. Only valued fields appear.
+        values:
+          type: object
+          additionalProperties: true
+          description: Current value of every closed-set field, keyed by checklist field id.
+        gaps:
+          type: array
+          items:
+            type: object
+            required: [field, reason, hint]
+            additionalProperties: false
+            properties:
+              field: { type: string }
+              reason: { type: string, enum: [unset, proposed_unconfirmed] }
+              hint: { type: string }
+          description: Each field still blocking mint, with an operator-facing hint.
+        last_resolution:
+          type: object
+          additionalProperties: true
+          description: |
+            The resolver turn's own output — `assessment`, `findings`
+            (`{field, proposed_value, confidence, evidence}`), `next_action`
+            (`{kind, questions}` where each question is
+            `{field, prompt, options}` — `field` names the checklist gap the
+            answer resolves so the panel applies it as a confirmed patch), and
+            `recap` (set only on a `ready` turn).
+
+    ResolveOriginResponse:
+      type: object
+      required: [resolution, draft]
+      additionalProperties: false
+      description: One resolver turn's outcome — the resolution block + the post-apply draft.
+      properties:
+        resolution:
+          $ref: '#/components/schemas/OriginResolution'
+        draft:
+          $ref: '#/components/schemas/DraftCampaign'
 
     EditDraftCampaignPayload:
       type: object

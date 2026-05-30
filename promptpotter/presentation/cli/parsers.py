@@ -5,10 +5,11 @@ is the operator-facing surface.
 
 Two write verbs:
 
-* ``new [DATASET]`` mints a fresh campaign — ``campaign_id`` is
-  ``{dataset}__{YYYYMMDD-HHMMSS}``, collision-free by construction, so
-  every invocation lands in its own ``campaigns/{campaign_id}/`` directory
-  with its own dashboard.
+* ``new [DATASET|FILE]`` mints a fresh campaign — from an authored dataset
+  name, or from a raw file (CSV) it ingests → origin-resolves → commits as a
+  tenant dataset → runs. ``campaign_id`` is ``{dataset}__{YYYYMMDD-HHMMSS}``,
+  collision-free by construction, so every invocation lands in its own
+  ``campaigns/{campaign_id}/`` directory with its own dashboard.
 * ``resume`` continues the active campaign (rewinds with ``--from``, forks
   on divergence with ``--fork-on-divergence``, etc.).
 """
@@ -78,17 +79,24 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
 def _add_new_args(p_new: argparse.ArgumentParser) -> None:
     """Fresh-init flags for ``new``.
 
-    The positional ``dataset`` is the common path: ``new aime`` reads
-    ``datasets/aime/{pipeline,campaign}.json`` and starts the loop.
-    Explicit ``--config`` overrides ``datasets/<name>/campaign.json``.
+    The positional accepts a dataset **name** *or* a **raw file** (CSV):
+    ``new aime`` reads ``datasets/aime/{pipeline,campaign}.json`` and starts the
+    loop; ``new data.csv`` ingests the file, resolves its origin via the AI
+    check-in, commits a tenant dataset, then runs — the headless twin of the web
+    onboarding (parses → draft → auto-drives the resolver → deterministic gate →
+    mint). Residual gaps are answered with repeatable ``--set field=value``
+    (operator-stated, applied before the resolver so they seed it), or printed so
+    you can re-run — no silent default ever reaches mint. Explicit ``--config``
+    overrides ``datasets/<name>/campaign.json``.
     """
     p_new.add_argument(
         "dataset",
         nargs="?",
         default=None,
-        help="Dataset under ./datasets/ (positional). "
-        "Reads datasets/<name>/{pipeline,campaign}.json. "
-        "Omit only if you pass --dataset-name explicitly.",
+        help="Dataset name under ./datasets/ OR a path to a raw file (CSV). "
+        "A name reads datasets/<name>/{pipeline,campaign}.json; a file is "
+        "ingested → origin-resolved → committed as a tenant dataset → run. "
+        "Omit (name form) only if you pass --dataset-name explicitly.",
     )
     p_new.add_argument(
         "--dataset-name",
@@ -111,6 +119,24 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
         "--excel-path",
         default=None,
         help="Build train/test datasets from an Excel ground-truth file before minting.",
+    )
+    # File-ingest form only (ignored for the name form).
+    p_new.add_argument(
+        "--slug",
+        default=None,
+        help="(file form) Dataset slug under projects/{tenant}/datasets/ "
+        "(default: derived from the filename).",
+    )
+    p_new.add_argument(
+        "--set",
+        dest="sets",
+        action="append",
+        default=[],
+        metavar="FIELD=VALUE",
+        help="(file form) Confirm an origin field directly (operator-stated), e.g. "
+        "`--set task_description='map names to codes'` or "
+        "`--set column.query=input`. Repeatable. Applied before the resolver "
+        "runs, so it seeds the rest.",
     )
     p_new.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     p_new.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
@@ -479,8 +505,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m promptpotter",
         description="PromptPotter optimization CLI. Bare invocation runs "
-        "`resume` (continue the active session). `new [DATASET]` mints a "
-        "fresh campaign. Reads happen by opening the artifact tree "
+        "`resume` (continue the active session). `new [DATASET|FILE]` mints a "
+        "fresh campaign — from a dataset name or a raw file it ingests + "
+        "origin-resolves. Reads happen by opening the artifact tree "
         "(sessions/{id}/, campaigns/{campaign_id}/) directly.",
     )
     _add_global_args(parser)
@@ -488,9 +515,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_new = sub.add_parser(
         "new",
-        help="Mint a fresh campaign on the named dataset. Every invocation "
-        "mints a brand-new campaign (campaign_id is timestamp-derived — "
-        "collision-free, no discriminator).",
+        help="Mint a fresh campaign from a dataset NAME or a raw FILE (CSV). A "
+        "name uses an authored datasets/<name>/; a file is ingested → "
+        "origin-resolved → committed as a tenant dataset → run (headless parity "
+        "with the web onboarding). Every invocation mints a brand-new campaign "
+        "(campaign_id is timestamp-derived — collision-free, no discriminator).",
     )
     _add_new_args(p_new)
 

@@ -50,8 +50,13 @@ def _apply_dataset_overlay(
             continue
         out.setdefault("nodes", {}).setdefault(node_name, {})
         for k, v in node_def.items():
-            if k == "config" and isinstance(v, dict):
-                out["nodes"][node_name].setdefault("config", {}).update(v)
+            # ``config`` and ``optimizer`` shallow-merge onto the backend node so a
+            # partial overlay (e.g. a connector seed narrowing
+            # ``optimizer.param_allowed_values``) augments the live schema instead of
+            # clobbering the backend's ``observation_mappings`` / ``param_keys``. A
+            # full authored block (justlogic) still fully overrides — its keys win.
+            if k in ("config", "optimizer") and isinstance(v, dict):
+                out["nodes"][node_name].setdefault(k, {}).update(v)
             else:
                 out["nodes"][node_name][k] = v
     return out
@@ -329,6 +334,7 @@ async def init_services(
         backend_client=client,
         pipeline_schema=pipeline_schema,
         dataset_name=dataset_name,
+        dataset_config_dir=dataset_config_dir,
         identity=resolved_identity,
         project_root=str(store.base_dir),
         langfuse=LangfuseLogger(),

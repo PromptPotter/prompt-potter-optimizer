@@ -18,7 +18,6 @@ import type {
   OriginSummary,
   RoundSummary,
 } from "./api/types";
-import { rootCycleId } from "./ids";
 import { usePoll } from "./usePoll";
 
 export type StatusKind = "live" | "stale" | "offline";
@@ -376,15 +375,16 @@ function useCycleStreamSource(
         return;
       }
 
-      // Payload-identity guard: dashboard.json self-stamps the
-      // session-family it describes. Drop any payload that doesn't match
-      // the unit we polled for — a late response from the prior cycle, or
-      // a transient identity/payload disagreement during a `new` or a
-      // cycle switch. Stale data never reaches the UI; the next tick
-      // retries against the correct unit.
-      if (dash.campaign_id !== cmp || dash.cycle_id !== rootCycleId(id)) {
+      // Payload-identity guard: dashboard.json self-stamps the cycle it
+      // describes (per-cycle — every cycle owns its own file, stamped with
+      // its own cycle_id). Drop any payload that doesn't match the unit we
+      // polled for — a late response from the prior cycle, or a transient
+      // identity/payload disagreement during a `new` or a cycle switch.
+      // Stale data never reaches the UI; the next tick retries against the
+      // correct unit.
+      if (dash.campaign_id !== cmp || dash.cycle_id !== id) {
         const reported = `(${dash.campaign_id ?? "none"}, ${dash.cycle_id ?? "none"})`;
-        const expected = `(${cmp}, ${rootCycleId(id)})`;
+        const expected = `(${cmp}, ${id})`;
         console.debug(
           `[cycle-stream] dropped dashboard payload — stamp ${reported} != unit ${expected}`,
         );

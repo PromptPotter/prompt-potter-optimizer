@@ -12,13 +12,15 @@ from pydantic import BaseModel, Field
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
-    read_tabular,
 )
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaignRegistry,
-    default_slug_from_filename,
 )
-from promptpotter.application.datasets.origin_readiness import resolution_block
+from promptpotter.application.datasets.ingest import (
+    MAX_UPLOAD_BYTES,
+    SlugTakenError,
+    ingest_draft,
+)
 from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
 from promptpotter.application.intelligence.measurement_series import (
     campaign_measurement_series,
@@ -35,12 +37,6 @@ from promptpotter.infrastructure.store.paths import (
 )
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.shared.identity import BENCHMARKS_READ_CAP
-
-# Per-file upload cap. 25 MB is the smallest size that comfortably holds
-# ``MAX_SAMPLES`` 500-byte rows + headroom; rejects the obvious DOS shapes
-# (multi-hundred-MB CSVs) before we even decode UTF-8. Wire-level limit
-# (FastAPI / Starlette do not enforce one by default).
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 _datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
@@ -146,8 +142,17 @@ async def ingest_dataset(
             },
         )
 
+    # Parse → register the draft → persist its cache. Shared with the CLI
+    # `ingest` verb (`application/datasets/ingest.py`) so both surfaces drive
+    # the identical orchestration; the handler only maps errors to HTTP.
     try:
-        table = read_tabular(blob, fmt="csv")
+        draft = ingest_draft(
+            stores=store,
+            registry=registry,
+            blob=blob,
+            filename=file.filename or "",
+            slug=slug,
+        )
     except IngestError as exc:
         raise HTTPException(
             status_code=422,
@@ -157,10 +162,6 @@ async def ingest_dataset(
                 "details": {"reason": exc.reason, "max_samples": MAX_SAMPLES},
             },
         ) from None
-
-    base_slug = (slug or default_slug_from_filename(file.filename or "upload")).lower()
-    try:
-        validate_dataset_name(base_slug)
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
@@ -170,37 +171,15 @@ async def ingest_dataset(
                 "details": {"reason": "bad_slug"},
             },
         ) from None
-
-    if store.tenant_datasets.slug_exists(base_slug):
-        suggested = store.tenant_datasets.suggest_free_slug(base_slug)
+    except SlugTakenError as exc:
         raise HTTPException(
             status_code=409,
             detail={
                 "error": "payload_invalid",
-                "message": f"Slug '{base_slug}' already exists in your collection.",
-                "details": {"suggested_slug": suggested},
+                "message": f"Slug '{exc.slug}' already exists in your collection.",
+                "details": {"suggested_slug": exc.suggested},
             },
-        )
-
-    preview = [dict(row) for row in table.rows[:10]]
-    draft = registry.create(
-        tenant_id=store.identity.tenant_id,
-        slug=base_slug,
-        n_samples=len(table.rows),
-        sample_preview=preview,
-        headers=list(table.headers),
-        source_file=file.filename or "",
-    )
-    # Stash the raw rows + headers; materialization to Samples waits until the
-    # column mapping is confirmed (at mint). The resolution block lets an
-    # operator open cache.json and see what still blocks mint.
-    store.tenant_datasets.write_draft_cache(
-        draft.draft_id,
-        list(table.rows),
-        source_file=file.filename or "",
-        headers=list(table.headers),
-    )
-    store.tenant_datasets.write_draft_resolution(draft.draft_id, resolution_block(draft))
+        ) from None
     return draft.to_wire()
 
 

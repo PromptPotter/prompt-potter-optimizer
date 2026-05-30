@@ -1,8 +1,8 @@
 """Per-cycle reads — cycle list, cycle detail, rounds, dashboard.
 
 All routes carry ``(campaign_id, cycle_id)``. ``dashboard.json`` is
-session-scoped — the dashboard route accepts any cycle of the session and
-resolves the session-family root server-side.
+per-cycle — the dashboard route serves the viewed cycle's own file, so a
+fork's chart shows the fork's trajectory, not the session root's.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from promptpotter.infrastructure.runtime_flags import (
     is_stop_requested,
     read_spend_cap,
 )
-from promptpotter.infrastructure.store import cycle_dir_for, root_cycle_id
+from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -185,11 +185,11 @@ def _client_seen_at_or_after(if_modified_since: str | None, mtime_epoch: float) 
 async def get_cycle_dashboard(
     request: Request, store: StoreDep, campaign_id: str, cycle_id: str
 ) -> Response:
-    """Live session telemetry — ``cycles/{session_root}/dashboard.json``.
+    """Live telemetry for the viewed cycle — ``cycles/{cycle_id}/dashboard.json``.
 
-    ``dashboard.json`` is written once per session, into the session's
-    root cycle dir; the session root and its forks share it. Pass any
-    cycle of the session — the session-family root is resolved here.
+    ``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag)
+    owns its own live file, stamped with its own ``cycle_id``. The route
+    serves the file for the cycle passed in — no session-root collapse.
 
     Honors ``If-Modified-Since`` and returns ``304 Not Modified`` when the
     on-disk mtime hasn't advanced — keeps the 2 s webapp poll cheap during
@@ -198,15 +198,14 @@ async def get_cycle_dashboard(
     ``warming_up`` payload at 200 instead of 404 so the webapp can render a
     "campaign initialising" placeholder rather than appear offline.
     """
-    session_root = root_cycle_id(cycle_id)
-    session_dir = cycle_dir_for(store.base_dir, campaign_id, session_root)
-    path = session_dir / "dashboard.json"
+    cycle_path = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+    path = cycle_path / "dashboard.json"
 
     if not path.is_file():
-        # Fresh-campaign warming_up shape. Last-Modified rides the session
+        # Fresh-campaign warming_up shape. Last-Modified rides the cycle
         # dir's mtime so polling clients still get cheap 304s while waiting.
         try:
-            mtime_epoch = session_dir.stat().st_mtime
+            mtime_epoch = cycle_path.stat().st_mtime
             headers = {"Last-Modified": _http_date(mtime_epoch)}
             if _client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
                 return Response(status_code=304, headers=headers)
@@ -215,7 +214,7 @@ async def get_cycle_dashboard(
         warming: dict[str, Any] = {
             "warming_up": True,
             "campaign_id": campaign_id,
-            "cycle_id": session_root,
+            "cycle_id": cycle_id,
             "phase_hint": "origin",
         }
         return JSONResponse(warming, headers=headers)
@@ -253,12 +252,11 @@ class CycleRunState(BaseModel):
 )
 async def get_cycle_runstate(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleRunState:
     """Live run-control state for the viewed cycle — always fresh, never 304."""
-    runtime = cycle_dir_for(store.base_dir, campaign_id, cycle_id) / ".runtime"
-    # dashboard.json is session-scoped (root cycle dir); runtime flags are on
-    # the target cycle dir where the runner writes + polls them.
-    dashboard_path = (
-        cycle_dir_for(store.base_dir, campaign_id, root_cycle_id(cycle_id)) / "dashboard.json"
-    )
+    cycle_path = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+    runtime = cycle_path / ".runtime"
+    # Both the per-cycle dashboard.json and the runtime flags live on this
+    # cycle's own dir, where the runner writes + polls them.
+    dashboard_path = cycle_path / "dashboard.json"
     return CycleRunState(
         campaign_id=campaign_id,
         cycle_id=cycle_id,

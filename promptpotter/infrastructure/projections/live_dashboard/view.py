@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.cycle_paths import SessionFamilyDir
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import (
@@ -57,7 +57,6 @@ from promptpotter.infrastructure.projections.live_state import (
 )
 from promptpotter.infrastructure.store import (
     cycle_dir_for,
-    root_cycle_id,
     session_dir_for,
     write_json,
 )
@@ -269,7 +268,7 @@ class LiveDashboardView(DerivedView):
 
     def __init__(
         self,
-        family_dir: SessionFamilyDir,
+        cycle_dir: CycleDir,
         session_dir: Path,
         *,
         campaign_id: str,
@@ -282,9 +281,9 @@ class LiveDashboardView(DerivedView):
         recorder: AuditTrailView | None = None,
         initial_llm_nodes: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        family_path = Path(family_dir)
-        self.family_dir = family_path
-        self.state_path = family_path / "dashboard.json"
+        cycle_path = Path(cycle_dir)
+        self.cycle_dir = cycle_path
+        self.state_path = cycle_path / "dashboard.json"
         self.session_dir = session_dir
         self._recorder = recorder
         self.patience_max = l1_patience
@@ -359,33 +358,44 @@ class LiveDashboardView(DerivedView):
         sp_budget_ttest: int,
         resumed_from_round: int | None = None,
         recorder: AuditTrailView | None = None,
+        seed_from_cycle_id: str | None = None,
     ) -> LiveDashboardView | None:
-        """Build projection, or ``None`` if ids missing."""
+        """Build projection, or ``None`` if ids missing.
+
+        Writes ``cycles/{cycle_id}/dashboard.json`` — each cycle (root, fork,
+        sweep, diag) owns its own live file, stamped with its own ``cycle_id``.
+        ``seed_from_cycle_id`` (set for a fork) names the cycle to read the
+        prior dashboard from — the fork inherits the parent's trajectory up to
+        the cut while counting its own (copied) round files; ``None`` seeds from
+        the cycle's own dir (root / resume).
+        """
         if not (project_root and session_id and campaign_id and cycle_id):
             return None
 
         tenant_root = Path(project_root)
-        session_root = root_cycle_id(cycle_id)
-        family_dir = SessionFamilyDir(cycle_dir_for(tenant_root, campaign_id, session_root))
         session_dir = session_dir_for(tenant_root, session_id)
-        cycle_dir = cycle_dir_for(tenant_root, campaign_id, cycle_id)
+        cycle_dir = CycleDir(cycle_dir_for(tenant_root, campaign_id, cycle_id))
+        seed_dir = (
+            cycle_dir_for(tenant_root, campaign_id, seed_from_cycle_id)
+            if seed_from_cycle_id
+            else Path(cycle_dir)
+        )
 
         resume_from = resolve_resume_state(
-            Path(family_dir),
-            cycle_dir,
+            seed_dir,
+            Path(cycle_dir),
             origin_accuracy,
             resumed_from_round,
         )
         # Resume seed for the sticky LLM-call mirror — surfaces prior rounds' L1/L2/L3
         # outputs on the dashboard before the first new call lands.
-        initial_llm_nodes = read_most_recent_round_nodes(audit_rounds_dir(cycle_dir))
+        initial_llm_nodes = read_most_recent_round_nodes(audit_rounds_dir(Path(cycle_dir)))
 
         return cls(
-            family_dir,
+            cycle_dir,
             session_dir,
-            # `cycle_id` stamps the family ROOT; forks share this file and must match the stamp.
             campaign_id=campaign_id,
-            cycle_id=session_root,
+            cycle_id=cycle_id,
             session_id=session_id,
             l1_patience=l1_patience,
             n_variants=n_variants,
@@ -412,12 +422,6 @@ class LiveDashboardView(DerivedView):
         self.state["stop_reason"] = reason
         self._set_state("stopped")
         self._flush_pending_persist()
-
-    def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:
-        """No-op hook — active-cycle identity now lives in `active_session.json`; kept so the
-        runner's `_fork_sibling_setup` call site doesn't have to change.
-        """
-        del old_cycle_id, new_cycle_id, from_round
 
     # -- Write coalesce -------------------------------------------------------
     # Snapshot / token / LLM-call handlers fire hundreds of times per round;

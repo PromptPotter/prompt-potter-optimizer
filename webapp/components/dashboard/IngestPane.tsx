@@ -25,14 +25,23 @@ import {
   postIngestDataset,
   postMintCampaign,
   postMintCampaignFromDraft,
+  postResolveOrigin,
   type DatasetIndexEntry,
   type DraftCampaignWire,
   type DraftPatch,
   type LLMProvider,
   type OriginGap,
+  type OriginLastResolution,
+  type OriginQuestion,
+  type ProvenanceSource,
   type ProvenanceTag,
 } from "@/lib/api";
-import { originReadiness, plainLanguageRecap } from "@/lib/origin-readiness";
+import {
+  originReadiness,
+  plainLanguageRecap,
+  questionOptions,
+  questionPatch,
+} from "@/lib/origin-readiness";
 
 interface Props {
   open: boolean;
@@ -336,6 +345,10 @@ function DraftCommitFlow({
   // the proactively-derived gaps shown in the required tier: these only
   // appear if the operator forces a commit the client gate already blocks.
   const [serverGaps, setServerGaps] = useState<OriginGap[] | null>(null);
+  // One origin-resolver turn in flight + its last output (assessment,
+  // operator questions, ready-turn recap).
+  const [resolving, setResolving] = useState(false);
+  const [lastResolution, setLastResolution] = useState<OriginLastResolution | null>(null);
 
   const readiness = originReadiness(draft);
 
@@ -347,6 +360,21 @@ function DraftCommitFlow({
       onDraftChange(next);
     } catch (e) {
       setError(IngestApiError.toOperatorMessage(e));
+    }
+  };
+
+  const handleResolve = async () => {
+    setResolving(true);
+    setError(null);
+    setServerGaps(null);
+    try {
+      const r = await postResolveOrigin(draft.draft_id);
+      onDraftChange(r.draft);
+      setLastResolution(r.resolution.last_resolution ?? null);
+    } catch (e) {
+      setError(IngestApiError.toOperatorMessage(e));
+    } finally {
+      setResolving(false);
     }
   };
 
@@ -376,11 +404,21 @@ function DraftCommitFlow({
         optional settings.
       </p>
 
-      {/* Required tier — the only fields the mint gate blocks on today. */}
+      {/* Required tier — the column mapping the mint gate blocks on. */}
       <ColumnMappingPicker draft={draft} onApply={applyPatch} />
 
+      {/* Origin setup-in-progress — the closed-set fields with provenance, and
+          the AI resolver that proposes the task framing + refinements. */}
+      <OriginCheckinPanel
+        draft={draft}
+        resolving={resolving}
+        lastResolution={lastResolution}
+        onResolve={handleResolve}
+        onApply={applyPatch}
+      />
+
       {readiness.complete ? (
-        <RecapCard text={plainLanguageRecap(draft)} />
+        <RecapCard text={lastResolution?.recap || plainLanguageRecap(draft)} />
       ) : (
         <GapList gaps={readiness.gaps} tone="pending" />
       )}
@@ -457,6 +495,175 @@ function ProvenanceBadge({ tag }: { tag: ProvenanceTag }) {
   );
 }
 
+// Plain-language source labels — `auto` is a smart default the operator can
+// override; `stated` is a choice they made. Audit sub-tag, only shown once a
+// field has a value (.impeccable register: no jargon, accessibility-first).
+const SOURCE_LABEL: Record<ProvenanceSource, string> = {
+  auto: "auto",
+  stated: "you set",
+};
+
+function SourceBadge({ source }: { source: ProvenanceSource | undefined }) {
+  if (!source) return null;
+  return (
+    <span className={`origin-src origin-src--${source}`}>{SOURCE_LABEL[source]}</span>
+  );
+}
+
+// The closed-set config fields, surfaced so the once-hidden defaults are
+// visible + their provenance honest. Each reads its tag from `draft.resolved`.
+const CHECKIN_FIELDS: Array<{ key: string; label: string; value: (d: DraftCampaignWire) => string }> =
+  [
+    { key: "task_description", label: "Task", value: (d) => d.task_description || "—" },
+    { key: "connector", label: "Backend", value: (d) => d.connector },
+    { key: "scoring_composite", label: "Scoring", value: (d) => d.scoring_composite },
+    { key: "max_rounds", label: "Max rounds", value: (d) => String(d.max_rounds) },
+    {
+      key: "optimizer.provider",
+      label: "Optimizer",
+      value: (d) => `${d.optimizer_provider}${d.optimizer_model ? ` · ${d.optimizer_model}` : ""}`,
+    },
+  ];
+
+// The origin-setup-in-progress window. Shows the closed-set fields with their
+// provenance, an "AI set-up" turn that proposes the task framing + refinements
+// (origin-resolution steps 3-4), and the resolver's assessment / questions.
+function OriginCheckinPanel({
+  draft,
+  resolving,
+  lastResolution,
+  onResolve,
+  onApply,
+}: {
+  draft: DraftCampaignWire;
+  resolving: boolean;
+  lastResolution: OriginLastResolution | null;
+  onResolve: () => void;
+  onApply: (patch: DraftPatch) => void;
+}) {
+  const ready = CHECKIN_FIELDS.filter(
+    (f) => (draft.resolved[f.key] ?? "unset") === "confirmed",
+  ).length;
+  const questions = lastResolution?.next_action.questions ?? [];
+
+  return (
+    <section className="origin-checkin">
+      <header className="origin-checkin-head">
+        <span className="origin-columns-head">Campaign setup</span>
+        <span className="origin-checkin-progress">
+          {ready}/{CHECKIN_FIELDS.length} ready
+        </span>
+      </header>
+
+      <ul className="origin-checkin-fields">
+        {CHECKIN_FIELDS.map((f) => {
+          const tag: ProvenanceTag = draft.resolved[f.key] ?? "unset";
+          const source: ProvenanceSource | undefined = draft.sources[f.key];
+          return (
+            <li key={f.key} className="origin-checkin-field">
+              <span className="origin-checkin-label">{f.label}</span>
+              <span className="origin-checkin-value">{f.value(draft)}</span>
+              <ProvenanceBadge tag={tag} />
+              <SourceBadge source={source} />
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="origin-checkin-actions">
+        <button
+          type="button"
+          className="origin-checkin-resolve"
+          disabled={resolving}
+          onClick={onResolve}
+        >
+          {resolving ? "Setting up…" : "Set up with AI"}
+        </button>
+        <small className="origin-checkin-hint">
+          Reads your columns + sample rows to draft the task framing and propose
+          any unset fields. High-confidence picks confirm automatically; the
+          rest wait for you.
+        </small>
+      </div>
+
+      {lastResolution?.assessment ? (
+        <p className="origin-checkin-assessment">{lastResolution.assessment}</p>
+      ) : null}
+      {questions.length > 0 ? (
+        <ul className="origin-checkin-questions">
+          {questions.map((q, i) => (
+            <li key={i}>
+              <QuestionAnswer question={q} draft={draft} onApply={onApply} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+// One answerable resolver question. Renders the prompt plus a control keyed to
+// the field's answer set: a picker when the resolver gave `options` (or for a
+// column-mapping question, the uploaded headers), else a free-text input.
+// Submitting maps the answer to an `edit-draft-campaign` patch via
+// `questionPatch` (server flips the field CONFIRMED + STATED) — the answer-back
+// half of the resolver loop. A field that isn't string-applicable yields no
+// patch and the control is omitted (only its prompt shows).
+function QuestionAnswer({
+  question,
+  draft,
+  onApply,
+}: {
+  question: OriginQuestion;
+  draft: DraftCampaignWire;
+  onApply: (patch: DraftPatch) => void;
+}) {
+  const [text, setText] = useState("");
+  const options = questionOptions(question.field, question.options, draft.headers);
+  // "1" is a valid probe across every mapped field (incl. max_rounds' numeric
+  // guard); only backend.node_config / unknown fields yield null → not answerable.
+  const answerable = questionPatch(question.field, "1") !== null;
+
+  const submit = (answer: string) => {
+    const patch = questionPatch(question.field, answer);
+    if (patch) onApply(patch);
+  };
+
+  return (
+    <div className="origin-question">
+      <span className="origin-question-prompt">{question.prompt}</span>
+      {!answerable ? null : options.length > 0 ? (
+        <select
+          className="origin-question-select"
+          defaultValue=""
+          onChange={(e) => submit(e.target.value)}
+        >
+          <option value="" disabled>
+            — choose —
+          </option>
+          {options.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="origin-question-text">
+          <input
+            type="text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Your answer"
+          />
+          <button type="button" disabled={!text.trim()} onClick={() => submit(text)}>
+            Answer
+          </button>
+        </span>
+      )}
+    </div>
+  );
+}
+
 // The required tier: pick which uploaded header is the input and which is the
 // target. Selecting a column confirms it (rides `edit-draft-campaign` with
 // `column_query` / `column_ground_truth`) — no separate Apply click, since
@@ -478,6 +685,8 @@ function ColumnMappingPicker({
 
   const queryProv: ProvenanceTag = draft.resolved["column.query"] ?? "unset";
   const gtProv: ProvenanceTag = draft.resolved["column.ground_truth"] ?? "unset";
+  const querySrc: ProvenanceSource | undefined = draft.sources["column.query"];
+  const gtSrc: ProvenanceSource | undefined = draft.sources["column.ground_truth"];
   const sameColumn =
     !!draft.column_query && draft.column_query === draft.column_ground_truth;
 
@@ -488,6 +697,7 @@ function ColumnMappingPicker({
         <label className="new-campaign-field">
           <span>
             Input column <ProvenanceBadge tag={queryProv} />
+            <SourceBadge source={querySrc} />
           </span>
           <select
             value={draft.column_query}
@@ -506,6 +716,7 @@ function ColumnMappingPicker({
         <label className="new-campaign-field">
           <span>
             Target column <ProvenanceBadge tag={gtProv} />
+            <SourceBadge source={gtSrc} />
           </span>
           <select
             value={draft.column_ground_truth}

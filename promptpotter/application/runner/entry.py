@@ -186,10 +186,7 @@ async def run_optimization(
                     display=observers.display,
                     resumed_from_round=session.state.resumed_from_round,
                     origin_accuracy=origin.origin_acc,
-                    fork=ForkInfo(
-                        parent_cycle_id=pre_loop_cycle_id,
-                        parent_dashboard=observers.dashboard,
-                    ),
+                    fork=ForkInfo(parent_cycle_id=pre_loop_cycle_id),
                 )
                 observers.callbacks._phase_ctx = parent_phase_ctx
                 cb = observers.callbacks
@@ -352,10 +349,7 @@ async def run_optimization(
             display=observers.display,
             resumed_from_round=rebase_req.fork_from_round,
             origin_accuracy=origin.origin_acc,
-            fork=ForkInfo(
-                parent_cycle_id=parent_cycle_id,
-                parent_dashboard=observers.dashboard,
-            ),
+            fork=ForkInfo(parent_cycle_id=parent_cycle_id),
         )
         observers.callbacks._phase_ctx = parent_phase_ctx
         cb = observers.callbacks

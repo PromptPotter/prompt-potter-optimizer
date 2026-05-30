@@ -44,8 +44,8 @@ Small ships (mostly <1 day). Must land before chat state-queries and new dashboa
 
 | # | Item | Status | Spec |
 |---|---|---|---|
-| B1 | state-sync P1 (identity collapse — absorbs the spend double-touch) | pending | [`state-sync-cleanup`](state-sync-cleanup.md) |
-| B2 | state-sync P2–P4 (`dashboard.json`→`state.json`, **`GET /api/v1/live`**, sidecar delete) | pending — P3 gates every new panel | [`state-sync-cleanup`](state-sync-cleanup.md) |
+| B1 | state-sync P1 (identity collapse — absorbs the spend double-touch) | ✅ shipped 2026-05-30 | [`state-sync-cleanup`](state-sync-cleanup.md) |
+| B2 | state-sync P2–P4 (per-cycle `dashboard.json`, **`GET /api/v1/live`**, sidecar delete) | ✅ shipped 2026-05-30 | [`state-sync-cleanup`](state-sync-cleanup.md) |
 
 ### Lane C — product differentiator + capability (after A + B)
 

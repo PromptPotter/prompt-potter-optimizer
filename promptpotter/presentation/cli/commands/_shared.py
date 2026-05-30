@@ -162,7 +162,7 @@ def _prepare_cycle(
     origin = load_origin_prompt(
         session.experiment_extract,
         prompt_node_names=schema.prompt_node_names() if schema else [],
-        dataset_name=session.dataset_name,
+        dataset_dir=session.dataset_config_dir,
     )
     return pipeline_params, origin, build_origin_cycle_id(origin, schema, dataset)
 

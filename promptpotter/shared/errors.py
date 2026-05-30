@@ -46,10 +46,13 @@ class RequestTooLargeError(RuntimeError):
             f"{provider_name}: single request exceeds tier TPM cap "
             f"(limit={limit}, requested={requested}). Retrying will not help — "
             f"the request alone is larger than the per-minute token allowance.\n"
-            f"Reduce the L1 meta-prompt (biggest levers first):\n"
-            f"  - CampaignConfig.optimization.n_variants: 5 -> 3\n"
-            f"  - shorten datasets/<name>/task_description.md\n"
-            f"Or upgrade your provider tier."
+            f"This is one optimizer (L1) call; n_variants is the per-round candidate "
+            f"count (parallel calls), NOT a single-request lever — lowering it does "
+            f"not shrink this request. Biggest lever first:\n"
+            f"  - point CampaignConfig.optimizer_llm.provider at a tier whose "
+            f"per-minute cap exceeds {requested} tokens (e.g. OpenRouter, or a paid "
+            f"Groq tier) — the free Groq on_demand tier caps at {limit}\n"
+            f"  - or shorten the optimizer meta-prompt (task_description.md)."
         )
 
 

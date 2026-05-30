@@ -355,11 +355,13 @@ def configure_and_apply_pipeline(
 
     valid_overrides: dict[str, dict[str, Any]] = {}
     dataset_name = campaign_config.dataset_name or (session.dataset_name or "")
+    dataset_dir = session.dataset_config_dir
 
-    # Per-dataset overlay from `datasets/{name}/pipeline.json::nodes.{name}.config` — sparse
-    # overrides on backend defaults (e.g. AIME → OpenRouter+Mistral).
-    if dataset_name:
-        for node, cfg in load_dataset_node_overlay(dataset_name).items():
+    # Per-dataset overlay from `{dataset_dir}/pipeline.json::nodes.{name}.config` — sparse
+    # overrides on backend defaults (e.g. AIME → OpenRouter+Mistral). `dataset_dir`
+    # is resolved tenant-first at bootstrap, so ingested datasets honor it too.
+    if dataset_dir is not None:
+        for node, cfg in load_dataset_node_overlay(dataset_dir).items():
             if node in active:
                 valid_overrides.setdefault(node, {}).update(cfg)
 
@@ -377,11 +379,11 @@ def configure_and_apply_pipeline(
                     value,
                 )
 
-    # Starting prompts from `datasets/{name}/prompts/[<node>|default].json`, per prompt-bearing node.
-    if dataset_name and filtered and has_dataset_prompts(dataset_name):
+    # Starting prompts from `{dataset_dir}/prompts/[<node>|default].json`, per prompt-bearing node.
+    if dataset_dir is not None and filtered and has_dataset_prompts(dataset_dir):
         prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
         for pnode in prompt_nodes:
-            template = load_node_prompt(dataset_name, pnode, "default")
+            template = load_node_prompt(dataset_dir, pnode, "default")
             valid_overrides.setdefault(pnode, {})["prompt"] = template.render()
             log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|default].json → {pnode}")
 

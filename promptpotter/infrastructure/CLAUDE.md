@@ -27,16 +27,19 @@ follow the same pattern.
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardView` | session-family root cycle | `dashboard.json`, `output.log` | **Display surface** — origin + completed-round summaries (`dash.rounds[]`) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
+| `LiveDashboardView` | per cycle | `dashboard.json`, `output.log` | **Display surface** — origin + completed-round summaries (`dash.rounds[]`) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
 | `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
 | `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 | `EventStreamView` | per cycle | SSE frames over `GET /campaigns/{c}/cycles/{cy}/events:subscribe` | **Profile A outbound highway** — sole writer of `ProjectionEnvelope` frames (security box 4). Per-cycle ledger subscriber; broadcasts to N HTTP subscribers via per-subscriber asyncio queues bridged from the ledger thread via `loop.call_soon_threadsafe`. Snapshot-then-tail + 15 s heartbeat + sequence-gap detection. Certified contract: [`docs/developer/event-stream.md`](../../docs/developer/event-stream.md). Lookup via process-wide registry (`event_stream/registry.py`); `register_event_stream` at `build_run_observers`, `deregister_event_stream` at `drain_all`. |
 
-`LiveDashboardView` writes into the **session-family root cycle dir**
-(`cycles/{session_root}/dashboard.json`) — a session's forks share their
-session root's stream. A campaign therefore carries N live `dashboard.json`
-streams, one per session, never one shared at the campaign root. The write
-target is the `SessionFamilyDir` newtype (`domain/cycle_paths.py`).
+`LiveDashboardView` writes into the **cycle's own dir**
+(`cycles/{cycle_id}/dashboard.json`) — every cycle (root, fork, sweep, diag)
+owns its live stream, stamped with its own `cycle_id`. A fork's view can't
+surface the parent's id; a fork seeds its prior trajectory from the parent's
+on-disk `dashboard.json` (via `for_session(seed_from_cycle_id=…)`). The write
+target is the `CycleDir` newtype (`domain/cycle_paths.py`); the four read sites
+(`/api/v1/live`, the per-cycle `dashboard` + `runstate` routes, `EventStreamView`
+snapshot) serve the viewed cycle's own file — no `root_cycle_id` collapse.
 
 `DerivedView.on_record` (`projections/base.py`) owns the
 `isinstance(record, …)` dispatch; subclasses override hooks. There's no
@@ -74,7 +77,7 @@ no-drift gate #4 — never an independent field). Composite over focused
 leaf stores (`BackendStore`, `CampaignStore` (`store/campaign_store/`),
 `DatasetRunStore`, `PlanStore`, `SessionStore`). Shared I/O +
 `EntityStore` in `store/base.py`. Path helpers in `store/paths.py`; the
-`CycleDir` / `SessionFamilyDir` write-target newtypes in
+`CycleDir` / `WorkspaceDir` write-target newtypes in
 `domain/cycle_paths.py` — projections and stores accept these newtypes,
 not raw `str`/`Path`. `archive/` is cross-cycle/session/tenant;
 `MeasurementArchive` is the DB core.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.sample import Sample
@@ -71,6 +72,11 @@ class Session:
     index_terms: list[str] = field(default_factory=list)
     identity: IdentityContext = field(default_factory=default_identity)
     dataset_name: str | None = None
+    # Resolved tenant-first at bootstrap (`resolve_dataset_config_dir`): tenant
+    # uploads at `projects/{tenant}/datasets/{slug}/`, else repo `datasets/{name}/`.
+    # The single resolution seam — every dataset-file loader reads this rather than
+    # recomputing a repo path from the bare name.
+    dataset_config_dir: Path | None = None
     project_root: str = ""
     pipeline_params: dict[str, Any] = field(default_factory=dict)
     langfuse: LangfuseLogger | None = None

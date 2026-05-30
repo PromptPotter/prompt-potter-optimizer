@@ -199,6 +199,12 @@ export async function postStartRun(
 // or `proposed` (the deterministic `origin_readiness` gate).
 export type ProvenanceTag = "unset" | "proposed" | "confirmed";
 
+// Mirror of `domain/origin_provenance.ProvenanceSource`. Orthogonal to the
+// provenance tag: `auto` = machine-set (template default, column auto-detect,
+// or resolver finding); `stated` = the operator set it via edit-draft-campaign.
+// Only valued fields carry a source. Audit-only — the gate reads `resolved`.
+export type ProvenanceSource = "auto" | "stated";
+
 export interface DraftCampaignWire {
   draft_id: string;
   slug: string;
@@ -221,6 +227,9 @@ export interface DraftCampaignWire {
   column_query: string;
   column_ground_truth: string;
   resolved: Record<string, ProvenanceTag>;
+  // Per-field source (`auto` / `stated`), orthogonal to `resolved`. Only
+  // valued fields appear; audit-only, never gates. See `ProvenanceSource`.
+  sources: Record<string, ProvenanceSource>;
   created_at: string;
   updated_at: string;
 }
@@ -397,6 +406,65 @@ export async function postMintCampaignFromDraft(
   });
   if (!r.ok) await _throwApiError(r);
   return (await r.json()) as MintFromDraftResponse;
+}
+
+// One operator-facing question on a `kind='ask'` turn. `field` names the
+// checklist field the answer resolves so the panel applies it directly as a
+// confirmed patch; `options` (when non-empty) is a closed answer set rendered
+// as a picker, else the input is free text.
+export interface OriginQuestion {
+  field: string;
+  prompt: string;
+  options: string[];
+}
+
+// The resolver turn's own output, persisted to the draft `cache.json` and
+// echoed on the `resolve-origin` response. Drives the check-in panel's
+// assessment line, operator questions, and the ready-turn recap.
+export interface OriginLastResolution {
+  assessment: string;
+  findings: Array<{
+    field: string;
+    proposed_value: string;
+    confidence: string;
+    evidence: string;
+  }>;
+  next_action: { kind: string; questions: OriginQuestion[] };
+  recap: string;
+}
+
+export interface OriginResolutionBlock {
+  complete: boolean;
+  provenance: Record<string, string>;
+  values: Record<string, unknown>;
+  gaps: OriginGap[];
+  last_resolution?: OriginLastResolution;
+}
+
+export interface ResolveOriginResponse {
+  resolution: OriginResolutionBlock;
+  draft: DraftCampaignWire;
+}
+
+// One origin-resolver turn: the origin-aware `checkin` node proposes
+// evidence-cited values for the unresolved closed-set fields (high-confidence
+// auto-confirms; low-confidence lands `proposed`). Synchronous, like
+// `edit-draft-campaign`. Returns the resolver output + the post-apply draft.
+export async function postResolveOrigin(draftId: string): Promise<ResolveOriginResponse> {
+  const r = await fetch(`${API}/commands/resolve-origin`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": _mintIdempotencyKey(),
+    },
+    body: JSON.stringify({
+      kind: "resolve-origin",
+      payload: { draft_id: draftId },
+    }),
+    cache: "no-store",
+  });
+  if (!r.ok) await _throwApiError(r);
+  return (await r.json()) as ResolveOriginResponse;
 }
 
 // Security pane sign-out. Not a command-highway POST (logout is

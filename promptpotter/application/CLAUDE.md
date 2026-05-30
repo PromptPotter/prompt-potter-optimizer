@@ -56,4 +56,6 @@ intelligence; intelligence does not depend on either.
 
 `nodes.{name}.config` in the dataset's `pipeline.json` is a sparse overlay merged onto each wire payload by `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`config.py:344`). It's the sole route for changing a backend tunable — model, provider, temperature, anything in the node's `optimizer.param_keys`. AIME's overlay routes through OpenRouter+Mistral while the backend default stays Groq+gpt-oss. The sibling `llm_defaults` is the `GET /pipeline` snapshot — keep it accurate, don't repurpose it.
 
+**Resolution is tenant-first.** "The dataset's `pipeline.json`" means the file under the dir `resolve_dataset_config_dir` chose — a tenant upload at `projects/{tenant}/datasets/{slug}/` before a repo benchmark at `datasets/{name}/`. The loaders (`load_dataset_node_overlay`, `load_node_prompt`, …) take that resolved dir (carried on `Session.dataset_config_dir`), never a bare name — so an ingested dataset's overlay + starting prompts load identically to a benchmark's.
+
 **Never edit the backend repo to achieve a switch** (even co-owned ones like the sibling TermNorm backend); if a needed key isn't in the dataset's `param_keys`, extend the snapshot, not the backend. Pipeline-agnostic is a §0 commitment.

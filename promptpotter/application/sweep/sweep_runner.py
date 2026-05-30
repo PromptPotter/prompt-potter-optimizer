@@ -36,11 +36,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def resolve_sweep_dir(dataset_name: str | None) -> Path | None:
-    """Path to ``datasets/{name}/sweep/`` if it exists, else None."""
-    if not dataset_name:
+def resolve_sweep_dir(dataset_dir: Path | None) -> Path | None:
+    """Path to ``{dataset_dir}/sweep/`` if it exists, else None.
+
+    *dataset_dir* is the resolved config dir (``Session.dataset_config_dir``,
+    tenant-first), so a tenant dataset's ``sweep/`` is honored alongside repo
+    benchmarks'."""
+    if dataset_dir is None:
         return None
-    sweep_dir = Path("datasets") / dataset_name / "sweep"
+    sweep_dir = dataset_dir / "sweep"
     return sweep_dir if sweep_dir.is_dir() else None
 
 

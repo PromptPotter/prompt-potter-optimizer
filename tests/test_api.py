@@ -6,8 +6,8 @@ ledger structure has at least one external consumer that fails loudly
 when the record schema drifts.
 
 A campaign is a forest of N sessions: routes carry both ``campaign_id``
-and ``cycle_id``; ``dashboard.json`` is per-session (in the session's
-root cycle dir).
+and ``cycle_id``; ``dashboard.json`` is per-cycle (each cycle owns its own
+file in its own cycle dir).
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str, str]]:
         ),
         encoding="utf-8",
     )
-    # dashboard.json is per-session — it lives in the session's root cycle dir.
+    # dashboard.json is per-cycle — it lives in this cycle's own dir.
     (cycle_dir / "dashboard.json").write_text(
         json.dumps({"phase": "l1_score", "round": 3, "best": 0.812}),
         encoding="utf-8",
@@ -193,14 +193,26 @@ def test_forks_derives_from_fork_cut_records(seeded_tenant: tuple[TestClient, st
     assert fork["forked_at"] == "2026-04-30T12:00:00+00:00"
 
 
-def test_dashboard_resolves_at_session_family_root(
+def test_dashboard_is_per_cycle_not_session_root(
     seeded_tenant: tuple[TestClient, str, str],
 ) -> None:
-    """The dashboard route resolves the session-family root server-side."""
+    """Each cycle serves its OWN dashboard.json — a fork does not collapse to
+    the session root's file (state-sync Phase 2)."""
     client, campaign_id, cycle_id = seeded_tenant
-    resp = client.get(f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
-    assert resp.status_code == 200
-    assert resp.json()["round"] == 3
+
+    # Root cycle's dashboard (seeded at round 3). A fork carries its own.
+    stores = app.dependency_overrides[build_stores_from_identity]()
+    fork_id = f"{cycle_id}_fork_abc123"
+    fork_dir = cycle_dir_for(stores.base_dir, campaign_id, fork_id)
+    fork_dir.mkdir(parents=True, exist_ok=True)
+    (fork_dir / "dashboard.json").write_text(
+        json.dumps({"phase": "l1_score", "round": 7, "best": 0.91}), encoding="utf-8"
+    )
+
+    root_resp = client.get(f"/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
+    fork_resp = client.get(f"/api/v1/campaigns/{campaign_id}/cycles/{fork_id}/dashboard")
+    assert root_resp.json()["round"] == 3
+    assert fork_resp.json()["round"] == 7  # the fork's own file, not the root's
 
 
 # ===========================================================================
@@ -277,7 +289,7 @@ def test_files_lists_cycle_and_campaign_artifacts(
     assert body["cycle_id"] == cycle_id
     cycle_paths = {e["path"] for e in body["entries"] if e["scope"] == "cycle"}
     campaign_paths = {e["path"] for e in body["entries"] if e["scope"] == "campaign"}
-    # dashboard.json is per-session — it sits in the (root) cycle dir, not
+    # dashboard.json is per-cycle — it sits in this cycle's own dir, not
     # the campaign dir.
     assert {"index.json", "log.md", "rounds/round_0000.json", "dashboard.json"} <= cycle_paths
     assert {"campaign.json"} <= campaign_paths
@@ -366,6 +378,10 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
         assert draft["headers"] == ["query", "ground_truth"]
         assert draft["resolved"]["column.query"] == "confirmed"
         assert draft["resolved"]["column.ground_truth"] == "confirmed"
+        # The auto-detected column + the template-default config knobs are
+        # AUTO-sourced — once-hidden defaults made visible, not operator choices.
+        assert draft["sources"]["column.query"] == "auto"
+        assert draft["sources"]["connector"] == "auto"
         # Sparse edit lands a mutation; response is the full post-mutation shape.
         edit = client.post(
             "/api/v1/commands/edit-draft-campaign",
@@ -409,11 +425,15 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
         assert blocked.status_code == 422, blocked.text
         gate = blocked.json()["detail"]
         assert gate["error"] == "origin_incomplete"
+        # Closed set: unset columns + the once-hidden `task_description` (no
+        # default framing) gate; the config knobs auto-confirm from templates.
         assert {g["field"] for g in gate["details"]["gaps"]} == {
             "column.query",
             "column.ground_truth",
+            "task_description",
         }
-        # Confirming the mapping via edit-draft-campaign opens the gate.
+        # Confirming the mapping via edit-draft-campaign flips those fields'
+        # provenance (task_description still gates until stated).
         confirmed = client.post(
             "/api/v1/commands/edit-draft-campaign",
             headers={"Idempotency-Key": "test-gate-2"},
@@ -428,6 +448,8 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
         assert confirmed.status_code == 200, confirmed.text
         assert confirmed.json()["resolved"]["column.query"] == "confirmed"
         assert confirmed.json()["resolved"]["column.ground_truth"] == "confirmed"
+        # An operator edit overrides the seed → STATED source (not auto).
+        assert confirmed.json()["sources"]["column.query"] == "stated"
 
 
 def test_mint_from_draft_503_preserves_draft_when_backend_unreachable(
@@ -472,6 +494,21 @@ def test_mint_from_draft_503_preserves_draft_when_backend_unreachable(
         )
         assert r.status_code == 200, r.text
         draft = r.json()
+
+        # State the framing so the origin gate passes and we reach the backend
+        # preflight (literal columns already auto-confirmed; config knobs seed
+        # from templates). Without this, mint blocks at 422 before any network.
+        client.post(
+            "/api/v1/commands/edit-draft-campaign",
+            headers={"Idempotency-Key": "test-mint-frame"},
+            json={
+                "kind": "edit-draft-campaign",
+                "payload": {
+                    "draft_id": draft["draft_id"],
+                    "patch": {"task_description": "label support tickets"},
+                },
+            },
+        )
 
         # First mint: backend down → 503 with the structured code, NOT a 422.
         mint = client.post(

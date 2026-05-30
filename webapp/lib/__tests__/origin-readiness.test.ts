@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 import type { DraftCampaignWire } from "../api";
-import { originReadiness, plainLanguageRecap } from "../origin-readiness";
+import {
+  originReadiness,
+  plainLanguageRecap,
+  questionOptions,
+  questionPatch,
+} from "../origin-readiness";
+
+// The config knobs auto-confirm at ingest (template defaults); a fresh draft
+// carries them `confirmed`. `task_description` lands `unset`. The fixture
+// mirrors that server-side seed.
+const CONFIG_CONFIRMED = {
+  connector: "confirmed",
+  scoring_composite: "confirmed",
+  max_rounds: "confirmed",
+  "optimizer.provider": "confirmed",
+  "optimizer.model": "confirmed",
+  "backend.node_config": "confirmed",
+  task_description: "unset",
+} as const;
 
 function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
   return {
@@ -18,57 +36,108 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     headers: ["input", "gt"],
     column_query: "",
     column_ground_truth: "",
-    resolved: { "column.query": "unset", "column.ground_truth": "unset" },
+    resolved: {
+      "column.query": "unset",
+      "column.ground_truth": "unset",
+      ...CONFIG_CONFIRMED,
+    },
+    // Config knobs auto-confirm from template defaults → AUTO source; the
+    // gate ignores this axis, it is audit-only. Columns/task carry no source
+    // until set, mirroring the server seed.
+    sources: {
+      connector: "auto",
+      scoring_composite: "auto",
+      max_rounds: "auto",
+      "optimizer.provider": "auto",
+      "optimizer.model": "auto",
+      "backend.node_config": "auto",
+    },
     created_at: "2026-05-30T00:00:00Z",
     updated_at: "2026-05-30T00:00:00Z",
     ...over,
   };
 }
 
+// A fully-resolved draft: columns confirmed + framing stated. Helper for the
+// "passes" cases so each test states only what it changes.
+function resolved(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
+  return draft({
+    column_query: "input",
+    column_ground_truth: "gt",
+    task_description: "map names to codes",
+    resolved: {
+      "column.query": "confirmed",
+      "column.ground_truth": "confirmed",
+      ...CONFIG_CONFIRMED,
+      task_description: "confirmed",
+    },
+    ...over,
+  });
+}
+
 describe("originReadiness", () => {
-  it("flags both columns as unset gaps on a fresh non-literal upload", () => {
+  it("flags unset columns AND the unset task framing; config knobs auto-pass", () => {
     const r = originReadiness(draft());
     expect(r.complete).toBe(false);
-    expect(r.gaps.map((g) => g.field)).toEqual(["column.query", "column.ground_truth"]);
-    expect(r.gaps.every((g) => g.reason === "unset")).toBe(true);
-    // Hint lists the available headers so the operator knows what to pick.
-    expect(r.gaps[0].hint).toContain("input, gt");
+    // The config knobs auto-confirm, so only the columns + task framing gap.
+    expect(new Set(r.gaps.map((g) => g.field))).toEqual(
+      new Set(["column.query", "column.ground_truth", "task_description"]),
+    );
+    const col = r.gaps.find((g) => g.field === "column.query");
+    expect(col?.hint).toContain("input, gt");
   });
 
-  it("passes once both columns are confirmed members of headers", () => {
-    const r = originReadiness(
-      draft({
-        column_query: "input",
-        column_ground_truth: "gt",
-        resolved: { "column.query": "confirmed", "column.ground_truth": "confirmed" },
-      }),
-    );
+  it("passes once columns are confirmed members AND the framing is stated", () => {
+    const r = originReadiness(resolved());
     expect(r.complete).toBe(true);
     expect(r.gaps).toHaveLength(0);
   });
 
-  it("reports a proposed-unconfirmed gap distinct from unset", () => {
+  it("blocks on a proposed (low-confidence) framing until confirmed", () => {
     const r = originReadiness(
-      draft({
-        column_query: "input",
-        resolved: { "column.query": "proposed", "column.ground_truth": "unset" },
+      resolved({
+        task_description: "maybe map codes",
+        resolved: {
+          "column.query": "confirmed",
+          "column.ground_truth": "confirmed",
+          ...CONFIG_CONFIRMED,
+          task_description: "proposed",
+        },
       }),
     );
-    const q = r.gaps.find((g) => g.field === "column.query");
-    expect(q?.reason).toBe("proposed_unconfirmed");
+    const t = r.gaps.find((g) => g.field === "task_description");
+    expect(t?.reason).toBe("proposed_unconfirmed");
   });
 
-  it("does not pass when the confirmed value is not a member of headers", () => {
-    // A stale confirm whose column was renamed out of the upload still blocks.
-    const r = originReadiness(
-      draft({
-        column_query: "ghost",
-        column_ground_truth: "gt",
-        resolved: { "column.query": "confirmed", "column.ground_truth": "confirmed" },
-      }),
-    );
+  it("does not pass when a confirmed column is not a member of headers", () => {
+    const r = originReadiness(resolved({ column_query: "ghost" }));
     expect(r.complete).toBe(false);
     expect(r.gaps.map((g) => g.field)).toEqual(["column.query"]);
+  });
+});
+
+describe("questionPatch / questionOptions (resolver answer-back loop)", () => {
+  it("maps each field id to its draft-patch key", () => {
+    expect(questionPatch("column.query", "input")).toEqual({ column_query: "input" });
+    expect(questionPatch("task_description", "map codes")).toEqual({
+      task_description: "map codes",
+    });
+    expect(questionPatch("max_rounds", "8")).toEqual({ max_rounds: 8 });
+  });
+
+  it("rejects un-applicable answers so the caller skips them", () => {
+    expect(questionPatch("max_rounds", "lots")).toBeNull(); // non-numeric
+    expect(questionPatch("max_rounds", "999")).toBeNull(); // out of 1..100
+    expect(questionPatch("column.query", "  ")).toBeNull(); // blank
+    expect(questionPatch("backend.node_config", "x")).toBeNull(); // not string-applicable
+    expect(questionPatch("nonsense", "x")).toBeNull(); // unknown field
+  });
+
+  it("grounds a column question's options in the uploaded headers", () => {
+    expect(questionOptions("column.query", [], ["a", "b"])).toEqual(["a", "b"]);
+    // The resolver's own options win when supplied; non-column free-text → empty.
+    expect(questionOptions("connector", ["termnorm"], ["a"])).toEqual(["termnorm"]);
+    expect(questionOptions("task_description", [], ["a"])).toEqual([]);
   });
 });
 
