@@ -1004,11 +1004,23 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .chat-job-dropdown .row:last-child{border-bottom:none}
 .chat-job-dropdown .lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:600;flex-shrink:0}
 .chat-job-dropdown .val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:12px;text-align:right;word-break:break-all}
-.chat-job-dropdown .job-footer{grid-column:1/-1;margin-top:8px;padding:8px 10px;border:1px dashed var(--color-border-tertiary);border-radius:8px;color:var(--color-text-tertiary);font-size:11px;text-align:center;font-style:italic}
+/* Finishing-criteria control (change-spend-budget). Sits in the dropdown's
+   left column under Identity/Spend; write-only mid-flight cap edit. */
+.spend-control{display:flex;flex-direction:column;gap:6px;padding-top:4px}
+.spend-control-used{color:var(--color-text-tertiary);font-weight:400}
+.spend-control-edit{display:flex;align-items:center;gap:6px}
+.spend-control-prefix{color:var(--color-text-tertiary);font-size:12px}
+.spend-control-edit input{flex:1;min-width:0;padding:6px 8px;border:0.5px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:12px;font-family:var(--font-mono)}
+.spend-control-set{padding:6px 12px;border-radius:5px;border:0.5px solid var(--color-accent);background:var(--color-accent);color:var(--color-text-on-accent,#fff);font-size:12px;font-weight:500;cursor:pointer;flex-shrink:0}
+.spend-control-set:disabled{opacity:0.5;cursor:not-allowed}
+.spend-control-hint{color:var(--color-text-tertiary);font-size:11px;line-height:1.4}
+.spend-control-note{color:var(--color-success);font-size:11px}
 @media (prefers-reduced-motion:reduce){.chat-job-toggle .chev{transition:none}}
 .wf-hero{position:relative;padding:24px 16px 42px;max-width:980px;margin:0 auto;width:100%}
 .wf-hero-status{position:absolute;top:-50px;right:6px;font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--color-warn-border);border-radius:999px;background:var(--color-warn-bg)}
 .wf-hero-status .dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 8px var(--color-success)}
+.wf-hero-status .dot.paused{background:var(--color-warn);box-shadow:0 0 8px var(--color-warn)}
+.wf-hero-status .dot.idle{background:var(--color-text-tertiary);box-shadow:none}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:18px 0 8px}
 .wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:10px;padding:14px 22px;text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:12px;position:relative;z-index:2}
 .wf-hero-node .ico{color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -1304,6 +1316,20 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    mini on the right. Each owns an independent expand state; their
    expanded panels stack below (trajectory above the hard-samples table). */
 .hs-controls-row{display:flex;align-items:center;justify-content:center;gap:8px;width:100%}
+/* Run control — sits to the RIGHT of the heat-map + sample-trajectory view
+   toggles. Play/pause matches their bordered-rect shape (state shown by icon
+   colour, not a loud accent disc); fork is a quiet ghost, present but hushed. */
+.run-ctl{display:inline-flex;align-items:center;gap:4px;margin-left:2px}
+.run-ctl-primary{display:inline-flex;align-items:center;justify-content:center;width:30px;height:22px;padding:0;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);cursor:pointer;transition:border-color .12s,color .12s,background .12s}
+.run-ctl-primary.is-play{color:var(--color-success)}
+.run-ctl-primary.is-pause{color:var(--color-warn)}
+.run-ctl-primary:hover:not(:disabled){border-color:var(--color-accent)}
+.run-ctl-primary:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.run-ctl-primary:disabled{opacity:0.5;cursor:not-allowed}
+.run-ctl-fork{display:inline-flex;align-items:center;justify-content:center;width:20px;height:22px;padding:0;border:0;background:transparent;color:var(--color-text-tertiary);opacity:0.5;cursor:pointer;transition:opacity .12s,color .12s}
+.run-ctl-fork:hover:not(:disabled){opacity:1;color:var(--color-accent)}
+.run-ctl-fork:disabled{opacity:0.3;cursor:not-allowed}
+.run-ctl-err{color:var(--color-danger,#c53030);font-size:11px;max-width:160px}
 /* Sample-trajectory mini button — fixed dimensions mirroring `.hs-heat-mini-btn`
    (57x22px, non-draggable). Inner `.st-mini` renders a miniature Series view
    (4px tiles) — same shape as the heat-map's mini, different palette. */
@@ -1637,6 +1663,27 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .new-campaign-benchmark-list button{width:100%;text-align:left;padding:6px 10px;border-radius:5px;border:0.5px solid var(--color-border-tertiary);background:transparent;color:var(--color-text-primary);font-size:12px;cursor:pointer}
 .new-campaign-benchmark-list button:hover:not(:disabled){background:var(--color-background-hover)}
 .new-campaign-benchmark-list button:disabled{opacity:0.5;cursor:not-allowed}
+.new-campaign-warn{color:var(--color-warn);font-size:12px}
+/* A3 origin-resolution gate surfaces — required-tier column mapping,
+   per-field provenance badges, gap hints, and the plain-language recap. */
+.new-campaign-optional > summary{cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary);padding:2px 0}
+.new-campaign-optional > summary:hover{color:var(--color-text-secondary)}
+.new-campaign-optional-body{display:flex;flex-direction:column;gap:14px;padding-top:12px}
+.origin-columns{display:flex;flex-direction:column;gap:8px}
+.origin-columns-head{font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary)}
+.origin-column-row{display:flex;gap:12px}
+.origin-column-row .new-campaign-field{flex:1;gap:6px}
+.origin-column-row .new-campaign-field > span{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.origin-prov{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;padding:1px 6px;border-radius:9px;border:0.5px solid var(--color-border-tertiary);line-height:1.5;white-space:nowrap}
+.origin-prov--confirmed{color:var(--color-success);background:var(--color-success-bg);border-color:var(--color-success-border)}
+.origin-prov--proposed{color:var(--color-warn);background:var(--color-warn-bg);border-color:var(--color-warn-border)}
+.origin-prov--unset{color:var(--color-text-tertiary)}
+.origin-gaps{list-style:none;margin:0;padding:10px 12px;border-radius:6px;font-size:12px;display:flex;flex-direction:column;gap:5px;border:0.5px solid}
+.origin-gaps--pending{color:var(--color-text-secondary);background:var(--color-warn-bg);border-color:var(--color-warn-border)}
+.origin-gaps--blocked{color:var(--color-text-primary);background:var(--color-danger-bg);border-color:var(--color-danger-border)}
+.origin-recap{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:6px;background:var(--color-success-bg);border:0.5px solid var(--color-success-border)}
+.origin-recap-tick{flex-shrink:0;width:18px;height:18px;border-radius:50%;background:var(--color-success);color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-top:1px}
+.origin-recap p{margin:0;font-size:13px;line-height:1.5;color:var(--color-text-primary)}
 /* Sweep-Group-B: lift IngestPane inputs to the iOS-safe size on
    small phones, drop overlay padding, full-width modal. The Phase 0
    pointer-coarse rule covers buttons + non-select inputs; select needs
@@ -1647,6 +1694,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
   .new-campaign-modal{max-width:none;max-height:calc(var(--vh-full) - 32px)}
   .new-campaign-field select,.new-campaign-field input{font-size:16px;min-height:44px}
   .new-campaign-cancel,.new-campaign-submit{min-height:44px;padding:10px 16px;font-size:14px}
+  .origin-column-row{flex-direction:column;gap:14px}
 }
 
 /* Account modal (Phase 6 — Clerk-style profile + security) */

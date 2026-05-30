@@ -83,7 +83,11 @@ class CycleIndexMixin(CampaignStoreKernel):
         """Create/augment cycle ``index.json``; replay merges keys without clobbering rounds/best."""
         path = self._index_path(campaign_id, cycle_id)
         existing = read_json_optional(path) or {}
+        # Identity is the directory name, never a stored field. Strip both
+        # ids on every write so the dir name stays the sole source of truth
+        # (self-heals any index.json minted under an older scheme).
         existing.pop("cycle_id", None)
+        existing.pop("campaign_id", None)
         now = datetime.now(UTC).isoformat()
         defaults: dict[str, Any] = {
             "created_at": existing.get("created_at", now),

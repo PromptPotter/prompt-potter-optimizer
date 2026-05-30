@@ -20,6 +20,39 @@ export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse
   return jget<ActiveSessionResponse>(`${API}/active`, signal);
 }
 
+// Live state of the active session — the stable façade keyed on the active
+// pointer (no campaign/cycle ids needed). New data panels and chat
+// state-reads code against this rather than the per-cycle dashboard route,
+// so they're insulated from the eventual state-sync persistence swap. 404
+// when no session is active; `{warming_up: true, ...}` while origin runs.
+export function fetchLiveState(signal?: AbortSignal): Promise<Record<string, unknown>> {
+  return jget<Record<string, unknown>>(`${API}/live`, signal);
+}
+
+export interface CycleRunState {
+  campaign_id: string;
+  cycle_id: string;
+  running: boolean;
+  paused: boolean;
+  stop_requested: boolean;
+  spend_cap_usd: number | null;
+}
+
+// Non-cached run-control state for the VIEWED cycle. The run controls + state
+// badges poll this so they reflect the run you're looking at — not the single
+// active-pointer cycle. Unlike the 304-cached dashboard route, it's recomputed
+// every call, so a paused (file-static) run still reports `paused: true`.
+export function fetchRunState(
+  campaignId: string,
+  cycleId: string,
+  signal?: AbortSignal,
+): Promise<CycleRunState> {
+  return jget<CycleRunState>(
+    `${API}/campaigns/${campaignId}/cycles/${cycleId}/runstate`,
+    signal,
+  );
+}
+
 // Current identity envelope — drives the account modal (Profile + Security).
 // 401 when no session; the caller should treat that as "redirect to /ui/login".
 export interface ConnectedAccount {

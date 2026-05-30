@@ -306,6 +306,43 @@ def test_campaign_records_parent_session(
     assert data["parent_session_id"], "index.json must carry parent_session_id"
 
 
+def test_cycle_identity_is_dir_name_not_stored(tmp_path: Path) -> None:
+    """The directory name IS the (campaign_id, cycle_id) — index.json never
+    stores either. ``create()`` strips a stale id off an older-scheme file,
+    and ``_ids_from_index_path`` derives both from the path (state-sync P1
+    invariants #1 + #4)."""
+    from promptpotter.infrastructure.store import build_stores
+    from promptpotter.infrastructure.store.campaign_store._kernel import (
+        CampaignStoreKernel,
+    )
+    from promptpotter.shared.identity import default_identity
+
+    stores = build_stores(
+        default_identity(),
+        projects_root=tmp_path / "projects",
+        datasets_root=tmp_path / "datasets",
+    )
+    campaign_id = "ds__20260101-000000"
+    cycle_id = "cycle_abc123def456"
+
+    # Seed an older-scheme index.json that wrongly stored both ids.
+    index_path = stores.campaigns._index_path(campaign_id, cycle_id)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(
+        json.dumps({"campaign_id": "stale_campaign", "cycle_id": "stale_cycle", "n_rounds": 0}),
+        encoding="utf-8",
+    )
+
+    stores.campaigns.create(campaign_id, cycle_id, {})
+    on_disk = json.loads(index_path.read_text(encoding="utf-8"))
+    assert "campaign_id" not in on_disk, "index.json must not store campaign_id"
+    assert "cycle_id" not in on_disk, "index.json must not store cycle_id"
+
+    # Identity is derived purely from the path.
+    derived = CampaignStoreKernel._ids_from_index_path(index_path)
+    assert derived == (campaign_id, cycle_id)
+
+
 def test_legacy_session_suffix_still_parses() -> None:
     """Pre-existing on-disk campaigns minted under the old "forest of N
     sessions" scheme carry ``cycle_<hash>_s{N}`` roots; the readers
@@ -785,6 +822,52 @@ def test_no_bare_string_decision_kinds() -> None:
             if not kind_expr.startswith("ResumeCheckpointKind."):
                 offenders.append(f"{py.relative_to(_SRC_ROOT.parent)}: {kind_expr!r}")
     assert not offenders, "bare-string decision kinds found:\n  " + "\n  ".join(offenders)
+
+
+# Control-local hooks (pause/stop) must bind centrally in the runner seam
+# (run_optimization), never per-entry-point — else a launch path (the API
+# launcher did exactly this) silently ships a run that ignores pause.flag /
+# stop.flag. ``=(?!=)`` skips ``is``/``==`` comparisons.
+_CONTROL_HOOK_ASSIGN = re.compile(r"\.(?:pause_check|stop_check)\s*=(?!=)")
+_CONTROL_HOOK_SEAM = "application/runner/entry.py"
+
+
+def test_control_hooks_wired_only_at_runner_seam() -> None:
+    """``session.pause_check``/``stop_check`` are assigned only in the runner seam."""
+    offenders: list[str] = []
+    for py in _SRC_ROOT.rglob("*.py"):
+        rel = py.relative_to(_SRC_ROOT.parent).as_posix()
+        if rel.endswith(_CONTROL_HOOK_SEAM):
+            continue
+        if _CONTROL_HOOK_ASSIGN.search(py.read_text(encoding="utf-8")):
+            offenders.append(rel)
+    assert not offenders, (
+        "pause_check/stop_check assigned outside application/runner/entry.py — "
+        "Control-local wiring must stay central so every launch path polls the "
+        "flags:\n  " + "\n  ".join(offenders)
+    )
+
+
+# CLI identity must resolve through registered_or_default_identity (marker-aware:
+# explicit --tenant > registered developer > anonymous default), never
+# default_identity straight off args — else a command reads one tenant's active
+# pointer but looks for the session/campaign in another tenant's tree (the
+# resume / sweep tenant-split bug). registered_or_default_identity's own
+# internal default_identity(tenant_id=explicit) is fine — it doesn't read args.
+_ARGS_IDENTITY = re.compile(r"default_identity\(\s*tenant_id\s*=\s*getattr\(\s*args")
+
+
+def test_cli_identity_resolves_through_registered_resolver() -> None:
+    """No CLI site resolves identity via ``default_identity(... getattr(args,'tenant'))``."""
+    offenders: list[str] = []
+    for py in _SRC_ROOT.rglob("*.py"):
+        if _ARGS_IDENTITY.search(py.read_text(encoding="utf-8")):
+            offenders.append(py.relative_to(_SRC_ROOT.parent).as_posix())
+    assert not offenders, (
+        "CLI identity resolved off args via default_identity() — use "
+        "registered_or_default_identity so resume/sweep honour the registered "
+        "developer's one workspace:\n  " + "\n  ".join(offenders)
+    )
 
 
 def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:

@@ -244,6 +244,27 @@ def test_active_returns_pointer_when_present(
         "cycle_id": cycle_id,
     }
 
+    # /live is the stable façade: active pointer → session-family live state.
+    live = client.get("/api/v1/live")
+    assert live.status_code == 200
+    body = live.json()
+    assert body["round"] == 3
+    # Run-control facts the dashboard projection doesn't carry: default to
+    # not-paused / uncapped when the runtime flags are absent.
+    assert body["is_paused"] is False
+    assert body["current_spend_cap_usd"] is None
+
+    # With a pause.flag + spend_cap.json on the active cycle, /live reflects
+    # both — the run controls read pause-state from here, not from telemetry
+    # freshness (a paused runner emits no events).
+    runtime = cycle_dir_for(stores.base_dir, campaign_id, cycle_id) / ".runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    (runtime / "pause.flag").write_text("requested_at=now\n", encoding="utf-8")
+    (runtime / "spend_cap.json").write_text('{"max_usd": 4.5}', encoding="utf-8")
+    live2 = client.get("/api/v1/live").json()
+    assert live2["is_paused"] is True
+    assert live2["current_spend_cap_usd"] == 4.5
+
 
 def test_files_lists_cycle_and_campaign_artifacts(
     seeded_tenant: tuple[TestClient, str, str],
@@ -340,6 +361,11 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
         assert draft["slug"] == "tickets"
         assert draft["connector"] == "termnorm"
         assert draft["max_rounds"] == 5
+        # Literal `query` / `ground_truth` headers auto-confirm the column
+        # mapping deterministically (no LLM, no operator click).
+        assert draft["headers"] == ["query", "ground_truth"]
+        assert draft["resolved"]["column.query"] == "confirmed"
+        assert draft["resolved"]["column.ground_truth"] == "confirmed"
         # Sparse edit lands a mutation; response is the full post-mutation shape.
         edit = client.post(
             "/api/v1/commands/edit-draft-campaign",
@@ -358,13 +384,50 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
         # Cross-tenant lookup: same draft_id, different tenant → 404, not 403.
         registry: DraftCampaignRegistry = client.app.state.draft_campaigns  # type: ignore[attr-defined]
         assert registry.get(draft["draft_id"], tenant_id=TenantId("other-tenant")) is None
-        # Missing-column 422 with structured reason for the wire layer.
-        bad = client.post(
+        # Header-agnostic ingest: non-literal columns are accepted (the
+        # literal-column gate is gone), but the mapping lands UNSET for the
+        # operator to confirm before mint.
+        agnostic = client.post(
             "/api/v1/datasets/ingest",
-            files={"file": ("bad.csv", b"foo,bar\n1,2\n", "text/csv")},
+            files={"file": ("other.csv", b"foo,bar\n1,2\n", "text/csv")},
         )
-        assert bad.status_code == 422
-        assert bad.json()["detail"]["details"]["reason"] == "missing_column"
+        assert agnostic.status_code == 200, agnostic.text
+        ag = agnostic.json()
+        assert ag["headers"] == ["foo", "bar"]
+        assert ag["resolved"]["column.query"] == "unset"
+        assert ag["resolved"]["column.ground_truth"] == "unset"
+        # Mint is gated: unset column mapping → 422 origin_incomplete (the
+        # checklist fires before the backend preflight, so no network touch).
+        blocked = client.post(
+            "/api/v1/commands/mint-campaign-from-draft",
+            headers={"Idempotency-Key": "test-gate-1"},
+            json={
+                "kind": "mint-campaign-from-draft",
+                "payload": {"draft_id": ag["draft_id"]},
+            },
+        )
+        assert blocked.status_code == 422, blocked.text
+        gate = blocked.json()["detail"]
+        assert gate["error"] == "origin_incomplete"
+        assert {g["field"] for g in gate["details"]["gaps"]} == {
+            "column.query",
+            "column.ground_truth",
+        }
+        # Confirming the mapping via edit-draft-campaign opens the gate.
+        confirmed = client.post(
+            "/api/v1/commands/edit-draft-campaign",
+            headers={"Idempotency-Key": "test-gate-2"},
+            json={
+                "kind": "edit-draft-campaign",
+                "payload": {
+                    "draft_id": ag["draft_id"],
+                    "patch": {"column_query": "foo", "column_ground_truth": "bar"},
+                },
+            },
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        assert confirmed.json()["resolved"]["column.query"] == "confirmed"
+        assert confirmed.json()["resolved"]["column.ground_truth"] == "confirmed"
 
 
 def test_mint_from_draft_503_preserves_draft_when_backend_unreachable(

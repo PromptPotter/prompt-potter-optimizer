@@ -9,10 +9,15 @@ import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
+import { RunControlButton } from "./RunControlButton";
 import { type MeasurementDot } from "./hard-samples/columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface Props {
+  // Run-control target — the play/pause/fork cluster sits beside the heat-map
+  // + sample-trajectory toggles in this row, so the ids ride in here.
+  campaignId: string | null;
+  cycleId: string | null;
   dash: DashboardSnapshot | null;
   // Freshness gate — forwarded to HardSamplesTable so the row-scoring blink
   // stops when the optimizer process dies.
@@ -76,6 +81,8 @@ function liveMeasurements(
 // mostly miss, dark = no measurements. Clicking the badge expands the full
 // HardSamplesTable; the bottom-edge grip (hover to reveal) resizes it.
 export function HardSamplesHeatmap({
+  campaignId,
+  cycleId,
   dash,
   isLive,
   dashRound,
@@ -186,6 +193,7 @@ export function HardSamplesHeatmap({
           rounds={dash?.rounds ?? []}
           onToggle={() => setBankExpanded((e) => !e)}
         />
+        <RunControlButton campaignId={campaignId} cycleId={cycleId} dash={dash} />
       </div>
       {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
       {heatExpanded && (

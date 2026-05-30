@@ -224,7 +224,7 @@ scope for any "hide non-functional controls" sweep.
 | Topbar search input (disabled) | `webapp/components/shell/Topbar.tsx:29` | M13+ analytics search |
 | ChatPane attach + textarea + send button (disabled) | `webapp/components/dashboard/ChatPane.tsx:273-279` | M13+ chat-first operator UX |
 | ChatPane Extended-thinking / Web-search / Code-execution toggles (`toggle locked`) | `webapp/components/dashboard/ChatPane.tsx:286-322` | M13+ chat-first feature toggles |
-| ChatPane "job-footer" — "Adjust spend / finishing criteria — wired in M12" | `webapp/components/dashboard/ChatPane.tsx:204-206` | M12 control-plane (spend cap + finishing criteria editor) |
+| ~~ChatPane "job-footer" — "Adjust spend / finishing criteria — wired in M12"~~ | — | **FULFILLED 2026-05-30.** The placeholder is now the live `SpendBudgetControl` (`change-spend-budget`) in the job-bar dropdown. No longer a placeholder. |
 | ConfigMenu — gear icon + frozen-parameters panel | `webapp/components/dashboard/ConfigMenu.tsx` (+ render at `ChatPane.tsx:217`) | M12 control-plane (editable config surface) |
 | AccountModal "Update profile" button (disabled) | `webapp/components/account/AccountModal.tsx:193-200` | M13+ profile-editing surface |
 | AccountModal "Remove account" menu item (disabled) | `webapp/components/account/AccountModal.tsx:251-258` | M13+ multi-provider account management |

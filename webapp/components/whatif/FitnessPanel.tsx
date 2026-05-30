@@ -51,8 +51,15 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
 
   const meta = WHATIF_INLINE_META;
 
-  // ── 1. In-flight candidates from the live dashboard
-  const inflightCandidates: LiveCandidate[] = liveL1Candidates(dash);
+  // ── 1. In-flight candidates from the live dashboard. Memoized on `dash`
+  // so identity is stable across polls (and across no-op 304 ticks): the
+  // downstream Set chain (realApplicable→viewApplicable→inActive) only
+  // rebuilds when `dash` actually changes, so the seed + prune guards below
+  // converge instead of looping setState every render (React #185).
+  const inflightCandidates: LiveCandidate[] = useMemo(
+    () => liveL1Candidates(dash),
+    [dash],
+  );
   const currentRound = dashRound ?? 0;
 
   // ── 2. Completed-round summaries from `dash.rounds[]` — sole source
@@ -159,9 +166,9 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   // inActive set so the operator opens to "what's actually scored" as the
   // default. Local `seededHere` is the canonical render-phase reset guard
   // (see `webapp/CLAUDE.md::State reset on prop change` and the precedent
-  // at `AccountModal.tsx:56-62`) — `setSeededHere` commits before React
-  // re-checks the condition, so no cross-render closure window exists
-  // for the post-OIDC `cycleId` flip to loop through (React #185).
+  // at `AccountModal.tsx:56-62`): it fires the seed once per cycle. The
+  // #185 loop is held off upstream — `inflightCandidates` is now a stable
+  // ref, so the Set chain feeding this condition doesn't churn every render.
   // Bail when `cycleId == null` (no active campaign yet).
   const [seededHere, setSeededHere] = useState<string | null>(null);
   if (

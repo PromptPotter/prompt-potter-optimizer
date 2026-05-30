@@ -620,19 +620,21 @@ class LiveDashboardView(DerivedView):
                 if short is not None:
                     self.short_formula_template = short
         elif phase == CampaignPhase.INIT and event.event == "exit":
-            cycle = data["state"]
             config = data["config"]
-            # Identity stamp (campaign/cycle/session) is set once at construction;
-            # ``env`` was stripped by ``RunCallbacks.on_phase`` (R3) so don't read it.
-            s["origin"] = {
-                "accuracy": float(cycle.tracking.current_accuracy),
-                "samples": len(cycle.tracking.origin_per_sample_results),
-            }
-            self.patience_max = config.optimization.l1_patience
-            s["patience"] = f"0/{self.patience_max}"
+            # ``env`` and ``state`` are runtime-only keys stripped by
+            # ``RunCallbacks.on_phase`` before the record is persisted/streamed
+            # (the live ``Cycle``/``Session`` hold the BackendStore the JSON
+            # serializer can't walk). Origin accuracy + sample count ride the
+            # view dict instead.
             if view is not None:
+                s["origin"] = {
+                    "accuracy": float(view.get("origin_acc") or 0.0),
+                    "samples": int(view.get("origin_samples") or 0),
+                }
                 s["composite_fitness_formula"] = view.get("composite_fitness_formula")
                 self.short_formula_template = view.get("composite_fitness_formula_short")
+            self.patience_max = config.optimization.l1_patience
+            s["patience"] = f"0/{self.patience_max}"
         elif phase == "scoring_steer" and event.event == "applied":
             # Operator hot-swap — custom formulas render verbatim (no short form).
             new_formula = data.get("formula")

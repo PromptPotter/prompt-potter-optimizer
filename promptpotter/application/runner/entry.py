@@ -206,6 +206,17 @@ async def run_optimization(
                 if session.state.cycle_id
                 else Path()
             )
+            # Control-local hooks (pause/stop) bind HERE — the single runner
+            # seam every launch path funnels through — not at the entry points.
+            # The CLI used to set these in new.py/resume.py, which left the API
+            # launcher's runs (mint / start-run) unable to pause or stop: the
+            # flags were written but never polled. Binding per rebase/fork
+            # iteration also tracks a fork's own cycle dir (the entry-point
+            # version bound once and went stale across forks).
+            if session.state.cycle_id:
+                runtime_dir = cycle_dir_for_probe / ".runtime"
+                session.stop_check = (runtime_dir / "stop.flag").is_file
+                session.pause_check = (runtime_dir / "pause.flag").is_file
             stop_reason, cycle_error = await run_round_loop(
                 cycle,
                 dataset,

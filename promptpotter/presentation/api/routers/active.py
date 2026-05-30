@@ -16,7 +16,12 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from promptpotter.infrastructure.store import read_active_pointer
+from promptpotter.infrastructure.runtime_flags import is_paused, read_spend_cap
+from promptpotter.infrastructure.store import (
+    cycle_dir_for,
+    read_active_pointer,
+    root_cycle_id,
+)
 from promptpotter.presentation.api.deps import StoreDep
 
 _active_router = APIRouter(tags=["Active"])
@@ -52,6 +57,62 @@ async def get_active_session(store: StoreDep) -> ActiveSessionResponse:
         campaign_id=campaign_id,
         cycle_id=cycle_id,
     )
+
+
+@_active_router.get("/live")
+async def get_live_state(store: StoreDep) -> dict[str, Any]:
+    """Live state of the caller-tenant's **active** session — the stable
+    surface every new web panel / chat state-read codes against.
+
+    Resolves the active pointer, then returns the session-family root's
+    live telemetry (the same shape the per-cycle dashboard route serves).
+    Keying on the active pointer means a consumer needs no campaign/cycle
+    ids and no file path; it is insulated from how that telemetry is
+    produced or persisted, so the eventual state-sync Phase 2/3 internals
+    swap (derive-from-ledger) changes nothing here.
+
+    404 when no session is active. While a fresh campaign's origin is still
+    running (no telemetry flushed yet) returns a ``warming_up`` payload at
+    200 so the panel can render an "initialising" placeholder rather than
+    treat the session as offline.
+
+    Beyond the dashboard telemetry, the payload carries two runtime facts the
+    dashboard projection does not track (they are control-flow flags, not
+    ledger events): ``is_paused`` (``.runtime/pause.flag`` present on the
+    active cycle) and ``current_spend_cap_usd`` (the live cap from
+    ``.runtime/spend_cap.json``, or ``null`` when uncapped). The run controls
+    code against these rather than guessing pause-state from telemetry
+    freshness — a paused runner emits no events, so liveness alone is blind.
+    """
+    session_id, campaign_id, cycle_id = read_active_pointer(
+        store.tenant_id, projects_root=store.projects_root
+    )
+    if not session_id:
+        raise HTTPException(404, "No active session")
+    # Runtime flags live on the *active* cycle dir (where the runner writes
+    # them + polls them), which may be a fork — distinct from the session
+    # root that owns the shared dashboard.json. Shared readers in
+    # ``infrastructure.runtime_flags`` so this matches the per-cycle /runstate.
+    runtime_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id) / ".runtime"
+    paused = is_paused(runtime_dir)
+    current_spend_cap_usd = read_spend_cap(runtime_dir)
+
+    session_root = root_cycle_id(cycle_id)
+    path = cycle_dir_for(store.base_dir, campaign_id, session_root) / "dashboard.json"
+    if not path.is_file():
+        return {
+            "warming_up": True,
+            "session_id": session_id,
+            "campaign_id": campaign_id,
+            "cycle_id": session_root,
+            "phase_hint": "origin",
+            "is_paused": paused,
+            "current_spend_cap_usd": current_spend_cap_usd,
+        }
+    state: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    state["is_paused"] = paused
+    state["current_spend_cap_usd"] = current_spend_cap_usd
+    return state
 
 
 class CycleListEntry(BaseModel):

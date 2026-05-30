@@ -120,11 +120,18 @@ export interface L1ScoreOutput {
   candidates?: LiveCandidate[];
 }
 
+// Shared frozen empty result for the no-candidate path so every consumer
+// gets a stable reference. A fresh `[]` per call gave each poll a new array
+// identity, churning the FitnessPanel Set chain
+// (realApplicable→viewApplicable→inActive) into an unbounded setState loop
+// once a real cycleId resolved post-login (React #185).
+const NO_CANDIDATES: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
+
 export function liveL1Candidates(dash: DashboardSnapshot | null): LiveCandidate[] {
   const nodes = dash?.current_round?.nodes;
-  if (!nodes || typeof nodes !== "object") return [];
+  if (!nodes || typeof nodes !== "object") return NO_CANDIDATES;
   const l1 = (nodes as Record<string, { output?: L1ScoreOutput }>).l1_score;
-  return l1?.output?.candidates ?? [];
+  return l1?.output?.candidates ?? NO_CANDIDATES;
 }
 
 // Shape-agnostic round-file document. Deep audit consumers (FreqChart,

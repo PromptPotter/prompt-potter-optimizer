@@ -241,11 +241,17 @@ class LiveDisplay(DerivedView):
                         break
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
             self.sample_counter = 0
-        if (
-            event.phase == CampaignPhase.INIT
-            and event.event == "exit"
-            and event.data["env"].state.resumed_from_round > 0
-        ):
+        # Resume-rewind rebuild needs the live ``env``/``state`` objects, which
+        # exist only on the direct in-memory callback path — they're stripped
+        # from the persisted/streamed record (``RunCallbacks._DATA_KEYS_RUNTIME_ONLY``).
+        # On the ledger path ``env`` is absent and the display rebuilds from the
+        # replayed ``round:display`` records instead, so skip cleanly.
+        env_obj = (
+            event.data.get("env")
+            if event.phase == CampaignPhase.INIT and event.event == "exit"
+            else None
+        )
+        if env_obj is not None and env_obj.state.resumed_from_round > 0:
             del self.campaign_rounds[self.initial_len :]
             cycle_state = event.data.get("state")
             for rr in getattr(cycle_state, "rounds", None) or []:

@@ -9,8 +9,11 @@ import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
 import { ConfigMenu } from "@/components/dashboard/ConfigMenu";
 import { CyclePicker } from "@/components/dashboard/CyclePicker";
 import { TargetPipelineHero } from "@/components/dashboard/TargetPipelineHero";
+import { SpendBudgetControl } from "@/components/dashboard/SpendBudgetControl";
+import { useRunState } from "@/lib/useRunState";
 
 interface Props {
+  campaignId: string | null;
   cycleId: string | null;
   sessionId: string | null;
   datasetTitle: string | null;
@@ -37,6 +40,7 @@ interface Props {
 // (purely visual, mirrors vanilla). Control plane lands in M12 — see
 // docs/specs/m12-multi-connector.md § Track 3 for the interactive write path.
 export function ChatPane({
+  campaignId,
   cycleId,
   sessionId,
   datasetTitle,
@@ -69,6 +73,11 @@ export function ChatPane({
       setSamplesOpen(true);
     }
   }, [cycleId]);
+
+  // Real run state for the viewed cycle (not the hardcoded "production" dot):
+  // paused / running / idle, flag-driven so it's honest the instant you pause.
+  const runstate = useRunState(campaignId, cycleId);
+  const runLabel = runstate?.paused ? "paused" : runstate?.running ? "running" : "idle";
 
   const best = typeof dash?.best === "number" ? dash.best : null;
   const accPct = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}% acc` : "— acc";
@@ -193,8 +202,14 @@ export function ChatPane({
             <div className="job-whatif">
               <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} />
             </div>
-            <div className="job-footer" title={TERMS.newjob_bar_adjust}>
-              Adjust spend / finishing criteria — wired in M12
+            <div className="job-section" title={TERMS.newjob_bar_adjust}>
+              <div className="section-title">Finishing criteria</div>
+              <SpendBudgetControl
+                campaignId={campaignId}
+                cycleId={cycleId}
+                currentBudgetUsd={budgetUsd}
+                usedUsd={usedUsd}
+              />
             </div>
           </div>
         )}
@@ -204,8 +219,8 @@ export function ChatPane({
       <div className="wf-hero">
         <div className="wf-hero-status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <span className="dot" />
-            <span>production · {accPct}</span>
+            <span className={`dot ${runLabel}`} />
+            <span>{runLabel} · {accPct}</span>
           </div>
           <ConfigMenu datasetName={datasetName} />
         </div>
@@ -216,6 +231,8 @@ export function ChatPane({
         />
         {samplesOpen && (
           <HardSamplesHeatmap
+            campaignId={campaignId}
+            cycleId={cycleId}
             dash={dash}
             isLive={isLive}
             dashRound={dashRound}

@@ -155,6 +155,7 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
         origin_acc=cycle.tracking.origin_accuracy,
         cycle_id_short=(session.state.cycle_id or "?")[:12],
         samples=len(session.scoring.scoring_set),
+        origin_samples=len(cycle.tracking.origin_per_sample_results),
         obs_on=session.state.obs is not None,
         resumed_from_round=session.state.resumed_from_round,
         cached_rounds_count=len(cycle.rounds),

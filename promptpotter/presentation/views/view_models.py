@@ -110,6 +110,11 @@ class InitExitView:
     cycle_id_short: str
     samples: int
     obs_on: bool
+    # Count of origin per-sample measurements — the live dashboard's
+    # ``origin.samples`` field. Carried on the view so the dashboard projection
+    # reads it here, not off the live ``Cycle`` (a runtime-only object stripped
+    # before the record is persisted/streamed).
+    origin_samples: int = 0
     resumed_from_round: int = 1
     cached_rounds_count: int = 0
     task_context_keys: int = 0

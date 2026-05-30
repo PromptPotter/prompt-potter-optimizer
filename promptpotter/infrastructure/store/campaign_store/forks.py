@@ -71,7 +71,9 @@ class ForkMixin(CampaignStoreKernel):
             "status": "resumed",
             "updated_at": forked_at,
         }
+        # Identity is the directory name — never inherit a stored id from the parent.
         index.pop("cycle_id", None)
+        index.pop("campaign_id", None)
         path = self._index_path(campaign_id, new_cycle_id)
         write_json(path, index)
         return path

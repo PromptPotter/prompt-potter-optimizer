@@ -50,10 +50,15 @@ __all__ = ["ForkInfo", "RunCallbacks", "RunObservers", "build_run_observers"]
 
 
 # Keys in ``PhaseEvent.data`` that carry live runtime references the JSON
-# serializer can't walk (BackendStore + LangfuseLogger inside ``env=session``).
-# View derivation in ``RunCallbacks.on_phase`` consumes them before they're
-# stripped; nothing reads them off the ledger.
-_DATA_KEYS_RUNTIME_ONLY = frozenset({"env"})
+# serializer can't walk: ``env`` (the ``Session`` — BackendStore +
+# LangfuseLogger) and ``state`` (the live ``Cycle``, which reaches the same
+# handles via its ledger + scoring wiring). View derivation in
+# ``RunCallbacks.on_phase`` consumes them before they're stripped, and the two
+# ledger subscribers that read origin state at INIT:exit (LiveDashboardView,
+# LiveDisplay) now take it off ``payload['view']`` instead — so nothing reads
+# these off the persisted/streamed record. Without stripping ``state`` the SSE
+# projection's ``model_dump(mode="json")`` raises on the BackendStore.
+_DATA_KEYS_RUNTIME_ONLY = frozenset({"env", "state"})
 
 
 @dataclass

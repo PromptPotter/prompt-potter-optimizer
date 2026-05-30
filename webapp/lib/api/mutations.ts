@@ -128,6 +128,42 @@ export async function postMintCampaign(
   return _postCommand("mint-campaign", payload);
 }
 
+// Pause / resume a running cycle. Pause writes `.runtime/pause.flag`; the
+// loop's `pause_check` blocks at the next round boundary while it's present.
+// Resume removes the flag; the wait-loop exits on its next tick. Both
+// idempotent. Cycle-scoped per `m12-api-openapi.yaml::pauseCycle/resumeCycle`.
+// Pause-state is read back from `GET /api/v1/live::is_paused`.
+export async function postPauseCycle(
+  campaignId: string,
+  cycleId: string,
+): Promise<CommandAcceptedBody> {
+  return _postCommand("pause-cycle", { campaign_id: campaignId, cycle_id: cycleId });
+}
+
+export async function postResumeCycle(
+  campaignId: string,
+  cycleId: string,
+): Promise<CommandAcceptedBody> {
+  return _postCommand("resume-cycle", { campaign_id: campaignId, cycle_id: cycleId });
+}
+
+// Raise or lower a running cycle's USD spend cap mid-flight. Writes
+// `.runtime/spend_cap.json`; the round loop's `spend_cap_probe` re-reads it
+// every clean round — `0` halts at the next round boundary, raising above
+// current spend releases the halt. Cycle-scoped command per
+// `m12-api-openapi.yaml::changeSpendBudget`.
+export async function postChangeSpendBudget(
+  campaignId: string,
+  cycleId: string,
+  maxUsd: number,
+): Promise<CommandAcceptedBody> {
+  return _postCommand("change-spend-budget", {
+    campaign_id: campaignId,
+    cycle_id: cycleId,
+    max_usd: maxUsd,
+  });
+}
+
 export async function postStartRun(
   campaignId: string,
   cycleId: string,
@@ -156,6 +192,13 @@ export async function postStartRun(
 // `docs/specs/m12-api-openapi.yaml` (`POST /datasets/ingest`,
 // `POST /commands/edit-draft-campaign`, `POST /commands/mint-campaign-from-draft`).
 
+// One uploaded column header's provenance tag — mirrors the server's
+// `domain/origin_provenance.Provenance` StrEnum. `unset` = no value yet,
+// `proposed` = an inference awaiting confirmation, `confirmed` =
+// operator-stated or auto-confirmed. No field reaches mint while `unset`
+// or `proposed` (the deterministic `origin_readiness` gate).
+export type ProvenanceTag = "unset" | "proposed" | "confirmed";
+
 export interface DraftCampaignWire {
   draft_id: string;
   slug: string;
@@ -168,8 +211,27 @@ export interface DraftCampaignWire {
   pipeline_overlay: Record<string, unknown>;
   optimizer_provider: string;
   optimizer_model: string;
+  // Header-agnostic ingest (A3 origin-resolution gate). `headers` are the
+  // uploaded file's columns in order; `column_query` / `column_ground_truth`
+  // are the operator-resolved input/target mapping (empty until picked);
+  // `resolved` carries per-field provenance keyed by dotted field name
+  // (`column.query`, `column.ground_truth`, …). The mint gate blocks until
+  // both columns are `confirmed` and members of `headers`.
+  headers: string[];
+  column_query: string;
+  column_ground_truth: string;
+  resolved: Record<string, ProvenanceTag>;
   created_at: string;
   updated_at: string;
+}
+
+// One origin field still blocking mint, as returned by the server's
+// `origin_readiness` checklist (the `422 origin_incomplete` `details.gaps`
+// array, and re-derived client-side from the draft wire to drive the panel).
+export interface OriginGap {
+  field: string;
+  reason: string;
+  hint: string;
 }
 
 export interface IngestErrorDetail {
@@ -178,6 +240,7 @@ export interface IngestErrorDetail {
   backend_type?: string;
   backend_url?: string;
   draft_id?: string;
+  gaps?: OriginGap[];
 }
 
 export class IngestApiError extends Error {
@@ -188,6 +251,10 @@ export class IngestApiError extends Error {
   readonly backendType?: string;
   readonly backendUrl?: string;
   readonly draftId?: string;
+  // Populated on `origin_incomplete` (422) — the deterministic checklist's
+  // still-open fields. Consumers surface these inline rather than collapse
+  // them into the single `message` line.
+  readonly gaps?: OriginGap[];
   constructor(
     status: number,
     message: string,
@@ -202,6 +269,7 @@ export class IngestApiError extends Error {
     this.backendType = detail?.backend_type;
     this.backendUrl = detail?.backend_url;
     this.draftId = detail?.draft_id;
+    this.gaps = detail?.gaps;
   }
 
   // Operator-facing error message. Every consumer that catches an
@@ -279,6 +347,11 @@ export interface DraftPatch {
   pipeline_overlay?: Record<string, unknown>;
   optimizer_provider?: string;
   optimizer_model?: string;
+  // Confirm the input/target column mapping. Each must be a member of the
+  // draft's `headers` (server rejects with 422 otherwise); setting one flips
+  // `resolved["column.query|ground_truth"]` to `confirmed`.
+  column_query?: string;
+  column_ground_truth?: string;
 }
 
 export async function postEditDraftCampaign(

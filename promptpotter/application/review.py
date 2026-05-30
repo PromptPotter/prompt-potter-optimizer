@@ -139,7 +139,7 @@ def _compute_behavior_per_round(
 
 
 def _render_header(index: dict[str, Any], final: dict[str, Any], stats: L1Stats) -> list[str]:
-    cycle_id = index.get("campaign_id") or "(unknown cycle)"
+    cycle_id = index.get("cycle_id") or "(unknown cycle)"
     mode = (final.get("mode") or "full").strip() or "full"
     parts: list[str] = [
         f"# Review — {cycle_id}",

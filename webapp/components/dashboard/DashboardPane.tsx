@@ -225,6 +225,7 @@ function DashboardPaneInner() {
         ) : null}
         {tab === "chat" ? (
           <ChatPane
+            campaignId={campaignId}
             cycleId={cycleId}
             sessionId={sessionId}
             datasetTitle={datasetTitle}
