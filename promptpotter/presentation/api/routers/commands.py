@@ -36,6 +36,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Header, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from promptpotter.application.datasets.csv_ingest import IngestError
 from promptpotter.application.datasets.draft_campaign import (
     DEFAULT_CONNECTOR,
     DEFAULT_MAX_ROUNDS,
@@ -43,9 +44,11 @@ from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     DraftCampaignRegistry,
 )
+from promptpotter.application.datasets.origin_readiness import resolution_block
 from promptpotter.application.jobs import JobRegistry
 from promptpotter.application.jobs.launcher import (
     LaunchError,
+    OriginIncompleteError,
     mint_campaign_from_draft_command,
 )
 from promptpotter.connectors import BackendUnreachableError
@@ -214,6 +217,8 @@ class _EditDraftPatch(BaseModel):
     pipeline_overlay: dict[str, Any] | None = None
     optimizer_provider: str | None = Field(default=None, min_length=1, max_length=32)
     optimizer_model: str | None = Field(default=None, max_length=128)
+    column_query: str | None = Field(default=None, max_length=256)
+    column_ground_truth: str | None = Field(default=None, max_length=256)
 
 
 class _EditDraftEnvelope(BaseModel):
@@ -308,8 +313,37 @@ async def edit_draft_campaign(
         changes["task_description"] = patch.task_description
     if patch.pipeline_overlay is not None:
         changes["pipeline_overlay"] = patch.pipeline_overlay
+    if patch.optimizer_provider is not None:
+        changes["optimizer_provider"] = patch.optimizer_provider
+    if patch.optimizer_model is not None:
+        changes["optimizer_model"] = patch.optimizer_model
 
-    updated = registry.update(draft.patch(**changes))
+    # Column mapping confirms the input/target headers — each must be a member
+    # of the uploaded headers (422 otherwise), and confirming flips the
+    # field's provenance so the origin-readiness gate opens.
+    for label, col in (
+        ("column_query", patch.column_query),
+        ("column_ground_truth", patch.column_ground_truth),
+    ):
+        if col is not None and col not in draft.headers:
+            raise HTTPException(
+                422,
+                {
+                    "error": "payload_invalid",
+                    "message": (
+                        f"patch.{label} {col!r} is not one of the uploaded headers "
+                        f"{list(draft.headers)}."
+                    ),
+                },
+            )
+
+    updated = draft.patch(**changes)
+    if patch.column_query is not None or patch.column_ground_truth is not None:
+        updated = updated.confirm_columns(
+            query_col=patch.column_query, ground_truth_col=patch.column_ground_truth
+        )
+    registry.update(updated)
+    store.tenant_datasets.write_draft_resolution(updated.draft_id, resolution_block(updated))
     return updated.to_wire()
 
 
@@ -345,6 +379,30 @@ async def mint_campaign_from_draft(
             draft_registry=registry,
             job_registry=job_registry,
         )
+    except OriginIncompleteError as exc:
+        # The deterministic origin-readiness checklist still has gaps — the
+        # draft is preserved; the operator resolves them (edit-draft-campaign)
+        # and retries. Surface every blocking field so the panel can render it.
+        store.tenant_datasets.write_draft_resolution(draft.draft_id, resolution_block(draft))
+        raise HTTPException(
+            422,
+            {
+                "error": "origin_incomplete",
+                "message": str(exc),
+                "details": {"gaps": [gap.to_wire() for gap in exc.gaps]},
+            },
+        ) from exc
+    except IngestError as exc:
+        # A confirmed column mapping still hit a per-row data failure at
+        # materialization (e.g. a blank input/target cell). Clean 422.
+        raise HTTPException(
+            422,
+            {
+                "error": "ingest_failed",
+                "message": exc.message,
+                "details": {"reason": exc.reason},
+            },
+        ) from exc
     except BackendUnreachableError as exc:
         # Preflight ran before commit_draft → draft is preserved; the operator
         # can fix the backend and retry without re-uploading.

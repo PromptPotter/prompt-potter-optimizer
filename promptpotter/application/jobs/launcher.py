@@ -28,10 +28,12 @@ from promptpotter.application.config import (
     configure_and_apply_pipeline,
     load_campaign_config,
 )
+from promptpotter.application.datasets.csv_ingest import Table, materialize_samples
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     DraftCampaignRegistry,
 )
+from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
     check_launch_quotas,
@@ -49,6 +51,20 @@ logger = logging.getLogger(__name__)
 
 class LaunchError(RuntimeError):
     """Raised on mint-time failures (missing dataset, malformed config, …)."""
+
+
+class OriginIncompleteError(RuntimeError):
+    """Raised when the origin-readiness checklist still has gaps at mint time.
+
+    Carries the blocking :class:`FieldGap`s so the API can surface every
+    unresolved field (422 ``origin_incomplete``). The draft is left intact —
+    the operator resolves the gaps and retries.
+    """
+
+    def __init__(self, gaps: tuple[FieldGap, ...]) -> None:
+        self.gaps = gaps
+        fields = ", ".join(gap.field for gap in gaps) or "<none>"
+        super().__init__(f"origin incomplete — unresolved fields: {fields}")
 
 
 async def _run_preflight(backend_type: str, backend_url: str) -> None:
@@ -187,9 +203,30 @@ async def mint_campaign_from_draft_command(
             f"slug collision at commit: {draft.slug!r} already exists in this tenant's collection"
         )
 
+    # Deterministic origin gate BEFORE anything irreversible. A false-ready
+    # never reaches mint — the checklist, not the operator, decides.
+    readiness = origin_readiness(draft)
+    if not readiness.complete:
+        raise OriginIncompleteError(readiness.gaps)
+
     # Preflight BEFORE commit_draft so a backend-down failure preserves the
     # draft — the operator can fix the backend and retry without re-uploading.
     await _run_preflight(draft.connector, backend_url)
+
+    # Materialize raw rows → Samples now that the column mapping is confirmed,
+    # overwriting the draft cache so commit_draft's rename yields a proper
+    # dataset cache.json. Materialization may surface a per-row data failure
+    # (e.g. a blank mapped cell) as IngestError — propagated to a 422.
+    cache = stores.tenant_datasets.load_draft_cache(draft.draft_id)
+    if cache is None:
+        raise LaunchError(f"draft {draft.draft_id!r} has no cached rows to materialize")
+    table = Table(headers=draft.headers, rows=tuple(cache.get("items", [])))
+    samples = materialize_samples(
+        table, query_col=draft.column_query, ground_truth_col=draft.column_ground_truth
+    )
+    stores.tenant_datasets.write_draft_cache(
+        draft.draft_id, samples, source_file=draft.source_file, headers=draft.headers
+    )
 
     pipeline_json = _build_origin_pipeline_json(draft)
     campaign_json = _build_default_campaign_json(draft)
@@ -480,6 +517,7 @@ def _load_dataset_campaign_config(dataset_root: Path) -> dict[str, Any]:
 
 __all__ = [
     "LaunchError",
+    "OriginIncompleteError",
     "QuotaExceededError",
     "mint_campaign_command",
     "mint_campaign_from_draft_command",

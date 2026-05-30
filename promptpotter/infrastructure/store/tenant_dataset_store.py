@@ -116,21 +116,48 @@ class TenantDatasetStore:
         items: Sequence[Sample | dict[str, Any]],
         *,
         source_file: str = "",
+        headers: Sequence[str] = (),
     ) -> Path:
-        """Persist the parsed sample bank for ``draft_id`` to ``.drafts/{draft_id}/cache.json``."""
+        """Persist a draft's bank to ``.drafts/{draft_id}/cache.json``.
+
+        On ingest ``items`` are the raw header-keyed rows (the input/target
+        column mapping is not yet confirmed); ``headers`` records the column
+        order so the resolver / operator can pick. On commit the launcher
+        rewrites this file with materialized ``Sample`` rows once the mapping
+        is confirmed. A prior ``resolution`` block (provenance + gaps) is
+        preserved across a rewrite.
+        """
         from promptpotter.domain.sample import Sample
 
+        path = self.draft_dir(draft_id) / "cache.json"
+        prior = read_json_optional(path) or {}
         serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
         data: dict[str, Any] = {
             "name": draft_id,
             "created_at": datetime.now(UTC).isoformat(),
             "source_file": source_file,
+            "headers": list(headers),
             "row_count": len(serialized),
             "items": serialized,
         }
-        path = self.draft_dir(draft_id) / "cache.json"
+        if "resolution" in prior:
+            data["resolution"] = prior["resolution"]
         write_json(path, data)
         return path
+
+    def write_draft_resolution(self, draft_id: str, resolution: dict[str, Any]) -> None:
+        """Patch the draft cache's ``resolution`` block (per-field provenance + gaps).
+
+        Lets an operator (or the AI) open ``cache.json`` and see exactly what
+        blocks mint and why each resolved field was set — the AI-on-disk
+        commitment (origin-resolution gate #6). No-op when the draft is gone.
+        """
+        path = self.draft_dir(draft_id) / "cache.json"
+        data = read_json_optional(path)
+        if data is None:
+            return
+        data["resolution"] = resolution
+        write_json(path, data)
 
     def load_draft_cache(self, draft_id: str) -> dict[str, Any] | None:
         """Read a draft's parsed bank, or ``None`` if the draft is gone."""

@@ -29,7 +29,10 @@ import {
   type DraftCampaignWire,
   type DraftPatch,
   type LLMProvider,
+  type OriginGap,
+  type ProvenanceTag,
 } from "@/lib/api";
+import { originReadiness, plainLanguageRecap } from "@/lib/origin-readiness";
 
 interface Props {
   open: boolean;
@@ -161,8 +164,9 @@ function ChatIngestFlow({
     return (
       <div className="new-campaign-body">
         <p>
-          Drop a CSV with two columns — <code>query</code> and{" "}
-          <code>ground_truth</code> — to start your first Origin.
+          Drop a CSV to start your first Origin — any column names work.
+          You&rsquo;ll pick which column is the input and which is the target
+          on the next step.
         </p>
         <FileDropZone busy={busy} onFile={onFileDrop} />
         {uploadError ? <p className="new-campaign-error">{uploadError}</p> : null}
@@ -328,9 +332,16 @@ function DraftCommitFlow({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Server-side `origin_incomplete` gaps from a rejected mint. Distinct from
+  // the proactively-derived gaps shown in the required tier: these only
+  // appear if the operator forces a commit the client gate already blocks.
+  const [serverGaps, setServerGaps] = useState<OriginGap[] | null>(null);
+
+  const readiness = originReadiness(draft);
 
   const applyPatch = async (patch: DraftPatch) => {
     setError(null);
+    setServerGaps(null);
     try {
       const next = await postEditDraftCampaign(draft.draft_id, patch);
       onDraftChange(next);
@@ -342,11 +353,15 @@ function DraftCommitFlow({
   const handleCommit = async () => {
     setSubmitting(true);
     setError(null);
+    setServerGaps(null);
     try {
       const r = await postMintCampaignFromDraft(draft.draft_id);
       onMinted?.(r.campaign_id, r.cycle_id);
       onClose();
     } catch (e) {
+      if (e instanceof IngestApiError && e.errorCode === "origin_incomplete" && e.gaps) {
+        setServerGaps(e.gaps);
+      }
       setError(IngestApiError.toOperatorMessage(e));
     } finally {
       setSubmitting(false);
@@ -356,40 +371,60 @@ function DraftCommitFlow({
   return (
     <div className="new-campaign-body">
       <p>
-        Parsed <strong>{draft.n_samples}</strong> rows. Tune the defaults below
-        and click <strong>Create campaign</strong> when ready.
+        Parsed <strong>{draft.n_samples}</strong> rows from{" "}
+        <code>{draft.slug}</code>. First, map your columns — then tune the
+        optional settings.
       </p>
-      <SlugField slug={draft.slug} onApply={(slug) => applyPatch({ slug })} />
-      <TextField
-        label="Task description"
-        value={draft.task_description}
-        placeholder="What is the model supposed to do with each row?"
-        onApply={(task_description) => applyPatch({ task_description })}
-      />
-      <NumberField
-        label="Max rounds"
-        value={draft.max_rounds}
-        min={1}
-        max={100}
-        onApply={(max_rounds) => applyPatch({ max_rounds })}
-      />
-      <OptimizerLLMField
-        provider={draft.optimizer_provider}
-        model={draft.optimizer_model}
-        onApply={(optimizer_provider, optimizer_model) =>
-          applyPatch({ optimizer_provider, optimizer_model })
-        }
-      />
-      <details>
-        <summary>Sample preview ({draft.sample_preview.length})</summary>
-        <ul className="new-campaign-preview-list">
-          {draft.sample_preview.map((row, i) => (
-            <li key={i}>
-              <code>{row.query}</code> → <code>{row.ground_truth}</code>
-            </li>
-          ))}
-        </ul>
+
+      {/* Required tier — the only fields the mint gate blocks on today. */}
+      <ColumnMappingPicker draft={draft} onApply={applyPatch} />
+
+      {readiness.complete ? (
+        <RecapCard text={plainLanguageRecap(draft)} />
+      ) : (
+        <GapList gaps={readiness.gaps} tone="pending" />
+      )}
+
+      {/* Optional tier — refine but never block. Collapsed so the required
+          path stays short (origin-resolution spec § Operator surface). */}
+      <details className="new-campaign-optional">
+        <summary>Optional settings</summary>
+        <div className="new-campaign-optional-body">
+          <SlugField slug={draft.slug} onApply={(slug) => applyPatch({ slug })} />
+          <TextField
+            label="Task description"
+            value={draft.task_description}
+            placeholder="What is the model supposed to do with each row?"
+            onApply={(task_description) => applyPatch({ task_description })}
+          />
+          <NumberField
+            label="Max rounds"
+            value={draft.max_rounds}
+            min={1}
+            max={100}
+            onApply={(max_rounds) => applyPatch({ max_rounds })}
+          />
+          <OptimizerLLMField
+            provider={draft.optimizer_provider}
+            model={draft.optimizer_model}
+            onApply={(optimizer_provider, optimizer_model) =>
+              applyPatch({ optimizer_provider, optimizer_model })
+            }
+          />
+          <details>
+            <summary>Sample preview ({draft.sample_preview.length})</summary>
+            <ul className="new-campaign-preview-list">
+              {draft.sample_preview.map((row, i) => (
+                <li key={i}>
+                  <code>{row.query}</code> → <code>{row.ground_truth}</code>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </div>
       </details>
+
+      {serverGaps ? <GapList gaps={serverGaps} tone="blocked" /> : null}
       {error ? <p className="new-campaign-error">{error}</p> : null}
       <footer className="new-campaign-footer">
         <button type="button" className="new-campaign-cancel" onClick={onClose}>
@@ -398,12 +433,123 @@ function DraftCommitFlow({
         <button
           type="button"
           className="new-campaign-submit"
-          disabled={submitting}
+          disabled={submitting || !readiness.complete}
           onClick={handleCommit}
         >
           {submitting ? "Creating…" : "Create campaign"}
         </button>
       </footer>
+    </div>
+  );
+}
+
+// ----- Origin-readiness surfaces (A3 gate consumption) ---------------------
+
+const PROVENANCE_LABEL: Record<ProvenanceTag, string> = {
+  unset: "Not set",
+  proposed: "Proposed",
+  confirmed: "Confirmed",
+};
+
+function ProvenanceBadge({ tag }: { tag: ProvenanceTag }) {
+  return (
+    <span className={`origin-prov origin-prov--${tag}`}>{PROVENANCE_LABEL[tag]}</span>
+  );
+}
+
+// The required tier: pick which uploaded header is the input and which is the
+// target. Selecting a column confirms it (rides `edit-draft-campaign` with
+// `column_query` / `column_ground_truth`) — no separate Apply click, since
+// the pick *is* the confirmation.
+function ColumnMappingPicker({
+  draft,
+  onApply,
+}: {
+  draft: DraftCampaignWire;
+  onApply: (patch: DraftPatch) => void;
+}) {
+  if (draft.headers.length === 0) {
+    return (
+      <p className="new-campaign-error">
+        No columns were detected in the upload. Re-upload a CSV with a header row.
+      </p>
+    );
+  }
+
+  const queryProv: ProvenanceTag = draft.resolved["column.query"] ?? "unset";
+  const gtProv: ProvenanceTag = draft.resolved["column.ground_truth"] ?? "unset";
+  const sameColumn =
+    !!draft.column_query && draft.column_query === draft.column_ground_truth;
+
+  return (
+    <div className="origin-columns">
+      <span className="origin-columns-head">Map your columns</span>
+      <div className="origin-column-row">
+        <label className="new-campaign-field">
+          <span>
+            Input column <ProvenanceBadge tag={queryProv} />
+          </span>
+          <select
+            value={draft.column_query}
+            onChange={(e) => onApply({ column_query: e.target.value })}
+          >
+            <option value="" disabled>
+              — pick a column —
+            </option>
+            {draft.headers.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="new-campaign-field">
+          <span>
+            Target column <ProvenanceBadge tag={gtProv} />
+          </span>
+          <select
+            value={draft.column_ground_truth}
+            onChange={(e) => onApply({ column_ground_truth: e.target.value })}
+          >
+            <option value="" disabled>
+              — pick a column —
+            </option>
+            {draft.headers.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {sameColumn ? (
+        <small className="new-campaign-warn">
+          Input and target are the same column — every answer will trivially
+          match. Pick two different columns.
+        </small>
+      ) : null}
+    </div>
+  );
+}
+
+function GapList({ gaps, tone }: { gaps: OriginGap[]; tone: "pending" | "blocked" }) {
+  if (gaps.length === 0) return null;
+  return (
+    <ul className={`origin-gaps origin-gaps--${tone}`}>
+      {gaps.map((g) => (
+        <li key={g.field}>{g.hint}</li>
+      ))}
+    </ul>
+  );
+}
+
+function RecapCard({ text }: { text: string }) {
+  return (
+    <div className="origin-recap" role="status">
+      <span className="origin-recap-tick" aria-hidden="true">
+        ✓
+      </span>
+      <p>{text}</p>
     </div>
   );
 }

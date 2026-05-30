@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from promptpotter.domain.identity import TenantId, safe_name
+from promptpotter.domain.origin_provenance import Provenance
 
 DEFAULT_CONNECTOR = "termnorm"
 """Only registered connector today (per root CLAUDE.md); operator-editable."""
@@ -66,6 +67,17 @@ class DraftCampaign:
     pipeline_overlay: dict[str, Any]
     created_at: str
     updated_at: str
+    # Uploaded column headers + the input/target column mapping. The mapping
+    # is resolved on the draft (auto-confirmed for literal `query` /
+    # `ground_truth` headers; operator-confirmed otherwise) and gated at mint
+    # — ingest no longer requires literally-named columns.
+    headers: tuple[str, ...] = ()
+    column_query: str = ""
+    column_ground_truth: str = ""
+    # Per-field origin-readiness provenance, keyed by dotted field name
+    # (`column.query`, `column.ground_truth`, …). The deterministic checklist
+    # gates on it; no field reaches mint while UNSET or PROPOSED.
+    resolved: dict[str, Provenance] = field(default_factory=dict)
     source_file: str = ""
     # Per-draft optimizer LLM config — what model runs the L1/L2/L3
     # meta-prompts. Distinct from the backend pipeline node's own LLM
@@ -92,6 +104,10 @@ class DraftCampaign:
             "pipeline_overlay": dict(self.pipeline_overlay),
             "optimizer_provider": self.optimizer_provider,
             "optimizer_model": self.optimizer_model,
+            "headers": list(self.headers),
+            "column_query": self.column_query,
+            "column_ground_truth": self.column_ground_truth,
+            "resolved": {field_name: prov.value for field_name, prov in self.resolved.items()},
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -99,6 +115,24 @@ class DraftCampaign:
     def patch(self, **changes: Any) -> DraftCampaign:
         """Return a copy with ``updated_at`` refreshed and any provided fields replaced."""
         return replace(self, updated_at=_now_iso(), **changes)
+
+    def confirm_columns(
+        self, *, query_col: str | None = None, ground_truth_col: str | None = None
+    ) -> DraftCampaign:
+        """Set + CONFIRM the input/target column mapping (operator-stated).
+
+        Membership of each header in :attr:`headers` is the caller's
+        wire-validation concern (422); this only records the confirmed value.
+        """
+        resolved = dict(self.resolved)
+        changes: dict[str, Any] = {}
+        if query_col is not None:
+            changes["column_query"] = query_col
+            resolved["column.query"] = Provenance.CONFIRMED
+        if ground_truth_col is not None:
+            changes["column_ground_truth"] = ground_truth_col
+            resolved["column.ground_truth"] = Provenance.CONFIRMED
+        return self.patch(resolved=resolved, **changes)
 
 
 @dataclass
@@ -121,10 +155,19 @@ class DraftCampaignRegistry:
         slug: str,
         n_samples: int,
         sample_preview: list[dict[str, str]],
+        headers: list[str],
         source_file: str = "",
     ) -> DraftCampaign:
-        """Mint a fresh draft with smart defaults and register it."""
+        """Mint a fresh draft and register it.
+
+        The input/target column mapping is **not** silently assumed: it
+        auto-confirms only when a header is literally named ``query`` /
+        ``ground_truth`` (the unambiguous, deterministic case), and otherwise
+        lands ``UNSET`` for the operator to confirm. The other config knobs
+        keep their working operator-editable defaults this slice.
+        """
         now = _now_iso()
+        column_query, column_ground_truth, resolved = _auto_detect_columns(headers)
         draft = DraftCampaign(
             draft_id=_mint_draft_id(),
             tenant_id=tenant_id,
@@ -136,6 +179,10 @@ class DraftCampaignRegistry:
             max_rounds=DEFAULT_MAX_ROUNDS,
             task_description="",
             pipeline_overlay={},
+            headers=tuple(headers),
+            column_query=column_query,
+            column_ground_truth=column_ground_truth,
+            resolved=resolved,
             optimizer_provider=DEFAULT_OPTIMIZER_PROVIDER,
             optimizer_model=DEFAULT_OPTIMIZER_MODEL,
             created_at=now,
@@ -172,6 +219,26 @@ class DraftCampaignRegistry:
                 return False
             del self._by_id[draft_id]
             return True
+
+
+def _auto_detect_columns(
+    headers: list[str],
+) -> tuple[str, str, dict[str, Provenance]]:
+    """Deterministic column auto-confirm — literal `query` / `ground_truth` only.
+
+    The unambiguous case the spec's auto-confirm describes, resolved without
+    an LLM: a header literally named ``query`` (resp. ``ground_truth``)
+    confirms that column. Anything else stays ``UNSET`` for the operator to
+    pick — no fuzzy guessing in the deterministic gate.
+    """
+    header_set = set(headers)
+    query_col = "query" if "query" in header_set else ""
+    ground_truth_col = "ground_truth" if "ground_truth" in header_set else ""
+    resolved = {
+        "column.query": Provenance.CONFIRMED if query_col else Provenance.UNSET,
+        "column.ground_truth": Provenance.CONFIRMED if ground_truth_col else Provenance.UNSET,
+    }
+    return query_col, ground_truth_col, resolved
 
 
 def _mint_draft_id() -> str:

@@ -995,7 +995,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
+        '422':
+          description: |
+            Either `payload_invalid` (malformed envelope) or
+            `origin_incomplete` — the deterministic origin-readiness checklist
+            still has gaps (e.g. the input/target column mapping is unset or
+            unconfirmed). `details.gaps` lists each blocking field as
+            `{field, reason, hint}`. The draft is preserved; the operator
+            resolves the gaps (via `edit-draft-campaign`) and retries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '503': { $ref: '#/components/responses/BackendUnreachable' }
 
   /datasets/ingest:
@@ -1012,8 +1023,10 @@ paths:
         NOT a Control-remote command — no `CommandRecord` lands on a ledger;
         the draft lives in the server's draft-campaign store until the operator
         commits via the separate `/commands/mint-campaign-from-draft` verb.
-        File type in slice 1: CSV with two required columns `query`,
-        `ground_truth`. Future slices add XLSX (first sheet only), Parquet,
+        File type in slice 1: CSV. Ingest is header-agnostic — any column
+        names are accepted; the input/target column mapping is resolved on
+        the draft (`column_query` / `column_ground_truth`) and gated at mint,
+        not at upload. Future slices add XLSX (first sheet only), Parquet,
         JSON-lines — declared in this file before each handler lands.
       tags: [datasets]
       requestBody:
@@ -1027,7 +1040,7 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: CSV blob; two required columns `query`, `ground_truth`.
+                  description: CSV blob; any column headers (header-agnostic).
                 slug:
                   type: string
                   minLength: 1
@@ -1069,10 +1082,10 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '422':
           description: |
-            CSV parse / shape failure — malformed CSV, missing required
-            columns `query` / `ground_truth`, zero data rows. `details.reason`
-            carries the specific failure (`missing_column`, `bad_csv`,
-            `empty`, ...).
+            CSV parse / shape failure — undecodable bytes, unparseable CSV,
+            no header row, or zero data rows. `details.reason` carries the
+            specific failure (`bad_csv`, `empty`, `too_large`, `bad_slug`).
+            Column names are NOT validated here (header-agnostic ingest).
           content:
             application/json:
               schema:
@@ -1219,8 +1232,8 @@ components:
             `idempotency_key_missing` (400), `expected_version_missing` (400),
             `capability_denied` (403), `command_kind_unknown` (404),
             `payload_invalid` (422), `slug_collision` (409),
-            `backend_unreachable` (503), `ingest_failed` (422). New codes
-            require a YAML update first.
+            `backend_unreachable` (503), `ingest_failed` (422),
+            `origin_incomplete` (422). New codes require a YAML update first.
           enum:
             - version_conflict
             - idempotency_key_missing
@@ -1233,6 +1246,7 @@ components:
             - slug_collision
             - backend_unreachable
             - ingest_failed
+            - origin_incomplete
         message:
           type: string
           description: Human-readable explanation; never load-bearing for clients.
@@ -1254,8 +1268,15 @@ components:
               compose the "Start the backend and try again" message
               without re-parsing the `message` field.
             * `ingest_failed` (422 on `/datasets/ingest`) — `reason`
-              ∈ `missing_column` | `bad_csv` | `empty` | `too_large` |
-              `bad_slug`.
+              ∈ `bad_csv` | `empty` | `too_large` | `bad_slug`. (Ingest is
+              header-agnostic — it no longer rejects on column names; column
+              identity is resolved on the draft, gated at mint.)
+            * `origin_incomplete` (422 on `/commands/mint-campaign-from-draft`)
+              — `gaps`: a list of `{field, reason, hint}` objects naming each
+              origin field that still blocks mint. `reason` ∈ `unset` |
+              `proposed_unconfirmed`. The deterministic origin-readiness
+              checklist — not the operator — is the source of truth for
+              completeness (see `docs/specs/m10-origin-resolution-checkin.md`).
 
     # ---- Per-kind command payloads (v0 closed set) ----
     # Each `*Payload` schema is the `payload` field of one command kind.
@@ -1612,6 +1633,10 @@ components:
         - pipeline_overlay
         - optimizer_provider
         - optimizer_model
+        - headers
+        - column_query
+        - column_ground_truth
+        - resolved
         - created_at
         - updated_at
       additionalProperties: false
@@ -1640,14 +1665,14 @@ components:
           type: array
           minItems: 0
           maxItems: 10
-          description: First 10 parsed rows; read-only.
+          description: |
+            First 10 parsed rows; read-only. Header-agnostic — each row is
+            the raw uploaded record keyed by its own column headers (not yet
+            mapped to `query` / `ground_truth`; that mapping is `column_query`
+            / `column_ground_truth`, resolved on the draft and gated at mint).
           items:
             type: object
-            required: [query, ground_truth]
-            additionalProperties: false
-            properties:
-              query: { type: string }
-              ground_truth: { type: string }
+            additionalProperties: { type: string }
         n_samples:
           type: integer
           minimum: 0
@@ -1708,6 +1733,40 @@ components:
             `claude-sonnet-4-6`). Empty string means "use the connector's
             recommended default for this provider"; the curated per-provider
             model list is exposed by `GET /llm/providers`.
+        headers:
+          type: array
+          items: { type: string }
+          description: |
+            The uploaded file's column headers, in order. The operator (or,
+            once it lands, the origin resolver) maps two of these to
+            `column_query` / `column_ground_truth`.
+        column_query:
+          type: string
+          maxLength: 256
+          description: |
+            Which uploaded header carries the input string. Empty until
+            resolved. Auto-confirmed on ingest only when a header is literally
+            named `query`; otherwise the operator picks one via
+            `edit-draft-campaign`. Must be a member of `headers` to mint.
+        column_ground_truth:
+          type: string
+          maxLength: 256
+          description: |
+            Which uploaded header carries the target string. Same resolution
+            rules as `column_query` (literal `ground_truth` auto-confirms).
+        resolved:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [unset, proposed, confirmed]
+          description: |
+            Per-field provenance for the origin-readiness checklist. Keys are
+            dotted field names (`column.query`, `column.ground_truth`, …);
+            values are `unset` (no value), `proposed` (an inference awaiting
+            confirmation), or `confirmed` (operator-stated or auto-confirmed
+            high-confidence). No field reaches mint while `unset` or
+            `proposed`. The deterministic checklist gates; see
+            `docs/specs/m10-origin-resolution-checkin.md`.
         created_at:
           type: string
           format: date-time
@@ -1768,6 +1827,20 @@ components:
             optimizer_model:
               type: string
               maxLength: 128
+            column_query:
+              type: string
+              maxLength: 256
+              description: |
+                Confirm which uploaded header is the input column. Must be a
+                member of the draft's `headers` (422 otherwise). Setting it
+                moves `resolved["column.query"]` to `confirmed`.
+            column_ground_truth:
+              type: string
+              maxLength: 256
+              description: |
+                Confirm which uploaded header is the target column. Same
+                membership rule; moves `resolved["column.ground_truth"]` to
+                `confirmed`.
 
     MintCampaignFromDraftPayload:
       type: object

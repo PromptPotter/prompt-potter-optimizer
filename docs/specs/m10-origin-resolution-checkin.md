@@ -1,6 +1,8 @@
 # M10: Origin-Resolution Check-In
 
-**Status:** spec-only — no code shipped. Next up in the M10 ingest lane (current-beta scope). Extends the ingest path defined in [`m13-chat-first-user-web.md § Ingest`](m13-chat-first-user-web.md) — that `DraftCampaign` is the object this loop drives to completeness.
+**Status:** the **deterministic gate** (sequencing steps 1–2, column-mapping scope) shipped 2026-05-30; the **LLM proposer** (steps 3–4) is the remaining work. Extends the ingest path defined in [`m13-chat-first-user-web.md § Ingest`](m13-chat-first-user-web.md) — that `DraftCampaign` is the object this loop drives to completeness.
+
+> **Shipped gate (2026-05-30).** The proposer/gate split's *gate half* is live, scoped to the input/target column mapping — the field that was genuinely broken (ingest hard-required literally-named `query`/`ground_truth` columns). Parser split: `read_tabular(blob, fmt) -> Table` (header-agnostic, no literal-column gate) + `materialize_samples(table, *, query_col, ground_truth_col)` (run at commit). `DraftCampaign` gained `headers` + `column_query`/`column_ground_truth` + `resolved: dict[field, Provenance]` (`domain/origin_provenance.py`); `create()` auto-confirms only literal `query`/`ground_truth` headers (deterministic, no LLM) and otherwise leaves the mapping `unset`. Pure `origin_readiness(draft)` (`application/datasets/origin_readiness.py`) gates `mint-campaign-from-draft` with `422 origin_incomplete` (`details.gaps`); `edit-draft-campaign` carries `column_query`/`column_ground_truth` to confirm. Materialization moved to commit-time; the draft `cache.json` carries a `resolution` block (provenance + gaps) for on-disk readability. **Remaining (steps 3–4):** the `origin_resolve` LLM node + `build_origin_bundle` + `resolve-origin` verb + auto-confirm loop, and extending the checklist to the rest of the closed set (task framing, connector/scorer/round-cap/model provenance) once the proposer can justify + auto-confirm them.
 
 **Depends on:** the slice-1 ingest path (`POST /datasets/ingest`, `DraftCampaign`, `edit-draft-campaign`, `mint-campaign-from-draft`) — all shipped. This spec adds the gate *between* ingest and mint.
 
@@ -120,8 +122,8 @@ Multi-file / multi-sheet reconciliation in one draft (one file → one draft for
 
 ## Sequencing (not scheduled)
 
-1. Parser split (`read_tabular` + `materialize_samples`) + drop the literal-column requirement.
-2. `origin_readiness` checklist + `DraftCampaign.resolved` provenance; wire the `422 origin_incomplete` gate into `mint-campaign-from-draft`.
+1. ✅ **Shipped 2026-05-30.** Parser split (`read_tabular` + `materialize_samples`) + drop the literal-column requirement.
+2. ✅ **Shipped 2026-05-30 (column-mapping scope).** `origin_readiness` checklist + `DraftCampaign.resolved` provenance + `Provenance` enum; `422 origin_incomplete` gate wired into `mint-campaign-from-draft`; column confirmation rides `edit-draft-campaign`. (Closed-set fields beyond the column mapping join the checklist with step 3's proposer.)
 3. `origin_resolve` node + `build_origin_bundle` + response model.
 4. `resolve-origin` verb (openapi first) + the loop + auto-confirm.
 5. Frontend: surface `gaps` + per-field provenance in the ingest panel; the resolver drives chat turns.

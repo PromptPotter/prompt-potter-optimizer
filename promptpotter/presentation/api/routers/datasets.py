@@ -12,12 +12,13 @@ from pydantic import BaseModel, Field
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
-    parse_csv_to_samples,
+    read_tabular,
 )
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaignRegistry,
     default_slug_from_filename,
 )
+from promptpotter.application.datasets.origin_readiness import resolution_block
 from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
 from promptpotter.application.intelligence.measurement_series import (
     campaign_measurement_series,
@@ -146,12 +147,12 @@ async def ingest_dataset(
         )
 
     try:
-        samples = parse_csv_to_samples(blob, source_file=file.filename or "")
+        table = read_tabular(blob, fmt="csv")
     except IngestError as exc:
         raise HTTPException(
             status_code=422,
             detail={
-                "error": "payload_invalid",
+                "error": "ingest_failed",
                 "message": exc.message,
                 "details": {"reason": exc.reason, "max_samples": MAX_SAMPLES},
             },
@@ -181,17 +182,25 @@ async def ingest_dataset(
             },
         )
 
-    preview = [{"query": s.query, "ground_truth": s.ground_truth} for s in samples[:10]]
+    preview = [dict(row) for row in table.rows[:10]]
     draft = registry.create(
         tenant_id=store.identity.tenant_id,
         slug=base_slug,
-        n_samples=len(samples),
+        n_samples=len(table.rows),
         sample_preview=preview,
+        headers=list(table.headers),
         source_file=file.filename or "",
     )
+    # Stash the raw rows + headers; materialization to Samples waits until the
+    # column mapping is confirmed (at mint). The resolution block lets an
+    # operator open cache.json and see what still blocks mint.
     store.tenant_datasets.write_draft_cache(
-        draft.draft_id, samples, source_file=file.filename or ""
+        draft.draft_id,
+        list(table.rows),
+        source_file=file.filename or "",
+        headers=list(table.headers),
     )
+    store.tenant_datasets.write_draft_resolution(draft.draft_id, resolution_block(draft))
     return draft.to_wire()
 
 
