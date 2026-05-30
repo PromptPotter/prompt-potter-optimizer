@@ -7,6 +7,7 @@ informed: []
 relates:
   - docs/adr/0001-m12-control-plane.md
   - docs/adr/0003-spend-and-tenancy.md
+  - docs/adr/0004-operator-admin-channels.md
   - docs/specs/m13-chat-first-user-web.md
   - docs/specs/state-sync-cleanup.md
 supersedes: []
@@ -45,6 +46,8 @@ Chosen option: **A — OIDC wire + RLS data + SCIM 2.0 internal model.**
 The two contracts shape the seams once; the implementation behind each seam swaps per stage. Stage 0 ships a single-operator `IdentityContext(user_id="default", tenant_id="default")` at bootstrap with no auth and a file-based `projects/{tenant_id}/` data layout. Stage 1 swaps the resolver for an OIDC client (~200 LoC + `cryptography`) federating to Google / Apple / Microsoft / GitHub. Stage 2 swaps the file-based stores for a PostgreSQL adapter that sets `SET LOCAL app.tenant_id` per request inside RLS-protected transactions, optionally fronting Ory / Zitadel / Keycloak / Authentik as the issuer. **Reaching Stage 2 from Stage 0 is two additive jumps, not one rewrite.**
 
 Internal `User` / `Group` records use SCIM 2.0 Core + EnterpriseUser field names verbatim. The tenant claim normalizes to `org_id` at the verifier edge. Schema.org `Person` JSON-LD is an output projection on public surfaces — not the internal model. `IdentityContext` (5-field frozen dataclass at `promptpotter/shared/identity.py`) is the sole carrier past the seam; the deleted `TenantContext` collapses into it.
+
+**Administering the gate** is a facet of this kind, not a new one. Editing the sign-in allowlist or provider config is an identity-config *write* — delivered through an in-zone **operator-admin channel** (outbound conduit, no inbound public route) and audited in the identity zone, never the campaign Control-remote highway and never a tenant ledger. The channel pattern + Purdue/zero-trust threat model live in [`0004-operator-admin-channels.md`](0004-operator-admin-channels.md).
 
 ### Consequences
 
@@ -301,4 +304,5 @@ Stage-0 work (the `IdentityContext` seam — shipped) does **not** require the a
 - [`0001-m12-control-plane.md`](0001-m12-control-plane.md) — **second consumer.** Stage 1 OIDC client lands here; `JobRegistry` scopes on `IdentityContext`; auth-off mode is the Stage-0 fallback.
 - [`../specs/m13-chat-first-user-web.md`](../specs/m13-chat-first-user-web.md) — **third consumer.** Install / User / Project nouns map onto OIDC claims (`Install = iss`, `User = sub`, project scoping rides `tenant_id` claim). Stage 2 considered when self-hosters demand native identity.
 - [`../specs/state-sync-cleanup.md`](../specs/state-sync-cleanup.md) — convergence: identity-collapse touches the same store-seam files; sequence Phase 1 before the Stage-0 `IdentityContext` reification to avoid touching `index.json` writers twice.
+- [`0004-operator-admin-channels.md`](0004-operator-admin-channels.md) — **administrative-write facet.** How privileged identity/deployment mutations (allowlist edits) are delivered in-zone, outbound-only, without exposing an inbound route.
 - [`../architecture.md`](../architecture.md) §0 — `Identity` I/O kind amendment lands here at Stage 1.

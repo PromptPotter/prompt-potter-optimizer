@@ -94,6 +94,8 @@ tools
 
 # Per-dataset HF/Excel cache — regenerable, dataset-name keyed
 datasets/*/cache.json
+# demo-tickets samples are hand-authored, not regenerable — commit them
+!datasets/demo-tickets/cache.json
 
 # Recon-script raw data downloads (NaturalPlan GitHub JSON, etc.) — regenerable
 .cache/

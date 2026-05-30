@@ -13,7 +13,10 @@ JSON files). All git-ignored by inclusion in `.promptpotter/`.
 
 from promptpotter.infrastructure.identity.allowlist import (
     AllowlistDecision,
+    add_email,
     check_allowlist,
+    list_emails,
+    remove_email,
 )
 from promptpotter.infrastructure.identity.bundle import (
     IdentityBundle,
@@ -52,12 +55,15 @@ __all__ = [
     "ProviderIdentity",
     "SessionData",
     "SessionStore",
+    "add_email",
     "build_identity_bundle",
     "check_allowlist",
     "default_identity_paths",
     "derive_user_id",
+    "list_emails",
     "load_provider_config",
     "maybe_claim_default",
     "registered_or_default_identity",
     "registered_user_id",
+    "remove_email",
 ]

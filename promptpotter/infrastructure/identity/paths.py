@@ -28,6 +28,10 @@ class IdentityPaths:
         return self.root / "allowlist.json"
 
     @property
+    def allowlist_audit(self) -> Path:
+        return self.root / "allowlist_audit.jsonl"
+
+    @property
     def sessions_dir(self) -> Path:
         return self.root / "sessions"
 

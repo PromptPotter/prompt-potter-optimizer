@@ -28,6 +28,7 @@ _ASYNCAPI_PATH = _REPO_ROOT / "docs" / "specs" / "m12-events-asyncapi.yaml"
 _CONTRACT_PATH = _REPO_ROOT / "docs" / "adr" / "0001-m12-control-plane.md"
 _IDENTITY_ADR_PATH = _REPO_ROOT / "docs" / "adr" / "0002-identity-foundation.md"
 _SPEND_ADR_PATH = _REPO_ROOT / "docs" / "adr" / "0003-spend-and-tenancy.md"
+_ADMIN_ADR_PATH = _REPO_ROOT / "docs" / "adr" / "0004-operator-admin-channels.md"
 
 # Projection-only event kinds — emitted on the SSE channel but have no
 # underlying record class in `domain/run_records.py`. Synthesized by
@@ -274,12 +275,12 @@ def test_control_plane_drift() -> None:
 
 
 def test_adr_anchor_files_exist() -> None:
-    """Every Anchors-table file path in ADR-0001 / ADR-0002 / ADR-0003 must
-    exist on disk. ADR-0001 already checks itself inside the bundled drift
-    test (security box 20); this asserts the same shape for the two sibling
-    ADRs whose Anchors tables match the ``| Concern | File |`` format and
-    sit under an ``### Anchors`` heading."""
-    for adr_path in (_CONTRACT_PATH, _IDENTITY_ADR_PATH, _SPEND_ADR_PATH):
+    """Every Anchors-table file path in ADR-0001 / ADR-0002 / ADR-0003 /
+    ADR-0004 must exist on disk. ADR-0001 already checks itself inside the
+    bundled drift test (security box 20); this asserts the same shape for the
+    sibling ADRs whose Anchors tables match the ``| Concern | File |`` format
+    and sit under an ``### Anchors`` heading."""
+    for adr_path in (_CONTRACT_PATH, _IDENTITY_ADR_PATH, _SPEND_ADR_PATH, _ADMIN_ADR_PATH):
         assert adr_path.is_file(), f"missing {adr_path}"
         paths = _anchor_paths(adr_path.read_text(encoding="utf-8"))
         assert paths, f"{adr_path.name}: Anchors table must list at least one path"

@@ -35,7 +35,18 @@ points MUST NOT write campaign artifacts directly — they call into
 `api/` is **read-only by design** beyond the explicitly-sanctioned
 mutating endpoints. Webapp panels poll `dashboard.json` + a few JSON
 endpoints; they don't drive the loop. Adding any other mutating route
-is Control-remote highway territory and out of charter here.
+that touches **campaign / cycle** state is Control-remote highway
+territory and out of charter here.
+
+This is *not* a ban on every mutation in the codebase. **Identity-surface
+administration** (editing the sign-in allowlist, provider config) is a
+different I/O kind — it is delivered by an **operator-admin channel**
+(a deployment-side, outbound-only companion such as
+`presentation/admin_bot.py`), **not** an inbound API route and **not**
+`/commands/{kind}`. Permanent contract:
+[`../../docs/adr/0004-operator-admin-channels.md`](../../docs/adr/0004-operator-admin-channels.md).
+Don't reach for the command highway when the right home is the
+operator-admin channel.
 
 **Sanctioned mutating endpoints:**
 

@@ -1,0 +1,23 @@
+{
+  "name": "demo-tickets",
+  "created_at": "2026-05-30T00:00:00+00:00",
+  "source_file": "",
+  "row_count": 15,
+  "items": [
+    { "query": "My order arrived broken", "ground_truth": "refund" },
+    { "query": "The product I received is damaged, I want my money back", "ground_truth": "refund" },
+    { "query": "This isn't what I ordered — please return my payment", "ground_truth": "refund" },
+    { "query": "I forgot my account password", "ground_truth": "password_reset" },
+    { "query": "I can't log in, the password isn't working", "ground_truth": "password_reset" },
+    { "query": "How do I reset my login credentials?", "ground_truth": "password_reset" },
+    { "query": "The app keeps crashing when I open it", "ground_truth": "bug_report" },
+    { "query": "Something is broken — the page just shows a blank screen", "ground_truth": "bug_report" },
+    { "query": "I found a glitch where the checkout button does nothing", "ground_truth": "bug_report" },
+    { "query": "When will my package be delivered", "ground_truth": "shipping_status" },
+    { "query": "Where is my order right now?", "ground_truth": "shipping_status" },
+    { "query": "Can you tell me the tracking status of my shipment?", "ground_truth": "shipping_status" },
+    { "query": "Can I get a copy of my last invoice", "ground_truth": "billing_inquiry" },
+    { "query": "Why was I charged twice this month?", "ground_truth": "billing_inquiry" },
+    { "query": "I have a question about a charge on my statement", "ground_truth": "billing_inquiry" }
+  ]
+}

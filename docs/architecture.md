@@ -271,7 +271,18 @@ is *from*. Tokens are verified at this boundary and never appear past
 it (ADR-0002 gate #2, CI-checked). Stage 0 (auth-off, single
 operator) is the degenerate case: `default_identity()` substitutes
 for the middleware. Permanent contract:
-`docs/adr/0002-identity-foundation.md`. Adding a new I/O kind requires
+`docs/adr/0002-identity-foundation.md`. This kind also
+**administers the gate**: editing who may sign in (`allowlist.json`)
+or the provider config is an identity-config *write*, distinct from
+campaign state and never on the campaign ledger. Privileged identity
+or deployment mutations ride an **in-zone operator-admin channel** — a
+deployment-side companion (e.g. an on-box bot) that reaches an
+untrusted message channel *outbound*, exposing no inbound surface to a
+low-trust zone; audited in the identity zone (`allowlist_audit.jsonl`).
+They never become Control-remote commands and never an inbound public
+route — the Purdue/zero-trust rule that a control-plane mutation is not
+reachable from the lowest-trust zone. Permanent contract:
+`docs/adr/0004-operator-admin-channels.md`. Adding a new I/O kind requires
 amending §0 first; the pre-flight gate (CLAUDE.md Q4 sub-rule)
 blocks code that introduces one without §0 backing. Hexagonal layer
 separation is enforced by

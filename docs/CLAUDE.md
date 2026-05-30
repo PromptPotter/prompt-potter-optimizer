@@ -20,7 +20,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | [`manual/`](manual/) | Operator onboarding: install → first campaign → reading output → troubleshooting → going deeper. Numbered chapters. | [`manual/README.md`](manual/README.md) |
 | [`concepts/`](concepts/) | How the loop works conceptually — the three-layer loop, scoring + memory, candidate-elimination, **optimizer-of-the-optimizer (L4 recursion)**, campaign tree, paired-sample PoBB. Read before the developer docs. | [`concepts/README.md`](concepts/README.md) |
 | [`developer/`](developer/) | Implementation specs — Python names, data contracts, node wiring, `pipeline.json` contract, dispatch hub, L1-generate surface, L1-candidate-analysis checklist, self-healing internals, **`conventions.md` (full style + code-shape rules)**, `stable-api.md` (v1 fork-readiness surface). | [`developer/README.md`](developer/README.md) |
-| [`operations/`](operations/) | Running it — CLI reference, env, persistence + recovery, observability, backend integration, **`adding-a-dataset.md`**, **`dataset-selection-rationale.md`**, **`dataset-reasoning-matrix.md`** (per-dataset model + `reasoning_effort` + `max_tokens` defaults). | [`operations/README.md`](operations/README.md) |
+| [`operations/`](operations/) | Running it — CLI reference, env, persistence + recovery, observability, backend integration, **`secure-hosting.md`** (allowlist admin via the on-box bot), **`adding-a-dataset.md`**, **`dataset-selection-rationale.md`**, **`dataset-reasoning-matrix.md`** (per-dataset model + `reasoning_effort` + `max_tokens` defaults). | [`operations/README.md`](operations/README.md) |
 | [`methods/`](methods/) | The two spend-control procedures: PoBB elimination + hard-sample leaderboard. | [`methods/README.md`](methods/README.md) |
 | [`research/`](research/) | Benchmarks (BBEH comparison, pEvol-bench), metrics, related-work table (incl. MCTS comparison). | [`research/README.md`](research/README.md) |
 | [`specs/`](specs/) | Forward-looking specs — identity-foundation, multi-connector + L4 closure, control plane, publication benchmarks, spend + tenancy, M13 chat-first user web. **Specs index has its own CLAUDE.md.** | [`specs/CLAUDE.md`](specs/CLAUDE.md) |
@@ -42,6 +42,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT meta-campaign NOTES.md) |
 | What's the canonical split for this benchmark? | [`operations/adding-a-dataset.md`](operations/adding-a-dataset.md) |
 | How do I run the auth-on dashboard locally? | [`developer/local-oidc.md`](developer/local-oidc.md) (Dex harness at `dev/oidc-local/`) |
+| How do I manage the sign-in allowlist / host securely? | [`operations/secure-hosting.md`](operations/secure-hosting.md) + [`adr/0004-operator-admin-channels.md`](adr/0004-operator-admin-channels.md) |
 | How do I freeze a buggy cycle as a test fixture? | [`developer/cycle-fixtures.md`](developer/cycle-fixtures.md) (`tests/fixtures/cycles/`) |
 
 ## L4 — the recursion case

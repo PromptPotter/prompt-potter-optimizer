@@ -20,7 +20,10 @@ from promptpotter.domain.identity import SafeName, TenantId, UserId, safe_name
 from promptpotter.infrastructure.identity import (
     GitHubProviderClient,
     GoogleProviderClient,
+    add_email,
     derive_user_id,
+    list_emails,
+    remove_email,
 )
 from promptpotter.infrastructure.store import Stores, build_stores
 from promptpotter.presentation.api.deps import resolve_identity
@@ -90,7 +93,7 @@ def test_identity_seam_no_drift() -> None:
         raise AssertionError("safe_name must reject path-traversal slugs")
 
 
-def test_stage1_identity_gates(monkeypatch) -> None:
+def test_stage1_identity_gates(monkeypatch, tmp_path: Path) -> None:
     """Bundled assertion of Stage-1 no-drift gates #1, #2, #5."""
     # Gate #5 — §0 names the Identity I/O kind. The architecture spec lists the
     # five I/O kinds at the top of §0; the count + the literal "Identity" entry
@@ -157,6 +160,25 @@ def test_stage1_identity_gates(monkeypatch) -> None:
     for path in allowed:
         assert path.is_file(), f"gate #2 allowlist references missing file: {path}"
     _ = os  # used implicitly by monkeypatch
+
+    # Allowlist admin-write facet (ADR-0004) — add/remove/list round-trip,
+    # normalization, idempotency, atomic create, and one audit line per change.
+    al = tmp_path / "identity" / "allowlist.json"
+    audit = tmp_path / "identity" / "allowlist_audit.jsonl"
+    assert list_emails(al) == []  # absent file → empty
+    assert add_email(al, "  Alice@Example.com ", actor="t", audit_path=audit) == [
+        "alice@example.com"
+    ]
+    assert al.is_file()  # parent dir + file created atomically
+    add_email(al, "bob@example.com", actor="t", audit_path=audit)
+    assert list_emails(al) == ["alice@example.com", "bob@example.com"]
+    add_email(al, "alice@example.com", actor="t", audit_path=audit)  # idempotent
+    assert list_emails(al) == ["alice@example.com", "bob@example.com"]
+    assert remove_email(al, "ALICE@example.com", actor="t", audit_path=audit) == ["bob@example.com"]
+    remove_email(al, "nobody@example.com", actor="t", audit_path=audit)  # no-op
+    assert list_emails(al) == ["bob@example.com"]
+    # 5 mutating calls above → 5 audit lines (no-ops still record the attempt).
+    assert len(audit.read_text(encoding="utf-8").strip().splitlines()) == 5
 
 
 def test_registered_developer_resolution(tmp_path: Path) -> None:
