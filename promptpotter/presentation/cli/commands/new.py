@@ -282,14 +282,9 @@ async def _run_loop(
     observers = _build_observers(args, session, campaign_config, train_data, pre_origin_acc)
     ctx.save_phase("optimizing")
 
-    # Webapp control channels under `.runtime/`:
-    #   stop.flag  — loop exits at next stop_check (Stop button / Ctrl+C parity).
-    #   pause.flag — loop blocks at round boundary until cleared (`resume-cycle`
-    #                command removes it; `stop.flag` overrides during a pause).
-    cycle_dir = session.store.campaigns.cycle_dir(ctx.campaign_id, ctx.cycle_id)
-    session.stop_check = (cycle_dir / ".runtime" / "stop.flag").is_file
-    session.pause_check = (cycle_dir / ".runtime" / "pause.flag").is_file
-
+    # Control-local hooks (stop.flag / pause.flag under .runtime/) are bound
+    # centrally in run_optimization (the single runner seam) so CLI and API
+    # launches behave identically — no per-entry-point wiring here.
     cycle_result = await _orch_run_optimization(
         train_data,
         campaign_config,

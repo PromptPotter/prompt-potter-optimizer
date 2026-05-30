@@ -23,6 +23,10 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +73,43 @@ def maybe_claim_default(
     return renamed
 
 
+def registered_or_default_identity(explicit_tenant: str | None = None) -> IdentityContext:
+    """Resolve the CLI's identity: explicit ``--tenant`` > registered user > ``default``.
+
+    The single entry every CLI command (``new`` / ``resume`` / ``sweep``) uses
+    to decide which workspace a terminal run writes to. An explicit
+    ``--tenant`` wins; otherwise a registered developer (default-claim marker)
+    resolves to their own tenant so runs join the one workspace the
+    authenticated web reads; otherwise anonymous ``default``.
+    """
+    from promptpotter.infrastructure.identity.paths import default_identity_paths
+    from promptpotter.shared.identity import default_identity, identity_for_user
+
+    if explicit_tenant:
+        return default_identity(tenant_id=explicit_tenant)
+    uid = registered_user_id(default_identity_paths().default_claim_marker)
+    return identity_for_user(uid) if uid else default_identity()
+
+
+def registered_user_id(marker_path: Path) -> str | None:
+    """Return the claimed operator's ``user_id`` from the marker, or ``None``.
+
+    The default-claim marker is the single-operator "registration" record: once
+    written (first sign-in), the local developer *is* that user. The CLI reads
+    this to resolve its identity to the registered operator instead of
+    anonymous ``default``, so terminal runs land in the same one workspace the
+    authenticated web reads. ``None`` when never registered (no marker / no
+    ``user_id``) — callers fall back to :func:`default_identity`.
+    """
+    if not marker_path.is_file():
+        return None
+    try:
+        uid = json.loads(marker_path.read_text(encoding="utf-8")).get("user_id")
+    except (OSError, json.JSONDecodeError):
+        return None
+    return uid if isinstance(uid, str) and uid and uid != "default" else None
+
+
 def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
     """Rewrite every `campaign.json::owner_user_id` from ``default`` to *user_id*.
 
@@ -100,4 +141,4 @@ def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
         logger.info("Rebound %d campaigns to user %s", rewritten, user_id)
 
 
-__all__ = ["maybe_claim_default"]
+__all__ = ["maybe_claim_default", "registered_or_default_identity", "registered_user_id"]

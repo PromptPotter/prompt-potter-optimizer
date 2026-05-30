@@ -33,8 +33,12 @@ from promptpotter.application.optimization.dispatch.hub.injections.wounds import
     _r_validation_failures,
 )
 
-# `char_cap`: int for LLM-authored text (truncate + warn on overrun); None for derived/measurement
-# (already bounded by *_RENDER_CAP) and `task_context` (per-field cap is finer).
+# `char_cap`: truncate + warn on overrun. Set for LLM-authored text AND for the large
+# derived/measurement panels that feed L2/L3 (diagnostics, axis_memory, the wound channels) —
+# a backstop so a deep-stall round (when L3 fires and these panels are largest) can't balloon the
+# optimizer prompt past its budget. Caps sit above the typical render size, so healthy rounds are
+# untouched. None only for the small, internally-capped renderers (*_RENDER_CAP, top-K digests)
+# and `task_context` (its per-field cap is finer).
 INJECTIONS: dict[str, _Injection] = {
     "plan": _Injection(
         "plan",
@@ -69,35 +73,35 @@ INJECTIONS: dict[str, _Injection] = {
         InjectionKind.DERIVED,
         _r_diagnostics,
         "Layer-agnostic round readout: STATUS header + RoundDiagnostics body.",
-        char_cap=None,
+        char_cap=1500,
     ),
     "validation_failures": _Injection(
         "validation_failures",
         InjectionKind.MEASUREMENT,
         _r_validation_failures,
         "Wound 1: L1 parse-time validator failures (per-axis, per-value).",
-        char_cap=None,
+        char_cap=500,
     ),
     "runtime_failures": _Injection(
         "runtime_failures",
         InjectionKind.MEASUREMENT,
         _r_runtime_failures,
         "Wound 2: DegradationCheck mid-eval evidence — per-candidate runtime failures.",
-        char_cap=None,
+        char_cap=800,
     ),
     "l2_guard_breaches": _Injection(
         "l2_guard_breaches",
         InjectionKind.MEASUREMENT,
         _r_l2_guard_breaches,
         "Wound 4: L2_CONTEXT post-parse guard outcomes; non-empty force-triggers L3 heal.",
-        char_cap=None,
+        char_cap=300,
     ),
     "l3_guard_breaches": _Injection(
         "l3_guard_breaches",
         InjectionKind.MEASUREMENT,
         _r_l3_guard_breaches,
         "L3_PLAN post-parse guard outcomes. L3 reads its own past breaches.",
-        char_cap=None,
+        char_cap=300,
     ),
     "task_context": _Injection(
         "task_context",
@@ -135,7 +139,7 @@ INJECTIONS: dict[str, _Injection] = {
         _r_axis_memory,
         "Cross-cycle axis-keyed digest from AxisIndex: rankings, persistent failures, "
         "failure clusters, value trends, exhausted axes.",
-        char_cap=None,
+        char_cap=1200,  # digest() already caps to top-5 axes; this is the hard backstop.
     ),
     "origin_strengths": _Injection(
         "origin_strengths",

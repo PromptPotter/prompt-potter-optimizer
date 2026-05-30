@@ -67,6 +67,25 @@ def default_identity(tenant_id: str = "default") -> IdentityContext:
     )
 
 
+def identity_for_user(user_id: str) -> IdentityContext:
+    """Stage-0 identity for a *registered* operator — tenant == user.
+
+    Once a developer has signed in once, the default-tenant claim marker
+    records their ``user_id``; the CLI resolves to *this* identity instead of
+    anonymous ``default`` so a terminal run lands in the same single workspace
+    the authenticated web reads (one tenant per registered operator). Same
+    admin-capability rule as :func:`default_identity`.
+    """
+    safe = safe_name(user_id)
+    return IdentityContext(
+        user_id=UserId(safe),
+        tenant_id=TenantId(safe),
+        issuer=None,
+        claims={},
+        capabilities=_admin_caps_from_env(),
+    )
+
+
 __all__ = [
     "BENCHMARKS_READ_CAP",
     "PROMPTPOTTER_ADMIN_ENV",

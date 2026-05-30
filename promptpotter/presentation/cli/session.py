@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.infrastructure.identity import registered_or_default_identity
 from promptpotter.infrastructure.store import Stores, build_stores
-from promptpotter.shared.identity import default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
@@ -78,7 +78,10 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
     """Load active session from disk."""
     from promptpotter.infrastructure.store import active_pointer_exists, read_active_pointer
 
-    identity = default_identity(tenant_id=getattr(args, "tenant", None) or "default")
+    # Same resolver as `identity_from_args` — explicit --tenant > registered
+    # developer (claim marker) > anonymous default. Must match, else resume
+    # reads one tenant's pointer but looks for the session in another's tree.
+    identity = registered_or_default_identity(getattr(args, "tenant", None))
     if not active_pointer_exists(identity.tenant_id):
         raise SystemExit(
             "ERROR: No active session.\n\n"

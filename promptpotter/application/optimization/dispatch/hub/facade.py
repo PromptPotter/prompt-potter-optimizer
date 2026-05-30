@@ -73,7 +73,7 @@ class DispatchHub:
 
     @staticmethod
     def render(name: str, bundle: InjectionBundle) -> str:
-        """Render one injection with ``char_cap`` enforcement. LLM overruns truncate + warn;
+        """Render one injection with ``char_cap`` enforcement. Overruns truncate + warn;
         raises become ``InjectionRenderError`` (halts with ``StopReason.RENDER_ERROR``)."""
         sig = INJECTIONS.get(name)
         if sig is None:
@@ -85,8 +85,7 @@ class DispatchHub:
         cap = sig.char_cap
         if cap is not None and len(text) > cap:
             logger.warning(
-                "injection %r rendered %d chars (cap %d) — the authoring LLM "
-                "overran its output budget; truncating",
+                "injection %r rendered %d chars (cap %d) — over budget; truncating",
                 name,
                 len(text),
                 cap,

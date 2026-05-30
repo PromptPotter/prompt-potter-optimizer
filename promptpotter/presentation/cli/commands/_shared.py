@@ -128,12 +128,23 @@ async def init_services_cli(
 def identity_from_args(args: Any) -> IdentityContext:
     """Build the Stage-0 :class:`IdentityContext` from CLI ``argparse`` flags.
 
-    Reads ``args.tenant`` (defaults to ``'default'`` when absent). The CLI is
-    the seam where ``--tenant <slug>`` becomes the
-    :class:`~promptpotter.domain.identity.TenantId`; everything past this
-    point passes :class:`IdentityContext`, never bare strings.
+    Resolution order:
+
+    1. Explicit ``--tenant <slug>`` always wins (operator override).
+    2. Otherwise, if a developer has registered (the default-tenant claim
+       marker from first web sign-in records their ``user_id``), resolve to
+       *that* registered operator — so a terminal ``new`` / ``resume`` lands in
+       the same single workspace the authenticated web reads, instead of
+       recreating an orphaned anonymous ``projects/default/`` tree.
+    3. Otherwise fall back to anonymous ``default`` (never-registered install).
+
+    The CLI is the seam where the flag/marker becomes the
+    :class:`~promptpotter.domain.identity.TenantId`; everything past this point
+    passes :class:`IdentityContext`, never bare strings.
     """
-    return default_identity(tenant_id=getattr(args, "tenant", None) or "default")
+    from promptpotter.infrastructure.identity import registered_or_default_identity
+
+    return registered_or_default_identity(getattr(args, "tenant", None))
 
 
 def _prepare_cycle(

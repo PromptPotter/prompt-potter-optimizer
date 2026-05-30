@@ -157,3 +157,34 @@ def test_stage1_identity_gates(monkeypatch) -> None:
     for path in allowed:
         assert path.is_file(), f"gate #2 allowlist references missing file: {path}"
     _ = os  # used implicitly by monkeypatch
+
+
+def test_registered_developer_resolution(tmp_path: Path) -> None:
+    """CLI identity: explicit --tenant > registered developer (claim marker) > default.
+
+    Guards the one-workspace invariant — once a developer has signed in (the
+    default-claim marker records their user_id), terminal runs resolve to that
+    tenant instead of recreating an orphaned anonymous ``projects/default/``.
+    """
+    import json
+
+    from promptpotter.infrastructure.identity import (
+        registered_or_default_identity,
+        registered_user_id,
+    )
+    from promptpotter.shared.identity import identity_for_user
+
+    marker = tmp_path / "default_claimed.json"
+    assert registered_user_id(marker) is None  # never registered
+    marker.write_text(json.dumps({"user_id": "default"}), encoding="utf-8")
+    assert registered_user_id(marker) is None  # literal "default" is not a registration
+    marker.write_text(json.dumps({"user_id": "197ee2cf2aea7b14"}), encoding="utf-8")
+    assert registered_user_id(marker) == "197ee2cf2aea7b14"
+
+    # Explicit --tenant always wins, no marker read.
+    assert registered_or_default_identity("acme").tenant_id == TenantId(safe_name("acme"))
+
+    # A registered operator's identity is tenant == user (one workspace).
+    ident = identity_for_user("197ee2cf2aea7b14")
+    assert ident.tenant_id == TenantId("197ee2cf2aea7b14")
+    assert ident.user_id == UserId("197ee2cf2aea7b14")

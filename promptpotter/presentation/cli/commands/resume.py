@@ -279,10 +279,8 @@ async def _drive_optimization(
     observers = _build_observers(args, session, campaign_config, train_data, pre_origin_acc)
     ctx.save_phase("optimizing")
 
-    cycle_dir = session.store.campaigns.cycle_dir(ctx.campaign_id, ctx.cycle_id)
-    session.stop_check = (cycle_dir / ".runtime" / "stop.flag").is_file
-    session.pause_check = (cycle_dir / ".runtime" / "pause.flag").is_file
-
+    # Control-local hooks (stop.flag / pause.flag) are bound centrally in
+    # run_optimization (the single runner seam) so CLI + API launches match.
     cycle_result = await _orch_run_optimization(
         train_data,
         campaign_config,
@@ -435,7 +433,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             diag=False,
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
             spend_budget_usd=getattr(args, "spend_budget_usd", None),
-            tenant=getattr(args, "tenant", "default"),
+            tenant=getattr(args, "tenant", None),
             verbose=getattr(args, "verbose", False),
             session=getattr(args, "session", None),
             json_output=getattr(args, "json_output", False),

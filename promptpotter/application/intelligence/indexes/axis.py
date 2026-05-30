@@ -340,23 +340,28 @@ class AxisIndex:
             return
         modal_total = Counter(all_totals).most_common(1)[0][0]
 
-        scored: list[RunRecord] = []
+        # One run can have several archive entries (e.g. per-sample backfill rows);
+        # collapse to the best record per run_id so the leaderboard never lists the
+        # same run twice (wasted bytes + a misleading panel for L1/L2).
+        best_by_run: dict[str, RunRecord] = {}
         for entry in entries:
             scores = entry.get("scores") or {}
             total = scores.get("total") or 0
             if total != modal_total:
                 continue
-            scored.append(
-                RunRecord(
-                    run_id=entry.get("run_id", ""),
-                    name=entry.get("name", ""),
-                    accuracy=scores.get("accuracy", 0.0),
-                    composite=scores.get("composite_fitness", 0.0),
-                    hits=scores.get("hits", 0),
-                    total=total,
-                )
+            run_id = entry.get("run_id", "")
+            rec = RunRecord(
+                run_id=run_id,
+                name=entry.get("name", ""),
+                accuracy=scores.get("accuracy", 0.0),
+                composite=scores.get("composite_fitness", 0.0),
+                hits=scores.get("hits", 0),
+                total=total,
             )
-        scored.sort(key=lambda r: (-r.composite, -r.accuracy))
+            prev = best_by_run.get(run_id)
+            if prev is None or (rec.composite, rec.accuracy) > (prev.composite, prev.accuracy):
+                best_by_run[run_id] = rec
+        scored = sorted(best_by_run.values(), key=lambda r: (-r.composite, -r.accuracy))
         self._top_runs = scored[:k]
 
     def top_runs(self, k: int = 3) -> list[RunRecord]:

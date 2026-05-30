@@ -30,8 +30,12 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--session", default=None, help="Session ID (default: active)")
     parser.add_argument(
         "--tenant",
-        default="default",
-        help="Tenant partition under .promptpotter/projects/ (default: 'default')",
+        default=None,
+        help=(
+            "Tenant partition under .promptpotter/projects/. Unset → the "
+            "registered developer (default-tenant claim marker) or anonymous "
+            "'default' if never registered. Pass a slug to override."
+        ),
     )
     parser.add_argument(
         "-v",

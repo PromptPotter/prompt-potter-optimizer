@@ -96,10 +96,13 @@ async def run_sweep_batch(
     from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
+    from promptpotter.infrastructure.identity import registered_or_default_identity
     from promptpotter.presentation.cli.session import load_session
-    from promptpotter.shared.identity import default_identity
 
-    identity = default_identity(tenant_id=getattr(args, "tenant", None) or "default")
+    # Same resolution as `new`/`resume`: explicit --tenant > registered
+    # developer (default-claim marker) > anonymous default, so sweep runs join
+    # the one workspace instead of orphaning under `projects/default/`.
+    identity = registered_or_default_identity(getattr(args, "tenant", None))
     tenant_id = identity.tenant_id
     store = build_stores(identity)
     parent_cycle_id = root_ctx.cycle_id

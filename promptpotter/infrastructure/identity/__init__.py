@@ -21,7 +21,11 @@ from promptpotter.infrastructure.identity.bundle import (
 )
 from promptpotter.infrastructure.identity.github import GitHubProviderClient
 from promptpotter.infrastructure.identity.google import GoogleProviderClient, ProviderIdentity
-from promptpotter.infrastructure.identity.migration import maybe_claim_default
+from promptpotter.infrastructure.identity.migration import (
+    maybe_claim_default,
+    registered_or_default_identity,
+    registered_user_id,
+)
 from promptpotter.infrastructure.identity.paths import (
     IdentityPaths,
     default_identity_paths,
@@ -54,4 +58,6 @@ __all__ = [
     "derive_user_id",
     "load_provider_config",
     "maybe_claim_default",
+    "registered_or_default_identity",
+    "registered_user_id",
 ]
