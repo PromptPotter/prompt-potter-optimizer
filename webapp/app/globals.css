@@ -573,6 +573,28 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
   .run-telemetry-cell .run-telemetry-sub{display:none}
   .run-telemetry-delta{display:none}
 }
+/* Mobile (≤640px): the Console head + RunTelemetry strip and the floating
+   StatusAssistant both assumed a desktop single-row head. On a phone the
+   telemetry wraps into a tall multi-row block and the fixed chip
+   (bottom:56px) lands on top of it. Keep the footer one compact swipeable
+   row and lift the chip clear. The chip is position:fixed outside .content,
+   so this is a viewport @media query, not a container query. */
+@media (max-width:640px){
+  .console-head{gap:4px 12px}
+  /* Telemetry drops to its own row under the toggle as one non-wrapping,
+     horizontally-scrollable line — fixed height, no vertical sprawl. */
+  .run-telemetry{width:100%;flex-wrap:nowrap;overflow-x:auto;
+    -webkit-overflow-scrolling:touch;gap:0 14px;margin-left:0;
+    padding-bottom:2px;scrollbar-width:none}
+  .run-telemetry::-webkit-scrollbar{display:none}
+  /* Shed cells already shown elsewhere: unit (the CyclePicker up top),
+     updated (freshness lives in the status dot + "last write" hint). */
+  .run-telemetry-unit,.run-telemetry-updated{display:none}
+  /* Chip clears the compact footer; expanded form spans the width instead
+     of a 260px box smeared over the telemetry. */
+  .status-assistant{bottom:72px;right:12px}
+  .status-assistant.expanded{left:12px;right:12px;min-width:0;max-width:none}
+}
 
 .page-header{display:flex;align-items:center;margin-bottom:0;gap:20px;flex-wrap:wrap}
 .breadcrumb{font-size:13px;color:var(--color-text-secondary);margin-bottom:6px;font-family:var(--font-mono)}

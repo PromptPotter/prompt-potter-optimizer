@@ -13,12 +13,10 @@ from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
 )
-from promptpotter.application.datasets.draft_campaign import (
-    DraftCampaignRegistry,
-)
 from promptpotter.application.datasets.ingest import (
     MAX_UPLOAD_BYTES,
     SlugTakenError,
+    draft_from_dataset,
     ingest_draft,
 )
 from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
@@ -38,7 +36,7 @@ from promptpotter.infrastructure.store import (
 from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import StoreDep, get_draft_registry
 
 _datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
@@ -109,7 +107,7 @@ async def ingest_dataset(
     NOT a Control-remote command — no ``CommandRecord`` lands until the
     operator commits via ``/commands/mint-campaign-from-draft``.
     """
-    registry = _draft_registry(request)
+    registry = get_draft_registry(request)
 
     blob = await file.read()
     if len(blob) > MAX_UPLOAD_BYTES:
@@ -165,12 +163,35 @@ async def ingest_dataset(
     return draft_wire_with_locks(draft)
 
 
-def _draft_registry(request: Request) -> DraftCampaignRegistry:
-    """Pull the registry off ``app.state``; missing registry is a programmer error."""
-    registry: DraftCampaignRegistry | None = getattr(request.app.state, "draft_campaigns", None)
-    if registry is None:
-        raise HTTPException(500, "draft-campaign registry not initialised")
-    return registry
+@_datasets_router.post("/{name}/draft")
+async def draft_from_existing_dataset(
+    name: str, request: Request, store: StoreDep
+) -> dict[str, Any]:
+    """Build a server-held :class:`DraftCampaign` from an authored dataset's files.
+
+    The direct path behind "open this dataset in the setup wizard" — a demo /
+    benchmark / owned Origin becomes a prefilled draft without a browser-side CSV
+    round-trip. Identity-gated through the same resolver as the other dataset
+    reads; like ``/datasets/ingest`` it is NOT a Control-remote command — no
+    ``CommandRecord`` lands until the operator commits via
+    ``/commands/mint-campaign-from-draft``.
+    """
+    registry = get_draft_registry(request)
+    dataset_dir = _resolve_or_404(store, name)
+    try:
+        draft = draft_from_dataset(
+            stores=store, registry=registry, dataset_dir=dataset_dir, dataset_name=name
+        )
+    except IngestError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "ingest_failed",
+                "message": exc.message,
+                "details": {"reason": exc.reason},
+            },
+        ) from None
+    return draft_wire_with_locks(draft)
 
 
 def _resolve_or_404(store: Any, name: str) -> Path:

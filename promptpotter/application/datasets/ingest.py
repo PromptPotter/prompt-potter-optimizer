@@ -13,14 +13,25 @@ Spec: ``docs/specs/m10-origin-resolution-checkin.md`` (CLI parity) +
 
 from __future__ import annotations
 
-from promptpotter.application.datasets.csv_ingest import read_tabular
+import json
+from pathlib import Path
+from typing import Any
+
+from promptpotter.application.datasets.authored import read_authored_dataset
+from promptpotter.application.datasets.csv_ingest import IngestError, read_tabular
 from promptpotter.application.datasets.draft_campaign import (
+    DEFAULT_CONNECTOR,
+    DEFAULT_MAX_ROUNDS,
+    DEFAULT_OPTIMIZER_MODEL,
+    DEFAULT_OPTIMIZER_PROVIDER,
+    DEFAULT_SCORING_COMPOSITE,
     PREVIEW_ROWS,
     DraftCampaign,
     DraftCampaignRegistry,
     default_slug_from_filename,
 )
 from promptpotter.application.datasets.origin_readiness import resolution_block
+from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import validate_dataset_name
 
@@ -87,4 +98,99 @@ def ingest_draft(
     return draft
 
 
-__all__ = ["MAX_UPLOAD_BYTES", "SlugTakenError", "ingest_draft"]
+def _read_json(path: Path) -> dict[str, Any]:
+    """Read a JSON object from *path*; ``{}`` when absent. Lets an authored
+    dataset omit a sidecar (e.g. campaign.json) and still draft from defaults."""
+    if not path.is_file():
+        return {}
+    parsed: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return parsed
+
+
+def draft_from_dataset(
+    *,
+    stores: Stores,
+    registry: DraftCampaignRegistry,
+    dataset_dir: Path,
+    dataset_name: str,
+) -> DraftCampaign:
+    """Build a fully-confirmed :class:`DraftCampaign` straight from an authored
+    dataset's on-disk files — the server-side equivalent of uploading that
+    dataset as a CSV and confirming every field by hand.
+
+    This is the direct path behind "open an existing dataset (demo / benchmark /
+    owned Origin) in the setup wizard": no browser-side CSV reconstruction, no
+    ``/preview`` round-trip, no field-by-field prefill. The dataset's pipeline
+    node config rides through as ``pipeline_overlay``, so committing the draft
+    **preserves the backend model/provider** (a fresh CSV upload would instead
+    fall back to connector defaults). The same ``ingest_draft`` → wizard → commit
+    sequence runs from here on, so both surfaces share one commit path.
+    """
+    cache = _read_json(dataset_dir / "cache.json")
+    rows: list[dict[str, str]] = [
+        {"query": str(it["query"]), "ground_truth": str(it["ground_truth"])}
+        for it in cache.get("items", [])
+        if it.get("query") and it.get("ground_truth")
+    ]
+    if not rows:
+        raise IngestError(
+            reason="empty",
+            message=f"Dataset {dataset_name!r} has no usable (query, ground_truth) rows.",
+        )
+
+    # One validated parse of the dataset's config files. The DEFAULT_* ladders
+    # below fire only where the authored file omits a field — and they
+    # deliberately differ from CampaignConfig's schema defaults (ingest wants
+    # openrouter / 120b / 5 rounds; see the constant docstrings).
+    authored = read_authored_dataset(dataset_dir)
+    cc = authored.campaign_config
+    task = authored.task_description
+    scoring = str(cc.scoring or "").split("(", 1)[0].strip() or DEFAULT_SCORING_COMPOSITE
+    max_rounds = cc.optimization.max_rounds or DEFAULT_MAX_ROUNDS
+    optimizer_provider = cc.optimizer_llm.provider or DEFAULT_OPTIMIZER_PROVIDER
+    optimizer_model = cc.optimizer_llm.model or DEFAULT_OPTIMIZER_MODEL
+    connector = authored.backend_type or DEFAULT_CONNECTOR
+    pipeline_overlay = authored.pipeline_nodes
+
+    base_slug = dataset_name.lower()
+    slug = (
+        stores.tenant_datasets.suggest_free_slug(base_slug)
+        if stores.tenant_datasets.slug_exists(base_slug)
+        else base_slug
+    )
+
+    # headers ["query","ground_truth"] auto-confirm the column mapping in
+    # create(); the config knobs auto-confirm there too. We then state the
+    # task framing + override the knob VALUES from the dataset's own config.
+    draft = registry.create(
+        tenant_id=stores.identity.tenant_id,
+        slug=slug,
+        n_samples=len(rows),
+        sample_preview=rows[:PREVIEW_ROWS],
+        headers=["query", "ground_truth"],
+        source_file=f"dataset:{dataset_name}",
+    )
+    draft = draft.apply_resolution(
+        values={
+            "task_description": task,
+            "connector": connector,
+            "scoring_composite": scoring,
+            "max_rounds": max_rounds,
+            "optimizer_provider": optimizer_provider,
+            "optimizer_model": optimizer_model,
+            "pipeline_overlay": pipeline_overlay,
+        },
+        provenance={"task_description": Provenance.CONFIRMED},
+        sources={"task_description": ProvenanceSource.AUTO},
+    )
+    registry.update(draft)
+    stores.tenant_datasets.write_draft_cache(
+        draft.draft_id,
+        rows,
+        source_file=f"dataset:{dataset_name}",
+        headers=["query", "ground_truth"],
+    )
+    return draft
+
+
+__all__ = ["MAX_UPLOAD_BYTES", "SlugTakenError", "draft_from_dataset", "ingest_draft"]

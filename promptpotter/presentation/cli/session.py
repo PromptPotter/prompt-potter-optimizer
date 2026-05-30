@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -42,6 +41,7 @@ class SessionCtx:
         from promptpotter.application.config import (
             load_campaign_config as validate_campaign_config,
         )
+        from promptpotter.application.datasets import read_campaign_config_file
         from promptpotter.infrastructure.store.paths import DEFAULT_DATASETS_ROOT
 
         dataset_name = self.init_params.get("dataset_name") or ""
@@ -49,7 +49,7 @@ class SessionCtx:
         if dataset_name:
             ds_path = DEFAULT_DATASETS_ROOT / dataset_name / "campaign.json"
             if ds_path.is_file():
-                raw = load_campaign_config(str(ds_path))
+                raw = read_campaign_config_file(ds_path)
         if not raw and self.campaign_id:
             campaign = self.store.campaigns.load_campaign(self.campaign_id)
             if campaign is not None:
@@ -103,14 +103,4 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
     return SessionCtx(store, state, backend_id, session_id, campaign_id, cycle_id)
 
 
-def load_campaign_config(config_path: str | None) -> dict[str, Any]:
-    """Load campaign config JSON, unwrapping the optional outer ``campaign_config`` key."""
-    if not config_path:
-        return {}
-    with open(config_path) as f:
-        data = json.load(f)
-    result: dict[str, Any] = data.get("campaign_config", data) or {}
-    return result
-
-
-__all__ = ["SessionCtx", "load_campaign_config", "load_session", "no_dataset_hint"]
+__all__ = ["SessionCtx", "load_session", "no_dataset_hint"]

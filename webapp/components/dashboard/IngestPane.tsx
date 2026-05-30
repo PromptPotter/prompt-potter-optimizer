@@ -21,6 +21,7 @@ import {
   fetchDatasetIndex,
   fetchLLMProviders,
   IngestApiError,
+  postDraftFromDataset,
   postEditDraftCampaign,
   postIngestDataset,
   postMintCampaign,
@@ -65,9 +66,20 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
   // bare effect that never synchronously setStates.
   const [prevOpen, setPrevOpen] = useState(open);
   const [list, setList] = useState<LoadState>({ kind: "loading" });
+  // Setup-flow state lives here, not in the per-screen children: a CSV drop OR
+  // a demo pick (from EITHER screen) produces a draft, and once a draft exists
+  // the commit wizard renders regardless of which screen launched it. No screen
+  // instant-mints a demo — picking one always lands in the wizard, prefilled.
+  const [draft, setDraft] = useState<DraftCampaignWire | null>(null);
+  const [flowBusy, setFlowBusy] = useState(false);
+  const [flowError, setFlowError] = useState<string | null>(null);
   if (open !== prevOpen) {
     setPrevOpen(open);
-    if (open) setList({ kind: "loading" });
+    if (open) {
+      setList({ kind: "loading" });
+      setDraft(null);
+      setFlowError(null);
+    }
   }
 
   useEffect(() => {
@@ -92,6 +104,34 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
 
   if (!open) return null;
 
+  const ingestFile = async (file: File) => {
+    setFlowError(null);
+    setFlowBusy(true);
+    try {
+      setDraft(await postIngestDataset(file));
+    } catch (e) {
+      setFlowError(IngestApiError.toOperatorMessage(e));
+    } finally {
+      setFlowBusy(false);
+    }
+  };
+
+  // A demo is just a dataset: opening one asks the server to build a prefilled
+  // draft straight from the dataset's files (columns, task, scoring, and the
+  // backend model config all carried), then hands off to the same setup wizard
+  // a dropped CSV uses. Never an instant mint, no browser-side CSV round-trip.
+  const pickDemo = async (entry: DatasetIndexEntry) => {
+    setFlowError(null);
+    setFlowBusy(true);
+    try {
+      setDraft(await postDraftFromDataset(entry.name));
+    } catch (e) {
+      setFlowError(IngestApiError.toOperatorMessage(e));
+    } finally {
+      setFlowBusy(false);
+    }
+  };
+
   const ownedEntries =
     list.kind === "ready" ? list.entries.filter((d) => d.tier === "yours") : [];
   // The try-and-learn demo rides the same "ready-to-run" bucket as benchmarks.
@@ -99,6 +139,44 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
     list.kind === "ready"
       ? list.entries.filter((d) => d.tier === "benchmark" || d.tier === "demo")
       : [];
+
+  const body =
+    draft !== null ? (
+      <DraftCommitFlow
+        draft={draft}
+        onDraftChange={setDraft}
+        onClose={onClose}
+        onMinted={onMinted}
+      />
+    ) : list.kind === "loading" ? (
+      <div className="new-campaign-body">
+        <em className="new-campaign-loading">Loading your collection…</em>
+      </div>
+    ) : list.kind === "error" ? (
+      <div className="new-campaign-body">
+        <p className="new-campaign-error">{list.message}</p>
+      </div>
+    ) : ownedEntries.length === 0 ? (
+      <ChatIngestFlow
+        benchmarks={benchmarkEntries}
+        busy={flowBusy}
+        uploadError={flowError}
+        onFile={ingestFile}
+        onPickDemo={pickDemo}
+        onClose={onClose}
+        onMinted={onMinted}
+      />
+    ) : (
+      <ListAndMintFlow
+        owned={ownedEntries}
+        benchmarks={benchmarkEntries}
+        busy={flowBusy}
+        onPickDemo={pickDemo}
+        onClose={onClose}
+        onMinted={onMinted}
+        onAddOrigin={() => setList({ kind: "ready", entries: benchmarkEntries })}
+      />
+    );
 
   return (
     <div
@@ -122,29 +200,7 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
             ×
           </button>
         </header>
-        {list.kind === "loading" ? (
-          <div className="new-campaign-body">
-            <em className="new-campaign-loading">Loading your collection…</em>
-          </div>
-        ) : list.kind === "error" ? (
-          <div className="new-campaign-body">
-            <p className="new-campaign-error">{list.message}</p>
-          </div>
-        ) : ownedEntries.length === 0 ? (
-          <ChatIngestFlow
-            benchmarks={benchmarkEntries}
-            onClose={onClose}
-            onMinted={onMinted}
-          />
-        ) : (
-          <ListAndMintFlow
-            owned={ownedEntries}
-            benchmarks={benchmarkEntries}
-            onClose={onClose}
-            onMinted={onMinted}
-            onAddOrigin={() => setList({ kind: "ready", entries: benchmarkEntries })}
-          />
-        )}
+        {body}
       </div>
     </div>
   );
@@ -154,61 +210,43 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
 
 function ChatIngestFlow({
   benchmarks,
+  busy,
+  uploadError,
+  onFile,
+  onPickDemo,
   onClose,
   onMinted,
 }: {
   benchmarks: DatasetIndexEntry[];
+  busy: boolean;
+  uploadError: string | null;
+  onFile: (file: File) => void;
+  onPickDemo: (entry: DatasetIndexEntry) => void;
   onClose: () => void;
   onMinted?: (campaignId: string, cycleId: string) => void;
 }) {
-  const [draft, setDraft] = useState<DraftCampaignWire | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const onFileDrop = async (file: File) => {
-    setUploadError(null);
-    setBusy(true);
-    try {
-      const d = await postIngestDataset(file);
-      setDraft(d);
-    } catch (e) {
-      setUploadError(IngestApiError.toOperatorMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (draft === null) {
-    return (
-      <div className="new-campaign-body">
-        <p>
-          Drop a CSV to start your first Origin — any column names work.
-          You&rsquo;ll pick which column is the input and which is the target
-          on the next step.
-        </p>
-        <FileDropZone busy={busy} onFile={onFileDrop} />
-        {uploadError ? <p className="new-campaign-error">{uploadError}</p> : null}
-        {benchmarks.length > 0 ? (
-          <details>
-            <summary>Or run a benchmark</summary>
-            <BenchmarkList
-              benchmarks={benchmarks}
-              onClose={onClose}
-              onMinted={onMinted}
-            />
-          </details>
-        ) : null}
-      </div>
-    );
-  }
-
   return (
-    <DraftCommitFlow
-      draft={draft}
-      onDraftChange={setDraft}
-      onClose={onClose}
-      onMinted={onMinted}
-    />
+    <div className="new-campaign-body">
+      <p>
+        Drop a CSV to start your first Origin — any column names work.
+        You&rsquo;ll pick which column is the input and which is the target
+        on the next step.
+      </p>
+      <FileDropZone busy={busy} onFile={onFile} />
+      {uploadError ? <p className="new-campaign-error">{uploadError}</p> : null}
+      {benchmarks.length > 0 ? (
+        <details>
+          <summary>Or run a benchmark</summary>
+          <BenchmarkList
+            benchmarks={benchmarks}
+            onClose={onClose}
+            onMinted={onMinted}
+            onPickDemo={onPickDemo}
+            busy={busy}
+          />
+        </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -217,22 +255,36 @@ function ChatIngestFlow({
 function ListAndMintFlow({
   owned,
   benchmarks,
+  busy,
   onClose,
   onMinted,
+  onPickDemo,
   onAddOrigin,
 }: {
   owned: DatasetIndexEntry[];
   benchmarks: DatasetIndexEntry[];
+  busy: boolean;
   onClose: () => void;
   onMinted?: (campaignId: string, cycleId: string) => void;
+  onPickDemo: (entry: DatasetIndexEntry) => void;
   onAddOrigin: () => void;
 }) {
   const [picked, setPicked] = useState<string>(owned[0]?.name ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleMint = async () => {
+  const byName = new Map<string, DatasetIndexEntry>();
+  for (const d of [...owned, ...benchmarks]) byName.set(d.name, d);
+
+  const handleStart = async () => {
     if (!picked) return;
+    // A demo runs the prefilled setup wizard (the parent owns the draft) — never
+    // an instant mint — exactly like picking it from the empty-collection screen.
+    const entry = byName.get(picked);
+    if (entry?.tier === "demo") {
+      onPickDemo(entry);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -245,6 +297,8 @@ function ListAndMintFlow({
       setSubmitting(false);
     }
   };
+
+  const working = submitting || busy;
 
   return (
     <div className="new-campaign-body">
@@ -275,10 +329,10 @@ function ListAndMintFlow({
         <button
           type="button"
           className="new-campaign-submit"
-          disabled={submitting || !picked}
-          onClick={handleMint}
+          disabled={working || !picked}
+          onClick={handleStart}
         >
-          {submitting ? "Starting…" : "Start campaign"}
+          {working ? "Starting…" : "Start campaign"}
         </button>
       </footer>
     </div>
@@ -289,10 +343,17 @@ function BenchmarkList({
   benchmarks,
   onClose,
   onMinted,
+  onPickDemo,
+  busy,
 }: {
   benchmarks: DatasetIndexEntry[];
   onClose: () => void;
   onMinted?: (campaignId: string, cycleId: string) => void;
+  // A demo is a dataset: picking one runs the CSV-drop path (handled by the
+  // parent) instead of minting. Benchmarks still mint directly — copying a
+  // full benchmark into the tenant would be wrong.
+  onPickDemo: (entry: DatasetIndexEntry) => void;
+  busy: boolean;
 }) {
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -318,8 +379,8 @@ function BenchmarkList({
           <li key={d.name}>
             <button
               type="button"
-              disabled={submitting !== null}
-              onClick={() => void mint(d.name)}
+              disabled={submitting !== null || busy}
+              onClick={() => (d.tier === "demo" ? onPickDemo(d) : void mint(d.name))}
             >
               {submitting === d.name
                 ? "Starting…"

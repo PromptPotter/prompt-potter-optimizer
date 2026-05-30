@@ -387,6 +387,21 @@ export async function postIngestDataset(
   return (await r.json()) as DraftCampaignWire;
 }
 
+// Open an existing dataset (demo / benchmark / owned Origin) in the setup
+// wizard: the server builds a fully-prefilled DraftCampaign straight from the
+// dataset's files — no browser-side CSV reconstruction, and the dataset's
+// pipeline node config (backend model/provider) is preserved through commit.
+// Like `postIngestDataset`, no campaign exists until the operator commits the
+// returned draft via `postMintCampaignFromDraft`.
+export async function postDraftFromDataset(name: string): Promise<DraftCampaignWire> {
+  const r = await fetch(`${API}/datasets/${encodeURIComponent(name)}/draft`, {
+    method: "POST",
+    cache: "no-store",
+  });
+  if (!r.ok) await _throwApiError(r);
+  return (await r.json()) as DraftCampaignWire;
+}
+
 export interface DraftPatch {
   slug?: string;
   connector?: string;

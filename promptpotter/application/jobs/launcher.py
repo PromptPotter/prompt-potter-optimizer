@@ -29,6 +29,7 @@ from promptpotter.application.config import (
     configure_and_apply_pipeline,
     load_campaign_config,
 )
+from promptpotter.application.datasets import read_campaign_config_file
 from promptpotter.application.datasets.csv_ingest import Table, materialize_samples
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
@@ -125,7 +126,7 @@ async def mint_campaign_command(
         identity=stores.identity,
     )
 
-    file_config = _load_dataset_campaign_config(dataset_root)
+    file_config = read_campaign_config_file(dataset_root / "campaign.json")
     profile = session.store.backends.load_connector_profile(session.backend_id) or {}
     campaign_config = load_campaign_config({**profile, **file_config})
 
@@ -450,8 +451,8 @@ async def start_run_command(
         identity=stores.identity,
     )
 
-    file_config = _load_dataset_campaign_config(
-        resolve_dataset_config_dir(stores, _repo_root(), dataset_name)
+    file_config = read_campaign_config_file(
+        resolve_dataset_config_dir(stores, _repo_root(), dataset_name) / "campaign.json"
     )
     profile = session.store.backends.load_connector_profile(session.backend_id) or {}
     campaign_config = load_campaign_config({**profile, **file_config})
@@ -586,21 +587,6 @@ def _claim_email(stores: Stores) -> str | None:
     """Best-effort read of the OIDC email claim off ``IdentityContext.claims``."""
     raw = stores.identity.claims.get("email")
     return raw if isinstance(raw, str) else None
-
-
-def _load_dataset_campaign_config(dataset_root: Path) -> dict[str, Any]:
-    """Read ``datasets/{name}/campaign.json``; unwrap the optional outer
-    ``campaign_config`` key (the repo on-disk convention). Mirrors the CLI
-    loader at ``presentation/cli/session.py:load_campaign_config``."""
-    path = dataset_root / "campaign.json"
-    if not path.is_file():
-        return {}
-    raw = path.read_text(encoding="utf-8").strip()
-    if not raw:
-        return {}
-    data = json.loads(raw)
-    result: dict[str, Any] = data.get("campaign_config", data) or {}
-    return result
 
 
 __all__ = [

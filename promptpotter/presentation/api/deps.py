@@ -8,6 +8,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 
+from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.store import Stores, build_stores
 from promptpotter.shared.identity import IdentityContext, default_identity
@@ -65,11 +66,20 @@ def read_text_or_404(path: Path, label: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def get_draft_registry(request: Request) -> DraftCampaignRegistry:
+    """Pull the draft-campaign registry off ``app.state``; missing is a programmer error."""
+    registry: DraftCampaignRegistry | None = getattr(request.app.state, "draft_campaigns", None)
+    if registry is None:
+        raise HTTPException(500, "draft-campaign registry not initialised")
+    return registry
+
+
 __all__ = [
     "IdentityDep",
     "StoreDep",
     "build_stores_from_identity",
     "get_backend_or_404",
+    "get_draft_registry",
     "read_text_or_404",
     "resolve_identity",
 ]

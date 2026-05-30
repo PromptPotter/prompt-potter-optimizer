@@ -12,6 +12,11 @@ Three concerns, one per submodule:
   self-optimization).
 """
 
+from promptpotter.application.datasets.authored import (
+    AuthoredDataset,
+    read_authored_dataset,
+    read_campaign_config_file,
+)
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
@@ -47,6 +52,7 @@ __all__ = [
     "DATASET_LOADERS",
     "MAX_SAMPLES",
     "SHEET_COLUMN_MAP",
+    "AuthoredDataset",
     "IngestError",
     "Table",
     "build_dataset_run_data",
@@ -64,6 +70,8 @@ __all__ = [
     "load_node_prompt",
     "load_potter_traces",
     "materialize_samples",
+    "read_authored_dataset",
+    "read_campaign_config_file",
     "read_tabular",
     "sample_dataset",
     "samples_from_dicts",

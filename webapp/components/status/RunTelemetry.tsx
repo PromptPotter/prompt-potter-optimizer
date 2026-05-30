@@ -94,7 +94,7 @@ export function RunTelemetry({ campaignId, cycleId, dash, isLive }: Props) {
   const spend = readSpend(dash);
   return (
     <div className="run-telemetry" role="group" aria-label="Run telemetry">
-      <span className="run-telemetry-cell" title={cycleId ?? ""}>
+      <span className="run-telemetry-cell run-telemetry-unit" title={cycleId ?? ""}>
         <span className="run-telemetry-label">unit</span>
         <code>{shortCycleId(cycleId)}</code>
       </span>
@@ -123,7 +123,7 @@ export function RunTelemetry({ campaignId, cycleId, dash, isLive }: Props) {
           <strong>{lastQuery}</strong>
         </span>
       ) : null}
-      <span className="run-telemetry-cell">
+      <span className="run-telemetry-cell run-telemetry-updated">
         <span className="run-telemetry-label">updated</span>
         <strong>{ageText(dash?.wallclock_serialized_at)}</strong>
       </span>

@@ -35,26 +35,28 @@ export function StatusAssistant({
   const [collapsed, setCollapsed] = useState(false);
   const [paused, setPaused] = useState(false);
 
-  // Reset the collapse state whenever the displayed status changes — a
-  // live → offline flip should re-pop the chip even if it had auto-hidden
-  // a moment ago. statusHint changes alone don't re-pop (the dot already
-  // carries the salient signal). Render-phase guarded reset — the
-  // sanctioned recipe (see webapp/CLAUDE.md § State reset on prop change).
+  // Re-pop the chip on a meaningful transition — a live → offline flip
+  // should reopen it even if it had auto-hidden. Key on `status` (the
+  // kind) ONLY: `statusText` bakes a per-poll counter ("Live · last write
+  // Ns ago") that mutates every tick, so keying on it would re-pop — and
+  // reset the auto-collapse timer below — on every poll, pinning the chip
+  // open forever. Render-phase guarded reset — the sanctioned recipe (see
+  // webapp/CLAUDE.md § State reset on prop change).
   const [prevStatus, setPrevStatus] = useState(status);
-  const [prevStatusText, setPrevStatusText] = useState(statusText);
-  if (status !== prevStatus || statusText !== prevStatusText) {
+  if (status !== prevStatus) {
     setPrevStatus(status);
-    setPrevStatusText(statusText);
     setCollapsed(false);
   }
 
   // Auto-collapse timer. Skipped while already collapsed or while the
   // operator is hovering / has focus inside the chip — toast-pattern UX.
+  // Deps deliberately exclude `statusText` (see above) so the ticking
+  // freshness counter can't keep resetting the 10s timer.
   useEffect(() => {
     if (collapsed || paused) return;
     const t = setTimeout(() => setCollapsed(true), COLLAPSE_AFTER_MS);
     return () => clearTimeout(t);
-  }, [collapsed, paused, status, statusText]);
+  }, [collapsed, paused, status]);
 
   if (collapsed) {
     return (

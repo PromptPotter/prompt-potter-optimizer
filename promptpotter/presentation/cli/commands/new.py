@@ -22,7 +22,7 @@ from promptpotter.presentation.cli.commands._shared import (
     identity_from_args,
     init_services_cli,
 )
-from promptpotter.presentation.cli.session import load_campaign_config, load_session
+from promptpotter.presentation.cli.session import load_session
 from promptpotter.presentation.views.startup_checklist import checkin_line
 
 if TYPE_CHECKING:
@@ -250,10 +250,14 @@ async def _mint_fresh_session(
     """Find-or-create campaign + mint session + root cycle. No scoring (origin runs as phase 0 of the loop).
     Returns ``(session, campaign_config, dataset_name, session_id)``."""
     from promptpotter.application.config import load_campaign_config as _load_cfg
+    from promptpotter.application.datasets import read_campaign_config_file
     from promptpotter.application.origin import prepare_datasets
     from promptpotter.infrastructure.store import session_index
 
-    file_config = load_campaign_config(args.config)
+    # Shared unwrap only — `new` validates AFTER merging with the connector
+    # profile ({**profile, **file_config}), a different composition order than
+    # the draft path, so it keeps its own validate-after-merge step below.
+    file_config = read_campaign_config_file(Path(args.config)) if args.config else {}
     # Resolution order: positional dataset → --dataset-name → config["dataset_name"]
     dataset_name = (
         getattr(args, "dataset", None) or args.dataset_name or file_config.get("dataset_name")
@@ -283,7 +287,7 @@ async def _mint_fresh_session(
     if not args.config and session.dataset_config_dir is not None:
         default_config_path = session.dataset_config_dir / "campaign.json"
         if default_config_path.exists():
-            file_config = load_campaign_config(str(default_config_path))
+            file_config = read_campaign_config_file(default_config_path)
 
     profile = session.store.backends.load_connector_profile(backend_id) or {}
     campaign_config = _load_cfg({**profile, **file_config})

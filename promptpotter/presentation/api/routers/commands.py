@@ -38,13 +38,6 @@ from fastapi import APIRouter, Header, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.datasets.csv_ingest import IngestError
-from promptpotter.application.datasets.draft_campaign import (
-    DEFAULT_CONNECTOR,
-    DEFAULT_MAX_ROUNDS,
-    DEFAULT_SCORING_COMPOSITE,
-    DraftCampaign,
-    DraftCampaignRegistry,
-)
 from promptpotter.application.datasets.origin_readiness import resolution_block
 from promptpotter.application.jobs import JobRegistry
 from promptpotter.application.jobs.launcher import (
@@ -55,7 +48,7 @@ from promptpotter.application.jobs.launcher import (
 )
 from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import StoreDep, get_draft_registry
 from promptpotter.presentation.api.middleware import CommandAcceptedBody, CommandDispatcher
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     CycleScopedKind,
@@ -250,13 +243,6 @@ class _ResolveOriginEnvelope(BaseModel):
     client_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-def _draft_registry(request: Request) -> DraftCampaignRegistry:
-    registry: DraftCampaignRegistry | None = getattr(request.app.state, "draft_campaigns", None)
-    if registry is None:
-        raise HTTPException(500, "draft-campaign registry not initialised")
-    return registry
-
-
 def _require_draft_id(payload: dict[str, Any]) -> str:
     raw = payload.get("draft_id")
     if not isinstance(raw, str) or not raw or len(raw) > 64 or len(raw) < 8:
@@ -284,7 +270,7 @@ async def edit_draft_campaign(
     response is a `DraftCampaign`, not a `CommandAcceptedBody`.
     """
     _ensure_idempotency_key(idempotency_key)
-    registry = _draft_registry(request)
+    registry = get_draft_registry(request)
 
     raw_payload = envelope.payload
     draft_id = _require_draft_id(raw_payload)
@@ -380,7 +366,7 @@ async def resolve_origin(
     deterministic checklist re-gates before the response.
     """
     _ensure_idempotency_key(idempotency_key)
-    registry = _draft_registry(request)
+    registry = get_draft_registry(request)
     draft_id = _require_draft_id(envelope.payload)
     draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
     if draft is None:
@@ -415,7 +401,7 @@ async def mint_campaign_from_draft(
     Per ``docs/specs/m12-api-openapi.yaml::mintCampaignFromDraft``.
     """
     _ensure_idempotency_key(idempotency_key)
-    registry = _draft_registry(request)
+    registry = get_draft_registry(request)
     draft_id = _require_draft_id(envelope.payload)
     draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
     if draft is None:
@@ -484,8 +470,6 @@ async def mint_campaign_from_draft(
                 "details": {"suggested_slug": suggested},
             },
         ) from exc
-    # Quiet the unused-default lint while documenting our smart-default trio.
-    _ = (DEFAULT_CONNECTOR, DEFAULT_SCORING_COMPOSITE, DEFAULT_MAX_ROUNDS, DraftCampaign)
     return {"campaign_id": campaign_id, "cycle_id": cycle_id, "job_id": job.job_id}
 
 
