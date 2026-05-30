@@ -1,5 +1,7 @@
 # State-Sync Cleanup — Pre-Whitelabel Foundation
 
+**Status:** Not started (M12+). All four phases (identity collapse, `dashboard.json` → `state.json` rename, live endpoint, sidecar deletion) unimplemented. The 2026-05-15 `rewrite_active_cycle_id` patch is the only shipped mitigation — masks one symptom, stays until Phase 2 lands. Unscheduled; sequenced after the M12 multi-tenant prerequisites.
+
 Collapse five drifting state surfaces into two so CLI, file tree, and webapp render the same picture. Required before multi-tenant whitelabel — single-operator usage masks the drift today.
 
 ## Problem
@@ -43,7 +45,7 @@ Observed drift: 3↔4 collisions on manual rename (`cycle_0c7c4ceee267` ↔ `cyc
 
 ## Out of scope
 
-Not the control plane itself — that's [`m10-operator-control-loop.md`](m10-operator-control-loop.md) (which depends on Phases 1–3 here). Not a schema migration — only identity (`campaign_id`) is dropped.
+Not the control plane itself — that's [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md) (which depends on Phases 1–3 here). Not a schema migration — only identity (`campaign_id`) is dropped.
 
 ## Whitelabel rationale
 

@@ -1,6 +1,6 @@
 # M13: Chat-First Multi-User Web
 
-**Status:** spec only — no code. Replaces the abandoned `m12-multi-tenant-session-skeleton.md` (sidebar-tree shape mis-targeted product direction). Parent: [`m12-multi-connector.md`](m12-multi-connector.md) (Track 3 webapp Phase 2 unblocks this).
+**Status:** partially shipped — ingest Slice 1 (CSV, `DraftCampaign`, `POST /datasets/ingest`, `mint-campaign-from-draft`) shipped under the M10 lane. **Casual sign-in (OIDC Stage 1 client) is shipped** — Google + GitHub code exchange, allowlist, server-side sessions, `/auth/*` (see [`ADR-0002`](../adr/0002-identity-foundation.md) and roadmap **Already shipped**). **The control-plane endpoints the chat write-path reuses are shipped** ([`ADR-0001`](../adr/0001-m12-control-plane.md)), so the chat surface (steps 4–6) is now **unblocked, not gated** — the `ChatPane` is still an inert placeholder awaiting wiring. Install/User/Project product nouns as webapp-first-class and the cross-user measurement panel remain spec only. Replaces the abandoned `m12-multi-tenant-session-skeleton.md` (sidebar-tree shape mis-targeted product direction). Parent: [`m12-multi-connector.md`](m12-multi-connector.md) (Track 3 webapp Phase 2 unblocks this).
 
 **Depends on:** [`ADR-0002 identity-foundation`](../adr/0002-identity-foundation.md) Stages 1 + 2 — Stage 1 (OIDC client federating to Google / Apple / GitHub) covers casual auth; Stage 2 (becoming an OIDC provider by fronting Zitadel / Ory / Authentik / Keycloak) is considered when self-hosters demand native identity that doesn't depend on third-party providers.
 
@@ -159,11 +159,11 @@ Cross-install sharing (install is a hard isolation boundary; the RLS adapter fro
 
 ## Sequencing (not scheduled)
 
-1. **Identity-foundation Stage 1** lands first (OIDC client + middleware in M12). `Install` / `User` are real, federated to upstream IdPs. `IdentityContext` carries the verified claims. **§0 `Identity` I/O kind amendment lands in this step.**
+1. **Identity-foundation Stage 1 — SHIPPED.** OIDC client + middleware live (`middleware/oidc.py`, mounted `main.py:89`); Google + GitHub federation; `IdentityContext` carries the verified claims. **§0 `Identity` I/O kind amendment lands/landed with this step.** *(Stage 0.5 caveat: RLS / SCIM data isolation not yet enforced.)*
 2. Project as first-class noun on disk (`projects/{tenant}/datasets/{slug}/` — `tenant_id` already collapses install + user per ADR-0002 no-drift gate #3; no extra `users/{uid}/projects/{pid}/` nesting). Identity-scoped per `IdentityContext`.
 3. Webapp project view (drop-three-things upload; campaign comparison rides existing per-cycle data).
 4. Chat shell, read-only (query optimizer state).
-5. Chat write-path (steer / interrupt / fork; reuses M12 Track 3 control-plane endpoints).
+5. Chat write-path (steer / interrupt / fork) — **unblocked: the M12 control-plane endpoints it reuses are shipped** ([`ADR-0001`](../adr/0001-m12-control-plane.md)). Remaining work is wiring `ChatPane` to those verbs + querying state via `/api/v1/live` (∴ after state-sync P3).
 6. Cross-user measurement panel.
 7. **Identity-foundation Stage 2** — considered when self-hosters demand native identity (no third-party dependency) and/or B2B SSO / SCIM. Front Zitadel / Ory / Keycloak / Authentik as a sibling process; the OIDC client we already wrote re-targets to our own issuer URL. No application-code rewrite.
 

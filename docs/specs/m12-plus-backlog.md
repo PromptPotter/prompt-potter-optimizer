@@ -2,7 +2,7 @@
 
 **Version:** 0.2.0
 **Date:** 2026-04-28
-**Status:** Unscheduled
+**Status:** Unscheduled — opportunistic; items promoted individually to their own specs when picked up.
 **Depends on:** M12 (Multi-Connector, Competitor Comparison, Webapp Phase 2)
 
 ---
@@ -35,6 +35,8 @@ M12+ is the opportunistic bucket. Items here ship after M12 as user demand, time
 | Pipeline variant comparison | Compare pipelines (not just searchpoints within a pipeline). Needs second connector from M12 |
 | Non-prompt targets | Optimize scoring functions, fuzzy matchers, retrieval queries, GA settings — not just prompt strings |
 | Evolutionary operators | Population-based search (GA / DE) as an alternative to critique-guided generation |
+| AlphaEvolve code-harness (optional) | Evolve *code* (not just prompts) for the `llm_only` path — a small sandboxed code-execution node the optimizer can mutate, in the AlphaEvolve spirit. Largely subsumed now that prompt + `pipeline_params` evolution covers live targets; **optional, not urgent** — revisit if a code-target dataset appears. Overlaps Non-prompt targets + Evolutionary operators |
+| Synthetic dataset from one hold-out (far-horizon) | *"To make a synthetic dataset you need only one hold-out question."* Generate a population-representative synthetic set from a single example, deleting the dataset-provision requirement entirely. Hard, possibly unsolvable; **not on the horizon**, accepted as a known long-shot. Concept: [`synthetic-data.md`](synthetic-data.md) |
 | MCP server mode | Expose PromptPotter as MCP tools to Claude Code and other MCP clients |
 | ~~Self-optimization (L4) — completion~~ | **Promoted to M12** ([`m12-multi-connector.md`](m12-multi-connector.md) Track 4). M10 ships partial (`m10-prompt-iteration-framework.md` + `m10-cleanup.md` §3.5 contract pin + self-optimization fixture); M11 ships the connector ([`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) Track 5); M12 ships the outer-loop closure run. The residual blocker that originally lived here (PromptPotter-as-backend adapter + `pipeline.json`) is now M11 Track 5 work. |
 | Model comparison matrix | Same benchmark across multiple target LLMs |

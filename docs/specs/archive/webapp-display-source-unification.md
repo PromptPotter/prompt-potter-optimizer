@@ -318,8 +318,8 @@ justlogic` or similar):
 - **Backwards-compatibility with on-disk `dashboard.json` files** —
   per project rule, none. Operators resume; projection re-emits.
 - **Webapp control plane (launch/stop/resume/fork)** — that's
-  `m10-operator-control-loop.md`; this spec leaves write paths to
-  that arc.
+  `docs/adr/0001-m12-control-plane.md`; this spec leaves write paths
+  to that contract.
 - **Multi-tenant / auth / SaaS hardening** — `docs/adr/0001-m12-control-plane.md`.
 - **Schema validation of `dashboard.json`** — useful but separable;
   scope to its own follow-up if Phase 8 surfaces drift.

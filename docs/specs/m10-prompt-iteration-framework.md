@@ -1,6 +1,6 @@
 # M10: Prompt-Iteration Framework + L1-generate Tuning
 
-**Status:** active. Live mechanism is the `/potter-l1-meta-campaign` skill + [`../developer/l1-meta-campaign.md`](../developer/l1-meta-campaign.md).
+**Status:** partially-shipped. Sweep toolkit + unified fork primitive + behavior checks wired. Exit gate (`rounds_to_95 ≤ 5`, `proxy_lift_corr ≥ 0.6` over ≥4 paired branches) not yet met. Live iteration mechanism: `/potter-l1-meta-campaign` skill + [`../developer/l1-meta-campaign.md`](../developer/l1-meta-campaign.md).
 
 **Goal:** `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`.
 
@@ -8,7 +8,7 @@
 
 Tune the four optimizer meta-prompts (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`) by giving the operator + Claude per-cycle structured feedback. `l1_generate` is the principal bottleneck — the loop only descends gradient when L1 produces useful variants. Auto-tuning (L4) is too expensive at this scale; the framework's job is to give the operator the same quality of feedback an L4 would consume.
 
-**L4 partial.** `proxy_lift_corr` validates the cheap proxy, the unified fork primitive is the cheap-trial mechanism, behavior checks are the conformance signal, `review.md` + `L1Stats` are per-cycle features. PromptPotter-as-backend (M12+) is the eventual L4 driver. **Sibling mini-milestone:** [`m10-operator-control-loop.md`](m10-operator-control-loop.md).
+**L4 partial.** `proxy_lift_corr` validates the cheap proxy, the unified fork primitive is the cheap-trial mechanism, behavior checks are the conformance signal, `review.md` + `L1Stats` are per-cycle features. PromptPotter-as-backend (M12+) is the eventual L4 driver.
 
 ## Open tracks
 

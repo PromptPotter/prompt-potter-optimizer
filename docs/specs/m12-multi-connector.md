@@ -1,8 +1,8 @@
 # M12: Multi-Connector, Competitor Comparison, L4 Closure, Composite Fitness
 
-> **Status:** Partial — Track 1 (connector boundary + TermNorm) shipped (`ed95509`); remainder forward direction.
+> **Status:** Partial — Track 1 (connector boundary + TermNorm) shipped (`ed95509`); **config-driven lookup shipped** (`pipeline.json::backend_type` read in `bootstrap/wiring.py`, not hardcoded); **second connector `promptpotter.py` shipped + registered** (`connectors/__init__.py`); **control plane shipped** ([`ADR-0001`](../adr/0001-m12-control-plane.md)); **composite P1 = spend shipped** ([`ADR-0003`](../adr/0003-spend-and-tenancy.md)). Still open: the **L4 closure run** (inner-cycle dispatch + the actual campaign + `proxy_lift_corr` re-validation), **composite P2–P4**, **competitor numbers**.
 
-Second connector + competitor numbers + L4 closure + composite fitness still open.
+L4-closure run + competitor numbers + composite P2–P4 still open; the connector *boundary* and the self-connector are done.
 
 ## What this covers
 
@@ -11,7 +11,7 @@ Generalize the connector boundary (TermNorm is currently the only registered con
 ## Status
 
 - **Connector boundary — shipped.** `Connector` dataclass at `connectors/protocol.py`; registry at `connectors/__init__.py`; TermNorm at `connectors/termnorm.py`. Four hooks per connector: `wire_adapter`, `session_factory`, `extract_experiment`, `resolve_ground_truth`.
-- **Webapp control plane — extracted** to [`m10-operator-control-loop.md`](m10-operator-control-loop.md) (single-operator) + [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md) (multi-user SaaS).
+- **Webapp control plane** — the Control-remote contract at [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md); single-operator surface decayed into [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md).
 
 ## Open items
 

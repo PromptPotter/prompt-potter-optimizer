@@ -1,7 +1,7 @@
-# M13 — Onboarding Lockout
+# M10 — Onboarding Lockout
 
-**Status:** shipped · 2026-05-27
-**Sibling spec:** [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md) — separate, longer-arc workstream; both ship independently under the M13 tag.
+**Status:** shipped · 2026-05-27 (M10 current-beta lane).
+**Sibling spec:** [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md) — separate, longer-arc M13 workstream; they ship independently.
 
 Invite-gated front door for the live beta at `https://app.promptpotter.dev`. One slice of the v0.7.0 hosting arc: OIDC + allowlist + per-user quotas (`feat(m10): multi-user beta hosting`, `ADR-0002` Stage 1) + `deploy-linux/` (systemd + Cloudflare Tunnel) + this lockout.
 

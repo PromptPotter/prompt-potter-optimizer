@@ -2,7 +2,7 @@
 
 **HITL is not a separate I/O kind** — it collapses into the existing fork primitive.
 
-The operator forks via `resume --fork-on-divergence` (CLI). A webapp "Fork from here" button is planned (see [`../specs/m10-operator-control-loop.md`](../specs/m10-operator-control-loop.md) for the design). The fork mints a sibling cycle rooted at the chosen offset via `CycleEventLog.inherit_from(parent, offset)`; the new cycle inherits the parent's typed state at the cut and L1 picks up from there.
+The operator forks via `resume --fork-on-divergence` (CLI). A webapp "Fork from here" button is planned (see [`../adr/0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md) for the Control-remote design). The fork mints a sibling cycle rooted at the chosen offset via `CycleEventLog.inherit_from(parent, offset)`; the new cycle inherits the parent's typed state at the cut and L1 picks up from there.
 
 **Stop run.** Webapp's "Stop run" button writes `{cycle_dir}/.runtime/stop.flag`. The running loop's `Session.stop_check` polls the flag at the start of each round and exits cleanly; recorded as a `PhaseRecord` with `stop_reason="hitl_stop"`. CLI equivalent: Ctrl+C (first finishes in-flight, second force-quits).
 

@@ -76,7 +76,7 @@ tags:
 #   - 6 sanctioned POSTs migrated off active.py / backends.py (fork, stop,
 #     delete, cleanup-empty, register-backend, sync-backend-experiments).
 #   - 2 CLI verbs hoisted into the wire surface (mint-campaign = `new`,
-#     start-run = `resume` / launcher in m10-operator-control-loop).
+#     start-run = `resume` / launcher per ADR-0001 control plane).
 #   - 5 M12-new commands (pause, step, rewind-to-round, change-spend-budget,
 #     change-pipeline-param) — plan-listed v0 candidates.
 #
@@ -497,7 +497,7 @@ paths:
         Spawns the JobRegistry-tracked runner against an existing cycle.
         `kind: new` re-mints the root state of a stub cycle; `kind: resume`
         attaches to the cycle's current ledger tail. Tracked under
-        m10-operator-control-loop Track C.
+        ADR-0001 control plane (cycle-lifecycle commands).
       tags: [cycle-lifecycle]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'

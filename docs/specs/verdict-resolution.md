@@ -1,6 +1,6 @@
 # Spec: Verdict-Resolution Adaptive Queue Mechanism
 
-**Status:** Draft. Supersedes [`bayesian-sample-picker.md`](archive/bayesian-sample-picker.md).
+**Status:** Phase 1 **shipped** (`c714bffd`) — `explore_weight`, `model_information_gain`, `predictive_hit_prob` removed from `promptpotter/`; ranking unified on `decision_information_gain`. Supersedes [`bayesian-sample-picker.md`](archive/bayesian-sample-picker.md). Phase 2 (origin-relative observation weighting) deferred.
 
 ---
 
