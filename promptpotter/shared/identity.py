@@ -44,7 +44,14 @@ class IdentityContext:
 
 
 def _admin_caps_from_env() -> frozenset[str]:
-    """Return Stage-0 admin capabilities when ``PROMPTPOTTER_ADMIN=1`` is set."""
+    """Stage-0 admin capabilities when ``PROMPTPOTTER_ADMIN=1`` is set.
+
+    Sound ONLY on the single-operator Stage-0 box (auth-off CLI / local dev),
+    where "the box's operator" and "the identity" are the same principal. The
+    multi-user OIDC path MUST NOT use this — a process-wide flag there would
+    grant the capability to every signup. There, admin is pinned to the
+    registered-developer identity (`oidc.py`, per ADR-0004 secure-by-default).
+    """
     if os.environ.get(PROMPTPOTTER_ADMIN_ENV, "").strip() == "1":
         return frozenset({BENCHMARKS_READ_CAP})
     return frozenset()

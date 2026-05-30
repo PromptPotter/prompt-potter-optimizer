@@ -23,6 +23,12 @@ from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.backend_store import BackendStore
 from promptpotter.infrastructure.store.base import validate_path_component, write_json
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    DatasetRef,
+    list_readable_datasets,
+    readable_dataset_dir,
+)
 from promptpotter.infrastructure.store.diagnostic_run_store import DiagnosticRunStore
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.paths import (
@@ -138,6 +144,8 @@ def walk_cycle_lineage(tenant_root: Path, campaign_id: str, cycle_id: str) -> li
 __all__ = [
     "BackendStore",
     "CampaignStore",
+    "DatasetAccessError",
+    "DatasetRef",
     "DiagnosticRunStore",
     "MeasurementArchive",
     "OptimizerCallCache",
@@ -153,8 +161,10 @@ __all__ = [
     "campaign_root_dir_for",
     "clear_active_pointer",
     "cycle_dir_for",
+    "list_readable_datasets",
     "mint_session_id",
     "read_active_pointer",
+    "readable_dataset_dir",
     "root_cycle_id",
     "save_active_pointer",
     "session_dir_for",

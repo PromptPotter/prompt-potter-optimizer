@@ -28,23 +28,19 @@ from promptpotter.application.intelligence.measurement_series import (
 )
 from promptpotter.application.jobs.launcher import draft_wire_with_locks
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.infrastructure.store import campaign_root_dir_for, cycle_dir_for
+from promptpotter.infrastructure.store import (
+    DatasetAccessError,
+    campaign_root_dir_for,
+    cycle_dir_for,
+    list_readable_datasets,
+    readable_dataset_dir,
+)
 from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
-from promptpotter.infrastructure.store.paths import (
-    DEFAULT_DATASETS_ROOT,
-    validate_dataset_name,
-)
 from promptpotter.presentation.api.deps import StoreDep
-from promptpotter.shared.identity import BENCHMARKS_READ_CAP
 
 _datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
-
-# Built-in try-and-learn demo datasets (repo `datasets/{slug}/`). Surfaced in the
-# collection only while `User.demo_mode_enabled` is on; kept out of the benchmark
-# tier so the flag is the single control over their visibility.
-DEMO_DATASET_SLUGS: tuple[str, ...] = ("demo-tickets",)
 
 # `cycle` (one cycle's Rasch fit) / `campaign` (pooled) / `dataset` (cross-campaign archive).
 # Workspace scope would be meaningless (samples differ per dataset), so the tier stops at dataset.
@@ -80,65 +76,21 @@ class DatasetIndexResponse(BaseModel):
 
 @_datasets_router.get("", response_model=DatasetIndexResponse)
 async def list_datasets(store: StoreDep) -> DatasetIndexResponse:
-    """Tenant Origins + (if the identity holds ``datasets.benchmarks.read``) benchmarks.
+    """Every dataset this identity may read — tenant Origins, demo origins (while
+    demo mode is on), and install benchmarks (only with ``datasets.benchmarks.read``).
 
-    Identity-scoped: web tenants only see their own collection. The bleed-
-    through bug (every signup seeing the developer's locally cached
-    ``aime_2025`` / ``bbeh`` / ... benchmarks) is closed by gating
-    ``tier: "benchmark"`` rows on :data:`BENCHMARKS_READ_CAP`.
+    The visibility policy lives once in ``store/dataset_access.py`` and is shared
+    with the per-dataset read endpoints, so the picker can never list a dataset
+    that ``GET /datasets/{name}/...`` would then deny.
     """
-    out: list[DatasetIndexEntry] = []
-
-    for slug in store.tenant_datasets.list_slugs():
-        dataset_dir = store.tenant_datasets.dataset_dir(slug)
-        out.append(
+    return DatasetIndexResponse(
+        datasets=[
             DatasetIndexEntry(
-                name=slug,
-                title=_read_dataset_title(dataset_dir),
-                tier="yours",
-                n_samples=_read_n_samples(dataset_dir),
+                name=ref.name, title=ref.title, tier=ref.tier, n_samples=ref.n_samples
             )
-        )
-
-    if BENCHMARKS_READ_CAP in store.identity.capabilities and DEFAULT_DATASETS_ROOT.is_dir():
-        for entry in sorted(DEFAULT_DATASETS_ROOT.iterdir()):
-            if entry.name in DEMO_DATASET_SLUGS:
-                continue  # demo datasets surface via the flag below, not the benchmark tier
-            if not entry.is_dir() or not (entry / "pipeline.json").is_file():
-                continue
-            try:
-                validate_dataset_name(entry.name)
-            except ValueError:
-                continue
-            out.append(
-                DatasetIndexEntry(
-                    name=entry.name,
-                    title=_read_dataset_title(entry),
-                    tier="benchmark",
-                    n_samples=_read_n_samples(entry),
-                )
-            )
-
-    # Try-and-learn demo origin(s) — surfaced while the user keeps demo mode on
-    # (default). Repo datasets, minted in place; the flag is the sole control,
-    # so they never appear via the benchmark tier above.
-    user = store.users.get_or_create(
-        user_id=str(store.identity.user_id),
-        tenant_id=str(store.identity.tenant_id),
+            for ref in list_readable_datasets(store)
+        ]
     )
-    if user.demo_mode_enabled:
-        for slug in DEMO_DATASET_SLUGS:
-            demo_dir = DEFAULT_DATASETS_ROOT / slug
-            if (demo_dir / "pipeline.json").is_file():
-                out.append(
-                    DatasetIndexEntry(
-                        name=slug,
-                        title=_read_dataset_title(demo_dir),
-                        tier="demo",
-                        n_samples=_read_n_samples(demo_dir),
-                    )
-                )
-    return DatasetIndexResponse(datasets=out)
 
 
 @_datasets_router.post("/ingest")
@@ -221,55 +173,29 @@ def _draft_registry(request: Request) -> DraftCampaignRegistry:
     return registry
 
 
-def _read_dataset_title(dataset_dir: Path) -> str | None:
-    md = dataset_dir / "dataset.md"
-    if not md.is_file():
-        return None
-    for line in md.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("# "):
-            return stripped[2:].strip() or None
-    return None
+def _resolve_or_404(store: Any, name: str) -> Path:
+    """Resolve *name* through the identity-aware gateway; 404 if not readable.
 
-
-def _read_n_samples(dataset_dir: Path) -> int:
-    """Cheap read of ``cache.json::row_count`` (falls back to ``items`` length)."""
-    cache = dataset_dir / "cache.json"
-    if not cache.is_file():
-        return 0
-    try:
-        raw = json.loads(cache.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return 0
-    row_count = raw.get("row_count")
-    if isinstance(row_count, int):
-        return row_count
-    items = raw.get("items")
-    return len(items) if isinstance(items, list) else 0
-
-
-def _check_dataset_name(name: str) -> None:
-    """Translate ``validate_dataset_name``'s ``ValueError`` to ``HTTPException(400)``."""
-    try:
-        validate_dataset_name(name)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-
-
-def _load_dataset_cache(name: str) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
-    """Validate name, load ``cache.json``, normalise sample-id keys to int.
-
-    Sample-id key varies on disk (``id`` canonical, BBEH HF emits
-    ``sample_id``) — normalise at the read boundary. Raises
-    ``HTTPException`` on invalid name / missing file.
+    The 404 (rather than 403) keeps the existence-leak posture: a non-admin can't
+    tell a benchmark apart from a non-existent dataset. All dataset-directory
+    access in this router goes through here — never a raw ``benchmarks_root`` read.
     """
-    _check_dataset_name(name)
-    datasets_root = DEFAULT_DATASETS_ROOT.resolve()
-    cache_path = (datasets_root / name / "cache.json").resolve()
-    if not cache_path.is_relative_to(datasets_root):
-        raise HTTPException(400, "Invalid dataset name")
+    try:
+        return readable_dataset_dir(store, name)
+    except DatasetAccessError as exc:
+        raise HTTPException(404, f"Dataset '{name}' not found") from exc
+
+
+def _load_dataset_cache(dataset_dir: Path) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
+    """Load ``cache.json`` from a resolved dataset dir; normalise sample-id keys to int.
+
+    Sample-id key varies on disk (``id`` canonical, BBEH HF emits ``sample_id``) —
+    normalise at the read boundary. Raises ``HTTPException(404)`` when the resolved
+    dir carries no cache. The dir is already access-checked by :func:`_resolve_or_404`.
+    """
+    cache_path = dataset_dir / "cache.json"
     if not cache_path.is_file():
-        raise HTTPException(404, f"Dataset '{name}' not found")
+        raise HTTPException(404, f"Dataset '{dataset_dir.name}' not found")
     raw = json.loads(cache_path.read_text(encoding="utf-8"))
     sample_lookup: dict[int, dict[str, Any]] = {}
     for item in raw["items"]:
@@ -423,7 +349,8 @@ async def get_dataset_preview(
     series carrying ≥1 dot = measured). Rasch δ persists across rounds + inherits from parent
     fits, so it overcounts on its own.
     """
-    raw, sample_lookup = _load_dataset_cache(name)
+    dataset_dir = _resolve_or_404(store, name)
+    raw, sample_lookup = _load_dataset_cache(dataset_dir)
 
     artifact = _resolve_scope_artifact(
         store,
@@ -490,9 +417,8 @@ async def get_dataset_preview(
     # Train/test split from campaign config — display-only; held-out test never materialized.
     split_train: int | None = None
     split_test: int | None = None
-    datasets_root = DEFAULT_DATASETS_ROOT.resolve()
-    campaign_path = (datasets_root / name / "campaign.json").resolve()
-    if campaign_path.is_relative_to(datasets_root) and campaign_path.is_file():
+    campaign_path = dataset_dir / "campaign.json"
+    if campaign_path.is_file():
         cc = json.loads(campaign_path.read_text(encoding="utf-8"))
         declared = (cc.get("campaign_config") or {}).get("dataset_split")
         if isinstance(declared, dict):
@@ -558,7 +484,7 @@ async def get_dataset_measurement_series(
     """Chronological per-sample series for the Meas heat-map column. Aligned to `/preview` order
     + limit so clients can zip by sample_id. `ord` is opaque (only used for row alignment).
     """
-    raw, sample_lookup = _load_dataset_cache(name)
+    raw, sample_lookup = _load_dataset_cache(_resolve_or_404(store, name))
 
     artifact = _resolve_scope_artifact(
         store,
@@ -622,13 +548,13 @@ class DatasetPipelineResponse(BaseModel):
 
 
 @_datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
-async def get_dataset_pipeline(name: str) -> DatasetPipelineResponse:
-    """Return the dataset overlay's parsed pipeline schema and graph view."""
-    _check_dataset_name(name)
-    datasets_root = DEFAULT_DATASETS_ROOT.resolve()
-    pipeline_path = (datasets_root / name / "pipeline.json").resolve()
-    if not pipeline_path.is_relative_to(datasets_root):
-        raise HTTPException(400, "Invalid dataset name")
+async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
+    """Return the dataset overlay's parsed pipeline schema and graph view.
+
+    Identity-gated through the same resolver as the other dataset reads — there is
+    no unauthenticated path to a benchmark's pipeline/overlay config.
+    """
+    pipeline_path = _resolve_or_404(store, name) / "pipeline.json"
     if not pipeline_path.is_file():
         raise HTTPException(404, f"Dataset '{name}' has no pipeline.json")
     raw = json.loads(pipeline_path.read_text(encoding="utf-8"))

@@ -870,6 +870,32 @@ def test_cli_identity_resolves_through_registered_resolver() -> None:
     )
 
 
+def test_api_does_not_read_benchmarks_root_directly() -> None:
+    """Dataset-dir access in `presentation/api/` (the web trust boundary) must route
+    through the capability-aware gateway (`store/dataset_access.py`), never a raw
+    `DEFAULT_DATASETS_ROOT` / `.benchmarks_root` read.
+
+    Inline per-handler reads are how the benchmark capability check got skipped on
+    the preview/pipeline endpoints (a non-admin could pull install-benchmark content
+    the picker hid). Forcing every API read through `readable_dataset_dir` makes the
+    check structural — a handler that bypasses the gateway can't reach the data. The
+    on-box CLI (`presentation/cli/`) is the trusted zone and is intentionally out of
+    scope: shell access already moots a capability gate there.
+    """
+    forbidden = re.compile(r"DEFAULT_DATASETS_ROOT|\.benchmarks_root\b")
+    offenders = [
+        py.relative_to(_SRC_ROOT.parent).as_posix()
+        for py in (_SRC_ROOT / "presentation" / "api").rglob("*.py")
+        if forbidden.search(py.read_text(encoding="utf-8"))
+    ]
+    assert not offenders, (
+        "presentation/api/ reads the benchmarks root directly — route dataset access "
+        "through store/dataset_access.py (readable_dataset_dir / "
+        "list_readable_datasets) so the capability gate can't be skipped:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
 def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
     """Append decision/phase/snapshot; ``iter()`` preserves types."""
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc1"))

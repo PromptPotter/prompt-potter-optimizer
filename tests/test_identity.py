@@ -210,3 +210,16 @@ def test_registered_developer_resolution(tmp_path: Path) -> None:
     ident = identity_for_user("197ee2cf2aea7b14")
     assert ident.tenant_id == TenantId("197ee2cf2aea7b14")
     assert ident.user_id == UserId("197ee2cf2aea7b14")
+
+    # Web capability pinning (oidc.py) rides the SAME marker: BENCHMARKS_READ_CAP
+    # is granted to the registered developer's session and to NO other identity.
+    # A first-time signup never sees the install benchmarks — the bleed-through
+    # the M13 ingest arc closed must not reopen via a process-wide admin switch
+    # (ADR-0004 pinned-operator model, not a blanket grant).
+    from promptpotter.presentation.api.middleware.oidc import _session_capabilities
+    from promptpotter.shared.identity import BENCHMARKS_READ_CAP
+
+    bundle = MagicMock()
+    bundle.paths.default_claim_marker = marker  # marker == registered 197ee2cf…
+    assert _session_capabilities("197ee2cf2aea7b14", bundle) == frozenset({BENCHMARKS_READ_CAP})
+    assert _session_capabilities("a_brand_new_signup", bundle) == frozenset()

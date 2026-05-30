@@ -101,10 +101,15 @@ class Stores:
     ``projects_root`` is the parent-of-all-tenant-dirs (the workspace root).
     The relation is fixed: ``base_dir = projects_root / identity.tenant_id``.
     Use ``projects_root`` directly — do not re-walk ``base_dir.parent``.
+
+    ``benchmarks_root`` is the install-global ``datasets/`` dir (repo benchmarks,
+    shared across tenants). Access to it is capability-gated — go through
+    ``store/dataset_access.py``, never read this path directly from a handler.
     """
 
     base_dir: Path
     projects_root: Path
+    benchmarks_root: Path
     identity: IdentityContext
     backends: BackendStore
     tenant_datasets: TenantDatasetStore
@@ -142,6 +147,7 @@ def build_stores(
     return Stores(
         base_dir=tenant_dir,
         projects_root=root,
+        benchmarks_root=ds_root,
         identity=identity,
         backends=BackendStore(tenant_dir, ds_root),
         tenant_datasets=TenantDatasetStore(tenant_dir),
