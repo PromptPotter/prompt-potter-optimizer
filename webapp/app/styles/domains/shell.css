@@ -4,6 +4,11 @@
    Toggle the .sidebar-collapsed class on .shell to switch widths;
    CSS transitions handle the animation. */
 .shell{--sidebar-width:200px;display:flex;height:var(--vh-full);min-height:700px}
+/* Skip-to-content — off-screen until it takes keyboard focus, then it
+   parks at the top-left over the shell. First Tab from page load lands
+   here so a keyboard user can bypass the sidebar + topbar. */
+.skip-link{position:absolute;left:8px;top:-48px;z-index:1000;padding:8px 14px;background:var(--color-accent);color:var(--color-accent-contrast,#fff);border-radius:var(--border-radius-md);font-size:13px;text-decoration:none;transition:top .15s ease}
+.skip-link:focus{top:8px}
 .shell.sidebar-collapsed{--sidebar-width:36px}
 .shell.sidebar-hidden{--sidebar-width:0px}
 .shell.sidebar-hidden > .sidebar{display:none}
