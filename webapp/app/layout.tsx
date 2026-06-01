@@ -1,10 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
+import { BRAND, softwareApplicationLd } from "@/lib/brand";
 
 export const metadata: Metadata = {
-  title: "PromptPotter — Live Unit",
-  description: "PromptPotter operator dashboard",
+  metadataBase: new URL(BRAND.url),
+  title: `${BRAND.shortName} — Live Unit`,
+  description: BRAND.description,
+  applicationName: BRAND.shortName,
+  // publisher = the distributing brand; provider authored the software.
+  publisher: BRAND.publisher.name,
+  authors: [{ name: BRAND.provider.name, url: BRAND.provider.url }],
+  creator: BRAND.provider.name,
 };
 
 export const viewport: Viewport = {
@@ -32,6 +39,13 @@ export default function RootLayout({
     <html lang="en">
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
+        {/* schema.org provenance — who publishes vs. who powers this unit.
+            The crawler/agent-readable surface; the About pane shows the same
+            object via softwareApplicationLd(). */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareApplicationLd()) }}
+        />
       </head>
       <body>
         <AuthProvider>{children}</AuthProvider>

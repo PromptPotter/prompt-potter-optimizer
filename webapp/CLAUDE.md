@@ -8,6 +8,10 @@ Next.js 16.2.5 + React 19.2.4 + TypeScript, static export at `out/` mounted at `
 
 The central register is **light / editorial-cobalt** (cobalt `#090C9B` accent, oxblood `#55251D` depth, taupe `#C5AFA4` tint, olive `#696047` muted, warm-bone `#F5F1EA` paper — no orange). The webapp loads in light by default (`app/layout.tsx` pre-paint script, `var t = s || 'light'`). Dark is **DOOM/lava**, opt-in for deep operator work — a distinct register, not a recolor; orange lives only there. Theme change swaps palette + density + framing together via `[data-theme="…"]` on `<html>`.
 
+## Brand identity / "About this unit"
+
+`lib/brand.ts` is the single source of brand identity (name, publisher vs. provider, URLs), each `NEXT_PUBLIC_*`-overridable for whitelabel. It feeds three real surfaces — the Web App Manifest (`app/manifest.ts`), the schema.org `SoftwareApplication` JSON-LD in `<head>` (`app/layout.tsx`), and the Account → "About this unit" pane (`components/account/AboutUnit.tsx`). **`publisher`** = the distributing host (overridable); **`provider`** = PromptPotter (fixed — it's the provenance fact). The app **version** is not duplicated here: it's server-owned (`APP_VERSION`) and read live from `/api/v1/health`. Provenance is `self-declared` until a signed credential lands — never render a "verified" state while `BRAND.verification` says otherwise.
+
 ## Stack-drift warning
 
 Next.js 16 has breaking changes from prior versions — APIs, file conventions, and config differ from earlier training data. Before touching framework-level code (config, routing, build, async-component shapes), read the relevant section of `node_modules/next/dist/docs/` and heed deprecation notices in the CLI output. React 19 likewise: `use()`, `Actions`, ref-as-prop, removed `forwardRef` boilerplate.

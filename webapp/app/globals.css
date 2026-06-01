@@ -1848,6 +1848,42 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .activity-chart-svg{width:100%;height:90px;display:block}
 .activity-chart-empty{margin:6px 0 4px 0;font-size:12px;color:var(--color-text-tertiary);font-style:italic}
 
+/* About-this-unit pane — embed provenance / meta-info window. Renders the
+   schema.org manifest; reuses .account-row for label/value rhythm. */
+.about-unit-head{display:flex;align-items:flex-start;gap:14px;padding:4px 0 18px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.about-unit-mark{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:9px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary);color:var(--color-accent)}
+.about-unit-id{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 auto;padding-top:2px}
+.about-unit-name{font-size:16px;font-weight:600;color:var(--color-text-primary)}
+.about-unit-tagline{font-size:12px;line-height:1.45;color:var(--color-text-tertiary);max-width:46ch}
+.about-unit-pill{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:500;letter-spacing:0.01em;white-space:nowrap}
+.about-unit-pill-icon{font-size:11px;line-height:1}
+.about-unit-pill.declared{background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary)}
+.about-unit-pill.verified{background:var(--color-success-bg);border:0.5px solid var(--color-success-border);color:var(--color-success)}
+.about-unit-org{display:flex;flex-direction:column;gap:2px}
+.about-unit-org-name{font-size:14px;font-weight:500;color:var(--color-text-primary)}
+.about-unit-org-link{font-size:12px;color:var(--color-accent);text-decoration:none;width:fit-content}
+.about-unit-org-link:hover{text-decoration:underline}
+.about-unit-mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:13px;color:var(--color-text-primary)}
+.about-unit-links{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+.about-unit-resource{font-size:13px;color:var(--color-accent);text-decoration:none;width:fit-content}
+.about-unit-resource:hover{text-decoration:underline}
+.about-unit-disclosure-trigger{display:inline-flex;align-items:center;gap:6px;width:fit-content;background:transparent;border:0;padding:2px 0;font-size:12px;font-weight:500;color:var(--color-text-secondary);cursor:pointer}
+.about-unit-disclosure-trigger:hover{color:var(--color-accent)}
+.about-unit-caret{display:inline-block;font-size:13px;line-height:1;transition:transform .2s ease}
+.about-unit-caret.open{transform:rotate(90deg)}
+.about-unit-disclosure{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s cubic-bezier(.2,.8,.2,1)}
+.about-unit-disclosure.open{grid-template-rows:1fr}
+.about-unit-disclosure-inner{overflow:hidden;min-height:0}
+.about-unit-disclosure-inner p{margin:8px 0 0;font-size:12.5px;line-height:1.55;color:var(--color-text-secondary)}
+.about-unit-disclosure-inner strong{color:var(--color-text-primary);font-weight:600}
+.about-unit-manifest-controls{display:flex;align-items:center;gap:14px}
+.about-unit-copy{background:transparent;border:0.5px solid var(--color-border-tertiary);border-radius:5px;padding:3px 10px;font-size:11px;color:var(--color-text-secondary);cursor:pointer}
+.about-unit-copy:hover{border-color:var(--color-accent);color:var(--color-accent)}
+.about-unit-code{margin:10px 0 0;padding:12px 14px;border:0.5px solid var(--color-border-tertiary);border-radius:6px;background:var(--color-background-secondary);font-family:var(--font-mono);font-size:11.5px;line-height:1.55;color:var(--color-text-primary);max-height:280px;overflow:auto;white-space:pre;user-select:text}
+@media (prefers-reduced-motion: reduce){
+  .about-unit-caret,.about-unit-disclosure{transition:none}
+}
+
 /* WelcomeLockoutModal-specific account-modal variant. The auth prompt is
    narrower than the operator AccountModal (380 vs 820) and shape-shifts
    on phone (.account-overlay mobile rules below override max-width).

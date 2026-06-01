@@ -9,6 +9,7 @@
 //           tokens — over a selectable window.
 
 import { useEffect, useState } from "react";
+import { AboutUnit } from "./AboutUnit";
 import {
   fetchActivity,
   fetchMe,
@@ -29,7 +30,7 @@ interface Props {
   onClose: () => void;
 }
 
-type AccountTab = "profile" | "security" | "activity" | "preferences";
+type AccountTab = "profile" | "security" | "activity" | "preferences" | "about";
 
 const PROVIDER_LABEL: Record<string, string> = {
   google: "Google",
@@ -143,6 +144,15 @@ export function AccountModal({ open, onClose }: Props) {
                 Preferences
               </button>
             </li>
+            <li>
+              <button
+                type="button"
+                className={`account-nav-item${tab === "about" ? " active" : ""}`}
+                onClick={() => setTab("about")}
+              >
+                About this unit
+              </button>
+            </li>
           </ul>
         </nav>
         <section className="account-pane">
@@ -154,7 +164,9 @@ export function AccountModal({ open, onClose }: Props) {
                   ? "Security"
                   : tab === "preferences"
                     ? "Preferences"
-                    : "Activity"}
+                    : tab === "about"
+                      ? "About this unit"
+                      : "Activity"}
             </h3>
             <button
               type="button"
@@ -167,11 +179,14 @@ export function AccountModal({ open, onClose }: Props) {
           </header>
           <div className="account-pane-body">
             {error ? <p className="account-error">{error}</p> : null}
-            {!me && !error ? <p className="account-loading">Loading…</p> : null}
+            {!me && !error && (tab === "profile" || tab === "security") ? (
+              <p className="account-loading">Loading…</p>
+            ) : null}
             {me && tab === "profile" ? <ProfileTab me={me} /> : null}
             {me && tab === "security" ? <SecurityTab me={me} /> : null}
             {open && tab === "activity" ? <ActivityTab /> : null}
             {open && tab === "preferences" ? <PreferencesTab /> : null}
+            {open && tab === "about" ? <AboutUnit /> : null}
           </div>
         </section>
       </div>

@@ -20,6 +20,19 @@ export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse
   return jget<ActiveSessionResponse>(`${API}/active`, signal);
 }
 
+// Server health + the single-source app version (`APP_VERSION`, surfaced by
+// the `/health` route in `main.py`). The About pane reads version from here
+// rather than carrying a build-time copy that could drift.
+export interface HealthResponse {
+  status: string;
+  service: string;
+  timestamp: string;
+  version: string;
+}
+export function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
+  return jget<HealthResponse>(`${API}/health`, signal);
+}
+
 // Live state of the active session — the stable façade keyed on the active
 // pointer (no campaign/cycle ids needed). New data panels and chat
 // state-reads code against this rather than the per-cycle dashboard route,
