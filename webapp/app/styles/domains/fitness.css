@@ -37,10 +37,15 @@
    of the card — no wasted empty space above the legend. .fitness-body
    uses display:contents so its children participate directly in the
    card's grid without needing a JSX restructure. */
-.fitness-card.whatif-open{display:grid;grid-template-columns:432px minmax(0,1fr);column-gap:18px;align-items:start}
+/* Two rows: title (auto) + a flexible chart row. The What-If panel spans
+   both rows in col 2; because the panel is taller than title+chart, the
+   1fr chart row soaks up that extra height and `align-self:start` pins the
+   chart directly under the title — the slack lands BELOW the chart, never
+   as a gap above it. (Pre-fix the chart dropped to the bottom-left.) */
+.fitness-card.whatif-open{display:grid;grid-template-columns:432px minmax(0,1fr);grid-template-rows:auto 1fr;column-gap:18px;align-items:start}
 .fitness-card.whatif-open > .card-title{grid-column:1;grid-row:1;max-width:432px}
 .fitness-card.whatif-open > .fitness-body{display:contents}
-.fitness-card.whatif-open .fitness-chart-wrap{grid-column:1;grid-row:2;width:432px}
+.fitness-card.whatif-open .fitness-chart-wrap{grid-column:1;grid-row:2;width:432px;align-self:start}
 .fitness-card.whatif-open .fitness-whatif{grid-column:2;grid-row:1 / span 2;align-self:stretch;min-width:0;margin-top:0;padding-top:0;padding-left:18px;border-top:0;border-left:0.5px solid var(--color-border-tertiary)}
 @media (max-width:960px){
   .fitness-card.whatif-open{display:flex;flex-direction:column}

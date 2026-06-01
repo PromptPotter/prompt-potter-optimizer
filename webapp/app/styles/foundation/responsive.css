@@ -191,8 +191,9 @@
 }
 
 /* ── Rotate-to-landscape prompt (Phase 0 foundation) ──────────────
-   Dense visualisations (FamilyTree, WhatIfGrid, WorkflowCanvas,
-   HardSamplesHeatmap, RoundFileView, etc.) wrap in <RotatePrompt>.
+   Dense visualisations (FamilyTree, WhatIfGrid, HardSamplesHeatmap,
+   RoundFileView, leverage, console, etc.) wrap in <RotatePrompt>. The
+   Dashboard-tab boxes deliberately do NOT — they're sized to fit portrait.
    On portrait phone (orientation:portrait + width<bp-rotate) the
    wrapper renders the rotate card and hides children via CSS. On
    landscape or ≥bp-rotate the children render at full density.

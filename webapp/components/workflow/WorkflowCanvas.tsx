@@ -1,12 +1,24 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { CANVAS_W, CANVAS_H, DOT_R, EDGES, LAYOUT, phaseToNodeId } from "./layout";
+import {
+  CANVAS_W,
+  CANVAS_H,
+  CANVAS_V_W,
+  CANVAS_V_H,
+  DOT_R,
+  EDGES,
+  EDGES_V,
+  LAYOUT,
+  LAYOUT_V,
+  phaseToNodeId,
+} from "./layout";
 import { TERMS } from "@/lib/terms";
 import { getCss } from "@/lib/theme";
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
+import { useIsPortraitPhone } from "@/lib/useMediaQuery";
 import { useSelection } from "@/components/dashboard/SelectionContext";
+import { cx } from "@/lib/cx";
 import type { NodeDataLike, PipelineDoc } from "./types";
-import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 // Edge variants — collapses three parallel switches (stroke colour key,
 // dasharray, arrowhead marker id) into one row per kind. Add a kind:
@@ -29,6 +41,13 @@ interface Props {
 
 export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
   const view = pipeline?.view;
+  // Portrait phone re-flows the pipeline top-to-bottom; everything else
+  // keeps the wide left-to-right layout. Same graph, swapped geometry.
+  const vertical = useIsPortraitPhone();
+  const layout = vertical ? LAYOUT_V : LAYOUT;
+  const edges = vertical ? EDGES_V : EDGES;
+  const canvasW = vertical ? CANVAS_V_W : CANVAS_W;
+  const canvasH = vertical ? CANVAS_V_H : CANVAS_H;
   const activeId = phaseToNodeId(dash?.state);
   // Node selection rides the shared SelectionContext so the Now lane can
   // swap the 3-col row for OptimizerNodeDetail when a node is picked.
@@ -79,15 +98,13 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
 
   if (!view) {
     return (
-      <RotatePrompt surfaceName="The optimizer canvas" skipRender>
-        <div className="workflow-card">
-          <div className="workflow-toolbar">
-            <span style={{ flex: 1 }}>Optimizer</span>
-            <span id="wf-status" style={{ color: "var(--color-text-tertiary)" }}>● topology pending</span>
-          </div>
-          <div className="workflow-canvas-bg" style={{ minHeight: 200 }} />
+      <div className="workflow-card">
+        <div className="workflow-toolbar">
+          <span style={{ flex: 1 }}>Optimizer</span>
+          <span id="wf-status" style={{ color: "var(--color-text-tertiary)" }}>● topology pending</span>
         </div>
-      </RotatePrompt>
+        <div className="workflow-canvas-bg" style={{ minHeight: 200 }} />
+      </div>
     );
   }
 
@@ -101,7 +118,6 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
   };
 
   return (
-    <RotatePrompt surfaceName="The optimizer canvas" skipRender>
     <div className="workflow-card">
       <div className="workflow-toolbar">
         <span style={{ flex: 1 }}>Optimizer</span>
@@ -132,11 +148,11 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
         )}
       </div>
       <div className="workflow-canvas-bg">
-        <div className="workflow-canvas">
+        <div className={cx("workflow-canvas", vertical && "vertical")}>
           <svg
             width="100%"
             height="100%"
-            viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
+            viewBox={`0 0 ${canvasW} ${canvasH}`}
             preserveAspectRatio="xMidYMid meet"
             style={{ position: "absolute", inset: 0 }}
             aria-hidden="true"
@@ -149,7 +165,7 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
               ))}
             </defs>
             {view.edges.map((e) => {
-              const geom = EDGES[`${e.from}>${e.to}`];
+              const geom = edges[`${e.from}>${e.to}`];
               if (!geom) return null;
               const v = EDGE_VARIANTS[geom.kind] ?? EDGE_VARIANTS.forward;
               const stroke = colors[v.color];
@@ -163,7 +179,7 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
               );
             })}
             {view.nodes.map((n) => {
-              const pos = LAYOUT[n.id];
+              const pos = layout[n.id];
               if (!pos) return null;
               const data = currentNodes[n.id];
               const hasData = !!data;
@@ -191,6 +207,11 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
                       ? data?.model || "—"
                       : "idle";
               const tip = TERMS[`node_${n.id}`] || undefined;
+              // Label placement: default is centred below the dot; the
+              // vertical layout overrides to sit beside the dot.
+              const lDx = pos.labelDx ?? 0;
+              const lDy = pos.labelDy ?? DOT_R + 12;
+              const lAnchor = pos.labelAnchor ?? "middle";
               return (
                 <g
                   key={n.id}
@@ -213,18 +234,18 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
                   <circle className={dotCls} cx={pos.cx} cy={pos.cy} r={DOT_R} />
                   <text
                     className="wf-dot-label"
-                    x={pos.cx}
-                    y={pos.cy + DOT_R + 12}
-                    textAnchor="middle"
+                    x={pos.cx + lDx}
+                    y={pos.cy + lDy}
+                    textAnchor={lAnchor}
                   >
                     {n.label}
                   </text>
                   {sub && (
                     <text
                       className="wf-dot-sub"
-                      x={pos.cx}
-                      y={pos.cy + DOT_R + 24}
-                      textAnchor="middle"
+                      x={pos.cx + lDx}
+                      y={pos.cy + lDy + 12}
+                      textAnchor={lAnchor}
                     >
                       {sub}
                     </text>
@@ -236,7 +257,6 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
         </div>
       </div>
     </div>
-    </RotatePrompt>
   );
 }
 

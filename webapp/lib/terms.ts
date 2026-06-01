@@ -22,7 +22,7 @@ export const TERMS: Record<string, string> = {
   phase_between_candidates: "Between candidates — short pause between candidate evaluations.",
 
   // Workflow nodes
-  node_origin:    "Origin: the unmodified starting prompt, scored as the floor.",
+  node_checkin:   "Check-in & origin: resolves the dataset's origin, then scores the unmodified starting prompt as the floor.",
   node_l1_generate: "L1 Generate: produces N candidate prompts from current framing + critique.",
   node_l1_score:    "L1 Score: runs each candidate over the dataset, computes composite_fitness.",
   node_l1_critique: "L1 Critique: reads round results, writes the critique L1 Generate reads next round.",

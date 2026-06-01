@@ -13,7 +13,7 @@
     "@tanstack/react-virtual": "^3.13.26",
     "chart.js": "^4.5.1",
     "marked": "^18.0.3",
-    "next": "16.2.5",
+    "next": "16.2.6",
     "react": "19.2.4",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "19.2.4"
@@ -26,9 +26,9 @@
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "^1.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.5",
+    "eslint-config-next": "16.2.6",
     "jsdom": "^29.1.1",
     "typescript": "^5",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.8"
   }
 }

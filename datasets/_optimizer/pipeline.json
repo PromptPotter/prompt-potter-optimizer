@@ -127,11 +127,6 @@
         "kind": "llm"
       },
       {
-        "id": "origin",
-        "label": "origin",
-        "kind": "phase"
-      },
-      {
         "id": "l3_plan",
         "label": "l3_plan",
         "kind": "llm"
@@ -170,11 +165,6 @@
       },
       {
         "from": "checkin",
-        "to": "origin",
-        "kind": "forward"
-      },
-      {
-        "from": "origin",
         "to": "l1_generate",
         "kind": "forward"
       },
@@ -191,20 +181,17 @@
       {
         "from": "l1_critique",
         "to": "output",
-        "kind": "forward",
-        "label": "converged"
+        "kind": "forward"
       },
       {
         "from": "l1_critique",
         "to": "l1_generate",
-        "kind": "loop",
-        "label": "next round"
+        "kind": "loop"
       },
       {
         "from": "l1_critique",
         "to": "l2_context",
-        "kind": "escalate",
-        "label": "L1 stall"
+        "kind": "escalate"
       },
       {
         "from": "l2_context",
@@ -215,8 +202,7 @@
       {
         "from": "l1_critique",
         "to": "l3_plan",
-        "kind": "escalate",
-        "label": "L2 stall"
+        "kind": "escalate"
       },
       {
         "from": "l3_plan",

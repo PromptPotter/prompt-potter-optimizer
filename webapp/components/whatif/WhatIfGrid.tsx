@@ -4,7 +4,6 @@ import { type Row } from "./meta";
 import { whatifIconFor } from "./icons";
 import { type BarSlot } from "./FitnessChart";
 import { FitnessRankSummary } from "./FitnessRankSummary";
-import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface Props {
   rows: Row[];
@@ -25,7 +24,6 @@ export function WhatIfGrid({
   onToggle,
 }: Props) {
   return (
-    <RotatePrompt surfaceName="The what-if grid">
     <div className="fitness-whatif">
       <div className="whatif-legend">
         <span><span className="swatch checked">✓</span>selected (counts in what-if)</span>
@@ -82,6 +80,5 @@ export function WhatIfGrid({
         <FitnessRankSummary bars={bars} selected={selected} />
       </div>
     </div>
-    </RotatePrompt>
   );
 }

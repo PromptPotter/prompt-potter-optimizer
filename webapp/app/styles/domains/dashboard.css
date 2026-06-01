@@ -139,11 +139,14 @@
    it instead of as a separated row below. Cards are equal-height and
    align-items:start so a tall one (lineage with many forks) never
    forces the others taller. */
-.dash-row-triad{width:100%;display:grid;grid-template-columns:minmax(460px,auto) minmax(0,1fr);grid-template-areas:"fitness lineage";gap:18px;align-items:start}
+/* One shared card height drives the whole row — lineage height == fitness
+   height by construction (the operator's "Lineage same size as Fitness").
+   Shrinks together on mobile via the --triad-card-h override below. */
+.dash-row-triad{--triad-card-h:240px;width:100%;display:grid;grid-template-columns:minmax(460px,auto) minmax(0,1fr);grid-template-areas:"fitness lineage";gap:18px;align-items:start}
 .dash-row-triad > *{min-width:0}
-.dash-row-triad > .fitness-card{grid-area:fitness;justify-self:start;min-height:240px;margin-left:0;margin-right:0}
-.dash-row-triad > .lineage-card{grid-area:lineage;justify-self:stretch;height:240px}
-.dash-row-triad > .inspector-panel{grid-area:inspector;min-height:240px;height:auto;max-height:520px;overflow:auto}
+.dash-row-triad > .fitness-card{grid-area:fitness;justify-self:start;min-height:var(--triad-card-h);margin-left:0;margin-right:0}
+.dash-row-triad > .lineage-card{grid-area:lineage;justify-self:stretch;height:var(--triad-card-h)}
+.dash-row-triad > .inspector-panel{grid-area:inspector;min-height:var(--triad-card-h);height:auto;max-height:520px;overflow:auto}
 .dash-row-triad > .fitness-card,
 .dash-row-triad > .lineage-card,
 .dash-row-triad > .inspector-panel{display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
@@ -170,6 +173,13 @@
   .dash-row-triad{grid-template-columns:1fr;grid-template-areas:"fitness" "lineage" "inspector";max-width:none}
   .dash-row-triad > .fitness-card{justify-self:stretch}
   .dash-row-triad:has(> .fitness-card.whatif-open){grid-template-columns:1fr;grid-template-areas:"fitness" "lineage" "inspector"}
+}
+/* Phone (≤640px): the triad cards shrink together so the whole dashboard
+   reads in portrait without the rotate prompt. The chart frame drops in
+   step with the shared card height so the bars stay proportional. */
+@media (max-width:640px){
+  .dash-row-triad{--triad-card-h:200px}
+  .dash-row-triad .fitness-chart-frame{height:140px}
 }
 
 /* Top row — TopStrip on the left, round-tabs strip on the right. The
