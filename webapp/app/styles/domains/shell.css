@@ -1,0 +1,135 @@
+/* Shell + sidebar + main + topbar.
+   --sidebar-width drives both the sidebar's flex slot and the
+   viewport-centering compensation on .dash-spine-narrow below.
+   Toggle the .sidebar-collapsed class on .shell to switch widths;
+   CSS transitions handle the animation. */
+.shell{--sidebar-width:200px;display:flex;height:var(--vh-full);min-height:700px}
+.shell.sidebar-collapsed{--sidebar-width:36px}
+.shell.sidebar-hidden{--sidebar-width:0px}
+.shell.sidebar-hidden > .sidebar{display:none}
+.sidebar{width:var(--sidebar-width);flex-shrink:0;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column;padding:16px 0;overflow:hidden}
+.sidebar-toggle{position:absolute;top:8px;right:6px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;cursor:pointer;color:var(--color-text-tertiary);font-size:14px;font-family:inherit;border-radius:4px}
+.sidebar-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
+.sidebar > .sidebar-toggle{position:relative;align-self:flex-end;margin-right:6px;margin-bottom:8px}
+.shell.sidebar-collapsed .sidebar > .brand,
+.shell.sidebar-collapsed .sidebar > .sidebar-primary,
+.shell.sidebar-collapsed .sidebar > .unit-library,
+.shell.sidebar-collapsed .sidebar > .sidebar-footer{display:none}
+.brand{padding:8px 16px 20px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:8px}
+.brand-name{font-size:16px;font-weight:500}
+.brand-sub{font-size:11px;letter-spacing:.1em;color:var(--color-text-tertiary)}
+.nav-item{display:flex;align-items:center;gap:8px;padding:8px 16px;cursor:pointer;color:var(--color-text-secondary);font-size:14px;transition:background .1s;background:none;border:none;width:100%;text-align:left;font-family:inherit}
+.nav-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
+.nav-item.active{color:var(--color-accent);background:var(--color-background-tint-active);font-weight:500}
+.nav-item.disabled{opacity:.45;cursor:not-allowed}
+.nav-item.disabled:hover{background:transparent;color:var(--color-text-secondary)}
+.nav-item.disabled svg{opacity:.4 !important}
+.sidebar-footer{margin-top:auto;padding:12px 16px;border-top:0.5px solid var(--color-border-tertiary)}
+.sidebar-footer-item{font-size:13px;color:var(--color-text-tertiary);padding:5px 0}
+/* Primary sidebar CTA — "+ New campaign". Matches the Replit-style
+   "Create something new" pattern: full-width, prominent, sits between
+   the brand and the campaign library. */
+.sidebar-primary{padding:8px 12px 6px;display:flex;flex-direction:column;gap:6px}
+.sidebar-cta{display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 12px;background:var(--color-background-tint,rgba(255,255,255,0.04));color:var(--color-text-primary);border:0.5px solid var(--color-border);border-radius:8px;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;width:100%}
+.sidebar-cta:hover{background:var(--color-background-hover);border-color:var(--color-text-secondary)}
+/* Campaign library — chat-history-style list of every campaign on disk
+   under the tenant, each expanding to its unit-tree. Active per CLI
+   bullet-marked; currently-viewed highlighted. The list is kept current
+   by the shared workspace poll. */
+.unit-library{margin-top:14px;padding:0 8px;border-top:0.5px solid var(--color-border-tertiary);padding-top:10px;display:flex;flex-direction:column;min-height:0;flex:1}
+.unit-library-head{display:flex;align-items:center;padding:0 8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
+.unit-library-note{padding:4px 8px;font-size:12px;color:var(--color-text-tertiary)}
+.unit-library-note code{font-size:11px}
+/* Empty-state onboarding card — shown when the sidebar has zero campaigns. */
+.unit-library-empty{padding:12px 10px;display:flex;flex-direction:column;gap:6px}
+.unit-library-empty .empty-headline{font-size:13px;font-weight:500;color:var(--color-text-secondary)}
+.unit-library-empty .empty-body{font-size:12px;color:var(--color-text-tertiary)}
+.unit-library-empty .empty-cmd{margin:2px 0;padding:6px 8px;background:var(--color-surface-elev,rgba(255,255,255,.04));border:0.5px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;overflow-x:auto;white-space:nowrap}
+.unit-library-empty .empty-cmd code{font-family:var(--font-mono,monospace);color:var(--color-text-secondary)}
+.unit-library-empty .empty-hint{font-size:11px;color:var(--color-text-tertiary)}
+.unit-library-empty .empty-hint code{font-size:11px}
+/* Lifecycle tabs — Active / Archived. Deleted is hidden from the UI;
+   reach for the file tree by campaign id to recover one. */
+.unit-library-tabs{display:flex;gap:4px;padding:4px 8px 6px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.unit-library-tab{flex:1;padding:4px 8px;background:transparent;border:0;border-bottom:1.5px solid transparent;cursor:pointer;font-family:inherit;font-size:11px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.04em}
+.unit-library-tab:hover{color:var(--color-text-primary)}
+.unit-library-tab.active{color:var(--color-accent);border-bottom-color:var(--color-accent);font-weight:500}
+/* Per-campaign three-dots menu. Sits at the right edge of the campaign
+   row; the dropdown floats over adjacent rows so a long campaign list
+   doesn't shift when one row is open. */
+.campaign-menu{position:relative;flex-shrink:0;display:inline-flex;align-items:center}
+.campaign-menu-trigger{background:transparent;border:0;color:var(--color-text-tertiary);font-size:14px;line-height:1;padding:2px 6px;cursor:pointer;border-radius:4px}
+.campaign-menu-trigger:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
+.campaign-menu-trigger[aria-expanded="true"]{color:var(--color-accent);background:var(--color-background-tint-active)}
+.campaign-menu-trigger:disabled{cursor:default;opacity:.5}
+.campaign-menu-list{position:absolute;top:100%;right:0;z-index:10;min-width:140px;margin-top:2px;padding:4px 0;background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.4);display:flex;flex-direction:column}
+.campaign-menu-item{padding:6px 12px;background:transparent;border:0;text-align:left;cursor:pointer;font-family:inherit;font-size:12px;color:var(--color-text-secondary)}
+.campaign-menu-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
+.campaign-menu-item-danger{color:var(--color-status-error,#dc2626)}
+.campaign-menu-item-danger:hover{color:var(--color-status-error,#dc2626);background:var(--color-background-hover)}
+.campaign-menu-err{margin-left:4px;color:var(--color-status-error,#dc2626);font-weight:700;font-size:11px}
+/* Dataset filter chip-bar — narrows the flat campaign list to one dataset.
+   Shown only when 2+ datasets have campaigns on disk. */
+.unit-library-filter{display:flex;flex-wrap:wrap;gap:4px;padding:0 8px 8px}
+.unit-library-filter-chip{padding:1px 8px;background:transparent;border:1px solid var(--color-border);border-radius:10px;cursor:pointer;font-family:inherit;font-size:11px;color:var(--color-text-tertiary);line-height:1.5}
+.unit-library-filter-chip:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+.unit-library-filter-chip.active{background:var(--color-background-tint-active);border-color:var(--color-accent);color:var(--color-accent);font-weight:500}
+/* Dim origin-hash tail next to an unlabelled campaign name — disambiguates
+   two campaigns on the same dataset without stealing focus from the name. */
+.unit-library-hash{margin-left:6px;font-size:10px;color:var(--color-text-tertiary);font-variant-numeric:tabular-nums}
+.unit-library-list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1}
+.unit-library-item{display:flex;align-items:flex-start;gap:6px;padding:6px 8px;background:transparent;border:0;border-radius:6px;cursor:pointer;width:100%;text-align:left;font-family:inherit;color:var(--color-text-secondary);font-size:13px}
+.unit-library-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
+.unit-library-item.selected{background:var(--color-background-tint-active);color:var(--color-accent);font-weight:500}
+.unit-library-mark{width:10px;flex-shrink:0;text-align:center;color:var(--color-accent);font-size:10px;line-height:1.4}
+.unit-library-row{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+.unit-library-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unit-library-meta{font-size:11px;color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unit-library-live{color:var(--color-status-success,#16a34a);margin-left:4px;font-size:8px;vertical-align:middle}
+.unit-library-missing{color:var(--color-text-tertiary);margin-left:4px;font-size:10px;vertical-align:middle}
+/* Unit-kind badge on a non-root unit row (fork / diag / sweep). Small,
+   uppercase, low-contrast — a qualifier, not a focal point. The root unit
+   gets no badge. */
+.unit-library-kind{display:inline-block;margin-left:6px;padding:0 4px;border-radius:3px;background:var(--color-background-secondary,rgba(127,127,127,0.18));border:0.5px solid var(--color-border);color:var(--color-text-tertiary);font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;vertical-align:middle}
+/* Tiny clickable chips alongside the % on a family row — one per child
+   kind (forks/sweeps/diag). Sits OUTSIDE the row's <button> so we don't
+   nest interactive elements; flex on the family wrapper keeps it on the
+   same baseline. Click = toggle the family's expand state. */
+.unit-library-chips{display:inline-flex;gap:3px;align-items:center;margin-left:6px;flex-shrink:0}
+/* The chip needs to read as a button at a glance. Earlier styling stacked
+   three "subtle" tokens (hover-tint bg, tertiary text, 10px, 0.5px border)
+   and the chip was effectively invisible against the sidebar. Real chip
+   color + 1px border + secondary text + min-width gives a clear silhouette. */
+.unit-library-chip{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:28px;padding:1px 5px;background:var(--color-background-secondary,rgba(127,127,127,0.18));border:1px solid var(--color-border);border-radius:4px;cursor:pointer;font-family:inherit;color:var(--color-text-secondary);font-size:11px;font-weight:500;line-height:1.3}
+.unit-library-chip:hover{background:var(--color-background-tint-active);color:var(--color-accent);border-color:var(--color-accent)}
+.unit-library-chip-glyph{font-weight:600;opacity:0.75}
+.unit-library-chip-count{font-variant-numeric:tabular-nums}
+/* Family row = chevron + clickable label + count chips. Hover is unified
+   across the whole row (chevron + item + chips) so the operator sees one
+   continuous tint, not a three-region split. The `:not(.selected)` on the
+   hover rule is load-bearing — without it, hovering a selected row would
+   paint hover-grey over the accent tint and the row would flash deselected.
+   Inner `.unit-library-item` hover keeps the brighter text color but
+   drops its own background so it doesn't paint over the family hover. */
+.unit-library-family{display:flex;align-items:center;gap:2px;padding:0 4px;border-radius:6px}
+.unit-library-family > .unit-library-item{flex:1;min-width:0;width:auto}
+.unit-library-family:not(.selected):hover{background:var(--color-background-hover)}
+.unit-library-family > .unit-library-item:hover{background:transparent;color:var(--color-text-primary)}
+.unit-library-family.selected{background:var(--color-background-tint-active)}
+.unit-library-family.selected .unit-library-item.selected{background:transparent}
+.unit-library-twist{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:9px;padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px}
+.unit-library-twist:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
+.unit-library-twist:disabled{cursor:default;visibility:hidden}
+.unit-library-children{list-style:none;margin:2px 0 4px 14px;padding:0;border-left:1px solid var(--color-border-tertiary)}
+.unit-library-group{margin:2px 0}
+.unit-library-grouphead{padding:2px 8px;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
+.unit-library-group ul{list-style:none;margin:0;padding:0}
+.unit-library-child{padding-left:10px;font-size:12px}
+/* Live badge in the breadcrumb — passive indicator that the dashboard
+   poll is seeing fresh writes. dashState.status === "live" drives it. */
+.live-badge{display:inline-flex;align-items:center;gap:3px;margin-left:8px;padding:1px 6px;border-radius:10px;background:var(--color-status-success,#16a34a);color:#fff;font-size:10px;font-weight:500;letter-spacing:0.03em}
+/* Breadcrumb affordance shown only while the view is pinned to a campaign
+   (workspace `following` is false) — one click resumes following the
+   CLI's active campaign. */
+.follow-active-btn{display:inline-flex;align-items:center;gap:4px;margin-left:8px;padding:2px 8px;border-radius:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);font-family:inherit;font-size:11px;cursor:pointer;transition:color .15s,border-color .15s}
+.follow-active-btn:hover{color:var(--color-accent);border-color:var(--color-accent)}

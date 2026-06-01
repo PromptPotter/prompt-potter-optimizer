@@ -1,0 +1,214 @@
+/* ─── Mobile (≤640px) ────────────────────────────────────────────
+   Chat tab doubles as the public landing surface at
+   app.promptpotter.dev. Every desktop rule above was written for an
+   operator viewport (≥980px). This block adapts the chat-tab tree
+   (Topbar + ChatPane + WelcomeLockoutModal) for a 375px phone.
+   Other tabs (Dashboard / Verify / Files) remain desktop-shaped — a
+   phone visitor who reaches them is an edge case for another day. */
+@media (max-width:640px){
+  /* The shell pins min-height:700px desktop-wide; on mobile the
+     viewport height itself bounds the layout. Drop the floor so a
+     phone in landscape (~375h) doesn't get a vertical scrollbar
+     forced by the shell itself. */
+  .shell{min-height:0}
+
+  /* Topbar — surface the search icon (sidebar hamburger already
+     visible from the ≤bp-md band above). The disabled search input
+     itself stays in the DOM (M13+ placeholder rule) — collapses to
+     an icon; tapping the icon expands it inline by hiding the tabs
+     and letting the input span the row. */
+  .topbar{padding:0 8px;gap:6px}
+  .topbar-search-icon{display:inline-flex;align-items:center;justify-content:center;width:var(--touch-target-min);height:var(--touch-target-min);background:transparent;border:0;cursor:pointer;color:var(--color-text-secondary);border-radius:var(--border-radius-md);font-family:inherit}
+  .topbar-search-icon:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
+  .search{display:none}
+  .topbar.topbar-search-open .search{display:block;flex:1 1 auto;height:36px;font-size:16px}
+  .topbar.topbar-search-open .tabs{display:none}
+  .tabs{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{padding:0 10px;font-size:13px;height:52px}
+
+  /* Theme toggle + account/auth chips — keep them touch-sized but
+     compact. ThemeToggle is already 34×30; auth chips at 30h are
+     just under the 44px touch target so bump padding to compensate. */
+  .auth-chip{height:32px;padding:0 12px;font-size:12px}
+
+  /* Chat job bar — only rendered for authed-with-cycle, but when it
+     IS rendered the chip-row is absolute-centered which guarantees
+     overlap at narrow widths. Re-flow inline, allow wrap, drop the
+     chevron from `margin-left:auto` collapse. */
+  .chat-job-bar{padding:6px 10px 8px}
+  .chat-job-head{flex-wrap:wrap;gap:6px}
+  .chat-job-toggle{flex-wrap:wrap;min-height:0;padding:8px 10px;gap:6px}
+  .chat-job-toggle .chip-row{position:static;transform:none;flex-wrap:wrap;gap:6px;justify-content:flex-start}
+  .chat-job-toggle .chip{padding:3px 10px;font-size:13px}
+
+  /* Pipeline hero — let the horizontal pipeline overflow-scroll
+     instead of fighting flex shrink. The status badge was absolute-
+     positioned at top:-50px; on mobile that lands above the topbar.
+     Pull it back into the flow as a static badge above the row. */
+  .wf-hero{padding:12px 10px 18px;max-width:none}
+  .wf-hero-status{position:static;display:inline-flex;font-size:11px;padding:3px 8px;margin-bottom:10px;width:auto;align-self:flex-start}
+  .wf-hero-flow{overflow-x:auto;overflow-y:hidden;justify-content:flex-start;padding:14px 4px 6px;scrollbar-width:none;flex-wrap:nowrap}
+  .wf-hero-flow::-webkit-scrollbar{display:none}
+  .wf-hero-node{min-width:120px;padding:10px 14px}
+  .wf-hero-node.llm{min-width:180px;padding:10px 14px}
+  .wf-hero-node.llm.wf-hero-node-multi{min-width:240px;max-width:340px;padding:8px 12px 6px}
+  .wf-hero-node .val,.wf-hero-node.llm .val{max-width:160px}
+  .wf-hero-arrow{flex:0 0 auto;min-width:36px;max-width:60px}
+
+  /* Chat grid — the 980px breakpoint already collapses to 1fr, but
+     desktop padding + pinned 620px panel-height create overflow on a
+     phone. Slim padding, set a phone-sized floor so the message stack
+     is readable in flow (desktop 620px is too tall here; <300px would
+     show only the first bubble + input). */
+  .chat-grid{padding:0 12px;gap:14px}
+  .chat-panel{min-height:420px}
+  .chat-panel-header{padding:12px 14px}
+  .chat-messages{padding:14px;gap:10px}
+  .chat-msg{max-width:88%;font-size:13px;padding:9px 12px}
+  .chat-input-row{padding:10px 12px;gap:6px}
+  /* 44×44 minimum on touch — Apple HIG floor. Bumped from 38×38 to
+     honor the foundation tokens; row-height grows by 12px which is
+     well within the chat-panel min-height budget. */
+  .chat-attach{width:44px;height:44px;flex-shrink:0}
+  /* 16px font-size is the iOS Safari focus-zoom suppressor — anything
+     under 16px triggers an auto-zoom on tap, which permanently scales
+     the layout until the operator manually pinches back. */
+  .chat-input{font-size:16px;min-height:44px}
+  .chat-send{padding:10px 18px;font-size:14px;min-height:44px}
+
+  /* Settings card — wand-row has `margin:0 -12px` for its overhang
+     glow; on a narrow card that pushes content past the panel edge.
+     Tighten + let the desc line wrap instead of clipping. */
+  .chat-settings-card{padding:14px}
+  .toggle-row{padding:6px 0;gap:10px}
+  .toggle-row .name{font-size:13px}
+  .toggle-row.wand-row{margin:0 -6px;padding:10px 10px}
+  .toggle-row.wand-row .name{white-space:normal}
+  .toggle-row.wand-row .desc{max-width:none}
+
+  /* Welcome lockout modal — now class-driven (no inline overrides),
+     so !important is unnecessary. Drop overlay padding (24px eats
+     48px of viewport width on 375) and let the modal claim the full
+     screen comfortably. account-modal is shared with AccountModal
+     (operator-facing); if a phone operator opens it the same compact
+     layout applies, which is the right call. */
+  .account-overlay{padding:8px;align-items:flex-start;padding-top:24px}
+  .account-modal{max-width:none;width:100%;height:auto;min-height:0;max-height:calc(var(--vh-full) - 32px)}
+  .account-modal-auth{height:auto;max-height:calc(var(--vh-full) - 32px)}
+  .account-pane-body{padding:18px 16px 14px;gap:12px}
+  .account-pane-body-auth{padding:18px 16px 14px;gap:12px}
+  .auth-email-input{height:auto}
+  .login-button{padding:14px 16px;min-height:44px;font-size:14px}
+}
+
+/* Tighter band for iPhone-SE-class screens (≤380px). Only the
+   handful of cases where 640px already wraps to two rows. */
+@media (max-width:380px){
+  /* Drop the trailing chips in the chat-job-bar (Δ/$ + ETA — the
+     stalest numbers); Best + Budget are the headline. Only fires
+     for the authed-with-cycle code path where the bar is rendered. */
+  .chat-job-toggle .chip-row .chip:nth-child(n+3){display:none}
+  /* Tighter pipeline nodes — the 120/180 from the 640 band can
+     still be wider than the visible viewport when stacked with the
+     arrow gutter. */
+  .wf-hero-node{min-width:108px;padding:8px 12px}
+  .wf-hero-node.llm{min-width:160px}
+}
+
+/* ── Sidebar mobile drawer (Sweep-Group-A) ─────────────────────────
+   Below --bp-md the 200px fixed-flex sidebar becomes an overlay drawer
+   triggered by the topbar hamburger. The sidebar leaves the flex flow
+   (position:fixed) so main reclaims the full width; the backdrop sits
+   between sidebar and main z-axis-wise and catches a tap to close.
+   Chat-mode keeps the existing `sidebar-hidden` behaviour — drawer
+   doesn't apply there. */
+.sidebar-backdrop{display:none}
+@media (max-width:880px){
+  .shell:not(.chat-mode) > .sidebar{position:fixed;top:0;left:0;bottom:0;width:min(280px,86vw);max-width:280px;transform:translateX(-100%);transition:transform 220ms ease;z-index:200;box-shadow:0 0 24px rgba(0,0,0,0.4);padding-top:max(8px,var(--safe-top))}
+  .shell.sidebar-mobile-open > .sidebar{transform:translateX(0)}
+  .sidebar-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:199;opacity:0;pointer-events:none;transition:opacity 180ms ease}
+  .shell.sidebar-mobile-open > .sidebar-backdrop{opacity:1;pointer-events:auto}
+  /* The on-sidebar collapse toggle is desktop-only — operator hides the
+     full sidebar from the topbar hamburger in mobile mode instead. A
+     `sidebar-collapsed` state persisted from desktop is meaningless in
+     drawer mode: the drawer is full-width or off-screen, never the 36px
+     rail. Neutralise it so the drawer always renders its contents —
+     otherwise a desktop-collapsed operator opens an empty drawer with no
+     New-campaign CTA. Displays match each element's base rule. */
+  .sidebar > .sidebar-toggle{display:none}
+  .shell.sidebar-collapsed .sidebar > .brand,
+  .shell.sidebar-collapsed .sidebar > .sidebar-footer{display:block}
+  .shell.sidebar-collapsed .sidebar > .sidebar-primary,
+  .shell.sidebar-collapsed .sidebar > .unit-library{display:flex}
+}
+@media (max-width:880px) and (prefers-reduced-motion:reduce){
+  .shell:not(.chat-mode) > .sidebar,
+  .sidebar-backdrop{transition:none}
+}
+
+/* ── Touch hover-affordance reveal (Sweep-Group-B/C) ──────────────
+   A few CSS classes hide controls behind `:hover` to keep the desktop
+   surface clean (header tool icons, resize grips). On touch there's
+   no hover — these controls become permanently invisible. Make them
+   always-visible on coarse pointers. */
+@media (pointer:coarse){
+  .hs-header-tools{opacity:1}
+  .hs-heat-mini-btn::after{opacity:1}
+}
+
+/* ── Touch-pointer floor (Phase 0 foundation) ─────────────────────
+   Apple HIG / Material 3 / WCAG 2.5.8 — every interactive element on a
+   touch device must hit the 44px floor. Gated on (pointer:coarse) not
+   on viewport width so a touchscreen laptop also gets the larger
+   targets; a desktop with a mouse stays at the existing dense sizes.
+   The sweep tunes individual components; this is the safety net.
+
+   Inputs additionally need ≥16px font-size to prevent iOS Safari's
+   focus-zoom — the sweep applies that per-input, this block keeps the
+   touch region honest in the meantime. */
+@media (pointer:coarse){
+  button:not(.btn-tight):not(.unit-library-chip):not(.account-menu-item):not(.account-nav-item),
+  a[role="button"],
+  input[type="submit"],
+  input[type="button"],
+  select{
+    min-height:var(--touch-target-min);
+  }
+  /* Inputs (text, number, etc.) at touch density. Text fields specifically
+     need the font-size floor to suppress iOS focus-zoom; the sweep then
+     tunes per-field. */
+  input:not([type]),
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="search"],
+  textarea{
+    min-height:var(--touch-target-min);
+    font-size:max(16px,1em);
+  }
+}
+
+/* ── Rotate-to-landscape prompt (Phase 0 foundation) ──────────────
+   Dense visualisations (FamilyTree, WhatIfGrid, WorkflowCanvas,
+   HardSamplesHeatmap, RoundFileView, etc.) wrap in <RotatePrompt>.
+   On portrait phone (orientation:portrait + width<bp-rotate) the
+   wrapper renders the rotate card and hides children via CSS. On
+   landscape or ≥bp-rotate the children render at full density.
+   Pure CSS — no JS reflow on rotation. */
+.rotate-prompt-card{display:none}
+@media (orientation:portrait) and (max-width:767px){
+  .rotate-prompt-host > .rotate-prompt-children{display:none}
+  .rotate-prompt-host > .rotate-prompt-card{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:40px 24px;min-height:60vh;text-align:center;color:var(--color-text-secondary)}
+  .rotate-prompt-card .rotate-icon{width:48px;height:48px;color:var(--color-accent);animation:rotate-hint 2.4s ease-in-out infinite}
+  .rotate-prompt-card .rotate-title{font-size:16px;font-weight:600;color:var(--color-text-primary)}
+  .rotate-prompt-card .rotate-body{font-size:14px;max-width:280px;line-height:1.5}
+}
+@keyframes rotate-hint{
+  0%,100%{transform:rotate(0deg)}
+  45%,55%{transform:rotate(90deg)}
+}
+@media (prefers-reduced-motion:reduce){
+  .rotate-prompt-card .rotate-icon{animation:none}
+}

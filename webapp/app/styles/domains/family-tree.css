@@ -1,0 +1,67 @@
+/* Sidebar stays mounted across tab switches so toggling Chat ↔ Dashboard
+   doesn't reflow the entire page width. If you want chat to feel
+   immersive, collapse the sidebar — don't unmount it. */
+
+/* Lineage tree — paper-cladogram aesthetic: horizontal child stubs and
+   slanted parent-to-child branches, sharp corners, no dots. Winner gets
+   slightly heavier stroke. Stroke color uses --color-text-primary so the
+   tree reads black on light theme, white on dark. */
+.lineage-card{padding:14px 16px}
+.lineage-scroll{overflow:auto;margin-top:8px;max-height:60vh}
+.lineage-svg{display:block;font-family:var(--font-mono);font-size:11px}
+.lineage-branch,.lineage-stub{stroke:var(--color-text-primary);stroke-width:1;fill:none}
+.lineage-branch.winner,.lineage-stub.winner{stroke-width:1.6}
+.lineage-label{fill:var(--color-text-secondary);font-size:11px;letter-spacing:.02em}
+.lineage-label.winner{fill:var(--color-text-primary);font-weight:600}
+.lineage-empty{color:var(--color-text-tertiary);font-style:italic;font-size:12px;padding:14px 0;text-align:center}
+.lineage-inherit-link{background:transparent;border:0;color:var(--color-accent);cursor:pointer;font:inherit;font-style:italic;text-decoration:underline;padding:0}
+.lineage-inherit-link:hover{color:var(--color-text-primary)}
+
+/* Family lineage cladogram — REAL search-point graph across the whole
+   family. One lane per cycle, one column per round, fork stems drawn
+   from parent.r{fork_from_round} to child.r1. Inside the Lineage card,
+   above the candidate cladogram. Self-hides for single-cycle families. */
+.family-cladogram{margin:8px 0 12px;padding:0 4px 8px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.family-cladogram-head{display:flex;align-items:center;justify-content:space-between;padding:0 2px 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
+.family-cladogram-scroll{max-height:none;overflow:auto}
+/* A campaign is a forest — one cladogram per session. Each forest is its
+   own <svg>; the session sub-header appears only for multi-session
+   campaigns (a single-session campaign needs no per-session label). */
+.family-cladogram-forest{margin-top:6px}
+.family-cladogram-forest:first-of-type{margin-top:0}
+.family-cladogram-session-head{padding:2px 2px 1px;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
+.family-cladogram-svg{display:block;font-family:var(--font-mono,inherit)}
+.family-cladogram-branch{stroke:var(--color-text-tertiary);stroke-width:1;opacity:0.55}
+.family-cladogram-branch.fork{stroke:var(--color-text-secondary);stroke-width:1;opacity:0.8;stroke-dasharray:2 2}
+.family-cladogram-origin{fill:var(--color-text-tertiary);font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+.family-cladogram-headerlabel{fill:var(--color-text-tertiary);font-size:10px;font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.family-cladogram-gridline{stroke:var(--color-border-tertiary);stroke-width:1;opacity:0.4;stroke-dasharray:1 3}
+.family-cladogram-roundlabel{fill:var(--color-text-tertiary);font-size:9px;font-variant-numeric:tabular-nums}
+.family-cladogram-cyclelabel{fill:var(--color-text-secondary);font-size:11px;letter-spacing:.02em}
+.family-cladogram-glyph{font-weight:600;fill:var(--color-text-tertiary)}
+.family-cladogram-dot{fill:var(--color-text-secondary);stroke:var(--color-background-primary);stroke-width:1}
+.family-cladogram-dot.kind-root{fill:var(--color-text-primary)}
+.family-cladogram-dot.kind-fork{fill:var(--color-accent)}
+.family-cladogram-dot.kind-sweep{fill:var(--color-text-secondary)}
+.family-cladogram-dot.kind-diag{fill:var(--color-status-success,#16a34a)}
+.family-cladogram-lane-selected{fill:var(--color-background-tint-active);opacity:0.45}
+.family-cladogram-node.selected .family-cladogram-dot{stroke:var(--color-accent);stroke-width:2}
+.family-cladogram-node.selected .family-cladogram-cyclelabel{fill:var(--color-accent);font-weight:600}
+.family-cladogram-node:hover .family-cladogram-dot{r:5}
+.family-cladogram-node:hover .family-cladogram-cyclelabel{fill:var(--color-text-primary)}
+/* Lane-hit overlay: invisible until hover, then a faint tint highlights
+   the whole row. Sits in front of branches but behind the node groups
+   so dot clicks still win. */
+.family-cladogram-lane-hit{fill:transparent}
+.family-cladogram-lane-hit:hover{fill:var(--color-background-hover);opacity:0.5}
+/* Header right-side cluster: badge + "Clean up N stubs" button. */
+.family-cladogram-head-meta{display:inline-flex;align-items:center;gap:8px}
+.family-cladogram-cleanup-btn{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:2px 8px;text-transform:none;letter-spacing:0}
+.family-cladogram-cleanup-btn:hover{color:var(--color-status-error,#c53030);border-color:var(--color-status-error,#c53030)}
+.family-cladogram-cleanup-done{font-size:11px;color:var(--color-text-tertiary);font-style:italic;text-transform:none;letter-spacing:0}
+/* Cleanup modal body + error. .modal-backdrop / .modal-card primitives
+   come from the existing modal styles further up this file. */
+.family-tree-modal-body{font-size:13px;color:var(--color-text-secondary);margin:0 0 12px;line-height:1.4}
+.family-tree-modal-body code{font-family:var(--font-mono,monospace);background:var(--color-background-hover);padding:1px 4px;border-radius:3px;font-size:12px}
+.family-tree-modal-error{font-size:12px;color:var(--color-status-error,#c53030);margin:0 0 12px}
+

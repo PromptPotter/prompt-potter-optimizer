@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import "./globals.css";
+import "./styles/index.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 

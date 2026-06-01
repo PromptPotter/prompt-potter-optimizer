@@ -1,0 +1,288 @@
+
+.content{flex:1;overflow-y:auto;padding:20px;container-type:inline-size;container-name:content}
+#content-dashboard{padding-top:0}
+
+/* Dashboard spines — DashboardLayout exports two width tiers. Narrow
+   (980px) wraps the header + diagnostics; wide (1400px) wraps the panel
+   grids so lineage + fitness + workflow get the room to spread out. */
+.dash-spine-narrow,.dash-spine-wide{width:100%;margin-left:auto;margin-right:auto;margin-bottom:var(--dash-zone-gap)}
+/* Narrow stripe stays viewport-centered (not main-area-centered) so
+   collapsing/expanding the sidebar doesn't shift the cards. main is
+   offset by --sidebar-width inside .shell's flex; translateX by
+   -sidebar-width/2 re-centres the element against the viewport.
+   No transition — layout-property `width` reflow and composite-thread
+   `transform` desync mid-animation and the stripe wobbles. Snap is
+   exact in a single frame. */
+.dash-spine-narrow{max-width:var(--dash-narrow-max);transform:translateX(calc(var(--sidebar-width, 0px) / -2))}
+.dash-spine-wide{max-width:var(--dash-wide-max)}
+/* Sweep-Group-B: tighten content padding + drop the sidebar-offset
+   transform when the sidebar is a fixed drawer (≤bp-md). The spine
+   centers itself by translating left half the sidebar width — but in
+   drawer mode the sidebar is out of flow, so that offset just pushes
+   content off-screen left. Zero it. Source-order matters: this block
+   sits AFTER the unconditional transform so the cascade resolves
+   correctly at equal specificity. */
+@media (max-width:880px){
+  .content{padding:12px}
+  .dash-spine-narrow{transform:none}
+  .dash-row-triad{gap:12px}
+  .dash-top-row{gap:10px}
+}
+.dash-spine-narrow:last-child,.dash-spine-wide:last-child{margin-bottom:0}
+
+/* Status assistant — Clippy-style floating chip pinned to the
+   bottom-right corner of the viewport, just above the Console pane.
+   Expanded form carries the contextual framing (dot + statusText +
+   statusHint) plus the operator's one jump into FilesPane and a manual
+   collapse affordance. After 10s of idle time it shrinks to a circular
+   button (see StatusAssistant.tsx). Run-state telemetry lives in the
+   Console head — see .run-telemetry. */
+.status-assistant{position:fixed;right:16px;bottom:56px;z-index:30;
+  display:inline-flex;align-items:center;gap:10px;
+  background:var(--color-background-primary);
+  border:0.5px solid var(--color-border-tertiary);
+  border-radius:var(--border-radius-md);
+  box-shadow:0 4px 14px rgba(0,0,0,0.14);
+  font-size:13px;
+  max-width:calc(100vw - 32px);
+  transition:box-shadow .15s ease,transform .15s ease}
+.status-assistant.expanded{padding:8px 10px 8px 14px;min-width:260px;max-width:420px}
+.status-assistant.expanded.live{background:var(--color-success-bg);color:var(--color-success);border-color:var(--color-success-border);box-shadow:0 4px 14px rgba(0,0,0,0.14),inset 3px 0 0 var(--color-success)}
+.status-assistant.expanded.stale{background:var(--color-warn-bg);color:var(--color-warn);border-color:var(--color-warn-border);box-shadow:0 4px 14px rgba(0,0,0,0.14),inset 3px 0 0 var(--color-warn)}
+.status-assistant.expanded.offline{background:var(--color-danger-bg);color:var(--color-danger);border-color:var(--color-danger-border);box-shadow:0 4px 14px rgba(0,0,0,0.14),inset 3px 0 0 var(--color-danger)}
+.status-assistant.collapsed{width:44px;height:44px;padding:0;border-radius:50%;justify-content:center;cursor:pointer}
+.status-assistant.collapsed:hover{transform:scale(1.06);box-shadow:0 6px 18px rgba(0,0,0,0.18)}
+.status-assistant.collapsed:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.status-assistant.collapsed.live{color:var(--color-success);border-color:var(--color-success-border)}
+.status-assistant.collapsed.stale{color:var(--color-warn);border-color:var(--color-warn-border)}
+.status-assistant.collapsed.offline{color:var(--color-danger);border-color:var(--color-danger-border)}
+.status-assistant.collapsed .status-dot{width:14px;height:14px}
+.status-assistant-text{display:inline-flex;align-items:baseline;gap:8px;min-width:0;flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status-assistant-text strong{color:currentColor}
+.status-assistant-hint{color:var(--color-text-tertiary);font-weight:400;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.status-assistant-jump{font-family:inherit;font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:4px 10px;cursor:pointer;transition:color .15s,border-color .15s,background .15s;flex-shrink:0}
+.status-assistant-jump:hover{color:var(--color-accent);border-color:var(--color-accent);background:var(--color-background-hover)}
+.status-assistant-jump:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.status-assistant-close{background:transparent;border:0;color:currentColor;opacity:.6;font-size:18px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:4px;flex-shrink:0}
+.status-assistant-close:hover{opacity:1;background:var(--color-background-hover)}
+.status-assistant-close:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+
+/* Run telemetry — flex row of value cells (unit/round/best/spend/last/
+   updated) plus the Stop affordance. Mounted into the Console head row
+   by DashboardPane as the `headSlot` prop so persistent run state sits
+   at the chrome edge alongside the live tail. No sticky behaviour of its
+   own — the parent .console-pane is already pinned to the bottom of
+   <main>. `margin-left:auto` pushes it to the right of the toggle. */
+.run-telemetry{display:inline-flex;align-items:baseline;gap:6px 14px;flex-wrap:wrap;margin-left:auto;min-width:0}
+.run-telemetry-cell{display:inline-flex;align-items:baseline;gap:6px;font-size:12px;color:var(--color-text-secondary);white-space:nowrap;min-width:0}
+.run-telemetry-cell code{font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:3px;padding:1px 6px;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
+.run-telemetry-cell strong{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
+.run-telemetry-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600}
+.run-telemetry-sub{color:var(--color-text-tertiary);font-size:11px}
+.run-telemetry-delta{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary);padding:0 4px;border-radius:3px}
+.run-telemetry-delta.up{color:var(--color-success);background:var(--color-success-bg)}
+.run-telemetry-delta.down{color:var(--color-danger);background:var(--color-danger-bg)}
+
+/* RunErrorBanner — surfaces dashboard.json::error when the runner crashed.
+   Sits above the TopStrip in the "Now" lane so the operator sees the cause
+   before scanning anything else. */
+.run-error-banner{
+  background:var(--color-danger-bg);
+  border:1px solid var(--color-danger-border);
+  border-radius:4px;
+  padding:10px 14px;
+  margin-bottom:12px;
+  color:var(--color-text-primary);
+  font-size:12px;
+}
+.run-error-banner-head{
+  display:flex;gap:10px;align-items:baseline;
+  font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--color-danger);font-weight:700;margin-bottom:4px;
+}
+.run-error-banner-stop{color:var(--color-text-tertiary);font-weight:500;letter-spacing:0;text-transform:none}
+.run-error-banner-msg{margin:0;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-word}
+.run-error-banner-list{margin:6px 0 0 0;padding-left:18px;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:11px}
+.run-error-banner-list li{margin:2px 0}
+/* Warn tone for the same banner — non-fatal optimizer-loop degradations. */
+.run-error-banner.is-warn{background:var(--color-warn-bg);border-color:var(--color-warn-border)}
+.run-error-banner.is-warn .run-error-banner-head{color:var(--color-warn)}
+
+/* Hero zone — title block + KPIs in one row, progress bars beneath them. */
+.dash-hero{display:flex;flex-direction:column;gap:14px}
+.dash-hero .page-header{margin-bottom:0}
+
+/* Top band — Workflow alone, spanning the full 980px column so it reads as
+   twice the width of the FitnessPanel that sits below in the left grid
+   column. */
+.dash-top > *{margin-bottom:0}
+
+/* Main two-column grid — FitnessPanel left, Lineage right. Columns split
+   1:1 so both stay at ~half the 980 column (matches the user's "Lineage
+   same size as FitnessPanel"). */
+/* Dashboard lanes — three collapsible sections that taxonomize the
+   panels by operator intent: NOW (what's running this instant) /
+   VERDICT (has it improved?) / WHY (drill down). Open/closed state
+   persists in localStorage via the Lane component. */
+.dash-lane{margin:0 auto var(--dash-zone-gap);max-width:var(--dash-wide-max)}
+.dash-lane-head{display:flex;align-items:baseline;gap:10px;width:100%;padding:6px 12px;background:transparent;border:0;border-bottom:0.5px solid var(--color-border-tertiary);cursor:pointer;color:inherit;text-align:left;font:inherit}
+.dash-lane-head:hover{background:var(--color-bg-secondary)}
+.dash-lane-caret{color:var(--color-text-tertiary);font-size:12px;width:14px;flex:none}
+.dash-lane-title{margin:0;font-size:13px;font-weight:600;color:var(--color-text-secondary);letter-spacing:0.04em;text-transform:uppercase}
+.dash-lane-subtitle{color:var(--color-text-tertiary);font-size:12px;font-weight:400}
+.dash-lane-body{display:flex;flex-direction:column;gap:12px;padding-top:14px}
+.dash-lane.closed .dash-lane-head{border-bottom-color:transparent}
+
+/* NOW lane — workflow + live-state side-by-side. The workflow column is
+   pinned at the compact 460px box; live-state takes the rest and scrolls
+   when its KV grid overflows. */
+.dash-row-now{--row-h:280px;width:100%}
+.dash-row-now > .live-state-card{height:var(--row-h);overflow:auto;margin-bottom:0}
+
+/* Triad layout — Fitness + Lineage always present; Inspector is a third
+   column conditionally rendered when a candidate is selected. A click
+   in any of the three re-anchors the others through SelectionContext,
+   so the inspector sits directly adjacent to the surfaces that drive
+   it instead of as a separated row below. Cards are equal-height and
+   align-items:start so a tall one (lineage with many forks) never
+   forces the others taller. */
+.dash-row-triad{width:100%;display:grid;grid-template-columns:minmax(460px,auto) minmax(0,1fr);grid-template-areas:"fitness lineage";gap:18px;align-items:start}
+.dash-row-triad > *{min-width:0}
+.dash-row-triad > .fitness-card{grid-area:fitness;justify-self:start;min-height:240px;margin-left:0;margin-right:0}
+.dash-row-triad > .lineage-card{grid-area:lineage;justify-self:stretch;height:240px}
+.dash-row-triad > .inspector-panel{grid-area:inspector;min-height:240px;height:auto;max-height:520px;overflow:auto}
+.dash-row-triad > .fitness-card,
+.dash-row-triad > .lineage-card,
+.dash-row-triad > .inspector-panel{display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
+.dash-row-triad > .fitness-card.whatif-open{height:auto;justify-self:stretch}
+.dash-row-triad .lineage-scroll{flex:1;min-height:0;overflow:auto}
+.dash-row-triad .family-cladogram-scroll{max-height:none}
+.dash-row-triad .fitness-chart-frame{flex:1;height:160px;min-height:0}
+.dash-row-triad .fitness-body{flex:1;display:flex;flex-direction:column;min-height:0}
+.dash-row-triad > .inspector-panel .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
+
+/* Inspector present — slot it as the 3rd column right next to lineage.
+   Adjacency is the whole point: the fitness/lineage clicks reveal the
+   drill inline rather than scrolling a separated panel into view. */
+.dash-row-triad:has(> .inspector-panel){grid-template-columns:minmax(0,1.1fr) minmax(0,0.9fr) minmax(0,1fr);grid-template-areas:"fitness lineage inspector"}
+
+/* What-If open — fitness card promotes to a full-width top row; the
+   remaining columns (lineage, plus inspector if present) drop to row 2.
+   The chart frame stays at its closed-mode 432px × 160px so the
+   bars don't jump when the operator opens the ablation grid. */
+.dash-row-triad:has(> .fitness-card.whatif-open){grid-template-columns:minmax(0,2fr) minmax(0,1fr);grid-template-areas:"fitness fitness" "lineage inspector"}
+.dash-row-triad:has(> .fitness-card.whatif-open):not(:has(> .inspector-panel)){grid-template-columns:1fr;grid-template-areas:"fitness" "lineage"}
+
+@media (max-width:960px){
+  .dash-row-triad{grid-template-columns:1fr;grid-template-areas:"fitness" "lineage" "inspector";max-width:none}
+  .dash-row-triad > .fitness-card{justify-self:stretch}
+  .dash-row-triad:has(> .fitness-card.whatif-open){grid-template-columns:1fr;grid-template-areas:"fitness" "lineage" "inspector"}
+}
+
+/* Top row — TopStrip on the left, round-tabs strip on the right. The
+   round-tabs sit beside the headline KPIs so the round axis is visible
+   in the first second of looking at the page. align-items:stretch keeps
+   both cards the same height. */
+.dash-top-row{display:flex;align-items:stretch;gap:14px;width:100%}
+.dash-top-row > .topstrip{flex:1 1 auto;min-width:0}
+.dash-top-row > .round-tabs-strip{flex:0 1 auto;min-width:200px;max-width:55%;margin-bottom:0}
+@media (max-width:960px){.dash-top-row{flex-direction:column}.dash-top-row > .round-tabs-strip{max-width:none}}
+
+/* Eval charts inside LiveStateCard — stacked vertically because the
+   narrow spine doesn't have width for the prior side-by-side layout.
+   Same Trend + Score Frequency cards from the dropped Verdict lane. */
+.lsc-charts{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+.lsc-charts > *{margin-bottom:0;min-width:0}
+
+/* Round-tabs strip — clickable circle per L1 round, plus a LIVE pill for
+   the in-flight round. Sits directly above the fitness/lineage/inspector
+   triad so the round axis that ties them together is visible at a glance.
+   Horizontal scroll handles long campaigns (100 rounds = 100 circles). */
+.round-tabs-strip{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--color-background-tertiary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);margin-bottom:14px}
+.round-tabs-label{font-size:10px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600;flex:0 0 auto}
+.round-tabs-scroll{display:flex;align-items:center;gap:5px;flex:1;overflow-x:auto;scrollbar-width:thin;padding:2px 0}
+.round-tab{flex:0 0 auto;min-width:28px;height:28px;padding:0 6px;border-radius:14px;border:1px solid var(--color-border);background:transparent;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;transition:background-color 100ms,color 100ms,border-color 100ms}
+.round-tab:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+.round-tab.active{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border-color:var(--color-accent);font-weight:600}
+.round-tab-live{padding:0 10px;font-weight:600;gap:6px}
+.round-tab-live-dot{width:6px;height:6px;border-radius:50%;background:var(--color-status-success,#10b981);box-shadow:0 0 4px var(--color-status-success,#10b981);display:inline-block;animation:round-tab-live-pulse 1.6s ease-in-out infinite}
+@keyframes round-tab-live-pulse{0%,100%{opacity:.5}50%{opacity:1}}
+
+/* Round samples view — one card whose body picks live vs historical
+   based on `selection.round`. Per-candidate `<details>` groups with
+   sticky headers; click the header to anchor lineage + fitness on
+   that candidate. */
+.round-samples-view{margin-bottom:14px}
+.round-back-live{background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;font-family:inherit;font-size:11px;padding:2px 8px;border-radius:10px}
+.round-back-live:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+.rsv-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:4px 4px 8px}
+.rsv-cand-select{background:var(--color-background-secondary,rgba(127,127,127,0.06));border:0;border-radius:4px;color:inherit;font:inherit;font-size:12px;padding:4px 8px;cursor:pointer;max-width:320px}
+.rsv-toggle{display:inline-flex;align-items:center;gap:0;border:1px solid var(--color-border);border-radius:6px;overflow:hidden}
+.rsv-toggle button{background:transparent;border:0;color:var(--color-text-secondary);padding:4px 10px;font-family:inherit;font-size:11px;cursor:pointer;border-right:1px solid var(--color-border)}
+.rsv-toggle button:last-child{border-right:0}
+.rsv-toggle button:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
+.rsv-toggle button.on{background:var(--color-accent);color:var(--color-accent-contrast,#fff);font-weight:600}
+.rsv-count{margin-left:auto;color:var(--color-text-tertiary);font-size:11px;font-family:var(--font-mono)}
+.rsv-groups{max-height:clamp(280px,46vh,640px);overflow-y:auto;font-family:var(--font-mono);font-size:12px;line-height:1.5;padding:4px 0}
+.rsv-group{margin-bottom:8px}
+.rsv-group.selected{outline:1px solid var(--color-selection);border-radius:4px}
+.rsv-group-head{position:sticky;top:0;z-index:1;background:var(--color-background-tertiary);display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border:0;border-bottom:0.5px solid var(--color-border-tertiary);font-size:11px;width:100%;cursor:pointer;color:inherit;font-family:inherit}
+.rsv-group-head:hover{background:var(--color-background-hover)}
+.rsv-cand-label{color:var(--color-text-primary);font-weight:600}
+.rsv-tally{display:inline-flex;gap:8px;font-weight:500}
+.rsv-empty-row{padding:4px 8px;color:var(--color-text-tertiary)}
+.rsv-rows{display:flex;flex-direction:column}
+.rsv-row{padding:2px 8px;display:block;border-bottom:0.5px dotted transparent}
+.rsv-row > summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:8px}
+.rsv-row > summary::-webkit-details-marker{display:none}
+.rsv-row > summary:hover{background:var(--color-background-hover)}
+.rsv-row[open]{border-bottom-color:var(--color-border-tertiary);padding-bottom:8px}
+.rsv-row-raw{padding:2px 8px;color:var(--color-text-secondary)}
+.rsv-row .idx{color:var(--color-text-tertiary);flex:0 0 auto}
+.rsv-row .elapsed{color:var(--color-text-tertiary);flex:0 0 auto;min-width:42px;text-align:right}
+.rsv-row .scorer{color:var(--color-text-secondary);flex:0 0 auto;min-width:80px}
+.rsv-row .body{color:var(--color-text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rsv-detail{padding:6px 8px 4px 96px;display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;font-size:12px}
+.rsv-detail .kv-label{color:var(--color-text-tertiary)}
+
+/* Hero / progress fluidity — collapses the KPI trio under the title block on
+   narrow viewports without leaving the cells overlapping. */
+@container content (max-width:780px){
+  .dash-hero .page-header{flex-direction:column;align-items:flex-start}
+  .hero-summary{margin-left:0}
+}
+/* Telemetry sheds the phase sub-label and the delta chip on narrow
+   viewports. The status assistant is position:fixed and lives outside
+   the .content container, so the existing @container queries don't
+   reach it — the hint already truncates via overflow on the expanded
+   form, and the collapsed form has no text at all. */
+@container content (max-width:760px){
+  .run-telemetry-cell .run-telemetry-sub{display:none}
+  .run-telemetry-delta{display:none}
+}
+/* Mobile (≤640px): the Console head + RunTelemetry strip and the floating
+   StatusAssistant both assumed a desktop single-row head. On a phone the
+   telemetry wraps into a tall multi-row block and the fixed chip
+   (bottom:56px) lands on top of it. Keep the footer one compact swipeable
+   row and lift the chip clear. The chip is position:fixed outside .content,
+   so this is a viewport @media query, not a container query. */
+@media (max-width:640px){
+  .console-head{gap:4px 12px}
+  /* Telemetry drops to its own row under the toggle as one non-wrapping,
+     horizontally-scrollable line — fixed height, no vertical sprawl. */
+  .run-telemetry{width:100%;flex-wrap:nowrap;overflow-x:auto;
+    -webkit-overflow-scrolling:touch;gap:0 14px;margin-left:0;
+    padding-bottom:2px;scrollbar-width:none}
+  .run-telemetry::-webkit-scrollbar{display:none}
+  /* Shed cells already shown elsewhere: unit (the CyclePicker up top),
+     updated (freshness lives in the status dot + "last write" hint). */
+  .run-telemetry-unit,.run-telemetry-updated{display:none}
+  /* Chip clears the compact footer; expanded form spans the width instead
+     of a 260px box smeared over the telemetry. */
+  .status-assistant{bottom:72px;right:12px}
+  .status-assistant.expanded{left:12px;right:12px;min-width:0;max-width:none}
+}
+
+.page-header{display:flex;align-items:center;margin-bottom:0;gap:20px;flex-wrap:wrap}
+.breadcrumb{font-size:13px;color:var(--color-text-secondary);margin-bottom:6px;font-family:var(--font-mono)}

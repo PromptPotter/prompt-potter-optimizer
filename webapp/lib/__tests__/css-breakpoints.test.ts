@@ -1,5 +1,5 @@
 // Breakpoint sprawl alarm. Asserts every `@media (min-width|max-width: NNN)`
-// value in `webapp/app/globals.css` is on the canonical breakpoint list.
+// value across `webapp/app/styles/**/*.css` is on the canonical breakpoint list.
 //
 // The list mirrors the responsive tokens in `:root` (--bp-xs / sm / rotate /
 // md / lg / xl) plus a handful of pre-foundation values that the sweep will
@@ -14,7 +14,7 @@
 // a single ~30-line test in the existing scope is cheaper and gives the
 // same signal.
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -33,14 +33,22 @@ const ALLOWED_BREAKPOINTS = new Set<number>([
   1400, // --bp-xl  (full desktop)
 ]);
 
-const GLOBALS_CSS = path.resolve(__dirname, "../../app/globals.css");
+const STYLES_DIR = path.resolve(__dirname, "../../app/styles");
 
 const MEDIA_BREAKPOINT_RE =
   /@media[^{]*\(\s*(?:min|max)-width\s*:\s*(\d+)px\s*\)/g;
 
-describe("globals.css breakpoint set", () => {
+function allStylesheets(): string {
+  return readdirSync(STYLES_DIR, { recursive: true })
+    .map(String)
+    .filter((f) => f.endsWith(".css"))
+    .map((f) => readFileSync(path.join(STYLES_DIR, f), "utf-8"))
+    .join("\n");
+}
+
+describe("stylesheet breakpoint set", () => {
   it("uses only canonical breakpoint values", () => {
-    const css = readFileSync(GLOBALS_CSS, "utf-8");
+    const css = allStylesheets();
     const found = new Set<number>();
     for (const match of css.matchAll(MEDIA_BREAKPOINT_RE)) {
       found.add(Number(match[1]));
@@ -48,7 +56,7 @@ describe("globals.css breakpoint set", () => {
     const violations = [...found].filter((n) => !ALLOWED_BREAKPOINTS.has(n));
     expect(
       violations,
-      `Non-canonical @media breakpoints in globals.css: ${violations.join(", ")}. ` +
+      `Non-canonical @media breakpoints in app/styles: ${violations.join(", ")}. ` +
         `Either reuse an existing token (--bp-xs/sm/rotate/md/lg/xl) or add ` +
         `the value to ALLOWED_BREAKPOINTS in css-breakpoints.test.ts with a ` +
         `comment explaining why.`,

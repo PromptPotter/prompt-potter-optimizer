@@ -1,0 +1,16 @@
+/* Unauthed Topbar chips — Log in (yellow-gold) + Sign up for free (rust/burnt-orange).
+   Same shape, two color variants drawn straight from the accent palette. */
+.auth-chip{display:inline-flex;align-items:center;height:30px;padding:0 14px;border-radius:999px;border:0.5px solid transparent;font:inherit;font-size:13px;font-weight:600;text-decoration:none;cursor:pointer;transition:filter 120ms,transform 60ms}
+.auth-chip:hover{filter:brightness(1.08)}
+.auth-chip:active{transform:translateY(1px)}
+.auth-chip-gold{background:var(--color-accent);border-color:var(--color-accent);color:var(--color-text-on-accent)}
+.auth-chip-rust{background:var(--color-accent-strong);border-color:var(--color-accent-strong);color:#fff}
+/* "OR" divider used inside the auth prompt — two thin rules with the word
+   centered in the gutter. */
+.auth-divider{display:flex;align-items:center;gap:10px;color:var(--color-text-tertiary);font-size:11px;letter-spacing:.08em;margin:2px 0}
+.auth-divider::before,.auth-divider::after{content:"";flex:1;height:1px;background:var(--color-border-tertiary)}
+/* Default-browser-style blue hyperlinks used inside the auth prompt. */
+.auth-link{color:#3b82f6;text-decoration:underline}
+.auth-link:hover{color:#60a5fa}
+.auth-legal-row{display:flex;justify-content:center;align-items:center;gap:8px;font-size:12px;color:var(--color-text-tertiary)}
+

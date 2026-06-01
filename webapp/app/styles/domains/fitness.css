@@ -1,0 +1,68 @@
+/* Fitness card — chart-first surface with two progressive-disclosure
+   chips (Composite, What-If). Default view = single bar per candidate
+   (accuracy); chips reveal paired bars and the ablation widget. The card
+   auto-shrinks to the chart width by default. What-If renders below the
+   chart in-card; the card grows vertically without resizing the chart
+   so the bars never shift on toggle. */
+.fitness-card{margin-bottom:14px;width:auto;max-width:100%;margin-left:auto;margin-right:auto}
+.fitness-toggles{display:flex;gap:6px}
+.fitness-chip{font-family:inherit;font-size:11px;padding:3px 9px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);cursor:pointer;letter-spacing:.04em;transition:background .15s,color .15s,border-color .15s}
+.fitness-chip:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
+.fitness-chip.on{background:var(--color-background-tint-active);color:var(--color-accent);border-color:rgba(var(--color-accent-rgb),0.55)}
+/* Chart frame: fills available width so 5 → 25 bars all read; height stays
+   compact. Chart.js handles the bar fan-out within its responsive options. */
+.fitness-chart-frame{position:relative;height:200px;width:100%;max-width:100%;margin:0 auto;min-width:0}
+/* Slimmer fitness frame when it sits next to the lineage tree in the
+   VERDICT lane row — the standalone whatif-open variant keeps its size. */
+.dash-row-triad .fitness-card{margin-bottom:0;padding:10px 14px}
+.dash-row-triad .fitness-chart-frame{height:160px}
+.fitness-legend{display:flex;justify-content:center;gap:14px;font-size:11px;color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:8px}
+.fitness-legend .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.fitness-legend .dot.accuracy{background:rgba(var(--color-accent-rgb),0.95)}
+.fitness-legend .dot.composite{background:rgba(var(--color-accent-rgb),0.55)}
+.fitness-legend .dot.whatif{background:var(--color-accent-strong)}
+/* What-If opens to the RIGHT of the chart (side-by-side) inside the
+   fitness card. .fitness-chart-wrap groups the legend + chart so the
+   legend stays positioned above the bars (matching the Composite-only
+   placement) when the card stretches; without the wrap, the legend
+   centres itself across the full widened card. The wrap is locked to
+   432px (= 460px card - 28px padding) so bars don't shift on toggle.
+   The card itself stretches to the full triad-row width via the :has()
+   rule above; the What-If panel fills everything to the right. */
+.fitness-chart-wrap{display:flex;flex-direction:column;width:100%;min-width:0}
+/* When What-If is open, the card becomes a 2-column grid so the WhatIf
+   panel can span the FULL card height (rows 1+2 of col 2) instead of
+   sitting below the title in only-the-body row. The title pins to col 1
+   (432px), chart sits below it; the right panel starts at the very top
+   of the card — no wasted empty space above the legend. .fitness-body
+   uses display:contents so its children participate directly in the
+   card's grid without needing a JSX restructure. */
+.fitness-card.whatif-open{display:grid;grid-template-columns:432px minmax(0,1fr);column-gap:18px;align-items:start}
+.fitness-card.whatif-open > .card-title{grid-column:1;grid-row:1;max-width:432px}
+.fitness-card.whatif-open > .fitness-body{display:contents}
+.fitness-card.whatif-open .fitness-chart-wrap{grid-column:1;grid-row:2;width:432px}
+.fitness-card.whatif-open .fitness-whatif{grid-column:2;grid-row:1 / span 2;align-self:stretch;min-width:0;margin-top:0;padding-top:0;padding-left:18px;border-top:0;border-left:0.5px solid var(--color-border-tertiary)}
+@media (max-width:960px){
+  .fitness-card.whatif-open{display:flex;flex-direction:column}
+  .fitness-card.whatif-open > .card-title{max-width:none}
+  .fitness-card.whatif-open > .fitness-body{display:flex;flex-direction:column}
+  .fitness-card.whatif-open .fitness-chart-wrap{width:100%}
+  .fitness-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border-tertiary);margin-top:0}
+}
+.fitness-whatif{margin-top:18px;padding-top:18px;border-top:0.5px solid var(--color-border-tertiary)}
+.fitness-empty{color:var(--color-text-tertiary);font-style:italic;font-size:12px;padding:16px 0;text-align:center}
+.whatif-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
+.whatif-legend .swatch{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:middle;margin-right:5px;border:1.5px solid var(--color-text-tertiary);background:var(--color-background-secondary);text-align:center;line-height:11px;font-size:11px;font-weight:900}
+.whatif-legend .swatch.optional{border-style:dashed}
+.whatif-legend .swatch.checked{color:var(--color-accent)}
+.whatif-legend .swatch.active{
+  background:linear-gradient(180deg,rgba(var(--color-accent-rgb),0.16) 0%,rgba(var(--color-accent-rgb),0.05) 100%);
+  border:1.5px solid rgba(var(--color-accent-rgb),0.32);
+  box-shadow:0 0 6px rgba(var(--color-accent-rgb),0.18);
+}
+/* Exactly two rows of tiles visible: 2 × 108px tile + 1 × 10px gap +
+   2 × 6px wrap padding = 238px. Anything beyond two rows scrolls. */
+.whatif-grid-wrap{overflow-y:auto;max-height:238px;padding:6px 4px 6px 0;margin-bottom:12px}
+.whatif-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:10px}
+.whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border-tertiary);border-radius:9px;padding:13px 7px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:108px;user-select:none;z-index:1;font-family:inherit}
+.whatif-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}

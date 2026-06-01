@@ -1,0 +1,98 @@
+/* Raw JSON dump */
+.raw-card details{cursor:pointer}
+.raw-card summary{cursor:pointer;list-style:none;font-size:14px;font-weight:500;padding:2px 0}
+.raw-card summary::before{content:'▸ ';color:var(--color-text-tertiary)}
+.raw-card details[open] summary::before{content:'▾ '}
+.raw-card pre{font-family:var(--font-mono);font-size:13px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px 14px;margin-top:10px;max-height:480px;overflow:auto;line-height:1.5}
+
+/* Workflow canvas — sized small. Pipeline topology is reference info,
+   not a primary view; cap the canvas so it doesn't take a third of the
+   page. The SVG aspect-locks; cap width → height drops in lockstep. */
+.workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;margin-bottom:14px}
+.workflow-toolbar{padding:6px 12px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--color-text-secondary)}
+.workflow-round-pick{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-tertiary)}
+.workflow-round-pick select{background:var(--color-background-secondary);color:var(--color-text-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-sm);padding:1px 6px;font-family:inherit;font-size:11px;cursor:pointer}
+.workflow-round-pick select:hover{border-color:var(--color-accent)}
+.workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%;display:flex;align-items:center;justify-content:center}
+.workflow-canvas{position:relative;width:100%;max-width:460px;aspect-ratio:500/290;margin:0 auto;overflow:hidden}
+/* SVG `<g>` wrapping each node — keyboard focus + click affordance. */
+.wf-node{cursor:pointer;user-select:none;outline:none}
+.wf-node[aria-disabled="true"]{cursor:default}
+.wf-node:focus-visible .wf-dot{filter:drop-shadow(0 0 6px var(--color-accent-glow))}
+.wf-dot{fill:var(--color-accent);stroke:var(--color-accent);stroke-width:1;filter:drop-shadow(0 0 5px var(--color-accent-glow));transition:transform .15s,filter .15s,fill .15s}
+.wf-node:hover .wf-dot{transform-box:fill-box;transform-origin:center;transform:scale(1.12)}
+.wf-dot.selected{filter:drop-shadow(0 0 9px var(--color-accent-glow)) drop-shadow(0 0 14px var(--color-accent-glow))}
+.wf-dot.active{fill:var(--color-success);stroke:var(--color-success);filter:drop-shadow(0 0 7px rgba(var(--color-success-rgb),0.55));animation:pulse-active 1.6s ease-in-out infinite}
+@keyframes pulse-active{0%,100%{filter:drop-shadow(0 0 6px rgba(var(--color-success-rgb),0.40))}50%{filter:drop-shadow(0 0 12px rgba(var(--color-success-rgb),0.70))}}
+.wf-dot.dim{opacity:.45}
+.wf-dot.kind-io{fill:var(--color-background-secondary);stroke:var(--color-border-tertiary);stroke-width:1.5;filter:none}
+.wf-dot.kind-measurement{fill:var(--color-text-tertiary);stroke:var(--color-text-tertiary);filter:drop-shadow(0 0 3px rgba(var(--color-accent-rgb),0.25))}
+.wf-dot.kind-phase{fill:var(--color-accent);stroke:var(--color-accent);opacity:.85}
+.wf-dot-label{font-size:11px;font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
+.wf-dot-sub{font-size:10px;fill:var(--color-text-tertiary);font-family:var(--font-mono);pointer-events:none}
+/* Optimizer node detail — slave content panel appended BELOW the Now-lane
+   row when a workflow node is picked. The 3-col row stays mounted so the
+   operator can keep clicking between optimizer nodes; this panel just
+   re-targets to whichever node is selected. Flat layout (no accordions
+   in the primary content) so it doesn't dominate the viewport. */
+.opt-detail{margin-top:14px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;display:flex;flex-direction:column}
+
+.opt-detail-head{padding:10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:16px;flex:none}
+.opt-detail-head-titles{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0;flex:1}
+.opt-detail-name{margin:0;font-size:15px;font-weight:600;color:var(--color-text-primary);letter-spacing:-.005em}
+.opt-detail-id{font-family:var(--font-mono);font-size:11px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:3px;padding:1px 5px;color:var(--color-text-secondary)}
+.opt-detail-kind{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-tertiary)}
+.opt-detail-kind.kind-llm{color:var(--color-accent)}
+.opt-detail-status{font-size:12px;color:var(--color-text-tertiary);margin-left:4px}
+.opt-detail-status.live{color:var(--color-success);font-weight:500}
+.opt-detail-head-actions{display:flex;align-items:center;gap:10px;flex:none}
+.opt-detail-round-tag{font-size:11px;color:var(--color-text-tertiary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-sm);padding:1px 8px;white-space:nowrap}
+.opt-detail-close{background:none;border:0;color:var(--color-text-tertiary);font-size:18px;line-height:1;cursor:pointer;padding:0 6px;font-family:inherit;border-radius:var(--border-radius-sm)}
+.opt-detail-close:hover{color:var(--color-accent);background:var(--color-background-secondary)}
+
+/* Metadata strip — one dense line of label/value chips. The "portfolio"
+   line the operator asked for; collapses to multi-line on narrow screens. */
+.opt-detail-meta{padding:8px 16px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary)}
+.opt-detail-chip{display:inline-flex;align-items:baseline;gap:4px;white-space:nowrap;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.opt-detail-chip-label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-tertiary)}
+.opt-detail-chip-value{font-family:var(--font-mono);font-size:11px;color:var(--color-text-primary);overflow:hidden;text-overflow:ellipsis}
+
+.opt-detail-empty{padding:22px 18px;font-size:13px;color:var(--color-text-tertiary)}
+
+/* Two-column flat content — Template fields | Response. No accordions
+   here; both are primary content. Stacks on narrow viewports. */
+.opt-detail-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:0}
+.opt-detail-col{display:flex;flex-direction:column;min-width:0;border-right:0.5px solid var(--color-border-tertiary)}
+.opt-detail-col:last-child{border-right:none}
+.opt-detail-col-head{padding:8px 16px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-tertiary);font-weight:600;background:var(--color-background-secondary)}
+.opt-detail-col-count{margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--color-text-tertiary);background:var(--color-background-primary);padding:1px 6px;border-radius:8px;border:0.5px solid var(--color-border-tertiary)}
+.opt-detail-col-body{padding:10px 14px;overflow:auto;max-height:46vh}
+.opt-detail-col-empty{font-size:12px;color:var(--color-text-tertiary);padding:8px 0}
+
+.opt-detail-fields{margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.opt-detail-field{display:grid;grid-template-columns:130px 1fr;gap:10px;align-items:start;min-width:0}
+.opt-detail-field dt{font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);padding-top:5px;overflow-wrap:break-word;min-width:0}
+.opt-detail-field dd{margin:0;min-width:0}
+.opt-detail-field dd pre{margin:0;font-family:var(--font-mono);font-size:11px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-sm);padding:5px 8px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow:auto;line-height:1.45;color:var(--color-text-primary)}
+
+.opt-detail-pre{margin:0;font-family:var(--font-mono);font-size:12px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-sm);padding:8px 11px;white-space:pre-wrap;word-break:break-word;max-height:44vh;overflow:auto;line-height:1.5;color:var(--color-text-primary)}
+
+/* Footer — secondary content as inline disclosures. The raw payloads and
+   config dump are escape hatches, not primary; default-collapsed so the
+   strip stays one line tall. */
+.opt-detail-footer{padding:6px 16px 10px;border-top:0.5px solid var(--color-border-tertiary);display:flex;flex-wrap:wrap;gap:6px 14px;background:var(--color-background-secondary)}
+.opt-detail-disclosure{font-size:11px;color:var(--color-text-tertiary);flex:1 1 100%;min-width:0}
+.opt-detail-disclosure > summary{cursor:pointer;list-style:none;padding:4px 0;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.4px;user-select:none}
+.opt-detail-disclosure > summary::-webkit-details-marker{display:none}
+.opt-detail-disclosure > summary::before{content:'▸';font-size:10px;width:8px}
+.opt-detail-disclosure[open] > summary::before{content:'▾'}
+.opt-detail-disclosure > summary:hover{color:var(--color-accent)}
+.opt-detail-disclosure[open]{flex:1 1 100%}
+.opt-detail-disclosure > .opt-detail-pre{margin-top:4px}
+
+@media (max-width:880px){
+  .opt-detail-cols{grid-template-columns:1fr}
+  .opt-detail-col{border-right:none;border-bottom:0.5px solid var(--color-border-tertiary)}
+  .opt-detail-col:last-child{border-bottom:none}
+}
+

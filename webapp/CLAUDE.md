@@ -4,9 +4,26 @@ Next.js 16.2.5 + React 19.2.4 + TypeScript, static export at `out/` mounted at `
 
 ## Design — single source of truth
 
-**Brand, palette, theme framing, copy register live in [`../.impeccable.md`](../.impeccable.md).** Read it before touching styles, brand assets, or any user-visible copy. It is the spec; `app/globals.css` is the canonical token implementation (light + dark blocks); every component reads `var(--…)`. Do not introduce a parallel design spec, design-tokens file, or theme-decision doc — extend `.impeccable.md` in place if direction changes.
+**Brand, palette, theme framing, copy register live in [`../.impeccable.md`](../.impeccable.md).** Read it before touching styles, brand assets, or any user-visible copy. It is the spec; `app/styles/foundation/tokens.css` + `app/styles/foundation/themes.css` are the canonical token implementation (dark `:root` defaults + the `[data-theme="light"]` block); every component reads `var(--…)`. Do not introduce a parallel design spec, design-tokens file, or theme-decision doc — extend `.impeccable.md` in place if direction changes.
 
 The central register is **light / editorial-cobalt** (cobalt `#090C9B` accent, oxblood `#55251D` depth, taupe `#C5AFA4` tint, olive `#696047` muted, warm-bone `#F5F1EA` paper — no orange). The webapp loads in light by default (`app/layout.tsx` pre-paint script, `var t = s || 'light'`). Dark is **DOOM/lava**, opt-in for deep operator work — a distinct register, not a recolor; orange lives only there. Theme change swaps palette + density + framing together via `[data-theme="…"]` on `<html>`.
+
+## Stylesheet organization (cascade order is load-bearing)
+
+All CSS lives under `app/styles/`, imported by the ordered barrel `app/styles/index.css` (the only stylesheet `app/layout.tsx` imports). Lightning CSS inlines the `@import`s at build into one sheet **in barrel order** — so the barrel order *is* the cascade. There is no `globals.css`; do not reintroduce one.
+
+- **`foundation/`** — the portable, whitelabel-safe skeleton, imported first: `tokens.css` (all `--color-*` / `--font-*` / `--bp-*` / radius / touch / safe-area vars), `themes.css` (dark `:root` + `[data-theme="light"]`), `base.css` (reset, `box-sizing`, `:focus-visible`, body type). Plus two cross-cutting tail files imported last so their overrides win: `reduced-motion.css` and `responsive.css` (the `≤640`/`≤380` blocks, sidebar drawer, `pointer:coarse` 44px floor, rotate prompt).
+- **`domains/`** — one file per feature (`shell`, `dashboard`, `chat`, `workflow`, `hard-samples`, `account`, …), each carrying its own co-located `@media`. `glass.css` is the operator-vetoed glassmorphism — preserved verbatim, never restyled.
+
+**Editing rules.** Component-specific rules belong in their domain file (or, once a component is refactored, its co-located `*.module.css` — that is the migration endgame). Adding a new `@media` breakpoint trips `lib/__tests__/css-breakpoints.test.ts` unless the value is canonical — reuse a `--bp-*` token or update the allowlist deliberately. When you move rules between files, the cascade only stays correct if you preserve their relative order in the barrel.
+
+State-class composition uses `cx()` (`lib/cx.ts`), not template strings: `cx("hs-cell", folded && "folded")`, never `` `hs-cell${folded ? " folded" : ""}` ``.
+
+## Component conventions
+
+- **Anatomy: fetch lives in a hook, not a component.** A component that fetches *and* renders *and* owns selection/scroll state is the prototype smell this layer is moving off of. Put data access in a `lib/use*.ts` hook (peers: `useRoundFile`, `useDatasetPreview`, `useDashboard`); keep components presentational where possible. Reuse the pure `lib/derivations/*` for data→data shaping rather than re-deriving inline.
+- **Primitive-first.** Do not hand-roll another modal / popover / dropdown / button. Reach for `components/ui/*`; if the primitive doesn't exist yet, add it there (with a `*.module.css` and an RTL test) so the next caller inherits it.
+- **Accessibility is positioning, not compliance** (`.impeccable.md`). Every interactive element — including SVG `<g>`/nodes — needs keyboard operability + `role`; dialogs trap focus + restore on close + close on ESC; state pairs color with a label or icon (HIT/MISS, pass/fail, live/stale), never color alone; focus rings stay visible (the `:focus-visible` accent outline); honor `prefers-reduced-motion` on the 2 s poll. Operator data (IDs, hashes, payloads) stays selectable — never inject hidden characters.
 
 ## Brand identity / "About this unit"
 

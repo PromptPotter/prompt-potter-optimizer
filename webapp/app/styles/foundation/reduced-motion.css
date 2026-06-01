@@ -1,0 +1,12 @@
+/* Honor user vestibular preference. The wizard mascot, sparkles,
+   pulse-active border, and chevron rotations all stop being motion under
+   this. transition: 0.01ms keeps state changes instant rather than abrupt. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:0.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:0.01ms !important;
+    scroll-behavior:auto !important;
+  }
+}
+

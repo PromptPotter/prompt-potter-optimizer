@@ -1,0 +1,40 @@
+/* Console pane — Replit-style live tail of output.log. Pinned to the
+   bottom of <main>, collapsible. Default-collapsed shows just the toggle
+   bar; expanded shows a 30vh terminal-style scroll buffer. ANSI SGR codes
+   from the LiveDashboardView projection carry the optimizer's narrative
+   highlights into the colors below. */
+.console-pane{flex-shrink:0;background:var(--color-background-primary);border-top:0.5px solid var(--color-border-tertiary)}
+/* Console head — flex row carrying the toggle button on the left and the
+   RunTelemetry strip (mounted by DashboardPane as `headSlot`) on the right.
+   The toggle is the only click target that expand/collapses the body; the
+   telemetry strip is a sibling, never wraps the button. */
+.console-head{display:flex;align-items:center;gap:8px 16px;width:100%;padding:6px 12px;background:transparent;flex-wrap:wrap}
+.console-toggle{display:inline-flex;align-items:baseline;gap:10px;padding:0;background:transparent;border:0;cursor:pointer;color:inherit;text-align:left;font:inherit;flex-shrink:0}
+.console-toggle:hover{color:var(--color-text-primary)}
+.console-caret{color:var(--color-text-tertiary);font-size:12px;width:14px;flex:none}
+.console-title{font-size:13px;font-weight:600;color:var(--color-text-secondary);letter-spacing:0.04em;text-transform:uppercase}
+.console-subtitle{color:var(--color-text-tertiary);font-size:12px;font-weight:400}
+.console-body{height:30vh;min-height:120px;max-height:50vh;overflow-y:auto;padding:8px 14px;background:var(--color-background-secondary);font-family:var(--font-mono);font-size:12px;line-height:1.4;color:var(--color-text-primary);border-top:0.5px solid var(--color-border-tertiary)}
+.console-body.console-empty{height:auto;padding:14px;color:var(--color-text-tertiary);font-family:inherit}
+.console-line{white-space:pre-wrap;word-break:break-word}
+/* ANSI palette — keep the optimizer's terminal narration legible against the
+   console's bg. Uses theme tokens so dark/light flips remain readable. */
+.ansi-bold{font-weight:600}
+.ansi-dim{opacity:0.6}
+.ansi-fg-30{color:#3b3b3b}
+.ansi-fg-31{color:var(--color-danger,#c0392b)}
+.ansi-fg-32{color:var(--color-success,#3a9d5d)}
+.ansi-fg-33{color:var(--color-warn,#c27500)}
+.ansi-fg-34{color:#4f8ad6}
+.ansi-fg-35{color:#a661c2}
+.ansi-fg-36{color:#3aa6a0}
+.ansi-fg-37{color:var(--color-text-primary)}
+.ansi-fg-90{color:var(--color-text-tertiary)}
+.ansi-fg-91{color:var(--color-danger,#c0392b)}
+.ansi-fg-92{color:var(--color-success,#3a9d5d)}
+.ansi-fg-93{color:var(--color-warn,#c27500)}
+.ansi-fg-94{color:#6ba4e0}
+.ansi-fg-95{color:#c47ad6}
+.ansi-fg-96{color:#5dbab4}
+.ansi-fg-97{color:var(--color-text-primary)}
+
