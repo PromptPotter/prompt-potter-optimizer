@@ -1,0 +1,95 @@
+/* PromptPotter — design tokens + global styles.
+   Lifted from webapp/index.html (vanilla preservation list, commit f1dab82).
+   Glassmorphism preserved verbatim at the 5 sites it appears (operator veto). */
+
+:root{
+  --color-background-primary:#1a1a1a; --color-background-secondary:#0d0d0d; --color-background-tertiary:#0d0d0d;
+  --color-background-hover:#1a1a1a;
+  --color-background-tint-active:#2a1f10;
+  --color-background-tint-icon:#3a2a10;
+  --color-background-tint-soft:#1f1a14;
+  --color-text-primary:#f3f4f6; --color-text-secondary:#9ca3af; --color-text-tertiary:#6b7280;
+  --color-text-on-accent:#0d0d0d;
+  --color-border-tertiary:#2a2a2a;
+  --color-accent:#f59e0b; --color-accent-strong:#ea580c;
+  --color-accent-rgb:245,158,11;
+  --color-accent-glow:rgba(var(--color-accent-rgb),0.30);
+  /* Cross-panel "this candidate is selected" stroke. Lineage stub, fitness
+     bar border, and any future panel highlight all read this one var. */
+  --color-selection:#dc2626;
+  /* Dashboard layout — one source for the centred spines. NarrowSpine
+     wraps the header + diagnostics; WideSpine wraps the panel grids. */
+  --dash-narrow-max:980px;
+  --dash-wide-max:1400px;
+  --dash-zone-gap:18px;
+
+  /* ── Responsive tokens (mobile-first foundation) ─────────────────
+     Content-driven breakpoints — derived from the points where existing
+     desktop layouts already break (commit b1f35923 chose 640/380; the
+     dashboard's container queries break at 760/780/880/960). Five tiers
+     plus an orientation-rotation threshold for dense visualisations
+     that cannot meaningfully fit portrait phone.
+
+     Note: CSS @media queries cannot read CSS custom properties (per
+     spec — media queries resolve before custom-property substitution).
+     The numbers must literal in @media rules; these tokens are the
+     canonical source the sweep references when authoring new rules
+     and the lint test pins to a single list of allowed breakpoints. */
+  --bp-xs:380px;          /* iPhone SE-class portrait */
+  --bp-sm:640px;          /* large phone */
+  --bp-rotate:768px;      /* below this, portrait dense surfaces show rotate prompt */
+  --bp-md:880px;          /* small tablet / landscape phone */
+  --bp-lg:1024px;         /* small laptop — matches existing dash-narrow-max-adjacent break */
+  --bp-xl:1400px;         /* full desktop — matches existing dash-wide-max */
+
+  /* Touch-target floor — Apple HIG 44pt, Material 48dp, WCAG 2.5.8 AA
+     24px (with adequate spacing). Design to the strictest applicable.
+     Applied via @media (pointer:coarse) so a touchscreen laptop also
+     gets the larger targets. */
+  --touch-target-min:44px;
+  --touch-target-spacing:8px;
+
+  /* Safe-area insets — iOS notch + home indicator. Always pair with a
+     fallback (0px) so non-iOS chrome stays unaffected. WebKit primary
+     source: webkit.org/blog/7929/designing-websites-for-iphone-x/ */
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-right:env(safe-area-inset-right,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+  --safe-left:env(safe-area-inset-left,0px);
+
+  /* Fluid type base. ≥16px floor is load-bearing: iOS Safari auto-zooms
+     on input focus when the input font-size is <16px. The clamp keeps
+     dense desktop legibility while preventing that zoom on phones. */
+  --font-size-base:clamp(14px,calc(13px + 0.25vw),16px);
+
+  /* Dynamic viewport height. `dvh` follows iOS Safari's address-bar
+     resize without layout shift; `vh` fallback declared first so old
+     browsers get the static-height behaviour. */
+  --vh-full:100vh;
+  --vh-full:100dvh;
+  --color-success:#10b981; --color-success-rgb:16,185,129;
+  --color-success-bg:rgba(var(--color-success-rgb),0.12); --color-success-border:rgba(var(--color-success-rgb),0.35);
+  --color-danger:#f87171;  --color-danger-rgb:248,113,113;
+  --color-danger-bg:rgba(var(--color-danger-rgb),0.12);  --color-danger-border:rgba(var(--color-danger-rgb),0.35);
+  --color-warn:#f59e0b;    --color-warn-bg:rgba(var(--color-accent-rgb),0.12);     --color-warn-border:rgba(var(--color-accent-rgb),0.35);
+  --border-radius-md:6px; --border-radius-lg:10px;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  /* Mono stack: Cascadia Mono first so Windows ClearType gets the heaviest
+     hinted face it has; SF Mono picks up macOS; fallbacks for everyone else. */
+  --font-mono:"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
+  /* Scrollbar — VS Code dark+ palette, rectangular, no roundness. */
+  --scrollbar-thumb:rgba(121,121,121,.4);
+  --scrollbar-thumb-hover:rgba(100,100,100,.7);
+  --scrollbar-thumb-active:rgba(191,191,191,.4);
+}
+
+/* Universal scrollbar style. Applies to <html>, <body>, and every scroll
+   container on the page so the look is consistent (overrides UA chrome). */
+*{scrollbar-width:thin;scrollbar-color:var(--scrollbar-thumb) transparent}
+*::-webkit-scrollbar{width:16px;height:16px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb);border-radius:0}
+*::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover)}
+*::-webkit-scrollbar-thumb:active{background:var(--scrollbar-thumb-active)}
+*::-webkit-scrollbar-corner{background:transparent}
+

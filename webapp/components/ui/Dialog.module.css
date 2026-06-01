@@ -1,0 +1,52 @@
+/* Dialog primitive. Backdrop + centred card ported verbatim from the old
+   global `.modal-backdrop` / `.modal-card` so existing confirm dialogs are
+   pixel-stable. Adds the a11y behaviour (focus trap, ESC, focus restore) in
+   Dialog.tsx. Rendered through a portal to document.body. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+  padding-top: max(16px, var(--safe-top));
+  padding-bottom: max(16px, var(--safe-bottom));
+}
+
+.card {
+  background: var(--color-background-primary, #fff);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 18px 20px 14px;
+  max-width: 480px;
+  width: calc(100% - 32px);
+  max-height: calc(var(--vh-full) - 32px);
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Body paragraph styling for the simple message-string dialog (Modal). */
+.message {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}

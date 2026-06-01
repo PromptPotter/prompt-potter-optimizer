@@ -190,6 +190,11 @@ function DashboardPaneInner() {
     <div
       className={`shell${tab === "chat" ? " chat-mode sidebar-hidden" : sidebarCollapsed ? " sidebar-collapsed" : ""}${sidebarMobileOpen ? " sidebar-mobile-open" : ""}`}
     >
+      {/* First focusable element — lets keyboard users jump the sidebar +
+          topbar straight to the main content. Off-screen until focused. */}
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       <Sidebar
         onSelectCycle={(cmp, cyc) => {
           selectCycle(cmp, cyc);
@@ -213,7 +218,7 @@ function DashboardPaneInner() {
           onClick={() => setSidebarMobileOpen(false)}
         />
       ) : null}
-      <main className="main">
+      <main className="main" id="main-content" tabIndex={-1}>
         <Topbar
           tab={tab}
           onTabChange={setTab}
@@ -324,11 +329,11 @@ function DashboardPaneInner() {
       <IngestPane
         open={newCampaignOpen}
         onClose={() => setNewCampaignOpen(false)}
-        onMinted={(cmp, cyc) => {
-          // Fresh-CSV mint returns the new (campaign, cycle) — select it now
-          // rather than waiting on the 2 s workspace poll. The existing-Origin
-          // and benchmark paths pass empty ids (the poll snaps to them).
-          if (cmp && cyc) selectCycle(cmp, cyc);
+        onMinted={(sel) => {
+          // Fresh-CSV / from-draft mint returns the new (campaign, cycle) —
+          // select it now rather than waiting on the 2 s workspace poll. The
+          // existing-Origin and benchmark paths return null (the poll snaps).
+          if (sel) selectCycle(sel.campaignId, sel.cycleId);
         }}
       />
     </div>

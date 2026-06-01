@@ -514,6 +514,11 @@ export function HardSamplesTable({
                               text: String(cell.raw),
                             })
                         : undefined;
+                    // A clickable cell is keyboard-operable: folded cells
+                    // unfold, expandable text cells open the read-out
+                    // popover. Virtualization bounds this to visible rows,
+                    // so the tab order never spans the whole roster.
+                    const interactive = onClick != null;
                     return (
                       <div
                         key={col.id}
@@ -522,7 +527,22 @@ export function HardSamplesTable({
                         data-running={isRunning ? "true" : undefined}
                         style={cell.style}
                         title={folded ? undefined : cell.title}
+                        role={interactive ? "button" : undefined}
+                        tabIndex={interactive ? 0 : undefined}
+                        aria-label={
+                          interactive && folded ? "Unfold column" : undefined
+                        }
                         onClick={onClick}
+                        onKeyDown={
+                          interactive
+                            ? (e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  onClick?.();
+                                }
+                              }
+                            : undefined
+                        }
                       >
                         {folded ? "" : isMeas ? (
                           ordCols.length === 0 && !isRunning ? (

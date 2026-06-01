@@ -65,7 +65,17 @@ const BranchNode = memo(function BranchNode({
       />
       <g
         className={`lineage-node${isSelected ? " selected" : ""}`}
+        role="button"
+        tabIndex={0}
+        aria-pressed={isSelected}
+        aria-label={`Round ${slot.row.round} candidate ${slot.row.label}, accuracy ${fmtPct0(slot.row.accuracy)}${slot.row.is_winner ? ", round winner" : ""}`}
         onClick={() => onPick(slot.row, isSelected)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onPick(slot.row, isSelected);
+          }
+        }}
         style={{ cursor: "pointer" }}
       >
         <line
@@ -284,7 +294,17 @@ export const LineageTree = memo(function LineageTree({
           {originRow ? (
             <g
               className={`lineage-node lineage-node-origin${originSelected ? " selected" : ""}`}
+              role="button"
+              tabIndex={0}
+              aria-pressed={originSelected}
+              aria-label={`Origin ${originRow.label}, accuracy ${fmtPct0(originRow.accuracy)}`}
               onClick={() => onPickRow(originRow, originSelected)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onPickRow(originRow, originSelected);
+                }
+              }}
               style={{ cursor: "pointer" }}
             >
               <text

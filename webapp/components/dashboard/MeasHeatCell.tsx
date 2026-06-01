@@ -174,6 +174,19 @@ export function MeasHeatCell({
     <canvas
       ref={canvasRef}
       className="hs-heat-canvas"
+      role="button"
+      tabIndex={0}
+      aria-label={`Measurement history — ${byOrd.size} measurement${byOrd.size === 1 ? "" : "s"}. Enter to inspect; arrow keys pan.`}
+      onKeyDown={(e) => {
+        // Keyboard entry point into the ord selection the pointer path
+        // reaches via click. Pick the first ord this row actually has a
+        // measurement for; arrow-key pan then takes over (window listener).
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          const first = ordCols.find((o) => byOrd.has(o)) ?? ordCols[0];
+          if (first != null) onSelectOrd(first);
+        }
+      }}
       onPointerDown={(e) => {
         const hit = locate(e);
         if (hit) onSelectOrd(ordCols[hit.idx]);

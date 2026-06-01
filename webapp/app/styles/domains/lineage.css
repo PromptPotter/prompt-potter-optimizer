@@ -1,0 +1,56 @@
+/* Lineage clickable nodes — hover/selected feedback so the operator
+   sees which node feeds the ScoringInspector. */
+.lineage-node:hover .lineage-stub{stroke-width:3}
+/* Keyboard focus feedback. SVG <g> renders an `outline` box unreliably
+   across browsers, so mirror the hover affordance on the child stub +
+   label instead — same visual language, reliably painted. */
+.lineage-node:focus{outline:none}
+.lineage-node:focus-visible .lineage-stub{stroke-width:3}
+.lineage-node:focus-visible .lineage-label{text-decoration:underline}
+/* Selection color: lineage entries are orange by default, switching to
+   red when one is clicked — quick visual feedback distinct from the
+   accent the rest of the dashboard uses. */
+.lineage-node:not(.selected) .lineage-stub{stroke:var(--color-accent)}
+.lineage-node:not(.selected) .lineage-label{fill:var(--color-accent)}
+.lineage-node.selected .lineage-stub{stroke:var(--color-selection);stroke-width:3}
+.lineage-node.selected .lineage-label{fill:var(--color-selection);font-weight:600}
+/* Scoring inspector — embedded inside the LineageTree card itself
+   (not a sibling card). Rendered below the SVG via a divider, so the
+   summary + Endorse & fork button surface inside the lineage block
+   the operator just clicked. */
+.scoring-inspector{border-top:1px solid var(--color-border);margin-top:12px;padding-top:10px;display:flex;flex-direction:column;gap:6px}
+.inspector-head{display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:13px;font-weight:600;color:var(--color-text-primary)}
+.scoring-inspector .card-title{display:flex;align-items:center;justify-content:space-between}
+.inspector-close{background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:18px;line-height:1;padding:0 4px}
+.inspector-close:hover{color:var(--color-text-primary)}
+.inspector-body{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;padding:8px 12px;font-family:var(--font-mono);font-size:13px}
+.inspector-row{display:contents}
+.inspector-key{color:var(--color-text-secondary)}
+.inspector-val{color:var(--color-text-primary)}
+.inspector-note{grid-column:1/-1;color:var(--color-text-secondary);font-style:italic;margin-top:6px}
+/* Cycle-level toolbar — Edit toggle + Stop button live on the breadcrumb
+   row next to the picker. Off by default; Edit mode reveals Stop and the
+   Fork action inside the ScoringInspector. */
+.cycle-toolbar{display:inline-flex;align-items:center;gap:6px;margin-left:14px}
+.edit-mode-toggle{background:transparent;border:1px solid var(--color-border);border-radius:6px;padding:2px 10px;font-size:12px;color:var(--color-text-secondary);cursor:pointer;font-family:inherit}
+.edit-mode-toggle:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+.edit-mode-toggle.on{background:var(--color-status-warn,#b45309);color:#fff;border-color:var(--color-status-warn,#b45309)}
+.stop-button-wrap{display:inline-flex;align-items:center;gap:6px}
+.stop-button{background:var(--color-status-error,#c53030);color:#fff;border:0;border-radius:6px;padding:2px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+.stop-button:disabled{background:var(--color-text-secondary);cursor:not-allowed;opacity:0.6}
+.stop-err{color:var(--color-status-error,#c53030);font-size:12px}
+/* Fork action inside the ScoringInspector — only rendered when Edit mode
+   is on. After a successful POST the action is replaced by the CLI command
+   to run the new fork. */
+.inspector-actions{padding:8px 12px;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:8px}
+.fork-button{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border:0;border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:inherit}
+.fork-button:disabled{opacity:0.5;cursor:not-allowed}
+/* Secondary fork action — Substitute candidates. Disabled in MVP
+   (needs the typed-searchpoint form, landing in M12). Rendered as a
+   ghost button to show the path exists without competing with the
+   live Endorse action. */
+.fork-button-secondary{display:inline-flex;align-items:center;gap:6px;background:transparent;color:var(--color-text-secondary);border:1px dashed var(--color-border);border-radius:6px;padding:6px 12px;font-size:13px;font-family:inherit;cursor:not-allowed;opacity:0.7}
+.fork-coming-soon{font-size:10px;padding:1px 5px;border-radius:8px;background:var(--color-background-tint,rgba(0,0,0,0.06));color:var(--color-text-tertiary);font-weight:500;letter-spacing:0.04em}
+.fork-err{color:var(--color-status-error,#c53030);font-size:12px}
+.inspector-fork-result{padding:10px 12px;border-top:1px solid var(--color-border);font-family:var(--font-mono);font-size:13px;display:grid;gap:6px}
+.inspector-fork-result code{background:var(--color-background-tint,rgba(0,0,0,0.04));padding:1px 5px;border-radius:3px}

@@ -1,5 +1,8 @@
 "use client";
-import { useEffect } from "react";
+
+import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
+import s from "@/components/ui/Dialog.module.css";
 
 export interface ModalAction {
   label: string;
@@ -15,45 +18,23 @@ interface Props {
   onClose: () => void;
 }
 
-// Plain-React modal — no portal, sits at the end of <main> via the
-// consumer's own render. Escape closes; backdrop click closes. Multiple
-// action buttons render in the order given (rightmost is the primary
-// affordance in our convention).
+// Confirm dialog: title + message + a row of action buttons. The canonical
+// confirm surface, built on the Dialog + Button primitives (which carry the
+// focus-trap / ESC / restore a11y). Actions render in order — rightmost is the
+// primary by convention.
 export function Modal({ open, title, message, actions, onClose }: Props) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="modal-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 id="modal-title" className="modal-title">{title}</h3>
-        <p className="modal-message">{message}</p>
-        <div className="modal-actions">
-          {actions.map((a) => (
-            <button
-              key={a.label}
-              type="button"
-              className={`modal-btn modal-btn-${a.variant ?? "default"}`}
-              onClick={a.onClick}
-            >
-              {a.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
+    <Dialog
+      open={open}
+      title={title}
+      onClose={onClose}
+      footer={actions.map((a) => (
+        <Button key={a.label} variant={a.variant ?? "default"} onClick={a.onClick}>
+          {a.label}
+        </Button>
+      ))}
+    >
+      <p className={s.message}>{message}</p>
+    </Dialog>
   );
 }

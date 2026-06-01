@@ -11,6 +11,24 @@
 
 import type { DraftCampaignWire, DraftPatch, OriginGap, ProvenanceTag } from "./api";
 
+// The dotted field-key namespace the server's `origin_readiness` checklist
+// keys `draft.resolved` / `draft.sources` by. Single source for every site
+// that reads provenance by key (this module, plus the ingest column-mapping
+// and check-in panels). Mirror of the field ids in `origin_readiness.py`.
+export const ORIGIN_KEY = {
+  columnQuery: "column.query",
+  columnGroundTruth: "column.ground_truth",
+  taskDescription: "task_description",
+  connector: "connector",
+  scoringComposite: "scoring_composite",
+  maxRounds: "max_rounds",
+  optimizerProvider: "optimizer.provider",
+  optimizerModel: "optimizer.model",
+  backendNodeConfig: "backend.node_config",
+} as const;
+
+export type OriginKey = (typeof ORIGIN_KEY)[keyof typeof ORIGIN_KEY];
+
 export interface OriginReadiness {
   complete: boolean;
   gaps: OriginGap[];
@@ -48,14 +66,14 @@ function checkColumn(draft: DraftCampaignWire, check: ColumnCheck): OriginGap | 
 // `task_description` is the one that lands `unset` (no default framing), so it
 // gates until the operator (or the resolver, high-confidence) states it. Mirror
 // of `_CONFIG_FIELDS` in `origin_readiness.py`.
-const CONFIG_FIELDS: Array<{ fieldKey: string; hint: string }> = [
-  { fieldKey: "task_description", hint: "Describe what the prompt should do." },
-  { fieldKey: "connector", hint: "Confirm which backend runs the pipeline." },
-  { fieldKey: "scoring_composite", hint: "Confirm how a prediction is scored." },
-  { fieldKey: "max_rounds", hint: "Confirm the optimization round cap." },
-  { fieldKey: "optimizer.provider", hint: "Confirm the optimizer LLM provider." },
-  { fieldKey: "optimizer.model", hint: "Confirm the optimizer LLM model." },
-  { fieldKey: "backend.node_config", hint: "Confirm the backend node overlay." },
+const CONFIG_FIELDS: Array<{ fieldKey: OriginKey; hint: string }> = [
+  { fieldKey: ORIGIN_KEY.taskDescription, hint: "Describe what the prompt should do." },
+  { fieldKey: ORIGIN_KEY.connector, hint: "Confirm which backend runs the pipeline." },
+  { fieldKey: ORIGIN_KEY.scoringComposite, hint: "Confirm how a prediction is scored." },
+  { fieldKey: ORIGIN_KEY.maxRounds, hint: "Confirm the optimization round cap." },
+  { fieldKey: ORIGIN_KEY.optimizerProvider, hint: "Confirm the optimizer LLM provider." },
+  { fieldKey: ORIGIN_KEY.optimizerModel, hint: "Confirm the optimizer LLM model." },
+  { fieldKey: ORIGIN_KEY.backendNodeConfig, hint: "Confirm the backend node overlay." },
 ];
 
 function checkConfirmed(
@@ -77,8 +95,8 @@ function checkConfirmed(
 export function originReadiness(draft: DraftCampaignWire): OriginReadiness {
   const gaps: OriginGap[] = [];
   for (const check of [
-    { fieldKey: "column.query", value: draft.column_query, label: "input" },
-    { fieldKey: "column.ground_truth", value: draft.column_ground_truth, label: "target" },
+    { fieldKey: ORIGIN_KEY.columnQuery, value: draft.column_query, label: "input" },
+    { fieldKey: ORIGIN_KEY.columnGroundTruth, value: draft.column_ground_truth, label: "target" },
   ]) {
     const gap = checkColumn(draft, check);
     if (gap) gaps.push(gap);
@@ -101,21 +119,21 @@ export function questionPatch(field: string, answer: string): DraftPatch | null 
   const value = answer.trim();
   if (!value) return null;
   switch (field) {
-    case "column.query":
+    case ORIGIN_KEY.columnQuery:
       return { column_query: value };
-    case "column.ground_truth":
+    case ORIGIN_KEY.columnGroundTruth:
       return { column_ground_truth: value };
-    case "task_description":
+    case ORIGIN_KEY.taskDescription:
       return { task_description: value };
-    case "connector":
+    case ORIGIN_KEY.connector:
       return { connector: value };
-    case "scoring_composite":
+    case ORIGIN_KEY.scoringComposite:
       return { scoring_composite: value };
-    case "optimizer.provider":
+    case ORIGIN_KEY.optimizerProvider:
       return { optimizer_provider: value };
-    case "optimizer.model":
+    case ORIGIN_KEY.optimizerModel:
       return { optimizer_model: value };
-    case "max_rounds": {
+    case ORIGIN_KEY.maxRounds: {
       const n = Number(value);
       return Number.isInteger(n) && n >= 1 && n <= 100 ? { max_rounds: n } : null;
     }
@@ -129,7 +147,7 @@ export function questionPatch(field: string, answer: string): DraftPatch | null 
 // is always grounded in real columns), else empty → free-text input.
 export function questionOptions(field: string, options: string[], headers: string[]): string[] {
   if (options.length > 0) return options;
-  if (field === "column.query" || field === "column.ground_truth") return headers;
+  if (field === ORIGIN_KEY.columnQuery || field === ORIGIN_KEY.columnGroundTruth) return headers;
   return [];
 }
 

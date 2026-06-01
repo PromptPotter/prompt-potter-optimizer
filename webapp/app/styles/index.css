@@ -1,0 +1,41 @@
+/* PromptPotter stylesheet — ordered cascade.
+   Imports are inlined at build (Lightning CSS); ORDER IS LOAD-BEARING.
+   Foundation first (tokens → themes → base), then component domains in the
+   source order the cascade was authored against, then the cross-cutting
+   responsive/a11y tail LAST so its overrides win.
+
+   foundation/ = the portable, whitelabel-safe skeleton (tokens, both theme
+   palettes, reset/base, reduced-motion, responsive floors).
+   domains/    = per-feature component rules + their co-located @media.
+   Glassmorphism (domains/glass.css) is operator-vetoed — preserved verbatim. */
+
+/* ── Foundation ─────────────────────────────────────────────── */
+@import "./foundation/tokens.css";
+@import "./foundation/themes.css";
+@import "./foundation/base.css";
+
+/* ── Domains (authored cascade order) ───────────────────────── */
+@import "./domains/shell.css";
+@import "./domains/topbar.css";
+@import "./domains/dashboard.css";
+@import "./domains/cycle-picker.css";
+@import "./domains/lineage.css";
+@import "./domains/panels.css";
+@import "./domains/fitness.css";
+@import "./domains/glass.css";
+@import "./domains/workflow.css";
+@import "./domains/files.css";
+@import "./domains/chat.css";
+@import "./domains/family-tree.css";
+@import "./domains/hard-samples.css";
+@import "./domains/console.css";
+@import "./domains/leverage.css";
+@import "./domains/verify.css";
+
+/* ── Cross-cutting a11y + responsive tail (must win) ────────── */
+@import "./foundation/reduced-motion.css";
+@import "./domains/login.css";
+@import "./domains/onboarding.css";
+@import "./domains/account.css";
+@import "./domains/auth.css";
+@import "./foundation/responsive.css";

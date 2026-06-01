@@ -1,0 +1,146 @@
+/* Hard-samples heat-map. Collapsed: a compact resizable badge — one 4 px
+   tile per sample (matching the original badge) in live Rasch difficulty
+   order (green = mostly hit, red = mostly miss, dark = no measurements).
+   Standard layout ~10 tiles across × 3 down; drag the bottom-right corner
+   on either axis to resize — tiles keep their size, the grid reflows how
+   many show. The grip fades in on hover. Click to expand HardSamplesTable. */
+.hs-heat-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;margin-top:24px;padding:0 8px}
+/* Two-button control row: heat-map mini on the left, sample-trajectory
+   mini on the right. Each owns an independent expand state; their
+   expanded panels stack below (trajectory above the hard-samples table). */
+.hs-controls-row{display:flex;align-items:center;justify-content:center;gap:8px;width:100%}
+/* Run control — sits to the RIGHT of the heat-map + sample-trajectory view
+   toggles. Play/pause matches their bordered-rect shape (state shown by icon
+   colour, not a loud accent disc); fork is a quiet ghost, present but hushed. */
+.run-ctl{display:inline-flex;align-items:center;gap:4px;margin-left:2px}
+.run-ctl-primary{display:inline-flex;align-items:center;justify-content:center;width:30px;height:22px;padding:0;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);cursor:pointer;transition:border-color .12s,color .12s,background .12s}
+.run-ctl-primary.is-play{color:var(--color-success)}
+.run-ctl-primary.is-pause{color:var(--color-warn)}
+.run-ctl-primary:hover:not(:disabled){border-color:var(--color-accent)}
+.run-ctl-primary:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.run-ctl-primary:disabled{opacity:0.5;cursor:not-allowed}
+.run-ctl-fork{display:inline-flex;align-items:center;justify-content:center;width:20px;height:22px;padding:0;border:0;background:transparent;color:var(--color-text-tertiary);opacity:0.5;cursor:pointer;transition:opacity .12s,color .12s}
+.run-ctl-fork:hover:not(:disabled){opacity:1;color:var(--color-accent)}
+.run-ctl-fork:disabled{opacity:0.3;cursor:not-allowed}
+.run-ctl-err{color:var(--color-danger,#c53030);font-size:11px;max-width:160px}
+/* Sample-trajectory mini button — fixed dimensions mirroring `.hs-heat-mini-btn`
+   (57x22px, non-draggable). Inner `.st-mini` renders a miniature Series view
+   (4px tiles) — same shape as the heat-map's mini, different palette. */
+.st-mini-btn{position:relative;display:block;margin:0;padding:3px;cursor:pointer;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;width:57px;height:22px;transition:border-color .12s,box-shadow .12s,background .12s}
+.st-mini-btn:hover{border-color:var(--color-accent)}
+.st-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.st-mini-btn[aria-expanded="true"]{border-color:var(--color-accent);background:var(--color-background-tertiary,var(--color-background-secondary))}
+/* 4px tiles; auto-fill so the round x sample matrix flows without ever
+   changing tile size. */
+.st-mini{display:grid;grid-template-columns:repeat(auto-fill,4px);grid-auto-rows:4px;gap:1px;align-content:start}
+.st-mini-cell{width:4px;height:4px;border-radius:1px;background:var(--color-background-tertiary)}
+.st-mini-cell.new{background:#3b82f6}
+.st-mini-cell.gained{background:var(--color-success)}
+.st-mini-cell.lost{background:var(--color-warn)}
+.st-mini-cell.kept{background:var(--color-text-tertiary);opacity:.5}
+.st-mini-cell.absent{background:var(--color-background-tertiary)}
+.hs-heat-mini-btn{position:relative;display:block;margin:0;padding:3px;cursor:pointer;border:1px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;resize:both;width:57px;height:22px;min-width:30px;min-height:14px;max-width:90%;max-height:50vh;transition:border-color .12s,box-shadow .12s,background .12s}
+.hs-heat-mini-btn[aria-expanded="true"]{border-color:var(--color-accent);background:var(--color-background-tertiary,var(--color-background-secondary))}
+.hs-heat-mini-btn:hover{border-color:var(--color-accent)}
+.hs-heat-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+/* Native resizer glyph hidden; a diagonal-line grip fades in on hover. */
+.hs-heat-mini-btn::-webkit-resizer{background:transparent}
+.hs-heat-mini-btn::after{content:"";position:absolute;right:1px;bottom:1px;width:5px;height:5px;background:repeating-linear-gradient(135deg,var(--color-accent) 0 1.5px,transparent 1.5px 3px);opacity:0;transition:opacity .12s;pointer-events:none}
+.hs-heat-mini-btn:hover::after{opacity:1}
+/* 4 px tiles; auto-fill so dragging the button on either axis reflows how
+   many tiles are visible without ever changing tile size. */
+.hs-heat-mini{display:grid;grid-template-columns:repeat(auto-fill,4px);grid-auto-rows:4px;gap:1px;align-content:start}
+.hs-heat-mini-cell{width:4px;height:4px;border-radius:1px;background:var(--color-background-tertiary)}
+.hs-heat-mini-cell.hit{background:var(--color-success)}
+.hs-heat-mini-cell.miss{background:var(--color-danger)}
+/* Expanded wrap — full-bleed breakout from the 980 px hero. Left gutter
+   tracks where a 1280 px centred block would sit (the operator's preferred
+   distance); the right edge runs to a 24 px viewport gutter. */
+.hs-expand-wrap{position:relative;align-self:stretch;width:100vw;margin-left:calc(50% - 50vw);display:flex;justify-content:flex-start;padding-left:max(8px,calc((100vw - 1280px) / 2));padding-right:24px}
+.hs-expand-wrap > .hs-zone{margin-top:0;width:100%;align-items:stretch;padding:0}
+/* --- Expanded view: full HardSamplesTable --- */
+.hs-zone{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:24px;padding:0 8px}
+/* Width tracks the columns' total via --hs-table-w (set inline), so folding
+   or narrowing a column shrinks the whole block instead of leaving dead
+   space; max-width caps it at the available width. resize:both — drag the
+   bottom-right corner on either axis; that writes an inline `width` which
+   overrides the custom property, so a manual size sticks. */
+.hs-block{width:var(--hs-table-w,fit-content);max-width:100%;min-width:360px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:both;height:calc(30px + 16.5 * 26px + 33px);min-height:200px;max-height:80vh}
+.hs-scroll{flex:1;min-height:0;overflow:auto}
+.hs-grid{display:grid;grid-auto-rows:min-content;background:var(--color-background-secondary);position:relative}
+.hs-header{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:4px;padding:0 8px;height:30px;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border-tertiary);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600;user-select:none;overflow:hidden}
+.hs-header[data-align="right"]{justify-content:flex-end}
+.hs-header[data-align="center"]{justify-content:center}
+.hs-header.folded{padding:0 2px;justify-content:center}
+.hs-header.sorted{color:var(--color-accent)}
+.hs-header-label{background:transparent;border:0;cursor:pointer;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;padding:0;display:inline-flex;align-items:center;gap:4px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.hs-header[data-align="right"] .hs-header-label{justify-content:flex-end}
+.hs-header[data-align="center"] .hs-header-label{justify-content:center}
+.hs-header-label:hover{color:var(--color-text-primary)}
+.hs-header.sorted .hs-header-label{color:var(--color-accent)}
+.hs-sort-mark{font-size:9px;opacity:.85}
+.hs-header-tools{display:flex;align-items:center;gap:1px;opacity:0;transition:opacity .12s;flex-shrink:0}
+.hs-header:hover .hs-header-tools{opacity:1}
+.hs-tool{background:transparent;border:0;font-size:11px;cursor:pointer;color:var(--color-text-tertiary);padding:2px 4px;border-radius:3px;line-height:1}
+.hs-tool:hover{background:rgba(var(--color-accent-rgb),0.10);color:var(--color-accent)}
+.hs-tool.on{color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.12)}
+.hs-resize{width:6px;align-self:stretch;margin-left:2px;cursor:col-resize;background:transparent;border-right:1px solid var(--color-border-tertiary);flex-shrink:0;touch-action:none}
+.hs-resize:hover{border-right-color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.10);border-right-width:2px}
+.hs-cell{padding:6px 10px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);border-bottom:1px solid var(--color-border-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;content-visibility:auto;contain-intrinsic-size:auto 26px;display:flex;align-items:center;min-width:0}
+.hs-cell[data-align="right"]{justify-content:flex-end;font-variant-numeric:tabular-nums}
+.hs-cell[data-align="center"]{justify-content:center}
+.hs-cell.wrapped{white-space:normal;overflow-wrap:anywhere;align-items:flex-start;padding:6px 10px}
+.hs-cell.folded{padding:0;color:transparent;cursor:pointer}
+.hs-cell.folded:hover{background:rgba(var(--color-accent-rgb),0.08)}
+.hs-cell.rank,.hs-header.rank{color:var(--color-text-tertiary);background:var(--color-background-primary)}
+.hs-cell.rank{font-variant-numeric:tabular-nums}
+.hs-cell.meas{padding:0;overflow:hidden}
+/* flex-wrap so a narrow table (folded columns / shrink-wrapped width)
+   wraps whole controls onto a second row instead of squashing their text. */
+.hs-footer{padding:6px 10px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-primary);font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:center;gap:8px 12px}
+.hs-counts{margin-left:32px;font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap;flex-shrink:0}
+.hs-reset{margin-left:auto;flex-shrink:0;white-space:nowrap;font-family:var(--font-mono);font-size:11px;background:transparent;border:1px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 8px;border-radius:4px;cursor:pointer}
+.hs-reset:hover{border-color:var(--color-accent);color:var(--color-accent)}
+.hs-header.sort-locked .hs-header-label{color:var(--color-text-tertiary);cursor:default}
+.hs-header.sort-locked .hs-header-label:hover{color:var(--color-text-tertiary)}
+.hs-sync-toggle{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;white-space:nowrap;font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);letter-spacing:.04em;cursor:pointer;user-select:none}
+.hs-sync-toggle input[type="checkbox"]{accent-color:var(--color-accent);margin:0;cursor:pointer}
+.hs-sync-toggle:hover{color:var(--color-text-primary)}
+.hs-scope-toggle{display:inline-flex;flex-shrink:0;border:1px solid var(--color-border-tertiary);border-radius:4px;overflow:hidden;font-family:var(--font-mono);font-size:11px;letter-spacing:.04em}
+.hs-scope-opt{background:transparent;border:0;color:var(--color-text-secondary);padding:3px 9px;cursor:pointer;white-space:nowrap;border-right:1px solid var(--color-border-tertiary)}
+.hs-scope-opt:last-child{border-right:0}
+.hs-scope-opt:hover{color:var(--color-text-primary)}
+.hs-scope-opt.on{background:var(--color-accent);color:var(--color-background-primary)}
+.hs-cell[data-running="true"]{animation:hs-soft-blink 1.4s ease-in-out infinite}
+@keyframes hs-soft-blink{0%,100%{background-color:transparent}50%{background-color:rgba(var(--color-accent-rgb),0.18)}}
+.hs-popover-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px}
+.hs-popover{background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:10px;max-width:80vw;max-height:80vh;min-width:320px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
+.hs-popover-header{padding:10px 14px;border-bottom:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--color-text-secondary);letter-spacing:.04em}
+.hs-popover-header button{background:transparent;border:0;color:var(--color-text-tertiary);font-size:18px;cursor:pointer;padding:0 4px;line-height:1}
+.hs-popover-header button:hover{color:var(--color-accent)}
+.hs-popover-body{margin:0;padding:14px;overflow:auto;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);white-space:pre-wrap;word-break:break-word}
+.hs-heat-empty{color:var(--color-text-tertiary);font-style:italic}
+/* One <canvas> per row — the whole hit/miss history compressed into the
+   column width. See MeasHeatCell.tsx / heat-canvas.ts. */
+.hs-heat-canvas{display:block;width:100%;height:20px;cursor:pointer}
+/* Virtualised body. .hs-header-row holds the sticky headers; .hs-body is
+   the scroll-bar-sizing container that holds the absolutely-positioned
+   .hs-row windows. Both keep the same grid template as the header so cell
+   widths stay aligned across the sticky boundary. */
+.hs-header-row{position:sticky;top:0;z-index:3}
+.hs-body{will-change:transform}
+.hs-row{border-bottom:1px solid var(--color-border-tertiary)}
+.hs-row > .hs-cell{border-bottom:0}
+/* Selection marker — anchored inside .hs-body, spans the full virtual
+   height (the body's height drives the scroll-bar, so 0..100% covers every
+   virtual row regardless of which ones are mounted right now). */
+.hs-heat-marker{position:absolute;top:0;bottom:0;width:2px;background:var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);pointer-events:none;z-index:1}
+/* Stale dim — applied while useDatasetPreview is fetching a fresh slice
+   over a prior-unit cache hit. The prior data stays readable but the
+   block dims so the operator knows it's transitional. */
+.hs-block[data-stale="true"]{opacity:.55;transition:opacity .12s}
+.hs-heat-tip{position:fixed;z-index:1000;padding:3px 7px;border-radius:4px;background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);font-family:var(--font-mono);font-size:11px;color:var(--color-text-primary);white-space:nowrap;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,0.35)}
+@media (prefers-reduced-motion:reduce){
+  .hs-cell[data-running="true"]{animation:none;background-color:rgba(var(--color-accent-rgb),0.12)}
+}
+

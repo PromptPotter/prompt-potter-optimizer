@@ -1,0 +1,31 @@
+/* Popover primitive. Anchored floating panel — wrap + panel ported from the
+   old global `.campaign-menu` / `.campaign-menu-list` rules so the sidebar
+   menu is pixel-stable. Behaviour (click-outside, ESC) lives in Popover.tsx. */
+
+.wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  min-width: 140px;
+  margin-top: 2px;
+  padding: 4px 0;
+  background: var(--color-background-secondary);
+  border: 0.5px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+}
+
+.alignRight {
+  left: auto;
+  right: 0;
+}

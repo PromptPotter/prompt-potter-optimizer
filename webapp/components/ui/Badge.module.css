@@ -1,0 +1,29 @@
+/* Badge primitive — a small pill label. Base ported verbatim from the old
+   global `.badge`; tones pair with the success/danger tokens for state pills
+   (always carry a text label too — never colour alone). */
+
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-secondary);
+  color: var(--color-text-secondary);
+  border: 0.5px solid var(--color-border-tertiary);
+}
+
+.accent {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.success {
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+  background: var(--color-success-bg);
+}
+
+.danger {
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+}
