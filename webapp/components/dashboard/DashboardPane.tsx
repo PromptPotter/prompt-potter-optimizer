@@ -324,11 +324,11 @@ function DashboardPaneInner() {
       <IngestPane
         open={newCampaignOpen}
         onClose={() => setNewCampaignOpen(false)}
-        onMinted={(cmp, cyc) => {
-          // Fresh-CSV mint returns the new (campaign, cycle) — select it now
-          // rather than waiting on the 2 s workspace poll. The existing-Origin
-          // and benchmark paths pass empty ids (the poll snaps to them).
-          if (cmp && cyc) selectCycle(cmp, cyc);
+        onMinted={(sel) => {
+          // Fresh-CSV / from-draft mint returns the new (campaign, cycle) —
+          // select it now rather than waiting on the 2 s workspace poll. The
+          // existing-Origin and benchmark paths return null (the poll snaps).
+          if (sel) selectCycle(sel.campaignId, sel.cycleId);
         }}
       />
     </div>
