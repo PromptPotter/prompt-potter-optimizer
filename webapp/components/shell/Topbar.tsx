@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
+import { RunningJobsButton } from "./RunningJobsButton";
 import { AccountModal } from "@/components/account/AccountModal";
 import { WelcomeLockoutModal } from "@/components/onboarding/WelcomeLockoutModal";
 import { useAuth } from "@/lib/auth-context";
@@ -111,6 +112,7 @@ export function Topbar({ tab, onTabChange, onMenuToggle }: Props) {
           >{t.label}</button>
         ))}
       </div>
+      <RunningJobsButton onPicked={() => onTabChange("dashboard")} />
       <ThemeToggle />
       {status === "authed" ? (
         <>

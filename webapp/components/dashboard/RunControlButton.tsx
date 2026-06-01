@@ -10,7 +10,7 @@ import {
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useRunState } from "@/lib/useRunState";
 import { Modal } from "@/components/shell/Modal";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 
 interface Props {
   campaignId: string | null;
@@ -71,7 +71,7 @@ export function RunControlButton({ campaignId, cycleId, dash }: Props) {
   // Fork point = the live round's PoBB leader. Only a live round exposes a
   // determinable candidate, so fork is "allowed" only while one is running.
   const pobb = dash?.current_round?.pobb;
-  const forkRound = dash?.current_round?.round ?? dash?.round ?? null;
+  const forkRound = roundOf(dash);
   const forkCandidate = pobb?.current_id ?? pobb?.top?.[0]?.id ?? null;
 
   if (!campaignId || !cycleId) return null;

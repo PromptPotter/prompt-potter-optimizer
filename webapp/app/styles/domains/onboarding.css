@@ -21,6 +21,9 @@
 .new-campaign-cancel:hover{background:var(--color-background-hover)}
 .new-campaign-submit{background:var(--color-accent);border-color:var(--color-accent);color:white;font-weight:500}
 .new-campaign-submit:disabled{opacity:0.55;cursor:not-allowed}
+.new-campaign-demo{margin-right:auto;padding:8px 14px;border-radius:5px;font-size:13px;font-weight:500;cursor:pointer;border:0.5px solid var(--color-accent);background:transparent;color:var(--color-accent)}
+.new-campaign-demo:hover{background:var(--color-accent);color:white}
+.new-campaign-demo:disabled{opacity:0.55;cursor:not-allowed}
 .new-campaign-field textarea{padding:8px 10px;border:0.5px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:13px;font-family:inherit;resize:vertical}
 .new-campaign-field button{align-self:flex-end;padding:6px 12px;border-radius:5px;border:0.5px solid var(--color-border-tertiary);background:transparent;color:var(--color-text-secondary);font-size:12px;cursor:pointer}
 .new-campaign-field button:hover:not(:disabled){background:var(--color-background-hover)}
@@ -75,22 +78,9 @@
 .origin-question-prompt{flex:1 1 auto}
 .origin-question-select{flex:0 0 auto}
 .origin-question-text{display:inline-flex;gap:4px;align-items:center;flex:0 0 auto}
-/* Pipeline & optimizer-permission step — the pre-mint "another window". Makes
-   the connector-pinned rails explicit: locked model, thinking floor with
-   higher levels crossed out (the optimizer is locked out, not just defaulted). */
-.opt-locks{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:6px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
-.opt-locks-lead{margin:0;font-size:12px;line-height:1.5;color:var(--color-text-secondary)}
-.opt-locks-row{display:flex;align-items:center;gap:10px;font-size:12px}
-.opt-locks-label{flex-shrink:0;width:64px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;font-size:11px}
-.opt-locks-pipeline{display:flex;gap:6px;flex-wrap:wrap}
+/* Hyperparameter lock table (the "Review hyperparameters" expander) + the
+   pipeline chip reused by the editable config panel. */
 .opt-locks-chip{font-family:var(--font-mono);font-size:11px;padding:2px 8px;border-radius:9px;background:var(--color-background-tertiary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-primary)}
-.opt-locks-locked{display:inline-flex;align-items:center;gap:6px;color:var(--color-text-secondary)}
-.opt-locks-lock{font-size:11px}
-.opt-locks-ladder{display:inline-flex;gap:6px}
-.opt-locks-level{font-size:11px;padding:2px 10px;border-radius:9px;border:0.5px solid var(--color-border-tertiary);color:var(--color-text-tertiary);background:transparent;text-transform:lowercase}
-.opt-locks-level.is-active{color:white;background:var(--color-accent);border-color:var(--color-accent);font-weight:600}
-.opt-locks-level.is-crossed{text-decoration:line-through;opacity:0.45;border-style:dashed}
-.opt-locks-hint{font-size:11px;line-height:1.5;color:var(--color-text-tertiary)}
 .opt-locks-table{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
 .opt-locks-param{display:flex;align-items:center;gap:8px;font-size:12px}
 .opt-locks-param-name{flex:1;font-family:var(--font-mono);font-size:11px;color:var(--color-text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -99,6 +89,56 @@
 .opt-locks-tag{flex-shrink:0;font-size:10px;font-weight:600;padding:1px 7px;border-radius:9px;border:0.5px solid var(--color-border-tertiary);white-space:nowrap}
 .opt-locks-tag.is-locked{color:var(--color-text-secondary)}
 .opt-locks-tag.is-free{color:var(--color-text-tertiary)}
+/* Wizard step pips — the 1-2-3 launch indicator at the top of the draft body. */
+.wizard-steps{display:flex;gap:8px;list-style:none;margin:0 0 4px;padding:0}
+.wizard-step{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:600;color:var(--color-text-tertiary);border:0.5px solid var(--color-border-tertiary);background:transparent}
+.wizard-step.is-active{color:white;background:var(--color-accent);border-color:var(--color-accent)}
+.wizard-step.is-done{color:var(--color-success);border-color:var(--color-success)}
+.wizard-demo-note{margin:0;font-size:12px;line-height:1.5;color:var(--color-text-secondary);padding:8px 10px;border-radius:6px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary)}
+/* Starting-prompt control panel — the editable 6-field decomposition. */
+.prompt-editor{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:6px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
+.prompt-editor-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.prompt-editor-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-primary)}
+.prompt-editor-sub{font-size:11px;color:var(--color-text-tertiary)}
+.prompt-editor-demo-note{margin:0;font-size:11px;line-height:1.5;color:var(--color-text-secondary)}
+.prompt-editor-grid{display:flex;flex-direction:column;gap:8px}
+.prompt-field{display:grid;grid-template-columns:96px 1fr;align-items:start;gap:8px}
+.prompt-field-label{font-size:12px;font-weight:600;color:var(--color-text-primary);padding-top:6px}
+.prompt-field-input{width:100%;resize:vertical;font:inherit;font-size:12px;line-height:1.45;padding:6px 9px;border-radius:6px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background);color:var(--color-text-primary)}
+.prompt-field-input:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+.prompt-editor-fewshot{margin:0;font-size:11px;color:var(--color-text-tertiary)}
+.prompt-editor.is-flat{border:0;background:transparent;padding:0}
+/* Unified setup preview — one compact card holding the editable pipeline
+   config + starting prompt (step 3). */
+.setup-preview{display:flex;flex-direction:column;gap:12px;padding:12px 14px;border-radius:6px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
+.setup-preview-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.setup-preview-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-primary)}
+.setup-preview-sub{font-size:11px;color:var(--color-text-tertiary)}
+.setup-preview-divider{width:100%;height:0;border:0;border-top:0.5px solid var(--color-border-tertiary);margin:2px 0}
+/* Editable pipeline/optimizer config controls. */
+.config-editor{display:flex;flex-direction:column;gap:8px}
+.config-row{display:flex;align-items:center;gap:10px;font-size:12px;flex-wrap:wrap}
+.config-label{flex-shrink:0;width:64px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;font-size:11px}
+.config-value{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.config-model{flex:1;min-width:0}
+.config-lock{font-size:11px;font-weight:600;padding:2px 9px;border-radius:9px;border:0.5px solid var(--color-border-tertiary);background:transparent;color:var(--color-text-secondary);cursor:pointer}
+.config-lock.is-locked{color:var(--color-accent);border-color:var(--color-accent)}
+.config-lock:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+.config-input{flex:1;min-width:120px;font:inherit;font-size:12px;padding:4px 8px;border-radius:6px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background);color:var(--color-text-primary);font-family:var(--font-mono)}
+.config-input:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+.config-hint{font-size:11px;line-height:1.4;color:var(--color-text-tertiary);padding-left:74px}
+.config-level{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 10px;border-radius:9px;border:0.5px solid var(--color-border-tertiary);background:transparent;color:var(--color-text-tertiary);text-transform:lowercase;cursor:pointer}
+.config-level:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+.config-level.is-on{color:white;background:var(--color-accent);border-color:var(--color-accent);font-weight:600}
+.config-level.is-off{opacity:0.55;border-style:dashed;text-decoration:line-through}
+.config-level.is-origin{box-shadow:0 0 0 1.5px var(--color-success)}
+.config-origin-tag{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:0 3px;border-radius:4px;background:var(--color-success);color:white;text-decoration:none}
+/* Check-in agent working — a compact inline line (real resolve + demo sim). */
+.checkin-loading{display:flex;align-items:center;gap:8px;font-size:13px;line-height:1.5;color:var(--color-text-secondary);padding:8px 0}
+.checkin-loading-bot{font-size:20px;animation:checkin-bob 1s ease-in-out infinite}
+.checkin-loading-model{font-family:var(--font-mono);color:var(--color-accent)}
+@keyframes checkin-bob{50%{transform:translateY(-3px)}}
+@media (prefers-reduced-motion:reduce){.checkin-loading-bot{animation:none}}
 /* Sweep-Group-B: lift IngestPane inputs to the iOS-safe size on
    small phones, drop overlay padding, full-width modal. The Phase 0
    pointer-coarse rule covers buttons + non-select inputs; select needs

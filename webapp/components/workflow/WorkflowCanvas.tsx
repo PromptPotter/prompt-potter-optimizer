@@ -3,21 +3,16 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CANVAS_W,
   CANVAS_H,
-  CANVAS_V_W,
-  CANVAS_V_H,
   DOT_R,
   EDGES,
-  EDGES_V,
   LAYOUT,
-  LAYOUT_V,
   phaseToNodeId,
 } from "./layout";
 import { TERMS } from "@/lib/terms";
 import { getCss } from "@/lib/theme";
-import { roundOf, type DashboardSnapshot } from "@/lib/poll";
-import { useIsPortraitPhone } from "@/lib/useMediaQuery";
+import { type DashboardSnapshot } from "@/lib/poll";
+import { availableRounds } from "@/lib/derivations/round-axis";
 import { useSelection } from "@/components/dashboard/SelectionContext";
-import { cx } from "@/lib/cx";
 import type { NodeDataLike, PipelineDoc } from "./types";
 
 // Edge variants — collapses three parallel switches (stroke colour key,
@@ -41,13 +36,12 @@ interface Props {
 
 export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
   const view = pipeline?.view;
-  // Portrait phone re-flows the pipeline top-to-bottom; everything else
-  // keeps the wide left-to-right layout. Same graph, swapped geometry.
-  const vertical = useIsPortraitPhone();
-  const layout = vertical ? LAYOUT_V : LAYOUT;
-  const edges = vertical ? EDGES_V : EDGES;
-  const canvasW = vertical ? CANVAS_V_W : CANVAS_W;
-  const canvasH = vertical ? CANVAS_V_H : CANVAS_H;
+  // One compact wide-short layout at every width — keeps the optimizer
+  // card (and the dashboard) short on desktop as well as phone.
+  const layout = LAYOUT;
+  const edges = EDGES;
+  const canvasW = CANVAS_W;
+  const canvasH = CANVAS_H;
   const activeId = phaseToNodeId(dash?.state);
   // Node selection rides the shared SelectionContext so the Now lane can
   // swap the 3-col row for OptimizerNodeDetail when a node is picked.
@@ -60,15 +54,13 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
     round: selectedRound,
     setSelectionForRound,
   } = useSelection();
-  const liveRound = roundOf(dash);
-  const completedRounds = useMemo(
-    () => ((dash?.rounds ?? []).map((r) => r.round)).sort((a, b) => b - a),
-    [dash?.rounds],
-  );
-  // `live` only appears when there's an in-flight round NOT yet summarized
-  // into `dash.rounds[]` — otherwise the picker would carry both a "live"
-  // entry and a completed entry for the same round number.
-  const liveActive = liveRound != null && !completedRounds.includes(liveRound);
+  // Single round-axis truth, shared with RoundTabsStrip — `live` is already
+  // gated on `isLive`, so a stopped run drops the "(live)" option. The
+  // picker lists rounds newest-first, so reverse the ascending `completed`.
+  const axis = useMemo(() => availableRounds(dash, isLive), [dash, isLive]);
+  const liveRound = axis.live;
+  const completedRounds = useMemo(() => [...axis.completed].reverse(), [axis.completed]);
+  const liveActive = liveRound != null;
   const showPicker = completedRounds.length > 0 || liveActive;
   // Bumped by the MutationObserver below on `data-theme` flips; drives the
   // `colors` memo so SVG strokes/labels re-derive from the new CSS vars.
@@ -110,6 +102,14 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
 
   const currentNodes = (dash?.current_round?.nodes ?? {}) as Record<string, NodeDataLike>;
 
+  // Node id → label, so a terminal edge (one whose target has no layout
+  // position, e.g. `output`) can borrow that node's label ("Best SP")
+  // instead of repeating it in the geometry. Keeps the copy in the
+  // optimizer pipeline JSON, the single source of truth.
+  const nodeLabel: Record<string, string> = Object.fromEntries(
+    view.nodes.map((n) => [n.id, n.label]),
+  );
+
   const markerColors: Record<string, string> = {
     arrh: colors.txt,
     "arrh-loop": colors.ok,
@@ -148,7 +148,7 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
         )}
       </div>
       <div className="workflow-canvas-bg">
-        <div className={cx("workflow-canvas", vertical && "vertical")}>
+        <div className="workflow-canvas">
           <svg
             width="100%"
             height="100%"
@@ -159,8 +159,8 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
           >
             <defs>
               {Object.entries(markerColors).map(([id, fill]) => (
-                <marker key={id} id={id} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                  <path d="M0,0 L8,4 L0,8 z" fill={fill} />
+                <marker key={id} id={id} markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto">
+                  <path d="M0,0 L9,4.5 L0,9 z" fill={fill} />
                 </marker>
               ))}
             </defs>
@@ -169,11 +169,15 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
               if (!geom) return null;
               const v = EDGE_VARIANTS[geom.kind] ?? EDGE_VARIANTS.forward;
               const stroke = colors[v.color];
+              // Geometry label wins (brief / plan); otherwise, when the
+              // target is a node with no dot, fall back to its label so
+              // the terminal arrow reads "Best SP" straight from the JSON.
+              const edgeLabel = geom.label ?? (layout[e.to] ? undefined : nodeLabel[e.to]);
               return (
                 <g key={`${e.from}>${e.to}`}>
-                  <path d={geom.d} fill="none" stroke={stroke} strokeWidth="1.5" strokeDasharray={v.dash || undefined} markerEnd={`url(#${v.marker})`} />
-                  {geom.label && geom.labelXY && (
-                    <text x={geom.labelXY[0]} y={geom.labelXY[1]} fontSize="12" fill={stroke} textAnchor="middle" fontFamily="ui-sans-serif,system-ui" paintOrder="stroke" stroke={colors.bg} strokeWidth="3">{geom.label}</text>
+                  <path d={geom.d} fill="none" stroke={stroke} strokeWidth="2" strokeDasharray={v.dash || undefined} markerEnd={`url(#${v.marker})`} />
+                  {edgeLabel && geom.labelXY && (
+                    <text x={geom.labelXY[0]} y={geom.labelXY[1]} fontSize="12" fill={stroke} textAnchor="middle" fontFamily="ui-sans-serif,system-ui" paintOrder="stroke" stroke={colors.bg} strokeWidth="3">{edgeLabel}</text>
                   )}
                 </g>
               );

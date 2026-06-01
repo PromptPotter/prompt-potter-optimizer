@@ -276,30 +276,28 @@ function DashboardPaneInner() {
                 </div>
               </header>
             </div>
-            <Lane id="now" title="Now" subtitle="What's running right now" defaultOpen>
-              <div className="dash-spine-narrow">
-                <RunErrorBanner dash={dash} />
-                {/* TopStrip + RoundTabsStrip share one row so the round
-                    axis (LIVE pill + completed-round circles) sits beside
-                    the headline KPIs the operator scans first. */}
-                <div className="dash-top-row">
-                  <TopStrip dash={dash} dashRound={dashRound} />
-                  <RoundTabsStrip dash={dash} />
-                </div>
+            <div className="dash-spine-narrow">
+              <RunErrorBanner dash={dash} />
+              {/* TopStrip + RoundTabsStrip share one row so the round
+                  axis (LIVE pill + completed-round circles) sits beside
+                  the headline KPIs the operator scans first. */}
+              <div className="dash-top-row">
+                <TopStrip dash={dash} dashRound={dashRound} />
+                <RoundTabsStrip dash={dash} isLive={isLive} />
               </div>
-              <div className="dash-spine-narrow">
-                <NowTriad
-                  dash={dash}
-                  dashRound={dashRound}
-                  status={dashState.status}
-                  pipeline={pipeline}
-                  campaignId={campaignId}
-                  cycleId={cycleId}
-                  onSelectCycle={selectCycle}
-                  isLive={isLive}
-                />
-              </div>
-            </Lane>
+            </div>
+            <div className="dash-spine-narrow">
+              <NowTriad
+                dash={dash}
+                dashRound={dashRound}
+                status={dashState.status}
+                pipeline={pipeline}
+                campaignId={campaignId}
+                cycleId={cycleId}
+                onSelectCycle={selectCycle}
+                isLive={isLive}
+              />
+            </div>
             <Lane id="livestate" title="Live state" subtitle="Raw dashboard.json + trend + score frequency" defaultOpen>
               <div className="dash-spine-narrow">
                 <LiveStateCard dash={dash} />

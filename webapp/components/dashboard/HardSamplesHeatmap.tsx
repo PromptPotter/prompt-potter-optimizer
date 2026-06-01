@@ -160,7 +160,6 @@ export function HardSamplesHeatmap({
   }`;
 
   return (
-    <RotatePrompt surfaceName="The sample heat-map" skipRender>
     <div className="hs-heat-wrap">
       <div className="hs-controls-row">
         <button
@@ -195,25 +194,28 @@ export function HardSamplesHeatmap({
         />
         <RunControlButton campaignId={campaignId} cycleId={cycleId} dash={dash} />
       </div>
-      {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
-      {heatExpanded && (
-        <div className="hs-expand-wrap">
-          <HardSamplesTable
-            dash={dash}
-            isLive={isLive}
-            perSample={perSample}
-            datasetName={datasetName}
-            datasetItems={datasetItems}
-            datasetMeasuredCount={datasetMeasuredCount}
-            datasetUnmeasuredCount={datasetUnmeasuredCount}
-            datasetSplitTest={datasetSplitTest}
-            datasetStale={datasetStale}
-            scope={hardSamplesScope}
-            onScopeChange={onHardSamplesScopeChange}
-          />
-        </div>
+      {(bankExpanded || heatExpanded) && (
+        <RotatePrompt surfaceName="The sample heat-map" skipRender>
+          {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
+          {heatExpanded && (
+            <div className="hs-expand-wrap">
+              <HardSamplesTable
+                dash={dash}
+                isLive={isLive}
+                perSample={perSample}
+                datasetName={datasetName}
+                datasetItems={datasetItems}
+                datasetMeasuredCount={datasetMeasuredCount}
+                datasetUnmeasuredCount={datasetUnmeasuredCount}
+                datasetSplitTest={datasetSplitTest}
+                datasetStale={datasetStale}
+                scope={hardSamplesScope}
+                onScopeChange={onHardSamplesScopeChange}
+              />
+            </div>
+          )}
+        </RotatePrompt>
       )}
     </div>
-    </RotatePrompt>
   );
 }

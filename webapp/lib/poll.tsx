@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { fetchDashboardConditional } from "./api";
+import { isRunningState } from "./cycle-status";
 import { ageTextSeconds } from "./format";
 import type {
   OriginSummary,
@@ -169,11 +170,14 @@ export interface CycleStreamState {
   ageS: number | null;
   termKey: string;
   error: string | null;
-  // `status === "live"` — the optimizer wrote dashboard.json within the
-  // freshness window. The single gate for every transient indicator (blinking
-  // rows, pulsing nodes, "rolling" badges): when the producer dies the
-  // freshness signal goes stale and `isLive` flips false, so all motion stops
-  // without any per-component timeout logic.
+  // The optimizer is actively executing this cycle: dashboard.json is fresh
+  // (`status === "live"`) AND the FSM hasn't reached a terminal phase
+  // (`isRunningState(dash.state)`). The single gate for every transient
+  // indicator (blinking rows, pulsing nodes, the round-strip "live" pill,
+  // the Stop affordance): a producer that dies silently goes stale, an
+  // explicit stop writes `state: "stopped"` — either way `isLive` flips
+  // false and all motion stops, with no per-component timeout or topology
+  // check. Liveness is computed once here; consumers never re-derive it.
   isLive: boolean;
   // `dash.state` lifted to the top level so transient indicators can gate on
   // the phase (e.g. only blink a sample row when `phase === "scoring"`).
@@ -358,7 +362,7 @@ function useCycleStreamSource(
             statusHint: bucket.statusHint,
             ageS,
             termKey: bucket.termKey,
-            isLive: bucket.status === "live",
+            isLive: bucket.status === "live" && isRunningState(prev.dash?.state),
           };
         });
         return;
@@ -433,7 +437,7 @@ function useCycleStreamSource(
         ageS,
         termKey: bucket.termKey,
         error: null,
-        isLive: bucket.status === "live",
+        isLive: bucket.status === "live" && isRunningState(dash.state),
         phase: typeof dash.state === "string" ? dash.state : null,
       }));
     } catch (e) {

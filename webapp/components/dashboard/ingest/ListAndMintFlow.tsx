@@ -29,6 +29,9 @@ export function ListAndMintFlow({
 
   const byName = new Map<string, DatasetIndexEntry>();
   for (const d of [...owned, ...benchmarks]) byName.set(d.name, d);
+  // The bundled try-and-learn demo (if surfaced) — one click lands the prefilled
+  // wizard (simulated check-in), no CSV, no LLM spend.
+  const demoEntry = [...owned, ...benchmarks].find((d) => d.tier === "demo");
 
   const handleStart = async () => {
     if (!picked) return;
@@ -77,6 +80,16 @@ export function ListAndMintFlow({
       </label>
       {error ? <p className="new-campaign-error">{error}</p> : null}
       <footer className="new-campaign-footer">
+        {demoEntry ? (
+          <button
+            type="button"
+            className="new-campaign-demo"
+            onClick={() => onPickDemo(demoEntry)}
+            disabled={working}
+          >
+            ✨ Try the demo
+          </button>
+        ) : null}
         <button type="button" className="new-campaign-cancel" onClick={onAddOrigin}>
           Add an Origin
         </button>

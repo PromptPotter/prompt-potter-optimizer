@@ -40,10 +40,7 @@
 .spend-control-note{color:var(--color-success);font-size:11px}
 @media (prefers-reduced-motion:reduce){.chat-job-toggle .chev{transition:none}}
 .wf-hero{position:relative;padding:24px 16px 42px;max-width:980px;margin:0 auto;width:100%}
-.wf-hero-status{position:absolute;top:-50px;right:6px;font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--color-warn-border);border-radius:999px;background:var(--color-warn-bg)}
-.wf-hero-status .dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 8px var(--color-success)}
-.wf-hero-status .dot.paused{background:var(--color-warn);box-shadow:0 0 8px var(--color-warn)}
-.wf-hero-status .dot.idle{background:var(--color-text-tertiary);box-shadow:none}
+.wf-hero-tools{display:flex;justify-content:flex-end}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:18px 0 8px}
 .wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:10px;padding:14px 22px;text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:12px;position:relative;z-index:2}
 .wf-hero-node .ico{color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;flex-shrink:0}

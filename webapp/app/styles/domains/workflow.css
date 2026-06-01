@@ -14,10 +14,9 @@
 .workflow-round-pick select{background:var(--color-background-secondary);color:var(--color-text-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-sm);padding:1px 6px;font-family:inherit;font-size:11px;cursor:pointer}
 .workflow-round-pick select:hover{border-color:var(--color-accent)}
 .workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%;display:flex;align-items:center;justify-content:center}
-.workflow-canvas{position:relative;width:100%;max-width:360px;aspect-ratio:360/300;margin:0 auto;overflow:hidden}
-/* Portrait-phone vertical variant — WorkflowCanvas swaps to the top-to-
-   bottom coordinate set and adds `.vertical`; the box turns tall+narrow. */
-.workflow-canvas.vertical{max-width:300px;aspect-ratio:340/470}
+/* One compact wide-short canvas at every width — aspect-ratio mirrors
+   CANVAS_W/CANVAS_H. Keeps the optimizer card short on desktop too. */
+.workflow-canvas{position:relative;width:100%;max-width:360px;aspect-ratio:360/160;margin:0 auto;overflow:hidden}
 /* SVG `<g>` wrapping each node — keyboard focus + click affordance. */
 .wf-node{cursor:pointer;user-select:none;outline:none}
 .wf-node[aria-disabled="true"]{cursor:default}

@@ -3,19 +3,15 @@ import { memo, useEffect, useMemo, useRef } from "react";
 import { TERMS } from "@/lib/terms";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { cycleStatusLabel } from "@/lib/cycle-status";
+import { headlineStats } from "@/lib/derivations/headline-stats";
 import { fmtSecs } from "@/lib/format";
 
-// Merged Hero + Progress card. Replaces the prior dash-hero double-card
-// (HeroSummary on the right of the breadcrumb + ProgressCard underneath).
-// Three columns at full width, collapses to stacked rows below 640px:
+// Single-line, frameless run summary. Everything the operator scans in
+// the first second sits on one inline row, separated by hairline dividers:
 //
-//   ┌──────────────────┬───────────────────────┬──────────────────┐
-//   │ Best 42% ╱╲╱╲    │ scoring · R3          │ Queries 4920     │
-//   │                  │ ▓▓▓░░ 24/40 60% qps   │ Last 0.8s        │
-//   └──────────────────┴───────────────────────┴──────────────────┘
+//   Best 42% ╱╲╱╲ │ scoring R3 │ 24/40 · 60% · 1.2 q/s │ Last 0.8s
 //
-// One card, one set of paddings, one source for every stat the operator
-// scans in the first second of looking at the page.
+// No card chrome — it reads as a status line, not a panel.
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -90,8 +86,7 @@ export const TopStrip = memo(function TopStrip({ dash, dashRound }: Props) {
   }, [dash]);
   const qps = qpsRef.current.qps;
 
-  const best = typeof dash?.best === "number" ? dash.best : null;
-  const queries = dash?.total_queries_scored ?? null;
+  const { best } = headlineStats(dash);
   const lastQuery = dash?.last_query_elapsed_s ?? null;
   const phase = cycleStatusLabel(
     dash?.state as string | undefined,
@@ -105,7 +100,7 @@ export const TopStrip = memo(function TopStrip({ dash, dashRound }: Props) {
 
   return (
     <div className="topstrip">
-      <div className="topstrip-cell topstrip-best">
+      <span className="topstrip-best">
         <span className="topstrip-label">Best</span>
         <span className="topstrip-best-val">
           {best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}%` : "—"}
@@ -116,33 +111,22 @@ export const TopStrip = memo(function TopStrip({ dash, dashRound }: Props) {
             <path className="line" d={spark.path} />
           </svg>
         )}
-      </div>
-      <div className="topstrip-cell topstrip-progress">
-        <div className="topstrip-progress-head">
-          <span className="phase-tag" title={phaseTip}>{phase}</span>
-          <span className="topstrip-round">{round}</span>
-        </div>
-        <div className="topstrip-bar-wrap">
-          <div
-            className={`topstrip-bar-fill${qPct >= 100 ? " complete" : ""}${qm ? "" : " empty"}`}
-            style={{ width: `${qPct}%` }}
-          />
-        </div>
-        <div className="topstrip-progress-foot">
-          {qm ? `${qm.cur}/${qm.tot} · ${qPct}%` : "queries —"}
-          {qpsTxt ? <span className="topstrip-qps"> · {qpsTxt}</span> : null}
-        </div>
-      </div>
-      <div className="topstrip-cell topstrip-counters">
-        <div className="topstrip-counter">
-          <span className="topstrip-label">Queries</span>
-          <span className="topstrip-counter-val">{queries != null ? String(queries) : "—"}</span>
-        </div>
-        <div className="topstrip-counter">
-          <span className="topstrip-label">Last</span>
-          <span className="topstrip-counter-val">{fmtSecs(lastQuery)}</span>
-        </div>
-      </div>
+      </span>
+      <span className="topstrip-sep" aria-hidden="true" />
+      <span className="topstrip-phase">
+        <span className="phase-tag" title={phaseTip}>{phase}</span>
+        <span className="topstrip-round">{round}</span>
+      </span>
+      <span className="topstrip-sep" aria-hidden="true" />
+      <span className="topstrip-prog">
+        {qm ? `${qm.cur}/${qm.tot} · ${qPct}%` : "—"}
+        {qpsTxt ? <span className="topstrip-qps"> · {qpsTxt}</span> : null}
+      </span>
+      <span className="topstrip-sep" aria-hidden="true" />
+      <span className="topstrip-last">
+        <span className="topstrip-label">Last</span>
+        <span className="topstrip-counter-val">{fmtSecs(lastQuery)}</span>
+      </span>
     </div>
   );
 });

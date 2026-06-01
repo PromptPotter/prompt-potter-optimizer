@@ -158,25 +158,38 @@ const SCORER_LABELS: Record<string, string> = {
   exact_match: "an exact match against the target",
 };
 
-// A jargon-free restatement of what the campaign will do, built from the
-// confirmed draft fields — the operator approves *intent*, not field names
+// The first line of a task description, stripped of markdown heading markers —
+// used as a short human name for the task. Returns null when there is no clean
+// short title (empty, or a full spec/sentence line that would dump): the recap
+// then falls back to the column-based phrasing. Task descriptions are often a
+// full markdown brief, so we never splice the raw body into the sentence.
+function shortTaskTitle(task: string): string | null {
+  const firstLine = task
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (!firstLine) return null;
+  const cleaned = firstLine.replace(/^#+\s*/, "").replace(/[.\s]+$/, "").trim();
+  return cleaned.length > 0 && cleaned.length <= 72 ? cleaned : null;
+}
+
+// A jargon-free, one-line restatement of what the campaign will do, built from
+// the confirmed draft fields — the operator approves *intent*, not field names
 // (.impeccable register: anti-nerdy, accessibility-first). Pending the LLM
-// resolver's authored `ready`-turn recap (origin-resolution step 4); until
-// then this is a deterministic restatement of the draft's own values.
+// resolver's authored `ready`-turn recap (origin-resolution step 4); until then
+// this is a deterministic restatement of the draft's own values. Kept to a
+// single short sentence — never the raw task brief, which can be a full doc.
 export function plainLanguageRecap(draft: DraftCampaignWire): string {
   const input = draft.column_query || "your input";
   const target = draft.column_ground_truth || "the target";
   const scorer = SCORER_LABELS[draft.scoring_composite] ?? draft.scoring_composite;
   const connector = CONNECTOR_LABELS[draft.connector] ?? draft.connector;
-  const model = draft.optimizer_model || "the default model";
   const rounds = draft.max_rounds === 1 ? "1 round" : `up to ${draft.max_rounds} rounds`;
 
-  const lead = draft.task_description.trim()
-    ? draft.task_description.trim()
+  const title = shortTaskTitle(draft.task_description);
+  const lead = title
+    ? `evolve a prompt for “${title}”`
     : `evolve a prompt that turns each “${input}” into the right “${target}”`;
 
-  return (
-    `You're about to ${lead}. PromptPotter will run ${connector}, ` +
-    `scoring each answer by ${scorer}, and refine the prompt with ${model} over ${rounds}.`
-  );
+  return `PromptPotter will ${lead} — running ${connector}, scoring by ${scorer}, over ${rounds}.`;
 }

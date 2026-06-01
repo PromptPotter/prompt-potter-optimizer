@@ -1,9 +1,11 @@
 "use client";
-import { roundOf, type DashboardSnapshot } from "@/lib/poll";
+import { type DashboardSnapshot } from "@/lib/poll";
+import { availableRounds } from "@/lib/derivations/round-axis";
 import { useSelection } from "@/components/dashboard/SelectionContext";
 
 interface Props {
   dash: DashboardSnapshot | null;
+  isLive: boolean;
 }
 
 // One circle per L1 round, plus a LIVE pill when an in-flight round exists
@@ -15,15 +17,12 @@ interface Props {
 //   round === null         → follow live (default, no explicit pick)
 //   round === liveRound    → explicit "show live" (same view as null)
 //   round  <  liveRound    → drill into a completed round
-export function RoundTabsStrip({ dash }: Props) {
+export function RoundTabsStrip({ dash, isLive }: Props) {
   const { round: selectedRound, setSelectionForRound } = useSelection();
-  const completed = ((dash?.rounds ?? []).map((r) => r.round)).sort((a, b) => a - b);
-  const liveRound = roundOf(dash);
-  // The pill represents the in-flight round only when it isn't already
-  // a finished entry. Without that check, the strip would render both a
-  // completed circle and a live pill for the same round between
-  // round:close and round:display ticks.
-  const liveActive = liveRound != null && !completed.includes(liveRound);
+  // Single round-axis truth — `completed` circles + the `live` pill, the
+  // latter already gated on `isLive` so a stopped run drops the pill.
+  const { completed, live: liveRound } = availableRounds(dash, isLive);
+  const liveActive = liveRound != null;
   const followingLive =
     liveActive && (selectedRound == null || selectedRound === liveRound);
 

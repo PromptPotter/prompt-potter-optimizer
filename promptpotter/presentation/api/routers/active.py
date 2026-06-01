@@ -129,6 +129,10 @@ class CycleListEntry(BaseModel):
     unit_kind: Literal["session", "divergent_resume", "user_fork", "l3_fork"]
     is_root: bool
     status: str
+    running: bool = Field(
+        default=False,
+        description="Actively-progressing flag — dashboard.json fresh AND the cycle is neither paused nor stopping. True for a live run (CLI or web); flips off the moment it's paused/stopped, independent of the persisted status.",
+    )
     best_accuracy: float | None = None
     n_rounds: int = 0
     created_at: str = ""

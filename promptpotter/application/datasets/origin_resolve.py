@@ -44,6 +44,7 @@ from promptpotter.application.optimization.dispatch.llm_call import (
     run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -218,6 +219,20 @@ def _apply_findings(draft: DraftCampaign, output: CheckinOutput) -> DraftCampaig
             Provenance.CONFIRMED if finding.confidence == "high" else Provenance.PROPOSED
         )
         sources[finding.field] = ProvenanceSource.AUTO
+    # The same check-in node returns the decomposition half (the six Layer-1
+    # prompt strings) alongside the origin findings — see the CheckinOutput
+    # two-mode contract. Capture it as the draft's starting prompt; the operator
+    # edits it in the review step and it's written to prompts/default.json at
+    # mint. A turn that only authored the prompt (no findings) still applies.
+    prompt_fields = {
+        name: getattr(output, name)
+        for name in PROMPT_STRING_FIELDS
+        if str(getattr(output, name, "")).strip()
+    }
+    if prompt_fields:
+        values["starting_prompt"] = {**draft.starting_prompt, **prompt_fields}
+        provenance["starting_prompt"] = Provenance.CONFIRMED
+        sources["starting_prompt"] = ProvenanceSource.AUTO
     if not values:
         return draft
     return draft.apply_resolution(values=values, provenance=provenance, sources=sources)

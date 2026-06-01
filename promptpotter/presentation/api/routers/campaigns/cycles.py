@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.runtime_flags import (
+    RUN_FRESH_S,
     is_paused,
     is_running,
     is_stop_requested,
@@ -26,11 +27,6 @@ from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-
-# dashboard.json older than this ⇒ the run is treated as not-running. The loop
-# bumps the file on every sample / progress tick / round boundary, so a healthy
-# run stays well inside the window even across long backend calls.
-RUNSTATE_FRESH_S = 30.0
 
 
 class CycleSummary(BaseModel):
@@ -260,7 +256,7 @@ async def get_cycle_runstate(store: StoreDep, campaign_id: str, cycle_id: str) -
     return CycleRunState(
         campaign_id=campaign_id,
         cycle_id=cycle_id,
-        running=is_running(dashboard_path, fresh_s=RUNSTATE_FRESH_S),
+        running=is_running(dashboard_path, fresh_s=RUN_FRESH_S),
         paused=is_paused(runtime),
         stop_requested=is_stop_requested(runtime),
         spend_cap_usd=read_spend_cap(runtime),

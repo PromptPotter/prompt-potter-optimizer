@@ -41,6 +41,14 @@ def read_spend_cap(runtime_dir: Path) -> float | None:
     return float(value) if isinstance(value, int | float) else None
 
 
+# dashboard.json untouched for longer than this ⇒ the run is treated as
+# not-running. The loop bumps the file on every sample / progress tick / round
+# boundary, so a healthy run stays well inside the window even across long
+# backend calls. Shared by the /runstate endpoint and the cycle-list `running`
+# flag so both judge liveness against the same threshold.
+RUN_FRESH_S = 30.0
+
+
 def is_running(dashboard_path: Path, *, fresh_s: float) -> bool:
     """True iff ``dashboard.json`` was written within ``fresh_s`` seconds.
 

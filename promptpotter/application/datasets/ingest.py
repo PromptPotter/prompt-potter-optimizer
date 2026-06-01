@@ -31,6 +31,10 @@ from promptpotter.application.datasets.draft_campaign import (
     default_slug_from_filename,
 )
 from promptpotter.application.datasets.origin_readiness import resolution_block
+from promptpotter.application.datasets.prompts import (
+    list_dataset_prompts,
+    load_dataset_prompt,
+)
 from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import validate_dataset_name
@@ -152,6 +156,19 @@ def draft_from_dataset(
     connector = authored.backend_type or DEFAULT_CONNECTOR
     pipeline_overlay = authored.pipeline_nodes
 
+    # The authored dataset's own starting prompt rides through as the draft's
+    # ``starting_prompt`` (its six string fields + few-shot), so committing a
+    # demo/benchmark/owned Origin preserves the prompt the optimizer evolves
+    # from — a fresh CSV upload instead gets the check-in's decomposition.
+    starting_prompt: dict[str, Any] = {}
+    prompt_names = list_dataset_prompts(dataset_dir)
+    if prompt_names:
+        name = "default" if "default" in prompt_names else prompt_names[0]
+        try:
+            starting_prompt = load_dataset_prompt(dataset_dir, name).prompt_field_dict()
+        except FileNotFoundError:
+            starting_prompt = {}
+
     base_slug = dataset_name.lower()
     slug = (
         stores.tenant_datasets.suggest_free_slug(base_slug)
@@ -179,6 +196,7 @@ def draft_from_dataset(
             "optimizer_provider": optimizer_provider,
             "optimizer_model": optimizer_model,
             "pipeline_overlay": pipeline_overlay,
+            "starting_prompt": starting_prompt,
         },
         provenance={"task_description": Provenance.CONFIRMED},
         sources={"task_description": ProvenanceSource.AUTO},

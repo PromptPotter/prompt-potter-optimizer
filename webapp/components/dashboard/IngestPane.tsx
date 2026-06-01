@@ -27,8 +27,22 @@ import {
 } from "@/lib/api";
 import { ChatIngestFlow } from "./ingest/ChatIngestFlow";
 import { ListAndMintFlow } from "./ingest/ListAndMintFlow";
-import { DraftCommitFlow } from "./ingest/DraftCommitFlow";
+import { DraftCommitFlow, type WizardStep } from "./ingest/DraftCommitFlow";
+import { CheckinLoadingWindow } from "./ingest/CheckinLoadingWindow";
 import type { OnMinted } from "./ingest/types";
+
+// How long the demo's simulated check-in window lingers before the prefilled
+// wizard lands — long enough to read the model + see the counter tick, short
+// enough not to stall. The real flow shows the window for the actual call.
+const DEMO_CHECKIN_MS = 2200;
+
+// Per-step modal titles — the 1-2-3 launch the operator walks. Pre-draft (the
+// drop / collection screen) keeps the plain title.
+const STEP_TITLES: Record<WizardStep, string> = {
+  1: "Step 1 of 3 · Your data & goal",
+  2: "Step 2 of 3 · Map columns",
+  3: "Step 3 of 3 · Pipeline & prompt",
+};
 
 interface Props {
   open: boolean;
@@ -53,13 +67,26 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
   const [draft, setDraft] = useState<DraftCampaignWire | null>(null);
   const [flowBusy, setFlowBusy] = useState(false);
   const [flowError, setFlowError] = useState<string | null>(null);
+  // Wizard step, owned here so the modal header can title each step. Resets to
+  // 1 whenever the active draft changes (a new drop / demo pick).
+  const [step, setStep] = useState<WizardStep>(1);
+  const [prevDraftId, setPrevDraftId] = useState<string | null>(null);
+  // Non-null while the demo's simulated check-in window is showing — carries the
+  // model name to display. Cleared when the prefilled wizard lands.
+  const [checkinModel, setCheckinModel] = useState<string | null>(null);
   if (open !== prevOpen) {
     setPrevOpen(open);
     if (open) {
       setList({ kind: "loading" });
       setDraft(null);
       setFlowError(null);
+      setCheckinModel(null);
     }
+  }
+  const draftId = draft?.draft_id ?? null;
+  if (draftId !== prevDraftId) {
+    setPrevDraftId(draftId);
+    setStep(1);
   }
 
   useEffect(() => {
@@ -104,11 +131,18 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
     setFlowError(null);
     setFlowBusy(true);
     try {
-      setDraft(await postDraftFromDataset(entry.name));
+      // The demo simulates the check-in: build the prefilled draft, then show
+      // its check-in window (model + counter) for a beat before landing the
+      // wizard — the same window the real resolve call shows.
+      const d = await postDraftFromDataset(entry.name);
+      setCheckinModel(d.optimizer_model || "the check-in model");
+      await new Promise((resolve) => setTimeout(resolve, DEMO_CHECKIN_MS));
+      setDraft(d);
     } catch (e) {
       setFlowError(IngestApiError.toOperatorMessage(e));
     } finally {
       setFlowBusy(false);
+      setCheckinModel(null);
     }
   };
 
@@ -121,9 +155,15 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
       : [];
 
   const body =
-    draft !== null ? (
+    checkinModel !== null ? (
+      <div className="new-campaign-body">
+        <CheckinLoadingWindow model={checkinModel} />
+      </div>
+    ) : draft !== null ? (
       <DraftCommitFlow
         draft={draft}
+        step={step}
+        onStep={setStep}
         onDraftChange={setDraft}
         onClose={onClose}
         onMinted={onMinted}
@@ -170,7 +210,13 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
     >
       <div className="new-campaign-modal">
         <header className="new-campaign-header">
-          <h2>New campaign</h2>
+          <h2>
+            {checkinModel !== null
+              ? "Check-in"
+              : draft !== null
+                ? STEP_TITLES[step]
+                : "New campaign"}
+          </h2>
           <button
             type="button"
             className="new-campaign-close"

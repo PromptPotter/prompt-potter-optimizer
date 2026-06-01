@@ -2,6 +2,8 @@
 import { TERMS } from "@/lib/terms";
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 import { cycleStatusLabel } from "@/lib/cycle-status";
+import { headlineStats } from "@/lib/derivations/headline-stats";
+import { readSpend } from "@/lib/derivations/spend";
 import { fmtPct1, fmtSecs, fmtUsd, fmtTokens, ageText } from "@/lib/format";
 import { StopButton } from "@/components/dashboard/StopButton";
 
@@ -23,47 +25,21 @@ function shortCycleId(id: string | null): string {
   return id.length > 22 ? `${id.slice(0, 14)}…${id.slice(-4)}` : id;
 }
 
-interface SpendBucket {
-  used_usd?: number;
-  input_tokens?: number;
-  output_tokens?: number;
-  rate_known?: boolean;
-}
-
-interface SpendBlock {
-  backend?: SpendBucket;
-  loop?: SpendBucket;
-  total_used_usd?: number;
-  budget_usd?: number | null;
-}
-
-// Cycle spend → headline chip. Rate-known providers (OpenRouter on the
-// wire, mapped through shared/spend.py for the rest) yield USD; otherwise
-// fall back to a token-count display so the operator still has a number.
-function readSpend(dash: DashboardSnapshot | null): { chip: string; tooltip: string } {
-  const block = (dash as Record<string, unknown> | null)?.spend as SpendBlock | undefined;
+// Cycle spend → headline chip + tooltip. Rate-known providers (OpenRouter on
+// the wire, mapped through shared/spend.py for the rest) yield USD; otherwise
+// fall back to a token-count display so the operator still has a number. The
+// numeric extraction is shared (`readSpend`); only the formatting lives here.
+function spendChip(dash: DashboardSnapshot | null): { chip: string; tooltip: string } {
   const fallbackTip = TERMS.newjob_bar_spend ?? "Campaign spend";
-  if (!block) return { chip: "—", tooltip: fallbackTip };
-  const backend = block.backend ?? {};
-  const loop = block.loop ?? {};
-  const backendUsd = typeof backend.used_usd === "number" ? backend.used_usd : 0;
-  const loopUsd = typeof loop.used_usd === "number" ? loop.used_usd : 0;
-  const totalUsd =
-    typeof block.total_used_usd === "number" ? block.total_used_usd : backendUsd + loopUsd;
-  const rateKnown = !!(backend.rate_known || loop.rate_known);
-  const totalTokens =
-    (backend.input_tokens ?? 0) +
-    (backend.output_tokens ?? 0) +
-    (loop.input_tokens ?? 0) +
-    (loop.output_tokens ?? 0);
-  const chip = rateKnown
-    ? fmtUsd(totalUsd)
-    : totalTokens > 0
-      ? fmtTokens(totalTokens)
+  const s = readSpend(dash);
+  const chip = s.rateKnown
+    ? fmtUsd(s.totalUsd)
+    : s.totalTokens > 0
+      ? fmtTokens(s.totalTokens)
       : "—";
   const tooltip =
-    rateKnown && (backendUsd > 0 || loopUsd > 0)
-      ? `Backend ${fmtUsd(backendUsd)} • Loop ${fmtUsd(loopUsd)}`
+    s.rateKnown && (s.backendUsd > 0 || s.loopUsd > 0)
+      ? `Backend ${fmtUsd(s.backendUsd)} • Loop ${fmtUsd(s.loopUsd)}`
       : fallbackTip;
   return { chip, tooltip };
 }
@@ -81,9 +57,7 @@ export function RunTelemetry({ campaignId, cycleId, dash, isLive }: Props) {
           (dash as { stop_reason?: string } | null)?.stop_reason,
         )
       : null;
-  const best = typeof dash?.best === "number" ? dash.best : null;
-  const origin = typeof dash?.origin?.accuracy === "number" ? dash.origin.accuracy : null;
-  const delta = best != null && origin != null ? best - origin : null;
+  const { best, origin, delta } = headlineStats(dash);
   const deltaSign = delta == null ? "" : delta > 0 ? "+" : "";
   const deltaCls = delta == null ? "" : delta > 0 ? "up" : delta < 0 ? "down" : "flat";
   const lastQueryS = dash?.last_query_elapsed_s;
@@ -91,7 +65,7 @@ export function RunTelemetry({ campaignId, cycleId, dash, isLive }: Props) {
     typeof lastQueryS === "number" && Number.isFinite(lastQueryS)
       ? fmtSecs(lastQueryS)
       : null;
-  const spend = readSpend(dash);
+  const spend = spendChip(dash);
   return (
     <div className="run-telemetry" role="group" aria-label="Run telemetry">
       <span className="run-telemetry-cell run-telemetry-unit" title={cycleId ?? ""}>

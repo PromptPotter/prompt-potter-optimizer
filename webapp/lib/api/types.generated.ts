@@ -236,6 +236,10 @@ export interface CycleListEntry {
   unit_kind: 'session' | 'divergent_resume' | 'user_fork' | 'l3_fork';
   is_root: boolean;
   status: string;
+  /** Actively-progressing flag — dashboard.json fresh AND the cycle is neither
+   * paused nor stopping. True for a live run (CLI or web); flips off the
+   * moment it's paused/stopped, independent of the persisted status. */
+  running: boolean;
   best_accuracy: number | null;
   n_rounds: number;
   created_at: string;

@@ -217,6 +217,13 @@ class _EditDraftPatch(BaseModel):
     optimizer_model: str | None = Field(default=None, max_length=128)
     column_query: str | None = Field(default=None, max_length=256)
     column_ground_truth: str | None = Field(default=None, max_length=256)
+    # Operator edits to the campaign's starting prompt (PromptTemplate field
+    # shape: the six string fields + optional few_shot_examples). Replaces the
+    # draft's starting_prompt wholesale — the editor sends the full object.
+    starting_prompt: dict[str, Any] | None = None
+    # Whether the optimizer is barred from mutating model/provider (the
+    # forbidden_axes_strict knob). The pipeline-config control panel toggles it.
+    lock_model: bool | None = None
 
 
 class _EditDraftEnvelope(BaseModel):
@@ -317,11 +324,17 @@ async def edit_draft_campaign(
         (patch.pipeline_overlay, "pipeline_overlay", "backend.node_config"),
         (patch.optimizer_provider, "optimizer_provider", "optimizer.provider"),
         (patch.optimizer_model, "optimizer_model", "optimizer.model"),
+        (patch.starting_prompt, "starting_prompt", "starting_prompt"),
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val
             provenance[field_key] = Provenance.CONFIRMED
             sources[field_key] = ProvenanceSource.STATED
+
+    # lock_model is a campaign-config toggle, not an origin-readiness checklist
+    # field — it carries no provenance, just flips the draft value.
+    if patch.lock_model is not None:
+        changes["lock_model"] = patch.lock_model
 
     # Column mapping confirms the input/target headers — each must be a member
     # of the uploaded headers (422 otherwise), and confirming flips the

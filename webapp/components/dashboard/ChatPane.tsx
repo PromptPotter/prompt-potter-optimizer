@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
 import type { DatasetItem, HardSamplesScope, MeasurementDot } from "@/lib/api";
 import { TERMS } from "@/lib/terms";
+import { headlineStats } from "@/lib/derivations/headline-stats";
+import { readSpend } from "@/lib/derivations/spend";
 import { fmtText, fmtDuration, fmtUsd } from "@/lib/format";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
@@ -10,7 +12,6 @@ import { ConfigMenu } from "@/components/dashboard/ConfigMenu";
 import { CyclePicker } from "@/components/dashboard/CyclePicker";
 import { TargetPipelineHero } from "@/components/dashboard/TargetPipelineHero";
 import { SpendBudgetControl } from "@/components/dashboard/SpendBudgetControl";
-import { useRunState } from "@/lib/useRunState";
 
 interface Props {
   campaignId: string | null;
@@ -74,55 +75,24 @@ export function ChatPane({
     }
   }, [cycleId]);
 
-  // Real run state for the viewed cycle (not the hardcoded "production" dot):
-  // paused / running / idle, flag-driven so it's honest the instant you pause.
-  const runstate = useRunState(campaignId, cycleId);
-  const runLabel = runstate?.paused ? "paused" : runstate?.running ? "running" : "idle";
+  // Headline KPIs + spend — both read through the shared derivations so the
+  // chat job-bar can't disagree with the console telemetry strip.
+  const { best, origin, delta } = headlineStats(dash);
+  const bestPctOnly = best != null ? `${(best * 100).toFixed(0)}%` : "—";
+  const originPct = origin != null ? `${(origin * 100).toFixed(0)}%` : null;
 
-  const best = typeof dash?.best === "number" ? dash.best : null;
-  const accPct = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}% acc` : "— acc";
-  const bestPctOnly = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}%` : "—";
-  const origin = typeof dash?.origin?.accuracy === "number" ? dash.origin.accuracy : null;
-  const originPct =
-    origin != null && Number.isFinite(origin) ? `${(origin * 100).toFixed(0)}%` : null;
-
-  // Spend block — written by LiveDashboardProjection from per-sample
-  // step_tokens (backend bucket) + ledger TokenUsageRecord (loop bucket).
-  // OpenRouter calls ship USD via the wire; other providers resolve
-  // through shared/spend.py's rate table. When neither path produces a
-  // figure (rate_known stays false), the chip falls back to a token-
-  // count display ("1.2M tok") instead of pretending it's $0.
-  type SpendBucket = {
-    used_usd?: number;
-    input_tokens?: number;
-    output_tokens?: number;
-    rate_known?: boolean;
-    model?: string | null;
-  };
-  const spendBlock = (dash as Record<string, unknown> | null)?.spend as
-    | {
-        backend?: SpendBucket;
-        loop?: SpendBucket;
-        total_used_usd?: number;
-        budget_usd?: number | null;
-      }
-    | undefined;
-  const backendBucket = spendBlock?.backend ?? {};
-  const loopBucket = spendBlock?.loop ?? {};
-  const backendUsd = typeof backendBucket.used_usd === "number" ? backendBucket.used_usd : 0;
-  const loopUsd = typeof loopBucket.used_usd === "number" ? loopBucket.used_usd : 0;
-  const totalUsd =
-    typeof spendBlock?.total_used_usd === "number"
-      ? spendBlock.total_used_usd
-      : backendUsd + loopUsd;
-  const usedUsd = totalUsd > 0 ? totalUsd : null;
-  const budgetUsd = typeof spendBlock?.budget_usd === "number" ? spendBlock.budget_usd : null;
-  const rateKnown = !!(backendBucket.rate_known || loopBucket.rate_known);
+  const {
+    backendUsd,
+    loopUsd,
+    usedUsd,
+    budgetUsd,
+    rateKnown,
+    backendTokens,
+    loopTokens,
+  } = readSpend(dash);
   const budgetChip = budgetUsd != null ? `$${budgetUsd.toFixed(2)}` : "—";
   const deltaPerSpend =
-    best != null && origin != null && usedUsd != null && usedUsd > 0
-      ? (best - origin) / usedUsd
-      : null;
+    delta != null && usedUsd != null && usedUsd > 0 ? delta / usedUsd : null;
   const effChip =
     deltaPerSpend != null ? `${(deltaPerSpend * 100).toFixed(2)} pp/$` : "—";
 
@@ -194,8 +164,8 @@ export function ChatPane({
               <div className="row"><span className="lbl">Project</span><span className="val">{fmtText(datasetTitle)}</span></div>
               <div className="row"><span className="lbl">Updated</span><span className="val">{fmtText(dash?.wallclock_serialized_at)}</span></div>
               <div className="section-title" style={{ marginTop: 12 }}>Spend</div>
-              <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${(backendBucket.input_tokens ?? 0) + (backendBucket.output_tokens ?? 0)} tok`}</span></div>
-              <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${(loopBucket.input_tokens ?? 0) + (loopBucket.output_tokens ?? 0)} tok`}</span></div>
+              <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${backendTokens} tok`}</span></div>
+              <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${loopTokens} tok`}</span></div>
               <div className="row"><span className="lbl">Total</span><span className="val">{usedUsd != null ? fmtUsd(usedUsd) : "—"}</span></div>
               <div className="row"><span className="lbl">Budget</span><span className="val">{budgetChip}</span></div>
             </div>
@@ -217,11 +187,7 @@ export function ChatPane({
       ) : null}
 
       <div className="wf-hero">
-        <div className="wf-hero-status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <span className={`dot ${runLabel}`} />
-            <span>{runLabel} · {accPct}</span>
-          </div>
+        <div className="wf-hero-tools">
           <ConfigMenu datasetName={datasetName} />
         </div>
         <TargetPipelineHero

@@ -96,6 +96,18 @@ class DraftCampaign:
     # (lives in ``pipeline_overlay::nodes.{name}.config``).
     optimizer_provider: str = DEFAULT_OPTIMIZER_PROVIDER
     optimizer_model: str = DEFAULT_OPTIMIZER_MODEL
+    # The campaign's starting prompt — a ``PromptTemplate.prompt_field_dict()``
+    # shape (the six string fields + optional ``few_shot_examples``). Seeded by
+    # the check-in node's decomposition half (``CheckinOutput`` carries it), or
+    # from an authored dataset's prompt on the ``draft_from_dataset`` path;
+    # operator-editable before commit, and written verbatim to
+    # ``prompts/default.json`` at mint. Empty until the check-in fills it.
+    starting_prompt: dict[str, Any] = field(default_factory=dict)
+    # Whether the optimizer is barred from mutating model/provider campaign-wide
+    # (the ``forbidden_axes_strict`` knob). Default locked — the conservative
+    # floor. Operator-editable in the pipeline-config control panel; drives both
+    # the wire ``optimizer_locks.forbidden_axes`` and the committed campaign.json.
+    lock_model: bool = True
 
     def to_wire(self) -> dict[str, Any]:
         """Wire shape matching the OpenAPI ``DraftCampaign`` schema.
@@ -121,6 +133,8 @@ class DraftCampaign:
             "column_ground_truth": self.column_ground_truth,
             "resolved": {field_name: prov.value for field_name, prov in self.resolved.items()},
             "sources": {field_name: src.value for field_name, src in self.sources.items()},
+            "starting_prompt": dict(self.starting_prompt),
+            "lock_model": self.lock_model,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

@@ -52,6 +52,8 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
       "optimizer.model": "auto",
       "backend.node_config": "auto",
     },
+    starting_prompt: {},
+    lock_model: true,
     created_at: "2026-05-30T00:00:00Z",
     updated_at: "2026-05-30T00:00:00Z",
     optimizer_locks: { pipeline: ["llm_only"], forbidden_axes: ["model", "provider"], nodes: {} },
@@ -148,14 +150,12 @@ describe("plainLanguageRecap", () => {
       draft({
         column_query: "input",
         column_ground_truth: "gt",
-        optimizer_model: "openai/gpt-oss-120b",
         task_description: "map lab-test names to their codes",
       }),
     );
     expect(text).toContain("map lab-test names to their codes");
     expect(text).toContain("TermNorm pipeline");
     expect(text).toContain("exact match");
-    expect(text).toContain("openai/gpt-oss-120b");
     expect(text).toContain("5 rounds");
   });
 });

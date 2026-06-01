@@ -228,6 +228,16 @@ The persisted world is a four-entity containment hierarchy
   `application/optimization/validators/l1_behavior.py`.
 - **Meta-prompt** — synonym for "optimizer prompt" (L1/L2/L3/Critique
   LLM template). Field-standard from PromptWizard / DSPy / OPRO.
+- **checkin** — the fifth optimizer node (**renamed from `restructure`**,
+  commit `269e9b87` — that old name is gone from the code). One node, two
+  modes sharing `CheckinOutput`
+  (`application/optimization/dispatch/schemas.py`): **task decomposition**
+  (raw `task_description` → the 8-field prompt; CLI `new`,
+  `task_context.py::decompose_prompt_fields`) and **origin resolution**
+  (draft origin → findings/recap; web ingest,
+  `datasets/origin_resolve.py`). Not a loop layer — runs via
+  `run_optimizer_node`, not the dispatch bundle. Full contract:
+  `application/optimization/CLAUDE.md § checkin`.
 
 ## Connector / pipeline / overlay
 

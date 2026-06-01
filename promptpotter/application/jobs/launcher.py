@@ -343,7 +343,7 @@ def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
     :func:`_merged_backend_nodes`.
     """
     connector = connectors.get(draft.connector)
-    forbidden_strict = bool(dict(connector.default_optimization).get("forbidden_axes_strict", True))
+    forbidden_strict = draft.lock_model
     node_locks: dict[str, Any] = {}
     for node_name, overlay in _merged_backend_nodes(draft).items():
         optimizer = overlay.get("optimizer", {})
@@ -385,6 +385,9 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     connector = connectors.get(draft.connector)
     optimization: dict[str, Any] = {"max_rounds": draft.max_rounds}
     optimization.update(dict(connector.default_optimization))
+    # The operator's model-lock choice overrides the connector default —
+    # mirrors derive_optimizer_locks so the committed campaign matches the panel.
+    optimization["forbidden_axes_strict"] = draft.lock_model
     return {
         "campaign_config": {
             "dataset_name": draft.slug,
@@ -397,11 +400,17 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
 
 
 def _build_default_prompt(draft: DraftCampaign) -> dict[str, Any]:
-    """Slice-1 starter prompt — wraps the task description, no per-node tuning yet."""
-    return {
-        "task_description": draft.task_description,
-        "instructions": draft.task_description,
-    }
+    """The campaign's starting prompt, written to ``prompts/default.json``.
+
+    When the draft carries a ``starting_prompt`` (the check-in's decomposition,
+    an authored dataset's prompt, or the operator's edits) it's written
+    verbatim — a valid ``PromptTemplate.prompt_field_dict()`` shape. Otherwise
+    we floor the prompt on ``instruction`` from the task description (a real
+    PromptTemplate field — the prior ``task_description``/``instructions`` keys
+    were not, so the committed prompt loaded empty)."""
+    if draft.starting_prompt:
+        return dict(draft.starting_prompt)
+    return {"instruction": draft.task_description}
 
 
 async def start_run_command(

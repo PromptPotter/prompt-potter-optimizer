@@ -62,12 +62,13 @@ export interface NodeBlock {
 // `dash.rounds[]` yet; the derivation merges them in once, here.
 export type RoundCandidates = Map<number, CandidateRow[]>;
 
-// What the round-tabs strip needs to render the picker.
+// What a round-picker surface needs to render its axis.
 export interface RoundAxis {
   // Round numbers with a closed summary on `dash.rounds[]`, ascending.
   completed: number[];
-  // The in-flight round, if `dash.current_round` carries one and it
-  // isn't already in `completed`. null = no live round yet (or the
-  // live round already closed, hence in `completed`).
+  // The in-flight round to advertise as live — set only when the optimizer
+  // is running (`isLive`) AND `dash.current_round` carries a round not yet
+  // in `completed`. null = no live round to show (never started, already
+  // closed, or the run stopped).
   live: number | null;
 }

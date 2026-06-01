@@ -43,11 +43,8 @@
   .chat-job-toggle .chip{padding:3px 10px;font-size:13px}
 
   /* Pipeline hero — let the horizontal pipeline overflow-scroll
-     instead of fighting flex shrink. The status badge was absolute-
-     positioned at top:-50px; on mobile that lands above the topbar.
-     Pull it back into the flow as a static badge above the row. */
+     instead of fighting flex shrink. */
   .wf-hero{padding:12px 10px 18px;max-width:none}
-  .wf-hero-status{position:static;display:inline-flex;font-size:11px;padding:3px 8px;margin-bottom:10px;width:auto;align-self:flex-start}
   .wf-hero-flow{overflow-x:auto;overflow-y:hidden;justify-content:flex-start;padding:14px 4px 6px;scrollbar-width:none;flex-wrap:nowrap}
   .wf-hero-flow::-webkit-scrollbar{display:none}
   .wf-hero-node{min-width:120px;padding:10px 14px}

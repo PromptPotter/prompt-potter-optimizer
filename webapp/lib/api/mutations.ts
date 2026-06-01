@@ -268,6 +268,15 @@ export interface DraftCampaignWire {
   // Per-field source (`auto` / `stated`), orthogonal to `resolved`. Only
   // valued fields appear; audit-only, never gates. See `ProvenanceSource`.
   sources: Record<string, ProvenanceSource>;
+  // The campaign's starting prompt — `PromptTemplate.prompt_field_dict()` shape
+  // (the six string fields + optional `few_shot_examples`). Seeded by the
+  // check-in decomposition or an authored dataset's prompt; operator-editable
+  // before commit. Empty `{}` until the check-in fills it.
+  starting_prompt: Record<string, unknown>;
+  // Whether the optimizer is barred from changing model/provider campaign-wide
+  // (the `forbidden_axes_strict` knob). Default `true` (locked). Toggled in the
+  // pipeline-config control panel; drives `optimizer_locks.forbidden_axes`.
+  lock_model: boolean;
   created_at: string;
   updated_at: string;
   // Connector-derived backend-pipeline permission surface; see `OptimizerLocks`.
@@ -416,6 +425,11 @@ export interface DraftPatch {
   // `resolved["column.query|ground_truth"]` to `confirmed`.
   column_query?: string;
   column_ground_truth?: string;
+  // Replace the starting prompt wholesale (PromptTemplate field shape). The
+  // editor sends the full object, not a sparse field patch.
+  starting_prompt?: Record<string, unknown>;
+  // Toggle the campaign-wide model/provider lock (forbidden_axes_strict).
+  lock_model?: boolean;
 }
 
 export async function postEditDraftCampaign(
