@@ -28,12 +28,6 @@
 .inspector-key{color:var(--color-text-secondary)}
 .inspector-val{color:var(--color-text-primary)}
 .inspector-note{grid-column:1/-1;color:var(--color-text-secondary);font-style:italic;margin-top:6px}
-/* Demoted New Job — small `+ New` button, not a primary tab. Quiet by
-   default; the active state mirrors the topbar's tab styling so the
-   operator still sees they're in New Job when they pick it. */
-.btn-new-job{background:transparent;border:1px solid var(--color-border);border-radius:6px;padding:4px 10px;font-size:13px;color:var(--color-text-secondary);cursor:pointer;font-family:inherit}
-.btn-new-job:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
-.btn-new-job.active{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border-color:var(--color-accent)}
 /* Cycle-level toolbar — Edit toggle + Stop button live on the breadcrumb
    row next to the picker. Off by default; Edit mode reveals Stop and the
    Fork action inside the ScoringInspector. */
@@ -60,5 +54,3 @@
 .fork-err{color:var(--color-status-error,#c53030);font-size:12px}
 .inspector-fork-result{padding:10px 12px;border-top:1px solid var(--color-border);font-family:var(--font-mono);font-size:13px;display:grid;gap:6px}
 .inspector-fork-result code{background:var(--color-background-tint,rgba(0,0,0,0.04));padding:1px 5px;border-radius:3px}
-.fork-cli{display:flex;align-items:center;gap:6px}
-.fork-cli code{flex:1}

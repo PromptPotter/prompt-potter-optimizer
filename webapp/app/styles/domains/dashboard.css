@@ -2,10 +2,9 @@
 .content{flex:1;overflow-y:auto;padding:20px;container-type:inline-size;container-name:content}
 #content-dashboard{padding-top:0}
 
-/* Dashboard spines — DashboardLayout exports two width tiers. Narrow
-   (980px) wraps the header + diagnostics; wide (1400px) wraps the panel
-   grids so lineage + fitness + workflow get the room to spread out. */
-.dash-spine-narrow,.dash-spine-wide{width:100%;margin-left:auto;margin-right:auto;margin-bottom:var(--dash-zone-gap)}
+/* Dashboard spine — the single width tier (980px) wrapping the header +
+   diagnostics + panel grids, viewport-centered. */
+.dash-spine-narrow{width:100%;margin-left:auto;margin-right:auto;margin-bottom:var(--dash-zone-gap)}
 /* Narrow stripe stays viewport-centered (not main-area-centered) so
    collapsing/expanding the sidebar doesn't shift the cards. main is
    offset by --sidebar-width inside .shell's flex; translateX by
@@ -14,7 +13,6 @@
    `transform` desync mid-animation and the stripe wobbles. Snap is
    exact in a single frame. */
 .dash-spine-narrow{max-width:var(--dash-narrow-max);transform:translateX(calc(var(--sidebar-width, 0px) / -2))}
-.dash-spine-wide{max-width:var(--dash-wide-max)}
 /* Sweep-Group-B: tighten content padding + drop the sidebar-offset
    transform when the sidebar is a fixed drawer (≤bp-md). The spine
    centers itself by translating left half the sidebar width — but in
@@ -28,7 +26,7 @@
   .dash-row-triad{gap:12px}
   .dash-top-row{gap:10px}
 }
-.dash-spine-narrow:last-child,.dash-spine-wide:last-child{margin-bottom:0}
+.dash-spine-narrow:last-child{margin-bottom:0}
 
 /* Status assistant — Clippy-style floating chip pinned to the
    bottom-right corner of the viewport, just above the Console pane.
@@ -133,12 +131,6 @@
 .dash-lane-subtitle{color:var(--color-text-tertiary);font-size:12px;font-weight:400}
 .dash-lane-body{display:flex;flex-direction:column;gap:12px;padding-top:14px}
 .dash-lane.closed .dash-lane-head{border-bottom-color:transparent}
-
-/* NOW lane — workflow + live-state side-by-side. The workflow column is
-   pinned at the compact 460px box; live-state takes the rest and scrolls
-   when its KV grid overflows. */
-.dash-row-now{--row-h:280px;width:100%}
-.dash-row-now > .live-state-card{height:var(--row-h);overflow:auto;margin-bottom:0}
 
 /* Triad layout — Fitness + Lineage always present; Inspector is a third
    column conditionally rendered when a candidate is selected. A click
@@ -250,7 +242,6 @@
    narrow viewports without leaving the cells overlapping. */
 @container content (max-width:780px){
   .dash-hero .page-header{flex-direction:column;align-items:flex-start}
-  .hero-summary{margin-left:0}
 }
 /* Telemetry sheds the phase sub-label and the delta chip on narrow
    viewports. The status assistant is position:fixed and lives outside

@@ -89,7 +89,6 @@
 .unit-library-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-meta{font-size:11px;color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-live{color:var(--color-status-success,#16a34a);margin-left:4px;font-size:8px;vertical-align:middle}
-.unit-library-missing{color:var(--color-text-tertiary);margin-left:4px;font-size:10px;vertical-align:middle}
 /* Unit-kind badge on a non-root unit row (fork / diag / sweep). Small,
    uppercase, low-contrast — a qualifier, not a focal point. The root unit
    gets no badge. */
@@ -124,9 +123,6 @@
 .unit-library-twist:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
 .unit-library-twist:disabled{cursor:default;visibility:hidden}
 .unit-library-children{list-style:none;margin:2px 0 4px 14px;padding:0;border-left:1px solid var(--color-border-tertiary)}
-.unit-library-group{margin:2px 0}
-.unit-library-grouphead{padding:2px 8px;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
-.unit-library-group ul{list-style:none;margin:0;padding:0}
 .unit-library-child{padding-left:10px;font-size:12px}
 /* Live badge in the breadcrumb — passive indicator that the dashboard
    poll is seeing fresh writes. dashState.status === "live" drives it. */

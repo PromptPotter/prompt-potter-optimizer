@@ -55,13 +55,9 @@
 .hs-heat-mini-cell.miss{background:var(--color-danger)}
 /* Expanded wrap — full-bleed breakout from the 980 px hero. Left gutter
    tracks where a 1280 px centred block would sit (the operator's preferred
-   distance); the right edge runs to a 24 px viewport gutter. Also the
-   positioned ancestor for the Shrink FAB at the table's top-right corner. */
+   distance); the right edge runs to a 24 px viewport gutter. */
 .hs-expand-wrap{position:relative;align-self:stretch;width:100vw;margin-left:calc(50% - 50vw);display:flex;justify-content:flex-start;padding-left:max(8px,calc((100vw - 1280px) / 2));padding-right:24px}
 .hs-expand-wrap > .hs-zone{margin-top:0;width:100%;align-items:stretch;padding:0}
-.hs-heat-shrink-fab{position:absolute;top:8px;right:32px;z-index:5;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0.5px solid var(--color-border-tertiary);border-radius:4px;background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;transition:background .12s,color .12s,border-color .12s,box-shadow .12s}
-.hs-heat-shrink-fab:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
-.hs-heat-shrink-fab:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 /* --- Expanded view: full HardSamplesTable --- */
 .hs-zone{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:24px;padding:0 8px}
 /* Width tracks the columns' total via --hs-table-w (set inline), so folding
@@ -147,22 +143,4 @@
 @media (prefers-reduced-motion:reduce){
   .hs-cell[data-running="true"]{animation:none;background-color:rgba(var(--color-accent-rgb),0.12)}
 }
-
-/* Phase 4 — cadence signals readout + stuck-diagnosis verdict. */
-.signals-panel .signals-list{display:flex;flex-direction:column;gap:10px;margin-top:8px}
-.signal-row{padding:8px 10px;border:1px solid var(--color-border-tertiary);border-radius:6px;background:var(--color-surface-secondary)}
-.signal-row-head{display:flex;flex-wrap:wrap;align-items:origin;gap:8px;font-size:13px}
-.signal-rule{font-weight:600;color:var(--color-text-primary)}
-.signal-layer{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);padding:1px 6px;border-radius:3px;background:var(--color-surface-tertiary)}
-.signal-action{color:var(--color-text-secondary)}
-.signal-meta{margin-left:auto;font-size:11px;color:var(--color-text-tertiary)}
-.signal-reason{font-size:12px;color:var(--color-text-secondary);margin-top:4px}
-.signal-inputs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-.signal-chip{font-size:11px;padding:2px 6px;border-radius:3px;background:var(--color-surface-tertiary);color:var(--color-text-secondary)}
-.signal-chip b{color:var(--color-text-primary);font-weight:600}
-.stuck-diagnosis .diagnosis-headline{font-size:14px;font-weight:600;color:var(--color-text-primary);margin-top:4px}
-.stuck-diagnosis .diagnosis-detail{font-size:12px;color:var(--color-text-secondary);margin-top:4px}
-.stuck-diagnosis.sev-warn{border-color:var(--color-warning,#c27500)}
-.stuck-diagnosis.sev-warn .diagnosis-headline{color:var(--color-warning,#c27500)}
-.stuck-diagnosis.sev-ok .diagnosis-headline{color:var(--color-success,#3a9d5d)}
 
