@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { CardFrame } from "@/components/ui/card";
+import { Badge } from "@/components/ui/Badge";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface ScoreboardEntry {
@@ -78,7 +79,7 @@ export function RoundFileView({ doc, raw }: Props) {
     <div className="round-file-view">
       <div className="round-file-summary">
         <div className="round-file-summary-row">
-          <span className="badge">round {doc.round ?? "—"}</span>
+          <Badge>round {doc.round ?? "—"}</Badge>
           <span>accuracy {pct(doc.accuracy)} {typeof doc.origin_accuracy === "number" && (<span style={{ color: "var(--color-text-tertiary)" }}>(origin {pct(doc.origin_accuracy)})</span>)}</span>
           <span>composite {num(doc.composite_fitness)}</span>
           <span>{hits}/{total} hits</span>
@@ -91,7 +92,7 @@ export function RoundFileView({ doc, raw }: Props) {
         <CardFrame
           style={{ margin: "8px 0" }}
           title={<span>Scoreboard</span>}
-          actions={<span className="badge">{scoreboard.length}</span>}
+          actions={<Badge>{scoreboard.length}</Badge>}
         >
           <div className="table-wrap">
             <table>
@@ -128,7 +129,7 @@ export function RoundFileView({ doc, raw }: Props) {
         <CardFrame
           style={{ margin: "8px 0" }}
           title={<span>Per-sample results</span>}
-          actions={<span className="badge">{results.length}</span>}
+          actions={<Badge>{results.length}</Badge>}
         >
           <div className="table-wrap">
             <table>

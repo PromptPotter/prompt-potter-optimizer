@@ -1,0 +1,53 @@
+/* Button primitive. Ported from the old global `.modal-btn*` rules so the
+   confirm-dialog footer keeps its exact look; now the one button surface every
+   caller reaches for. Reads design tokens — theme-agnostic. */
+
+.btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  line-height: 1.4;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn:hover {
+  background: var(--color-background-hover);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn:disabled:hover {
+  background: transparent;
+}
+
+.primary {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast, #fff);
+  border-color: var(--color-accent);
+}
+.primary:hover {
+  background: var(--color-accent);
+  filter: brightness(1.08);
+}
+
+.danger {
+  background: var(--color-status-error, #c53030);
+  color: #fff;
+  border-color: var(--color-status-error, #c53030);
+}
+.danger:hover {
+  background: var(--color-status-error, #c53030);
+  filter: brightness(1.08);
+}
+
+.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.ghost:hover {
+  background: var(--color-background-hover);
+}

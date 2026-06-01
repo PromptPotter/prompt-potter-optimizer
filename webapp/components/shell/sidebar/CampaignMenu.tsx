@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   postArchiveCampaign,
   postDeleteCampaign,
@@ -8,45 +8,25 @@ import {
 } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
+import { Popover } from "@/components/ui/Popover";
 
 // Per-campaign three-dots menu. Surfaces the lifecycle commands wired in
 // `mutations.ts`: archive / unarchive (soft-mark, reversible) and delete
 // (soft-mark, hidden from default surface — measurements survive
 // cross-campaign cache-hits per ADR-0002 §0.5; nothing on disk is removed).
 // Delete asks for confirmation; archive / unarchive fire immediately.
+// Dropdown open/close + click-outside/ESC come from the Popover primitive.
 
 interface Props {
   campaign: CampaignSummary;
 }
 
 export function CampaignMenu({ campaign }: Props) {
-  const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  // Click-outside + Escape close the dropdown. Mounted only while open so
-  // we don't pay the listener cost for every row in a long campaign list.
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!containerRef.current) return;
-      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
 
   const runArchive = useCallback(async () => {
-    setOpen(false);
     setPending(true);
     setErr(null);
     try {
@@ -60,7 +40,6 @@ export function CampaignMenu({ campaign }: Props) {
   }, [campaign.campaign_id]);
 
   const runUnarchive = useCallback(async () => {
-    setOpen(false);
     setPending(true);
     setErr(null);
     try {
@@ -94,64 +73,57 @@ export function CampaignMenu({ campaign }: Props) {
   ];
 
   return (
-    <div className="campaign-menu" ref={containerRef}>
-      <button
-        type="button"
-        className="campaign-menu-trigger"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Campaign actions"
-        title="Campaign actions"
-        disabled={pending}
-        tabIndex={-1}
-      >
-        ⋯
-      </button>
-      {open && (
-        <div role="menu" className="campaign-menu-list">
-          {archived ? (
-            <button
-              type="button"
-              role="menuitem"
-              className="campaign-menu-item"
-              onClick={(e) => {
-                e.stopPropagation();
-                void runUnarchive();
-              }}
-            >
-              Unarchive
-            </button>
-          ) : (
-            <button
-              type="button"
-              role="menuitem"
-              className="campaign-menu-item"
-              onClick={(e) => {
-                e.stopPropagation();
-                void runArchive();
-              }}
-            >
-              Archive
-            </button>
-          )}
+    <>
+      <Popover
+        align="right"
+        renderTrigger={({ open, toggle }) => (
           <button
             type="button"
-            role="menuitem"
-            className="campaign-menu-item campaign-menu-item-danger"
+            className="campaign-menu-trigger"
             onClick={(e) => {
               e.stopPropagation();
-              setOpen(false);
-              setConfirmDelete(true);
+              toggle();
             }}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            aria-label="Campaign actions"
+            title="Campaign actions"
+            disabled={pending}
+            tabIndex={-1}
           >
-            Delete
+            ⋯
           </button>
-        </div>
-      )}
+        )}
+      >
+        {({ close }) => (
+          <div role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              className="campaign-menu-item"
+              onClick={(e) => {
+                e.stopPropagation();
+                close();
+                void (archived ? runUnarchive() : runArchive());
+              }}
+            >
+              {archived ? "Unarchive" : "Archive"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="campaign-menu-item campaign-menu-item-danger"
+              onClick={(e) => {
+                e.stopPropagation();
+                close();
+                setConfirmDelete(true);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        )}
+      </Popover>
       {err && (
         <span className="campaign-menu-err" title={err}>
           !
@@ -166,6 +138,6 @@ export function CampaignMenu({ campaign }: Props) {
         actions={deleteActions}
         onClose={() => setConfirmDelete(false)}
       />
-    </div>
+    </>
   );
 }

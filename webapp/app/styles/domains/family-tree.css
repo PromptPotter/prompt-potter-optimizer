@@ -59,8 +59,8 @@
 .family-cladogram-cleanup-btn{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:2px 8px;text-transform:none;letter-spacing:0}
 .family-cladogram-cleanup-btn:hover{color:var(--color-status-error,#c53030);border-color:var(--color-status-error,#c53030)}
 .family-cladogram-cleanup-done{font-size:11px;color:var(--color-text-tertiary);font-style:italic;text-transform:none;letter-spacing:0}
-/* Cleanup modal body + error. .modal-backdrop / .modal-card primitives
-   come from the existing modal styles further up this file. */
+/* Cleanup-dialog body + error text. The dialog chrome (backdrop, card) comes
+   from the Dialog primitive (components/ui/Dialog.module.css). */
 .family-tree-modal-body{font-size:13px;color:var(--color-text-secondary);margin:0 0 12px;line-height:1.4}
 .family-tree-modal-body code{font-family:var(--font-mono,monospace);background:var(--color-background-hover);padding:1px 4px;border-radius:3px;font-size:12px}
 .family-tree-modal-error{font-size:12px;color:var(--color-status-error,#c53030);margin:0 0 12px}

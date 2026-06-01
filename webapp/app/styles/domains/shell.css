@@ -54,16 +54,14 @@
 .unit-library-tab{flex:1;padding:4px 8px;background:transparent;border:0;border-bottom:1.5px solid transparent;cursor:pointer;font-family:inherit;font-size:11px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.04em}
 .unit-library-tab:hover{color:var(--color-text-primary)}
 .unit-library-tab.active{color:var(--color-accent);border-bottom-color:var(--color-accent);font-weight:500}
-/* Per-campaign three-dots menu. Sits at the right edge of the campaign
-   row; the dropdown floats over adjacent rows so a long campaign list
-   doesn't shift when one row is open. */
-.campaign-menu{position:relative;flex-shrink:0;display:inline-flex;align-items:center}
+/* Per-campaign three-dots menu. The wrapper + floating panel come from the
+   Popover primitive (components/ui/Popover.module.css); these style the
+   trigger and the menu items inside that panel. */
 .campaign-menu-trigger{background:transparent;border:0;color:var(--color-text-tertiary);font-size:14px;line-height:1;padding:2px 6px;cursor:pointer;border-radius:4px}
 .campaign-menu-trigger:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
 .campaign-menu-trigger[aria-expanded="true"]{color:var(--color-accent);background:var(--color-background-tint-active)}
 .campaign-menu-trigger:disabled{cursor:default;opacity:.5}
-.campaign-menu-list{position:absolute;top:100%;right:0;z-index:10;min-width:140px;margin-top:2px;padding:4px 0;background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.4);display:flex;flex-direction:column}
-.campaign-menu-item{padding:6px 12px;background:transparent;border:0;text-align:left;cursor:pointer;font-family:inherit;font-size:12px;color:var(--color-text-secondary)}
+.campaign-menu-item{padding:6px 12px;background:transparent;border:0;text-align:left;cursor:pointer;font-family:inherit;font-size:12px;color:var(--color-text-secondary);width:100%}
 .campaign-menu-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
 .campaign-menu-item-danger{color:var(--color-status-error,#dc2626)}
 .campaign-menu-item-danger:hover{color:var(--color-status-error,#dc2626);background:var(--color-background-hover)}
