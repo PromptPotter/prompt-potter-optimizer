@@ -8,10 +8,18 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     AXES_ENUM_PREVIEW,
     PIPELINE_PARAM_CATALOGUE_MODEL_CAP,
     InjectionBundle,
+    InjectionKind,
+    signal,
 )
 from promptpotter.domain.l1_layout import L1_POSSIBLE
 
 
+@signal(
+    "pipeline_param_catalogue",
+    kind=InjectionKind.DERIVED,
+    description="Pipeline-param menu: name + ≤4-value enum hint per node, plus available models.",
+    char_cap=None,
+)
 def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
     """Pipeline-param menu (name + ≤4-value enum hint) — what L1 picks from for `pipeline_params_override`.
     Symmetric with `l1_signal_catalogue` (the menu L2 picks from for L1's layout).
@@ -53,6 +61,12 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
     return "\n".join(lines)
 
 
+@signal(
+    "l1_signal_catalogue",
+    kind=InjectionKind.DERIVED,
+    description="L1 SIGNAL MENU: sorted L1_POSSIBLE placeholder names L2 may use in l1_layout.",
+    char_cap=None,
+)
 def _r_l1_signal_catalogue(b: InjectionBundle) -> str:
     """Names only — sorted ``L1_POSSIBLE``. L2 may pick from this menu."""
     return "L1 SIGNAL MENU (placeholders L2 may use in l1_layout):\n  " + "\n  ".join(

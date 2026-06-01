@@ -11,7 +11,6 @@ construct bundles directly; the ``Cycle``-snapshot path lives in
 from __future__ import annotations
 
 import enum
-import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -79,30 +78,6 @@ class _Injection:
     char_cap: int | None
 
 
-def accessor_renderer(
-    accessor: Callable[[InjectionBundle], object],
-    template: str,
-    *,
-    json_value: bool = False,
-) -> Callable[[InjectionBundle], str]:
-    """Build a renderer for a one-shot field accessor + fixed template.
-
-    ``accessor(b)`` returns the raw value; falsy → empty string (renderer
-    skips its INJECTIONS slot entirely). Otherwise the value fills the
-    ``{value}`` placeholder in ``template``. Set ``json_value=True`` to
-    JSON-encode the value first (for dict/list payloads).
-    """
-
-    def render(b: InjectionBundle) -> str:
-        v = accessor(b)
-        if not v:
-            return ""
-        rendered = json.dumps(v) if json_value else v
-        return template.format(value=rendered)
-
-    return render
-
-
 @dataclass(frozen=True)
 class CycleSlice:
     """Frozen cycle-state snapshot for renderers — keeps them ``Cycle``-free + unit-testable.
@@ -149,6 +124,44 @@ class InjectionBundle:
     rebase_capability: bool = True
 
 
+Renderer = Callable[[InjectionBundle], str]
+
+# Filled by the @signal decorator at each renderer's definition site. registry.py imports the
+# renderer modules to trigger registration, then snapshots this into the public INJECTIONS dict.
+_REGISTRY: dict[str, _Injection] = {}
+
+
+def signal(
+    name: str,
+    *,
+    kind: InjectionKind,
+    description: str,
+    char_cap: int | None,
+) -> Callable[[Renderer], Renderer]:
+    """Register a renderer into the injection registry at its definition site.
+
+    Co-locates the slot key with its renderer body: ``grep "<name>"`` lands on the
+    ``@signal("<name>", …)`` line directly above the ``def``, one hop to the call edge.
+    The decorated function is returned unchanged — still directly callable and
+    unit-testable. A duplicate key raises at import time (loud, not last-wins).
+    """
+
+    def deco(fn: Renderer) -> Renderer:
+        if name in _REGISTRY:
+            raise ValueError(f"duplicate injection signal {name!r}")
+        _REGISTRY[name] = _Injection(name, kind, fn, description, char_cap)
+        return fn
+
+    return deco
+
+
+def injection_registry() -> dict[str, _Injection]:
+    """Snapshot of every ``@signal``-registered injection. Call only after importing all
+    renderer modules (registry.py does this) — a renderer whose module wasn't imported is
+    absent here and surfaces as an orphan in ``test_every_injection_renderer_is_wired``."""
+    return dict(_REGISTRY)
+
+
 __all__ = [
     "AXES_ENUM_PREVIEW",
     "FAILURE_WARNING_PREVIEW",
@@ -161,6 +174,9 @@ __all__ = [
     "CycleSlice",
     "InjectionBundle",
     "InjectionKind",
+    "Renderer",
     "RoundDigest",
     "fence_untrusted",
+    "injection_registry",
+    "signal",
 ]

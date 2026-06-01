@@ -10,11 +10,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from promptpotter.config.settings import DATASET_NAME, settings
 from promptpotter.infrastructure.tracing.events import (
@@ -50,27 +50,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["NodeTrace", "ObservabilityBridge", "observed_node"]
 
-
-# Event → sink method. Sinks without the method are silently skipped.
-_DISPATCH: dict[type[Event], str] = {
-    DatasetRegistered: "on_dataset_registered",
-    CampaignStart: "on_campaign_start",
-    DatasetRun: "on_dataset_run",
-    RoundStart: "on_round_start",
-    NodeStart: "on_node_start",
-    NodeEnd: "on_node_end",
-    RoundEnd: "on_round_end",
-    PromptVersion: "on_prompt_version",
-    CampaignEnd: "on_campaign_end",
-    CandidateCreated: "on_write_point",
-    CandidateScored: "on_write_point",
-    RoundWinnerChosen: "on_write_point",
-    L1CritiqueWritten: "on_write_point",
-    LayerApplied: "on_layer_applied",
-    QueryScoreStart: "on_query_score_start",
-    QueryNodeSpan: "on_query_node_span",
-    QueryScoreEnd: "on_query_score_end",
-}
+_E = TypeVar("_E", bound=Event)
 
 
 @dataclass
@@ -129,23 +109,98 @@ class ObservabilityBridge:
             mlflow_sink=MLflowSink(store_base_dir, backend_id) if settings.MLFLOW_ENABLED else None,
         )
 
+    def _fan(self, event: _E, *handlers: tuple[str, Callable[[_E], None] | None]) -> None:
+        """Call each sink handler bound to ``event`` under :func:`graceful`.
+
+        Handlers are passed as literal bound-method references by :meth:`emit`, so a
+        sink's participation in an event is greppable at the call site (and its absence
+        from an arm means it genuinely isn't called — no silent ``getattr`` skip). A
+        ``None`` handler is a disabled optional sink (Langfuse / MLflow off).
+        """
+        for label, fn in handlers:
+            if fn is None:
+                continue
+            with graceful(f"{label} sink failed on {type(event).__name__}"):
+                fn(event)
+
     def emit(self, event: Event) -> None:
+        # Explicit per-event fan-out. The sink methods named here are the only callers of
+        # each `on_*` handler — `grep on_node_start` lands on the call site in one hop. Each
+        # sink implements a different subset; subset membership is encoded by which arms list
+        # it, not by a dynamic `getattr(sink, method, None)`.
         if not self._enabled:
             return
-        method = _DISPATCH.get(type(event))
-        if method is None:
-            return
-        for label, sink in (
-            ("file", self._file),
-            ("langfuse", self._langfuse),
-            ("mlflow", self._mlflow),
-        ):
-            if sink is None:
-                continue
-            fn = getattr(sink, method, None)
-            if fn is not None:
-                with graceful(f"{label} sink {method} failed on {type(event).__name__}"):
-                    fn(event)
+        lf = self._langfuse
+        ml = self._mlflow
+        match event:
+            case DatasetRegistered():
+                self._fan(
+                    event,
+                    ("file", self._file.on_dataset_registered),
+                    ("langfuse", lf.on_dataset_registered if lf else None),
+                )
+            case CampaignStart():
+                self._fan(
+                    event,
+                    ("file", self._file.on_campaign_start),
+                    ("langfuse", lf.on_campaign_start if lf else None),
+                    ("mlflow", ml.on_campaign_start if ml else None),
+                )
+            case DatasetRun():
+                self._fan(
+                    event,
+                    ("file", self._file.on_dataset_run),
+                    ("langfuse", lf.on_dataset_run if lf else None),
+                )
+            case RoundStart():
+                self._fan(
+                    event,
+                    ("file", self._file.on_round_start),
+                    ("langfuse", lf.on_round_start if lf else None),
+                )
+            case NodeStart():
+                self._fan(
+                    event,
+                    ("file", self._file.on_node_start),
+                    ("langfuse", lf.on_node_start if lf else None),
+                )
+            case NodeEnd():
+                self._fan(
+                    event,
+                    ("file", self._file.on_node_end),
+                    ("langfuse", lf.on_node_end if lf else None),
+                )
+            case RoundEnd():
+                self._fan(
+                    event,
+                    ("file", self._file.on_round_end),
+                    ("langfuse", lf.on_round_end if lf else None),
+                    ("mlflow", ml.on_round_end if ml else None),
+                )
+            case PromptVersion():
+                self._fan(
+                    event,
+                    ("file", self._file.on_prompt_version),
+                    ("langfuse", lf.on_prompt_version if lf else None),
+                )
+            case CampaignEnd():
+                self._fan(
+                    event,
+                    ("file", self._file.on_campaign_end),
+                    ("langfuse", lf.on_campaign_end if lf else None),
+                )
+            case CandidateCreated() | CandidateScored() | RoundWinnerChosen() | L1CritiqueWritten():
+                self._fan(event, ("file", self._file.on_write_point))
+            case LayerApplied():
+                self._fan(event, ("file", self._file.on_layer_applied))
+            case QueryScoreStart():
+                self._fan(event, ("langfuse", lf.on_query_score_start if lf else None))
+            case QueryNodeSpan():
+                self._fan(event, ("langfuse", lf.on_query_node_span if lf else None))
+            case QueryScoreEnd():
+                self._fan(event, ("langfuse", lf.on_query_score_end if lf else None))
+            case _:
+                return
 
     def emit_write_point(
         self,

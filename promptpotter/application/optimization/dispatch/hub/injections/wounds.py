@@ -13,7 +13,9 @@ from typing import Any
 from promptpotter.application.optimization.dispatch.hub.bundle import (
     RUNTIME_FAILURE_RECENCY_WINDOW,
     InjectionBundle,
+    InjectionKind,
     fence_untrusted,
+    signal,
 )
 from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
@@ -37,6 +39,12 @@ def _rf_matches_current_config(
     return all(observed.get(k) == current.get(k) for k in PARAM_FORBIDDEN_KEYS if k in observed)
 
 
+@signal(
+    "validation_failures",
+    kind=InjectionKind.MEASUREMENT,
+    description="Wound 1: L1 parse-time validator failures (per-axis, per-value).",
+    char_cap=500,
+)
 def _r_validation_failures(b: InjectionBundle) -> str:
     """Wound 1 — L1 parse-time validator. Fenced (echoes LLM-proposed values)."""
     failures = b.opt_sp.memory.wounds.validation_failures
@@ -52,6 +60,12 @@ def _r_validation_failures(b: InjectionBundle) -> str:
     return fence_untrusted("\n".join(sec))
 
 
+@signal(
+    "runtime_failures",
+    kind=InjectionKind.MEASUREMENT,
+    description="Wound 2: DegradationCheck mid-eval evidence — per-candidate runtime failures.",
+    char_cap=800,
+)
 def _r_runtime_failures(b: InjectionBundle) -> str:
     """Wound 2 — DegradationCheck mid-eval evidence. Fenced (echoes pipeline warnings).
     ACCUMULATED entries filter through `_rf_matches_current_config`; NEW (first-seen this round)
@@ -96,11 +110,23 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
     return "\n".join(lines)
 
 
+@signal(
+    "l2_guard_breaches",
+    kind=InjectionKind.MEASUREMENT,
+    description="Wound 4: L2_CONTEXT post-parse guard outcomes; non-empty force-triggers L3 heal.",
+    char_cap=300,
+)
 def _r_l2_guard_breaches(b: InjectionBundle) -> str:
     """Wound 4 — L2_CONTEXT guard outcomes; non-empty force-triggers an L3 heal."""
     return _render_guard_breaches(b.opt_sp.memory.wounds.l2_guard_breaches, "L2")
 
 
+@signal(
+    "l3_guard_breaches",
+    kind=InjectionKind.MEASUREMENT,
+    description="L3_PLAN post-parse guard outcomes. L3 reads its own past breaches.",
+    char_cap=300,
+)
 def _r_l3_guard_breaches(b: InjectionBundle) -> str:
     """L3_PLAN guard outcomes — L3 reads its own past breaches to avoid repeating them."""
     return _render_guard_breaches(b.opt_sp.memory.wounds.l3_guard_breaches, "L3")

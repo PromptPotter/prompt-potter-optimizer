@@ -5,7 +5,6 @@ composite_fitness block from ``shared.composite``."""
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 
 from promptpotter.presentation.views.display import (
     BOLD,
@@ -304,27 +303,38 @@ def _render_plan_exit(v: PlanExitView) -> str:
     return "\n".join(out)
 
 
-_TEXT_RENDERERS: dict[type, Callable[..., str]] = {
-    InitEnterView: _render_init_enter,
-    InitExitView: _render_init_exit,
-    RoundStartView: _render_round_start,
-    CandidatesGeneratedView: _render_candidates_generated,
-    RoundCompleteView: _render_round_complete,
-    EscalationEnterView: _render_escalation_enter,
-    EscalationExitView: _render_escalation_exit,
-    L2RefineEnterView: _render_l2_refine_enter,
-    L2RefineExitView: _render_l2_refine_exit,
-    ProbeEnterView: _render_probe_enter,
-    ProbeExitView: _render_probe_exit,
-    PlanEnterView: _render_plan_enter,
-    PlanExitView: _render_plan_exit,
-}
-
-
 def to_text(view: AnyView) -> str:
-    """Dispatch a typed view to its ANSI text renderer."""
-    fn = _TEXT_RENDERERS.get(type(view))
-    return fn(view) if fn else ""
+    """Dispatch a typed view to its ANSI text renderer. Explicit match so each
+    ``grep _render_*`` lands on the call site and mypy narrows the view type per arm."""
+    match view:
+        case InitEnterView():
+            return _render_init_enter(view)
+        case InitExitView():
+            return _render_init_exit(view)
+        case RoundStartView():
+            return _render_round_start(view)
+        case CandidatesGeneratedView():
+            return _render_candidates_generated(view)
+        case RoundCompleteView():
+            return _render_round_complete(view)
+        case EscalationEnterView():
+            return _render_escalation_enter(view)
+        case EscalationExitView():
+            return _render_escalation_exit(view)
+        case L2RefineEnterView():
+            return _render_l2_refine_enter(view)
+        case L2RefineExitView():
+            return _render_l2_refine_exit(view)
+        case ProbeEnterView():
+            return _render_probe_enter(view)
+        case ProbeExitView():
+            return _render_probe_exit(view)
+        case PlanEnterView():
+            return _render_plan_enter(view)
+        case PlanExitView():
+            return _render_plan_exit(view)
+        case _:
+            return ""
 
 
 __all__ = ["to_text"]

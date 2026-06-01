@@ -14,10 +14,18 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     NEAR_MISS_RENDER_CAP,
     SAMPLE_RENDER_CAP,
     InjectionBundle,
+    InjectionKind,
     fence_untrusted,
+    signal,
 )
 
 
+@signal(
+    "diagnostics",
+    kind=InjectionKind.DERIVED,
+    description="Layer-agnostic round readout: STATUS header + RoundDiagnostics body.",
+    char_cap=1500,
+)
 def _r_diagnostics(b: InjectionBundle) -> str:
     """Round readout: plain STATUS (cycle counters, renders even pre-R1) + fenced RoundDiagnostics
     body (wrapped because it echoes raw queries/GTs/warnings).
@@ -177,6 +185,15 @@ def _filter_axis_rankings_to_prompt(value: str) -> str:
     return "; ".join(kept)
 
 
+@signal(
+    "axis_memory",
+    kind=InjectionKind.DERIVED,
+    description=(
+        "Cross-cycle axis-keyed digest from AxisIndex: rankings, persistent failures, "
+        "failure clusters, value trends, exhausted axes."
+    ),
+    char_cap=1200,  # digest() already caps to top-5 axes; this is the hard backstop.
+)
 def _r_axis_memory(b: InjectionBundle) -> str:
     """Cross-cycle axis/sample memory from the MeasurementArchive via `AxisIndex.digest`.
 
@@ -218,6 +235,12 @@ def _query_stem(row: dict[str, Any], n: int = 70) -> str:
     return q[:n]
 
 
+@signal(
+    "origin_strengths",
+    kind=InjectionKind.MEASUREMENT,
+    description="Round-0 origin's per-sample hits — the floor variants must preserve.",
+    char_cap=None,
+)
 def _r_origin_strengths(b: InjectionBundle) -> str:
     """One-line hit count — actionable signal ("don't strip scaffolding"). Enumerating samples
     added bytes without adding input: L1 preserves all origin hits, doesn't pick.
@@ -234,6 +257,12 @@ def _r_origin_strengths(b: InjectionBundle) -> str:
     )
 
 
+@signal(
+    "intractable_samples",
+    kind=InjectionKind.MEASUREMENT,
+    description="Cumulative cycle-wide miss set — samples no candidate has solved yet this cycle.",
+    char_cap=None,
+)
 def _r_intractable_samples(b: InjectionBundle) -> str:
     """Cumulative-best misses from `current_results` — the cluster L1 must attack next.
     Mutations that don't address any of them are unlikely to break the plateau. Fenced.
@@ -257,6 +286,15 @@ def _r_intractable_samples(b: InjectionBundle) -> str:
     return fence_untrusted("\n".join(lines))
 
 
+@signal(
+    "archive_top_runs",
+    kind=InjectionKind.MEASUREMENT,
+    description=(
+        "Top-K historical runs across the dataset's archive — anchor the optimizer "
+        "against the best composite ever scored instead of re-discovering it."
+    ),
+    char_cap=None,
+)
 def _r_archive_top_runs(b: InjectionBundle) -> str:
     """Top historical runs — anchor "beat run X (acc=Y%, comp=Z)" instead of re-discovering a
     peak already on disk. Empty until `AxisIndex.refresh` has folded at least one run.
@@ -275,6 +313,15 @@ def _r_archive_top_runs(b: InjectionBundle) -> str:
     return "\n".join(lines)
 
 
+@signal(
+    "rare_hit_samples",
+    kind=InjectionKind.MEASUREMENT,
+    description=(
+        "Samples cracked by ≤3 of ≥10 attempts — names the run(s) that hit them "
+        "(recipe pointers). Zero-hit samples surface as capacity-bound."
+    ),
+    char_cap=None,
+)
 def _r_rare_hit_samples(b: InjectionBundle) -> str:
     """Samples cracked by ≤3 of ≥10 attempts — unlock-pattern pointers. Zero-hit samples surface
     as `capacity-bound` (stop engineering for them).

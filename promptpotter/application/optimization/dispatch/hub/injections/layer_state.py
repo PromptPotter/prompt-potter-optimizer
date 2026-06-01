@@ -5,6 +5,7 @@ L2-authored rules/examples appended to L1's instruction.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
@@ -16,6 +17,8 @@ from promptpotter.application.optimization.dispatch.hub.auto_rules import (
 from promptpotter.application.optimization.dispatch.hub.bundle import (
     TASK_CONTEXT_VALUE_CAP,
     InjectionBundle,
+    InjectionKind,
+    signal,
 )
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
@@ -26,6 +29,60 @@ logger = logging.getLogger(__name__)
 _LATEX_CORRUPTION_RE = re.compile(r"(?<!\\b)oxed\{|(?<![a-zA-Z])athematical")
 
 
+@signal(
+    "plan",
+    kind=InjectionKind.TRACE,
+    description="L3's strategic plan text. Persistent until next L3 fire.",
+    char_cap=800,
+)
+def _r_plan(b: InjectionBundle) -> str:
+    """L3's strategic plan text — read by every prompt; persistent until next L3 fire."""
+    plan = b.opt_sp.plan
+    return f"PLAN:\n{plan}" if plan else ""
+
+
+@signal(
+    "l3_to_l2_note",
+    kind=InjectionKind.DIRECTIVE,
+    description="Sticky L3→L2 pointer. Mounted only in L2's template; absent from L1.",
+    char_cap=400,
+)
+def _r_l3_to_l2_note(b: InjectionBundle) -> str:
+    """Sticky L3→L2 directive — mounted only in L2's template, absent from L1."""
+    note = b.opt_sp.memory.wounds.l3_note
+    return f"L3 NOTE TO L2:\n{note}" if note else ""
+
+
+@signal(
+    "rendered_prompt",
+    kind=InjectionKind.TRACE,
+    description="Current best searchpoint's compiled prompt body.",
+    char_cap=2500,
+)
+def _r_rendered_prompt(b: InjectionBundle) -> str:
+    """Current best searchpoint's compiled prompt body."""
+    body = b.opt_sp.render()
+    return f"CURRENT PROMPT:\n---\n{body}\n---" if body else ""
+
+
+@signal(
+    "l1_overrides",
+    kind=InjectionKind.TRACE,
+    description="Current L1 runtime knobs (creativity, n_variants, etc.) as JSON.",
+    char_cap=None,
+)
+def _r_l1_overrides(b: InjectionBundle) -> str:
+    """Current L1 runtime knobs (creativity, n_variants, …) as JSON."""
+    overrides = b.opt_sp.memory.l1_overrides
+    return f"CURRENT L1 CONFIG: {json.dumps(overrides)}" if overrides else ""
+
+
+@signal(
+    "task_context",
+    kind=InjectionKind.TRACE,
+    description="Persistent task framing dict refined by L2; broadcast to all four prompts.",
+    char_cap=None,  # _r_task_context caps each field at TASK_CONTEXT_VALUE_CAP
+)
 def _r_task_context(b: InjectionBundle) -> str:
     tc = b.opt_sp.memory.task_context
     if not tc:
@@ -92,6 +149,12 @@ def format_l1_critique_for_prompt(critique: dict[str, Any], pipeline_schema: Any
     return "\n".join(parts)
 
 
+@signal(
+    "critique",
+    kind=InjectionKind.TRACE,
+    description="Compact view of the most recent L1_CRITIQUE LLM output dict.",
+    char_cap=800,
+)
 def _r_critique(b: InjectionBundle) -> str:
     """Compact view of the most recent L1_CRITIQUE output dict."""
     return format_l1_critique_for_prompt(b.digest.critique or {}, b.pipeline_schema)
@@ -110,6 +173,17 @@ _REBASE_CAPABILITY_TEXT = (
 )
 
 
+@signal(
+    "rebase_capability",
+    kind=InjectionKind.DIRECTIVE,
+    description=(
+        "Conditional fork_proposal escape-hatch instruction (renders into L2 + "
+        "L3 prompts). Empty when ``OptimizationConfig.rebase_capability`` is "
+        "off — keeps prompt body bit-for-bit identical to a no-rebase "
+        "ablation so the input distribution doesn't drift on prompt text."
+    ),
+    char_cap=None,
+)
 def _r_rebase_capability(b: InjectionBundle) -> str:
     """Render the fork_proposal escape-hatch instruction, gated by
     ``OptimizationConfig.rebase_capability``. When the capability is off
@@ -142,6 +216,16 @@ def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
     return triggers
 
 
+@signal(
+    "l1_supplemental_rules",
+    kind=InjectionKind.DIRECTIVE,
+    description=(
+        "Situational rules appended to L1's instruction — auto-triggered from "
+        "bundle state (PEAKED axes, runtime failures, chain-bind, continuous-axis, "
+        "L2 stall, LaTeX corruption) plus L2-authored entries on opt_sp."
+    ),
+    char_cap=1000,
+)
 def _r_l1_supplemental_rules(b: InjectionBundle) -> str:
     """Auto-triggered rules (from `AUTO_RULES`) + L2-authored ones (cited). Empty → L1 omits the block."""
     rendered: list[tuple[str, str]] = []
@@ -160,6 +244,16 @@ def _r_l1_supplemental_rules(b: InjectionBundle) -> str:
     return "\n".join(lines)
 
 
+@signal(
+    "l1_situational_examples",
+    kind=InjectionKind.DIRECTIVE,
+    description=(
+        "Worked examples pinned to currently-active triggers — built-ins shipped "
+        "in auto_rules.py plus L2-authored entries on opt_sp. Examples whose "
+        "trigger is not active this round are silently filtered."
+    ),
+    char_cap=1000,
+)
 def _r_l1_situational_examples(b: InjectionBundle) -> str:
     """Worked examples for currently-active triggers. L2-authored examples without a matching
     active trigger filter out (would orphan from the rule). L2 entry overrides matching built-in.

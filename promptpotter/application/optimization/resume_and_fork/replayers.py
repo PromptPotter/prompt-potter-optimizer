@@ -67,10 +67,15 @@ def replay_decisions(
         origin_results=list(origin_results or []),
     )
     for rec in round_data.get("decisions") or []:
-        kind = rec.get("kind", "")
+        try:
+            kind = ResumeCheckpointKind(rec.get("kind", ""))
+        except ValueError:
+            # Not a known checkpoint kind — corrupt/foreign decision record; skip (not a divergence).
+            continue
         fn = REPLAYERS.get(kind)
         if fn is None:
-            continue
+            continue  # valid kind, but ARCHIVAL gating — recorded, never replayed
+
         try:
             current = fn(ctx, rec.get("inputs_ref") or {}, rec.get("data") or {})
         except Exception:

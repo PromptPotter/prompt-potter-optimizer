@@ -10,6 +10,7 @@ Pure computation — no I/O, no backend dependencies.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -109,17 +110,15 @@ def extract_sample_diagnostics(
     if not pd:
         return diag
 
-    type_steps: dict[str, list[PipelineNode]] = {}
+    # Namespace a node's diagnostics by step name only when ≥2 nodes share its type.
+    type_counts = Counter(s.node_type for s in pipeline_schema.nodes if s.node_type)
     for step in pipeline_schema.nodes:
-        if step.node_type and step.node_type in _DIAG_DISPATCH:
-            type_steps.setdefault(step.node_type, []).append(step)
-
-    for _ntype, steps in type_steps.items():
-        needs_namespace = len(steps) > 1
-        for step in steps:
-            prefix = f"{step.name}_" if needs_namespace else ""
-            for k, v in _DIAG_DISPATCH[step.node_type](step, pd, gt).items():
-                diag[f"{prefix}{k}"] = v
+        extracted = _extract_node_diagnostics(step, pd, gt)
+        if extracted is None:
+            continue
+        prefix = f"{step.name}_" if type_counts[step.node_type] > 1 else ""
+        for k, v in extracted.items():
+            diag[f"{prefix}{k}"] = v
     return diag
 
 
@@ -191,12 +190,22 @@ def _diag_cache(
     return {"cache_hit": timings.get(node.name) is not None}
 
 
-_DIAG_DISPATCH: dict[str, Any] = {
-    NodeType.CANDIDATE_SOURCE: _diag_candidate_source,
-    NodeType.RANKER: _diag_ranker,
-    NodeType.ENRICHER: _diag_enricher,
-    NodeType.CACHE: _diag_cache,
-}
+def _extract_node_diagnostics(
+    node: PipelineNode, pd: Mapping[str, Any], gt: str
+) -> dict[str, float | bool | int | str | None] | None:
+    """Per-node diagnostic extractor — None for node types without one. Explicit match so
+    ``grep _diag_ranker`` lands on the call site (no string-keyed dispatch table)."""
+    match node.node_type:
+        case NodeType.CANDIDATE_SOURCE:
+            return _diag_candidate_source(node, pd, gt)
+        case NodeType.RANKER:
+            return _diag_ranker(node, pd, gt)
+        case NodeType.ENRICHER:
+            return _diag_enricher(node, pd, gt)
+        case NodeType.CACHE:
+            return _diag_cache(node, pd, gt)
+        case _:
+            return None
 
 
 # ---------------------------------------------------------------------------
