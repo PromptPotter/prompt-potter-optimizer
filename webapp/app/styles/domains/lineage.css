@@ -1,6 +1,12 @@
 /* Lineage clickable nodes — hover/selected feedback so the operator
    sees which node feeds the ScoringInspector. */
 .lineage-node:hover .lineage-stub{stroke-width:3}
+/* Keyboard focus feedback. SVG <g> renders an `outline` box unreliably
+   across browsers, so mirror the hover affordance on the child stub +
+   label instead — same visual language, reliably painted. */
+.lineage-node:focus{outline:none}
+.lineage-node:focus-visible .lineage-stub{stroke-width:3}
+.lineage-node:focus-visible .lineage-label{text-decoration:underline}
 /* Selection color: lineage entries are orange by default, switching to
    red when one is clicked — quick visual feedback distinct from the
    accent the rest of the dashboard uses. */
