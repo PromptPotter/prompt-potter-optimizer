@@ -18,11 +18,13 @@ __all__ = [
     "CommandRecord",
     "CycleRecord",
     "ErrorRecord",
-    "ForkPayload",
+    "ForkSeed",
+    "ForkSpec",
     "ForkTrigger",
     "LLMCallProgressRecord",
     "LLMCallRecord",
     "LLMCallStartRecord",
+    "LimitOverrides",
     "OperatorSweepFile",
     "PhaseRecord",
     "ResumeCheckpointKind",
@@ -316,20 +318,59 @@ class ForkTrigger(enum.StrEnum):
     OPERATOR_SWEEP = "operator_sweep"
     OPERATOR_DIAG = "operator_diag"
     OPERATOR_REWIND = "operator_rewind"
+    OPERATOR_ENDORSE = "operator_endorse"
+    OPERATOR_STEERED = "operator_steered"
     L2_REBASE = "l2_rebase"
     L3_REBASE = "l3_rebase"
     SCORING_DIVERGENCE = "scoring_divergence"
 
 
-class ForkPayload(BaseModel):
-    """Why + what-changed at a fork cut → `FORK_CUT.data.fork`; optional deltas (today `l1_layout`) only when the trigger carries them."""
+class LimitOverrides(BaseModel):
+    """Run-limit knobs the fork-time reconcile dialog re-sets — absolute values
+    for the fork, every field optional (absent inherits the parent). Applied to
+    the fork's `OptimizationConfig` snapshot at bootstrap; never mutates the
+    parent's frozen config. Domain twin of the `LimitOverrides` wire schema."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    max_rounds: int | None = None
+    spend_budget_usd: float | None = None
+    l1_patience: int | None = None
+    l2_patience: int | None = None
+    l3_patience: int | None = None
+    pobb_epsilon: float | None = None
+
+
+class ForkSeed(BaseModel):
+    """The edited-searchpoint origin override: a fork's origin = chosen
+    searchpoint + operator edits. `seed is not None` on a `ForkSpec` ⇔ the fork
+    is `operator_steered`. `starting_prompt` is a `PromptTemplate.prompt_field_dict()`
+    shape → becomes the origin `OptSearchPoint` at bootstrap. `pipeline_overlay`
+    merges ON TOP of the dataset overlay (seed > dataset > backend default) for
+    this fork only — the dataset `pipeline.json` stays immutable."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    starting_prompt: dict[str, Any] = Field(default_factory=dict)
+    pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
+    limit_overrides: LimitOverrides = Field(default_factory=LimitOverrides)
+
+
+class ForkSpec(BaseModel):
+    """Why + what-changed at a fork cut → `FORK_CUT.data.fork` + `index.json::fork`.
+    One typed record for every fork; `l1_layout` carries L2/L3 rebase deltas,
+    `seed` carries the operator-steered origin override. The single fork-provenance
+    model — no free-string `fork.trigger` twin."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     trigger: ForkTrigger
     reason: str
     issued_by: str
+    from_round: int | None = None
+    from_candidate_id: str | None = None
     l1_layout: dict[str, list[str]] | None = None
+    seed: ForkSeed | None = None
 
 
 class RebaseRequest(BaseModel):
@@ -347,7 +388,7 @@ class RebaseRequest(BaseModel):
 
 
 class OperatorSweepFile(BaseModel):
-    """Operator JSON under ``datasets/{name}/sweep/``; dispatcher widens to ``ForkPayload(OPERATOR_SWEEP)``."""
+    """Operator JSON under ``datasets/{name}/sweep/``; dispatcher widens to ``ForkSpec(OPERATOR_SWEEP)``."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

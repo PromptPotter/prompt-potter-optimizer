@@ -61,7 +61,7 @@ async def _fork_and_bind(
     from promptpotter.application.bootstrap import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.optimization.resume_and_fork import _mint_fork
-    from promptpotter.domain.run_records import ForkPayload, ForkTrigger
+    from promptpotter.domain.run_records import ForkSpec, ForkTrigger
     from promptpotter.infrastructure.identity import registered_or_default_identity
     from promptpotter.infrastructure.store import build_stores
 
@@ -69,7 +69,7 @@ async def _fork_and_bind(
     tenant_id = identity.tenant_id
     store = build_stores(identity)
     source_file = variant.path.name if variant.path else f"current-{variant.label or 'unset'}.json"
-    fork_payload = ForkPayload(
+    fork_payload = ForkSpec(
         trigger=ForkTrigger.OPERATOR_SWEEP,
         reason=f"sweep-toolkit:{sweep_id}",
         issued_by=tenant_id,

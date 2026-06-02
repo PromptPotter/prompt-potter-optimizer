@@ -31,8 +31,6 @@ Closed inbound set: ``docs/specs/m12-api-openapi.yaml``. Permanent contract:
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 import re
 import uuid
@@ -41,14 +39,14 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from promptpotter import connectors
 from promptpotter.config.settings import settings
 from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
-from promptpotter.domain.run_records import CommandRecord
+from promptpotter.domain.run_records import CommandRecord, ForkSeed
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import (
@@ -60,7 +58,6 @@ from promptpotter.infrastructure.llm.models import (
 from promptpotter.infrastructure.store import (
     Stores,
     read_active_pointer,
-    save_active_pointer,
 )
 from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.paths import root_cycle_id
@@ -398,12 +395,22 @@ class CommandDispatcher:
         payload_extras: dict[str, Any],
     ) -> Any:
         if kind == "fork-cycle":
-            return lambda: self._apply_fork_cycle(
-                campaign_id=campaign_id,
-                cycle_id=cycle_id,
-                round_num=int(payload_extras.get("round", 0)),
-                candidate_id=str(payload_extras.get("candidate_id", "")),
-            )
+            from promptpotter.application.optimization.resume_and_fork import mint_operator_fork
+
+            seed = _parse_fork_seed(payload_extras.get("seed"))
+
+            def _apply_fork() -> None:
+                mint_operator_fork(
+                    stores=self._store,
+                    campaign_id=campaign_id,
+                    cycle_id=cycle_id,
+                    from_round=int(payload_extras.get("round", 0)),
+                    from_candidate_id=str(payload_extras.get("candidate_id", "")),
+                    seed=seed,
+                    steered_by=str(payload_extras.get("steered_by", "")),
+                )
+
+            return _apply_fork
         if kind == "stop-cycle":
             return lambda: self._apply_stop_cycle(campaign_id, cycle_id)
         if kind == "cleanup-empty-cycles":
@@ -517,72 +524,6 @@ class CommandDispatcher:
             ) from exc
         backend.last_synced_at = datetime.now(UTC).isoformat()
         self._store.backends.update(backend)
-
-    def _apply_fork_cycle(
-        self,
-        *,
-        campaign_id: str,
-        cycle_id: str,
-        round_num: int,
-        candidate_id: str,
-    ) -> None:
-        """Operator-initiated fork via the lineage inspector — endorse path.
-
-        Fork inherits ledger up to parent's current ``next_offset``;
-        ``round`` + ``candidate_id`` land on ``index.json::fork`` for audit.
-        Active pointer retargets so bare ``resume`` picks up the new fork."""
-        parent_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
-        parent_index_path = parent_dir / "index.json"
-        parent_index = json.loads(parent_index_path.read_text(encoding="utf-8"))
-
-        ts = datetime.now(UTC).isoformat()
-        ts_compact = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        suffix = hashlib.sha256(f"{cycle_id}|hitl|{ts_compact}".encode()).hexdigest()[:8]
-        root_id = root_cycle_id(cycle_id)
-        fork_id = f"{root_id}_fork_{suffix}"
-
-        fork_dir = self._store.campaigns.cycle_dir(campaign_id, fork_id)
-        if fork_dir.exists():
-            raise HTTPException(409, f"fork dir already exists: {fork_dir}")
-        fork_dir.mkdir(parents=True, exist_ok=True)
-
-        parent_session_id = parent_index.get("parent_session_id", "")
-        fork_index = {
-            "type": parent_index.get("type", "optimization_loop"),
-            "connector_type": parent_index.get("connector_type", ""),
-            # backend_id / dataset_name ride the inherited header block (single
-            # identity home) — copied forward below, never a top-level duplicate.
-            "parent_cycle_id": cycle_id,
-            "parent_session_id": parent_session_id,
-            "sibling_kind": "fork",
-            "status": "interrupted",
-            "n_rounds": 0,
-            "best_accuracy": None,
-            "origin_accuracy": parent_index.get("best_accuracy"),
-            "created_at": ts,
-            "updated_at": ts,
-            "header": parent_index.get("header", {}),
-            "fork": {
-                "trigger": "operator_hitl",
-                "from_round": round_num,
-                "from_candidate": candidate_id,
-                "forked_at": ts,
-            },
-        }
-        write_json(fork_dir / "index.json", fork_index)
-
-        parent_log = CycleEventLog.open(CycleDir(parent_dir))
-        fork_log = CycleEventLog.open(CycleDir(fork_dir))
-        fork_log.inherit_from(parent_log, parent_log.next_offset)
-
-        if parent_session_id:
-            save_active_pointer(
-                self._store.tenant_id,
-                parent_session_id,
-                campaign_id,
-                fork_id,
-                projects_root=self._store.projects_root,
-            )
 
     def _apply_stop_cycle(self, campaign_id: str, cycle_id: str) -> None:
         """Write ``.runtime/stop.flag``; ``Session.stop_check`` polls at the
@@ -758,6 +699,26 @@ def _optional_float(raw: object) -> float | None:
     if isinstance(raw, int | float):
         return float(raw)
     return None
+
+
+def _parse_fork_seed(raw: object) -> ForkSeed | None:
+    """Validate the optional ``fork-cycle`` seed into a typed :class:`ForkSeed`.
+
+    ``None`` ⇒ an endorse fork (no operator edits). A present-but-malformed seed
+    is a 422 (the typed schema is the contract; `LimitOverrides` bounds ride
+    `m12-api-openapi.yaml`)."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise HTTPException(
+            422, {"error": "payload_invalid", "message": "payload.seed must be an object."}
+        )
+    try:
+        return ForkSeed.model_validate(raw)
+    except ValidationError as exc:
+        raise HTTPException(
+            422, {"error": "payload_invalid", "message": f"payload.seed invalid: {exc}"}
+        ) from exc
 
 
 def _slugify_backend_id(name: str) -> str:

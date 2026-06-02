@@ -42,7 +42,7 @@ from promptpotter.application.jobs.quota import (
     effective_spend_cap_usd,
 )
 from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus
-from promptpotter.application.origin import load_origin_prompt
+from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner import build_origin_cycle_id
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
@@ -144,7 +144,7 @@ async def mint_campaign_command(
         session, campaign_config, log=lambda *_a, **_k: None
     )
     schema = session.pipeline_schema
-    origin = load_origin_prompt(
+    origin = resolve_origin_opt_search_point(
         session.experiment_extract,
         prompt_node_names=schema.prompt_node_names() if schema else [],
         dataset_dir=session.dataset_config_dir,

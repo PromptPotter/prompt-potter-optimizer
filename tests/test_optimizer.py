@@ -33,7 +33,7 @@ from promptpotter.application.optimization.validators.l3_output import (
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint, WoundChannels
 from promptpotter.domain.results import CandidateProposal, CandidateScore
-from promptpotter.domain.run_records import ForkPayload, ForkTrigger, ResumeCheckpointKind
+from promptpotter.domain.run_records import ForkSpec, ForkTrigger, ResumeCheckpointKind
 from promptpotter.domain.search_point import TaskDecomposition
 
 scipy = pytest.importorskip("scipy")  # transitively required by other math helpers
@@ -578,8 +578,8 @@ def _full_layout_dict() -> dict[str, list[str]]:
     return default_l1_layout().model_dump()
 
 
-def _operator_sweep_payload(**kwargs: object) -> ForkPayload:
-    return ForkPayload(
+def _operator_sweep_payload(**kwargs: object) -> ForkSpec:
+    return ForkSpec(
         trigger=ForkTrigger.OPERATOR_SWEEP,
         reason=str(kwargs.pop("reason", "canonical case")),
         issued_by=str(kwargs.pop("issued_by", "test-operator")),

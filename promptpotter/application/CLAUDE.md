@@ -25,7 +25,7 @@ intelligence; intelligence does not depend on either.
 
 - `runner/` — master orchestrator; the optimize-loop entry point (`identity`, `round`, `sweep`, `loop`, `entry`).
 - `config.py` — `CampaignConfig` model + LLM factory.
-- `origin.py` — campaign origin scoring + dataset loading.
+- `origin.py` — campaign origin scoring + dataset loading. `resolve_origin_opt_search_point` resolves the origin OSP by priority **fork-seed → experiment prompts → dataset prompts → empty**: an operator-steered fork's `.overrides/seed.json::starting_prompt` *is* the origin (lineage `source="fork_seed"`).
 - `review.py` — per-cycle markdown renderer (post-cycle log).
 - `datasets/` — `loaders.py` (dataset loaders + registry + `build_dataset_run_data`), `prompts.py` (per-dataset prompt store + node overlay), `traces.py` (potter-trace loader).
 - `run_observers.py` — `RunCallbacks` typed event constructor over `CycleEventLog.append`.
@@ -59,3 +59,5 @@ intelligence; intelligence does not depend on either.
 **Resolution is tenant-first.** "The dataset's `pipeline.json`" means the file under the dir `resolve_dataset_config_dir` chose — a tenant upload at `projects/{tenant}/datasets/{slug}/` before a repo benchmark at `datasets/{name}/`. The loaders (`load_dataset_node_overlay`, `load_node_prompt`, …) take that resolved dir (carried on `Session.dataset_config_dir`), never a bare name — so an ingested dataset's overlay + starting prompts load identically to a benchmark's.
 
 **Never edit the backend repo to achieve a switch** (even co-owned ones like the sibling TermNorm backend); if a needed key isn't in the dataset's `param_keys`, extend the snapshot, not the backend. Pipeline-agnostic is a §0 commitment.
+
+**Fork-seed overlay (operator-steered forks only).** A fork's `.overrides/seed.json::pipeline_overlay` is layered ON TOP of the resolved `session.pipeline_params` (which already holds dataset-overlay + campaign-overrides), so the effective precedence is **seed > campaign-override > dataset > backend default** — for that fork only, the dataset file stays immutable. The merge is read-once and applied at the single runner seam (`runner/entry.py::run_optimization` via `_read_fork_seed`), keyed by the known fork `cycle_id` — not threaded through each launcher or `configure_and_apply_pipeline` caller.

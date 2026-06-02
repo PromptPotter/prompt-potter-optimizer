@@ -49,6 +49,10 @@ class CandidateScore:
     total: int
     evaluators: dict[str, float]
     pipeline_params_override: dict[str, Any] | None = None
+    # The candidate's evolved prompt (``OptSearchPoint.prompt_field_dict()`` shape).
+    # Paired with ``pipeline_params_override`` this is the full searchpoint an
+    # operator selects to seed an operator-steered fork (read side, Decision F).
+    prompt_fields: dict[str, Any] = field(default_factory=dict)
     escalation_aborted: bool = False
     elimination_stopped: bool = False
     scored_samples: int = 0
@@ -75,6 +79,7 @@ class CandidateScore:
             "label": self.label,
             "changes_description": self.changes_description,
             "pipeline_params_override": self.pipeline_params_override,
+            "prompt_fields": dict(self.prompt_fields),
             "accuracy": self.accuracy,
             "composite_fitness": self.composite_fitness,
             "hits": self.hits,

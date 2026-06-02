@@ -563,6 +563,12 @@ async def post_command(
             )
         extras["round"] = round_raw
         extras["candidate_id"] = _optional_string(payload, "candidate_id", max_len=128)
+        # Operator-steered seed (edited searchpoint + reconciled limit overrides)
+        # + the editor's identity. Both optional: bare payload = `operator_endorse`,
+        # seed-carrying = `operator_steered`. The dispatcher validates the seed
+        # into a typed `ForkSeed` (schema: m12-api-openapi.yaml::ForkSeed).
+        extras["seed"] = payload.get("seed")
+        extras["steered_by"] = _optional_string(payload, "steered_by", max_len=256)
     elif kind == "change-spend-budget":
         max_usd_raw = payload.get("max_usd")
         if not isinstance(max_usd_raw, int | float) or max_usd_raw < 0:

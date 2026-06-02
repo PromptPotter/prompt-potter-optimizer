@@ -35,7 +35,7 @@ from promptpotter.application.optimization.validators.l3_output import run_l3_ou
 from promptpotter.domain.l1_layout import L1Layout, coerce_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopLoop, StopReason, emit_phase
-from promptpotter.domain.run_records import ForkPayload, ForkTrigger, RebaseRequest
+from promptpotter.domain.run_records import ForkSpec, ForkTrigger, RebaseRequest
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.llm.models import emit_round_warning
@@ -293,7 +293,7 @@ L3 = LayerStrategy(
 # ---------------------------------------------------------------------------
 
 
-def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkPayload) -> None:
+def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkSpec) -> None:
     """Stamp a fork payload's L1-surface deltas on the OSP — same shape L2 writes. Assumes
     `payload.l1_layout is not None` (callers without deltas guard at the call site).
     """

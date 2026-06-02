@@ -34,6 +34,9 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
     ForkResult,
     _mint_fork,
 )
+from promptpotter.application.optimization.resume_and_fork.operator_fork import (
+    mint_operator_fork,
+)
 from promptpotter.application.optimization.resume_and_fork.replayers import (
     REPLAYERS,
     Divergence,
@@ -56,6 +59,7 @@ __all__ = [
     "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
     "_mint_fork",
+    "mint_operator_fork",
     "record_decision",
     "replay_decisions",
     "resume_with_divergence_check",

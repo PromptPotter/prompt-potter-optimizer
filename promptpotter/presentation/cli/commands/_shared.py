@@ -152,14 +152,14 @@ def _prepare_cycle(
 ) -> tuple[dict[Any, Any], OptSearchPoint, str]:
     """Apply pipeline → load origin → compute cycle_id. Returns (pipeline_params, origin, cycle_id)."""
     from promptpotter.application.config import configure_and_apply_pipeline
-    from promptpotter.application.origin import load_origin_prompt
+    from promptpotter.application.origin import resolve_origin_opt_search_point
     from promptpotter.application.runner import build_origin_cycle_id
 
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(
         session, campaign_config, log=logger.info if _VERBOSE else (lambda *_a, **_k: None)
     )
-    origin = load_origin_prompt(
+    origin = resolve_origin_opt_search_point(
         session.experiment_extract,
         prompt_node_names=schema.prompt_node_names() if schema else [],
         dataset_dir=session.dataset_config_dir,

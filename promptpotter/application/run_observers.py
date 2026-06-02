@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.bootstrap.session import auto_mint_session
 from promptpotter.application.origin import (
     build_campaign_emitter,
-    load_origin_prompt,
+    resolve_origin_opt_search_point,
 )
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
@@ -319,7 +319,7 @@ def _ensure_session_minted(
         return
 
     prompt_nodes = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
-    origin_osp = load_origin_prompt(
+    origin_osp = resolve_origin_opt_search_point(
         session.experiment_extract or {},
         prompt_node_names=prompt_nodes,
         dataset_dir=session.dataset_config_dir,

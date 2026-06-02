@@ -242,9 +242,13 @@ paths:
       operationId: forkCycle
       summary: Fork from the parent's current ledger offset; retargets active pointer.
       description: |
-        Migrated from `POST /api/v1/campaigns/{c}/cycles/{cy}/forks`
-        (active.py:120). Rides `CycleEventLog.inherit_from(parent, offset)`;
-        `round` / `candidate_id` go to `index.json::fork` for audit.
+        Rides `CycleEventLog.inherit_from(parent, offset)` via the unified
+        `mint_operator_fork` path. `round` / `candidate_id` name the searchpoint;
+        the typed `ForkSpec` lands on the parent's `FORK_CUT` ledger record and
+        the fork's `index.json::fork`. A bare payload is an endorse-as-is fork
+        (`operator_endorse`); a payload carrying `seed` is an operator-steered
+        fork (`operator_steered`) whose origin = the chosen searchpoint plus the
+        operator's prompt/config edits and reconciled run limits.
       tags: [cycle-lifecycle]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1407,11 +1411,89 @@ components:
             round:
               type: integer
               minimum: 0
-              description: Round the operator endorsed (audit-trail only in v0).
+              description: Round the searchpoint the operator endorsed/steered from.
             candidate_id:
               type: string
               maxLength: 128
-              description: Candidate the operator endorsed (audit-trail only in v0).
+              description: |
+                Candidate the operator endorsed/steered from. With no `seed` this
+                is an endorse-as-is fork (`operator_endorse`); with a `seed` it is
+                the point the edits are rooted on (`operator_steered`).
+            steered_by:
+              type: string
+              maxLength: 256
+              description: |
+                Operator identity stamped into lineage as the human who steered
+                this fork. Recorded, not gated — operators may act; we record it.
+            seed:
+              $ref: '#/components/schemas/ForkSeed'
+
+    ForkSeed:
+      type: object
+      additionalProperties: false
+      description: |
+        The edited-searchpoint origin override that makes a fork's origin =
+        chosen searchpoint + operator edits. Presence promotes the fork to
+        `operator_steered`. Persisted to the fork's `.overrides/seed.json`
+        (read once at bootstrap) and onto the parent's `FORK_CUT` ledger record.
+      properties:
+        starting_prompt:
+          type: object
+          additionalProperties: true
+          description: |
+            The fork's origin prompt — a `PromptTemplate.prompt_field_dict()`
+            shape (the 8 prompt fields). Becomes the origin `OptSearchPoint` at
+            bootstrap. `{}` inherits the parent's origin prompt.
+        pipeline_overlay:
+          type: object
+          additionalProperties: true
+          description: |
+            `nodes.*.config` overlay for this fork only, merged ON TOP of the
+            dataset overlay (seed > dataset > backend default). The dataset
+            `pipeline.json` stays immutable — the steer never mutates the origin.
+        limit_overrides:
+          $ref: '#/components/schemas/LimitOverrides'
+
+    LimitOverrides:
+      type: object
+      additionalProperties: false
+      description: |
+        Run-limit knobs the fork-time reconcile dialog re-sets. Every field
+        optional — absent inherits the parent's value. Values are ABSOLUTE for
+        the fork (the dialog defaults `max_rounds`/`spend_budget_usd` to the
+        parent's remaining, e.g. "3 of 6 rounds left", then the operator confirms
+        the fork's own absolute ceiling). Applied to the fork's `OptimizationConfig`
+        snapshot at bootstrap — never mutates the parent's frozen config.
+      properties:
+        max_rounds:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Absolute L1-round ceiling for the fork.
+        spend_budget_usd:
+          type: number
+          minimum: 0
+          nullable: true
+          description: Absolute spend cap (USD) for the fork; `null` lifts the cap.
+        l1_patience:
+          type: integer
+          minimum: 1
+          description: Consecutive non-improving L1 rounds before escalation.
+        l2_patience:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: L2 stall tolerance; `null` disables the L2 gate.
+        l3_patience:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: L3 stall tolerance; `null` disables the L3 gate.
+        pobb_epsilon:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Per-candidate P(best) elimination threshold.
 
     DeleteCyclePayload:
       $ref: '#/components/schemas/CycleRef'

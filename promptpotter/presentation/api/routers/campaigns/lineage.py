@@ -14,13 +14,24 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
+from promptpotter.domain.run_records import (
+    ForkTrigger,
+    ResumeCheckpointKind,
+    ResumeCheckpointRecord,
+)
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.base import read_json_optional
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
+
+# Operator forks (endorse / steered) are clean offshoots: numbering restarts at
+# 1, so all their rounds are post-divergence by definition and the lane sits one
+# column past the parent's fork point.
+_OPERATOR_RESTART_TRIGGERS = frozenset(
+    {ForkTrigger.OPERATOR_ENDORSE.value, ForkTrigger.OPERATOR_STEERED.value}
+)
 
 
 class CampaignLineageCandidate(BaseModel):
@@ -50,8 +61,8 @@ class CampaignLineageCycle(BaseModel):
     # cut. None for roots; may be None for forks whose index didn't record it.
     fork_from_round: int | None
     # Candidate id at the parent's fork_from_round that this fork descends
-    # from. Only set when index.json::fork carries from_candidate (operator
-    # HITL forks); divergence/sweep forks attach at round-level only.
+    # from. Only set when index.json::fork carries from_candidate_id (operator
+    # endorse/steered forks); divergence/sweep forks attach at round-level only.
     fork_from_candidate_id: str | None
     # Fork creation trigger — drives the round-numbering convention.
     trigger: str
@@ -123,10 +134,10 @@ def _filter_post_divergence_rounds(
     parent (round <= fork_from_round). Those rounds belong to the parent's
     lane and would visually overlap if rendered in the fork's lane.
 
-    Operator HITL forks restart numbering at 1 so all their rounds are
-    post-divergence by definition — return as-is.
+    Operator endorse/steered forks restart numbering at 1 so all their rounds
+    are post-divergence by definition — return as-is.
     """
-    if trigger == "operator_hitl":
+    if trigger in _OPERATOR_RESTART_TRIGGERS:
         return rounds
     if fork_from_round is None:
         return rounds
@@ -191,7 +202,7 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
                 cycle_dir_for(store.base_dir, campaign_id, immediate_parent), cid
             )
 
-        from_candidate = fork_block.get("from_candidate")
+        from_candidate = fork_block.get("from_candidate_id")
         from_candidate_str = (
             str(from_candidate) if isinstance(from_candidate, str) and from_candidate else None
         )
@@ -219,7 +230,11 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
                 )
 
         rounds_out = _filter_post_divergence_rounds(rounds_out, trigger, from_round)
-        col_offset = from_round if trigger == "operator_hitl" and isinstance(from_round, int) else 0
+        col_offset = (
+            from_round
+            if trigger in _OPERATOR_RESTART_TRIGGERS and isinstance(from_round, int)
+            else 0
+        )
 
         header_raw = index.get("header")
         header = header_raw if isinstance(header_raw, dict) else {}

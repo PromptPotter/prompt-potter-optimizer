@@ -16,7 +16,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 )
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
-from promptpotter.domain.run_records import ForkPayload, ForkTrigger, OperatorSweepFile
+from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
 from promptpotter.infrastructure.store import (
     build_stores,
     root_cycle_id,
@@ -146,7 +146,7 @@ async def run_sweep_batch(
                 existing[path.name],
             )
             continue
-        fork_payload = ForkPayload(
+        fork_payload = ForkSpec(
             trigger=ForkTrigger.OPERATOR_SWEEP,
             reason=payload.reason,
             issued_by=tenant_id,

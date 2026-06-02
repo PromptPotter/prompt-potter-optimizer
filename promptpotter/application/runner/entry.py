@@ -39,7 +39,7 @@ from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import CycleError, CycleResult
-from promptpotter.domain.run_records import ForkPayload
+from promptpotter.domain.run_records import ForkSeed, ForkSpec, LimitOverrides
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.models import emit_error_record
@@ -92,6 +92,53 @@ def _build_spend_cap_probe(cycle_dir: Path, initial: float | None) -> Callable[[
     return probe
 
 
+def _apply_limit_overrides(
+    config: CampaignConfig,
+    spend_budget_usd: float | None,
+    limits: LimitOverrides,
+) -> tuple[CampaignConfig, float | None]:
+    """Snapshot the fork's effective run limits: parent frozen config with the
+    operator's reconciled overrides applied (absolute values; an absent knob
+    inherits the parent). A new-cycle snapshot only — the parent config is never
+    mutated. Reassigning the returned config at the runner seam propagates the
+    limits to every reader (loop ``max_rounds`` / patience, L1 ``pobb_epsilon``,
+    the ``INIT.enter`` display event). The reconciled ``spend_budget_usd`` also
+    becomes the spend-cap probe's initial ceiling (``change-spend-budget`` can
+    still move it at runtime)."""
+    opt_updates = {
+        k: v
+        for k, v in {
+            "max_rounds": limits.max_rounds,
+            "spend_budget_usd": limits.spend_budget_usd,
+            "l1_patience": limits.l1_patience,
+            "l2_patience": limits.l2_patience,
+            "l3_patience": limits.l3_patience,
+            "pobb_epsilon": limits.pobb_epsilon,
+        }.items()
+        if v is not None
+    }
+    if not opt_updates:
+        return config, spend_budget_usd
+    new_config = config.model_copy(
+        update={"optimization": config.optimization.model_copy(update=opt_updates)}
+    )
+    effective_spend = (
+        limits.spend_budget_usd if limits.spend_budget_usd is not None else spend_budget_usd
+    )
+    return new_config, effective_spend
+
+
+def _read_fork_seed(session: Session) -> ForkSeed | None:
+    """Read this cycle's declared-at-fork seed, or ``None`` for a non-steered run.
+
+    The fork cycle_id is known (active-pointer / override, not hashed) and set on
+    ``session.state`` before the runner seam, so the lookup is non-circular with
+    cycle-id derivation."""
+    if not session.state.cycle_id:
+        return None
+    return session.store.campaigns.read_fork_seed(session.campaign_id, session.state.cycle_id)
+
+
 async def run_optimization(
     dataset: list[Sample],
     campaign_config: CampaignConfig,
@@ -107,7 +154,7 @@ async def run_optimization(
     fork_on_divergence: bool = False,
     sweep: bool = False,
     diag: bool = False,
-    fork_payload: ForkPayload | None = None,
+    fork_payload: ForkSpec | None = None,
     halt_at_accuracy: float | None = None,
     spend_budget_usd: float | None = None,
 ) -> CycleResult:
@@ -115,6 +162,27 @@ async def run_optimization(
     *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
     started_at = datetime.now(UTC).isoformat()
     cb = observers.callbacks
+
+    # Operator-steered fork: the edited searchpoint, declared at fork time, lives
+    # at `.overrides/seed.json` (read-once-at-bootstrap, keyed by the known fork
+    # cycle_id — set before this seam by both the CLI resume and API start-run
+    # launchers). It re-homes the origin (`starting_prompt`) and layers its
+    # `pipeline_overlay` ON TOP of the dataset overlay (seed > dataset > backend).
+    # Read here — the single runner seam every launch path funnels through — not
+    # threaded through each launcher + every `configure_and_apply_pipeline` caller.
+    fork_seed = _read_fork_seed(session)
+    if fork_seed is not None and fork_seed.pipeline_overlay:
+        merged = dict(session.pipeline_params or {})
+        for node, cfg in fork_seed.pipeline_overlay.items():
+            merged[node] = {**merged.get(node, {}), **cfg}
+        session.pipeline_params = merged
+    if fork_seed is not None:
+        # Reconcile the fork's run limits (rounds / spend / patience / epsilon)
+        # onto a fresh config snapshot — the loop starts at round 1 and stops
+        # after the reconciled max_rounds. Reassign before any downstream call.
+        campaign_config, spend_budget_usd = _apply_limit_overrides(
+            campaign_config, spend_budget_usd, fork_seed.limit_overrides
+        )
 
     if origin is None:
         _, _, campaign_rounds, _ = await prepare_scoring_context(
@@ -125,6 +193,7 @@ async def run_optimization(
             pipeline_schema=session.pipeline_schema,
             svc=session,
             listener=cb,
+            fork_seed=fork_seed,
         )
         origin = extract_campaign_origin(campaign_rounds)
         if observers.display is not None and hasattr(observers.display, "set_origin"):
@@ -333,7 +402,7 @@ async def run_optimization(
             session_id=session.session_id or "",
             parent_cycle_id=parent_cycle_id,
             fork_from_round=rebase_req.fork_from_round,
-            payload=ForkPayload(
+            payload=ForkSpec(
                 trigger=rebase_req.trigger,
                 reason=rebase_req.reason,
                 issued_by=rebase_req.issued_by,

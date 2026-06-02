@@ -28,7 +28,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 )
 from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.scoring.formula import rescore_results
-from promptpotter.domain.run_records import ForkPayload, ForkTrigger
+from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 from promptpotter.shared.errors import ResumeDivergenceError
 
 if TYPE_CHECKING:
@@ -119,7 +119,7 @@ def resume_with_divergence_check(
                     session.session_id,
                     cycle_id,
                     div.round_num,
-                    ForkPayload(
+                    ForkSpec(
                         trigger=ForkTrigger.SCORING_DIVERGENCE,
                         reason=f"scorer_mismatch:{div.kind}",
                         issued_by="system",

@@ -1,15 +1,20 @@
 """Unified fork-mint primitive — :func:`_mint_fork` dispatches on trigger.
 
-All 6 :class:`ForkTrigger` variants wired:
+All :class:`ForkTrigger` variants wired:
 
 * ``SCORING_DIVERGENCE`` — resume-detected divergence; needs ``surviving_rounds``.
 * ``L2_REBASE`` / ``L3_REBASE`` / ``OPERATOR_REWIND`` — in-loop rebase or
   operator-initiated rewind; needs ``fork_from_round > 0`` (rounds 0..N-1
   copied from parent). All three share the same on-disk shape; the
-  ``ForkPayload.trigger`` value is the audit-trail discriminator.
+  ``ForkSpec.trigger`` value is the audit-trail discriminator.
 * ``OPERATOR_DIAG`` — clean offshoot from root (``fork_from_round=0``).
 * ``OPERATOR_SWEEP`` — clean offshoot with sweep metadata
   (``fork_from_round=0`` + ``sweep_batch_id`` + ``sweep_source_file``).
+* ``OPERATOR_ENDORSE`` / ``OPERATOR_STEERED`` — operator forks from the
+  lineage/control panel (``fork_from_round=0``, ``_fork_`` id). Endorse forks
+  the selected searchpoint as-is; steered carries an edited-searchpoint
+  ``ForkSeed`` written to ``.overrides/seed.json``. Application entry:
+  ``operator_fork.py::mint_operator_fork``.
 
 A fork is a new *cycle* inside the **same campaign** — all cycles land
 flat under ``campaigns/{campaign_id}/cycles/``.
@@ -21,6 +26,7 @@ import hashlib
 import logging
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.optimization.resume_and_fork.decisions import (
@@ -29,7 +35,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
 )
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.identity import TenantId
-from promptpotter.domain.run_records import ForkPayload, ForkTrigger
+from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import (
     read_active_pointer,
@@ -62,9 +68,10 @@ def _fork_sibling_setup(
     new_cycle_id: str,
     *,
     from_round: int,
-    payload: ForkPayload,
+    payload: ForkSpec,
     sweep_batch_id: str | None = None,
     source_file: str | None = None,
+    projects_root: Path | None = None,
 ) -> str:
     """Common plumbing: dir create, FORK_CUT append, pointer + log. Returns ``now_iso``."""
     parent_dir = campaign_store.cycle_dir(campaign_id, parent_cycle_id)
@@ -92,7 +99,9 @@ def _fork_sibling_setup(
             data=record_data,
         )
 
-    save_active_pointer(tenant_id, session_id, campaign_id, new_cycle_id)
+    save_active_pointer(
+        tenant_id, session_id, campaign_id, new_cycle_id, projects_root=projects_root
+    )
     logger.info(
         "Forked %s → %s at round %d [trigger=%s] (active pointer retargeted)",
         parent_cycle_id,
@@ -135,6 +144,7 @@ _REBASE_TRIGGERS = frozenset(
         ForkTrigger.OPERATOR_REWIND,
     }
 )
+_OPERATOR_TRIGGERS = frozenset({ForkTrigger.OPERATOR_ENDORSE, ForkTrigger.OPERATOR_STEERED})
 
 
 def _mint_fork(
@@ -144,11 +154,12 @@ def _mint_fork(
     session_id: str,
     parent_cycle_id: str,
     fork_from_round: int,
-    payload: ForkPayload,
+    payload: ForkSpec,
     *,
     surviving_rounds: list[dict[str, Any]] | None = None,
     sweep_batch_id: str | None = None,
     sweep_source_file: str | None = None,
+    projects_root: Path | None = None,
 ) -> str:
     """Single entry point for fork creation. Dispatches on ``payload.trigger``.
 
@@ -184,6 +195,7 @@ def _mint_fork(
             new_cycle_id,
             from_round=fork_from_round,
             payload=payload,
+            projects_root=projects_root,
         )
         campaign_store.save_rebase_fork(
             campaign_id,
@@ -214,8 +226,34 @@ def _mint_fork(
             new_cycle_id,
             from_round=0,
             payload=payload,
+            projects_root=projects_root,
         )
         campaign_store.save_diag_fork(campaign_id, parent_cycle_id, new_cycle_id, forked_at=now)
+    elif payload.trigger in _OPERATOR_TRIGGERS:
+        if fork_from_round != 0:
+            raise ValueError(
+                f"_mint_fork({payload.trigger.value}) requires fork_from_round=0, "
+                f"got {fork_from_round}"
+            )
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        suffix = hashlib.sha256(f"{parent_cycle_id}|operator|{ts}".encode()).hexdigest()[:8]
+        new_cycle_id = f"{root_cycle_id(parent_cycle_id)}_fork_{suffix}"
+        now = _fork_sibling_setup(
+            campaign_store,
+            campaign_id,
+            tenant_id,
+            session_id,
+            parent_cycle_id,
+            new_cycle_id,
+            from_round=0,
+            payload=payload,
+            projects_root=projects_root,
+        )
+        campaign_store.save_operator_fork(campaign_id, parent_cycle_id, new_cycle_id, forked_at=now)
+        # The steered seed (edited searchpoint + reconciled limits) rides its own
+        # read-once home; the ledger FORK_CUT still carries it as SoT.
+        if payload.seed is not None:
+            campaign_store.write_fork_seed(campaign_id, new_cycle_id, payload.seed)
     elif payload.trigger is ForkTrigger.OPERATOR_SWEEP:
         if sweep_batch_id is None or sweep_source_file is None:
             raise ValueError(
@@ -243,6 +281,7 @@ def _mint_fork(
             payload=payload,
             sweep_batch_id=sweep_batch_id,
             source_file=sweep_source_file,
+            projects_root=projects_root,
         )
         campaign_store.save_sweep_fork(
             campaign_id,
@@ -251,7 +290,12 @@ def _mint_fork(
             sweep_batch_id=sweep_batch_id,
             forked_at=now,
         )
-    campaign_store.update(campaign_id, new_cycle_id, {"fork": {"trigger": payload.trigger.value}})
+    # The lineage-read fork block — serialized from the one typed ForkSpec (no
+    # hand-built per-trigger dict). The heavy `seed` payload is excluded; it has
+    # its own read-once home at `.overrides/seed.json`.
+    campaign_store.update(
+        campaign_id, new_cycle_id, {"fork": payload.model_dump(mode="json", exclude={"seed"})}
+    )
     return new_cycle_id
 
 

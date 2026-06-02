@@ -134,6 +134,7 @@ def build_score_report(
         label=label,
         changes_description=osp.lineage.changes_description or "",
         pipeline_params_override=pipeline_params_override,
+        prompt_fields=osp.prompt_field_dict(),
         accuracy=score_summary["accuracy"],
         composite_fitness=score_summary.get("composite_fitness", score_summary["accuracy"]),
         hits=score_summary["hits"],

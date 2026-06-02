@@ -9,14 +9,17 @@ from promptpotter.application.optimization.resume_and_fork import (
     _mint_fork,
     replay_decisions,
 )
+from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.scoring.formula import compile_scorer, rescore_results
 from promptpotter.application.scoring.search_point_scorer import (
     merge_with_unprocessed_priors,
 )
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import (
-    ForkPayload,
+    ForkSeed,
+    ForkSpec,
     ForkTrigger,
+    LimitOverrides,
     ResumeCheckpointKind,
     ResumeCheckpointRecord,
 )
@@ -146,18 +149,18 @@ def _patch_pointer(monkeypatch, tmp_path: Path) -> Path:
     return tmp_path / "default" / ".workspace" / "active_session.json"
 
 
-def _div_payload() -> ForkPayload:
-    return ForkPayload(
+def _div_payload() -> ForkSpec:
+    return ForkSpec(
         trigger=ForkTrigger.SCORING_DIVERGENCE, reason="scorer_mismatch", issued_by="system"
     )
 
 
-def _diag_payload() -> ForkPayload:
-    return ForkPayload(trigger=ForkTrigger.OPERATOR_DIAG, reason="bfs", issued_by="default")
+def _diag_payload() -> ForkSpec:
+    return ForkSpec(trigger=ForkTrigger.OPERATOR_DIAG, reason="bfs", issued_by="default")
 
 
-def _sweep_payload() -> ForkPayload:
-    return ForkPayload(
+def _sweep_payload() -> ForkSpec:
+    return ForkSpec(
         trigger=ForkTrigger.OPERATOR_SWEEP,
         reason="probe persona",
         issued_by="default",
@@ -196,7 +199,15 @@ def test_mint_fork_scoring_divergence_inherits_and_appends_fork_cut(
     assert index["parent_cycle_id"] == parent
     assert index["forked_from_round"] == 2
     assert index["sibling_kind"] == "fork"
-    assert index["fork"] == {"trigger": "scoring_divergence"}
+    # The lineage-read fork block is serialized from the typed ForkSpec (seed-excluded).
+    assert index["fork"] == {
+        "trigger": "scoring_divergence",
+        "reason": "scorer_mismatch",
+        "issued_by": "system",
+        "from_round": None,
+        "from_candidate_id": None,
+        "l1_layout": None,
+    }
 
     assert json.loads(ptr.read_text(encoding="utf-8"))["cycle_id"] == new_cycle
     assert json.loads(ptr.read_text(encoding="utf-8"))["campaign_id"] == _CAMPAIGN
@@ -210,7 +221,10 @@ def test_mint_fork_scoring_divergence_inherits_and_appends_fork_cut(
         "trigger": "scoring_divergence",
         "reason": "scorer_mismatch",
         "issued_by": "system",
+        "from_round": None,
+        "from_candidate_id": None,
         "l1_layout": None,
+        "seed": None,
     }
 
 
@@ -233,7 +247,14 @@ def test_mint_fork_operator_diag_counted_id_clean_slate(tmp_path: Path, monkeypa
     sib1_index = json.loads((sib1_dir / "index.json").read_text(encoding="utf-8"))
     assert sib1_index["rounds"] == []
     assert sib1_index["sibling_kind"] == "diag"
-    assert sib1_index["fork"] == {"trigger": "operator_diag"}
+    assert sib1_index["fork"] == {
+        "trigger": "operator_diag",
+        "reason": "bfs",
+        "issued_by": "default",
+        "from_round": None,
+        "from_candidate_id": None,
+        "l1_layout": None,
+    }
 
 
 def test_mint_fork_operator_sweep_no_inherit_and_dedup_fields(tmp_path: Path, monkeypatch) -> None:
@@ -264,7 +285,14 @@ def test_mint_fork_operator_sweep_no_inherit_and_dedup_fields(tmp_path: Path, mo
     index = json.loads((new_dir / "index.json").read_text(encoding="utf-8"))
     assert index["sweep_batch_id"] == "b1abc"
     assert index["sibling_kind"] == "sweep"
-    assert index["fork"] == {"trigger": "operator_sweep"}
+    assert index["fork"] == {
+        "trigger": "operator_sweep",
+        "reason": "probe persona",
+        "issued_by": "default",
+        "from_round": None,
+        "from_candidate_id": None,
+        "l1_layout": {"task_intent": ["task_context"]},
+    }
 
     # source_file + sweep_batch_id stay at data top level so
     # existing_fork_source_files dedup keeps working without parsing data.fork.
@@ -274,6 +302,99 @@ def test_mint_fork_operator_sweep_no_inherit_and_dedup_fields(tmp_path: Path, mo
     assert cut.data["sweep_batch_id"] == "b1abc"
     assert cut.data["fork"]["trigger"] == "operator_sweep"
     assert cut.data["fork"]["l1_layout"] == {"task_intent": ["task_context"]}
+
+
+def test_mint_fork_operator_steered_writes_seed_and_typed_fork_block(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """OPERATOR_STEERED: clean ``_fork_`` offshoot, edited seed → ``.overrides/seed.json``,
+    typed fork block carries from_candidate_id but NOT the heavy seed."""
+    tenant = "default"
+    parent = "cyclesteerparent"
+    _seed_cycle(tmp_path, tenant, parent, n_rounds=3)
+    _patch_pointer(monkeypatch, tmp_path)
+    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
+
+    spec = ForkSpec(
+        trigger=ForkTrigger.OPERATOR_STEERED,
+        reason="operator steered",
+        issued_by="nieena",
+        from_round=2,
+        from_candidate_id="cand_x",
+        seed=ForkSeed(
+            starting_prompt={"instruction": "edited"},
+            pipeline_overlay={"llm_only": {"reasoning_effort": "high"}},
+            limit_overrides=LimitOverrides(max_rounds=2),
+        ),
+    )
+    new_cycle = _mint_fork(stores.campaigns, _CAMPAIGN, tenant, "s_test", parent, 0, spec)
+
+    assert "_fork_" in new_cycle
+    new_dir = stores.campaigns.cycle_dir(_CAMPAIGN, new_cycle)
+    index = json.loads((new_dir / "index.json").read_text(encoding="utf-8"))
+    assert index["sibling_kind"] == "fork"
+    assert index["rounds"] == []  # clean offshoot — no parent-round copy
+    assert index["fork"]["trigger"] == "operator_steered"
+    assert index["fork"]["from_candidate_id"] == "cand_x"
+    assert "seed" not in index["fork"]  # the seed has its own read-once home
+
+    # The seed rides ``.overrides/seed.json`` (bootstrap-read), round-trips typed.
+    read_back = stores.campaigns.read_fork_seed(_CAMPAIGN, new_cycle)
+    assert read_back is not None
+    assert read_back.starting_prompt == {"instruction": "edited"}
+    assert read_back.limit_overrides.max_rounds == 2
+
+
+def test_resolve_origin_fork_seed_wins_over_experiment_prompt() -> None:
+    """A fork seed's ``starting_prompt`` becomes the origin OSP — beating the
+    experiment/dataset sources — and stamps ``source='fork_seed'`` lineage.
+    No seed → falls through to the experiment-registry prompt (``source='origin'``)."""
+    experiment_extract = {"dependencies": {"prompts": {"llm_only": {"template": "dataset origin"}}}}
+
+    steered = resolve_origin_opt_search_point(
+        experiment_extract,
+        prompt_node_names=["llm_only"],
+        fork_seed=ForkSeed(starting_prompt={"instruction": "edited by operator"}),
+    )
+    assert steered.instruction == "edited by operator"
+    assert steered.lineage.source == "fork_seed"
+
+    plain = resolve_origin_opt_search_point(
+        experiment_extract, prompt_node_names=["llm_only"], fork_seed=None
+    )
+    assert plain.instruction == "dataset origin"
+    assert plain.lineage.source == "origin"
+
+
+def test_apply_limit_overrides_snapshots_fork_limits_leaving_parent_intact() -> None:
+    """A fork's reconciled ``LimitOverrides`` land on a fresh config snapshot —
+    absolute values, an absent knob inherits the parent — and the seed's
+    ``spend_budget_usd`` becomes the effective cap. The parent config is untouched."""
+    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.runner.entry import _apply_limit_overrides
+
+    parent = CampaignConfig(
+        optimization={
+            "max_rounds": 6,
+            "l1_patience": 3,
+            "improvement_threshold": 0.01,
+            "degradation_threshold": 0.4,
+        }
+    )
+    forked, spend = _apply_limit_overrides(
+        parent,
+        spend_budget_usd=10.0,
+        limits=LimitOverrides(max_rounds=2, spend_budget_usd=4.0),
+    )
+    assert forked.optimization.max_rounds == 2  # override applied
+    assert forked.optimization.l1_patience == 3  # absent knob inherited
+    assert spend == 4.0  # seed spend reconciled as the effective cap
+    assert parent.optimization.max_rounds == 6  # parent snapshot untouched
+
+    # Empty overrides → identity passthrough (parent config + original spend kept).
+    same, spend2 = _apply_limit_overrides(parent, 7.0, LimitOverrides())
+    assert same is parent
+    assert spend2 == 7.0
 
 
 def test_walk_cycle_lineage_walks_parent_chain(tmp_path: Path, monkeypatch) -> None:

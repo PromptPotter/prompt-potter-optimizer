@@ -180,7 +180,8 @@ class IndividualLineage(BaseModel):
     parent_id: str | None = None
     changes_description: str = ""
     source: str = Field(
-        default="", description="'origin' / 'l1_generate' / 'l2_context' / 'l3_plan'."
+        default="",
+        description="'origin' / 'l1_generate' / 'l2_context' / 'l3_plan' / 'fork_seed'.",
     )
     evidence_grounding: EvidenceGrounding | None = None
 

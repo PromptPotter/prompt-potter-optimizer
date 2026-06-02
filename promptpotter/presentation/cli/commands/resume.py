@@ -190,7 +190,7 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
     if (existing_index.get("final") or {}).get("mode") != "diag":
         return
     from promptpotter.application.optimization.resume_and_fork import _mint_fork
-    from promptpotter.domain.run_records import ForkPayload, ForkTrigger
+    from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 
     tenant_id = session.identity.tenant_id
     new_cycle_id = _mint_fork(
@@ -200,7 +200,7 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
         ctx.session_id,
         ctx.cycle_id,
         0,
-        ForkPayload(
+        ForkSpec(
             trigger=ForkTrigger.OPERATOR_DIAG,
             reason="diag-sibling BFS exploration",
             issued_by=tenant_id,
@@ -230,7 +230,7 @@ def _maybe_fork_operator_rewind(
         raise SystemExit("ERROR: --rewind 0 mints a fork at the cycle root. Use `--diag` instead.")
 
     from promptpotter.application.optimization.resume_and_fork import _mint_fork
-    from promptpotter.domain.run_records import ForkPayload, ForkTrigger
+    from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 
     reason = (getattr(args, "rewind_reason", "") or "").strip() or (
         f"operator rewind to round {rewind_to}"
@@ -244,7 +244,7 @@ def _maybe_fork_operator_rewind(
         ctx.session_id,
         parent_cycle_id,
         rewind_to,
-        ForkPayload(
+        ForkSpec(
             trigger=ForkTrigger.OPERATOR_REWIND,
             reason=reason,
             issued_by=tenant_id,

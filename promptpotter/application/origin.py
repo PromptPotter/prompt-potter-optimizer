@@ -12,6 +12,7 @@ from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
+from promptpotter.domain.run_records import ForkSeed
 from promptpotter.domain.sample import Sample
 
 if TYPE_CHECKING:
@@ -27,9 +28,9 @@ __all__ = [
     "DatasetSummary",
     "build_campaign_emitter",
     "extract_campaign_origin",
-    "load_origin_prompt",
     "prepare_datasets",
     "prepare_scoring_context",
+    "resolve_origin_opt_search_point",
     "summarize_archive_runs",
 ]
 
@@ -108,16 +109,31 @@ def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOr
     )
 
 
-def load_origin_prompt(
+def resolve_origin_opt_search_point(
     experiment_extract: dict[str, Any],
     prompt_node_names: list[str] | None = None,
     dataset_dir: Path | None = None,
+    *,
+    fork_seed: ForkSeed | None = None,
 ) -> OptSearchPoint:
-    """Resolve origin OptSearchPoint: experiment prompts → {dataset_dir}/prompts → empty.
+    """Resolve the origin OptSearchPoint by priority: fork-seed → experiment
+    prompts → {dataset_dir}/prompts → empty.
 
-    *dataset_dir* is the resolved config dir (``Session.dataset_config_dir``,
-    tenant-first), so an ingested dataset's authored prompts are found the same
-    way a repo benchmark's are."""
+    A *fork_seed* with a non-empty ``starting_prompt`` wins outright — an
+    operator-steered fork's origin *is* the edited searchpoint, so we build the
+    OSP straight from those fields and short-circuit (no dataset/experiment
+    lookup). *dataset_dir* is the resolved config dir
+    (``Session.dataset_config_dir``, tenant-first), so an ingested dataset's
+    authored prompts are found the same way a repo benchmark's are."""
+    if fork_seed is not None and fork_seed.starting_prompt:
+        return OptSearchPoint.from_prompt_fields(
+            fork_seed.starting_prompt,
+            lineage=IndividualLineage(
+                changes_description="Operator-steered fork — edited searchpoint as origin",
+                source="fork_seed",
+            ),
+        )
+
     dependencies = experiment_extract.get("dependencies", {})
     prompts = dependencies.get("prompts", {})
     names = prompt_node_names or []
@@ -185,15 +201,17 @@ async def prepare_scoring_context(
     svc: Any = None,
     listener: Any | None = None,
     obs: Any | None = None,
+    fork_seed: ForkSeed | None = None,
 ) -> tuple[OptSearchPoint, list[Sample], list[dict[str, Any]], list[Any]]:
-    """Load origin prompt, set dataset, and produce a populated ``campaign_rounds[0]``."""
+    """Resolve origin (fork-seed wins), set dataset, produce a populated ``campaign_rounds[0]``."""
     from promptpotter.application.datasets import sample_dataset
 
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
-    origin = load_origin_prompt(
+    origin = resolve_origin_opt_search_point(
         experiment_extract or {},
         prompt_node_names=prompt_nodes,
         dataset_dir=getattr(svc, "dataset_config_dir", None),
+        fork_seed=fork_seed,
     )
     dataset = train_data or []
 

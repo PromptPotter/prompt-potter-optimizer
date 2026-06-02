@@ -43,7 +43,7 @@ class ForkMixin(CampaignStoreKernel):
         Single writer for all 4 rebase-shaped triggers
         (``SCORING_DIVERGENCE``, ``L2_REBASE``, ``L3_REBASE``,
         ``OPERATOR_REWIND``). The issuer is recorded on the FORK_CUT
-        ledger record via ``ForkPayload.trigger``.
+        ledger record via ``ForkSpec.trigger``.
         """
         parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
         best_acc = max(
@@ -76,6 +76,29 @@ class ForkMixin(CampaignStoreKernel):
         index.pop("campaign_id", None)
         path = self._index_path(campaign_id, new_cycle_id)
         write_json(path, index)
+        return path
+
+    def save_operator_fork(
+        self,
+        campaign_id: str,
+        parent_cycle_id: str,
+        new_cycle_id: str,
+        *,
+        forked_at: str,
+    ) -> Path:
+        """Clean-offshoot fork from the lineage/control panel (endorse or steered).
+
+        Fresh sibling index (no parent-round copy, numbering restarts at round
+        1); the origin re-scores from the selected/edited searchpoint at
+        bootstrap. The ``ForkSpec`` provenance (trigger + from_round +
+        from_candidate_id) lands on ``index.json::fork`` via the single
+        fork-block writer in ``_mint_fork``; the steered seed rides
+        ``.overrides/seed.json`` (its own read-once home).
+        """
+        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
+        blob = fresh_sibling_index_blob(parent_index, parent_cycle_id, "fork", forked_at)
+        path = self._index_path(campaign_id, new_cycle_id)
+        write_json(path, blob)
         return path
 
     def save_sweep_fork(
