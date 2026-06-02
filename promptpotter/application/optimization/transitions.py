@@ -1,8 +1,9 @@
 """L2/L3 transition types shared by the firing path.
 
 ``TransitionResult`` = one L2/L3 fire's output; ``LayerStrategy`` = static
-per-layer spec (template, phase, temperature, the four
-parse/apply/enter/exit callables) that ``escalation.firing.executor`` reads.
+per-layer spec (template, phase, the four parse/apply/enter/exit callables)
+that ``escalation.firing.executor`` reads. Temperature is sourced per-layer
+from ``OptimizerLLMConfig.temperature_for`` at the call site, not held here.
 """
 
 from __future__ import annotations
@@ -83,7 +84,6 @@ class LayerStrategy:
 
     layer_id: Literal["L2", "L3"]
     template_name: str
-    default_temperature: float
     phase: CampaignPhase
     parse: ParseFn
     apply: ApplyFn

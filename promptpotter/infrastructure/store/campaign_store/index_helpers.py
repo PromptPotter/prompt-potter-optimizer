@@ -28,14 +28,15 @@ def fresh_sibling_index_blob(
     forked_at: str,
     **extras: Any,
 ) -> dict[str, Any]:
-    """Clean-slate sibling index inheriting type/backend from the parent.
+    """Clean-slate sibling index inheriting type + identity ``header`` from the parent.
 
-    ``sibling_kind ∈ {fork, diag, sweep}``.
+    ``sibling_kind ∈ {fork, diag, sweep}``. ``backend_id`` / ``dataset_name`` ride the
+    inherited ``header`` block (the single identity home built by
+    ``_build_index_header``) — no top-level copy.
     """
     return {
         "type": parent_index.get("type", "optimization_loop"),
         "connector_type": parent_index.get("connector_type", ""),
-        "backend_id": parent_index.get("backend_id", ""),
         "header": parent_index.get("header", {}),
         "parent_cycle_id": parent_cycle_id,
         "parent_session_id": parent_index.get("parent_session_id", ""),

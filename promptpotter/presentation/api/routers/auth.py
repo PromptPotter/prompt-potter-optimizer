@@ -17,11 +17,9 @@ login / callback / providers / logout routes — those run pre-auth. Only
 
 from __future__ import annotations
 
-import json
 import logging
 import secrets
 from datetime import UTC, datetime
-from pathlib import Path as FsPath
 from typing import Annotated, Any, cast
 from urllib.parse import quote_plus
 
@@ -31,6 +29,12 @@ from pydantic import BaseModel
 
 from promptpotter.application.jobs import JobRegistry
 from promptpotter.application.jobs.quota import effective_spend_cap_usd
+from promptpotter.application.jobs.spend import (
+    iter_user_token_usage,
+    record_cost_usd,
+    start_of_utc_day,
+    sum_user_spend,
+)
 from promptpotter.infrastructure.identity.allowlist import check_allowlist
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.github import (
@@ -347,9 +351,9 @@ _N_BUCKETS = 30
 async def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
     """Live quota snapshot for the Security pane.
 
-    Reuses ``effective_spend_cap_usd``-style accounting: today's spend
-    sums ``dashboard.json::spend.total_used_usd`` across the user's jobs
-    created since UTC midnight; concurrent + daily counts ride the
+    Today's spend sums ``TokenUsageRecord`` cost from the canonical ledger since
+    UTC midnight (via ``effective_spend_cap_usd`` when a cap is set, else
+    ``sum_user_spend`` directly); concurrent + daily counts ride the
     `JobRegistry`.
     """
     user = store.users.get_or_create(
@@ -374,8 +378,11 @@ async def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
         )
         spent = max(0.0, user.spend_budget_usd_daily - float(remaining or 0.0))
     else:
-        # No daily cap → still surface today's spend by walking dashboards directly.
-        spent = _sum_user_spend_today(store=store, job_registry=job_registry, user_id=user.user_id)
+        # No daily cap → still surface today's spend from the ledger (same source
+        # the cap path uses via effective_spend_cap_usd → sum_user_spend).
+        spent = sum_user_spend(
+            store=store, since=start_of_utc_day(), until=datetime.now(UTC).timestamp()
+        )
 
     return QuotaStatus(
         spend_used_today_usd=round(spent, 6),
@@ -431,8 +438,6 @@ async def activity(
     ``api_key`` = derived provider slug (``openai`` / ``groq`` /
     ``anthropic`` / ``openrouter``).
     """
-    from promptpotter.shared.spend import lookup_rate
-
     span_s = _WINDOW_SECONDS[window]
     until = datetime.now(UTC).timestamp()
     since = until - span_s
@@ -455,21 +460,13 @@ async def activity(
     total_requests = 0
     label_order: dict[str, int] = {}  # insertion-order set
 
-    for rec in _iter_user_token_usage(store=store, since=since, until=until):
+    for rec in iter_user_token_usage(store=store, since=since, until=until):
         idx = min(_N_BUCKETS - 1, max(0, int((rec["ts"] - since) / bucket_width)))
         b = buckets[idx]
         tokens = rec["tokens"]
         model = rec.get("model") or "unknown"
         kind = rec.get("kind") or "optimizer"
-        cost = rec["cost_usd"]
-        if cost is None:
-            rate = lookup_rate(model if model != "unknown" else None)
-            if rate is not None:
-                input_t = rec.get("input_tokens", 0)
-                output_t = rec.get("output_tokens", 0)
-                cost = input_t * rate[0] + output_t * rate[1]
-            else:
-                cost = 0.0
+        cost = record_cost_usd(rec)
         # Tag backend rows so optimizer + backend never collide in the legend
         # even when they share a provider slug (Groq-hosted openai/gpt-oss-* +
         # OpenRouter-backed TermNorm both prefix with provider names).
@@ -526,155 +523,6 @@ def _provider_from_model(model: str) -> str:
 def _claim_email(store: Stores) -> str | None:
     raw = store.identity.claims.get("email")
     return raw if isinstance(raw, str) else None
-
-
-def _sum_user_spend_today(*, store: Stores, job_registry: JobRegistry, user_id: str) -> float:
-    """Fallback used when no daily-cap is set: sum dashboards directly.
-
-    Mirrors `quota._sum_daily_spend` but lives here because the no-cap
-    code path can't call `effective_spend_cap_usd` (which returns None).
-    """
-    total = 0.0
-    for job in job_registry.list_created_today(user_id=user_id):
-        try:
-            cycle_dir = store.campaigns.cycle_dir(job.campaign_id, job.cycle_id)
-        except Exception:
-            continue
-        dash = cycle_dir / "dashboard.json"
-        if not dash.is_file():
-            continue
-        try:
-            data = json.loads(dash.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        raw = (data.get("spend") or {}).get("total_used_usd")
-        if isinstance(raw, int | float):
-            total += float(raw)
-    return total
-
-
-def _iter_user_token_usage(*, store: Stores, since: float, until: float) -> list[dict[str, Any]]:
-    """Walk every per-cycle ledger under the user's workspace.
-
-    The canonical per-cycle ledger lives at
-    ``{cycle_dir}/.runtime/ledger.jsonl`` (the name ``events.jsonl`` is
-    used only by the workspace-scoped sibling). Filters to
-    ``TokenUsageRecord`` rows whose ``timestamp`` lands in
-    ``[since, until)``. JSON-decodes each line; cheaper than running the
-    full ledger ``iter`` (no pydantic validation per record). Beta-scale
-    only — fine for a few campaigns × a few cycles each.
-
-    Returns ``cost_usd`` as ``None`` when the record didn't carry one;
-    the caller falls back to the rate table for retro spend.
-
-    Pre-emit_token_usage backfill: per-cycle ``dashboard.json::spend.backend``
-    is cumulative for the cycle. Campaigns that ran before
-    ``sample_measurement.emit_token_usage(kind="backend", …)`` shipped
-    have backend tokens in the dashboard bucket but not on the ledger.
-    For each cycle whose ledger has no backend token-usage rows, we
-    synthesise ONE record stamped at the cycle's ``index.json::created_at``
-    so the backend spend is visible in the Activity pane even for old
-    campaigns. Cycles that already emit backend records via the ledger
-    don't double-count (the synthesis is gated by the per-cycle flag).
-    """
-    out: list[dict[str, Any]] = []
-    campaigns_root = store.base_dir / "campaigns"
-    if not campaigns_root.is_dir():
-        return out
-    for ledger_path in campaigns_root.glob("*/cycles/*/.runtime/ledger.jsonl"):
-        cycle_dir = ledger_path.parent.parent
-        has_backend = False
-        try:
-            with ledger_path.open("r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line or '"token_usage"' not in line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if rec.get("record_type") != "token_usage":
-                        continue
-                    ts_str = rec.get("timestamp", "")
-                    try:
-                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
-                    except (ValueError, TypeError):
-                        continue
-                    kind = rec.get("kind")
-                    if kind == "backend":
-                        has_backend = True
-                    if not (since <= ts < until):
-                        continue
-                    raw_cost = rec.get("cost_usd")
-                    input_t = int(rec.get("input_tokens", 0))
-                    output_t = int(rec.get("output_tokens", 0))
-                    out.append(
-                        {
-                            "ts": ts,
-                            "cost_usd": float(raw_cost)
-                            if isinstance(raw_cost, int | float)
-                            else None,
-                            "input_tokens": input_t,
-                            "output_tokens": output_t,
-                            "tokens": input_t + output_t,
-                            "model": rec.get("model"),
-                            "kind": kind,
-                        }
-                    )
-        except OSError:
-            continue
-        if not has_backend:
-            synth = _synth_legacy_backend_record(cycle_dir, since, until)
-            if synth is not None:
-                out.append(synth)
-    return out
-
-
-def _synth_legacy_backend_record(
-    cycle_dir: FsPath, since: float, until: float
-) -> dict[str, Any] | None:
-    """Synthesise one backend token-usage row from a cycle's dashboard.
-
-    Used for campaigns that pre-date the ledger-side backend emission.
-    Reads ``dashboard.json::spend.backend`` for the totals + ``index.json::created_at``
-    for the timestamp. Returns ``None`` when there's no backend usage or
-    the timestamp falls outside the window.
-    """
-    try:
-        idx_raw = (cycle_dir / "index.json").read_text(encoding="utf-8")
-        dash_raw = (cycle_dir / "dashboard.json").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    try:
-        idx = json.loads(idx_raw)
-        dash = json.loads(dash_raw)
-    except json.JSONDecodeError:
-        return None
-    backend = (dash.get("spend") or {}).get("backend") or {}
-    input_t = int(backend.get("input_tokens", 0) or 0)
-    output_t = int(backend.get("output_tokens", 0) or 0)
-    if input_t == 0 and output_t == 0:
-        return None
-    ts_str = idx.get("created_at") or idx.get("updated_at") or ""
-    try:
-        ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00")).timestamp()
-    except (ValueError, TypeError):
-        return None
-    if not (since <= ts < until):
-        return None
-    raw_cost = backend.get("used_usd")
-    raw_model = backend.get("model")
-    model = str(raw_model) if isinstance(raw_model, str) and raw_model else "backend"
-    return {
-        "ts": ts,
-        "cost_usd": float(raw_cost) if isinstance(raw_cost, int | float) and raw_cost > 0 else None,
-        "input_tokens": input_t,
-        "output_tokens": output_t,
-        "tokens": input_t + output_t,
-        "model": model,
-        "kind": "backend",
-    }
 
 
 def _refresh_identity(bundle: IdentityBundle, session_id: str | None) -> Any:

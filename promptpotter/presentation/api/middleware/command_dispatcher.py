@@ -550,7 +550,8 @@ class CommandDispatcher:
         fork_index = {
             "type": parent_index.get("type", "optimization_loop"),
             "connector_type": parent_index.get("connector_type", ""),
-            "backend_id": parent_index.get("backend_id", ""),
+            # backend_id / dataset_name ride the inherited header block (single
+            # identity home) — copied forward below, never a top-level duplicate.
             "parent_cycle_id": cycle_id,
             "parent_session_id": parent_session_id,
             "sibling_kind": "fork",

@@ -78,9 +78,13 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "forbidden_axes_strict"): "policy",
     ("optimization", "rebase_capability"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
-    # OptimizerLLMConfig — provider/model swap changes the L1/L2/L3 candidate distribution → data.
+    # OptimizerLLMConfig — provider/model swap + per-layer temperature change the
+    # L1/L2/L3 candidate distribution → data.
     ("optimizer_llm", "provider"): "data",
     ("optimizer_llm", "model"): "data",
+    ("optimizer_llm", "l1_temperature"): "data",
+    ("optimizer_llm", "l2_temperature"): "data",
+    ("optimizer_llm", "l3_temperature"): "data",
 }
 
 
@@ -216,6 +220,21 @@ class OptimizerLLMConfig(BaseModel):
 
     provider: str = Field("groq")
     model: str | None = Field(None)
+    # Per-layer sampling temperature for the meta-prompt LLM. L1 generates a
+    # candidate spread (higher); L2 refines task_context, L3 replans (lower, more
+    # deterministic). Sourced by l1.generate + escalation.executor — no hardcoded
+    # constant. Like provider/model, a change shifts the candidate distribution.
+    l1_temperature: float = Field(0.7)
+    l2_temperature: float = Field(0.3)
+    l3_temperature: float = Field(0.5)
+
+    def temperature_for(self, layer_id: str) -> float:
+        """Meta-prompt temperature for ``layer_id`` ∈ {L1, L2, L3}."""
+        return {
+            "L1": self.l1_temperature,
+            "L2": self.l2_temperature,
+            "L3": self.l3_temperature,
+        }[layer_id]
 
 
 class DatasetSplit(BaseModel):

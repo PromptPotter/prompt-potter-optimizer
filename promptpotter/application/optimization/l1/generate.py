@@ -71,15 +71,11 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
     return summaries
 
 
-L1_CREATIVITY: float = 0.7
-"""LLM sampling temperature for L1 candidate generation."""
-
-
 async def l1_generate(
     cycle: Cycle,
     *,
     n_variants: int,
-    creativity: float = L1_CREATIVITY,
+    creativity: float,
     llm_client: LLMClientBase,
     model: str | None = None,
     obs: ObservabilityBridge | None = None,
@@ -249,4 +245,4 @@ def _truncate_raw(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-__all__ = ["L1_CREATIVITY", "candidate_summaries", "l1_generate"]
+__all__ = ["candidate_summaries", "l1_generate"]

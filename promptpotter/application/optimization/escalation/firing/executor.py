@@ -206,7 +206,6 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
 L2 = LayerStrategy(
     layer_id="L2",
     template_name="l2_context",
-    default_temperature=0.3,
     phase=CampaignPhase.REFINE_STRATEGY,
     parse=_parse_l2,
     apply=_apply_l2,
@@ -281,7 +280,6 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
 L3 = LayerStrategy(
     layer_id="L3",
     template_name="l3_plan",
-    default_temperature=0.5,
     phase=CampaignPhase.MODIFY_PLAN,
     parse=_parse_l3,
     apply=_apply_l3,
@@ -354,7 +352,7 @@ async def _run_transition(
             prompt_vars=prompt_vars,
             llm_client=client,
             model=config.optimizer_llm.model,
-            temperature=transition.default_temperature,
+            temperature=config.optimizer_llm.temperature_for(transition.layer_id),
             context=LLMCallContext(
                 ledger=cycle.session.state.ledger,
                 round_num=round_num,

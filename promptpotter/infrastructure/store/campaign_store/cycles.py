@@ -274,7 +274,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         for index_path in self._index_files():
             data = read_json(index_path)
             header = data.get("header") if isinstance(data.get("header"), dict) else {}
-            row_backend = data.get("backend_id") or header.get("backend_id", "")
+            row_backend = header.get("backend_id", "")
             if backend_id and row_backend and row_backend != backend_id:
                 continue
             campaign_id, cycle_id = self._ids_from_index_path(index_path)
@@ -346,7 +346,7 @@ class CycleIndexMixin(CampaignStoreKernel):
                     "parent_cycle_id": data.get("parent_cycle_id")
                     or (None if kind == "root" else root_cycle_id(cycle_id)),
                     "dataset_name": header.get("dataset_name", ""),
-                    "backend_id": data.get("backend_id") or header.get("backend_id", ""),
+                    "backend_id": header.get("backend_id", ""),
                     "sibling_kind": sk,
                     "unit_kind": _unit_kind(sk, fork_trigger),
                     "is_root": kind == "root",

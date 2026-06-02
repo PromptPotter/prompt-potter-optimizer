@@ -42,7 +42,7 @@ Resume = `python -m promptpotter resume`. No re-`new` needed.
 Sessions and campaigns are separate. The Session is a pointer/lens; the Campaign is the entity.
 
 - `{tenant_id}/sessions/{session_id}/` — operator metadata: `session.json`.
-- `{tenant_id}/campaigns/{campaign_id}/` — one campaign per directory. Three bands: **campaign-level artifacts** (`campaign.json` manifest, `log.md` campaign digest, `hard_samples.json`) at the campaign root; **per-cycle audit** (`index.json`, `log.md`, `review.md`, `rounds/`, `langfuse/`, `prompts/`, and `dashboard.json` for session-root cycles) inside each `cycles/{cycle_id}/`; **per-cycle internals** (`.runtime/...`) under a `.runtime/` umbrella. Every cycle — all N session roots, plus their forks, diag, sweeps — sits **flat** under `cycles/`; sibling kind and sweep batch id are `index.json` metadata, not directory nesting. `dashboard.json` is per-session: it lives in the session's root cycle dir and is shared by that session's forks.
+- `{tenant_id}/campaigns/{campaign_id}/` — one campaign per directory. Three bands: **campaign-level artifacts** (`campaign.json` manifest, `log.md` campaign digest, `hard_samples.json`) at the campaign root; **per-cycle audit** (`index.json`, `log.md`, `review.md`, `rounds/`, `langfuse/`, `prompts/`, and `dashboard.json`) inside each `cycles/{cycle_id}/`; **per-cycle internals** (`.runtime/...`) under a `.runtime/` umbrella. Every cycle — all N session roots, plus their forks, diag, sweeps — sits **flat** under `cycles/`; sibling kind and sweep batch id are `index.json` metadata, not directory nesting. `dashboard.json` is per-cycle: each cycle (root, fork, diag, sweep) owns its own, written into its own dir; a fork seeds its prior trajectory from the parent's file, then writes its own.
 - `{tenant_id}/archive/` — the **measurement archive**, cross-cycle/session/tenant — a peer of `campaigns/`. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
 
 ```
@@ -87,7 +87,7 @@ Sessions and campaigns are separate. The Session is a pointer/lens; the Campaign
       # AxisIndex + SampleIndex are in-memory only — rebuilt every refresh.
 ```
 
-**Why split this way?** Telemetry is *temporal* — a stream that flows through whichever cycle of a session is active. Anchoring it at the session's root cycle means a single `tail cycles/{session_root}/dashboard.json` covers that session and all its forks. Audit is *structural* — frozen records keyed by the cycle that produced them, where per-cycle detail belongs. The flat `cycles/` store is deliberate: a fork tree keyed by `parent_cycle_id` metadata scales where nested fork-of-fork directories do not.
+**Why split this way?** Telemetry is *temporal* — a live stream the webapp polls; each cycle owns its own `dashboard.json`, so `tail cycles/{cycle_id}/dashboard.json` follows exactly the cycle you're watching (a fork seeds from its parent, then diverges). Audit is *structural* — frozen records keyed by the cycle that produced them, where per-cycle detail belongs. The flat `cycles/` store is deliberate: a fork tree keyed by `parent_cycle_id` metadata scales where nested fork-of-fork directories do not.
 
 **Why Campaign is first-class.** The campaign directory is self-describing: `campaigns/justlogic__a1b2c3/` groups one declared optimization effort under one prefix-scannable id — dataset grouping is a prefix scan. The campaign root is self-describing — `campaign.json` (manifest), `log.md` (human digest) — and the session's `dashboard.json` lives in its root cycle, so you can read a campaign and its live session without guessing directory names. Cross-campaign evidence pooling on the same declaration rides the dataset-scoped `archive/measurements/`, not the campaign-id, so a fresh `new` on an unchanged declaration cache-hits every origin sample (zero LLM calls during origin scoring) and produces a byte-identical origin score — while still getting its own `campaign_id` for the optimization trajectory.
 
@@ -148,7 +148,7 @@ The Campaign manifest — one per campaign directory. Fields: `campaign_id`, `da
 
 ### `dashboard.json`
 
-Scalar-only live dashboard, **per-session** — at the session's root cycle dir (`cycles/{session_root}/dashboard.json`), shared by that session's forks. Atomically rewritten on every event. Carries display counters across the session's cycles via `resume_from`. Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `origin`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`. A campaign with N sessions has N independent `dashboard.json` streams. Post-mortem `stop_reason` is in `index.json::final::stop_reason`, not the live dashboard.
+Scalar-only live dashboard, **per-cycle** — at the cycle's own dir (`cycles/{cycle_id}/dashboard.json`); each cycle (root, fork, diag, sweep) owns its own. Atomically rewritten on every event. A fork seeds its prior display counters from the parent's file via `resume_from`, then writes its own. Key fields: `phase`, `round`, `run_phase`, `layer`, `candidate`, `query`, `patience`, `origin`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`. Every cycle on disk has its own `dashboard.json` stream. Post-mortem `stop_reason` is in `index.json::final::stop_reason`, not the live dashboard.
 
 ### `.runtime/cache/rounds/round_NNNN.json`
 
@@ -165,7 +165,7 @@ The resume source of truth. On resume, `Cycle.replay_priors` walks every prior `
 
 ## Entry-point emission boundary
 
-Entry points (notebook, CLI, `/potter-run`, API, webapp) MUST NOT write campaign artifacts directly. Writes go through two newtype-guarded projections in `promptpotter/infrastructure/projections/`: `LiveDashboardView` (per-session telemetry, written into the session-family root cycle dir) and `AuditTrailView` (per-cycle audit). Both subscribe to the per-cycle `CycleEventLog` (`infrastructure/ledger.py`) which persists every fact to `.runtime/ledger.jsonl`. Allowlists — covering the campaign-level artifacts (`campaign.json`, campaign `log.md`, `hard_samples.json`), the per-cycle operator artifacts (including `dashboard.json` on session-root cycles), and the `.runtime/` internal umbrella — live in `tests/test_invariants.py`.
+Entry points (notebook, CLI, `/potter-run`, API, webapp) MUST NOT write campaign artifacts directly. Writes go through two newtype-guarded projections in `promptpotter/infrastructure/projections/`: `LiveDashboardView` (per-cycle telemetry, written into the cycle's own dir) and `AuditTrailView` (per-cycle audit). Both subscribe to the per-cycle `CycleEventLog` (`infrastructure/ledger.py`) which persists every fact to `.runtime/ledger.jsonl`. Allowlists — covering the campaign-level artifacts (`campaign.json`, campaign `log.md`, `hard_samples.json`), the per-cycle operator artifacts (including `dashboard.json`), and the `.runtime/` internal umbrella — live in `tests/test_invariants.py`.
 
 ---
 

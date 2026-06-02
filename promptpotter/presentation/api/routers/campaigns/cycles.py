@@ -131,7 +131,7 @@ async def get_cycle(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleDe
         ),
         created_at=str(index.get("created_at") or ""),
         updated_at=str(index.get("updated_at") or ""),
-        backend_id=str(index.get("backend_id") or ""),
+        backend_id=str((index.get("header") or {}).get("backend_id") or ""),
         best_round_id=index.get("best_round_id"),
         rounds=_round_summaries(index),
     )

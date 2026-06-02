@@ -69,7 +69,7 @@ def build_node_block(record: LLMCallRecord) -> dict[str, Any]:
     if record.payload_kind == "synthesized":
         return {
             "input": dict(record.payload.get("input") or {}),
-            "output": dict(record.payload.get("response") or record.payload.get("output") or {}),
+            "output": dict(record.payload.get("response") or {}),
             "timestamp": record.timestamp,
         }
     return _action_to_node_block({**record.payload, "timestamp": record.timestamp})

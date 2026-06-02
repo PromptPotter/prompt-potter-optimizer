@@ -1,7 +1,9 @@
 """LiveDashboardView — operator-facing ``dashboard.json`` writer.
 
-Family-root-bound: one ``dashboard.json`` per cycle family, shared across
-all forks. The package keeps the writer thin: the class owns its own
+Per-cycle: each cycle (root, fork, sweep, diag) owns its own
+``cycles/{cycle_id}/dashboard.json`` (`view.py::for_session`); a fork seeds its
+prior trajectory from the parent's file but writes its own thereafter — the root
+does not aggregate forks. The package keeps the writer thin: the class owns its own
 round-state mutations and block builders inside :mod:`view`; the two
 remaining submodules carve off concerns that don't belong inside the
 ledger-subscriber loop:

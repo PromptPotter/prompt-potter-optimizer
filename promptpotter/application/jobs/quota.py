@@ -14,13 +14,12 @@ enforcement still rides the existing ``spend_cap_probe`` in the runner.
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
-from pathlib import Path
 
-from promptpotter.application.jobs.registry import Job, JobRegistry
+from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.spend import start_of_utc_day, sum_user_spend
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.user_store import User
 
@@ -122,69 +121,19 @@ def effective_spend_cap_usd(
 ) -> float | None:
     """Compose the per-cycle spend cap with the user's daily cap.
 
-    Sums ``dashboard.json::spend.total_used_usd`` across the user's
-    today-created jobs to get ``daily_spent``; returns
-    ``min(requested, daily_cap - daily_spent)``. A negative remainder
-    collapses to ``0.0`` so the runner halts at the first round boundary.
+    Sums today's ``TokenUsageRecord`` cost from the canonical ledger
+    (:func:`~promptpotter.application.jobs.spend.sum_user_spend`) to get
+    ``daily_spent``; returns ``min(requested, daily_cap - daily_spent)``. A
+    negative remainder collapses to ``0.0`` so the runner halts at the first
+    round boundary.
     """
     if user.spend_budget_usd_daily is None:
         return requested_cap_usd
-    spent = _sum_daily_spend(job_registry=job_registry, stores=stores, user_id=user.user_id)
+    spent = sum_user_spend(store=stores, since=start_of_utc_day(), until=time.time())
     daily_remaining = max(0.0, user.spend_budget_usd_daily - spent)
     if requested_cap_usd is None:
         return daily_remaining
     return min(float(requested_cap_usd), daily_remaining)
-
-
-def _sum_daily_spend(*, job_registry: JobRegistry, stores: Stores, user_id: str) -> float:
-    """Aggregate ``dashboard.json::spend.total_used_usd`` across today's jobs."""
-    total = 0.0
-    for job in job_registry.list_created_today(user_id=user_id):
-        spend = _read_dashboard_spend(stores=stores, job=job)
-        if spend is not None:
-            total += spend
-    return total
-
-
-def _read_dashboard_spend(*, stores: Stores, job: Job) -> float | None:
-    """Read the campaign's session-root dashboard spend bucket; ``None`` on miss."""
-    try:
-        cycle_dir = stores.campaigns.cycle_dir(job.campaign_id, job.cycle_id)
-    except Exception:
-        return None
-    # LiveDashboardView writes into the session-family root cycle dir; we
-    # follow ``parent_cycle_id`` to the root if this job started on a fork.
-    root_dir = _resolve_session_root(cycle_dir)
-    dashboard_path = root_dir / "dashboard.json"
-    if not dashboard_path.is_file():
-        return None
-    try:
-        data = json.loads(dashboard_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    spend = data.get("spend") or {}
-    raw = spend.get("total_used_usd")
-    if isinstance(raw, int | float):
-        return float(raw)
-    return None
-
-
-def _resolve_session_root(cycle_dir: Path) -> Path:
-    """Walk ``index.json::parent_cycle_id`` to the session-family root dir."""
-    current = cycle_dir
-    for _ in range(32):  # depth ceiling — paranoia, real depth <5
-        idx = current / "index.json"
-        if not idx.is_file():
-            return current
-        try:
-            data = json.loads(idx.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return current
-        parent_id = data.get("parent_cycle_id")
-        if not parent_id:
-            return current
-        current = current.parent / str(parent_id)
-    return current
 
 
 __all__ = [

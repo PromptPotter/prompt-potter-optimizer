@@ -9,7 +9,6 @@ poke directly.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,6 +22,7 @@ from promptpotter.application.jobs import (
 )
 from promptpotter.application.jobs.quota import reset_rate_buckets
 from promptpotter.domain.identity import TenantId, UserId
+from promptpotter.domain.run_records import TokenUsageRecord
 from promptpotter.infrastructure.store import build_stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.identity import IdentityContext
@@ -95,8 +95,9 @@ def test_quota_contract(tmp_path: Path) -> None:
     assert exc.value.code == "rate_limited"
 
     # --- Gate 4: spend-cap composition -----------------------------------
-    # User's daily cap is $1.00; today's one finished job spent $0.40 according
-    # to its dashboard. Per-cycle request of $0.80 collapses to remaining $0.60.
+    # User's daily cap is $1.00; today's per-cycle ledger carries $0.40 of token
+    # spend. Per-cycle request of $0.80 collapses to remaining $0.60. Spend is
+    # read from the canonical ledger (TokenUsageRecord), not dashboard.json.
     user_spend = _mk_user(
         user_id="u_spend",
         tenant_id="u_spend",
@@ -105,19 +106,19 @@ def test_quota_contract(tmp_path: Path) -> None:
     spend_registry = JobRegistry(tmp_path / "jobs_spend")
     identity = IdentityContext(user_id=UserId("u_spend"), tenant_id=TenantId("u_spend"))
     stores = build_stores(identity, projects_root=tmp_path / "projects_spend")
-    # Plant a job + a fake dashboard at the expected path.
+    # Plant a job + a token-usage record on its per-cycle ledger.
     job = spend_registry.create(
         user_id=user_spend.user_id,
         campaign_id="cmp",
         cycle_id="cycle_abcdef012345",
         dataset_name="aime",
     )
-    cycle_dir = stores.campaigns.cycle_dir(job.campaign_id, job.cycle_id)
-    cycle_dir.mkdir(parents=True, exist_ok=True)
-    (cycle_dir / "index.json").write_text(json.dumps({"parent_cycle_id": None}), encoding="utf-8")
-    (cycle_dir / "dashboard.json").write_text(
-        json.dumps({"spend": {"total_used_usd": 0.40}}), encoding="utf-8"
+    runtime_dir = stores.campaigns.cycle_dir(job.campaign_id, job.cycle_id) / ".runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    usage = TokenUsageRecord(
+        kind="backend", node="x", input_tokens=0, output_tokens=0, cost_usd=0.40
     )
+    (runtime_dir / "ledger.jsonl").write_text(usage.model_dump_json() + "\n", encoding="utf-8")
     cap = effective_spend_cap_usd(
         requested_cap_usd=0.80,
         user=user_spend,
