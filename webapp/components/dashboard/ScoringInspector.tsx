@@ -7,11 +7,16 @@ import { Modal, type ModalAction } from "@/components/shell/Modal";
 import { fmtPct1 } from "@/lib/format";
 import type { SelectedCandidate } from "@/lib/types/selection";
 import type { ScoreboardEntry } from "@/lib/types/round";
+import type { DashboardSnapshot } from "@/lib/poll";
+import { SteerForkPanel } from "@/components/dashboard/control-panel/SteerForkPanel";
 
 interface Props {
   campaignId: string | null;
   cycleId: string | null;
   selected: SelectedCandidate | null;
+  // The dashboard snapshot — the fork reconcile dialog defaults rounds + spend
+  // off the parent's `run_limits` + `spend` blocks carried here.
+  dash: DashboardSnapshot | null;
   isLive: boolean;
   onClose: () => void;
 }
@@ -20,6 +25,7 @@ export function ScoringInspector({
   campaignId,
   cycleId,
   selected,
+  dash,
   isLive,
   onClose,
 }: Props) {
@@ -32,6 +38,9 @@ export function ScoringInspector({
   const [forkDone, setForkDone] = useState(false);
   const [forkErr, setForkErr] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // Inline steer flow — when open, the edit+reconcile panel replaces the
+  // action row; its own Confirm mints the `operator_steered` fork.
+  const [steering, setSteering] = useState(false);
 
   const entry = useMemo<ScoreboardEntry | null>(() => {
     if (!selected || !doc) return null;
@@ -137,16 +146,25 @@ export function ScoringInspector({
           </div>
         )}
       </div>
-      {!forkDone && (
+      {!forkDone && !steering && (
         <div className="inspector-actions">
           <button
             type="button"
             className="fork-button"
             onClick={() => setConfirming(true)}
             disabled={forkPending}
-            title="Endorse this candidate and mint a fork rooted here. L1 then generates fresh candidates from this point."
+            title="Endorse this candidate as-is and mint a fork rooted here (operator_endorse). L1 then generates fresh candidates from this point."
           >
             {forkPending ? "Forking…" : "Endorse & fork"}
+          </button>
+          <button
+            type="button"
+            className="fork-button"
+            onClick={() => setSteering(true)}
+            disabled={forkPending}
+            title="Edit this searchpoint's evolved prompt + reconcile run limits, then fork-continue from it (operator_steered)."
+          >
+            Steer &amp; fork
           </button>
           <button
             type="button"
@@ -159,6 +177,19 @@ export function ScoringInspector({
           </button>
           {forkErr && <span className="fork-err">fork: {forkErr}</span>}
         </div>
+      )}
+      {steering && (
+        <SteerForkPanel
+          campaignId={campaignId}
+          cycleId={cycleId}
+          candidate={selected}
+          dash={dash}
+          onDone={() => {
+            setSteering(false);
+            setForkDone(true);
+          }}
+          onCancel={() => setSteering(false)}
+        />
       )}
       <Modal
         open={confirming}

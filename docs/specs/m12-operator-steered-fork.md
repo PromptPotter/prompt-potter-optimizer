@@ -1,6 +1,6 @@
 # M12: Operator-Steered Fork (human-in-the-loop steer)
 
-> **Status:** Design-only. No code. Captures the steer-and-fork loop the read-only backend-node panel ([`BackendNodeDetail.tsx`](../../webapp/components/dashboard/BackendNodeDetail.tsx)) points at. Rides the existing `fork-cycle` command + control-plane highway ([`ADR-0001`](../adr/0001-m12-control-plane.md)) — **no new verb.**
+> **Status:** Implemented. Stop → select a candidate → **Steer & fork** in the Scoring inspector ([`ScoringInspector.tsx`](../../webapp/components/dashboard/ScoringInspector.tsx) → [`control-panel/SteerForkPanel.tsx`](../../webapp/components/dashboard/control-panel/SteerForkPanel.tsx)): edit the candidate's evolved prompt + reconcile run limits → fork tagged `operator_steered`. Endorse-as-is is the same button with no seed (`operator_endorse`). Typed `ForkSpec`/`ForkSeed`/`LimitOverrides` ([`domain/run_records.py`](../../promptpotter/domain/run_records.py)); seed read once at the runner seam from `.overrides/seed.json` (`CycleOverrideMixin`); origin resolved fork-seed-first (`resolve_origin_opt_search_point`). Rode the existing `fork-cycle` command + control-plane highway ([`ADR-0001`](../adr/0001-m12-control-plane.md)) — **no new verb.** One remaining follow-up: editing node-config VALUES in the steer panel (the candidate's overlay rides along read-only; needs a `pipeline_params`-shape value-editor).
 
 ## What this covers
 

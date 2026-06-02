@@ -19,12 +19,13 @@ import { LockTable } from "@/components/dashboard/control-panel/LockTable";
 // webapp-readable surface yet (the target node block carries only `model`; no
 // winning PromptTemplate is stamped into the round/dashboard).
 //
-// M12 (operator-steered fork — docs/specs/m12-operator-steered-fork.md): when
-// the control-plane write path lands, flip PipelineConfigEditor to mode="edit" +
-// a writable PromptFieldsEditor. The edit doesn't mutate the dataset-scoped
-// origin (that would change every run on the dataset) — it seeds a *fork* from
-// the selected searchpoint that carries the edits, so the campaign continues
-// optimizing from the steered point. Hence the "fork from a searchpoint" note.
+// Operator-steered fork (docs/specs/m12-operator-steered-fork.md) SHIPPED via
+// the Scoring inspector's "Steer & fork": select a candidate → edit its evolved
+// prompt + reconcile limits → fork-continue tagged `operator_steered`. The edit
+// seeds a *fork* (not the dataset origin — that would change every run on the
+// dataset). This node panel stays read-only; editing node-config VALUES here
+// (the `pipeline_params` overlay) is the one remaining steer follow-up and
+// needs a value-editor, NOT this allowed-values/locks editor.
 
 // Demo fallback — the preview ChatPane has no real dataset behind the hero.
 // Mirrors the conservative floor (model/provider frozen, no allowed-value sets).
@@ -59,7 +60,7 @@ export function BackendNodeDetail({ cv, onClose }: Props) {
             <span className="setup-preview-sub">
               {cv.isLive
                 ? "read-only — running"
-                : "read-only — to steer, stop the run and fork from a searchpoint (coming)"}
+                : "read-only — to steer, select a candidate and use Steer & fork in the inspector"}
             </span>
             <button
               type="button"

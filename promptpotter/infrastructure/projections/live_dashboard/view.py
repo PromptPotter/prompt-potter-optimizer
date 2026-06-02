@@ -654,8 +654,22 @@ class LiveDashboardView(DerivedView):
                 }
                 s["composite_fitness_formula"] = view.get("composite_fitness_formula")
                 self.short_formula_template = view.get("composite_fitness_formula_short")
-            self.patience_max = config.optimization.l1_patience
+            opt = config.optimization
+            self.patience_max = opt.l1_patience
             s["patience"] = f"0/{self.patience_max}"
+            # Static run-limit surface — the operator-facing source for the
+            # fork reconcile dialog ("3 of 6 rounds left"). `patience` above is
+            # the live stall counter ("N/max"); this is the declared ceilings.
+            # A fork re-emits this at its own INIT with the reconciled config,
+            # so a steered fork's dashboard shows its own limits.
+            s["run_limits"] = {
+                "max_rounds": opt.max_rounds,
+                "l1_patience": opt.l1_patience,
+                "l2_patience": opt.l2_patience,
+                "l3_patience": opt.l3_patience,
+                "pobb_epsilon": opt.pobb_epsilon,
+                "spend_budget_usd": opt.spend_budget_usd,
+            }
         elif phase == "scoring_steer" and event.event == "applied":
             # Operator hot-swap — custom formulas render verbatim (no short form).
             new_formula = data.get("formula")

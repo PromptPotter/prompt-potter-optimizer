@@ -108,6 +108,30 @@ The persisted world is a four-entity containment hierarchy
   session**. Three kinds: divergence (operator-chosen), diagnostic,
   and sweep (sweep-toolkit A/B candidates) — all flat under the
   campaign's `cycles/`.
+- **ForkSpec** — the single typed fork record (`domain/run_records.py`),
+  the one writer behind three projections: the parent's `FORK_CUT`
+  ledger entry (SoT), the fork's `index.json::fork` (lineage read), and —
+  when steered — its `.overrides/seed.json` (bootstrap read). Carries
+  `{trigger, reason, issued_by, from_round, from_candidate_id, seed}`.
+  Absorbs the old free-dict `index.json::fork` + ledger `ForkPayload`.
+- **ForkSeed** — the edited-searchpoint origin override inside a `ForkSpec`
+  (`domain/run_records.py`): `{starting_prompt, pipeline_overlay,
+  limit_overrides}`. `seed is not None` ⇔ an **operator-steered** fork —
+  the seed prompt becomes the fork's origin `OptSearchPoint`
+  (`resolve_origin_opt_search_point`, lineage `source="fork_seed"`) and
+  `pipeline_overlay` layers onto the dataset overlay (seed > dataset) for
+  that fork only. The dataset file stays immutable.
+- **operator_steered / operator_endorse** — the two `ForkTrigger` values
+  for operator-initiated forks. `operator_endorse` = endorse the selected
+  candidate as-is (no seed); `operator_steered` = edit it first (seed
+  present). Both restart round numbering at 1. Replaced the free-string
+  `operator_hitl`. Queryable in the lineage tree (`lineage.py`).
+- **Cycle override store** — `CycleOverrideMixin` (`store/campaign_store/`)
+  writes/reads `cycles/{id}/.overrides/seed.json`, the **read-once**
+  per-cycle override home (a steered fork's `ForkSeed`), distinct from
+  `.runtime/{stop,pause,spend_cap}` which are **polled** per round. The
+  dir name encodes read-cadence; the seed is read at the single runner
+  seam (`runner/entry.py::run_optimization`) keyed by the fork `cycle_id`.
 - **Sibling kind** — `root | fork | diag | sweep`. Recorded in the
   cycle's `index.json` metadata, not derived from a directory path.
   See `infrastructure/store/paths.py::sibling_kind`.

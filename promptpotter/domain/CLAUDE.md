@@ -12,6 +12,7 @@ encoded by `derive()`.
 | `PromptTemplate` | `opt_search_point.py` | 8-field prompt scheme with `render()` / `compile_prompt()`. Canonical prompts at `datasets/{name}/prompts/{node}.json`. |
 | `OptSearchPoint` | `opt_search_point.py` | Optimizer state: 8 prompt fields + `lineage` + `memory: L2L3Memory` (wounds / l1_layout / l1_overrides / l1_supplemental_rules / l1_situational_examples / task_context) + `plan`. **All new optimizer state flows through here** — no sidecar state. |
 | `ResumeCheckpointKind` + `RESUME_CHECKPOINT_GATING` | `run_records.py` | Import-time exhaustiveness — adding a kind without a gating mode raises before the module loads. SoT for replayed-vs-archival gating. |
+| `ForkSpec` / `ForkSeed` / `LimitOverrides` | `run_records.py` | The one typed fork record + its operator-steer payload. `ForkSeed` (`{starting_prompt, pipeline_overlay, limit_overrides}`) present ⇔ `operator_steered`; absent ⇔ `operator_endorse`. One writer (`_mint_fork`), three projections (`FORK_CUT` ledger SoT, `index.json::fork`, `.overrides/seed.json`). |
 | `PipelineSchema` / `PipelineNode` | `pipeline_schema.py` | Built entirely from `GET /pipeline` (pure parser in `pipeline_parsing.py`); zero backend constants. |
 | `RoundResult` | `results.py` | Per-round outcome, including `deprecated` (sanctioned vocabulary for fatal-warning sample lifecycle). |
 

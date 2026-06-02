@@ -62,9 +62,9 @@ When a contract is renamed, restructured, or replaced:
 
 ## Ceiling
 
-Target **≤ 15 test files, ≤ 200 collected tests**. Above that, prune before
+Target **≤ 18 test files, ≤ 240 collected tests**. Above that, prune before
 adding. Canary: `python -m pytest tests/ --collect-only -q | tail -1`.
-Currently at 199; one-test margin to the 200 ceiling.
+Currently at 237; three-test margin to the 240 ceiling.
 
 ## Fixtures (`conftest.py`)
 

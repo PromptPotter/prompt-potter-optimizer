@@ -81,6 +81,18 @@ export interface DashboardSnapshot {
   // by this when the operator's "sync with live sort" tick is on.
   // ``null`` before the first sorter fit lands.
   hard_sample_order?: number[] | null;
+  // Declared run-limit ceilings, written at INIT.exit from the cycle's
+  // OptimizationConfig. Static (unlike the live `patience` "N/max" string) —
+  // the operator-facing source the fork reconcile dialog defaults against
+  // ("3 of 6 rounds left"). A fork re-emits its own reconciled limits here.
+  run_limits?: {
+    max_rounds?: number | null;
+    l1_patience?: number;
+    l2_patience?: number | null;
+    l3_patience?: number | null;
+    pobb_epsilon?: number;
+    spend_budget_usd?: number | null;
+  };
   // Fresh-campaign placeholder — set by the server when `dashboard.json`
   // hasn't been written yet (origin still running). The companion
   // `phase_hint` names what's blocking; the rest of the shape is empty.

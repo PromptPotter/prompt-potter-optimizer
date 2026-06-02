@@ -61,6 +61,7 @@ export function NowTriad({
               campaignId={campaignId}
               cycleId={cycleId}
               selected={candidate}
+              dash={dash}
               isLive={isLive}
               onClose={() => setSelectionForCandidate(null)}
             />
