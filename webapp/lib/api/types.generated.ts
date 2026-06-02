@@ -204,12 +204,32 @@ export interface MeasurementSeriesResponse {
   items: SampleSeries[];
 }
 
+/** One operator-editable config param of a node — the FULL config surface the */
+export interface NodeConfigParam {
+  key: string;
+  value: unknown;
+  kind: string;
+  options: string[];
+  description: string;
+  optimizer_locked: boolean;
+}
+
+/** Resolved output schema for a pipeline node. */
+export interface NodeOutputSchema {
+  fields: string[];
+  field_descriptions: Record<string, string>;
+  json_schema: Record<string, unknown>;
+}
+
 /** Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero; */
 export interface DatasetPipelineResponse {
   name: string;
   connector: string;
   pipeline: Record<string, unknown>;
   view: Record<string, unknown> | null;
+  node_config_schema: Record<string, NodeConfigParam[]>;
+  node_output_schema: Record<string, NodeOutputSchema | null>;
+  starting_prompt: Record<string, unknown> | null;
 }
 
 export interface ActiveSessionResponse {
@@ -380,6 +400,7 @@ export interface CampaignLineageCycle {
   fork_from_round: number | null;
   fork_from_candidate_id: string | null;
   trigger: string;
+  steered_by: string | null;
   round_column_offset: number;
   status: string;
   dataset_name: string;

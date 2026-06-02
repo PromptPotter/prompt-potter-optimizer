@@ -6,7 +6,7 @@ import { lockedParams } from "@/lib/optimizer-locks";
 import { RecapCard } from "./RecapCard";
 import { OptionalSettings } from "./OptionalSettings";
 import { LockTable } from "@/components/dashboard/control-panel/LockTable";
-import { PipelineConfigEditor } from "@/components/dashboard/control-panel/PipelineConfigEditor";
+import { AllowedValuesEditor } from "@/components/dashboard/control-panel/AllowedValuesEditor";
 import { PromptFieldsEditor } from "@/components/dashboard/control-panel/PromptFieldsEditor";
 
 // Step 3 — one compact preview the operator reviews before launch: the
@@ -39,7 +39,7 @@ export function PipelinePromptStep({
           </span>
         </header>
 
-        <PipelineConfigEditor
+        <AllowedValuesEditor
           locks={draft.optimizer_locks}
           overlayBase={draft.pipeline_overlay}
           lockModel={draft.lock_model}

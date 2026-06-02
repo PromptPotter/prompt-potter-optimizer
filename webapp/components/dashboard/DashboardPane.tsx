@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchCycleFile, fetchPipeline, type HardSamplesScope } from "@/lib/api";
 import { CycleStreamProvider } from "@/lib/poll";
+import { ConnectorProvider } from "@/lib/hooks/useConnectorView";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/useDatasetPreview";
@@ -22,6 +23,7 @@ import { SelectionProvider } from "./SelectionContext";
 import { IngestPane } from "./IngestPane";
 import { NowTriad } from "./NowTriad";
 import { RunErrorBanner } from "./RunErrorBanner";
+import { CriticalAlertBanner } from "./CriticalAlertBanner";
 import { FilesPane } from "@/components/tree/FilesPane";
 import { VerifyPane } from "@/components/verify/VerifyPane";
 
@@ -187,6 +189,7 @@ function DashboardPaneInner() {
 
   return (
     <SelectionProvider cycleId={cycleId}>
+    <ConnectorProvider datasetName={datasetName}>
     <div
       className={`shell${tab === "chat" ? " chat-mode sidebar-hidden" : sidebarCollapsed ? " sidebar-collapsed" : ""}${sidebarMobileOpen ? " sidebar-mobile-open" : ""}`}
     >
@@ -223,6 +226,17 @@ function DashboardPaneInner() {
           tab={tab}
           onTabChange={setTab}
           onMenuToggle={tab !== "chat" ? () => setSidebarMobileOpen((v) => !v) : undefined}
+        />
+        {/* Loud failure surface — sticky, full-width, on every tab. Renders
+            null on a healthy run; not gated on cycleId so a server-down state
+            with no unit in view still screams. */}
+        <CriticalAlertBanner
+          bannerStatus={bannerStatus}
+          bannerText={bannerText}
+          bannerHint={bannerHint}
+          dash={dash}
+          runPhaseResolved={runPhaseResolved}
+          onOpenFiles={() => setTab("files")}
         />
         {cycleId ? (
           <StatusAssistant
@@ -336,6 +350,7 @@ function DashboardPaneInner() {
         }}
       />
     </div>
+    </ConnectorProvider>
     </SelectionProvider>
   );
 }

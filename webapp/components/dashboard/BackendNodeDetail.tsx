@@ -1,54 +1,26 @@
 "use client";
-import type { OptimizerLocks } from "@/lib/api";
 import type { ConnectorView } from "@/lib/types/connector";
-import { lockedParams } from "@/lib/optimizer-locks";
-import { PipelineConfigEditor } from "@/components/dashboard/control-panel/PipelineConfigEditor";
 import { PromptFieldsEditor } from "@/components/dashboard/control-panel/PromptFieldsEditor";
-import { LockTable } from "@/components/dashboard/control-panel/LockTable";
+import { NodeConfigEditor } from "@/components/dashboard/control-panel/NodeConfigEditor";
+import { NodeOutputSchemaView } from "@/components/dashboard/control-panel/NodeOutputSchemaView";
 
 // Read-only config detail for a *target/backend* node, opened by clicking the
-// node in TargetPipelineHero. This IS the setup flow's Step-3 surface
-// (`PipelinePromptStep`'s `.setup-preview` block) — the same `PipelineConfigEditor`
-// + `PromptFieldsEditor`, rendered read-only — so it reads identically. It's the
-// on-the-node home of the old floating ConfigMenu's "frozen parameters", now
-// derived from the real overlay instead of a hardcoded map.
+// node in TargetPipelineHero. Renders the whole node as one unit — config
+// (model + params + provider) + prompt + structured output — straight off the
+// server's `node_config_schema` / `node_output_schema` (built from
+// `pipeline.json`), so the inspect-the-node surface reads identically to the
+// steer panel's editor. No new fetch: it rides the shared `useConnector()` view.
 //
-// Data is whatever `useConnectorView` already fetched: `optimizerLocks` (the
-// minted-pipeline permission surface) + `startingPrompt` (origin seed). No new
-// fetch. Prompt is origin-only — the current/evolved prompt isn't on any
-// webapp-readable surface yet (the target node block carries only `model`; no
-// winning PromptTemplate is stamped into the round/dashboard).
-//
-// Operator-steered fork (docs/specs/m12-operator-steered-fork.md) SHIPPED via
-// the Scoring inspector's "Steer & fork": select a candidate → edit its evolved
-// prompt + reconcile limits → fork-continue tagged `operator_steered`. The edit
-// seeds a *fork* (not the dataset origin — that would change every run on the
-// dataset). This node panel stays read-only; editing node-config VALUES here
-// (the `pipeline_params` overlay) is the one remaining steer follow-up and
-// needs a value-editor, NOT this allowed-values/locks editor.
-
-// Demo fallback — the preview ChatPane has no real dataset behind the hero.
-// Mirrors the conservative floor (model/provider frozen, no allowed-value sets).
-const DEMO_LOCKS: OptimizerLocks = {
-  pipeline: ["llm_only"],
-  forbidden_axes: ["model", "provider"],
-  nodes: { llm_only: { config: {}, param_allowed_values: {} } },
-};
+// Steering is a separate act with its own home — the `ScoringInspector` opens
+// the `SteerForkPanel` Dialog directly when a candidate is selected. This panel
+// is inspect-only; it never forks.
 
 interface Props {
   cv: ConnectorView;
   onClose: () => void;
 }
 
-// Fronts the pipeline's primary backend node (PipelineConfigEditor picks it via
-// primaryNode(locks)) — for the single llm_only target this is the clicked node.
-// M12 (per-node editing of a multi-node pipeline) re-introduces an explicit
-// `id` prop to scope the editor + overlay write to the selected node.
 export function BackendNodeDetail({ cv, onClose }: Props) {
-  const locks = cv.optimizerLocks ?? DEMO_LOCKS;
-  // The lock toggle reads off the campaign policy the server already resolved
-  // into forbidden_axes — single source, no second derivation.
-  const lockModel = locks.forbidden_axes.includes("model");
   const startingPrompt = cv.startingPrompt;
 
   return (
@@ -58,9 +30,7 @@ export function BackendNodeDetail({ cv, onClose }: Props) {
           <span className="setup-preview-title">Pipeline, optimizer &amp; prompt</span>
           <span className="setup-preview-side">
             <span className="setup-preview-sub">
-              {cv.isLive
-                ? "read-only — running"
-                : "read-only — to steer, select a candidate and use Steer & fork in the inspector"}
+              {cv.isLive ? "read-only — running" : "read-only"}
             </span>
             <button
               type="button"
@@ -74,7 +44,9 @@ export function BackendNodeDetail({ cv, onClose }: Props) {
           </span>
         </header>
 
-        <PipelineConfigEditor locks={locks} overlayBase={{}} lockModel={lockModel} mode="readonly" />
+        <NodeConfigEditor schema={cv.nodeConfigSchema} seedOverlay={{}} readOnly />
+
+        <NodeOutputSchemaView schema={cv.nodeOutputSchema} />
 
         <hr className="setup-preview-divider" />
 
@@ -83,13 +55,6 @@ export function BackendNodeDetail({ cv, onClose }: Props) {
             the operator sees the prompt structure to reason against. */}
         <PromptFieldsEditor value={startingPrompt ?? {}} demo readOnly flat />
       </section>
-
-      <details className="new-campaign-optional">
-        <summary>Review hyperparameters</summary>
-        <div className="new-campaign-optional-body">
-          <LockTable params={lockedParams(locks)} />
-        </div>
-      </details>
     </div>
   );
 }

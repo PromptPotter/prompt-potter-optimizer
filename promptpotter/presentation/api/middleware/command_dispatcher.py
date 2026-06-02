@@ -399,8 +399,16 @@ class CommandDispatcher:
 
             seed = _parse_fork_seed(payload_extras.get("seed"))
 
-            def _apply_fork() -> None:
-                mint_operator_fork(
+            async def _apply_fork() -> None:
+                # Mint the operator-steered fork (writes the cycle + seed,
+                # retargets the active pointer), THEN launch it. Minting alone is
+                # just disk I/O — without the launch the fork sits seeded-but-idle
+                # (the old design assumed a manual CLI `resume`, which never comes
+                # when steering from the web). One gesture = stop parent → mint →
+                # continue optimizing from the edited searchpoint. Pass no
+                # spend/halt: the seed's reconciled limits govern at the runner
+                # seam (runner/entry.py::_apply_limit_overrides).
+                new_cycle_id = mint_operator_fork(
                     stores=self._store,
                     campaign_id=campaign_id,
                     cycle_id=cycle_id,
@@ -408,6 +416,13 @@ class CommandDispatcher:
                     from_candidate_id=str(payload_extras.get("candidate_id", "")),
                     seed=seed,
                     steered_by=str(payload_extras.get("steered_by", "")),
+                )
+                await self._apply_start_run(
+                    campaign_id=campaign_id,
+                    cycle_id=new_cycle_id,
+                    kind="resume",
+                    halt_at_accuracy=None,
+                    spend_budget_usd=None,
                 )
 
             return _apply_fork
@@ -701,17 +716,16 @@ def _optional_float(raw: object) -> float | None:
     return None
 
 
-def _parse_fork_seed(raw: object) -> ForkSeed | None:
-    """Validate the optional ``fork-cycle`` seed into a typed :class:`ForkSeed`.
+def _parse_fork_seed(raw: object) -> ForkSeed:
+    """Validate the required ``fork-cycle`` seed into a typed :class:`ForkSeed`.
 
-    ``None`` ⇒ an endorse fork (no operator edits). A present-but-malformed seed
-    is a 422 (the typed schema is the contract; `LimitOverrides` bounds ride
+    Every operator fork is `operator_steered` and carries a seed (the edited
+    searchpoint + reconciled limits). A missing or malformed seed is a 422 (the
+    typed schema is the contract; `LimitOverrides` bounds ride
     `m12-api-openapi.yaml`)."""
-    if raw is None:
-        return None
     if not isinstance(raw, dict):
         raise HTTPException(
-            422, {"error": "payload_invalid", "message": "payload.seed must be an object."}
+            422, {"error": "payload_invalid", "message": "payload.seed (object) is required."}
         )
     try:
         return ForkSeed.model_validate(raw)

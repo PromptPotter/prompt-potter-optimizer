@@ -25,6 +25,13 @@ export const KIND_GLYPH: Record<SiblingKind, string> = {
   diag: "Δ",
 };
 
+// Operator-fork provenance mark, appended after the kind glyph. "✎" = the
+// operator steered the searchpoint (operator_steered). Everything else
+// (auto/divergence/sweep) is unmarked.
+export const TRIGGER_GLYPH: Record<string, string> = {
+  operator_steered: "✎",
+};
+
 // Build immediate-parent map + per-parent child list (sorted by recency
 // of fork) so the BFS lays out forks under their parent in a stable order.
 export interface CycleNode {
@@ -142,6 +149,9 @@ export interface RoundNodePos {
   label: string;
   isLastInLane: boolean;
   sibling_kind: SiblingKind;
+  // Fork creation trigger — drives the operator_steered / operator_endorse
+  // provenance glyph beside the lane label.
+  trigger: string;
 }
 export interface BranchSeg {
   x1: number;
@@ -181,6 +191,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
         label: round.label || winnerCandidate?.label || "",
         isLastInLane: round.round === lastRound,
         sibling_kind: l.cycle.sibling_kind,
+        trigger: l.cycle.trigger,
       };
       nodes.push(node);
       nodeByRowKey.set(`${l.cycle.cycle_id}::r${round.round}`, node);

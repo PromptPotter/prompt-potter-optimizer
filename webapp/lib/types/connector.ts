@@ -14,10 +14,12 @@
 // model surface; the connector popover reads `active` + `others` for
 // the security chips + multi-backend switcher.
 //
-// The real connector_state probe (live `/connector/{name}/health`) is
-// an M12 control-plane add — `isLive` is its proxy today.
+// `health` is the real connector reachability probe (`GET /backends/{id}/health`
+// → BackendClient.check_status), polled on a slow cadence — the connector node's
+// true up/down. `isLive` (live per-node observations from the run) is a separate
+// signal: whether the optimizer is actively scoring through this connector.
 
-import type { BackendInfo, OptimizerLocks } from "@/lib/api";
+import type { BackendHealth, BackendInfo, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import type { NodeDataLike, PipelineView } from "@/components/workflow/types";
 
 export interface ConnectorView {
@@ -30,9 +32,16 @@ export interface ConnectorView {
   isTls: boolean | null;
   currentNodes: Record<string, NodeDataLike>;
   isLive: boolean;
-  // The minted-pipeline optimizer-lock surface + origin prompt the backend-node
-  // detail renders (from `GET /datasets/{name}/pipeline`). Null until the
-  // dataset overlay resolves (or in demo, where there's no real dataset).
-  optimizerLocks: OptimizerLocks | null;
+  // Connector reachability from the slow `/backends/{id}/health` probe. Null
+  // until the first probe lands (or when no backend is resolved).
+  health: BackendHealth | null;
+  // The FULL operator-editable config surface per node (model/temperature/
+  // thinking/max_tokens/provider) the steer + read-only node-detail panels
+  // render, from `GET /datasets/{name}/pipeline`. Null until the dataset overlay
+  // resolves (or in demo, where there's no real dataset).
+  nodeConfigSchema: Record<string, NodeConfigParam[]> | null;
+  // The per-node structured-output contract (read-only), shown beside the config
+  // so the operator sees the whole node. Same fetch.
+  nodeOutputSchema: Record<string, NodeOutputSchema | null> | null;
   startingPrompt: Record<string, unknown> | null;
 }

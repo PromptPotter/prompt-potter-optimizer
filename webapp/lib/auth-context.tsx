@@ -84,3 +84,25 @@ export function useAuth(): AuthCtx {
   if (!ctx) throw new Error("useAuth must be used inside <AuthProvider>");
   return ctx;
 }
+
+// Poll gate. Every protected `/api/v1/*` read 401s without a session, so a
+// poll loop must (1) not run while unauthed and (2) detect a session that
+// died mid-run. `authed` gates `usePoll`'s `enabled`; `onAuthError`, called
+// from a tick's catch, re-probes `/auth/me` when a read 401s — confirming the
+// dead session and flipping `status` to "unauthed", which drops `authed` and
+// halts the loop. Without this a tab whose session died (e.g. server restart)
+// would 401-storm forever, since `/auth/me` is otherwise only re-probed on
+// window focus. Reads throw `Error("401 …")` (see lib/api/client.ts::jget).
+export function useAuthGate(): {
+  authed: boolean;
+  onAuthError: (err: unknown) => void;
+} {
+  const { status, refresh } = useAuth();
+  const onAuthError = useCallback(
+    (err: unknown) => {
+      if (err instanceof Error && err.message.startsWith("401 ")) refresh();
+    },
+    [refresh],
+  );
+  return { authed: status === "authed", onAuthError };
+}

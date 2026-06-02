@@ -36,6 +36,12 @@ Remaining after the 2026-05-28 unblocker arc (shipped: webapp source maps, conne
 
 1. **TermNorm wire `model`** — cross-repo edit at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`. With the connector revision-pin landed (`promptpotter/connectors/protocol.py::Connector.{expected_revision, version_check}`), the TermNorm-side PR adds `model` to the per-request response + a `/version` endpoint; this repo bumps `termnorm.py::_EXPECTED_REVISION` to the new SHA and deletes the `_synth_legacy_backend_record` back-fill in `presentation/api/routers/auth.py`.
 
+### Operator-steered-fork drift (v0.8.1 — found 2026-06-03)
+
+The large steer-fork feature (10 phases + 4 refinements + the chat-Origin consolidation) left these. Knots 1–4 shipped in the v0.8.1 panel-fix arc: `operator_endorse` collapsed (seed now required; `OPERATOR_STEERED` is the sole operator trigger); the twin editors split + renamed (`PipelineConfigEditor` → `AllowedValuesEditor` for ingest allowed-values; `NodeConfigEditor` is the steer/value editor, now also rendering the read-only node detail schema-driven); the dashboard→chat steer routing collapsed (`ScoringInspector` opens the steer `Dialog` directly — no tab hop, no node+candidate co-presence inference); the unregistered "Substitute candidates" ghost button cut. The dead `optimizer_locks` read path went with them (`PipelineSchema.optimizer_locks()` + the served field + `cv.optimizerLocks` deleted; ingest keeps its own `derive_optimizer_locks` draft path). Remaining:
+
+1. **Reconcile defaults snapshot `dash` at mount while the parent keeps polling.** `forkReconcileDefaults`/`LimitReconcile` freeze spend/round "remaining" via `useState(() => …)`; a long edit session shows mount-time remaining, not current. *Why debt:* latent staleness seam — intentional (avoids clobbering the operator's typed values) but undocumented, so a future reader may "fix" it into a clobber. **Action:** one-line comment affirming the snapshot is deliberate, or recompute-on-reopen. **Blocker:** none.
+
 ### Entries
 
 ### Deep indirection — scoped, not slated

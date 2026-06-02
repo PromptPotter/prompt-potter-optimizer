@@ -65,34 +65,33 @@ export interface LimitOverrides {
 }
 
 // The edited-searchpoint origin override — twin of the OpenAPI `ForkSeed`.
-// Presence promotes the fork to `operator_steered`; absence is an
-// endorse-as-is `operator_endorse`. `starting_prompt` is the PromptTemplate
-// field shape; `pipeline_overlay` is the candidate's `nodes.*.config` delta,
-// carried verbatim and merged onto the dataset overlay at fork bootstrap.
+// Required on every operator fork (all are `operator_steered`). `starting_prompt`
+// is the PromptTemplate field shape; `pipeline_overlay` is the candidate's
+// `nodes.*.config` delta, carried verbatim and merged onto the dataset overlay
+// at fork bootstrap.
 export interface ForkSeed {
   starting_prompt?: Record<string, unknown>;
   pipeline_overlay?: Record<string, unknown>;
   limit_overrides?: LimitOverrides;
 }
 
-// Endorse (no seed → `operator_endorse`) or steer (seed → `operator_steered`)
-// a fork rooted at the selected searchpoint. The single fork write path — the
-// dispatcher stamps the trigger from the seed's presence.
+// Mint an `operator_steered` fork rooted at the selected searchpoint, carrying
+// the operator's edits + reconciled limits. The single fork write path.
 export async function postCreateFork(
   campaignId: string,
   cycleId: string,
   round: number,
   candidateId: string,
-  opts?: { seed?: ForkSeed; steeredBy?: string },
+  opts: { seed: ForkSeed; steeredBy?: string },
 ): Promise<CommandAcceptedBody> {
   const payload: Record<string, unknown> = {
     campaign_id: campaignId,
     cycle_id: cycleId,
     round,
     candidate_id: candidateId,
+    seed: opts.seed,
   };
-  if (opts?.seed) payload.seed = opts.seed;
-  if (opts?.steeredBy) payload.steered_by = opts.steeredBy;
+  if (opts.steeredBy) payload.steered_by = opts.steeredBy;
   return _postCommand("fork-cycle", payload);
 }
 

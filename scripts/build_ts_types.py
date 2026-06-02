@@ -16,6 +16,7 @@ from pydantic.fields import FieldInfo
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
+from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
 from promptpotter.domain.results import (
     DiagnosticRunRecord,
     OriginSummary,
@@ -91,6 +92,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     MeasurementDot,
     SampleSeries,
     MeasurementSeriesResponse,
+    NodeConfigParam,
+    NodeOutputSchema,
     DatasetPipelineResponse,
     # --- active router ---
     ActiveSessionResponse,

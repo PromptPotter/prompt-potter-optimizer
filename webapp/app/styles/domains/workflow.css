@@ -8,7 +8,13 @@
 /* Workflow canvas — sized small. Pipeline topology is reference info,
    not a primary view; cap the canvas so it doesn't take a third of the
    page. The SVG aspect-locks; cap width → height drops in lockstep. */
-.workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;margin-bottom:14px}
+.workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;margin-bottom:14px;width:fit-content;max-width:100%}
+/* Running cycle (live + fresh connection): wash the whole card green and
+   weakly pulse so the optimizer reads as "active" at a glance. Neutralised
+   under reduced-motion; the tint + border + "● live" label still carry it. */
+.workflow-card.running{border-color:var(--color-success-border);background:var(--color-success-bg);animation:wf-running-pulse 2s ease-in-out infinite}
+.workflow-card.running .workflow-canvas-bg{background-color:var(--color-success-bg)}
+@keyframes wf-running-pulse{0%,100%{box-shadow:0 0 0 0 rgba(var(--color-success-rgb),0)}50%{box-shadow:0 0 14px 1px rgba(var(--color-success-rgb),0.35)}}
 .workflow-toolbar{padding:6px 12px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--color-text-secondary)}
 .workflow-round-pick{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-tertiary)}
 .workflow-round-pick select{background:var(--color-background-secondary);color:var(--color-text-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-sm);padding:1px 6px;font-family:inherit;font-size:11px;cursor:pointer}
@@ -16,7 +22,7 @@
 .workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%;display:flex;align-items:center;justify-content:center}
 /* One compact wide-short canvas at every width — aspect-ratio mirrors
    CANVAS_W/CANVAS_H. Keeps the optimizer card short on desktop too. */
-.workflow-canvas{position:relative;width:100%;max-width:360px;aspect-ratio:360/160;margin:0 auto;overflow:hidden}
+.workflow-canvas{position:relative;width:360px;max-width:100%;aspect-ratio:360/160;overflow:hidden}
 /* SVG `<g>` wrapping each node — keyboard focus + click affordance. */
 .wf-node{cursor:pointer;user-select:none;outline:none}
 .wf-node[aria-disabled="true"]{cursor:default}

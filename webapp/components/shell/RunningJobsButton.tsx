@@ -5,7 +5,7 @@ import { Popover } from "@/components/ui/Popover";
 // The most direct "is anything running?" signal, sitting in the topbar next to
 // the view tabs. Absent when idle, the Potter glyph when one cycle is live, and
 // the glyph + a count badge when several are. It reads the same `cycles` list
-// the sidebar renders (polled every 2 s by WorkspaceProvider) and filters on the
+// the sidebar renders (polled by WorkspaceProvider) and filters on the
 // live `running` flag — no separate poll, no separate source of truth.
 
 interface Props {

@@ -9,6 +9,7 @@ import {
   phaseToNodeId,
 } from "./layout";
 import { TERMS } from "@/lib/terms";
+import { cx } from "@/lib/cx";
 import { getCss } from "@/lib/theme";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { availableRounds } from "@/lib/derivations/round-axis";
@@ -118,7 +119,7 @@ export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
   };
 
   return (
-    <div className="workflow-card">
+    <div className={cx("workflow-card", isLive && "running")}>
       <div className="workflow-toolbar">
         <span style={{ flex: 1 }}>Optimizer</span>
         <span style={{ color: isLive ? colors.ok : colors.txt }}>

@@ -28,6 +28,7 @@ from promptpotter.application.intelligence.measurement_series import (
 )
 from promptpotter.application.jobs.launcher import draft_wire_with_locks
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
 from promptpotter.infrastructure.store import (
     DatasetAccessError,
     campaign_root_dir_for,
@@ -561,24 +562,31 @@ async def get_dataset_measurement_series(
 class DatasetPipelineResponse(BaseModel):
     """Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;
     `pipeline` is the full parsed schema for consumers needing per-node config; `connector` is
-    the original-cased name for chip labelling. `optimizer_locks` is the minted-pipeline
-    permission surface (same shape the draft wire carries) the backend-node detail renders;
-    `starting_prompt` is the origin PromptTemplate for the primary node (None when the dataset
-    ships no `prompts/`).
+    the original-cased name for chip labelling; `starting_prompt` is the origin PromptTemplate
+    for the primary node (None when the dataset ships no `prompts/`).
     """
 
     name: str
     connector: str
     pipeline: dict[str, Any]
     view: dict[str, Any] | None
-    optimizer_locks: dict[str, Any]
+    # The full operator-editable config surface per node (model/temperature/
+    # thinking/max_tokens/provider — the node's whole config minus prompt fields),
+    # the steer + read-only node-detail control surface. The `optimizer_locked`
+    # flag per param marks what the optimizer may not permute (model/provider
+    # under a strict campaign), which the operator may still set on a fork seed.
+    node_config_schema: dict[str, list[NodeConfigParam]]
+    # Per-node structured-output contract (read-only) — the steer panel shows it
+    # beside the config so the operator sees the WHOLE node (model + params +
+    # prompt + the structured output it produces). None for nodes with no schema.
+    node_output_schema: dict[str, NodeOutputSchema | None]
     starting_prompt: dict[str, Any] | None
 
 
 @_datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
 async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
-    """Return the dataset overlay's parsed pipeline schema, graph view, optimizer-lock
-    surface, and origin prompt.
+    """Return the dataset overlay's parsed pipeline schema, graph view, per-node
+    config + output schema, and origin prompt.
 
     Identity-gated through the same resolver as the other dataset reads — there is
     no unauthenticated path to a benchmark's pipeline/overlay config.
@@ -618,7 +626,8 @@ async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineRes
         connector=connector,
         pipeline=schema.model_dump(by_alias=True),
         view=schema.view.model_dump(by_alias=True) if schema.view is not None else None,
-        optimizer_locks=schema.optimizer_locks(forbidden_strict),
+        node_config_schema=schema.node_config_schema(forbidden_strict),
+        node_output_schema=schema.node_output_schemas(),
         starting_prompt=starting_prompt,
     )
 

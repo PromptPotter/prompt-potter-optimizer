@@ -1,6 +1,7 @@
 "use client";
 import { memo, useEffect, useMemo, useRef } from "react";
 import { TERMS } from "@/lib/terms";
+import { cx } from "@/lib/cx";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { headlineStats } from "@/lib/derivations/headline-stats";
@@ -97,6 +98,11 @@ export const TopStrip = memo(function TopStrip({ dash, dashRound, runPhase }: Pr
   const qPct = qm && qm.tot ? Math.min(100, Math.round((qm.cur / qm.tot) * 100)) : 0;
   const qpsTxt = qps != null ? `${qps.toFixed(qps < 10 ? 2 : 1)} q/s` : null;
   const phaseTip = TERMS[`phase_${phase.toLowerCase()}`] ?? "";
+  // The tag is success-green by default; recolour it when the phase contradicts
+  // that — a crash terminal reads danger, a detached/stopping run reads warn.
+  // A clean terminal (target hit / max rounds, no error record) stays green.
+  const phaseErr = dash?.run_phase === "terminal" && !!dash?.error;
+  const phaseWarn = runPhase === "detached" || runPhase === "stopping";
 
   return (
     <div className="topstrip">
@@ -114,7 +120,7 @@ export const TopStrip = memo(function TopStrip({ dash, dashRound, runPhase }: Pr
       </span>
       <span className="topstrip-sep" aria-hidden="true" />
       <span className="topstrip-phase">
-        <span className="phase-tag" title={phaseTip}>{phase}</span>
+        <span className={cx("phase-tag", phaseErr && "is-error", phaseWarn && "is-warn")} title={phaseTip}>{phase}</span>
         <span className="topstrip-round">{round}</span>
       </span>
       <span className="topstrip-sep" aria-hidden="true" />

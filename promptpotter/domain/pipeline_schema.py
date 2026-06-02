@@ -7,7 +7,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+
+# Prompt-decomposition fields the prompt editor owns — excluded from the
+# operator-editable node-config surface (they live in `param_keys` too, but the
+# steer panel edits them through `PromptFieldsEditor`, not the config widgets).
+_PROMPT_OWNED_FIELDS = frozenset(PROMPT_STRING_FIELDS) | {"few_shot_examples", "plan"}
 
 
 def stable_hash(value: Any) -> str:
@@ -119,6 +125,26 @@ class PipelineNode(BaseModel):
         return any(m.is_llm for m in self.observation_mappings)
 
 
+class NodeConfigParam(BaseModel):
+    """One operator-editable config param of a node — the FULL config surface the
+    operator-steer panel renders, NOT the optimizer-permutation subset
+    (`optimizer_locks`). `kind` drives the input widget (`model`/`enum` → a
+    select, `number`/`bool`/`string` → a typed input); `options` lists the
+    choices for `model` (from `available_models`) and `enum` (from
+    `param_allowed_values`). `optimizer_locked` flags a param the *optimizer* may
+    not permute (model/provider under a strict campaign) — shown for the operator,
+    who may still set it on a steered fork via the seed overlay."""
+
+    model_config = {"frozen": True}
+
+    key: str
+    value: Any = None
+    kind: str  # "model" | "enum" | "number" | "bool" | "string"
+    options: list[str] = Field(default_factory=list)
+    description: str = ""
+    optimizer_locked: bool = False
+
+
 class PipelineSchema(BaseModel):
     """Frozen, backend-agnostic pipeline description; SoT for identity at campaign start."""
 
@@ -157,29 +183,57 @@ class PipelineSchema(BaseModel):
         """``{"steps": [...]}`` sparse scaffold — backend merges per-node config defaults."""
         return {"steps": list(self.active_steps)}
 
-    def optimizer_locks(self, forbidden_strict: bool) -> dict[str, Any]:
-        """The optimizer permission surface for a *minted* pipeline — same wire shape
-        as ``application/jobs/launcher.py::derive_optimizer_locks`` (the draft-side sibling).
-
-        Read straight off the committed schema: ``pipeline`` is the active step order,
-        each node carries its ``config`` floor + the ``param_allowed_values`` the optimizer
-        may permute. ``forbidden_strict`` is the campaign-level
-        ``optimization.forbidden_axes_strict`` policy (NOT derivable from the pipeline —
-        a node may declare ``model`` in ``param_keys`` as a capability while the campaign
-        still pins it); the caller reads it from the dataset's ``campaign.json``. The two
-        derivations must stay shape-consistent — change them together.
+    def node_config_schema(self, forbidden_strict: bool) -> dict[str, list[NodeConfigParam]]:
+        """The operator-editable config surface per node — the FULL config the
+        node carries (the UNION of ``param_keys`` and the node's actual
+        ``current_config``) except the prompt-decomposition fields (the prompt
+        editor owns those). Config-only keys not advertised as tunable (e.g.
+        ``provider: groq``) bundle in too, so the operator sees the WHOLE node as
+        one unit. Unlike :meth:`optimizer_locks`, model/provider are INCLUDED
+        (the operator isn't the optimizer — the seed overlay outranks the
+        dataset). Widget ``kind`` resolves from ``model`` (→ ``available_models``)
+        → ``param_allowed_values`` (→ enum) → ``param_types`` (number/bool/string;
+        ``param_types`` covers config-only keys too, see ``_infer_param_types``).
+        ``forbidden_strict`` only sets the display-only ``optimizer_locked`` flag.
         """
-        return {
-            "pipeline": list(self.active_steps),
-            "forbidden_axes": sorted(PARAM_FORBIDDEN_KEYS) if forbidden_strict else [],
-            "nodes": {
-                n.name: {
-                    "config": dict(n.current_config),
-                    "param_allowed_values": {k: list(v) for k, v in n.param_allowed_values.items()},
-                }
-                for n in self.nodes
-            },
-        }
+        locked = PARAM_FORBIDDEN_KEYS if forbidden_strict else frozenset()
+        out: dict[str, list[NodeConfigParam]] = {}
+        for n in self.nodes:
+            params: list[NodeConfigParam] = []
+            for key in sorted((n.param_keys | set(n.current_config)) - _PROMPT_OWNED_FIELDS):
+                if key == "model":
+                    kind, options = "model", list(self.available_models)
+                elif key in n.param_allowed_values:
+                    kind, options = "enum", list(n.param_allowed_values[key])
+                else:
+                    t = n.param_types.get(key, "string")
+                    kind = (
+                        "number"
+                        if t in ("number", "integer")
+                        else "bool"
+                        if t == "boolean"
+                        else "string"
+                    )
+                    options = []
+                params.append(
+                    NodeConfigParam(
+                        key=key,
+                        value=n.current_config.get(key),
+                        kind=kind,
+                        options=options,
+                        description=n.param_descriptions.get(key, ""),
+                        optimizer_locked=key in locked,
+                    )
+                )
+            out[n.name] = params
+        return out
+
+    def node_output_schemas(self) -> dict[str, NodeOutputSchema | None]:
+        """Per-node structured-output contract (``fields`` / ``field_descriptions`` /
+        ``json_schema``) keyed by node name — the read-only companion to
+        :meth:`node_config_schema` so the steer panel can show the WHOLE node:
+        model + params + prompt + the structured output it produces."""
+        return {n.name: n.output_schema for n in self.nodes}
 
     def has_node(self, name: str) -> bool:
         return name in self._node_map
@@ -231,6 +285,7 @@ class PipelineSchema(BaseModel):
 
 
 __all__ = [
+    "NodeConfigParam",
     "NodeOutputSchema",
     "NodePromptMeta",
     "NodeType",

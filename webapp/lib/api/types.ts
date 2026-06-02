@@ -31,6 +31,8 @@ export type {
   LiveDashboardState,
   MeasurementDot,
   MeasurementSeriesResponse,
+  NodeConfigParam,
+  NodeOutputSchema,
   OriginSummary,
   PerQueryRow,
   RoundSummary,

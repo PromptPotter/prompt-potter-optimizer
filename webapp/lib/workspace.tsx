@@ -38,6 +38,7 @@ import {
 } from "./api";
 import { usePoll } from "./usePoll";
 import { useRevalidation } from "./revalidate";
+import { useAuthGate } from "./auth-context";
 
 export interface WorkspaceState {
   sessionId: string | null;
@@ -84,6 +85,10 @@ export function useWorkspace(): WorkspaceState {
   return v;
 }
 
+// Reconnect cadence while the API is unreachable — matches lib/poll.tsx's
+// RECONNECT_INTERVAL_MS so both polls retry a downed server on the same 5 s beat.
+const RECONNECT_INTERVAL_MS = 5000;
+
 function urlPin(): UnitPin | null {
   if (typeof window === "undefined") return null;
   const p = new URLSearchParams(window.location.search);
@@ -93,7 +98,7 @@ function urlPin(): UnitPin | null {
 }
 
 export function WorkspaceProvider({
-  intervalMs = 2000,
+  intervalMs = 10000,
   children,
 }: {
   intervalMs?: number;
@@ -115,6 +120,10 @@ export function WorkspaceProvider({
   const [activeError, setActiveError] = useState<string | null>(null);
   const [lifecycleFilter, setLifecycleFilter] =
     useState<LifecycleFilter>("active");
+
+  // Poll only with a confirmed session; a 401 on any of the three reads
+  // re-probes /auth/me so the loop halts when the session dies (useAuthGate).
+  const { authed, onAuthError } = useAuthGate();
 
   // Tracks the active pointer from the last successful poll. When the
   // server-side pointer transitions to a *different* cycle (CLI ran
@@ -145,10 +154,13 @@ export function WorkspaceProvider({
 
   // One poll — active pointer, cycle list, and campaign registry move
   // together so the list, the `●` pointer, and the sidebar can never
-  // disagree. `usePoll` owns the interval, the hidden-tab pause, the focus
-  // wake (a `new` run in another terminal shows within a frame), and
-  // per-tick aborts; a mutation bump (`useRevalidation`) forces an
-  // immediate re-tick so a fork / stop lands without a poll-interval wait.
+  // disagree. The 10 s `intervalMs` is the *passive* floor: this is
+  // registry-level data that changes rarely, so it doesn't need the live
+  // dashboard's 2 s cadence. Operator actions bypass it — `usePoll` owns
+  // the interval, the hidden-tab pause, the focus wake (a `new` run in
+  // another terminal shows within a frame), and per-tick aborts; a mutation
+  // bump (`useRevalidation`) forces an immediate re-tick so a fork / stop
+  // lands without a poll-interval wait.
   const tick = useCallback(async (signal: AbortSignal) => {
     const [activeRes, cyclesRes, campaignsRes] = await Promise.allSettled([
       fetchActive(signal),
@@ -156,6 +168,11 @@ export function WorkspaceProvider({
       fetchCampaigns(undefined, signal, lifecycleFilter),
     ]);
     if (signal.aborted) return;
+    // A 401 on any read means the session died — re-probe /auth/me so the
+    // gate flips unauthed and this loop stops instead of storming 401s.
+    for (const r of [activeRes, cyclesRes, campaignsRes]) {
+      if (r.status === "rejected") onAuthError(r.reason);
+    }
     let nextActiveCycle: string | null = null;
     let nextActiveCampaign: string | null = null;
     if (activeRes.status === "fulfilled") {
@@ -209,8 +226,17 @@ export function WorkspaceProvider({
       setCampaigns(campaignsRes.value.campaigns);
     }
     setCyclesLoaded(true);
-  }, [lifecycleFilter]);
-  usePoll(tick, { intervalMs, tickOnFocus: true, revalidateOn: useRevalidation() });
+  }, [lifecycleFilter, onAuthError]);
+  // Two cadences, mirroring the dashboard poll: when both the active pointer
+  // and the cycle list fail, the API is unreachable — back off to the 5 s
+  // reconnect probe instead of hammering 2 s. Either succeeding = reachable.
+  const wsOffline = activeError != null && cyclesError != null;
+  usePoll(tick, {
+    intervalMs: wsOffline ? RECONNECT_INTERVAL_MS : intervalMs,
+    tickOnFocus: true,
+    enabled: authed,
+    revalidateOn: useRevalidation(),
+  });
 
   // The viewed unit: the server pointer while following, else the pin.
   // campaignId is authoritative on both sides — never inferred from a

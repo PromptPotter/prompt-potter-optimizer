@@ -5,6 +5,7 @@ import {
   COL_W,
   HEADER_H,
   KIND_GLYPH,
+  TRIGGER_GLYPH,
   LANE_H,
   LEFT_PAD,
   NODE_R,
@@ -169,6 +170,7 @@ export function Forest({
                   >
                     <tspan className="family-cladogram-glyph">
                       {KIND_GLYPH[n.sibling_kind]}
+                      {TRIGGER_GLYPH[n.trigger] ?? ""}
                     </tspan>
                     <tspan dx="4">{rowLabelText}</tspan>
                   </text>
@@ -208,6 +210,9 @@ export function Forest({
                 <title>
                   {cyc.cycle_id}
                   {`\n${cyc.sibling_kind}`}
+                  {cyc.trigger === "operator_steered"
+                    ? ` · steered${cyc.steered_by ? ` by ${cyc.steered_by}` : ""}`
+                    : ""}
                   {cyc.status ? ` · ${cyc.status}` : ""}
                   {cyc.best_accuracy != null
                     ? ` · best ${fmtPct0(cyc.best_accuracy)}`

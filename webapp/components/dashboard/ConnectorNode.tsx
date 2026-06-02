@@ -1,7 +1,7 @@
 // Connector-state inspector — small dot button + hover popover sitting
 // over the Input→LLM arrow. Presentational; receives one `view:
 // ConnectorView` prop. The data join (registered backends + dataset
-// overlay + dashboard live state) is owned by `useConnectorView` so this
+// overlay + dashboard live state) is owned by the `ConnectorProvider` so this
 // component never fetches, derives, or matches by string.
 //
 // Mother object on the Python side: `BackendConnection`
@@ -12,6 +12,8 @@
 // registered alternatives (switching is read-only today; the M12
 // control-plane wires the write half).
 
+import { cx } from "@/lib/cx";
+import { connectorReachability } from "@/lib/derivations/connector-state";
 import type { ConnectorView } from "@/lib/types/connector";
 
 const SECURITY_DOC_URL =
@@ -30,14 +32,20 @@ export function ConnectorNode({ view }: Props) {
     baseUrl,
     isTls,
     currentNodes,
-    isLive,
+    health,
   } = view;
-  const stateCls = isLive ? "live" : "idle";
-  const stateLabel = isLive ? "connected" : "idle";
+  // Reachability verdict — shared with the CriticalAlertBanner so the LED and
+  // the top banner can never disagree (lib/derivations/connector-state.ts).
+  const { reachable, stateCls, stateLabel } = connectorReachability(health);
+  const footText = !health
+    ? "probe pending…"
+    : reachable
+      ? `reachable · ${new Date(health.checked_at).toLocaleTimeString()}`
+      : `unreachable${health.detail ? ` · ${health.detail}` : ""}`;
   const interior = pipelineView ? pipelineView.nodes.filter((n) => n.kind !== "io") : [];
 
   return (
-    <span className={`connector ${stateCls}`}>
+    <span className={cx("connector", stateCls)}>
       <button
         type="button"
         className="connector-dot"
@@ -121,7 +129,7 @@ export function ConnectorNode({ view }: Props) {
             </ul>
           </div>
         )}
-        <div className="connector-pop-foot">live probe pending</div>
+        <div className="connector-pop-foot">{footText}</div>
       </div>
     </span>
   );

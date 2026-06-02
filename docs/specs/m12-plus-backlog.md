@@ -20,7 +20,6 @@ M12+ is the opportunistic bucket. Items here ship after M12 as user demand, time
 | Cost tracking | Token usage and $ cost per campaign / round / variant. Feeds cost-aware optimizer strategies and reproducibility manifests |
 | API tests | Deferred from entry-point parity work |
 | Health endpoint | `GET /api/v1/health` with dependency status (backend, store, LLM provider) |
-| CONTRIBUTING.md | External contributor onboarding |
 | Docker hardening | Non-root user, minimal base image, secrets handling |
 | Notebook tests | Catch notebook import drift |
 | Metrics | Prometheus exporter for campaign progress, queue depth, LLM latency |

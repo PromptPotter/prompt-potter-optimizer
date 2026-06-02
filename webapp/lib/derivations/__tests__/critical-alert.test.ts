@@ -1,0 +1,110 @@
+import { describe, expect, it } from "vitest";
+import { criticalAlert } from "@/lib/derivations/critical-alert";
+import type { DashboardSnapshot } from "@/lib/poll";
+
+const base = {
+  bannerStatus: "live" as const,
+  bannerText: "Live · last write 2s ago",
+  bannerHint: undefined,
+  dash: null as DashboardSnapshot | null,
+  runPhaseResolved: "running" as string | null,
+};
+
+describe("criticalAlert", () => {
+  it("returns null on a clean live run", () => {
+    expect(criticalAlert(base)).toBeNull();
+  });
+
+  it("flags a crashed run as critical, regardless of connection", () => {
+    const dash = {
+      run_phase: "terminal",
+      error: { kind: "CRASHED", message: "boom\nretry", stop_reason: "crashed" },
+    } as DashboardSnapshot;
+    expect(criticalAlert({ ...base, dash })).toEqual({
+      severity: "critical",
+      title: "Run crashed — CRASHED",
+      detail: "stop: crashed",
+    });
+  });
+
+  it("flags server-unreachable (offline) as critical with the hint as detail", () => {
+    expect(
+      criticalAlert({
+        ...base,
+        bannerStatus: "offline",
+        bannerText: "Server unreachable — retrying",
+        bannerHint: "Resume: python -m promptpotter resume",
+        runPhaseResolved: null,
+      }),
+    ).toEqual({
+      severity: "critical",
+      title: "Server unreachable — retrying",
+      detail: "Resume: python -m promptpotter resume",
+    });
+  });
+
+  it("flags a detached (silent) run as a warning", () => {
+    expect(
+      criticalAlert({
+        ...base,
+        bannerStatus: "stale",
+        bannerText: "Stale · last write 90s ago",
+        runPhaseResolved: "detached",
+      }),
+    ).toEqual({
+      severity: "warn",
+      title: "Run went silent",
+      detail: "Stale · last write 90s ago",
+    });
+  });
+
+  it("does not flag a clean terminal (no error record)", () => {
+    const dash = { run_phase: "terminal", stop_reason: "target_reached" } as DashboardSnapshot;
+    expect(criticalAlert({ ...base, dash, runPhaseResolved: "terminal" })).toBeNull();
+  });
+
+  it("stays silent for warming_up (reachable, no snapshot yet)", () => {
+    const out = criticalAlert({
+      ...base,
+      bannerStatus: "stale",
+      bannerText: "Origin running",
+      runPhaseResolved: null,
+    });
+    expect(out).toBeNull();
+  });
+
+  it("crash takes precedence over offline", () => {
+    const dash = {
+      run_phase: "terminal",
+      error: { kind: "DIVERGED", message: "x", stop_reason: "diverged" },
+    } as DashboardSnapshot;
+    const out = criticalAlert({ ...base, bannerStatus: "offline", dash });
+    expect(out?.title).toBe("Run crashed — DIVERGED");
+  });
+
+  it("flags an unreachable backend as critical (the LED's twin)", () => {
+    expect(
+      criticalAlert({
+        ...base,
+        connectorDown: true,
+        connectorName: "termnorm",
+        connectorDetail: "All connection attempts failed",
+      }),
+    ).toEqual({
+      severity: "critical",
+      title: "Backend unreachable — termnorm",
+      detail: "All connection attempts failed",
+    });
+  });
+
+  it("server-offline takes precedence over a down backend", () => {
+    const out = criticalAlert({
+      ...base,
+      bannerStatus: "offline",
+      bannerText: "Server unreachable — retrying",
+      connectorDown: true,
+      connectorName: "termnorm",
+    });
+    expect(out?.title).toBe("Server unreachable — retrying");
+  });
+});

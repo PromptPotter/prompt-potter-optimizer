@@ -178,9 +178,15 @@ _PY_TO_JSON_TYPE: dict[type, str] = {
 
 
 def _infer_param_types(opt: dict[str, Any], node_config: dict[str, Any]) -> dict[str, str]:
-    """Resolve JSON-schema ``param_types`` for an optimizer node.
+    """Resolve JSON-schema ``param_types`` for a node — covering EVERY key the
+    node carries, not just the optimizer-tunable ``param_keys``.
 
-    Three-tier resolution, highest-precedence first:
+    A node's ``config`` can hold keys not declared in ``param_keys`` (e.g.
+    ``provider: groq`` — set but not advertised as tunable). The operator-steer
+    panel bundles those too (``node_config_schema`` walks the union), so their
+    widget kind must resolve. Iteration is ``param_keys`` followed by the
+    config-only keys, both run through the same three-tier resolution,
+    highest-precedence first:
 
     1. Explicit ``optimizer.param_types`` on the dataset overlay (rare; only
        needed for backend-specific params with no project-wide convention).
@@ -196,7 +202,9 @@ def _infer_param_types(opt: dict[str, Any], node_config: dict[str, Any]) -> dict
        True in Python — dict-iteration order in ``_PY_TO_JSON_TYPE`` matters.
     """
     declared: dict[str, str] = dict(opt.get("param_types", {}) or {})
-    for param in opt.get("param_keys", []) or []:
+    param_keys = list(opt.get("param_keys", []) or [])
+    config_only = [k for k in node_config if k not in param_keys]
+    for param in (*param_keys, *config_only):
         if param in declared:
             continue
         if param in WELL_KNOWN_PARAM_TYPES:

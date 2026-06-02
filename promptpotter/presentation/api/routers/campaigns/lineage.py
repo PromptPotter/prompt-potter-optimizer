@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import (
+    UNATTRIBUTED_OPERATOR,
     ForkTrigger,
     ResumeCheckpointKind,
     ResumeCheckpointRecord,
@@ -26,12 +27,10 @@ from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
-# Operator forks (endorse / steered) are clean offshoots: numbering restarts at
-# 1, so all their rounds are post-divergence by definition and the lane sits one
-# column past the parent's fork point.
-_OPERATOR_RESTART_TRIGGERS = frozenset(
-    {ForkTrigger.OPERATOR_ENDORSE.value, ForkTrigger.OPERATOR_STEERED.value}
-)
+# An operator-steered fork is a clean offshoot: numbering restarts at 1, so all
+# its rounds are post-divergence by definition and the lane sits one column past
+# the parent's fork point.
+_OPERATOR_RESTART_TRIGGER = ForkTrigger.OPERATOR_STEERED.value
 
 
 class CampaignLineageCandidate(BaseModel):
@@ -66,6 +65,10 @@ class CampaignLineageCycle(BaseModel):
     fork_from_candidate_id: str | None
     # Fork creation trigger — drives the round-numbering convention.
     trigger: str
+    # Operator who steered the fork (ForkSpec.issued_by), when attributed.
+    # None for non-operator forks and for the unattributed "operator" default.
+    # Surfaced as the lineage "edited by {name}" badge on operator_steered forks.
+    steered_by: str | None = None
     # X-axis offset for this cycle's rounds in the campaign cladogram —
     # add to each round's ``round`` number to get its absolute column.
     round_column_offset: int
@@ -134,10 +137,10 @@ def _filter_post_divergence_rounds(
     parent (round <= fork_from_round). Those rounds belong to the parent's
     lane and would visually overlap if rendered in the fork's lane.
 
-    Operator endorse/steered forks restart numbering at 1 so all their rounds
-    are post-divergence by definition — return as-is.
+    An operator-steered fork restarts numbering at 1 so all its rounds are
+    post-divergence by definition — return as-is.
     """
-    if trigger in _OPERATOR_RESTART_TRIGGERS:
+    if trigger == _OPERATOR_RESTART_TRIGGER:
         return rounds
     if fork_from_round is None:
         return rounds
@@ -207,6 +210,17 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
             str(from_candidate) if isinstance(from_candidate, str) and from_candidate else None
         )
 
+        # The operator who steered this fork (ForkSpec.issued_by). "operator"
+        # is the unattributed default the dispatcher stamps when the client
+        # sends no identity — surface only a real attribution, so the badge
+        # reads "edited by {name}" or nothing.
+        _issued_by = fork_block.get("issued_by")
+        steered_by = (
+            str(_issued_by)
+            if isinstance(_issued_by, str) and _issued_by and _issued_by != UNATTRIBUTED_OPERATOR
+            else None
+        )
+
         rounds_raw = index.get("rounds")
         rounds_out: list[CampaignLineageRound] = []
         if isinstance(rounds_raw, list):
@@ -232,7 +246,7 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
         rounds_out = _filter_post_divergence_rounds(rounds_out, trigger, from_round)
         col_offset = (
             from_round
-            if trigger in _OPERATOR_RESTART_TRIGGERS and isinstance(from_round, int)
+            if trigger == _OPERATOR_RESTART_TRIGGER and isinstance(from_round, int)
             else 0
         )
 
@@ -247,6 +261,7 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
                 fork_from_round=from_round,
                 fork_from_candidate_id=from_candidate_str,
                 trigger=trigger,
+                steered_by=steered_by,
                 round_column_offset=col_offset,
                 status=str(index.get("status") or ""),
                 dataset_name=str(header.get("dataset_name") or entry["dataset_name"]),

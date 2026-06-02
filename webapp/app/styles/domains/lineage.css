@@ -45,35 +45,40 @@
 .inspector-actions{padding:8px 12px;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:8px}
 .fork-button{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border:0;border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:inherit}
 .fork-button:disabled{opacity:0.5;cursor:not-allowed}
-/* Secondary fork action — Substitute candidates. Disabled in MVP
-   (needs the typed-searchpoint form, landing in M12). Rendered as a
-   ghost button to show the path exists without competing with the
-   live Endorse action. */
-.fork-button-secondary{display:inline-flex;align-items:center;gap:6px;background:transparent;color:var(--color-text-secondary);border:1px dashed var(--color-border);border-radius:6px;padding:6px 12px;font-size:13px;font-family:inherit;cursor:not-allowed;opacity:0.7}
-.fork-coming-soon{font-size:10px;padding:1px 5px;border-radius:8px;background:var(--color-background-tint,rgba(0,0,0,0.06));color:var(--color-text-tertiary);font-weight:500;letter-spacing:0.04em}
-.fork-err{color:var(--color-status-error,#c53030);font-size:12px}
-.inspector-fork-result{padding:10px 12px;border-top:1px solid var(--color-border);font-family:var(--font-mono);font-size:13px;display:grid;gap:6px}
-.inspector-fork-result code{background:var(--color-background-tint,rgba(0,0,0,0.04));padding:1px 5px;border-radius:3px}
 
 /* Operator-steered fork — the inline edit+reconcile panel that replaces the
    inspector action row while steering. Select → edit evolved prompt → carry
    node config → reconcile limits → confirm `operator_steered` fork. */
-.steer-fork{display:flex;flex-direction:column;gap:12px;padding:10px 12px;border-top:1px solid var(--color-border)}
-.steer-fork-head{display:flex;flex-direction:column;gap:2px}
-.steer-fork-title{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--color-text-primary)}
-.steer-fork-sub{font-size:11px;color:var(--color-text-tertiary)}
+.steer-fork{display:flex;flex-direction:column;gap:12px;min-width:min(440px,82vw);max-width:560px}
+.steer-fork-sub{font-size:12px;color:var(--color-text-tertiary);margin:0 0 2px}
 .steer-fork-note{font-size:12px;color:var(--color-text-secondary);background:var(--color-background-tint,rgba(0,0,0,0.04));border-radius:5px;padding:6px 8px;margin:0}
-.steer-fork-overlay{display:flex;flex-direction:column;gap:4px}
-.steer-fork-overlay-title{font-size:11px;font-weight:600;color:var(--color-text-secondary)}
-.steer-fork-overlay-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
-.steer-fork-overlay-row{display:flex;justify-content:space-between;gap:8px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary)}
-.steer-fork-overlay-row code{background:var(--color-background-tint,rgba(0,0,0,0.04));padding:1px 5px;border-radius:3px}
-.steer-fork-overlay-empty{font-size:11px;color:var(--color-text-tertiary)}
 .steer-fork-err{color:var(--color-status-error,#c53030);font-size:12px}
 .steer-fork-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
 .steer-fork-cancel{background:transparent;color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}
 .steer-fork-confirm{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border:0;border-radius:6px;padding:6px 14px;font-size:13px;font-family:inherit;cursor:pointer}
 .steer-fork-cancel:disabled,.steer-fork-confirm:disabled{opacity:0.5;cursor:not-allowed}
+
+/* Node-config value editor — edits the fork's starting {node:{param:value}}. */
+.node-config-editor{display:flex;flex-direction:column;gap:4px}
+.node-config-title{font-size:11px;font-weight:600;color:var(--color-text-secondary)}
+.node-config-empty{font-size:11px;color:var(--color-text-tertiary)}
+.node-config-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.node-config-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}
+.node-config-key{font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);display:inline-flex;align-items:center;gap:5px}
+.node-config-evolved{font-size:10px;color:var(--color-accent);font-family:var(--font-sans,inherit)}
+/* The optimizer can't permute this axis (model/provider) but the operator may
+   set it on the fork — a hint, not a lock. */
+.node-config-locked{font-size:9px;letter-spacing:0.02em;text-transform:uppercase;color:var(--color-text-tertiary);border:0.5px solid var(--color-border-tertiary,var(--color-border));border-radius:6px;padding:0 4px;font-family:var(--font-sans,inherit)}
+.node-config-input{min-width:120px;max-width:200px;padding:4px 7px;border:0.5px solid var(--color-border-tertiary,var(--color-border));border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:12px;font-family:var(--font-mono)}
+.node-config-check{width:16px;height:16px;justify-self:end;accent-color:var(--color-accent)}
+
+/* Node structured-output — read-only contract shown beside the config. */
+.node-output-schema{display:flex;flex-direction:column;gap:4px}
+.node-output-title{font-size:11px;font-weight:600;color:var(--color-text-secondary)}
+.node-output-list{margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+.node-output-row{display:grid;grid-template-columns:minmax(90px,auto) 1fr;align-items:baseline;gap:8px}
+.node-output-field{font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary)}
+.node-output-desc{margin:0;font-size:11px;color:var(--color-text-tertiary)}
 
 /* Limit reconcile — rounds + spend defaults to the parent's remaining. */
 .limit-reconcile{display:flex;flex-direction:column;gap:8px;padding:8px;border:0.5px solid var(--color-border-tertiary,var(--color-border));border-radius:6px}
@@ -85,3 +90,5 @@
 .limit-usd-prefix{color:var(--color-text-tertiary);font-size:12px}
 .limit-note{grid-column:2;color:var(--color-text-tertiary);font-size:11px;line-height:1.4}
 .limit-reconcile-foot{color:var(--color-text-tertiary);font-size:11px;line-height:1.4}
+.limit-advanced > summary{font-size:11px;color:var(--color-text-secondary);cursor:pointer}
+.limit-advanced-body{display:flex;flex-direction:column;gap:6px;padding-top:6px}

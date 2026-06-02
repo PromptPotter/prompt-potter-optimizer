@@ -10,9 +10,8 @@ All :class:`ForkTrigger` variants wired:
 * ``OPERATOR_DIAG`` — clean offshoot from root (``fork_from_round=0``).
 * ``OPERATOR_SWEEP`` — clean offshoot with sweep metadata
   (``fork_from_round=0`` + ``sweep_batch_id`` + ``sweep_source_file``).
-* ``OPERATOR_ENDORSE`` / ``OPERATOR_STEERED`` — operator forks from the
-  lineage/control panel (``fork_from_round=0``, ``_fork_`` id). Endorse forks
-  the selected searchpoint as-is; steered carries an edited-searchpoint
+* ``OPERATOR_STEERED`` — operator fork from the lineage/control panel
+  (``fork_from_round=0``, ``_fork_`` id), carrying an edited-searchpoint
   ``ForkSeed`` written to ``.overrides/seed.json``. Application entry:
   ``operator_fork.py::mint_operator_fork``.
 
@@ -144,7 +143,6 @@ _REBASE_TRIGGERS = frozenset(
         ForkTrigger.OPERATOR_REWIND,
     }
 )
-_OPERATOR_TRIGGERS = frozenset({ForkTrigger.OPERATOR_ENDORSE, ForkTrigger.OPERATOR_STEERED})
 
 
 def _mint_fork(
@@ -229,7 +227,7 @@ def _mint_fork(
             projects_root=projects_root,
         )
         campaign_store.save_diag_fork(campaign_id, parent_cycle_id, new_cycle_id, forked_at=now)
-    elif payload.trigger in _OPERATOR_TRIGGERS:
+    elif payload.trigger is ForkTrigger.OPERATOR_STEERED:
         if fork_from_round != 0:
             raise ValueError(
                 f"_mint_fork({payload.trigger.value}) requires fork_from_round=0, "

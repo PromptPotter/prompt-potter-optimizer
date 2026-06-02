@@ -48,12 +48,14 @@ export function StatusAssistant({
     setCollapsed(false);
   }
 
-  // Auto-collapse timer. Skipped while already collapsed or while the
-  // operator is hovering / has focus inside the chip — toast-pattern UX.
-  // Deps deliberately exclude `statusText` (see above) so the ticking
-  // freshness counter can't keep resetting the 10s timer.
+  // Auto-collapse timer. Skipped while already collapsed, while the operator
+  // is hovering / has focus inside the chip (toast-pattern UX), or while
+  // `offline` — only a true lost connection pins the chip open (reinforcing the
+  // top CriticalAlertBanner); a merely `stale`/warming chip still auto-hides.
+  // Deps deliberately exclude `statusText` (see above) so the ticking freshness
+  // counter can't keep resetting the 10s timer.
   useEffect(() => {
-    if (collapsed || paused) return;
+    if (collapsed || paused || status === "offline") return;
     const t = setTimeout(() => setCollapsed(true), COLLAPSE_AFTER_MS);
     return () => clearTimeout(t);
   }, [collapsed, paused, status]);

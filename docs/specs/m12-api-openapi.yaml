@@ -245,10 +245,12 @@ paths:
         Rides `CycleEventLog.inherit_from(parent, offset)` via the unified
         `mint_operator_fork` path. `round` / `candidate_id` name the searchpoint;
         the typed `ForkSpec` lands on the parent's `FORK_CUT` ledger record and
-        the fork's `index.json::fork`. A bare payload is an endorse-as-is fork
-        (`operator_endorse`); a payload carrying `seed` is an operator-steered
-        fork (`operator_steered`) whose origin = the chosen searchpoint plus the
-        operator's prompt/config edits and reconciled run limits.
+        the fork's `index.json::fork`. Every operator fork is `operator_steered`:
+        the required `seed` roots the fork at the chosen searchpoint plus the
+        operator's prompt/config edits and reconciled run limits. After minting,
+        the fork is **launched** (an implicit `start-run`/resume against the new
+        cycle), so steer-and-fork continues optimizing from the edited searchpoint
+        in one gesture — the reconciled limits in `seed` govern its run.
       tags: [cycle-lifecycle]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1407,18 +1409,18 @@ components:
         - $ref: '#/components/schemas/CycleRef'
         - type: object
           additionalProperties: false
+          required: [seed]
           properties:
             round:
               type: integer
               minimum: 0
-              description: Round the searchpoint the operator endorsed/steered from.
+              description: Round the searchpoint the operator steered from.
             candidate_id:
               type: string
               maxLength: 128
               description: |
-                Candidate the operator endorsed/steered from. With no `seed` this
-                is an endorse-as-is fork (`operator_endorse`); with a `seed` it is
-                the point the edits are rooted on (`operator_steered`).
+                Candidate the operator steered from — the point the edits in
+                `seed` are rooted on (`operator_steered`).
             steered_by:
               type: string
               maxLength: 256
@@ -1433,8 +1435,8 @@ components:
       additionalProperties: false
       description: |
         The edited-searchpoint origin override that makes a fork's origin =
-        chosen searchpoint + operator edits. Presence promotes the fork to
-        `operator_steered`. Persisted to the fork's `.overrides/seed.json`
+        chosen searchpoint + operator edits. Required on every operator fork
+        (all are `operator_steered`). Persisted to the fork's `.overrides/seed.json`
         (read once at bootstrap) and onto the parent's `FORK_CUT` ledger record.
       properties:
         starting_prompt:

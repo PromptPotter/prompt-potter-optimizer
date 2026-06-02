@@ -407,6 +407,56 @@ def test_parse_pipeline_response_threads_param_allowed_values():
     assert node.param_types["threshold"] == "integer"
 
 
+def test_node_config_schema_full_surface_excludes_prompt_fields():
+    """The operator-steer config surface: every ``param_keys`` tunable EXCEPT the
+    prompt fields, with widget kinds + options. Distinct from ``optimizer_locks``
+    — ``model`` is INCLUDED (the operator may set it on a steered fork) with
+    ``available_models`` as options, and flagged ``optimizer_locked`` under a
+    strict campaign rather than hidden."""
+    data = {
+        "config": {
+            "name": "gsm8k",
+            "available_models": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+            "nodes": {
+                "llm_only": {
+                    "type": "generation",
+                    "config": {
+                        "model": "openai/gpt-oss-120b",
+                        "temperature": 0.0,
+                        "reasoning_effort": "medium",
+                    },
+                    "optimizer": {
+                        "param_keys": [
+                            "temperature",
+                            "max_tokens",
+                            "model",
+                            "reasoning_effort",
+                            "persona",  # prompt fields — owned by the prompt editor,
+                            "instruction",  # excluded from the config surface
+                            "answer_format",
+                        ],
+                        "param_allowed_values": {"reasoning_effort": ["low", "medium", "high"]},
+                    },
+                }
+            },
+            "pipelines": {"default": ["llm_only"]},
+        }
+    }
+    schema = parse_pipeline_response(data)
+    params = {p.key: p for p in schema.node_config_schema(forbidden_strict=True)["llm_only"]}
+    assert set(params) == {"temperature", "max_tokens", "model", "reasoning_effort"}
+    assert params["model"].kind == "model"
+    assert params["model"].options == ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+    assert params["model"].optimizer_locked is True  # locked for optimizer, shown for operator
+    assert params["reasoning_effort"].kind == "enum"
+    assert params["reasoning_effort"].options == ["low", "medium", "high"]
+    assert params["temperature"].kind == "number"
+    assert params["max_tokens"].kind == "number"  # WELL_KNOWN integer → number widget
+    assert params["max_tokens"].value is None  # declared but unset in config
+    relaxed = schema.node_config_schema(forbidden_strict=False)["llm_only"]
+    assert {p.key for p in relaxed if p.optimizer_locked} == set()  # nothing locked when lax
+
+
 def test_validate_overrides_rejects_out_of_enum_reasoning_effort():
     schema = _bbeh_schema()
     failures = validate_overrides(

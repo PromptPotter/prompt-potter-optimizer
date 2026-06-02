@@ -12,7 +12,8 @@ import { CyclePicker } from "@/components/dashboard/CyclePicker";
 import { TargetPipelineHero } from "@/components/dashboard/TargetPipelineHero";
 import { BackendNodeDetail } from "@/components/dashboard/BackendNodeDetail";
 import { SpendBudgetControl } from "@/components/dashboard/SpendBudgetControl";
-import { useConnectorView } from "@/lib/hooks/useConnectorView";
+import { useConnector } from "@/lib/hooks/useConnectorView";
+import { targetNodeIds } from "@/lib/connector-nodes";
 import { useSelection } from "@/components/dashboard/SelectionContext";
 
 interface Props {
@@ -66,15 +67,13 @@ export function ChatPane({
   const [samplesOpen, setSamplesOpen] = useState(false);
   const toggleSamples = () => setSamplesOpen((v) => !v);
 
-  // One connector-view fetch, shared by the hero + the backend-node detail.
-  const cv = useConnectorView(datasetName);
+  // Shared connector view (one provider-level fetch + health poll).
+  const cv = useConnector();
   const { node: selectedNode, setSelectionForNode } = useSelection();
   // Target-node ids are disjoint from the optimizer canvas (membership-gate);
   // the demo/preview hero with no view exposes the synthetic "llm" chip id.
-  const targetNodeIds = cv.view
-    ? cv.view.nodes.filter((n) => n.kind !== "io").map((n) => n.id)
-    : ["llm"];
-  const showBackendDetail = selectedNode != null && targetNodeIds.includes(selectedNode);
+  const showBackendDetail =
+    selectedNode != null && targetNodeIds(cv.view).includes(selectedNode);
   // Auto-open once per mount as soon as a cycle is bound — saves the operator
   // one click on page reload. The ref guard means that if the user manually
   // closes the drawer and the cycle later changes (or a new cycle is bound),

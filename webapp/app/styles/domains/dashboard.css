@@ -82,6 +82,28 @@
 .run-telemetry-delta.up{color:var(--color-success);background:var(--color-success-bg)}
 .run-telemetry-delta.down{color:var(--color-danger);background:var(--color-danger-bg)}
 
+/* CriticalAlertBanner — the loud, can't-miss failure surface. Sticky bar
+   pinned under the Topbar on every tab, above all content. `critical` =
+   blocking (server gone / crash) in danger tone + a weak blink; `warn` =
+   producer went silent in warn tone, no blink. The blink is decoration —
+   colour + icon + text carry the state, and reduced-motion neutralises it. */
+.critical-alert{position:sticky;top:0;z-index:40;display:flex;align-items:baseline;gap:12px;
+  padding:11px 18px;border-bottom:1px solid transparent;font-size:14px}
+.critical-alert.critical{background:var(--color-danger-bg);border-bottom-color:var(--color-danger-border);
+  color:var(--color-danger);box-shadow:inset 4px 0 0 var(--color-danger);animation:critical-pulse 1.4s ease-in-out infinite}
+.critical-alert.warn{background:var(--color-warn-bg);border-bottom-color:var(--color-warn-border);
+  color:var(--color-warn);box-shadow:inset 4px 0 0 var(--color-warn)}
+.critical-alert-icon{font-size:15px;line-height:1;flex-shrink:0}
+.critical-alert-body{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0;flex:1}
+.critical-alert-title{font-weight:700;letter-spacing:.01em;color:currentColor}
+.critical-alert-detail{font-size:12px;color:var(--color-text-secondary);font-weight:400;
+  overflow:hidden;text-overflow:ellipsis;min-width:0}
+.critical-alert-jump{font-family:inherit;font-size:12px;color:currentColor;background:var(--color-background-primary);
+  border:0.5px solid currentColor;border-radius:var(--border-radius-md);padding:3px 10px;cursor:pointer;flex-shrink:0}
+.critical-alert-jump:hover{background:var(--color-background-hover)}
+.critical-alert-jump:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+@keyframes critical-pulse{0%,100%{opacity:1}50%{opacity:.72}}
+
 /* RunErrorBanner — surfaces dashboard.json::error when the runner crashed.
    Sits above the TopStrip in the "Now" lane so the operator sees the cause
    before scanning anything else. */

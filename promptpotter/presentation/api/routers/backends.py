@@ -46,6 +46,14 @@ class PipelineViewResponse(BaseModel):
     source: str = Field(description="Pipeline source: 'live', 'cached', or 'default'")
 
 
+class BackendHealthResponse(BaseModel):
+    backend_id: str = Field(description="Backend identifier")
+    base_url: str = Field(description="Backend API base URL probed")
+    status: str = Field(description="Reachability: 'live', 'unreachable', or 'error'")
+    checked_at: str = Field(description="ISO 8601 probe timestamp")
+    detail: str | None = Field(default=None, description="Error detail when not 'live'")
+
+
 @backends_router.get("", response_model=list[BackendResponse])
 async def list_backends(store: StoreDep) -> list[BackendResponse]:
     """List all registered backends."""
@@ -140,7 +148,46 @@ async def get_pipeline(backend_id: str, store: StoreDep) -> PipelineViewResponse
     )
 
 
+@backends_router.get("/{backend_id}/health", response_model=BackendHealthResponse)
+async def get_backend_health(backend_id: str, store: StoreDep) -> BackendHealthResponse:
+    """Probe the connector's own ``GET /status`` for live reachability.
+
+    Thin wrapper over ``BackendClient.check_status()`` — the read half of the
+    connector-state probe the webapp polls (slow cadence) to show the backend's
+    true up/down on the connector node. ``check_status`` already maps a TCP-level
+    failure to ``{"status": "unreachable"}``, so this never raises on a down
+    backend; only a genuinely missing ``backend_id`` 404s (via ``get_backend_or_404``).
+    """
+    backend = get_backend_or_404(backend_id, store)
+    connector = connectors.get(backend.backend_type)
+    client = BackendClient(
+        backend.base_url,
+        wire_adapter=connector.wire_adapter,
+        session=connector.session_factory(),
+        auth_token=settings.TERMNORM_TOKEN or None,
+    )
+    try:
+        probe = await client.check_status()
+    finally:
+        await client.aclose()
+    raw = probe.get("status")
+    # Reachable: any successful /status response that isn't our own failure
+    # sentinel. `check_status` returns the backend's status dict on success
+    # (its `status` may be absent or backend-specific) and {status:unreachable|error}
+    # on failure — only those two sentinels are non-live.
+    status = raw if raw in ("unreachable", "error") else "live"
+    detail = probe.get("error") if status != "live" else None
+    return BackendHealthResponse(
+        backend_id=backend_id,
+        base_url=backend.base_url,
+        status=status,
+        checked_at=datetime.now(UTC).isoformat(),
+        detail=str(detail) if detail is not None else None,
+    )
+
+
 __all__ = [
+    "BackendHealthResponse",
     "BackendResponse",
     "PipelineViewResponse",
     "backends_router",

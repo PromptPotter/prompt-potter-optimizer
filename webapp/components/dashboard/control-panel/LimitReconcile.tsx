@@ -8,13 +8,24 @@ import type { DashboardSnapshot } from "@/lib/poll";
 
 // The run-limit reconcile half of the steer flow (decision E). A fork numbers
 // its rounds from 1, so the operator confirms the fork's OWN absolute ceilings
-// — defaulted to the parent's remaining ("3 of 6 rounds used → 3 left",
-// "$4 of $10 spent → $6 left"). Rounds + spend are the two knobs surfaced;
-// patience/epsilon inherit the parent (LimitOverrides leaves them absent).
+// — rounds + spend default to the parent's remaining ("3 of 6 rounds used → 3
+// left", "$4 of $10 spent → $6 left"). Patience + elimination epsilon inherit
+// the parent by default and live behind an "Advanced" disclosure (placeholders
+// show the inherited value; blank = inherit).
 //
 // Emits a sparse `LimitOverrides` on every edit: a field is included only when
 // the operator's value is present + valid, so blank = inherit. Self-contained
 // presentational input; the parent panel folds the result into the ForkSeed.
+
+interface Fields {
+  rounds: string;
+  spend: string;
+  l1: string;
+  l2: string;
+  l3: string;
+  eps: string;
+}
+
 export function LimitReconcile({
   dash,
   onChange,
@@ -26,30 +37,41 @@ export function LimitReconcile({
   // steering, but the 2 s poll keeps mutating `dash`; the operator's typed
   // values are the working copy and must not be clobbered by a later tick.
   const [defaults] = useState(() => forkReconcileDefaults(dash));
-  const [roundsStr, setRoundsStr] = useState<string>(
-    defaults.roundsRemaining != null ? String(defaults.roundsRemaining) : "",
-  );
-  const [spendStr, setSpendStr] = useState<string>(
-    defaults.spendRemaining != null ? String(defaults.spendRemaining) : "",
-  );
+  const [rl] = useState(() => dash?.run_limits ?? {});
+  const [f, setF] = useState<Fields>(() => ({
+    rounds: defaults.roundsRemaining != null ? String(defaults.roundsRemaining) : "",
+    spend: defaults.spendRemaining != null ? String(defaults.spendRemaining) : "",
+    l1: "",
+    l2: "",
+    l3: "",
+    eps: "",
+  }));
 
-  const emit = (rounds: string, spend: string) => {
+  const set = (next: Fields) => {
+    setF(next);
     const limits: LimitOverrides = {};
-    const r = Number.parseInt(rounds, 10);
-    if (rounds.trim() !== "" && Number.isInteger(r) && r >= 1) limits.max_rounds = r;
-    const s = Number.parseFloat(spend);
-    if (spend.trim() !== "" && Number.isFinite(s) && s >= 0) limits.spend_budget_usd = s;
+    const intGte1 = (s: string) => {
+      const n = Number.parseInt(s, 10);
+      return s.trim() !== "" && Number.isInteger(n) && n >= 1 ? n : null;
+    };
+    const r = intGte1(next.rounds);
+    if (r != null) limits.max_rounds = r;
+    const s = Number.parseFloat(next.spend);
+    if (next.spend.trim() !== "" && Number.isFinite(s) && s >= 0) limits.spend_budget_usd = s;
+    const l1 = intGte1(next.l1);
+    if (l1 != null) limits.l1_patience = l1;
+    const l2 = intGte1(next.l2);
+    if (l2 != null) limits.l2_patience = l2;
+    const l3 = intGte1(next.l3);
+    if (l3 != null) limits.l3_patience = l3;
+    const eps = Number.parseFloat(next.eps);
+    if (next.eps.trim() !== "" && Number.isFinite(eps) && eps >= 0 && eps <= 1)
+      limits.pobb_epsilon = eps;
     onChange(limits);
   };
 
-  const onRounds = (v: string) => {
-    setRoundsStr(v);
-    emit(v, spendStr);
-  };
-  const onSpend = (v: string) => {
-    setSpendStr(v);
-    emit(roundsStr, v);
-  };
+  const ph = (v: number | null | undefined, fallback: string) =>
+    typeof v === "number" ? String(v) : fallback;
 
   return (
     <div className="limit-reconcile">
@@ -63,10 +85,10 @@ export function LimitReconcile({
           step={1}
           inputMode="numeric"
           className="limit-input"
-          value={roundsStr}
+          value={f.rounds}
           placeholder="inherit"
           aria-label="Fork max rounds"
-          onChange={(e) => onRounds(e.target.value)}
+          onChange={(e) => set({ ...f, rounds: e.target.value })}
         />
         <small className="limit-note">
           {defaults.parentMaxRounds != null
@@ -85,10 +107,10 @@ export function LimitReconcile({
             step={0.5}
             inputMode="decimal"
             className="limit-input"
-            value={spendStr}
+            value={f.spend}
             placeholder="no cap"
             aria-label="Fork spend cap in USD"
-            onChange={(e) => onSpend(e.target.value)}
+            onChange={(e) => set({ ...f, spend: e.target.value })}
           />
         </span>
         <small className="limit-note">
@@ -98,10 +120,67 @@ export function LimitReconcile({
         </small>
       </label>
 
-      <small className="limit-reconcile-foot">
-        Patience + elimination thresholds inherit the parent. The fork numbers
-        rounds from 1.
-      </small>
+      <details className="limit-advanced">
+        <summary>Advanced — patience &amp; elimination</summary>
+        <div className="limit-advanced-body">
+          <label className="limit-row">
+            <span className="limit-label">L1 patience</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              className="limit-input"
+              value={f.l1}
+              placeholder={ph(rl.l1_patience, "inherit")}
+              aria-label="Fork L1 patience"
+              onChange={(e) => set({ ...f, l1: e.target.value })}
+            />
+          </label>
+          <label className="limit-row">
+            <span className="limit-label">L2 patience</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              className="limit-input"
+              value={f.l2}
+              placeholder={ph(rl.l2_patience, "inherit")}
+              aria-label="Fork L2 patience"
+              onChange={(e) => set({ ...f, l2: e.target.value })}
+            />
+          </label>
+          <label className="limit-row">
+            <span className="limit-label">L3 patience</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              className="limit-input"
+              value={f.l3}
+              placeholder={ph(rl.l3_patience, "inherit")}
+              aria-label="Fork L3 patience"
+              onChange={(e) => set({ ...f, l3: e.target.value })}
+            />
+          </label>
+          <label className="limit-row">
+            <span className="limit-label">PoBB ε</span>
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.01}
+              className="limit-input"
+              value={f.eps}
+              placeholder={ph(rl.pobb_epsilon, "inherit")}
+              aria-label="Fork PoBB elimination epsilon"
+              onChange={(e) => set({ ...f, eps: e.target.value })}
+            />
+          </label>
+          <small className="limit-note">Blank inherits the parent&apos;s value.</small>
+        </div>
+      </details>
+
+      <small className="limit-reconcile-foot">The fork numbers rounds from 1.</small>
     </div>
   );
 }

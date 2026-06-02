@@ -90,8 +90,10 @@
   transition:transform .15s ease,background .15s ease,box-shadow .15s ease
 }
 .connector.live .connector-dot::before{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
+.connector.offline .connector-dot::before{background:var(--color-danger);box-shadow:0 0 5px var(--color-danger)}
 .connector-dot:hover::before,.connector-dot:focus-visible::before{transform:translate(-50%,-50%) scale(1.35)}
 .connector.live .connector-dot:hover::before,.connector.live .connector-dot:focus-visible::before{box-shadow:0 0 7px var(--color-success)}
+.connector.offline .connector-dot:hover::before,.connector.offline .connector-dot:focus-visible::before{box-shadow:0 0 8px var(--color-danger)}
 .connector-pop{
   position:absolute;left:50%;top:calc(100% + 10px);transform:translateX(-50%);
   min-width:240px;max-width:300px;
@@ -104,6 +106,7 @@
 .connector-pop-head{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--color-text-primary);margin-bottom:6px}
 .connector-pop-head .dot{width:6px;height:6px;border-radius:50%;background:var(--color-text-tertiary);flex-shrink:0}
 .connector.live .connector-pop-head .dot{background:var(--color-success);box-shadow:0 0 4px var(--color-success)}
+.connector.offline .connector-pop-head .dot{background:var(--color-danger);box-shadow:0 0 4px var(--color-danger)}
 .connector-pop-head .name{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .connector-pop-head .kind{font-size:9px;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:3px;background:var(--color-background-secondary);color:var(--color-text-tertiary);flex-shrink:0}
 .connector-pop-head .state{font-size:11px;color:var(--color-text-tertiary);flex-shrink:0}

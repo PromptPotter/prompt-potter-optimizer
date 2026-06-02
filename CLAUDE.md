@@ -38,10 +38,11 @@ The user is the operator. **The project file tree IS the dashboard**, plus a rea
 ## Conventions
 
 - Full style + code-shape + git rules → [`docs/developer/conventions.md`](docs/developer/conventions.md); enumerations → [`docs/glossary.md`](docs/glossary.md).
+- **Fewest dependencies possible** in both repos — reach for the stdlib or a small hand-rolled helper before adding a package; every new dependency must earn its place.
 
 ## Known issues
 
-- **TermNorm backend** lives in a sibling repo (`TermNorm-excel/backend-api`); clone alongside. Co-owned by this maintainer — cross-repo edits authorized; coordinate explicitly.
+- **TermNorm backend** lives in a sibling repo (`TermNorm-excel/backend-api`); clone alongside. It's not a third party — **same author, same project, just a separate repo for now**, and the goal is to eliminate the split and fold it in when practical. Cross-repo edits authorized; coordinate explicitly.
 
 ## Pre-flight gate
 

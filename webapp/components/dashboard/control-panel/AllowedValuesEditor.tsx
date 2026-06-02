@@ -4,14 +4,14 @@ import { useState } from "react";
 import type { DraftPatch, OptimizerLocks } from "@/lib/api";
 import { primaryNode } from "@/lib/optimizer-locks";
 
-// The pipeline/optimizer config — the operator decides what the optimizer may
-// move. Model lock on/off, which models it may test, which thinking levels it
-// may use. Decoupled from the draft wire: it reads only `locks`, `overlayBase`,
-// and `lockModel`, so the same panel serves both the setup flow and the
-// read-only backend-node detail. Three modes:
-//   - "edit"     — interactive; persists (lock_model + merged pipeline_overlay).
-//   - "demo"     — interactive; local-only, resets when the campaign starts.
-//   - "readonly" — disabled inputs; never persists (the minted-campaign node panel).
+// The setup-flow allowed-values editor — the operator decides what the
+// optimizer may MOVE (its permutation surface), not the literal config values.
+// Model lock on/off, which models it may test, which thinking levels it may
+// use. Edits the locks/allowed-values shape (`{node:{config,optimizer:{
+// param_allowed_values}}}`), distinct from `NodeConfigEditor`, which edits the
+// flat `{node:{param:value}}` overlay a steered fork is seeded with. Two modes:
+//   - "edit" — interactive; persists (lock_model + merged pipeline_overlay).
+//   - "demo" — interactive; local-only, resets when the campaign starts.
 
 const THINKING = ["low", "medium", "high"] as const;
 
@@ -60,9 +60,9 @@ function buildOverlay(
   return overlay as Record<string, unknown>;
 }
 
-export type ConfigEditorMode = "edit" | "demo" | "readonly";
+export type AllowedValuesMode = "edit" | "demo";
 
-export function PipelineConfigEditor({
+export function AllowedValuesEditor({
   locks,
   overlayBase,
   lockModel: lockModelProp,
@@ -72,14 +72,13 @@ export function PipelineConfigEditor({
   locks: OptimizerLocks;
   overlayBase: Record<string, unknown>;
   lockModel: boolean;
-  mode: ConfigEditorMode;
+  mode: AllowedValuesMode;
   onApply?: (patch: DraftPatch) => void;
 }) {
   const node = primaryNode(locks);
   const cfg = nodeConfig(locks, node);
   const baseModel = typeof cfg.model === "string" ? cfg.model : "";
   const activeThinking = typeof cfg.reasoning_effort === "string" ? cfg.reasoning_effort : "low";
-  const ro = mode === "readonly";
 
   const [lockModel, setLockModel] = useState(lockModelProp);
   const [models, setModels] = useState<string[]>(() => {
@@ -93,9 +92,9 @@ export function PipelineConfigEditor({
     return allowed.length > 0 ? allowed : [activeThinking];
   });
 
-  // Persist on every change — only in "edit" mode (demo resets on Start,
-  // readonly never writes). lock_model is a top-level toggle; models +
-  // thinking ride a merged pipeline_overlay.
+  // Persist on every change — only in "edit" mode (demo resets on Start).
+  // lock_model is a top-level toggle; models + thinking ride a merged
+  // pipeline_overlay.
   const persist = (next: { lockModel: boolean; models: string[]; thinking: string[] }) => {
     if (mode !== "edit" || !node || !onApply) return;
     onApply({
@@ -110,14 +109,12 @@ export function PipelineConfigEditor({
   };
 
   const toggleLock = () => {
-    if (ro) return;
     const v = !lockModel;
     setLockModel(v);
     persist({ lockModel: v, models, thinking });
   };
 
   const toggleThinking = (level: string) => {
-    if (ro) return;
     const next = thinking.includes(level)
       ? thinking.filter((t) => t !== level)
       : [...thinking, level];
@@ -127,7 +124,6 @@ export function PipelineConfigEditor({
   };
 
   const commitModels = (raw: string) => {
-    if (ro) return;
     const next = raw
       .split(",")
       .map((s) => s.trim())
@@ -161,15 +157,10 @@ export function PipelineConfigEditor({
             className={`config-lock${lockModel ? " is-locked" : ""}`}
             onClick={toggleLock}
             aria-pressed={lockModel}
-            disabled={ro}
             title={
-              ro
-                ? lockModel
-                  ? "Locked — the optimizer keeps this model fixed."
-                  : "Open — the optimizer may test several models."
-                : lockModel
-                  ? "Locked — the optimizer keeps this model fixed. Click to let it test others."
-                  : "Open — the optimizer may test the models below. Click to lock."
+              lockModel
+                ? "Locked — the optimizer keeps this model fixed. Click to let it test others."
+                : "Open — the optimizer may test the models below. Click to lock."
             }
           >
             {lockModel ? "🔒 Locked" : "🔓 Open"}
@@ -180,8 +171,6 @@ export function PipelineConfigEditor({
             defaultValue={models.join(", ")}
             aria-label={lockModel ? "Model" : "Models to test (comma-separated)"}
             placeholder="openai/gpt-oss-20b"
-            readOnly={ro}
-            disabled={ro}
             onBlur={(e) => commitModels(e.target.value)}
           />
         </span>
@@ -205,7 +194,6 @@ export function PipelineConfigEditor({
                 className={`config-level${on ? " is-on" : " is-off"}${isOrigin ? " is-origin" : ""}`}
                 onClick={() => toggleThinking(level)}
                 aria-pressed={on}
-                disabled={ro}
                 title={
                   isOrigin
                     ? "Origin level (the starting floor) — click to allow/lock out"

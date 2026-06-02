@@ -318,7 +318,6 @@ class ForkTrigger(enum.StrEnum):
     OPERATOR_SWEEP = "operator_sweep"
     OPERATOR_DIAG = "operator_diag"
     OPERATOR_REWIND = "operator_rewind"
-    OPERATOR_ENDORSE = "operator_endorse"
     OPERATOR_STEERED = "operator_steered"
     L2_REBASE = "l2_rebase"
     L3_REBASE = "l3_rebase"
@@ -342,18 +341,26 @@ class LimitOverrides(BaseModel):
 
 
 class ForkSeed(BaseModel):
-    """The edited-searchpoint origin override: a fork's origin = chosen
-    searchpoint + operator edits. `seed is not None` on a `ForkSpec` ⇔ the fork
-    is `operator_steered`. `starting_prompt` is a `PromptTemplate.prompt_field_dict()`
-    shape → becomes the origin `OptSearchPoint` at bootstrap. `pipeline_overlay`
-    merges ON TOP of the dataset overlay (seed > dataset > backend default) for
-    this fork only — the dataset `pipeline.json` stays immutable."""
+    """The edited-searchpoint origin override carried by every `operator_steered`
+    fork: a fork's origin = chosen searchpoint + operator edits. `starting_prompt`
+    is a `PromptTemplate.prompt_field_dict()` shape → becomes the origin
+    `OptSearchPoint` at bootstrap. `pipeline_overlay` merges ON TOP of the dataset
+    overlay (seed > dataset > backend default) for this fork only — the dataset
+    `pipeline.json` stays immutable. (Non-operator triggers — sweep / diag /
+    rebase — carry no seed.)"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     starting_prompt: dict[str, Any] = Field(default_factory=dict)
     pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
     limit_overrides: LimitOverrides = Field(default_factory=LimitOverrides)
+
+
+# The `issued_by` value an operator fork carries when the client sent no
+# identity. One SoT for both the stamp site (`mint_operator_fork`) and the
+# lineage suppression that turns it into a *no* "edited by" badge — they must
+# agree on the literal or the badge silently breaks.
+UNATTRIBUTED_OPERATOR = "operator"
 
 
 class ForkSpec(BaseModel):

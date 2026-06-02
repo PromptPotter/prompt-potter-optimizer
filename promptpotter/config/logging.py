@@ -1,6 +1,7 @@
 """Logging configuration. Call ``setup_logging()`` once from entry points."""
 
 import logging
+import re
 import sys
 from typing import Literal, TextIO
 
@@ -37,26 +38,31 @@ class _TqdmStreamHandler(logging.StreamHandler[TextIO]):
             self.handleError(record)
 
 
-class _QuietDashboardPoll(logging.Filter):
-    """Drop successful 2 s dashboard/index polls from ``uvicorn.access``.
+class _QuietPolls(logging.Filter):
+    """Drop successful high-frequency webapp polls from ``uvicorn.access``.
 
-    The React webapp polls a small set of JSON files via the generic
-    ``/api/v1/campaigns/{cycle_id}/file?scope=cycle&path=...`` reader.
-    With a live campaign this is ~30 identical 200s per minute and crowds
-    out real signal (errors, non-poll requests, startup). 4xx/5xx still
-    log — only 200s on the polled paths are silenced.
+    The dashboard polls ``/…/dashboard`` (2 s) and the workspace polls
+    ``/active`` + ``/cycles`` + ``/campaigns`` + per-backend ``/health``.
+    These are ~100+ identical 200/304s per minute and crowd out real signal
+    (errors, commands, startup). Only successful (200/304) GETs on those
+    routes are silenced — 4xx/5xx (incl. the unauthenticated-tab 401s),
+    POSTs, and one-shot reads still log.
     """
 
-    _POLLED = ("path=dashboard.json", "path=index.json")
+    _LIST = re.compile(r"^/api/v1/(active|cycles|campaigns)(\?|$)")
+    _SUFFIX = ("/dashboard", "/health")
+    _QUIET_STATUS = frozenset({200, 304})
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         if not (isinstance(args, tuple) and len(args) >= 5):
             return True
         method, path, _http, status = args[1], args[2], args[3], args[4]
-        if method != "GET" or status != 200:
+        if method != "GET" or status not in self._QUIET_STATUS:
             return True
-        return not any(p in str(path) for p in self._POLLED)
+        path_str = str(path)
+        base = path_str.split("?", 1)[0]
+        return not (self._LIST.match(path_str) or base.endswith(self._SUFFIX))
 
 
 def setup_logging(
@@ -89,7 +95,7 @@ def setup_logging(
         # Deep layers stay quiet — campaign_runner (presentation) prints the summary.
         logging.getLogger("promptpotter.application").setLevel(logging.WARNING)
         logging.getLogger("promptpotter.infrastructure").setLevel(logging.WARNING)
-    logging.getLogger("uvicorn.access").addFilter(_QuietDashboardPoll())
+    logging.getLogger("uvicorn.access").addFilter(_QuietPolls())
 
 
 __all__ = ["LOG_DATE_FORMAT", "LOG_FORMAT", "setup_logging"]

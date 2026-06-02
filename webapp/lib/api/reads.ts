@@ -203,6 +203,25 @@ export function fetchBackends(signal?: AbortSignal): Promise<BackendInfo[]> {
   return jget<BackendInfo[]>(`${API}/backends`, signal);
 }
 
+// Connector reachability probe — the server pings the backend's own GET /status
+// (BackendClient.check_status). `status`: 'live' (reachable), 'unreachable' (TCP
+// refused), or 'error'. Polled on a slow cadence by the ConnectorProvider to show the
+// backend's true up/down on the connector node. Mirrors BackendHealthResponse
+// (promptpotter/presentation/api/routers/backends.py).
+export interface BackendHealth {
+  backend_id: string;
+  base_url: string;
+  status: "live" | "unreachable" | "error";
+  checked_at: string;
+  detail: string | null;
+}
+export function fetchBackendHealth(
+  backendId: string,
+  signal?: AbortSignal,
+): Promise<BackendHealth> {
+  return jget<BackendHealth>(`${API}/backends/${encodeURIComponent(backendId)}/health`, signal);
+}
+
 // Per-cycle file content. Files live either under the cycle dir
 // (`scope=cycle`) or at the campaign dir (`scope=campaign` — campaign.json,
 // log.md, hard_samples.json). `dashboard.json` is NOT a campaign artifact —

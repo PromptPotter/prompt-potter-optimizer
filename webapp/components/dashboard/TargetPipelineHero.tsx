@@ -7,8 +7,8 @@ import { useSelection } from "./SelectionContext";
 interface Props {
   samplesOpen: boolean;
   onToggle: () => void;
-  // The joined connector/backend surface — owned by ChatPane (one
-  // `useConnectorView` call) and passed down so the same `cv` backs both this
+  // The joined connector/backend surface — read by ChatPane from the shared
+  // `useConnector()` view and passed down so the same `cv` backs both this
   // hero and the BackendNodeDetail panel below it (no double fetch).
   cv: ConnectorView;
 }

@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { fetchDashboardConditional } from "./api";
+import { useAuthGate } from "./auth-context";
 import { resolveRunPhase } from "./run-phase";
 import { ageTextSeconds } from "./format";
 import type {
@@ -231,6 +232,11 @@ const INITIAL_STATE: CycleStreamState = {
 // staring at "Connecting…" with no reason.
 const STAMP_MISMATCH_LIMIT = 3;
 
+// Reconnect cadence while the API is unreachable — slower than the live poll so
+// a downed server is retried efficiently (every 5 s) rather than hammered. See
+// the two-cadence note at the `usePoll` call.
+const RECONNECT_INTERVAL_MS = 5000;
+
 // Status banner age buckets — same thresholds as vanilla setStatus call sites.
 export interface BucketResult {
   status: StatusKind;
@@ -303,6 +309,9 @@ function useCycleStreamSource(
   intervalMs: number,
 ): CycleStreamState {
   const [state, setState] = useState<CycleStreamState>(INITIAL_STATE);
+  // Poll only with a confirmed session; a 401 mid-run re-probes /auth/me so
+  // the loop halts instead of storming the server (see useAuthGate).
+  const { authed, onAuthError } = useAuthGate();
   // Bumped on every unit switch so `usePoll` fires an immediate tick — the
   // hand-rolled loop used to restart (and tick at once) on each cycle change.
   const [revalCount, setRevalCount] = useState(0);
@@ -474,11 +483,14 @@ function useCycleStreamSource(
       }));
     } catch (e) {
       if ((e as Error).name === "AbortError" || signal.aborted) return;
+      // A 401 means the session died — re-probe /auth/me so the gate flips
+      // unauthed and this loop stops instead of 401-storming the server.
+      onAuthError(e);
       setState((prev) => ({
         ...prev,
         status: "offline",
-        statusText: `dashboard.json unreachable for ${id}`,
-        statusHint: "Resume the active campaign: `python -m promptpotter resume`",
+        statusText: "PromptPotter API unreachable",
+        statusHint: "Reconnecting every 5 s — check the server is running.",
         termKey: "status_offline",
         error: (e as Error).message,
         isLive: false,
@@ -488,9 +500,14 @@ function useCycleStreamSource(
     }
   };
 
+  // Two cadences. Reachable (live/stale) → the responsive `intervalMs` (2 s,
+  // mostly 304-cheap; user actions fire an immediate tick via `revalidateOn`).
+  // Offline → a steady 5 s reconnect probe, so a downed API recovers within
+  // ~5 s without hammering. `usePoll` restarts its timer when this changes.
+  const effectiveInterval = state.status === "offline" ? RECONNECT_INTERVAL_MS : intervalMs;
   usePoll(tick, {
-    intervalMs,
-    enabled: !!campaignId && !!cycleId,
+    intervalMs: effectiveInterval,
+    enabled: !!campaignId && !!cycleId && authed,
     revalidateOn: revalCount,
   });
 

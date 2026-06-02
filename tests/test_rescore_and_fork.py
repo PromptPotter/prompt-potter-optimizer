@@ -336,6 +336,10 @@ def test_mint_fork_operator_steered_writes_seed_and_typed_fork_block(
     assert index["rounds"] == []  # clean offshoot — no parent-round copy
     assert index["fork"]["trigger"] == "operator_steered"
     assert index["fork"]["from_candidate_id"] == "cand_x"
+    # The steering operator's identity round-trips to disk — this is the value
+    # the lineage read surfaces (suppressing only the UNATTRIBUTED_OPERATOR
+    # default) as the "edited by {name}" badge.
+    assert index["fork"]["issued_by"] == "nieena"
     assert "seed" not in index["fork"]  # the seed has its own read-once home
 
     # The seed rides ``.overrides/seed.json`` (bootstrap-read), round-trips typed.
