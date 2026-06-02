@@ -4,10 +4,10 @@ import { useState } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { lockedParams } from "@/lib/optimizer-locks";
 import { RecapCard } from "./RecapCard";
-import { LockTable } from "./LockTable";
 import { OptionalSettings } from "./OptionalSettings";
-import { PipelineConfigEditor } from "./PipelineConfigEditor";
-import { PromptFieldsEditor } from "./PromptFieldsEditor";
+import { LockTable } from "@/components/dashboard/control-panel/LockTable";
+import { PipelineConfigEditor } from "@/components/dashboard/control-panel/PipelineConfigEditor";
+import { PromptFieldsEditor } from "@/components/dashboard/control-panel/PromptFieldsEditor";
 
 // Step 3 — one compact preview the operator reviews before launch: the
 // editable pipeline/optimizer config (model lock, allowed models, thinking

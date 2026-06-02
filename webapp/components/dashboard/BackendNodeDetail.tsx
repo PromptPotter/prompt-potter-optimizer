@@ -2,9 +2,9 @@
 import type { OptimizerLocks } from "@/lib/api";
 import type { ConnectorView } from "@/lib/types/connector";
 import { lockedParams } from "@/lib/optimizer-locks";
-import { PipelineConfigEditor } from "@/components/dashboard/ingest/PipelineConfigEditor";
-import { PromptFieldsEditor } from "@/components/dashboard/ingest/PromptFieldsEditor";
-import { LockTable } from "@/components/dashboard/ingest/LockTable";
+import { PipelineConfigEditor } from "@/components/dashboard/control-panel/PipelineConfigEditor";
+import { PromptFieldsEditor } from "@/components/dashboard/control-panel/PromptFieldsEditor";
+import { LockTable } from "@/components/dashboard/control-panel/LockTable";
 
 // Read-only config detail for a *target/backend* node, opened by clicking the
 // node in TargetPipelineHero. This IS the setup flow's Step-3 surface
