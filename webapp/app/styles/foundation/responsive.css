@@ -42,16 +42,24 @@
   .chat-job-toggle .chip-row{position:static;transform:none;flex-wrap:wrap;gap:6px;justify-content:flex-start}
   .chat-job-toggle .chip{padding:3px 10px;font-size:13px}
 
-  /* Pipeline hero — let the horizontal pipeline overflow-scroll
-     instead of fighting flex shrink. */
-  .wf-hero{padding:12px 10px 18px;max-width:none}
-  .wf-hero-flow{overflow-x:auto;overflow-y:hidden;justify-content:flex-start;padding:14px 4px 6px;scrollbar-width:none;flex-wrap:nowrap}
-  .wf-hero-flow::-webkit-scrollbar{display:none}
-  .wf-hero-node{min-width:120px;padding:10px 14px}
-  .wf-hero-node.llm{min-width:180px;padding:10px 14px}
-  .wf-hero-node.llm.wf-hero-node-multi{min-width:240px;max-width:340px;padding:8px 12px 6px}
-  .wf-hero-node .val,.wf-hero-node.llm .val{max-width:160px}
-  .wf-hero-arrow{flex:0 0 auto;min-width:36px;max-width:60px}
+  /* Pipeline hero — on phones the flanking Input/Output boxes shrink to a
+     small icon + label so the LLM chip keeps its full glassmorphic
+     prominence and the centre spot (same emphasis as desktop). The LLM is
+     capped so it stays a contained chip rather than spanning the whole row;
+     the centred flow splits the freed space evenly around it. No scroll.
+     Desktop is unchanged (chat.css). */
+  .wf-hero{padding:10px 12px 14px;max-width:none}
+  .wf-hero-flow{justify-content:center;gap:0;padding:10px 0 4px;flex-wrap:nowrap;overflow:visible}
+  .wf-hero-node-toggle{
+    flex:0 0 auto;min-width:0;padding:0;gap:3px;flex-direction:column;
+    align-items:center;text-align:center;background:none;border:0;box-shadow:none
+  }
+  .wf-hero-node-toggle .ico svg{width:24px;height:24px}
+  .wf-hero-node-toggle .text-col{gap:0;align-items:center}
+  .wf-hero-node-toggle .lbl{font-size:10px;letter-spacing:.05em}
+  .wf-hero-node-toggle .val{display:none}
+  .wf-hero-node.llm{flex:1 1 auto;min-width:0;max-width:238px;padding:12px 16px}
+  .wf-hero-arrow{flex:0 0 auto;min-width:30px;max-width:48px}
 
   /* Chat grid — the 980px breakpoint already collapses to 1fr, but
      desktop padding + pinned 620px panel-height create overflow on a
@@ -106,11 +114,6 @@
      stalest numbers); Best + Budget are the headline. Only fires
      for the authed-with-cycle code path where the bar is rendered. */
   .chat-job-toggle .chip-row .chip:nth-child(n+3){display:none}
-  /* Tighter pipeline nodes — the 120/180 from the 640 band can
-     still be wider than the visible viewport when stacked with the
-     arrow gutter. */
-  .wf-hero-node{min-width:108px;padding:8px 12px}
-  .wf-hero-node.llm{min-width:160px}
 }
 
 /* ── Sidebar mobile drawer (Sweep-Group-A) ─────────────────────────

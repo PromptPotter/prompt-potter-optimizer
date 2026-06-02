@@ -1,18 +1,33 @@
-# PromptPotter — Linux deploy via Cloudflare Tunnel → app.promptpotter.dev
+# Linux deploy via Cloudflare Tunnel
 
 End state:
-- Linux box runs `uvicorn promptpotter.main:app` on `127.0.0.1:8001` under **systemd** (auto-restart, survives reboot).
-- `cloudflared` runs as another systemd service, exposing it at `https://app.promptpotter.dev` over Cloudflare's HTTPS edge.
+- Linux box runs `uvicorn $APP_MODULE` on `127.0.0.1:8001` under **systemd**
+  (auto-restart, survives reboot).
+- `cloudflared` runs as another systemd service, exposing it at
+  `https://$PUBLIC_HOSTNAME` over Cloudflare's HTTPS edge.
 - No open ports on your router, no static IP, free.
 
-## One-time prep (on Cloudflare's side, takes ~3 min)
+## Adopter config (do this first)
 
-Cloudflare must be the authoritative DNS for `app.promptpotter.dev`. Two options:
+All four scripts read their values from `deploy.config` (gitignored), falling back
+to generic placeholders if it's absent. Copy the example and fill in your own app:
 
-1. **Move the whole `promptpotter.dev` zone to Cloudflare** (easiest if Vercel isn't deeply wired into DNS-level things). Add the domain at https://dash.cloudflare.com, point the registrar's nameservers at the two CF nameservers Cloudflare gives you. Wait for propagation (a few minutes to a few hours).
-2. **Delegate just `app.promptpotter.dev`** (keeps Vercel DNS for the root). Add `app.promptpotter.dev` as a *separate zone* at Cloudflare, then at Vercel DNS create NS records for the host `app` pointing to the two CF nameservers. This is "subdomain delegation."
+```bash
+cd deploy-linux
+cp deploy.config.example deploy.config
+$EDITOR deploy.config        # set APP_NAME, APP_MODULE, REPO_URL, PUBLIC_HOSTNAME, …
+```
 
-Either works. Pick 1 unless you have something brittle on Vercel DNS.
+Every value can also be overridden inline for a one-off, e.g.
+`PUBLIC_HOSTNAME=staging.example.com ./install-tunnel.sh`.
+
+## One-time prep (on Cloudflare's side, ~3 min)
+
+Cloudflare must be the authoritative DNS for `$PUBLIC_HOSTNAME`. On the Free plan
+that means the **whole parent zone** lives at Cloudflare (a subdomain-only zone is
+refused on Free) — add `<your-domain>` as a site and point its nameservers at
+Cloudflare. Once the zone shows **Active**, `install-tunnel.sh` creates the
+`$PUBLIC_HOSTNAME` CNAME for you via `cloudflared tunnel route dns`.
 
 ## Run on the Linux box, in order
 
@@ -20,9 +35,9 @@ Either works. Pick 1 unless you have something brittle on Vercel DNS.
 # 0. copy this folder onto the box (e.g. via scp), cd into it
 cd ~/deploy-linux
 chmod +x *.sh         # the Windows filesystem strips the executable bit
+cp deploy.config.example deploy.config && $EDITOR deploy.config   # if not done already
 
-# 1. edit REPO_URL at the top of bootstrap.sh (it currently says CHANGE-ME),
-#    then clone repo, install deps, build webapp:
+# 1. clone repo, install deps, build webapp:
 ./bootstrap.sh
 # → edits .env interactively, prompts for the Groq/OpenAI key
 
@@ -33,23 +48,38 @@ chmod +x *.sh         # the Windows filesystem strips the executable bit
 ./install-tunnel.sh
 ```
 
-After step 3, `https://app.promptpotter.dev` should redirect to `/ui/` and load the dashboard.
+After step 3, `https://$PUBLIC_HOSTNAME` should redirect to `/ui/` and load the dashboard.
+
+## Backend service (the optimizer needs one)
+
+The optimizer drives a separate backend over `/matches` — clone it as a **git sibling** (not a release zip), then run it on `127.0.0.1:8000`:
+
+```bash
+git clone <backend>.git ~/potter/<backend>; cd ~/potter/<backend>/backend-api
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cp .env.example .env && $EDITOR .env
+```
+Wrap it in a systemd unit like `install-service.sh` (`ExecStart … uvicorn main:app --port 8000`); register it via PromptPotter's `POST /backends`.
 
 ## Defaults you can override
 
-Each script reads these env vars (with sensible defaults):
+Set these in `deploy.config` (or pass on the command line):
 
 | var | default | meaning |
 |---|---|---|
-| `REPO_URL` | `git@github.com:<your-handle>/prompt-potter-optimizer.git` | git clone source — **edit before running bootstrap.sh** |
-| `INSTALL_DIR` | `$HOME/prompt-potter-optimizer` | where the repo lands |
+| `APP_NAME` | `myapp` | slug → systemd unit, tunnel name, install-dir, Description |
+| `APP_MODULE` | `myapp.main:app` | uvicorn ASGI target |
+| `ADMIN_BOT_MODULE` | `myapp.presentation.admin_bot` | allowlist-bot module (optional) |
+| `REPO_URL` | `…/CHANGE-ME/your-repo.git` | git clone source — **edit before bootstrap** |
+| `INSTALL_DIR` | `$HOME/$APP_NAME/your-repo` | where the repo lands |
 | `RUN_USER` | `$USER` | systemd `User=` |
 | `BIND_HOST` | `127.0.0.1` | uvicorn host (don't change unless you also expose LAN) |
 | `BIND_PORT` | `8001` | uvicorn port |
-| `TUNNEL_NAME` | `potter` | cloudflared tunnel name |
-| `PUBLIC_HOSTNAME` | `app.promptpotter.dev` | public hostname to route |
-
-Override on the command line: `PUBLIC_HOSTNAME=foo.example.com ./install-tunnel.sh`.
+| `WEBAPP_DIR` | `webapp` | static frontend dir built by `npm run build` |
+| `HEALTH_PATH` | `/api/v1/health` | liveness endpoint the scripts curl |
+| `TUNNEL_NAME` | `$APP_NAME` | cloudflared tunnel name |
+| `PUBLIC_HOSTNAME` | `app.example.com` | public hostname to route |
+| `ALLOWED_ORIGINS` | `https://app.example.com` | CORS origin written into `.env` |
+| `OIDC_CALLBACK_PATH` | `/api/v1/auth/callback/google` | OAuth callback path |
 
 ## What's where after install
 
@@ -57,11 +87,11 @@ Override on the command line: `PUBLIC_HOSTNAME=foo.example.com ./install-tunnel.
 |---|---|
 | repo | `$INSTALL_DIR` |
 | Python venv | `$INSTALL_DIR/.venv` |
-| webapp build | `$INSTALL_DIR/webapp/out/` |
+| webapp build | `$INSTALL_DIR/$WEBAPP_DIR/out/` |
 | `.env` (secrets) | `$INSTALL_DIR/.env` — **0600 perms, don't commit** |
-| uvicorn unit | `/etc/systemd/system/promptpotter.service` |
+| uvicorn unit | `/etc/systemd/system/$APP_NAME.service` |
 | cloudflared config | `~/.cloudflared/config.yml` + `~/.cloudflared/<UUID>.json` |
-| logs (uvicorn) | `journalctl -u promptpotter -f` |
+| logs (uvicorn) | `journalctl -u $APP_NAME -f` |
 | logs (tunnel) | `journalctl -u cloudflared -f` |
 
 ## Verifying
@@ -74,25 +104,38 @@ curl http://127.0.0.1:8001/api/v1/health
 sudo systemctl status cloudflared
 
 # from outside
-curl -I https://app.promptpotter.dev/api/v1/health
+curl -I https://$PUBLIC_HOSTNAME/api/v1/health
 ```
 
-## Updating the app later
+## Updating later — one command
+
+`update.sh` is the whole routine after any change: it mirrors origin, refreshes
+deps, rebuilds the webapp, restarts the app — and does the same for the backend
+when `BACKEND_DIR` is set in `deploy.config`. Re-runnable; never stalls on a
+diverged box (tracked files are force-matched to origin; `.env`/runtime survive).
+It needs `deploy.config` (same one from setup) and aborts with the fix if it's
+missing — without it there's no real `INSTALL_DIR` to act on.
 
 ```bash
-cd $INSTALL_DIR
-git pull
-source .venv/bin/activate
-pip install -e ".[all,dev]"
-cd webapp && npm install && npm run build && cd ..
-sudo systemctl restart promptpotter
+cd "$INSTALL_DIR/deploy-linux" && ./update.sh   # deploy-linux lives inside the repo
 ```
+
+`./update.sh: Permission denied`? The exec bit didn't survive the clone — run
+`bash update.sh` once; the pull it does restores `100755` for next time.
 
 ## Security posture
 
-Stage-1 OIDC. Provider config: `.promptpotter/identity/oidc.json`. Email gate: `.promptpotter/identity/allowlist.json` (re-read on every sign-in — edits are instant, no restart). Don't stack Cloudflare Access — double-gate.
+Stage-1 OIDC. Provider config: `.promptpotter/identity/oidc.json`. Email gate:
+`.promptpotter/identity/allowlist.json` (re-read on every sign-in — edits are
+instant, no restart). Don't stack Cloudflare Access — double-gate.
 
-**The one rule:** a control-plane change never has an inbound door open to the internet. The allowlist is your front-door lock; editing it is a privileged action, so it is **not** exposed as a public endpoint. Instead an **on-box admin bot** reaches *out* to Telegram (long-poll, no open port, nothing new to attack) and edits the local file — the zero-trust / Purdue posture (protected zone never reachable from the lowest-trust zone). Full rationale: [`docs/adr/0004-operator-admin-channels.md`](../docs/adr/0004-operator-admin-channels.md).
+**The one rule:** a control-plane change never has an inbound door open to the
+internet. The allowlist is your front-door lock; editing it is a privileged action,
+so it is **not** exposed as a public endpoint. Instead an **on-box admin bot**
+reaches *out* to Telegram (long-poll, no open port, nothing new to attack) and edits
+the local file — the zero-trust / Purdue posture (protected zone never reachable from
+the lowest-trust zone). Full rationale:
+[`docs/adr/0004-operator-admin-channels.md`](../docs/adr/0004-operator-admin-channels.md).
 
 ### Manage the allowlist from your phone
 
@@ -104,16 +147,18 @@ Stage-1 OIDC. Provider config: `.promptpotter/identity/oidc.json`. Email gate: `
 ./install-allowlist-bot.sh        # systemd service, outbound-only, auto-restart
 ```
 
-Then message the bot `/allow you@example.com`, `/deny ...`, `/list`. Changes are audited to `.promptpotter/identity/allowlist_audit.jsonl`. Step-by-step + secret hygiene: [`docs/operations/secure-hosting.md`](../docs/operations/secure-hosting.md).
+Then message the bot `/allow you@example.com`, `/deny ...`, `/list`. Changes are
+audited to `.promptpotter/identity/allowlist_audit.jsonl`. Step-by-step + secret
+hygiene: [`docs/operations/secure-hosting.md`](../docs/operations/secure-hosting.md).
 
-| logs (allowlist bot) | `journalctl -u promptpotter-allowlist-bot -f` |
+| logs (allowlist bot) | `journalctl -u $APP_NAME-allowlist-bot -f` |
 
 ## Uninstall
 
 ```bash
-sudo systemctl disable --now promptpotter
-sudo rm /etc/systemd/system/promptpotter.service
+sudo systemctl disable --now $APP_NAME
+sudo rm /etc/systemd/system/$APP_NAME.service
 sudo cloudflared service uninstall
-cloudflared tunnel delete potter
+cloudflared tunnel delete $TUNNEL_NAME
 rm -rf $INSTALL_DIR ~/.cloudflared
 ```

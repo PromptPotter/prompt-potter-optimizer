@@ -1,0 +1,58 @@
+# deploy.config — adopter values for the Linux deploy scripts.
+#
+# Copy this file to `deploy.config` (gitignored) and fill in your own values:
+#   cp deploy.config.example deploy.config
+#
+# All four scripts (bootstrap / install-service / install-tunnel /
+# install-allowlist-bot) source `deploy.config` if present, then fall back to
+# these defaults. Anything you leave commented uses the default shown.
+# Every value can also be overridden inline, e.g.
+#   PUBLIC_HOSTNAME=staging.example.com ./install-tunnel.sh
+
+# --- identity -----------------------------------------------------------
+# Short slug for your app. Drives the systemd unit name, the cloudflared
+# tunnel name, the install-dir default, and the unit Description.
+APP_NAME="myapp"
+
+# uvicorn target — the FastAPI ASGI app, "package.module:attr".
+APP_MODULE="myapp.main:app"
+
+# Optional admin/allowlist bot module (only needed for install-allowlist-bot.sh).
+ADMIN_BOT_MODULE="myapp.presentation.admin_bot"
+
+# --- source + install ---------------------------------------------------
+# git clone source — REQUIRED, edit before running bootstrap.sh.
+REPO_URL="https://github.com/CHANGE-ME/your-repo.git"
+
+# Where the repo is cloned / where the service runs from.
+INSTALL_DIR="$HOME/$APP_NAME/your-repo"
+
+# systemd User= (the account the service runs as).
+RUN_USER="$USER"
+
+# --- runtime ------------------------------------------------------------
+BIND_HOST="127.0.0.1"          # uvicorn host (keep loopback behind the tunnel)
+BIND_PORT="8001"               # uvicorn port
+WEBAPP_DIR="webapp"            # static frontend dir built by `npm run build`
+HEALTH_PATH="/api/v1/health"   # liveness endpoint the scripts curl
+
+# --- backend service (optional) -----------------------------------------
+# The API the optimizer drives via /matches, cloned as a git sibling. Set these
+# and update.sh keeps it in lockstep with the app. Leave BACKEND_DIR empty to skip.
+BACKEND_DIR=""                 # e.g. $HOME/potter/TermNorm-excel/backend-api
+BACKEND_SERVICE=""             # e.g. termnorm  (its systemd unit name)
+BACKEND_PORT="8000"            # backend uvicorn port (health probed at /status)
+
+# --- public edge (Cloudflare tunnel) -----------------------------------
+# The hostname the app is served at. Cloudflare must be authoritative DNS for
+# it — for a subdomain, the whole parent zone must live at Cloudflare (Free-plan rule).
+PUBLIC_HOSTNAME="app.example.com"
+
+# cloudflared tunnel name (defaults to APP_NAME if left unset).
+TUNNEL_NAME="$APP_NAME"
+
+# Browser origins allowed by the API (CORS). Usually https://$PUBLIC_HOSTNAME.
+ALLOWED_ORIGINS="https://app.example.com"
+
+# OAuth callback path appended to PUBLIC_HOSTNAME for the OIDC redirect URI.
+OIDC_CALLBACK_PATH="/api/v1/auth/callback/google"

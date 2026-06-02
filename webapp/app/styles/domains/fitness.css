@@ -71,3 +71,20 @@
 .whatif-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:10px}
 .whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border-tertiary);border-radius:9px;padding:13px 7px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:108px;user-select:none;z-index:1;font-family:inherit}
 .whatif-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}
+/* Phone (≤640px): lay every tile in ONE horizontally-scrolling row (the
+   .wf-hero-flow pattern) instead of the two-row vertical-scroll grid —
+   one swipe sweeps the whole evaluator set. Tiles drop to ~70% in both
+   dimensions (100→70px wide, 108→76px tall); the icon + name + gaps scale
+   to match so the smaller tile stays legible. Overrides glass.css sizes
+   here (never edits the glass file itself). */
+@media (max-width:640px){
+  .whatif-grid-wrap{overflow-x:auto;overflow-y:hidden;max-height:none;padding:6px 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .whatif-grid-wrap::-webkit-scrollbar{display:none}
+  .whatif-grid{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:70px;gap:7px}
+  .whatif-sq{width:70px;height:76px;padding:9px 4px 7px;gap:3px}
+  .whatif-ico{width:19px;height:19px;margin-top:3px}
+  .whatif-name{font-size:9px;line-height:1.15}
+  .whatif-tick{width:11px;height:11px;top:4px;left:4px}
+  .whatif-tick svg{width:16px;height:16px}
+  .whatif-dir{font-size:11px;top:4px;right:5px}
+}

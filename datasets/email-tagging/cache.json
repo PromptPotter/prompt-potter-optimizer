@@ -1,0 +1,23 @@
+{
+  "name": "email-tagging",
+  "created_at": "2026-05-30T00:00:00+00:00",
+  "source_file": "PCRM_root_TestObject - Entries.tsv (anonymized, reconstructed hard-sample subset)",
+  "row_count": 15,
+  "items": [
+    { "id": 0, "query": "From: NimbusCloud Billing <billing@nimbuscloud.io>\nSubject: Your Pro plan has renewed\nDirection: inbound\n\nHi Tomas, your NimbusCloud Pro subscription renewed automatically. CHF 29.00 was charged to the card ending 4417. No action needed.", "ground_truth": "financial" },
+    { "id": 1, "query": "From: Calendar <calendar-notification@meetinghub.app>\nSubject: Invitation: Project sync @ Thu 14:00\nDirection: inbound\n\nLena Brunner invited you to \"Project sync\", Thu 5 Mar 14:00-14:30. Please respond: Yes / No / Maybe.", "ground_truth": "actionable" },
+    { "id": 2, "query": "From: Orders <orders@parcelo.example>\nSubject: Update on your order #88213\nDirection: inbound\n\nYour parcel is delayed by about three days. As an apology we have refunded the CHF 12.00 shipping fee to your original payment method.", "ground_truth": "financial" },
+    { "id": 3, "query": "From: Sozialdienst Musterstadt <revision@sd-musterstadt.example>\nSubject: Überprüfung Anspruch Sozialhilfegelder (Ref. 250645)\nDirection: inbound\n\nSehr geehrter Herr Vetterli, zur Überprüfung Ihres Anspruchs auf Sozialhilfegelder benötigen wir Ihre aktuellen Kontoauszüge. Bitte reichen Sie die Unterlagen bis 20.03. ein.", "ground_truth": "financial" },
+    { "id": 4, "query": "From: Olly <olly@senjafied.example>\nSubject: Why I almost shut it all down (and the MCP thing)\nDirection: inbound\n\nBig personal update this week, plus a new MCP server we just shipped. Hit reply if you want early access.", "ground_truth": "informational" },
+    { "id": 5, "query": "From: Lukas Brand <lukas@openclaw.example>\nSubject: Meeting on the Openclaw launch?\nDirection: inbound\n\nCan we grab 30 minutes Thursday to decide the launch date? Let me know what works for you.", "ground_truth": "actionable" },
+    { "id": 6, "query": "From: Accounts <accounts@devawarely.example>\nSubject: Invoice 1023 - DevAwarely\nDirection: inbound\n\nPlease find attached invoice 1023, CHF 480.00, net 30.\nAttachment: PDF invoice — DevAwarely, total CHF 480.00, due 2026-04-15.", "ground_truth": "financial" },
+    { "id": 7, "query": "From: Senjafied <no-reply@senjafied.example>\nSubject: Your annual license is active\nDirection: inbound\n\nThanks! Your payment of CHF 99.00 for the annual Senjafied license was successful. Your plan is active for the next 12 months.", "ground_truth": "financial" },
+    { "id": 8, "query": "From: Open Tab <digest@opentab.example>\nSubject: Open Tab: this week's essays\nDirection: inbound\n\nFive long reads on attention, AI and the long now. Enjoy the issue.", "ground_truth": "informational" },
+    { "id": 9, "query": "From: Shop <shop@parcelo.example>\nSubject: Your order has shipped\nDirection: inbound\n\nGood news — your order is on its way. Track it with the link below. Expected delivery Tuesday.", "ground_truth": "informational" },
+    { "id": 10, "query": "From: Mara Lindqvist <mara@helvetia-optics.example>\nSubject: Automatic reply: Out of office\nDirection: inbound\n\nI am away until 10 March with limited access to email. For urgent matters please contact the office.", "ground_truth": "other" },
+    { "id": 11, "query": "From: Priya Nadel <priya@helvetia-optics.example>\nSubject: Confirm by Friday: vendor choice\nDirection: inbound\n\nWe need your sign-off on whether we proceed with vendor X for the rollout. Please confirm by Friday.", "ground_truth": "actionable" },
+    { "id": 12, "query": "From: Jonas Frei <jonas.frei@example.com>\nSubject: Refund for last month's overcharge\nDirection: inbound\n\nI was charged twice in February. Could you please refund the extra CHF 20.00 to my account?", "ground_truth": "financial" },
+    { "id": 13, "query": "From: Events <events@dreamleaplabs.example>\nSubject: Free webinar: KI-Learnings aus dem Weltraum\nDirection: inbound\n\nJoin our free online session next Thursday. Register with a single click — seats are limited.", "ground_truth": "informational" },
+    { "id": 14, "query": "From: TWINT Receipts <receipts@paytwint.example>\nSubject: Your payment\nDirection: inbound\n\nPayment sent: CHF 18.50 to Café Effi. Thanks for paying with TWINT.", "ground_truth": "financial" }
+  ]
+}

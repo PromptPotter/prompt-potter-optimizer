@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
-# PromptPotter Linux bootstrap — clones the repo, installs Python 3.13 if
-# missing, installs Node.js 20 if missing, sets up a venv, builds the webapp,
-# and creates an .env. Idempotent: safe to re-run.
+# Linux bootstrap — clones the repo, installs Python 3.13 if missing, installs
+# Node.js 20 if missing, sets up a venv, builds the webapp, and creates an .env.
+# Idempotent: safe to re-run. Reads adopter values from deploy.config — see
+# deploy.config.example.
 set -euo pipefail
 
-# --- knobs --------------------------------------------------------------
-REPO_URL="${REPO_URL:-https://github.com/runfish5/prompt-potter-optimizer.git}"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/potter/prompt-potter-optimizer}"
+# --- config + knobs -----------------------------------------------------
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
+APP_NAME="${APP_NAME:-myapp}"
+APP_MODULE="${APP_MODULE:-myapp.main:app}"
+REPO_URL="${REPO_URL:-https://github.com/CHANGE-ME/your-repo.git}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/$APP_NAME/your-repo}"
+BIND_HOST="${BIND_HOST:-127.0.0.1}"
+BIND_PORT="${BIND_PORT:-8001}"
+WEBAPP_DIR="${WEBAPP_DIR:-webapp}"
+HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
+ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-https://app.example.com}"
 # ------------------------------------------------------------------------
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -110,25 +120,25 @@ if [[ ! -f .env ]]; then
     else
         warn "skipped — edit $INSTALL_DIR/.env manually before running the service"
     fi
-    # tighten CORS to the public hostname (matches default in install-tunnel.sh)
-    sed -i 's|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=https://app.promptpotter.dev|' .env
+    # tighten CORS to the public hostname (from deploy.config)
+    sed -i "s|^ALLOWED_ORIGINS=.*|ALLOWED_ORIGINS=${ALLOWED_ORIGINS}|" .env
 else
     say ".env already exists — leaving it alone"
 fi
 
 # --- 6. webapp build -----------------------------------------------------
-say "building webapp (Next.js static export → webapp/out/)"
-cd webapp
+say "building webapp (static export → $WEBAPP_DIR/out/)"
+cd "$WEBAPP_DIR"
 npm install
 npm run build
 cd ..
 
 # --- 7. smoke ------------------------------------------------------------
 say "smoke test: starting uvicorn for 4 seconds"
-.venv/bin/python -m uvicorn promptpotter.main:app --host 127.0.0.1 --port 8001 &
+.venv/bin/python -m uvicorn "$APP_MODULE" --host "$BIND_HOST" --port "$BIND_PORT" &
 uv_pid=$!
 sleep 4
-if curl -fsS http://127.0.0.1:8001/api/v1/health >/dev/null; then
+if curl -fsS "http://$BIND_HOST:$BIND_PORT$HEALTH_PATH" >/dev/null; then
     say "health check passed"
 else
     warn "health check failed — check logs above"

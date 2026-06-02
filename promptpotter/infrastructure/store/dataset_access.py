@@ -30,7 +30,7 @@ from promptpotter.shared.identity import BENCHMARKS_READ_CAP
 # Built-in try-and-learn demo datasets (repo ``datasets/{slug}/``). Surfaced to a
 # user while ``User.demo_mode_enabled`` is on — independent of the benchmark
 # capability, so a brand-new signup can try the product without being an admin.
-DEMO_DATASET_SLUGS: tuple[str, ...] = ("demo-tickets", "email-tagging")
+DEMO_DATASET_SLUGS: tuple[str, ...] = ("email-tagging",)
 
 
 class DatasetAccessError(Exception):

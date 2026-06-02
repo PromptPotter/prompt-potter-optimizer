@@ -4,8 +4,14 @@
 # allowlist — it opens no inbound port. Idempotent: re-running refreshes + restarts.
 set -euo pipefail
 
-# --- knobs --------------------------------------------------------------
-INSTALL_DIR="${INSTALL_DIR:-$HOME/potter/prompt-potter-optimizer}"
+# --- config + knobs -----------------------------------------------------
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
+APP_NAME="${APP_NAME:-myapp}"
+SERVICE_NAME="${SERVICE_NAME:-$APP_NAME}"
+BOT_SERVICE_NAME="${BOT_SERVICE_NAME:-$SERVICE_NAME-allowlist-bot}"
+ADMIN_BOT_MODULE="${ADMIN_BOT_MODULE:-myapp.presentation.admin_bot}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/$APP_NAME/your-repo}"
 RUN_USER="${RUN_USER:-$USER}"
 # ------------------------------------------------------------------------
 
@@ -20,12 +26,12 @@ grep -q '^ADMIN_BOT_TELEGRAM_TOKEN=' "$INSTALL_DIR/.env" \
 grep -q '^ADMIN_BOT_CHAT_ID=' "$INSTALL_DIR/.env" \
     || die "ADMIN_BOT_CHAT_ID not in .env — see docs/operations/secure-hosting.md"
 
-UNIT_FILE=/etc/systemd/system/promptpotter-allowlist-bot.service
+UNIT_FILE=/etc/systemd/system/$BOT_SERVICE_NAME.service
 say "writing $UNIT_FILE (user=$RUN_USER)"
 
 sudo tee "$UNIT_FILE" >/dev/null <<EOF
 [Unit]
-Description=PromptPotter allowlist admin bot (outbound-only operator-admin channel)
+Description=$APP_NAME allowlist admin bot (outbound-only operator-admin channel)
 After=network-online.target
 Wants=network-online.target
 
@@ -34,7 +40,7 @@ Type=simple
 User=$RUN_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
-ExecStart=$INSTALL_DIR/.venv/bin/python -m promptpotter.presentation.admin_bot
+ExecStart=$INSTALL_DIR/.venv/bin/python -m $ADMIN_BOT_MODULE
 Restart=on-failure
 RestartSec=5s
 # Hardening — the bot only needs to read .env + write the identity dir.
@@ -47,24 +53,24 @@ ReadWritePaths=$INSTALL_DIR
 WantedBy=multi-user.target
 EOF
 
-say "reloading systemd, enabling + starting promptpotter-allowlist-bot.service"
+say "reloading systemd, enabling + starting $BOT_SERVICE_NAME.service"
 sudo systemctl daemon-reload
-sudo systemctl enable promptpotter-allowlist-bot.service
-sudo systemctl restart promptpotter-allowlist-bot.service
+sudo systemctl enable "$BOT_SERVICE_NAME.service"
+sudo systemctl restart "$BOT_SERVICE_NAME.service"
 
 sleep 2
-if systemctl is-active --quiet promptpotter-allowlist-bot.service; then
+if systemctl is-active --quiet "$BOT_SERVICE_NAME.service"; then
     say "bot is running (outbound-only; no new listening port by design)"
 else
-    die "bot failed to start — see: journalctl -u promptpotter-allowlist-bot -e"
+    die "bot failed to start — see: journalctl -u $BOT_SERVICE_NAME -e"
 fi
 
 printf '\n\033[1;32mallowlist admin bot installed.\033[0m\n\n'
-cat <<'EOF'
+cat <<EOF
 useful commands:
-  systemctl status promptpotter-allowlist-bot        # is it running?
-  journalctl -u promptpotter-allowlist-bot -f        # live logs
-  sudo systemctl restart promptpotter-allowlist-bot  # after rotating the token
+  systemctl status $BOT_SERVICE_NAME        # is it running?
+  journalctl -u $BOT_SERVICE_NAME -f        # live logs
+  sudo systemctl restart $BOT_SERVICE_NAME  # after rotating the token
 
 now message your bot:
   /allow you@example.com

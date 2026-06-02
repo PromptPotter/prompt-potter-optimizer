@@ -6,11 +6,16 @@
 # the "One-time prep" section of README.md.
 set -euo pipefail
 
-# --- knobs --------------------------------------------------------------
-TUNNEL_NAME="${TUNNEL_NAME:-potter}"
-PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-app.promptpotter.dev}"
+# --- config + knobs -----------------------------------------------------
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
+APP_NAME="${APP_NAME:-myapp}"
+SERVICE_NAME="${SERVICE_NAME:-$APP_NAME}"
+TUNNEL_NAME="${TUNNEL_NAME:-$APP_NAME}"
+PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-app.example.com}"
 BIND_HOST="${BIND_HOST:-127.0.0.1}"
 BIND_PORT="${BIND_PORT:-8001}"
+HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 # ------------------------------------------------------------------------
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -107,10 +112,10 @@ else
 fi
 
 # --- 7. end-to-end check ------------------------------------------------
-say "checking https://$PUBLIC_HOSTNAME/api/v1/health (may take ~10s for DNS to propagate)"
+say "checking https://$PUBLIC_HOSTNAME$HEALTH_PATH (may take ~10s for DNS to propagate)"
 ok=0
 for i in 1 2 3 4 5 6; do
-    if curl -fsS --max-time 10 "https://$PUBLIC_HOSTNAME/api/v1/health" >/dev/null; then
+    if curl -fsS --max-time 10 "https://$PUBLIC_HOSTNAME$HEALTH_PATH" >/dev/null; then
         ok=1; break
     fi
     sleep 5
@@ -121,17 +126,17 @@ if [[ $ok -eq 1 ]]; then
     cat <<EOF
   - dashboard: https://$PUBLIC_HOSTNAME/ui/
   - api docs:  https://$PUBLIC_HOSTNAME/docs
-  - health:    https://$PUBLIC_HOSTNAME/api/v1/health
+  - health:    https://$PUBLIC_HOSTNAME$HEALTH_PATH
 
 logs:
-  journalctl -u cloudflared -f   # tunnel
-  journalctl -u promptpotter -f  # uvicorn
+  journalctl -u cloudflared -f      # tunnel
+  journalctl -u $SERVICE_NAME -f    # uvicorn
 
-reminder: this is currently public + unauthenticated. See "Security note"
-in deploy-linux/README.md for the Cloudflare Access setup.
+reminder: this is currently public. Sign-in is gated by the OIDC allowlist;
+see the Security posture section in deploy-linux/README.md.
 EOF
 else
     warn "could not reach https://$PUBLIC_HOSTNAME yet. DNS may still be propagating."
-    warn "verify locally first:  curl http://$BIND_HOST:$BIND_PORT/api/v1/health"
+    warn "verify locally first:  curl http://$BIND_HOST:$BIND_PORT$HEALTH_PATH"
     warn "then check tunnel logs: journalctl -u cloudflared -e"
 fi

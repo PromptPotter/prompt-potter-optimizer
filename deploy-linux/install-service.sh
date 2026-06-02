@@ -3,11 +3,17 @@
 # Idempotent: re-running just refreshes the unit and restarts.
 set -euo pipefail
 
-# --- knobs --------------------------------------------------------------
-INSTALL_DIR="${INSTALL_DIR:-$HOME/potter/prompt-potter-optimizer}"
+# --- config + knobs -----------------------------------------------------
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -f "$HERE/deploy.config" ]] && source "$HERE/deploy.config"
+APP_NAME="${APP_NAME:-myapp}"
+SERVICE_NAME="${SERVICE_NAME:-$APP_NAME}"
+APP_MODULE="${APP_MODULE:-myapp.main:app}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/$APP_NAME/your-repo}"
 RUN_USER="${RUN_USER:-$USER}"
 BIND_HOST="${BIND_HOST:-127.0.0.1}"
 BIND_PORT="${BIND_PORT:-8001}"
+HEALTH_PATH="${HEALTH_PATH:-/api/v1/health}"
 # ------------------------------------------------------------------------
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -16,12 +22,12 @@ die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 [[ -d "$INSTALL_DIR/.venv" ]] || die "no .venv at $INSTALL_DIR — run bootstrap.sh first"
 [[ -f "$INSTALL_DIR/.env" ]]  || die "no .env at $INSTALL_DIR — run bootstrap.sh first"
 
-UNIT_FILE=/etc/systemd/system/promptpotter.service
+UNIT_FILE=/etc/systemd/system/$SERVICE_NAME.service
 say "writing $UNIT_FILE (user=$RUN_USER, bind=$BIND_HOST:$BIND_PORT)"
 
 sudo tee "$UNIT_FILE" >/dev/null <<EOF
 [Unit]
-Description=PromptPotter Optimizer (FastAPI + static webapp)
+Description=$APP_NAME (FastAPI + static webapp)
 After=network-online.target
 Wants=network-online.target
 
@@ -30,7 +36,7 @@ Type=simple
 User=$RUN_USER
 WorkingDirectory=$INSTALL_DIR
 EnvironmentFile=$INSTALL_DIR/.env
-ExecStart=$INSTALL_DIR/.venv/bin/python -m uvicorn promptpotter.main:app \\
+ExecStart=$INSTALL_DIR/.venv/bin/python -m uvicorn $APP_MODULE \\
     --host $BIND_HOST --port $BIND_PORT --workers 1 --proxy-headers \\
     --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
@@ -46,24 +52,24 @@ ReadWritePaths=$INSTALL_DIR
 WantedBy=multi-user.target
 EOF
 
-say "reloading systemd, enabling + starting promptpotter.service"
+say "reloading systemd, enabling + starting $SERVICE_NAME.service"
 sudo systemctl daemon-reload
-sudo systemctl enable promptpotter.service
-sudo systemctl restart promptpotter.service
+sudo systemctl enable "$SERVICE_NAME.service"
+sudo systemctl restart "$SERVICE_NAME.service"
 
 sleep 2
-if curl -fsS "http://$BIND_HOST:$BIND_PORT/api/v1/health" >/dev/null; then
-    say "service is up: http://$BIND_HOST:$BIND_PORT/api/v1/health"
+if curl -fsS "http://$BIND_HOST:$BIND_PORT$HEALTH_PATH" >/dev/null; then
+    say "service is up: http://$BIND_HOST:$BIND_PORT$HEALTH_PATH"
 else
-    die "service started but health check failed — see: journalctl -u promptpotter -e"
+    die "service started but health check failed — see: journalctl -u $SERVICE_NAME -e"
 fi
 
 printf '\n\033[1;32muvicorn service installed.\033[0m\n\n'
-cat <<'EOF'
+cat <<EOF
 useful commands:
-  systemctl status promptpotter        # is it running?
-  journalctl -u promptpotter -f        # live logs
-  sudo systemctl restart promptpotter  # after pulling new code
+  systemctl status $SERVICE_NAME        # is it running?
+  journalctl -u $SERVICE_NAME -f        # live logs
+  sudo systemctl restart $SERVICE_NAME  # after pulling new code
 
 next step:
   ./install-tunnel.sh
