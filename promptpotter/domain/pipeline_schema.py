@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+
 
 def stable_hash(value: Any) -> str:
     """Deterministic 16-char hex digest of an arbitrary JSON-able value."""
@@ -154,6 +156,30 @@ class PipelineSchema(BaseModel):
     def to_pipeline_params(self) -> dict[str, Any]:
         """``{"steps": [...]}`` sparse scaffold — backend merges per-node config defaults."""
         return {"steps": list(self.active_steps)}
+
+    def optimizer_locks(self, forbidden_strict: bool) -> dict[str, Any]:
+        """The optimizer permission surface for a *minted* pipeline — same wire shape
+        as ``application/jobs/launcher.py::derive_optimizer_locks`` (the draft-side sibling).
+
+        Read straight off the committed schema: ``pipeline`` is the active step order,
+        each node carries its ``config`` floor + the ``param_allowed_values`` the optimizer
+        may permute. ``forbidden_strict`` is the campaign-level
+        ``optimization.forbidden_axes_strict`` policy (NOT derivable from the pipeline —
+        a node may declare ``model`` in ``param_keys`` as a capability while the campaign
+        still pins it); the caller reads it from the dataset's ``campaign.json``. The two
+        derivations must stay shape-consistent — change them together.
+        """
+        return {
+            "pipeline": list(self.active_steps),
+            "forbidden_axes": sorted(PARAM_FORBIDDEN_KEYS) if forbidden_strict else [],
+            "nodes": {
+                n.name: {
+                    "config": dict(n.current_config),
+                    "param_allowed_values": {k: list(v) for k, v in n.param_allowed_values.items()},
+                }
+                for n in self.nodes
+            },
+        }
 
     def has_node(self, name: str) -> bool:
         return name in self._node_map

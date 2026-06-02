@@ -1,17 +1,16 @@
 "use client";
 import type { NodeDataLike, PipelineView, PipelineViewNode } from "@/components/workflow/types";
-import { useConnectorView } from "@/lib/hooks/useConnectorView";
+import type { ConnectorView } from "@/lib/types/connector";
 import { ConnectorNode } from "./ConnectorNode";
 import { useSelection } from "./SelectionContext";
 
 interface Props {
   samplesOpen: boolean;
   onToggle: () => void;
-  // Active dataset id — feeds `useConnectorView`, which owns the dataset
-  // overlay + registered-backends fetches and the live-node join. Three
-  // props total (samplesOpen, onToggle, datasetName); everything the
-  // hero needs about the connector/backend surface comes from the hook.
-  datasetName: string | null;
+  // The joined connector/backend surface — owned by ChatPane (one
+  // `useConnectorView` call) and passed down so the same `cv` backs both this
+  // hero and the BackendNodeDetail panel below it (no double fetch).
+  cv: ConnectorView;
 }
 
 const ATTACH_ICON = (
@@ -80,7 +79,8 @@ function interiorNodes(view: PipelineView): PipelineViewNode[] {
 // stays "LLM" verbatim — even though the node id might be `llm_only`, the
 // chip is a brand surface, not a dump of the wire identifier. Model name
 // comes from dash.current_round.nodes; fall back to "idle" when the cycle
-// hasn't fired the node yet.
+// hasn't fired the node yet. Clickable — selects the node so BackendNodeDetail
+// opens (same SelectionContext.node axis the multi-node strip writes).
 function SingleNodeChip({
   node,
   currentNodes,
@@ -88,15 +88,23 @@ function SingleNodeChip({
   node: PipelineViewNode;
   currentNodes: Record<string, NodeDataLike>;
 }) {
+  const { node: selected, setSelectionForNode: setSelected } = useSelection();
   const model = currentNodes[node.id]?.model ?? "idle";
+  const isSelected = selected === node.id;
   return (
-    <div className="wf-hero-node llm">
+    <button
+      type="button"
+      className={`wf-hero-node llm${isSelected ? " selected" : ""}`}
+      aria-pressed={isSelected}
+      aria-label={`Node: ${node.label}`}
+      onClick={() => setSelected(isSelected ? null : node.id)}
+    >
       <div className="head">
         <div className="ico">{LLM_ICON}</div>
         <div className="lbl">LLM</div>
       </div>
       <div className="val">{model}</div>
-    </div>
+    </button>
   );
 }
 
@@ -203,8 +211,7 @@ function MultiNodeStrip({
   );
 }
 
-export function TargetPipelineHero({ samplesOpen, onToggle, datasetName }: Props) {
-  const cv = useConnectorView(datasetName);
+export function TargetPipelineHero({ samplesOpen, onToggle, cv }: Props) {
   const interior = cv.view ? interiorNodes(cv.view) : [];
   const isSingle = interior.length <= 1;
 

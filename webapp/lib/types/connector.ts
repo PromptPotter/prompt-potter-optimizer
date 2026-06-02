@@ -17,7 +17,7 @@
 // The real connector_state probe (live `/connector/{name}/health`) is
 // an M12 control-plane add — `isLive` is its proxy today.
 
-import type { BackendInfo } from "@/lib/api";
+import type { BackendInfo, OptimizerLocks } from "@/lib/api";
 import type { NodeDataLike, PipelineView } from "@/components/workflow/types";
 
 export interface ConnectorView {
@@ -30,4 +30,9 @@ export interface ConnectorView {
   isTls: boolean | null;
   currentNodes: Record<string, NodeDataLike>;
   isLive: boolean;
+  // The minted-pipeline optimizer-lock surface + origin prompt the backend-node
+  // detail renders (from `GET /datasets/{name}/pipeline`). Null until the
+  // dataset overlay resolves (or in demo, where there's no real dataset).
+  optimizerLocks: OptimizerLocks | null;
+  startingPrompt: Record<string, unknown> | null;
 }

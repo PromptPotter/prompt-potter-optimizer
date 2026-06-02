@@ -31,7 +31,7 @@ Execution order is the [roadmap.md](roadmap.md) sequence, not the `Mxx-` filenam
 
 - Beta-usability: [origin-resolution check-in](m10-origin-resolution-checkin.md) · [BYO per-user API keys](m10-byo-keys.md) (spec only) · [verdict-resolution](verdict-resolution.md) (active) · [prompt-iteration framework](m10-prompt-iteration-framework.md)
 - Foundation spine: [state-sync cleanup](state-sync-cleanup.md) (P1 first — before spend reification) + the three permanent contracts above
-- Web payoff + platform: [multi-connector](m12-multi-connector.md) (composite fitness, then connectors/L4) · [chat-first user web](m13-chat-first-user-web.md) (Install/User/Project nouns on OIDC claims, Stage 2 considered)
+- Web payoff + platform: [multi-connector](m12-multi-connector.md) (composite fitness, then connectors/L4) · [operator-steered fork](m12-operator-steered-fork.md) (HITL steer: stop → edit a searchpoint → fork-continue; design-only) · [chat-first user web](m13-chat-first-user-web.md) (Install/User/Project nouns on OIDC claims, Stage 2 considered)
 - Expansion + parallel publication lane: [m12+ backlog](m12-plus-backlog.md) · [publication benchmarks](m11-publication-benchmarks.md) · far-horizon [synthetic-data](synthetic-data.md)
 
 ## Reference (capability specs, not on the roadmap)

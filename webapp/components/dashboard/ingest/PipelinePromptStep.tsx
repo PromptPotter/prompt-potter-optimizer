@@ -39,7 +39,13 @@ export function PipelinePromptStep({
           </span>
         </header>
 
-        <PipelineConfigEditor draft={draft} demo={demo} onApply={onApply} />
+        <PipelineConfigEditor
+          locks={draft.optimizer_locks}
+          overlayBase={draft.pipeline_overlay}
+          lockModel={draft.lock_model}
+          mode={demo ? "demo" : "edit"}
+          onApply={onApply}
+        />
 
         <hr className="setup-preview-divider" />
 

@@ -8,10 +8,12 @@ import { readSpend } from "@/lib/derivations/spend";
 import { fmtText, fmtDuration, fmtUsd } from "@/lib/format";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
-import { ConfigMenu } from "@/components/dashboard/ConfigMenu";
 import { CyclePicker } from "@/components/dashboard/CyclePicker";
 import { TargetPipelineHero } from "@/components/dashboard/TargetPipelineHero";
+import { BackendNodeDetail } from "@/components/dashboard/BackendNodeDetail";
 import { SpendBudgetControl } from "@/components/dashboard/SpendBudgetControl";
+import { useConnectorView } from "@/lib/hooks/useConnectorView";
+import { useSelection } from "@/components/dashboard/SelectionContext";
 
 interface Props {
   campaignId: string | null;
@@ -63,6 +65,16 @@ export function ChatPane({
   const [wandOn, setWandOn] = useState(true);
   const [samplesOpen, setSamplesOpen] = useState(false);
   const toggleSamples = () => setSamplesOpen((v) => !v);
+
+  // One connector-view fetch, shared by the hero + the backend-node detail.
+  const cv = useConnectorView(datasetName);
+  const { node: selectedNode, setSelectionForNode } = useSelection();
+  // Target-node ids are disjoint from the optimizer canvas (membership-gate);
+  // the demo/preview hero with no view exposes the synthetic "llm" chip id.
+  const targetNodeIds = cv.view
+    ? cv.view.nodes.filter((n) => n.kind !== "io").map((n) => n.id)
+    : ["llm"];
+  const showBackendDetail = selectedNode != null && targetNodeIds.includes(selectedNode);
   // Auto-open once per mount as soon as a cycle is bound — saves the operator
   // one click on page reload. The ref guard means that if the user manually
   // closes the drawer and the cycle later changes (or a new cycle is bound),
@@ -187,14 +199,10 @@ export function ChatPane({
       ) : null}
 
       <div className="wf-hero">
-        <div className="wf-hero-tools">
-          <ConfigMenu datasetName={datasetName} />
-        </div>
-        <TargetPipelineHero
-          samplesOpen={samplesOpen}
-          onToggle={toggleSamples}
-          datasetName={datasetName}
-        />
+        <TargetPipelineHero samplesOpen={samplesOpen} onToggle={toggleSamples} cv={cv} />
+        {showBackendDetail && (
+          <BackendNodeDetail cv={cv} onClose={() => setSelectionForNode(null)} />
+        )}
         {samplesOpen && (
           <HardSamplesHeatmap
             campaignId={campaignId}

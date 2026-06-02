@@ -35,13 +35,17 @@ export function PromptFieldsEditor({
   demo,
   onApply,
   flat = false,
+  readOnly = false,
 }: {
   value: Record<string, unknown>;
   demo: boolean;
-  onApply: (patch: DraftPatch) => void;
+  onApply?: (patch: DraftPatch) => void;
   // When true, render without the own card chrome (it nests inside another
   // card — the unified setup-preview panel).
   flat?: boolean;
+  // When true, disable every field — the minted-campaign node panel shows the
+  // origin prompt read-only (no draft to persist to).
+  readOnly?: boolean;
 }) {
   // Fingerprint the incoming prompt; render-phase reset when it changes (e.g.
   // the check-in just populated it) so external updates flow in without a stale
@@ -56,10 +60,11 @@ export function PromptFieldsEditor({
 
   const setField = (key: string, v: string) => setFields((prev) => ({ ...prev, [key]: v }));
 
-  // Persist on blur — never in demo (edits are visual; mint uses the dataset's
-  // prompt). Merge over `value` so few_shot_examples / plan survive untouched.
+  // Persist on blur — never in demo or readonly (edits are visual; mint uses
+  // the dataset's prompt). Merge over `value` so few_shot_examples / plan
+  // survive untouched.
   const commit = () => {
-    if (demo) return;
+    if (demo || readOnly || !onApply) return;
     const merged: Record<string, unknown> = { ...value };
     for (const f of FIELDS) merged[f.key] = fields[f.key];
     onApply({ starting_prompt: merged });
@@ -93,6 +98,8 @@ export function PromptFieldsEditor({
               rows={f.rows}
               value={fields[f.key]}
               placeholder={f.hint}
+              readOnly={readOnly}
+              disabled={readOnly}
               onChange={(e) => setField(f.key, e.target.value)}
               onBlur={commit}
             />

@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
+from promptpotter.application.config import load_campaign_config
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
@@ -19,6 +20,7 @@ from promptpotter.application.datasets.ingest import (
     draft_from_dataset,
     ingest_draft,
 )
+from promptpotter.application.datasets.prompts import load_node_prompt
 from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
 from promptpotter.application.intelligence.measurement_series import (
     campaign_measurement_series,
@@ -559,23 +561,30 @@ async def get_dataset_measurement_series(
 class DatasetPipelineResponse(BaseModel):
     """Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;
     `pipeline` is the full parsed schema for consumers needing per-node config; `connector` is
-    the original-cased name for chip labelling.
+    the original-cased name for chip labelling. `optimizer_locks` is the minted-pipeline
+    permission surface (same shape the draft wire carries) the backend-node detail renders;
+    `starting_prompt` is the origin PromptTemplate for the primary node (None when the dataset
+    ships no `prompts/`).
     """
 
     name: str
     connector: str
     pipeline: dict[str, Any]
     view: dict[str, Any] | None
+    optimizer_locks: dict[str, Any]
+    starting_prompt: dict[str, Any] | None
 
 
 @_datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
 async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
-    """Return the dataset overlay's parsed pipeline schema and graph view.
+    """Return the dataset overlay's parsed pipeline schema, graph view, optimizer-lock
+    surface, and origin prompt.
 
     Identity-gated through the same resolver as the other dataset reads — there is
     no unauthenticated path to a benchmark's pipeline/overlay config.
     """
-    pipeline_path = _resolve_or_404(store, name) / "pipeline.json"
+    dataset_dir = _resolve_or_404(store, name)
+    pipeline_path = dataset_dir / "pipeline.json"
     if not pipeline_path.is_file():
         raise HTTPException(404, f"Dataset '{name}' has no pipeline.json")
     raw = json.loads(pipeline_path.read_text(encoding="utf-8"))
@@ -584,11 +593,33 @@ async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineRes
     # sequences pointing at lone low surrogates that crash UTF-8 encode).
     schema = parse_pipeline_response(raw)
     connector = (raw.get("backend_name") or raw.get("name") or name).strip()
+    # Model/provider lock is a campaign policy (`optimization.forbidden_axes_strict`),
+    # not a pipeline fact — a node may declare `model` in `param_keys` as a capability
+    # while the campaign still pins it. Read the dataset's default campaign.json; absent,
+    # fall back to the CampaignConfig default (strict — the conservative floor).
+    forbidden_strict = True
+    campaign_path = dataset_dir / "campaign.json"
+    if campaign_path.is_file():
+        craw = json.loads(campaign_path.read_text(encoding="utf-8"))
+        cfg = load_campaign_config(craw.get("campaign_config", craw))
+        forbidden_strict = cfg.optimization.forbidden_axes_strict
+    # Origin prompt for the first pipeline step — read-only seed the node panel
+    # shows. `load_node_prompt` resolves `{node}.json` → `default.json`; absent a
+    # `prompts/` dir it raises, which we surface as a null starting_prompt.
+    starting_prompt: dict[str, Any] | None = None
+    steps = schema.active_steps
+    if steps:
+        try:
+            starting_prompt = load_node_prompt(dataset_dir, steps[0]).model_dump()
+        except FileNotFoundError:
+            starting_prompt = None
     return DatasetPipelineResponse(
         name=name,
         connector=connector,
         pipeline=schema.model_dump(by_alias=True),
         view=schema.view.model_dump(by_alias=True) if schema.view is not None else None,
+        optimizer_locks=schema.optimizer_locks(forbidden_strict),
+        starting_prompt=starting_prompt,
     )
 
 

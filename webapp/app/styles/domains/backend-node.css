@@ -1,0 +1,46 @@
+/* Backend-node detail — the on-the-node config panel (replaces the old
+   ConfigMenu gear). It renders the setup flow's Step-3 `.setup-preview` block
+   verbatim (PipelineConfigEditor + PromptFieldsEditor, read-only), so it reads
+   identically to the wizard. This file only adds what the dashboard context
+   needs on top of that shared chrome: a width constraint (the hero is 980px
+   wide), a close affordance, and the now-clickable single-node hero chip. */
+
+.bnode {
+  position: relative;
+  max-width: 560px;
+  margin: 14px auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Close affordance grouped with the sub-note at the right of the reused
+   `.setup-preview-head` (title left, sub + × right). */
+.setup-preview-side { display: inline-flex; align-items: center; gap: 8px; }
+.bnode-close {
+  background: none;
+  border: 0;
+  color: var(--color-text-tertiary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: var(--border-radius-sm);
+}
+.bnode-close:hover { color: var(--color-accent); background: var(--color-background-primary); }
+.bnode-close:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+
+/* The single-node LLM hero chip is now a button — affordances + selected state
+   matching the Input/Output toggles. */
+.wf-hero-node.llm {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.wf-hero-node.llm:hover { border-color: var(--color-accent); }
+.wf-hero-node.llm:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--color-accent-glow); }
+.wf-hero-node.llm.selected {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent), 0 0 16px var(--color-accent-glow);
+}

@@ -25,7 +25,12 @@
 // match moves to the server; this hook becomes a thin wire wrapper.
 
 import { useEffect, useMemo, useState } from "react";
-import { fetchBackends, fetchDatasetPipeline, type BackendInfo } from "@/lib/api";
+import {
+  fetchBackends,
+  fetchDatasetPipeline,
+  type BackendInfo,
+  type OptimizerLocks,
+} from "@/lib/api";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import type { ConnectorView } from "@/lib/types/connector";
 import type { NodeDataLike, PipelineView } from "@/components/workflow/types";
@@ -40,6 +45,8 @@ const EMPTY: ConnectorView = {
   isTls: null,
   currentNodes: {},
   isLive: false,
+  optimizerLocks: null,
+  startingPrompt: null,
 };
 
 export function useConnectorView(datasetName: string | null): ConnectorView {
@@ -47,6 +54,8 @@ export function useConnectorView(datasetName: string | null): ConnectorView {
   const [view, setView] = useState<PipelineView | null>(null);
   const [connector, setConnector] = useState<string | null>(null);
   const [backendType, setBackendType] = useState<string | null>(null);
+  const [optimizerLocks, setOptimizerLocks] = useState<OptimizerLocks | null>(null);
+  const [startingPrompt, setStartingPrompt] = useState<Record<string, unknown> | null>(null);
 
   // Render-phase guarded reset — drops every dataset-keyed slot together
   // the same render the dataset id changes, so no consumer ever sees a
@@ -58,6 +67,8 @@ export function useConnectorView(datasetName: string | null): ConnectorView {
     setView(null);
     setConnector(null);
     setBackendType(null);
+    setOptimizerLocks(null);
+    setStartingPrompt(null);
   }
 
   // Backends — one-shot on mount; immutable within a session.
@@ -86,17 +97,23 @@ export function useConnectorView(datasetName: string | null): ConnectorView {
           view?: PipelineView | null;
           connector?: string | null;
           pipeline?: { backend_type?: string | null } | null;
+          optimizer_locks?: OptimizerLocks | null;
+          starting_prompt?: Record<string, unknown> | null;
         };
         if (!cancelled) {
           setView(resp?.view ?? null);
           setConnector(resp?.connector ?? null);
           setBackendType(resp?.pipeline?.backend_type ?? null);
+          setOptimizerLocks(resp?.optimizer_locks ?? null);
+          setStartingPrompt(resp?.starting_prompt ?? null);
         }
       } catch {
         if (!cancelled) {
           setView(null);
           setConnector(null);
           setBackendType(null);
+          setOptimizerLocks(null);
+          setStartingPrompt(null);
         }
       }
     })();
@@ -125,6 +142,18 @@ export function useConnectorView(datasetName: string | null): ConnectorView {
       isTls: baseUrl ? baseUrl.startsWith("https://") : null,
       currentNodes,
       isLive,
+      optimizerLocks,
+      startingPrompt,
     };
-  }, [datasetName, connector, backendType, view, backends, currentNodes, isLive]);
+  }, [
+    datasetName,
+    connector,
+    backendType,
+    view,
+    backends,
+    currentNodes,
+    isLive,
+    optimizerLocks,
+    startingPrompt,
+  ]);
 }

@@ -2,6 +2,7 @@
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { OptimizerNodeDetail } from "@/components/workflow/OptimizerNodeDetail";
+import { isOptimizerNodeId } from "@/components/workflow/layout";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { LineageTree } from "./LineageTree";
 import { RoundSamplesView } from "./round-samples/RoundSamplesView";
@@ -73,7 +74,7 @@ export function NowTriad({
         cycleId={cycleId}
       />
       <WorkflowCanvas pipeline={pipeline} dash={dash} isLive={isLive} />
-      {node && (
+      {node && isOptimizerNodeId(node) && (
         <OptimizerNodeDetail
           id={node}
           pipeline={pipeline}
