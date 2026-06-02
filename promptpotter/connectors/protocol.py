@@ -110,9 +110,8 @@ class Connector:
 
     default_exclude_nodes: tuple[str, ...] = ()
     """Nodes the connector recommends excluding by default. Slotted into
-    the seed ``campaign.json::exclude_nodes`` block. TermNorm sets this to
-    ``("llm_ranking",)`` because that node is currently broken
-    (~50% ``json_validate_failed``). Empty tuple means "exclude nothing."
+    the seed ``campaign.json::exclude_nodes`` block. Empty tuple means
+    "exclude nothing."
     """
 
     default_optimization: tuple[tuple[str, Any], ...] = ()

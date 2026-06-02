@@ -34,6 +34,5 @@ Separate test splits are also available: `test_material` (165 items), `test_proc
 
 ## Pipeline Notes
 
-- `llm_ranking` must always be excluded — it's broken (json_validate_failed on ~50% of queries)
-- Effective pipeline: `cache_lookup -> fuzzy_matching -> web_search -> entity_profiling -> token_matching`
-- Without `llm_ranking`, prompt string fields have no effect — optimization focuses on pipeline params
+- Full pipeline: `cache_lookup -> fuzzy_matching -> web_search -> entity_profiling -> token_matching -> llm_ranking`
+- `llm_ranking` is active — its prompt string fields (persona, task_intent, instruction, …) are a live optimization surface, alongside the pipeline params

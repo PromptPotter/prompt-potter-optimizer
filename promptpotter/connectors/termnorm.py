@@ -290,9 +290,6 @@ CONNECTOR = Connector(
     # The production-benchmark pipeline includes them; a fresh CSV upload
     # should not pay Brave Search billing + multi-second latency on round 1.
     default_pipeline=("llm_only",),
-    # ``llm_ranking`` is broken (~50% json_validate_failed) — known issue
-    # in root CLAUDE.md; pre-exclude it on every new tenant cycle.
-    default_exclude_nodes=("llm_ranking",),
     # R4: connector-owned seed for ``campaign.json::optimization``. The required
     # thresholds mirror ``datasets/gsm8k/campaign.json``. (``n_variants`` is the
     # round candidate count, NOT a single-request size lever — the optimizer-LLM

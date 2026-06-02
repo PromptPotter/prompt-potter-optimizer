@@ -83,7 +83,6 @@ If the user's intent is genuinely ambiguous ("should I resume or start over?"), 
 ### Anomaly allowlist (the only sources of warnings)
 
 - Backend `/status` non-200 or connection refused
-- `llm_ranking` in active_nodes on TermNorm
 - Active-session pointer points at a different dataset than requested
 - Recent `dataset_runs/*.json` show empty `predicted` strings (BBEH regression)
 
@@ -99,7 +98,7 @@ Flags from `datasets/{name}/dataset.md § Init Flags` — verbatim, never guess.
 python -m promptpotter new {name} {flags from dataset.md}
 ```
 
-`new <name>` auto-decomposes `datasets/{name}/task_description.md` if present (override via `--task-file` / `--task-text`) and then runs the loop from round 0. If `llm_ranking` lands in active nodes for `lca-termnorm`, STOP — wrong config.
+`new <name>` auto-decomposes `datasets/{name}/task_description.md` if present (override via `--task-file` / `--task-text`) and then runs the loop from round 0.
 
 Campaigns take minutes to hours, so the operator launches it in their terminal (you don't wrap it in Bash). On their return, read `dashboard.json` (live state) + the latest `rounds/round_NNNN.json` (round summary, critique, leaderboard) and summarize per round:
 

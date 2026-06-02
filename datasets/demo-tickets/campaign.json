@@ -2,7 +2,7 @@
   "campaign_config": {
     "dataset_name": "demo-tickets",
     "scoring": "exact_match(predicted, ground_truth)",
-    "exclude_nodes": ["llm_ranking"],
+    "exclude_nodes": [],
     "optimization": {
       "l1_patience": 3,
       "max_rounds": 5,

@@ -8,7 +8,7 @@ lists, persistence versioning, and service-level defaults.
 
 from pydantic_settings import BaseSettings
 
-APP_VERSION: str = "0.7.0"
+APP_VERSION: str = "0.8.0"
 
 # Defaults for backend connection (not env-driven — override via CLI args)
 DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"

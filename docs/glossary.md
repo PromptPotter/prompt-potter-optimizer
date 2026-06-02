@@ -189,7 +189,6 @@ The persisted world is a four-entity containment hierarchy
   posterior, not this snapshot.
 - **llm_ranking** — a backend node that orders ranked_items per
   sample. Distinct from PoBB, Rasch, and the adaptive queue mechanism.
-  Currently broken on TermNorm (see CLAUDE.md known issues).
 
 ## Escalation + healing
 
