@@ -1,122 +1,78 @@
 # Observability
 
-Every optimizer LLM call, backend match, and escalation check emits a structured trace event. Traces go two places: local files (always, under the cycle directory) and optionally Langfuse cloud.
+Every optimizer LLM call, backend match, and escalation check emits a structured trace — to local files always (under the cycle dir), and to Langfuse cloud when configured.
 
-## Local event log
+## What's traced, and where
 
-Events are appended to `campaigns/{cycle_id}/langfuse/events.jsonl`. Pure mirror — nothing reads it for state reconstruction; it's there for debugging and post-hoc inspection. Each line is a JSON object with phase, event type, round, and payload.
+Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_plan`, `escalation`) emit `enter`/`exit` pairs into the per-cycle ledger; the `escalation` phase emits `rule_fired` whenever a post-round rule matches. `langfuse/events.jsonl` is a pure mirror — nothing reads it for state reconstruction.
 
-Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_plan`, `escalation`) emit `enter` / `exit` pairs. The `escalation` phase emits a `rule_fired` event whenever the post-round rule engine matches a rule (see "Escalation rule signal stream" below).
-
-## What gets traced
-
-| Source | Event type | Payload |
-|--------|-----------|---------|
+| Source | Event | Payload |
+|--------|-------|---------|
 | L1 Generate | LLM call | rendered meta-prompt, candidate outputs, token counts |
-| L1 Critique | LLM call | rendered critique meta-prompt, structured output |
-| L2 Refine | LLM call | rendered refinement meta-prompt (incl. the L1 field catalogue), parsed transition result |
-| L3 Plan | LLM call | plan template (axes_digest + L2 history + pipeline + runtime failures), new plan text |
+| L1 Critique | LLM call | critique meta-prompt, structured output |
+| L2 Refine | LLM call | refinement meta-prompt (incl. the L1 field catalogue), parsed transition |
+| L3 Plan | LLM call | plan template (axes_digest + L2 history + pipeline + runtime failures), new plan |
 | Backend match | Span | query, params, result, `diagnostics.warnings` |
-| Escalation rule firing | `phase` event (`escalation/rule_fired`) | `{layer, rule_name, rule_priority, next_action, reason, signal_inputs}` |
-| Escalation check | Event | check type, fired/not, reason |
+| Escalation rule firing | `escalation/rule_fired` | `{layer, rule_name, rule_priority, next_action, reason, signal_inputs}` |
 | Stale-data protocol | Event | ladder step taken, resolution |
 
 ## Per-sample P(best) stream
 
-PoBB emits a per-sample Posterior-of-Being-Best snapshot for every candidate. Surfaced on every monitoring channel:
+PoBB emits a per-sample Posterior-of-Being-Best snapshot for every candidate, on four channels:
 
-| Channel | Path | Cadence | Format |
-|---|---|---|---|
-| Live dashboard fields | `dashboard.json::current_round.nodes.candidates[].p_best` (also `.p_best_delta`, `.p_best_history`, `.p_best_n_samples`) + `current_round.p_best_top` (top-5 sorted) | per-sample overwrite | scalar floats |
-| CLI / notebook | stderr via `LiveDisplay` | per-sample | one line: `p_best q14: *c042* 44.0%▲ c017 28.4%▼ ...` |
-| Append-only stream | `campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl` | per-sample append | `{round, sample_idx, current_id, n_samples, p_best, p_best_delta}` |
-| Round-end digest | `campaigns/{cycle_id}/log.md` § P(best) trajectory | once per round | per-candidate Unicode sparkline + final % |
+| Channel | Path | Format |
+|---|---|---|
+| Live dashboard | `dashboard.json::current_round.nodes.candidates[].p_best` (+ `_delta`/`_history`/`_n_samples`) + `current_round.p_best_top` | scalar floats |
+| CLI / notebook | stderr | `p_best q14: *c042* 44.0%▲ c017 28.4%▼ …` |
+| Append-only stream | `cycles/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl` | `{round, sample_idx, current_id, n_samples, p_best, p_best_delta}` |
+| Round digest | `log.md` § P(best) trajectory | per-candidate sparkline + final % |
 
-The JSONL stream is canonical replay. Dashboard fields and `log.md` sparkline are derived views.
-
-```bash
-# Tail the live JSONL
-tail -f .promptpotter/projects/default/campaigns/<cycle_id>/.runtime/streams/round_0003_p_best.jsonl
-```
-
-## Escalation rule firing
-
-Every escalation-rule firing — `decide_escalation` over `DEFAULT_ESCALATION_RULES` — emits a `escalation/rule_fired` PhaseRecord through the writer-side ingress (`RunCallbacks.on_phase`). The ledger event lands in `events.jsonl` and is consumed by the audit projection. Operator-facing read: `events.jsonl` itself — it is the canonical record (there is no separate signals stream).
+The JSONL stream is canonical replay; the dashboard fields and the sparkline are derived views.
 
 ## Langfuse cloud
 
-When `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` are set in `.env`, traces also go to Langfuse cloud. Integration: `promptpotter/infrastructure/tracing.py`.
-
-Trace shape:
-
-- **Cycle** = Langfuse trace
-- **Round** = nested span
-- **L1 / L2 / L3 / critique call** = LLM observation (input, output, token counts)
-- **Backend match** = span (query, params, result, diagnostics)
-
-A mirror of what's sent persists locally under `campaigns/{cycle_id}/langfuse/` including the id-map `state.json` for cross-reference.
-
-### Enable
-
-```bash
-pip install -e ".[observability]"
-```
-
-```dotenv
-LANGFUSE_PUBLIC_KEY=pk-...
-LANGFUSE_SECRET_KEY=sk-...
-LANGFUSE_HOST=https://cloud.langfuse.com
-```
-
-Next `new` / `resume` starts sending traces. To push historical traces uploaded later, the backfill helper in `infrastructure/tracing.py` reads the local shadow and replays it.
+Set `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` in `.env`, then `pip install -e ".[observability]"`. Trace shape: cycle = trace, round = span, each L1/L2/L3/critique call = LLM observation, backend match = span. A local shadow under `cycles/{cycle_id}/langfuse/` mirrors what's sent (with an id-map for cross-reference); a backfill helper replays historical traces uploaded later.
 
 ## MLflow sink
 
-Each round can be logged as an MLflow run when `settings.MLFLOW_ENABLED` is true (default false). Tracking URI: `archive/mlruns/`. Experiment name: `{tenant_id}/{cycle_id}`. Implementation: `infrastructure/tracing.py`. Installs alongside file + Langfuse sinks. Toggle via `MLFLOW_ENABLED=true` in `.env`.
+`MLFLOW_ENABLED=true` (default false) logs each round as an MLflow run under `archive/mlruns/`, experiment `{tenant_id}/{cycle_id}`. Installs alongside the file + Langfuse sinks.
 
 ## Display convention — `⚠ … ↳`
 
-PromptPotter surfaces optimizer findings (validation failures, anomaly flags, elimination signals, degradation) with a two-line shape:
+Optimizer findings (validation failures, anomaly flags, elimination, degradation) surface as two lines:
 
 ```
 ⚠ <fact, in data terms>
   ↳ <action, in optimizer terms>
 ```
 
-Line 1 names the observation. Line 2 names the repair or consequence. A finding without a `↳` is a bug.
+Line 1 names the observation, line 2 the repair or consequence. A finding without a `↳` is a bug.
 
 ```
 ⚠ llm_only.model = 'gpt-4o' ∉ [openai/gpt-oss-120b]
   ↳ scored 0; L2 brief will name this value
 ```
 
-`dashboard.json::last_scoring_metadata` holds the structured finding. Each entry point reads from there and formats using this convention — data lives in one place, only rendering is per-surface.
+The structured finding lives in `dashboard.json::last_scoring_metadata` — one source, per-surface rendering.
 
-### Per-sample annotation order
+**Per-sample annotation order** — one `⚠ {step}: {message}` per diagnostic warning (always), then exactly one status annotation from this exclusive set:
 
-Annotations render in this order, with mutual exclusion on the status line:
+- `🔄 cache had warnings → reran`
+- `🔬 rerun still degraded → resampled N fresh calls`
+- `🔀 query degrades ≥50% historically → using cached answer`
+- `⚠ stale-data ladder exhausted → still degraded`
+- `↩ pipeline warning observed; X/Y toward rerun trigger` — only when no fatal warning fired
 
-1. `⚠ {step}: {message}` — one line per diagnostic warning (always renders).
-2. One status annotation, exclusive set:
-   - `🔄 cache had pipeline warnings → reran; result: …`
-   - `🔬 cache had warnings + rerun still degraded → resampled N fresh calls …`
-   - `🔀 query degrades ≥ 50% historically → using cached answer …`
-   - `⚠ entire stale-data ladder exhausted → still degraded …`
-   - `↩ pipeline warning observed; X/Y occurrences toward rerun trigger …` — degraded observed, AND no fatal warning on this query
+Suppressing `↩` under a fatal warning is load-bearing: a fatal warning means the candidate is dead, so "1/3 toward rerun" would falsely promise more data. (The ladder's rescue step is *samplescan rescue* — "probe" is reserved for L2/L3 probe rounds.)
 
-The fatal-warning suppression of `↩ …` is load-bearing: when a fatal warning fires, the candidate is dead, so a counter reading "1/3 toward rerun" would falsely suggest more data is coming.
+## Reading what L2 wrote
 
-The stale-data ladder's rescue step is **samplescan rescue** — "probe" is reserved for L2/L3 probe rounds.
-
-## Reading what L2 wrote from a trial
-
-`campaigns/{cycle_id}/rounds/round_NNNN.json`:
+In `cycles/{cycle_id}/rounds/round_NNNN.json`:
 
 - `opt_search_point.task_context` — refined task framing (broadcast to all layers next round).
-- `opt_search_point.l1_layout` — per-slot signal-name layout L2 has stamped.
+- `opt_search_point.l1_layout` — per-slot signal-name layout L2 stamped.
 - `opt_search_point.l1_overrides` — L1 runtime knobs (creativity, n_variants).
-- `decisions[]` with `kind: "probe_round_commitment"` — outcome `True` when L2 set `action = "probe_round"`.
-- `nodes.l2_context.input.prompt` — rendered L2 prompt (incl. the `L1-GENERATE FIELD CATALOGUE` block).
-- `nodes.l2_context.output` — raw LLM JSON dict.
+- `decisions[]` with `kind: "probe_round_commitment"` — `True` when L2 set `action = "probe_round"`.
+- `nodes.l2_context.input.prompt` / `.output` — rendered L2 prompt (incl. the field catalogue) / raw JSON.
 
-Full reference: [`../developer/l2-internals.md`](../developer/l2-internals.md).
+Deep dive: [`../developer/l2-internals.md`](../developer/l2-internals.md).

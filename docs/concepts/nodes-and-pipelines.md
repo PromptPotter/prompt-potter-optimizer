@@ -2,7 +2,7 @@
 
 A pipeline is a sequence of steps the backend runs for each query. Each step is a node. **The optimizer loop itself is built from nodes — same JSON declaration format as backend pipeline steps, same registry.** This is what lets the optimizer self-inspect: search memory tracks warnings from both sides; self-healing applies to both; patience counters watching a backend degrade and an optimizer stall are the same shape.
 
-Capabilities are opt-in. A deterministic lookup node declares none. An LLM node participating in the optimizer loop may declare:
+Capabilities are opt-in (a deterministic lookup node declares none). An LLM node in the optimizer loop may declare:
 
 - **Prompt exposure** — broken into named fields ([`state-record.md`](state-record.md)).
 - **Optimizer-discoverable parameters** — node declares accepted parameters + valid values; PromptPotter picks them up automatically as optimization axes, no hardcoding either side.

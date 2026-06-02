@@ -6,8 +6,6 @@
 
 **What we actually ran.** Datasets to date were chosen for headroom and head-to-head comparability against peer optimizers (CAPO/GEPA/MIPROv2/Bootstrap) — not as PEvol-Bench-grade benchmarks. Run log below.
 
-See `## Trials log` for what's been run; see [`pevol-bench.md`](pevol-bench.md) for what comes next.
-
 ## Trials log
 
 Status as of 2026-04-29.
@@ -16,7 +14,7 @@ Status as of 2026-04-29.
 |---|---|---|---|---|
 | GSM8K | Dropped (cited only) | `gpt-oss-120b` | Saturated | No headroom under current model setup |
 | AIME 2025 | Dropped (cited only) | `gpt-oss-120b` | Saturated, n=30 | Shorter, simpler inputs than BBEH (a usability win) but population too small for config/test split |
-| LCA-TermNorm | Active | `gpt-oss-120b` (Groq) | Custom multi-node pipeline | Self-healing + multi-step pipeline demos; `llm_ranking` excluded (broken) |
+| LCA-TermNorm | Active | `gpt-oss-120b` (Groq) | Custom multi-node pipeline | Self-healing + multi-step pipeline demos; full 6-node pipeline incl. `llm_ranking` |
 | BBEH (mini) | Active (M11 head-to-head) | `mistralai/mistral-small-3.2-24b-instruct` (OpenRouter) | M11 publication target | Verbose inputs trip `gpt-oss-120b` reasoning-budget ceiling → swapped to OpenRouter Mistral at `reasoning_effort: low`. Same model used across all peer methods in the head-to-head. Mini split too small for AC generalization claims; kept for method comparison only |
 | MMLU-Pro | Planned | tbd | n/a | PEvol-Bench v1 candidate |
 | MATH | Planned | tbd | n/a | PEvol-Bench v1 candidate |
@@ -45,16 +43,14 @@ Successor to BBH from Google DeepMind. Replaces each of the 23 BBH tasks with a 
 
 #### Reading BBEH results
 
-The 23 BBEH tasks are **not strictly ordered by difficulty**. They are categorized by the cognitive domain / skill type they test. Numbering is organizational, not a ladder from easiest to hardest.
+The 23 BBEH tasks are **not ordered by difficulty** — numbering is organizational. Group by cognitive cluster when reading per-task results:
 
-Task clusters:
-
-1. **Linguistic & Semantic** — synonyms, antonyms, word analogies. Origin difficulty; modern models usually handle these with high accuracy.
-2. **Logical & Mathematical Reasoning** — boolean logic, arithmetic, sequence completion. Moderate; difficulty spikes with larger numbers or longer logic chains.
+1. **Linguistic & Semantic** — synonyms, antonyms, word analogies. Modern models handle these with high accuracy.
+2. **Logical & Mathematical Reasoning** — boolean logic, arithmetic, sequence completion. Moderate; spikes with larger numbers or longer logic chains.
 3. **Commonsense & World Knowledge** — physical trajectories, social situations. High for small models — requires world modeling, not just text prediction.
-4. **Algorithmic & Symbolic** — shuffled-object tracking (the "shell game"), complex grid navigation. Highest difficulty; biggest gap between standard and reasoning-specialized models.
+4. **Algorithmic & Symbolic** — shuffled-object tracking (the "shell game"), complex grid navigation. Highest difficulty; biggest standard-vs-reasoning-model gap.
 
-Raw benchmark data sometimes shows higher-numbered tasks scoring lower, but that's usually a coincidence of how tasks were added to the repository — not a designed difficulty ramp. BBEH difficulty is largely a function of model *scale*; a task a small model scores 0% on can jump to 90% once the model crosses a size threshold. When interpreting per-task BBEH results, group by cluster — the algorithmic/symbolic cluster is where reasoning-model gains are largest and where prompt-level interventions have the most headroom.
+Difficulty is largely a function of model *scale* (a task at 0% can jump to 90% past a size threshold); the algorithmic/symbolic cluster is where reasoning-model gains and prompt-level headroom are largest.
 
 ### HotPotQA — Secondary (saturation probe pending)
 

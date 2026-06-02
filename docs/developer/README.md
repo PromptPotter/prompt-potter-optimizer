@@ -1,5 +1,16 @@
 # Developer
 
+```
+┌──────────────────────┐                       ┌──────────────────────┐
+│  Your Backend        │  GET  /pipeline   ──► │  PromptPotter        │
+│  (any pipeline)      │                       │  Optimizer           │
+│                      │  POST /matches    ◄── │                      │
+│  runs the task       │   {prompt, params}    │  generates candidates│
+│                      │                       │  scores + critiques  │
+│                      │  → predictions    ──► │  iterates            │
+└──────────────────────┘                       └──────────────────────┘
+```
+
 Implementation notes for architectural seams not obvious from a single file. AI can read the code — this folder explains the wiring.
 
 Four things every contributor needs to understand:

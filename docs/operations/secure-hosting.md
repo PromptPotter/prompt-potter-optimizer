@@ -1,25 +1,18 @@
 # Hosting PromptPotter securely
 
-This page is for the operator running PromptPotter on their own box (the
-[Linux deploy](../../deploy-linux/README.md)). It covers the one security-critical
-admin task you'll do repeatedly — **managing who can sign in** — and the rule that
-keeps the whole thing safe.
+For the operator running PromptPotter on their own box (the
+[Linux deploy](../../deploy-linux/README.md)): the one admin task you'll repeat —
+**managing who can sign in** — and the rule that keeps it safe.
 
 ## The one rule
 
 **A control-plane change never has an inbound door open to the internet.**
 
-The sign-in allowlist (who may log into your install) is the most sensitive thing you
-control: editing it is editing your front-door lock. So we never put that edit behind a
-public web endpoint where the whole internet — and any cloud service holding a key —
-can reach it. Instead, the edit happens **on the box**, and the box reaches *out* to
-your phone. Nothing new is exposed; nothing new can be attacked from outside.
-
-This is the standard zero-trust / Purdue-model posture: the protected zone (your box)
-is never directly reachable from the lowest-trust zone (the public internet, a chat
-app, a cloud automation tool). The full rationale is
-[ADR-0004](../adr/0004-operator-admin-channels.md); you don't need to read it to host
-safely.
+The allowlist is your front-door lock, so its edit never sits behind a public endpoint
+(reachable by the whole internet and any cloud service holding a key). Instead the edit
+happens **on the box**, which reaches *out* to your phone — nothing new is exposed. This
+is the standard zero-trust / Purdue posture (protected zone never directly reachable from
+the lowest-trust zone); full rationale in [ADR-0004](../adr/0004-operator-admin-channels.md).
 
 ## Managing the allowlist from Telegram
 
@@ -68,13 +61,12 @@ when) — an audit trail you can `cat` on the box.
 
 ## Why not just expose an admin endpoint?
 
-Because that would put your front-door lock on the public internet, secured by a single
-token — and if that token sits in a cloud automation tool (n8n, Zapier, a CI job), a
-breach there hands an attacker your auth gate. The on-box bot avoids this entirely:
-no endpoint, no inbound surface, the key never leaves your box. If you ever *must* let
-an external tool drive an admin action, do it behind an edge broker
-(Cloudflare Access service token) **plus** an app token — never a bare public route.
-See [ADR-0004 § "When option C is the right escalation"](../adr/0004-operator-admin-channels.md).
+Because that puts your front-door lock on the public internet behind a single token —
+and if that token sits in a cloud tool (n8n, Zapier, CI), a breach there hands over your
+auth gate. The on-box bot has no endpoint, no inbound surface, and the key never leaves
+the box. If you *must* let an external tool drive an admin action, gate it behind an edge
+broker (Cloudflare Access service token) **plus** an app token — never a bare public route
+([ADR-0004 § "When option C is the right escalation"](../adr/0004-operator-admin-channels.md)).
 
 ## Secret hygiene checklist
 

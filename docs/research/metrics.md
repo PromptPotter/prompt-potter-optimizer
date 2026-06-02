@@ -27,8 +27,6 @@ Absolute accuracy is meaningful only when you know the base model and the origin
 | 3 | **Sample Efficiency** | SE | `HC / N_queries` | Headroom captured per optimization query spent | How economically the optimizer finds gains. High SE = fewer LLM calls to reach the same lift |
 | 4 | **Convergence Profile** | R₉₀ | Queries needed to reach 90% of final HC | Speed to near-saturation | Separates "finds good prompts" from "finds them fast". Critical for practical cost budgets |
 
-Together, the four separate three concerns: *how good* (Acc), *how much of what's available* (HC), *how cheaply* (SE), and *how quickly* (R₉₀).
-
 ---
 
 ## Proposed table format

@@ -1,6 +1,6 @@
 # Research
 
-Publication-facing material for PromptPotter. This folder collects the methodology, metrics, competitive positioning, and head-to-head benchmark results that back the paper.
+Publication-facing material: methodology, metrics, competitive positioning, and head-to-head benchmarks that back the paper.
 
 | Page | Purpose |
 |------|---------|

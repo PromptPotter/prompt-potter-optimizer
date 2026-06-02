@@ -8,17 +8,13 @@ posterior probability of being the best falls below ε. The original
 formulation assumes every arm is observed on an i.i.d. sample of the same
 underlying distribution.
 
-PromptPotter's adaptive queue mechanism intentionally violates that
-assumption. The queue mechanism reorders each candidate's evaluation so
-the most diagnostic samples land first — that lets a clearly inferior
-candidate be abandoned within a handful of queries instead of burning
-the full sample budget. Online adaptive ordering is the whole point of
-cheap loser elimination.
-
-This document explains the failure mode the asymmetric ordering creates,
-the paired-sample mechanism that fixes it without giving up the sorter's
-benefits, and the on-disk shape that lets resume replay paired decisions
-without re-running them.
+PromptPotter's adaptive queue mechanism intentionally violates that: it
+reorders each candidate's evaluation so the most diagnostic samples land
+first, abandoning a clearly inferior candidate within a handful of queries
+instead of burning the full sample budget. That asymmetric ordering breaks
+PoBB's iid premise — below is the failure mode it creates, the paired-sample
+fix that keeps the sorter's speedup, and the on-disk shape that lets resume
+replay paired decisions without re-running them.
 
 ## The pathology
 

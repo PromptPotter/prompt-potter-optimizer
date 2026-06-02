@@ -194,11 +194,11 @@ PromptPotter's mid-round abortion mechanism is an instance of the **best-arm ide
 | **OCBA** ([Chen 2000](https://www.jstor.org/stable/2697075)) | Bayesian, population, fixed-budget | Allocate next pulls to maximize posterior probability of correct selection | Optimal-allocation focus; same population-aware family as PoBB, addresses budget allocation rather than stop rules. |
 | **PoBB (this work)** | Bayesian, population, fixed-confidence | Per-query joint Normal-CLT posterior over candidate accuracy means; MC argmax; stop when `P(c is best) < ε` | What PromptPotter uses. ~60 LOC; single tunable `ε`; operator-readable per-query (display the probabilities). See [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md). |
 
-The choice of population-aware over pairwise is dictated by what we want to know: not "is the current candidate worse than each individual prior?" but "is the current candidate the round winner?" That second question depends on the *joint* shape of all candidates' posteriors, which only the population-aware family captures.
+Three design choices, each dictated by a different need:
 
-The choice of Bayesian over frequentist is dictated by interpretability: P(c is best) is one number per candidate that an operator can read at a glance ("c042 73% probability of winning round"); a Holm-corrected p-value or a Hoeffding bound is not.
-
-The choice of fixed-confidence (ε threshold) over fixed-budget (Successive Rejects / Sequential Halving) is dictated by adaptivity: we want clearly-broken candidates to stop within 3–5 queries in the early-round high-signal regime, and we want indistinguishable candidates to run to budget cap in the late-round low-signal regime. Phased fixed-budget algorithms can't do the first.
+- **Population-aware over pairwise** — the question is "is this the round winner?", not "is it worse than each prior?"; only the joint posterior across all candidates answers it.
+- **Bayesian over frequentist** — `P(c is best)` is one operator-readable number ("c042 73% probability of winning round"); a Holm-corrected p-value or Hoeffding bound is not.
+- **Fixed-confidence (ε) over fixed-budget** — broken candidates stop in 3–5 queries (early high-signal regime), indistinguishable ones run to the cap (late low-signal regime); phased fixed-budget algorithms can't do the first.
 
 For the implementation, two-regime analysis, tunable knobs, open questions, and the rationale for replacing Wilcoxon, see [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md).
 

@@ -46,10 +46,9 @@ The outer `campaign.json::scoring` composes these. Example:
 ```
 
 Operators **don't pick one proxy and commit** — they accumulate evidence
-across runs. Start with `first_round_delta` for cheap iteration; add
-`after_N_rounds_delta` once outer-loop dynamics stabilize; switch to a
-`rounds_to_N`-weighted formula for final runs. The three proxies are a
-tool for the operator's experimental judgment, not a fixed choice.
+across runs: start with `first_round_delta` for cheap iteration, add
+`after_N_rounds_delta` once outer-loop dynamics stabilize, switch to a
+`rounds_to_N`-weighted formula for final runs.
 
 ## Cost realism
 
@@ -75,15 +74,14 @@ surfaces accumulated cost; check it before extending runs.
 
 ## What stays the same on the outer cycle
 
-The outer cycle is just a PromptPotter cycle. The loop, escalation,
-PoBB elimination, dispatch hub, dashboard — all the same. From the
-outer L1's perspective, it's evolving prompts whose "score" happens to
-be "did this prompt make the inner loop converge faster." The
-self-reference is only visible when you read what the prompts are about.
-
-This is by design: the connector boundary keeps the outer cycle
-provider-agnostic. Today: TermNorm or PromptPotter-self. M12 expands the
-registry; the outer cycle doesn't change.
+The outer cycle is just a PromptPotter cycle — same loop, escalation,
+PoBB elimination, dispatch hub, dashboard. From the outer L1's
+perspective it's evolving prompts whose "score" happens to be "did this
+prompt make the inner loop converge faster"; the self-reference is only
+visible when you read what the prompts are about. By design, the
+connector boundary keeps the outer cycle provider-agnostic: today
+TermNorm or PromptPotter-self, and M12's registry expansion doesn't
+change the outer cycle.
 
 ## Status
 

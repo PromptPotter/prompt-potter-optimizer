@@ -1,234 +1,108 @@
 # Persistence, State, and Recovery
 
-Your work lives in `.promptpotter/`. Two trees:
+Your work lives in `.promptpotter/`, in two trees:
 
 - `sessions/{session_id}/` — your operator workspace (journal, notes).
-- `campaigns/{campaign_id}/` — one campaign per directory; every cycle (all session roots + forks + diag + sweeps) flat under `cycles/`.
+- `campaigns/{campaign_id}/` — one campaign per directory; every cycle (session roots + forks + diags + sweeps) sits flat under `cycles/`.
 
-The rest of this page covers the four-entity model, the active-session pointer, what each file holds, and the three recovery workflows (resume, rewind, fork).
+## Four entities
 
----
+A strict containment hierarchy: **Workspace → Dataset → Campaign → Cycle**.
 
-## Four entities: Workspace, Dataset, Campaign, Cycle
+- **Workspace** (`projects/{tenant}/`) — the tenant's datastore: every dataset, every campaign, the shared `archive/`.
+- **Dataset** — the optimization target plus its config. Resolved tenant-first: a tenant upload (`projects/{tenant}/datasets/{slug}/`, the `new <file>` ingest path) wins over a repo benchmark (`datasets/{name}/`). An ingested slug is first-class to both `new <slug>` and `resume`, not just the mint that made it.
+- **Campaign** — one declared optimization effort: a dataset, a pipeline origin, context text. `campaign_id = {dataset}__{rand6_hex}`, minted fresh per `new`. The declaration's hashes (`root_content_hash`, `optimizer_prompt_hash`) ride `campaign.json` for drift detection on resume — not as the id. Dataset is embedded, so "campaigns for dataset X" is a prefix scan.
+- **Cycle** — one node in a campaign's lineage tree: root | fork | diag | sweep. Id is `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_` on branches). Path resolution is always `(campaign_id, cycle_id)`.
 
-PromptPotter's persisted world is a strict containment hierarchy:
-
-- **Workspace** — the tenant-level container and queryable datastore (`projects/{tenant}/`): every dataset, every campaign, the shared `archive/`.
-- **Dataset** — the optimization target plus its config. Resolved tenant-first by `resolve_dataset_config_dir`: a tenant upload at `projects/{tenant}/datasets/{slug}/` (the chat-first / `new <file>` ingest path) wins over a repo benchmark at `datasets/{name}/`. The chosen dir rides `Session.dataset_config_dir`; every dataset-file loader reads it, so an ingested slug is first-class to `new <slug>` and `resume`, not just the mint that created it.
-- **Campaign** — one declared optimization effort: a dataset, a pipeline origin, and context text. A first-class entity with its own directory and `campaign.json` manifest. `campaign_id = {dataset}__{rand6_hex}` — minted fresh per `new` call by `mint_campaign_id`, so each `new` produces a distinct campaign. The declaration (target hash + optimizer-prompt hash) is recorded as `root_content_hash` + `optimizer_prompt_hash` properties on `campaign.json` for drift detection on resume, not as the id. The dataset is embedded so "campaigns for dataset X" is a prefix scan.
-- **Session** — one run of `new` on a campaign. A campaign holds one session — the `new` invocation that minted it. `resume` extends that session; `resume --fork-on-divergence` adds sibling cycles within it. A session's identity is its `session_id` (`s_xxxx`). Each session is a tree: a root cycle (bare `cycle_<target_hash>`) plus its fork descendants. Pre-existing on-disk shape (multi-session forest with `_s{N}` suffixes): see `promptpotter/infrastructure/store/paths.py`.
-- **Cycle** — one node in a session's lineage tree: root | fork | diag | sweep. Identity is `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_` for branches); `cycle_id` is campaign-scoped, so path resolution is always `(campaign_id, cycle_id)`.
-
-The **Session** is a unit of a campaign — its identity is the `session_id`. `active_session.json` is your active pointer/lens into the Workspace: which tenant, session, campaign, and cycle are live.
-
----
+A **Session** is one `new` invocation; a campaign holds one. `resume` extends it; `resume --fork-on-divergence` adds sibling cycles. Each session is a tree: a root cycle plus its fork descendants.
 
 ## Active session pointer
 
-PromptPotter remembers which session you're on via `.promptpotter/active_session.json` — `{tenant_id, session_id, campaign_id, cycle_id}`, like a browser's active tab.
+`.promptpotter/active_session.json` (`{tenant_id, session_id, campaign_id, cycle_id}`) is your active tab.
 
-- **`new`** mints a fresh Campaign (`campaign_id = {dataset}__{rand6_hex}`, distinct per call) plus its Session + root cycle, and overwrites the pointer. Re-running `new` on an unchanged declaration produces a new campaign with the same root cycle id (content-addressed) and origin score (cache-served); the two campaigns diverge from round 1 onward.
-- **`resume`** reads `{campaign_id, cycle_id}` and operates on that cycle automatically, extending the active session.
-- **`fork`** mints a new cycle inside the same session and retargets the pointer's `cycle_id`.
+- **`new`** mints a fresh campaign + session + root cycle and overwrites the pointer. Re-running `new` on an unchanged declaration reuses the content-addressed root-cycle id and origin score (cache-served), then diverges from round 1.
+- **`resume`** reads the pointer and picks up that cycle. No re-`new` needed.
+- **fork** mints a new cycle in the same session and retargets the pointer.
 - **`--session <id>`** overrides the pointer for one command.
-- **`--backend-id`** auto-derives from `dataset_name` when not passed.
 
-Resume = `python -m promptpotter resume`. No re-`new` needed.
-
----
-
-## Two trees: sessions + campaigns
-
-Sessions and campaigns are separate. The Session is a pointer/lens; the Campaign is the entity.
-
-- `{tenant_id}/sessions/{session_id}/` — operator metadata: `session.json`.
-- `{tenant_id}/campaigns/{campaign_id}/` — one campaign per directory. Three bands: **campaign-level artifacts** (`campaign.json` manifest, `log.md` campaign digest, `hard_samples.json`) at the campaign root; **per-cycle audit** (`index.json`, `log.md`, `review.md`, `rounds/`, `langfuse/`, `prompts/`, and `dashboard.json`) inside each `cycles/{cycle_id}/`; **per-cycle internals** (`.runtime/...`) under a `.runtime/` umbrella. Every cycle — all N session roots, plus their forks, diag, sweeps — sits **flat** under `cycles/`; sibling kind and sweep batch id are `index.json` metadata, not directory nesting. `dashboard.json` is per-cycle: each cycle (root, fork, diag, sweep) owns its own, written into its own dir; a fork seeds its prior trajectory from the parent's file, then writes its own.
-- `{tenant_id}/archive/` — the **measurement archive**, cross-cycle/session/tenant — a peer of `campaigns/`. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
+## Layout
 
 ```
 .promptpotter/
   active_session.json                  # { tenant_id, session_id, campaign_id, cycle_id }
   projects/{tenant_id}/
-    sessions/{session_id}/
-      session.json
-    campaigns/{campaign_id}/            # one campaign — {dataset}__{rand6_hex}, fresh per `new`
-      # ── Campaign-level artifacts ──
-      campaign.json                    # manifest: dataset_name, label, created_at, status,
-                                       #   root_cycle_id, root_content_hash, optimizer_prompt_hash,
-                                       #   backend_id, config
-      log.md                           # campaign digest — the session + its forks + rounds, heatmap
-      hard_samples.json                # campaign-scope hard-sample artifact (all the campaign's cycles)
-      # ── Cycles — session root + forks + diag + sweeps, ALL FLAT ──
-      cycles/{session_root_cycle_id}/   # session root: cycle_{target_hash}
-        dashboard.json                 # live PER-CYCLE telemetry (this cycle's own; forks carry their own)
-        index.json                     # phase, trial index, final block, sibling_kind: root
-        log.md                         # per-cycle narrative digest
-        review.md                      # per-cycle review (markdown digest)
-        rounds/round_NNNN.json         # resume source of truth
-        hard_samples.json              # cycle-scope hard-sample artifact (this cycle only)
-        langfuse/                      # trace persistence
-        prompts/{family}/{version}/    # rendered optimizer prompts
+    sessions/{session_id}/session.json
+    campaigns/{campaign_id}/            # {dataset}__{rand6_hex}, fresh per `new`
+      campaign.json                    # manifest (dataset, status, config snapshot, declaration hashes)
+      log.md                           # campaign digest — session + forks + rounds + heatmap
+      hard_samples.json                # campaign-scope hard-sample artifact
+      cycles/{cycle_id}/               # session root + forks + diags + sweeps, ALL FLAT
+        dashboard.json                 # live per-cycle telemetry (forks carry their own, seeded at the cut)
+        index.json                     # phase, trials, final block, sibling_kind, parent_cycle_id (forks)
+        log.md  review.md              # per-cycle digests (derived — safe to recompute)
+        rounds/round_NNNN.json         # resume source of truth (serialized OptSearchPoint)
+        langfuse/  prompts/            # trace shadow; rendered optimizer prompts
         .runtime/
-          ledger.jsonl                 # CycleEventLog spine — typed Decision/Phase/Snapshot
-          streams/round_NNNN_p_best.jsonl  # PoBB telemetry (rendered as sparkline in log.md)
-          cache/
-            rounds/round_NNNN.json     # per-round node I/O
-            candidates/round_NNNN.json # pre-scoring candidate checkpoint
+          ledger.jsonl                 # append-only Decision/Phase/Snapshot/LLMCall/TokenUsage spine
+          streams/round_NNNN_p_best.jsonl   # PoBB telemetry (sparkline in log.md)
+          cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
           archived/resumed_at_{ts}/    # mid-cycle rewind sweepup (--from)
-      cycles/{fork_cycle_id}/           # a fork — flat alongside its session root
-        dashboard.json                 # the fork's OWN live telemetry (seeded from parent at the cut)
-        index.json                     # parent_cycle_id, sibling_kind, sweep_batch_id?
-        rounds/ langfuse/ prompts/ .runtime/
-    archive/                            # the measurement archive (peer of campaigns/)
-      measurements/{run_id}.json
-      measurements.json                # archive index
-      backends/{backend_id}/
-      prompt_aliases.json
-      # AxisIndex + SampleIndex are in-memory only — rebuilt every refresh.
+    archive/                            # measurement archive — cross-cycle/session/tenant, peer of campaigns/
+      measurements/{run_id}.json  measurements.json  prompt_aliases.json
 ```
 
-**Why split this way?** Telemetry is *temporal* — a live stream the webapp polls; each cycle owns its own `dashboard.json`, so `tail cycles/{cycle_id}/dashboard.json` follows exactly the cycle you're watching (a fork seeds from its parent, then diverges). Audit is *structural* — frozen records keyed by the cycle that produced them, where per-cycle detail belongs. The flat `cycles/` store is deliberate: a fork tree keyed by `parent_cycle_id` metadata scales where nested fork-of-fork directories do not.
+**Why this shape.** Telemetry is *temporal* — each cycle owns its `dashboard.json`, so `tail cycles/{cycle_id}/dashboard.json` follows exactly the cycle you're watching (a fork seeds from its parent, then diverges). Audit is *structural* — frozen records keyed by the cycle that produced them. Cycles sit flat because a fork tree keyed by `parent_cycle_id` scales where nested fork-of-fork directories don't. The measurement archive is a cross-cycle peer of `campaigns/`, so a fresh `new` on an unchanged declaration cache-hits every origin sample (zero LLM calls, byte-identical origin score) yet still gets its own `campaign_id` and trajectory. The `langfuse/` mirror is observability only — resume/rewind read solely from `rounds/round_NNNN.json`.
 
-**Why Campaign is first-class.** The campaign directory is self-describing: `campaigns/justlogic__a1b2c3/` groups one declared optimization effort under one prefix-scannable id — dataset grouping is a prefix scan. The campaign root is self-describing — `campaign.json` (manifest), `log.md` (human digest) — and the session's `dashboard.json` lives in its root cycle, so you can read a campaign and its live session without guessing directory names. Cross-campaign evidence pooling on the same declaration rides the dataset-scoped `archive/measurements/`, not the campaign-id, so a fresh `new` on an unchanged declaration cache-hits every origin sample (zero LLM calls during origin scoring) and produces a byte-identical origin score — while still getting its own `campaign_id` for the optimization trajectory.
+## File reference
 
-Prior evaluation results replay without backend calls when a new config shares a matching prefix with a stored run. `langfuse/events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume / rewind are driven entirely by `rounds/round_NNNN.json`.
+| File | Lives at | Content |
+|------|----------|---------|
+| `campaign.json` | campaign dir | Manifest: dataset, label, status, `root_cycle_id`, declaration hashes, backend, and the frozen `CampaignConfig` snapshot (single owner — no per-cycle copies). |
+| `dashboard.json` | the cycle's dir | Live per-cycle scalars: round, origin, best, candidates, counters. One stream per cycle. Post-mortem `stop_reason` is in `index.json`, not here. |
+| `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
+| `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sibling_kind`/`sweep_batch_id` (branches), `trials[]`, `final` block (winner + stop_reason). |
+| `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
+| `rounds/round_NNNN.json` | per cycle | Serialized `OptSearchPoint` — the resume source of truth. |
+| `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. |
+| `.runtime/streams/…_p_best.jsonl` | per cycle | Per-sample PoBB snapshots. |
+| `.runtime/cache/rounds\|candidates/` | per cycle | Per-node I/O (l1_generate/critique/score, l2/l3) + pre-scoring candidate checkpoint. |
 
-**Deprecated-sample eviction.** Entries whose `classify_result()` returns a fatal code are written normally for forensic analysis but evicted at load — never served as cache. Next encounter gets a fresh backend call, tagged `retry_of_deprecated_cache`. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
+Material facts land on disk in human-readable form; reads happen by opening files (no read CLI). Entry points never write campaign artifacts directly — every write rides the per-cycle ledger through two projections (live telemetry + audit), allowlist-enforced in `tests/test_invariants.py`.
 
----
+**Editing optimizer state by hand.** Open `cycles/{cycle_id}/rounds/round_{N:04d}.json` before `resume --from N` and edit; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. On resume the cycle replays every prior `round_NNNN.json` in order to rebuild its state — there is no separate write-ahead log.
 
-## Campaign + cycle file reference
+## Recovery: resume, rewind, fork, sweep
 
-| File | Lives at | Updated | Content |
-|------|----------|---------|---------|
-| `campaign.json` | campaign dir | mint + finalize | Manifest: `dataset_name`, `label`, `created_at`, `status`, `root_cycle_id`, `root_content_hash`, `backend_id`, `config` (the frozen `CampaignConfig` snapshot — single owner). |
-| `dashboard.json` | the cycle's own dir | every event | Live PER-CYCLE state: round, origin, best, candidates, counters. `cycle_id` field stamps this cycle. One stream per cycle; every fork/sweep/diag carries its own (seeded from its parent at the cut). |
-| `log.md` (campaign) | campaign dir | round-complete + finalize | Campaign digest: status, best cycle, every session + its forks + rounds, campaign-scoped heatmap. |
-| `hard_samples.json` (campaign) | campaign dir | round-complete + finalize | Campaign-scope hard-sample artifact — aggregated across all the campaign's cycles. |
-| `index.json` | per cycle | phase / finalize | `pipeline_params`, `cycle_id`, `parent_cycle_id` (forks), `sibling_kind`, `sweep_batch_id` (sweeps), `best_accuracy`, `trials[]`, `final` block (winner + stop_reason on completion). The frozen config lives in `campaign.json`, not here. |
-| `log.md` (cycle) | per cycle | round-complete + finalize | Per-cycle narrative digest. Pure derived view — safe to delete and recompute. |
-| `review.md` | per cycle | round-complete + finalize | Per-cycle review (markdown digest). |
-| `rounds/round_NNNN.json` | per cycle | each completed round | Serialized `OptSearchPoint` for resume. |
-| `hard_samples.json` (cycle) | per cycle | round-complete + finalize | Cycle-scope hard-sample artifact — this cycle only. |
-| `langfuse/` | per cycle | during optimization | Trace shadow + `events.jsonl` mirror. Not read for state reconstruction. |
-| `prompts/` | per cycle | when prompts render | Rendered optimizer prompts. |
-| `.runtime/ledger.jsonl` | per cycle | every fact | Append-only `Decision` / `Phase` / `Snapshot` / `LLMCall` / `TokenUsage` stream. Escalation-rule firings ride on `PhaseRecord(phase="escalation", event="rule_fired")` — there is no separate signals stream. |
-| `.runtime/streams/round_NNNN_p_best.jsonl` | per cycle | per-sample | PoBB Posterior-of-Being-Best snapshots. |
-| `.runtime/cache/rounds/round_NNNN.json` | per cycle | each round | Per-node I/O: l1_generate, l1_critique, l1_score, l2/l3 (when escalated). |
-| `.runtime/cache/candidates/round_NNNN.json` | per cycle | each round's pre-scoring | Generated candidate checkpoint — overwritten next round. |
-| `.runtime/archived/resumed_at_{ts}/` | per cycle | `--from` runs | Mid-cycle rewind sweepup. |
-| `.runtime/inner/{outer_round}/{sample_idx}/` | per cycle | PromptPotter-as-connector only | Isolated inner-cycle sub-tree (own `sessions/`, `campaigns/`, `archive/`). Each outer "sample" gets its own root; pruned at outer cycle finalize unless `optimization.retain_inner_cycles: true`. See `docs/specs/m12-multi-connector.md`. |
-
-### Schema + writer sources
-
-For each on-disk artifact, the canonical schema source and writer module. Most artifact bodies are untyped JSON dicts written by their projection or store — the writer module IS the schema source (read its handler/serializer to learn the shape). Pydantic-typed artifacts are flagged.
-
-| Artifact | Schema source | Writer |
-|---|---|---|
-| `campaign.json` | `domain/campaign.py::Campaign` (Pydantic) | `infrastructure/store/campaign_store/manifest.py::CampaignManifestMixin` |
-| `dashboard.json` | `infrastructure/projections/live_dashboard/state.py` (untyped dict; field map in source) | `infrastructure/projections/live_dashboard/view.py::LiveDashboardView` |
-| `index.json` | `infrastructure/store/campaign_store/cycles.py::CycleIndexMixin` (untyped dict) | same |
-| `log.md` (cycle + campaign) | `presentation/writers.py` (markdown) | `presentation/writers.py::write_log_md` + `write_review_md` |
-| `review.md` | `presentation/writers.py` (markdown) | `presentation/writers.py::write_review_md` |
-| `rounds/round_NNNN.json` | `domain/opt_search_point.py::OptSearchPoint` (Pydantic, `model_dump()`) | `infrastructure/store/campaign_store/rounds.py::RoundMixin`; read on resume by `application/optimization/resume_and_fork/replayers.py` |
-| `hard_samples.json` (cycle + campaign) | `presentation/writers.py::write_hard_samples_artifacts` (untyped dict from `application/intelligence/hard_sample_sorter.py`) | same |
-| `.runtime/ledger.jsonl` | `domain/run_records.py::CycleRecord` discriminated union (Pydantic) | `infrastructure/ledger.py::CycleEventLog` |
-| `.runtime/streams/round_NNNN_p_best.jsonl` | `infrastructure/projections/pobb_stream.py` (untyped per-snapshot dict) | same `PoBBStreamView` |
-| `.runtime/cache/rounds/round_NNNN.json` | `infrastructure/projections/audit_trail.py::AuditTrailView` (untyped dict) | same |
-| Sweep operator files (`datasets/{name}/sweep/*.json`) | `domain/run_records.py::OperatorSweepFile` (Pydantic, `extra='forbid'`) | operator-authored, parsed by `application/sweep/sweep_runner.py` |
-| `scoring_steer.json` + `.applied.{ts}.json` | shape-validated inline (JSON object with non-empty `per_round` string) | operator-authored, applied by the round-boundary scoring-steer handler |
-| `active_session.json` | untyped `{session_id, campaign_id, cycle_id}` dict (tenant scope from path, not the body) | `infrastructure/store/__init__.py::save_active_pointer` / `clear_active_pointer` (workspace-scoped, called by bootstrap + command dispatchers) |
-| Commands (`POST /commands/{kind}`) | `m12-api-openapi.yaml` (envelope schemas) + `presentation/api/routers/commands.py` (server-side validators) | clients post; `presentation/api/middleware/command_dispatcher.py::CommandDispatcher` lands a `CommandRecord` on the target ledger |
-
-The convention: **typed at the edges, dict-shaped in the middle**. Domain primitives (`Campaign`, `OptSearchPoint`, `CycleRecord`, `OperatorSweepFile`) carry Pydantic schemas because they cross persistence + replay boundaries. Display + telemetry artifacts (`dashboard.json`, the round-NNNN cache, `index.json`) are untyped dicts owned by one writer — that writer is the schema. Forkers extending the framework follow the same rule.
-
-### `campaign.json`
-
-The Campaign manifest — one per campaign directory. Fields: `campaign_id`, `dataset_name`, `label` (operator-readable name), `created_at`, `status`, `root_cycle_id`, `root_content_hash` (the origin `JobSearchPoint` content hash, stored once for drift comparison), `backend_id`, and `config` (the frozen `CampaignConfig` dump — the single config-snapshot owner for the whole campaign, no per-cycle copies). Resume's drift check recomputes the current config's content hash and compares it to `root_content_hash` — a stored-value comparison, not a directory-name match.
-
-### `dashboard.json`
-
-Scalar-only live dashboard, **per-cycle** — at the cycle's own dir (`cycles/{cycle_id}/dashboard.json`); each cycle (root, fork, diag, sweep) owns its own. Atomically rewritten on every event. A fork seeds its prior display counters from the parent's file via `resume_from`, then writes its own. Key fields: `phase`, `round`, `run_phase`, `layer`, `candidate`, `query`, `patience`, `origin`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`. Every cycle on disk has its own `dashboard.json` stream. Post-mortem `stop_reason` is in `index.json::final::stop_reason`, not the live dashboard.
-
-### `.runtime/cache/rounds/round_NNNN.json`
-
-One JSON object per node that ran. Fields: `round`, `started_at`, `finished_at`, `nodes` (keyed by node type):
-
-- `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — LLM meta-prompt calls. Each has `input.template_fields`, `input.variables`, `output.response`, `usage`, `model`, `duration_s`.
-- `l1_score` — scoring phase. `input.candidates` lists what L1 generate produced; `output.candidates[*].stats` carries accuracy/composite/hits/total/invalid; `output.candidates[*].samples` lists per-sample outcomes (`qi`, `sample_id`, `hit`, `cached`, `time_s`, `terminated_at`, `input_tokens`, `output_tokens`, `prediction`, `ground_truth`, `query`).
-
-### `rounds/round_NNNN.json`
-
-The resume source of truth. On resume, `Cycle.replay_priors` walks every prior `round_NNNN.json` in order and reconstructs `cycle.rounds` (typed `RoundResult` list), `cycle.tracking` (current = last round, best = highest-composite across priors), and `cycle.opt_sp` (last round's snapshot) — no separate write-ahead log. You can edit a trial by hand between runs to modify optimizer state; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`.
-
----
-
-## Entry-point emission boundary
-
-Entry points (notebook, CLI, `/potter-run`, API, webapp) MUST NOT write campaign artifacts directly. Writes go through two newtype-guarded projections in `promptpotter/infrastructure/projections/`: `LiveDashboardView` (per-cycle telemetry, written into the cycle's own dir) and `AuditTrailView` (per-cycle audit). Both subscribe to the per-cycle `CycleEventLog` (`infrastructure/ledger.py`) which persists every fact to `.runtime/ledger.jsonl`. Allowlists — covering the campaign-level artifacts (`campaign.json`, campaign `log.md`, `hard_samples.json`), the per-cycle operator artifacts (including `dashboard.json`), and the `.runtime/` internal umbrella — live in `tests/test_invariants.py`.
-
----
-
-## Recovery: resume, rewind, fork
-
-Three workflows over the same fork primitive.
+Three workflows over one fork primitive (conceptual picture: [`../concepts/campaign-tree.md`](../concepts/campaign-tree.md)).
 
 | Workflow | Command | Effect |
 |----------|---------|--------|
-| **Resume** | `resume` | Pick up from latest completed round of the active cycle. |
-| **Rewind** | `resume --from N` | Same `cycle_id`; archive trials after round N; resume at round N+1. |
-| **Fork on divergence** | `resume --fork-on-divergence` | On scorer divergence, mint a sibling `cycle_id` rooted at the divergence point and continue under the current scorer. |
-| **Sweep batch** | `new --sweep-batch` (with payloads) | Mint N siblings under one root from operator-authored override files; run a 2-round sweep on each. |
-
-Conceptual picture: [`../concepts/campaign-tree.md`](../concepts/campaign-tree.md).
+| **Resume** | `resume` | Pick up from the latest completed round of the active cycle. |
+| **Rewind** | `resume --from N` | Same `cycle_id`; archive trials after round N; resume at N+1. |
+| **Fork on divergence** | `resume --fork-on-divergence` | On scorer divergence, mint a sibling cycle rooted at the divergence point and continue under the current scorer. |
+| **Sweep batch** | `new --sweep-batch` | Mint N siblings under one root from operator-authored overrides; 2-round sweep each. |
 
 ### Rewind — `resume --from N`
 
-Use when the active cycle went down a path you don't want — e.g. a bad L3 replan, or you edited config and want to re-explore from a specific round. `cycle_id` stays the same; you're rolling back history inside it.
+Use when the active cycle went somewhere you don't want (a bad L3 replan, or you edited config and want to re-explore from a round). `cycle_id` stays; you roll history back inside it. Rounds after N are moved into `.runtime/archived/resumed_at_<ts>/` (not deleted), state is restored from round N, and the run resumes at N+1. The measurement archive is preserved — per-sample results replay without backend calls.
 
-```bash
-python -m promptpotter resume --from 2
-```
-
-Archives `rounds/round_0003.json` onward into `campaigns/{campaign_id}/cycles/{cycle_id}/.runtime/archived/resumed_at_<ts>/`, rebuilds the round file index for rounds 0–2, restores optimizer state from round 2's trial, resumes at round 3.
-
-- **Preserved:** the content-addressed measurement archive. Per-sample results unchanged under the new search replay from `archive/measurements/` without backend calls.
-- **Discarded:** rounds after N are moved aside, not deleted. Inspectable in the archive directory.
-
-**Editing optimizer state by hand.** Open `campaigns/{campaign_id}/cycles/{cycle_id}/rounds/round_{N:04d}.json` and edit before `resume --from N`. Keep the `opt_search_point` block shape round-trippable. Schema: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
-
-#### Interrupted rounds
-
-If you Ctrl+C mid-round, the ledger has the partial events but the round never received `round:complete`. On teardown the runner drains projections: `.runtime/cache/rounds/round_NNNN.json` is written with `"interrupted": true` so post-mortem readers can see what landed. The public `rounds/round_NNNN.json` stays absent — a partial round is not a complete round — and `index.json` records `status: "interrupted"` + `interrupted_round: N`. `--from M` admissibility consults the ledger: `M` is valid iff round `M` has a closing PhaseRecord (`round:complete`, or `origin:exit` for round 0). After an interrupt mid-round-1, `--from 1` correctly refuses with `"ledger only has completed rounds 0..0"`; `--from 0` resumes cleanly.
+**Interrupted rounds.** Ctrl+C mid-round leaves ledger events but no `round:complete`; the public `rounds/round_NNNN.json` stays absent and `index.json` records `status: "interrupted"`. `--from M` is admissible only if round `M` has a closing event — so after an interrupt mid-round-1, `--from 1` refuses and `--from 0` resumes cleanly.
 
 ### Fork — `resume --fork-on-divergence`
 
-Use when a **data-affecting** config edit (scoring formula, `optimizer_llm.provider`/`model`, `pipeline_overrides`, `exclude_nodes`, `dataset_name`) causes resume's decision-replayer to detect that recorded decisions don't match rederived ones. The optimizer halts rather than drift silently. Two choices: revert the change, or commit by rerunning with `--fork-on-divergence`.
+Use when a **data-affecting** edit (scoring formula, `optimizer_llm.provider`/`model`, `pipeline_overrides`, `exclude_nodes`, `dataset_name`) makes resume's replayer find recorded decisions no longer hold. The optimizer halts rather than drift; either revert, or commit with `--fork-on-divergence`. It mints a new `cycle_id` **in the same session**, rooted at the divergence point, copies pre-divergence trials, records `parent_cycle_id`, and re-runs the divergent round under the current scorer. The shared archive is not duplicated — both cycles read the same measurements through their own scoring ledger.
 
-Policy-only edits (PoBB knobs, patience, thresholds, `n_variants`, `exploration.*`) take a different path: `resume_with_divergence_check` reads the frozen config from `campaign.json::config`, classifies the diff via `CampaignConfig.classify_diff_against`, recognizes the change can't have affected the data trace, and continues in-place on the same cycle. Past decisions stay as the audit record of the policy that decided them; the new policy governs unevaluated rounds. The `--fork-on-divergence` flag is a no-op for this case.
+**Policy-only edits** (PoBB knobs, patience, thresholds, `n_variants`, `exploration.*`) can't have changed the data trace, so resume continues in-place on the same cycle and `--fork-on-divergence` is a no-op. Past decisions stay as the audit record of the policy that made them; the new policy governs unevaluated rounds.
 
-```bash
-python -m promptpotter resume --fork-on-divergence
-```
+**Why rewind isn't enough:** rewind restarts under the *same* policy and would re-hit the same divergence; fork restarts under the *new* one.
 
-Mints a new `cycle_id` **inside the same session**, rooted at the divergence point, copies pre-divergence trials into the new cycle, records `parent_cycle_id`, retargets the active session pointer's `cycle_id`, re-runs the divergent round under the current scorer. A fork is a new Cycle, not a new Session or Campaign — the campaign's `campaign.json` config and `root_content_hash` are unchanged. The shared `archive/measurements/` archive is **not duplicated** — both cycles read the same measurements, each through their own scoring ledger.
+### Sweep batch — `new --sweep-batch`
 
-**Layout after a fork:**
+Breadth-first comparison of N L1-prompt hypotheses: instead of one trial cycle on the active OSP, mint N cheap sibling cycles, each from a different operator-authored override. Sweep cycles sit flat under `cycles/` with `sibling_kind: "sweep"` and a shared `sweep_batch_id`.
 
-- **Live telemetry** (`dashboard.json`, `output.log`) **lives in the fork's own cycle dir** (`cycles/{fork_cycle_id}/`). The fork gets its own stream, stamped with its own `cycle_id` and seeded from the parent's on-disk `dashboard.json` at the cut point. `output.log` gets a `=== FORK <id> from round N (parent: …) ===` banner.
-- **Per-cycle audit** (`index.json`, `log.md`, `rounds/`, `langfuse/`, `prompts/`, `.runtime/`) **lives in the fork's own dir** under `campaigns/{campaign_id}/cycles/{cycle_id}/` — flat alongside the session root cycle. The fork's `index.json` carries `parent_cycle_id` and `sibling_kind: "fork"`. The parent's audit stays frozen as the historical record.
+**Per-fork protocol:** origin (cache-hit after the first) + 1 scored round + 1 generation-only round + halt with `SWEEP_COMPLETE`.
 
-To monitor a forked run: tail the fork's own `dashboard.json` under `cycles/{fork_cycle_id}/`. To inspect a specific fork's history: open the fork's `index.json` / `log.md` / `rounds/` under the same dir.
-
-**Why rewind is not enough:** rewind restarts under the same policy; fork restarts under a different policy. If scoring changed, rewind would re-run decisions the recorded history expects to match, and halt again on the same divergence. Fork cuts the cord. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
-
-### Sweep batch — `new --sweep-batch` with payloads
-
-Breadth-first comparison of N L1-prompt hypotheses. Instead of one cheap-trial cycle on the active OSP, mints N cheap-trial sibling cycles inside the active campaign, each starting from a different operator-authored override. Sweep cycles sit flat under `cycles/` alongside the root — each one's `index.json` carries `sibling_kind: "sweep"` and a shared `sweep_batch_id`; the batch is a metadata grouping, not a directory.
-
-**Per-fork protocol:** origin (cache-hit after the first fork) + 1 full scored round + 1 generation-only round + halt with `SWEEP_COMPLETE`. The leaderboard pairs sweep cycles with their full counterparts via `proxy_lift_corr` once at least 4 paired branches exist.
-
-**Authoring a payload.** One JSON file per candidate under `datasets/{name}/sweep/`. Schema (`OperatorSweepFile`) — the L1-surface fields L2 already mutates, plus a `reason` label. The dispatcher widens each parsed file into a `ForkPayload(trigger=OPERATOR_SWEEP, ...)` before calling `_mint_fork`, so operators never write trigger/issued_by boilerplate by hand.
+**Authoring.** One JSON file per candidate under `datasets/{name}/sweep/`, shape `OperatorSweepFile` (`extra='forbid'` — typos fail at parse). Every field optional; `reason` is a label.
 
 ```json
 {
@@ -240,58 +114,29 @@ Breadth-first comparison of N L1-prompt hypotheses. Instead of one cheap-trial c
 }
 ```
 
-Every field optional; `reason` defaults to empty string. The Pydantic model is `extra='forbid'` — typos raise `ValidationError` at parse time, before any fork mints.
-
-| Field | Effect on L1 |
-|-------|--------------|
-| `l1_layout` | Per-slot list of signal names; stamped onto `OptSearchPoint.l1_layout`. Mandatory placeholders `{plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` must appear somewhere across the four slots. |
-
-This is the same L1-surface field L2 writes when it fires — sweep just lets the operator stage one without firing L2. See [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md).
-
-**Running a batch:**
+`l1_layout` stamps per-slot signal-name lists onto the fork's starting OSP — the same L1 surface L2 writes when it fires, staged without firing L2. Mandatory placeholders `{plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` must each appear somewhere across the four slots.
 
 ```bash
 python -m promptpotter new bbeh --backend-url http://127.0.0.1:8000
-# Active session now points at the freshly-minted bbeh cycle; --sweep-batch on
-# the next call dispatches sweep-mode against it:
-python -m promptpotter new --sweep-batch
+python -m promptpotter new --sweep-batch   # dispatches sweep-mode against the freshly-minted cycle
 ```
 
-The runner: parses every `*.json` under `datasets/{name}/sweep/` (sorted by filename), mints a fork per payload, stamps the payload's overrides onto the fork's starting OSP, runs round 1 scored + round 2 generation-only + halt, restores the active session pointer to root.
-
-**Reading results.** Each sweep cycle produces:
-
-- `campaigns/{campaign_id}/cycles/{sweep_cycle_id}/rounds/round_0001.json` — round 1 scored.
-- `campaigns/{campaign_id}/cycles/{sweep_cycle_id}/rounds/round_0002.json` — `status: "generation_only"`, no `composite`/`accuracy`.
-- `campaigns/{campaign_id}/cycles/{sweep_cycle_id}/review.md` — per-cycle review.
-- `campaigns/{campaign_id}/cycles/{sweep_cycle_id}/index.json::final.mode == "sweep"`, with `sweep_batch_id` linking the batch.
-
-Side-by-side: `python scripts/ppot_review.py --sweep`. Sweep view groups by parent root, sorts by `round_1_top_lift` desc, reports `proxy_lift_corr` once at least 4 paired (sweep, full) branches share an `l1_generate_hash`.
-
-**Sweep is screening, not validation.** Promote winners to a full `new` run. Sweep is for L1-surface overrides — pipeline / scoring changes are intentionally absent from the operator file shape (the unified `ForkPayload` reserves `pipeline_swap` / `scoring_swap` slots for future LLM-rebase callers, but operators don't author those). Forks run sequentially (the active session pointer doesn't tolerate concurrent mints).
-
----
+**Reading results.** Side-by-side: `python scripts/ppot_review.py --sweep` (groups by parent root, sorts by `round_1_top_lift`, reports `proxy_lift_corr` once ≥4 paired sweep/full branches share an `l1_generate_hash`). **Sweep is screening, not validation** — promote winners to a full `new` run. L1-surface only; pipeline/scoring changes are intentionally absent from the operator file shape. Forks run sequentially (the active pointer doesn't tolerate concurrent mints).
 
 ## Steering composite scoring between rounds
 
-The cycle's per-round formula can be hot-swapped between rounds by dropping a JSON file. The next round-end consumes it; the running optimizer never restarts.
+Hot-swap the cycle's per-round formula by dropping a file; the next round-end consumes it, the running optimizer never restarts.
 
-### File-drop mechanism
-
-1. Author a new `per_round` formula. The namespace is the active per-round evaluator registry — check `evaluators` in any `rounds/round_NNNN.json` for valid names.
-2. Write `campaigns/{campaign_id}/cycles/{cycle_id}/scoring_steer.json`:
-
+1. Author a `per_round` formula over the active evaluator registry (check `evaluators` in any `rounds/round_NNNN.json` for valid names).
+2. Write `cycles/{cycle_id}/scoring_steer.json`:
    ```json
    {"per_round": "0.5 * accuracy + 0.3 * prompt_compactness + 0.2 * latency_norm"}
    ```
-
-3. Wait for the next round to complete. The operator log emits a `scoring_steer applied` phase event.
-
-Under the hood: file is shape-validated (JSON object with non-empty string `per_round`), formula is smoke-compiled against a synthetic namespace (every registered evaluator at `0.5`) so undefined names or syntax errors fail before swap. On success, `session.round_scorer` is replaced and the file renamed to `scoring_steer.applied.{ts}.json`. On failure the running formula stays untouched and the file stays in place — fix and the next round retries.
+3. Wait for the next round. The formula is smoke-compiled against a synthetic namespace first, so undefined names or syntax errors fail *before* the swap; on success the file is renamed `scoring_steer.applied.{ts}.json`, on failure the running formula stays and you fix + retry.
 
 ### Available names
 
-Gated by `applies(schema)` — only present when the corresponding pipeline node is active.
+Gated by `applies(schema)` — present only when the matching node is active.
 
 | Name | Range | Meaning |
 | --- | --- | --- |
@@ -302,74 +147,29 @@ Gated by `applies(schema)` — only present when the corresponding pipeline node
 | `latency_norm` | `[0, 1]` | `1 - mean_ms / 10_000`; 1.0 = instant |
 | `prompt_compactness` | `[0, 1]` | `1 - len(rendered_prompt) / 4_000`; 1.0 = short |
 | `pipeline_compactness` | `[0, 1]` | `1 - (active_steps - 1) / 11`; 1.0 = single-node |
-| `source_recall` | `[0, 1]` | GT in candidate-source output (when active) |
-| `candidate_recall` | `[0, 1]` | GT in ranker `final_ranking` (when active) |
+| `source_recall` / `candidate_recall` | `[0, 1]` | GT in candidate-source output / in ranker `final_ranking` (when active) |
 | `cache_hit_rate` | `[0, 1]` | Cache-node short-circuit fraction |
 | `mean_retrieval_shortfall` | `[0, 1]` | Mean `min(observed/target, 1.0)` across `max_*`/`num_*` nodes |
 
-Helpers: `min`, `max`, `float`, `int`, `bool`, `abs`, `round`, `log`, `sqrt`, `exp`, `pow`. Output clamped to `[0, 1]`. Undefined names raise `NameError` — fail loud is the contract.
+Helpers: `min`, `max`, `float`, `int`, `bool`, `abs`, `round`, `log`, `sqrt`, `exp`, `pow`. Output clamped to `[0, 1]`; undefined names raise `NameError` — fail loud is the contract.
 
-### When NOT to steer
+**Don't steer per-sample by file-drop.** Changing the per-sample scorer mid-run rewrites recorded `hit`/`score` on every prior trace and trips the divergence replayer on next resume — use `resume --fork-on-divergence` instead.
 
-Per-sample steering is intentionally not supported by file-drop. Changing `compile_scorer` mid-run rewrites recorded `hit`/`score` semantics on every prior trace, triggering the divergence-replay walker on next resume. The right tool there is `resume --fork-on-divergence`, which forks a new cycle from the divergence point under the new policy.
-
-### Composite block in operator surfaces
-
-**Per-candidate (1 line):** `composite=0.6042  (Δ+0.1030 vs origin 0.5012)`.
-
-**Round summary (3 lines, log.md):**
-
-```
-composite = 0.6042   origin=0.5012  Δ+0.1030
-formula:  0.65*acc + 0.15*H + 0.10*lat + 0.05*R + 0.05*pc
-  acc=0.667  err=0.000  degr=0.083  rf=0.000  lat=0.965  pc=0.812
-```
-
-`H` is health `((1-error_rate) + (1-degraded_rate) + (1-runtime_failure_rate)) / 3`; `R` is the average of applicable recall evaluators. Custom formulas (`campaign.json::scoring`) render verbatim. `log.md` always carries the full formula text — source of truth when reviewing finished cycles.
-
-### Code references
-
-- Evaluator registry + default formula: `promptpotter/application/scoring/evaluators.py`
-- Composite computation: `promptpotter/application/scoring/metrics.py::compute_composite_score`
-- Hot-swap module: `promptpotter/application/scoring/formula/`
-- Per-round trajectory: in-memory `Cycle.rounds` (transient); persistent trajectory derives from ledger events.
-
----
+The default composite renders in operator surfaces as `composite=0.6042 (Δ+0.1030 vs origin 0.5012)` per candidate, with the full formula text always in `log.md` (source of truth when reviewing finished cycles).
 
 ## Beta hosting state
 
-Single-operator (auth-off) and hosted-beta (OIDC sign-up) share the same on-disk shape. The hosted beta adds three operator-visible state surfaces, plus three CLI verbs, all under `projects/{tenant_id}/`.
+Single-operator (auth-off) and hosted-beta (OIDC) share the same on-disk shape. The beta adds three operator-visible surfaces under `projects/{tenant_id}/`.
 
-### Per-user quota knobs (`user.json`)
-
-`projects/{tenant_id}/user.json` carries the per-user abuse-limit knobs the launcher gates against. One file per tenant directory (beta is one-tenant-per-user). Missing file ⇒ defaults via `UserStore.get_or_create()`.
+**Per-user quotas (`user.json`).** Abuse-limit knobs the launcher gates against (one tenant per user; missing file ⇒ defaults):
 
 ```json
-{
-  "user_id": "...",
-  "tenant_id": "...",
-  "email": "you@example.com",
-  "spend_budget_usd_daily": null,
-  "max_concurrent_cycles": 2,
-  "max_campaigns_per_day": 10,
-  "created_at": "2026-05-26T..."
-}
+{ "spend_budget_usd_daily": null, "max_concurrent_cycles": 2, "max_campaigns_per_day": 10 }
 ```
 
-Operators hand-edit `user.json` to lift / lower caps. `check_launch_quotas` reads it on every `mint-campaign` and `start-run`; `effective_spend_cap_usd` composes the per-cycle `spend_budget_usd` with the daily cap as `min(requested, daily_cap - daily_spent)`. Code: `promptpotter/infrastructure/store/user_store.py` + `promptpotter/application/jobs/quota.py`.
+Hand-edit to lift/lower caps; checked on every `mint-campaign` and `start-run`. The effective per-cycle spend cap is `min(requested, daily_cap - daily_spent)`.
 
-### Campaign ownership + lifecycle (`campaign.json`)
-
-Every campaign carries two operator-facing fields on its manifest:
-
-- `owner_user_id: UserId` — populated from `IdentityContext.user_id` at mint (`presentation/cli/commands/_shared.py::_mint_session_and_cycle`). `CampaignStore.list_campaigns(identity)` filters to the caller's user; cross-user reads return **404, not 403** (existence leakage is itself a violation).
-- `lifecycle_status: "active" | "archived" | "deleted"` plus `lifecycle_changed_at: datetime` and `lifecycle_reason: str | None`. **Campaigns are never physically removed** — only marked. Measurements under `archive/measurements/` stay cross-campaign per ADR-0002 §0.5, so a deleted campaign's measurements still cache-hit for siblings. `try_delete_stub_cycle` is the only physical-delete site (empty stub cycles, unchanged).
-
-`CampaignStore.list_campaigns(status="active")` is the default. The webapp sidebar Active/Archived tab and the `?status=archived | deleted | all` query parameter on `GET /campaigns` route through this single store gateway. `deleted` is hidden from the default UI — recover by id from the file tree.
-
-### Lifecycle CLI verbs
-
-Three verbs ride the command highway under the same `CommandDispatcher` the webapp action calls:
+**Campaign ownership + lifecycle (`campaign.json`).** Each manifest carries `owner_user_id` (cross-user reads return **404, not 403** — existence leakage is itself a violation) and `lifecycle_status: active | archived | deleted` (+ `_changed_at`, `_reason`). **Campaigns are never physically removed** — only marked; their measurements stay cross-campaign and still cache-hit for siblings. `deleted` is hidden from the default UI — recover by id from the file tree.
 
 ```bash
 python -m promptpotter archive   <campaign_id> [--reason TEXT]
@@ -377,14 +177,8 @@ python -m promptpotter delete    <campaign_id> [--reason TEXT]
 python -m promptpotter unarchive <campaign_id>
 ```
 
-Each writes a `CommandRecord` to the campaign's root-cycle ledger and inline-applies the manifest mark. Idempotent — re-running `archive` on an already-archived campaign is a no-op.
+Each is idempotent and writes a `CommandRecord` to the campaign's root-cycle ledger before marking the manifest.
 
-### Running jobs (`.runtime/jobs/`)
+**Running jobs (`.runtime/jobs/{job_id}.json`).** The browser-launched runner is tracked one file per job (`campaign_id, cycle_id, user_id, status, …`); reads filter by user. Concurrent campaigns are isolated via the per-cycle ledger ContextVar. The Account modal's Security pane surfaces live spend/concurrency/daily-mint counts against their caps.
 
-The browser-launched runner is tracked by an in-memory `JobRegistry` persisted to `projects/{tenant_id}/.runtime/jobs/{job_id}.json` (one file per job). Each `Job` carries `(campaign_id, cycle_id, user_id, status, created_at, …)`. The process-wide registry is stashed on `app.state.job_registry`; reads filter by `user_id`. Concurrent campaigns are safe via the `_CYCLE_LEDGER` ContextVar isolation already in place (`promptpotter/infrastructure/llm/models.py`).
-
-The Account modal's Security pane (`GET /auth/quota-status`) surfaces the live counts: spend used today, concurrent cycles running, campaigns minted today — each paired with its `user.json` cap.
-
-### Identity I/O kind
-
-The fifth I/O kind (Identity) is named in §0 of `docs/architecture.md`. OIDC verification at the API trust boundary (`presentation/api/middleware/oidc.py`) populates `IdentityContext` for the downstream resolver; tokens never appear past the middleware (ADR-0002 gate #2, CI-checked). Stage 0 (auth-off, single operator) substitutes `default_identity()` for the middleware. Permanent contract: `docs/adr/0002-identity-foundation.md`.
+**Identity** is the fifth I/O kind (§0 of `docs/architecture.md`): OIDC verification at the API trust boundary populates `IdentityContext`; tokens never appear past the middleware (ADR-0002, CI-checked). Stage 0 substitutes `default_identity()`. Contract: `docs/adr/0002-identity-foundation.md`.
