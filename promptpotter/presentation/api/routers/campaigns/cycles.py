@@ -16,13 +16,6 @@ from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from promptpotter.infrastructure.runtime_flags import (
-    RUN_FRESH_S,
-    is_paused,
-    is_running,
-    is_stop_requested,
-    read_spend_cap,
-)
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
@@ -221,43 +214,9 @@ async def get_cycle_dashboard(
         return Response(status_code=304, headers=headers)
 
     dashboard: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    # ``run_phase`` rides dashboard.json itself (declared by the runner, projected
+    # by LiveDashboardView) — the webapp reads it straight off the 2 s poll, so a
+    # paused run reads "paused" with no separate /runstate round-trip. The spend
+    # cap rides ``dashboard.json::spend.budget_usd`` already; the deleted
+    # /runstate endpoint's ``spend_cap_usd`` was unused.
     return JSONResponse(dashboard, headers=headers)
-
-
-class CycleRunState(BaseModel):
-    """Non-cached run-control state for one cycle.
-
-    Unlike the dashboard route (304-cached on file mtime — useless while a
-    paused run leaves the file static), this is recomputed every call:
-    ``paused`` / ``stop_requested`` are flag-driven (instant), ``running`` is
-    derived from ``dashboard.json`` freshness. The run controls + state badges
-    read this for the *viewed* cycle, so they reflect the run you're looking at
-    rather than the single active-pointer cycle.
-    """
-
-    campaign_id: str
-    cycle_id: str
-    running: bool
-    paused: bool
-    stop_requested: bool
-    spend_cap_usd: float | None = None
-
-
-@campaigns_router.get(
-    "/campaigns/{campaign_id}/cycles/{cycle_id}/runstate", response_model=CycleRunState
-)
-async def get_cycle_runstate(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleRunState:
-    """Live run-control state for the viewed cycle — always fresh, never 304."""
-    cycle_path = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
-    runtime = cycle_path / ".runtime"
-    # Both the per-cycle dashboard.json and the runtime flags live on this
-    # cycle's own dir, where the runner writes + polls them.
-    dashboard_path = cycle_path / "dashboard.json"
-    return CycleRunState(
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
-        running=is_running(dashboard_path, fresh_s=RUN_FRESH_S),
-        paused=is_paused(runtime),
-        stop_requested=is_stop_requested(runtime),
-        spend_cap_usd=read_spend_cap(runtime),
-    )

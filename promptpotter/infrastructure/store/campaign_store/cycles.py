@@ -14,12 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
-from promptpotter.infrastructure.runtime_flags import (
-    RUN_FRESH_S,
-    is_paused,
-    is_running,
-    is_stop_requested,
-)
+from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.base import read_json, read_json_optional, write_json
 from promptpotter.infrastructure.store.campaign_store._kernel import CampaignStoreKernel
 from promptpotter.infrastructure.store.campaign_store.index_helpers import round_summary
@@ -258,14 +253,19 @@ class CycleIndexMixin(CampaignStoreKernel):
             updates["n_rounds"] = n_rounds
             if final is not None:
                 updates["final"] = final
+        # Store partial-round / traceback markers based on what the caller computed
+        # (halted_mid_round → interrupted_round; has_traceback → crash_traceback),
+        # not by re-deriving from the status string — status is now the precise
+        # StopReason value, decoupled from this storage decision.
         remove_keys: list[str] = []
-        if status in {"interrupted", "crashed"}:
-            if interrupted_round is not None:
-                updates["interrupted_round"] = interrupted_round
-            if crash_traceback:
-                updates["crash_traceback"] = crash_traceback
+        if interrupted_round is not None:
+            updates["interrupted_round"] = interrupted_round
         else:
-            remove_keys = ["interrupted_round", "crash_traceback"]
+            remove_keys.append("interrupted_round")
+        if crash_traceback:
+            updates["crash_traceback"] = crash_traceback
+        else:
+            remove_keys.append("crash_traceback")
         with graceful("Cycle completion update failed"):
             self.update(campaign_id, cycle_id, updates, remove=remove_keys)
 
@@ -304,18 +304,14 @@ class CycleIndexMixin(CampaignStoreKernel):
             except Exception:
                 data = None
             kind = sibling_kind(cycle_id)
-            # Actively-progressing flag: dashboard.json is fresh AND the cycle is
-            # neither paused nor stopping. Freshness alone (the /runstate signal)
-            # lags a pause/stop by the whole window, since a just-paused run's
-            # file is still fresh — folding in the instant pause/stop flags makes
-            # the indicator flip the moment the operator acts. Process-agnostic:
-            # CLI and web runs both bump dashboard.json, so both read as running.
-            cycle_runtime = index_path.parent / ".runtime"
-            running = (
-                is_running(index_path.parent / "dashboard.json", fresh_s=RUN_FRESH_S)
-                and not is_paused(cycle_runtime)
-                and not is_stop_requested(cycle_runtime)
-            )
+            # The single run-phase derivation — running / paused / stopping /
+            # detached / terminal. Lifecycle (terminal) comes from index
+            # ``finished_at``; control + freshness from derive_run_phase. This is
+            # the one computation the picker, both live dots, and the badge all
+            # read — no surface re-derives "running" from its own inputs.
+            cycle_dir = index_path.parent
+            is_terminal = isinstance(data, dict) and bool(data.get("finished_at"))
+            run_phase = str(derive_run_phase(cycle_dir, is_terminal=is_terminal))
             if not isinstance(data, dict):
                 results.append(
                     {
@@ -329,7 +325,7 @@ class CycleIndexMixin(CampaignStoreKernel):
                         "unit_kind": _unit_kind(kind, None),
                         "is_root": kind == "root",
                         "status": "unreadable",
-                        "running": running,
+                        "run_phase": run_phase,
                         "best_accuracy": None,
                         "n_rounds": 0,
                         "created_at": "",
@@ -355,7 +351,7 @@ class CycleIndexMixin(CampaignStoreKernel):
                     "unit_kind": _unit_kind(sk, fork_trigger),
                     "is_root": kind == "root",
                     "status": data.get("status", ""),
-                    "running": running,
+                    "run_phase": run_phase,
                     "best_accuracy": data.get("best_accuracy"),
                     "n_rounds": data.get("n_rounds", 0),
                     "created_at": data.get("created_at", ""),

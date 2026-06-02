@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.sample_measurement import (
     _error_result,
@@ -25,6 +26,7 @@ from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
 from promptpotter.domain.escalation_signals import EscalationSignal
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.scoring import QueryMeasurement, Scorer
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import (
@@ -332,6 +334,7 @@ async def run_query_loop(
             sample = by_id[sid]
             if session.stop_check and session.stop_check():
                 logger.debug("Graceful stop after query %d/%d.", len(state.results), len(dataset))
+                declare_run_phase(session, RunPhase.STOPPING)
                 return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
 
             if on_sample_starting is not None:

@@ -91,7 +91,7 @@ async def get_live_state(store: StoreDep) -> dict[str, Any]:
     # Both the dashboard.json and the runtime flags live on the active cycle
     # dir (which may be a fork): each cycle owns its own live file, and the
     # runner writes + polls its flags there. Shared readers in
-    # ``infrastructure.runtime_flags`` so this matches the per-cycle /runstate.
+    # ``infrastructure.runtime_flags`` so this matches the per-cycle dashboard route.
     cycle_path = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     runtime_dir = cycle_path / ".runtime"
     paused = is_paused(runtime_dir)
@@ -128,10 +128,13 @@ class CycleListEntry(BaseModel):
     # Operator-facing unit kind — see _unit_kind() in campaign_store/cycles.py.
     unit_kind: Literal["session", "divergent_resume", "user_fork", "l3_fork"]
     is_root: bool
+    # Precise terminal reason (StopReason value) once finished, else "active"
+    # ("unreadable" for a malformed index). The display label + outcome derive
+    # from the one STOP_REASON_INFO table; do not re-map per surface.
     status: str
-    running: bool = Field(
-        default=False,
-        description="Actively-progressing flag — dashboard.json fresh AND the cycle is neither paused nor stopping. True for a live run (CLI or web); flips off the moment it's paused/stopped, independent of the persisted status.",
+    run_phase: Literal["running", "paused", "stopping", "detached", "terminal"] = Field(
+        default="detached",
+        description="The single run-state value (RunPhase) — running / paused / stopping / detached / terminal. Computed once by derive_run_phase from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'terminal' pairs with `status` for the reason label.",
     )
     best_accuracy: float | None = None
     n_rounds: int = 0

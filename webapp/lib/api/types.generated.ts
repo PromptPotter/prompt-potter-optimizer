@@ -122,6 +122,7 @@ export interface LiveDashboardState {
   session_id: string;
   state: string;
   state_since: string;
+  run_phase: string;
   stop_reason: string | null;
   round: number;
   candidate: string;
@@ -236,10 +237,11 @@ export interface CycleListEntry {
   unit_kind: 'session' | 'divergent_resume' | 'user_fork' | 'l3_fork';
   is_root: boolean;
   status: string;
-  /** Actively-progressing flag — dashboard.json fresh AND the cycle is neither
-   * paused nor stopping. True for a live run (CLI or web); flips off the
-   * moment it's paused/stopped, independent of the persisted status. */
-  running: boolean;
+  /** The single run-state value (RunPhase) — running / paused / stopping / detached
+   * / terminal. Computed once by derive_run_phase from lifecycle + control
+   * flags + freshness; every picker dot and badge reads this, none re-derive
+   * it. 'terminal' pairs with `status` for the reason label. */
+  run_phase: 'running' | 'paused' | 'stopping' | 'detached' | 'terminal';
   best_accuracy: number | null;
   n_rounds: number;
   created_at: string;
@@ -414,3 +416,23 @@ export interface DiagnosticRunListResponse {
   n: number;
   runs: DiagnosticRunRecord[];
 }
+
+// Operator-facing label per terminal reason (StopReason). Mirror of
+// domain/phases.py::STOP_REASON_INFO — the single label source.
+export const STOP_REASON_LABELS: Record<string, string> = {
+  'perfect_score': 'Perfect score',
+  'target_hit': 'Target reached',
+  'max_rounds': 'Max rounds',
+  'hard_cap_reached': 'Round cap',
+  'sweep_complete': 'Sweep complete',
+  'diag_complete': 'Diagnostic complete',
+  'l3_patience_exhausted': 'Converged (L3 patience)',
+  'rebased_to_fork': 'Rebased to fork',
+  'interrupted': 'Interrupted',
+  'escalation_abort': 'Escalation abort',
+  'spend_budget': 'Spend budget reached',
+  'crashed': 'Crashed',
+  'render_error': 'Render error',
+  'diverged': 'Diverged',
+  'optimizer_timeout': 'Optimizer timeout',
+};

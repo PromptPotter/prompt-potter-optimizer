@@ -238,7 +238,21 @@ tenant prefix. Per-cycle ledgers stay canonical for any command that
 targets a campaign or cycle; campaign lifecycle commands ride the
 campaign's root-cycle ledger. (2) **Display** — ledger subscribers (`LiveDisplay`,
 `LiveDashboardView`, `AuditTrailView`); read-only, never write
-campaign artifacts. (3) **Control-local** — `stop_check` on
+campaign artifacts. **Run-state is owned state, not a freshness
+guess.** The runner *declares* its control phase — `running` /
+`paused` / `stopping`, plus `terminal` at finalize — onto the ledger
+as a `control` `PhaseRecord`, and `LiveDashboardView` projects it to
+`dashboard.json::run_phase` (the `RunPhase` vocabulary,
+`domain/phases.py`). Every surface reads that one value; the only
+reader-side computation is `derive_run_phase`
+(`infrastructure/runtime_flags.py`), used by the cycle list, which
+composes lifecycle (terminal, from `index.json::finished_at`) with
+the control flags and consults `dashboard.json` freshness *only* to
+split `running` from `detached`. The terminal reason maps onto its
+display label + outcome class exactly once, through the single
+`STOP_REASON_INFO` table (which in turn drives `index.json::status`,
+`JobStatus`, and the webapp label). (3) **Control-local** —
+`stop_check` on
 `Session`; signals the loop to exit, writes nothing. The webapp's
 "Stop run" button rides this kind by writing a `.runtime/stop.flag`
 file the running loop polls via `stop_check`; the API route writing

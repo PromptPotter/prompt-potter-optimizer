@@ -1,7 +1,7 @@
 "use client";
 import { TERMS } from "@/lib/terms";
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
-import { cycleStatusLabel } from "@/lib/cycle-status";
+import { runPhaseLabel } from "@/lib/run-phase";
 import { headlineStats } from "@/lib/derivations/headline-stats";
 import { readSpend } from "@/lib/derivations/spend";
 import { fmtPct1, fmtSecs, fmtUsd, fmtTokens, ageText } from "@/lib/format";
@@ -18,6 +18,9 @@ interface Props {
   cycleId: string | null;
   dash: DashboardSnapshot | null;
   isLive: boolean;
+  // Connection-aware run phase (poll.tsx) — "detached" when a running cycle's
+  // poll has gone quiet. Used for the sub-label in place of raw dash.run_phase.
+  runPhase: string | null;
 }
 
 function shortCycleId(id: string | null): string {
@@ -44,18 +47,17 @@ function spendChip(dash: DashboardSnapshot | null): { chip: string; tooltip: str
   return { chip, tooltip };
 }
 
-export function RunTelemetry({ campaignId, cycleId, dash, isLive }: Props) {
+export function RunTelemetry({ campaignId, cycleId, dash, isLive, runPhase }: Props) {
   const round = roundOf(dash);
   // Live phase only — when the FSM is `stopped`, suppress the sub-label so
   // the round cell doesn't double-print the stop_reason that StatusAssistant
   // ("No live optimizer — viewing a frozen unit") already conveys.
-  const stateValue = (dash?.state as string | undefined) ?? null;
+  // Suppress the label on a terminal cycle — StatusAssistant ("No live
+  // optimizer — viewing a frozen unit") already conveys the stop reason.
+  const effectivePhase = runPhase ?? dash?.run_phase ?? null;
   const phase =
-    stateValue && stateValue !== "stopped"
-      ? cycleStatusLabel(
-          stateValue,
-          (dash as { stop_reason?: string } | null)?.stop_reason,
-        )
+    effectivePhase && effectivePhase !== "terminal"
+      ? runPhaseLabel(effectivePhase, dash?.stop_reason)
       : null;
   const { best, origin, delta } = headlineStats(dash);
   const deltaSign = delta == null ? "" : delta > 0 ? "+" : "";

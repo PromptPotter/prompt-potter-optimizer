@@ -37,9 +37,12 @@ follow the same pattern.
 owns its live stream, stamped with its own `cycle_id`. A fork's view can't
 surface the parent's id; a fork seeds its prior trajectory from the parent's
 on-disk `dashboard.json` (via `for_session(seed_from_cycle_id=…)`). The write
-target is the `CycleDir` newtype (`domain/cycle_paths.py`); the four read sites
-(`/api/v1/live`, the per-cycle `dashboard` + `runstate` routes, `EventStreamView`
-snapshot) serve the viewed cycle's own file — no `root_cycle_id` collapse.
+target is the `CycleDir` newtype (`domain/cycle_paths.py`); the three read sites
+(`/api/v1/live`, the per-cycle `dashboard` route, `EventStreamView` snapshot)
+serve the viewed cycle's own file — no `root_cycle_id` collapse. Run-state rides
+`dashboard.json::run_phase` (declared by the runner, projected by
+`LiveDashboardView`); the old non-cached `/runstate` probe is gone — its
+freshness-based "running" was the symptom that run-state was never owned state.
 
 `DerivedView.on_record` (`projections/base.py`) owns the
 `isinstance(record, …)` dispatch; subclasses override hooks. There's no

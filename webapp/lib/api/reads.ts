@@ -42,29 +42,10 @@ export function fetchLiveState(signal?: AbortSignal): Promise<Record<string, unk
   return jget<Record<string, unknown>>(`${API}/live`, signal);
 }
 
-export interface CycleRunState {
-  campaign_id: string;
-  cycle_id: string;
-  running: boolean;
-  paused: boolean;
-  stop_requested: boolean;
-  spend_cap_usd: number | null;
-}
-
-// Non-cached run-control state for the VIEWED cycle. The run controls + state
-// badges poll this so they reflect the run you're looking at — not the single
-// active-pointer cycle. Unlike the 304-cached dashboard route, it's recomputed
-// every call, so a paused (file-static) run still reports `paused: true`.
-export function fetchRunState(
-  campaignId: string,
-  cycleId: string,
-  signal?: AbortSignal,
-): Promise<CycleRunState> {
-  return jget<CycleRunState>(
-    `${API}/campaigns/${campaignId}/cycles/${cycleId}/runstate`,
-    signal,
-  );
-}
+// Run-control state for the VIEWED cycle now rides `dashboard.json::run_phase`
+// (declared by the runner, projected by LiveDashboardView) on the 2 s poll — the
+// separate /runstate endpoint + its freshness probe are gone. The spend cap is
+// folded into the same dashboard payload as `current_spend_cap_usd`.
 
 // Current identity envelope — drives the account modal (Profile + Security).
 // 401 when no session; the caller should treat that as "redirect to /ui/login".

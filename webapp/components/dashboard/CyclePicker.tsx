@@ -5,6 +5,7 @@ import { useCycleStream } from "@/lib/poll";
 import type { CycleListEntry } from "@/lib/api";
 import { rootCycleId, sessionIndexOf, campaignOriginHash, unitKey, UNIT_SEP } from "@/lib/ids";
 import { unitDisplayName } from "@/lib/names";
+import { runPhaseLabel } from "@/lib/run-phase";
 import { fmtPct0 } from "@/lib/format";
 
 // Inline unit picker. Single label scheme — optgroup `${dataset} ·
@@ -18,7 +19,9 @@ import { fmtPct0 } from "@/lib/format";
 // one passes BOTH ids back.
 
 function optionText(c: CycleListEntry): string {
-  return `${unitDisplayName(c)} · best ${fmtPct0(c.best_accuracy)} · ${c.status}`;
+  // run_phase while live (running/paused/stopping/detached); the precise terminal
+  // reason (from `status`) once finished — one label, via the single helper.
+  return `${unitDisplayName(c)} · best ${fmtPct0(c.best_accuracy)} · ${runPhaseLabel(c.run_phase, c.status)}`;
 }
 
 // The live badge subscribes to the 2 s dashboard.json poll on its own. Kept

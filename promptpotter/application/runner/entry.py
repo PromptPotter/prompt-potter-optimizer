@@ -385,13 +385,6 @@ def _finalize_run(
     has_traceback = is_crashed or is_render_error
     emitter = observers.dashboard
     if session.state.cycle_id:
-        status_map = {
-            str(StopReason.INTERRUPTED): "interrupted",
-            str(StopReason.CRASHED): "crashed",
-            str(StopReason.DIVERGED): "diverged",
-            str(StopReason.RENDER_ERROR): "render_error",
-            str(StopReason.OPTIMIZER_TIMEOUT): "optimizer_timeout",
-        }
         # Active round at teardown — surfaces on `interrupted_round` so the operator sees which
         # round is partial without diffing the on-disk tree (works for crash too; traceback is the
         # discriminator).
@@ -399,7 +392,10 @@ def _finalize_run(
         # Active exception is gone from sys.exc_info() by now — the except clause stashed the
         # formatted traceback on session.state.crash_traceback before returning.
         crash_traceback = session.state.crash_traceback if has_traceback else None
-        cycle_status = status_map.get(stop_reason, "completed")
+        # index.json::status is the precise terminal reason — "active" until now, then the raw
+        # StopReason value (no lossy collapse to "completed"). Operator-facing label + outcome
+        # derive from the single STOP_REASON_INFO table; never re-encoded per surface.
+        cycle_status = str(stop_reason)
         # index.json::final — terminal-summary namespace the `potter-l1-meta-campaign` skill gates
         # on; review.md + variant leaderboard read it for the frozen verdict.
         from promptpotter.application.optimization.dispatch.llm_call import (

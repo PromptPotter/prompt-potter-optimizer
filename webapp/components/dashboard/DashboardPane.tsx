@@ -118,7 +118,7 @@ function DashboardPaneInner() {
   // and exposes the derived round number — no component re-runs `roundOf`
   // on its own, no second snapshot path.
   const dashState = useDashboard();
-  const { dash, dashRound, isLive } = dashState;
+  const { dash, dashRound, isLive, runPhaseResolved } = dashState;
 
   // One-shot pipeline (topology) lookup
   useEffect(() => {
@@ -282,7 +282,7 @@ function DashboardPaneInner() {
                   axis (LIVE pill + completed-round circles) sits beside
                   the headline KPIs the operator scans first. */}
               <div className="dash-top-row">
-                <TopStrip dash={dash} dashRound={dashRound} />
+                <TopStrip dash={dash} dashRound={dashRound} runPhase={runPhaseResolved} />
                 <RoundTabsStrip dash={dash} isLive={isLive} />
               </div>
             </div>
@@ -319,6 +319,7 @@ function DashboardPaneInner() {
                 cycleId={cycleId}
                 dash={dash}
                 isLive={isLive}
+                runPhase={runPhaseResolved}
               />
             ) : null
           }

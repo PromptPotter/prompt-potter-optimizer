@@ -41,15 +41,24 @@ from promptpotter.application.jobs.quota import (
     check_launch_quotas,
     effective_spend_cap_usd,
 )
-from promptpotter.application.jobs.registry import Job, JobRegistry
+from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus
 from promptpotter.application.origin import load_origin_prompt
 from promptpotter.application.runner import build_origin_cycle_id
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
+from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
+
+# The one outcome → JobStatus mapping. Sole bridge from the StopReason outcome
+# table to JobRegistry's lifecycle vocabulary; there is no per-reason reconciler.
+_JOB_STATUS_BY_OUTCOME: dict[StopOutcome, JobStatus] = {
+    StopOutcome.SUCCESS: "completed",
+    StopOutcome.HALTED: "stopped",
+    StopOutcome.FAILED: "failed",
+}
 
 
 class LaunchError(RuntimeError):
@@ -526,28 +535,21 @@ async def _run_in_background(
             spend_budget_usd=spend_budget_usd,
         )
         stop_reason = getattr(result, "stop_reason", None)
-        reason_upper = str(stop_reason).upper() if stop_reason else ""
-        # crashed / render_error / diverged are operator-visible failures, not
-        # successful completions. ``result.error.message`` is the operator-
-        # facing string the runner picked at the throw site — the same string
-        # written to ``dashboard.json::error.message`` via the canonical
-        # ``ErrorRecord``; reading it here keeps JobRegistry and dashboard in
-        # lockstep without coupling to projection state.
-        failure_reasons = {"CRASHED", "RENDER_ERROR", "DIVERGED"}
-        if reason_upper in failure_reasons:
-            status: str = "failed"
-            persisted_reason = (
-                result.error.message if result.error is not None else str(stop_reason)
-            )
-        elif reason_upper == "INTERRUPTED":
-            status = "stopped"
-            persisted_reason = str(stop_reason)
+        # Job terminal status derives from the single StopReason outcome table —
+        # the SAME classification index.json / dashboard.json / the webapp read.
+        # No private reconciler: a cycle can no longer read "failed" here and
+        # "completed" there (the optimizer_timeout split is gone). For a FAILED
+        # outcome, ``result.error.message`` is the operator-facing string the
+        # runner picked at the throw site (same as dashboard.json::error.message).
+        outcome = stop_reason_outcome(stop_reason) if stop_reason else StopOutcome.SUCCESS
+        status: JobStatus = _JOB_STATUS_BY_OUTCOME[outcome]
+        if outcome is StopOutcome.FAILED and result.error is not None:
+            persisted_reason: str | None = result.error.message
         else:
-            status = "completed"
-            persisted_reason = str(stop_reason) if stop_reason else None  # type: ignore[assignment]
+            persisted_reason = str(stop_reason) if stop_reason else None
         job_registry.mark_finished(
             job_id,
-            status=status,  # type: ignore[arg-type]
+            status=status,
             stop_reason=persisted_reason,
         )
     except asyncio.CancelledError:

@@ -425,6 +425,7 @@ class LiveDashboardView(DerivedView):
         canonical ledger; ``mark_stopped`` only flips the liveness state.
         """
         self.state["stop_reason"] = reason
+        self.state["run_phase"] = "terminal"
         self._set_state("stopped")
         self._flush_pending_persist()
 
@@ -484,6 +485,17 @@ class LiveDashboardView(DerivedView):
     # Phases → scalars; snapshots → per-round candidate structures. No second dispatch.
 
     def _handle_phase(self, record: PhaseRecord) -> None:
+        if record.phase == "control":
+            # Control transition declared by the runner (running / paused /
+            # stopping). The sole writer of dashboard.json::run_phase short of
+            # the terminal `mark_stopped`. Flushing here bumps the file mtime at
+            # the transition, so the 304-cached dashboard route serves the new
+            # phase and a stale (paused) file still reads as paused.
+            if self.state.get("run_phase") not in ("terminal", record.event):
+                self.state["run_phase"] = record.event
+                self._flush_pending_persist()
+            return
+
         if record.phase == "backend" and record.event == "warning":
             # Surface backend retries (429 / 5xx / transport) — retry behaviour itself is unchanged.
             payload = dict(record.payload or {})

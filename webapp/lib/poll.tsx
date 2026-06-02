@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { fetchDashboardConditional } from "./api";
-import { isRunningState } from "./cycle-status";
+import { resolveRunPhase } from "./run-phase";
 import { ageTextSeconds } from "./format";
 import type {
   OriginSummary,
@@ -33,7 +33,17 @@ export interface DashboardSnapshot {
   campaign_id?: string;
   cycle_id?: string;
   session_id?: string;
+  // Fine-grained activity (origin / scoring / l1_generate / between_samples / …)
+  // plus the terminal "stopped". Lifted to `phase` for transient gating.
   state?: string;
+  // The single run-state value (RunPhase), declared by the runner and projected
+  // by LiveDashboardView: running | paused | stopping | terminal. The webapp
+  // reads this — it does NOT re-derive "running" from `state` freshness. The
+  // server-side cycle list adds "detached"; the live view composes that as
+  // run_phase==="running" + connection offline (see `isLive`).
+  run_phase?: "running" | "paused" | "stopping" | "terminal";
+  // Terminal reason (raw StopReason value) once run_phase==="terminal".
+  stop_reason?: string;
   round?: number;
   query?: string;
   best?: number;
@@ -170,15 +180,21 @@ export interface CycleStreamState {
   ageS: number | null;
   termKey: string;
   error: string | null;
-  // The optimizer is actively executing this cycle: dashboard.json is fresh
-  // (`status === "live"`) AND the FSM hasn't reached a terminal phase
-  // (`isRunningState(dash.state)`). The single gate for every transient
-  // indicator (blinking rows, pulsing nodes, the round-strip "live" pill,
-  // the Stop affordance): a producer that dies silently goes stale, an
-  // explicit stop writes `state: "stopped"` — either way `isLive` flips
-  // false and all motion stops, with no per-component timeout or topology
-  // check. Liveness is computed once here; consumers never re-derive it.
+  // The optimizer is actively executing this cycle — the composition of the two
+  // orthogonal axes: the run declares `run_phase === "running"` AND the
+  // connection is fresh (`status === "live"`). A paused run declares "paused"
+  // → isLive false immediately (no 30 s freshness lag — the old bug). A
+  // silently-dead producer ("detached") keeps run_phase "running" on disk but
+  // its poll goes stale → isLive false. The single gate for every transient
+  // indicator (blinking rows, pulsing nodes, the round-strip "live" pill, the
+  // Stop affordance). Computed once here; consumers never re-derive it.
   isLive: boolean;
+  // The connection-aware RunPhase for display (running/paused/stopping/detached/
+  // terminal). Same value the cycle list's derive_run_phase emits: the runner's
+  // declared `run_phase`, but a `running` cycle whose poll has gone quiet reads
+  // `detached`. Surfaces show this, not raw `dash.run_phase`, so a silently-dead
+  // producer is labelled `detached` here exactly as it is in the picker.
+  runPhaseResolved: string | null;
   // `dash.state` lifted to the top level so transient indicators can gate on
   // the phase (e.g. only blink a sample row when `phase === "scoring"`).
   phase: string | null;
@@ -193,6 +209,7 @@ const INITIAL_STATE: CycleStreamState = {
   termKey: "status_offline",
   error: null,
   isLive: false,
+  runPhaseResolved: null,
   phase: null,
 };
 
@@ -362,7 +379,8 @@ function useCycleStreamSource(
             statusHint: bucket.statusHint,
             ageS,
             termKey: bucket.termKey,
-            isLive: bucket.status === "live" && isRunningState(prev.dash?.state),
+            isLive: bucket.status === "live" && prev.dash?.run_phase === "running",
+            runPhaseResolved: resolveRunPhase(prev.dash?.run_phase, bucket.status === "live"),
           };
         });
         return;
@@ -387,6 +405,7 @@ function useCycleStreamSource(
           ageS: null,
           error: null,
           isLive: false,
+          runPhaseResolved: null,
           phase: "warming_up",
         }));
         return;
@@ -437,7 +456,8 @@ function useCycleStreamSource(
         ageS,
         termKey: bucket.termKey,
         error: null,
-        isLive: bucket.status === "live" && isRunningState(dash.state),
+        isLive: bucket.status === "live" && dash.run_phase === "running",
+        runPhaseResolved: resolveRunPhase(dash.run_phase, bucket.status === "live"),
         phase: typeof dash.state === "string" ? dash.state : null,
       }));
     } catch (e) {
@@ -450,6 +470,8 @@ function useCycleStreamSource(
         termKey: "status_offline",
         error: (e as Error).message,
         isLive: false,
+        // Unreachable producer: a cycle that was running now reads detached.
+        runPhaseResolved: resolveRunPhase(prev.dash?.run_phase, false),
       }));
     }
   };

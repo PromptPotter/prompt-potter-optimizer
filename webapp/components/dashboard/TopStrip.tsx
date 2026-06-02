@@ -2,7 +2,7 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import { TERMS } from "@/lib/terms";
 import { type DashboardSnapshot } from "@/lib/poll";
-import { cycleStatusLabel } from "@/lib/cycle-status";
+import { runPhaseLabel } from "@/lib/run-phase";
 import { headlineStats } from "@/lib/derivations/headline-stats";
 import { fmtSecs } from "@/lib/format";
 
@@ -16,6 +16,9 @@ import { fmtSecs } from "@/lib/format";
 interface Props {
   dash: DashboardSnapshot | null;
   dashRound: number | null;
+  // Connection-aware run phase (poll.tsx) — "detached" when a running cycle's
+  // poll has gone quiet. Shown in place of raw dash.run_phase.
+  runPhase: string | null;
 }
 
 interface QpsState {
@@ -53,7 +56,7 @@ function estimateQps(state: QpsState, dash: DashboardSnapshot | null): number | 
   return state.qps;
 }
 
-export const TopStrip = memo(function TopStrip({ dash, dashRound }: Props) {
+export const TopStrip = memo(function TopStrip({ dash, dashRound, runPhase }: Props) {
   // Sparkline: running-best composite over rounds, read from the
   // dashboard's per-round summary block.
   const spark = useMemo(() => {
@@ -88,10 +91,7 @@ export const TopStrip = memo(function TopStrip({ dash, dashRound }: Props) {
 
   const { best } = headlineStats(dash);
   const lastQuery = dash?.last_query_elapsed_s ?? null;
-  const phase = cycleStatusLabel(
-    dash?.state as string | undefined,
-    (dash as { stop_reason?: string } | null)?.stop_reason,
-  );
+  const phase = runPhaseLabel(runPhase ?? dash?.run_phase, dash?.stop_reason);
   const round = dashRound != null ? `R${dashRound}` : "—";
   const qm = parseProgress((dash as { query?: string } | null)?.query);
   const qPct = qm && qm.tot ? Math.min(100, Math.round((qm.cur / qm.tot) * 100)) : 0;

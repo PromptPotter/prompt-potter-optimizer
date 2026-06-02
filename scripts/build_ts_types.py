@@ -182,6 +182,23 @@ def _emit_field(name: str, info: FieldInfo) -> str:
     return f"{comment_block}  {name}: {ts_type};"
 
 
+def _emit_stop_reason_labels() -> str:
+    """Emit ``STOP_REASON_INFO`` (domain/phases.py) as a TS label const — the
+    single label source, mirrored to the webapp without hand-maintained drift."""
+    from promptpotter.domain.phases import STOP_REASON_INFO
+
+    rows = "\n".join(
+        f"  {reason.value!r}: {info.label!r}," for reason, info in STOP_REASON_INFO.items()
+    )
+    return (
+        "// Operator-facing label per terminal reason (StopReason). Mirror of\n"
+        "// domain/phases.py::STOP_REASON_INFO — the single label source.\n"
+        "export const STOP_REASON_LABELS: Record<string, string> = {\n"
+        f"{rows}\n"
+        "};"
+    )
+
+
 def _emit_interface(model: type[BaseModel]) -> str:
     body_lines = [_emit_field(name, info) for name, info in model.model_fields.items()]
     if model.model_config.get("extra") == "allow":
@@ -202,6 +219,7 @@ _HEADER = """\
 
 def main() -> int:
     blocks = [_emit_interface(model) for model in EXPORTED_MODELS]
+    blocks.append(_emit_stop_reason_labels())
     content = _HEADER + "\n\n".join(blocks) + "\n"
     _OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     prior = _OUT_PATH.read_text(encoding="utf-8") if _OUT_PATH.is_file() else ""

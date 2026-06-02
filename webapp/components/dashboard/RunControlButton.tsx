@@ -8,15 +8,15 @@ import {
   IngestApiError,
 } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
-import { useRunState } from "@/lib/useRunState";
 import { Modal } from "@/components/shell/Modal";
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 
 interface Props {
   campaignId: string | null;
   cycleId: string | null;
-  // dash is read only for the fork point (the live round's PoBB leader);
-  // running/paused come from useRunState for the VIEWED cycle.
+  // `dash.run_phase` (declared by the runner, projected to dashboard.json) is
+  // the run-state for the VIEWED cycle — no separate /runstate poll. `dash` also
+  // supplies the fork point (the live round's PoBB leader).
   dash: DashboardSnapshot | null;
 }
 
@@ -56,14 +56,13 @@ const FORK_ICON = (
 
 // The dominant run control: a play/pause toggle plus a conditional fork,
 // placed beside the heat-map + sample-trajectory view toggles. Play/pause
-// action depends on phase — running→pause, paused→resume, stopped→start.
-// Pause-state is read from GET /api/v1/live (a paused loop emits no telemetry,
-// so dashboard freshness alone is blind), re-fetched after each action.
+// action depends on phase — running→pause, paused→resume, else→start. The run
+// declares `paused` even though it emits no telemetry while held, so the
+// dashboard poll reads it directly — no separate freshness-blind probe.
 export function RunControlButton({ campaignId, cycleId, dash }: Props) {
-  const runstate = useRunState(campaignId, cycleId);
-  const paused = runstate?.paused ?? false;
-  const running = runstate?.running ?? false;
-  const phase: RunPhase = paused ? "paused" : running ? "running" : "stopped";
+  const runPhase = dash?.run_phase;
+  const phase: RunPhase =
+    runPhase === "paused" ? "paused" : runPhase === "running" ? "running" : "stopped";
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [confirmFork, setConfirmFork] = useState(false);
@@ -84,7 +83,7 @@ export function RunControlButton({ campaignId, cycleId, dash }: Props) {
     setErr(null);
     try {
       await fn();
-      bumpRevalidation(); // re-tick useRunState + the workspace poll
+      bumpRevalidation(); // re-tick the workspace poll (cycle list run_phase)
     } catch (e) {
       setErr(IngestApiError.toOperatorMessage(e));
     } finally {

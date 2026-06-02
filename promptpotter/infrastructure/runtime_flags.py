@@ -1,15 +1,17 @@
-"""Readers for the per-cycle Control-local flags under ``.runtime/``.
+"""Readers for the per-cycle Control-local flags + the single run-phase derivation.
 
 ``pause.flag`` / ``stop.flag`` / ``spend_cap.json`` are the cooperative files
 the command dispatcher writes and the runner polls (ADR-0001 § Control-local).
-This is the single read surface for them, shared by the ``/runstate`` endpoint
-and the ``/api/v1/live`` façade so the web reflects true run-control state
-without each call site re-implementing the file reads.
+This is the single read surface for them.
 
-``running`` is derived from ``dashboard.json`` freshness rather than a
-dedicated heartbeat: the loop bumps that file on every sample / progress tick /
-round boundary, so a healthy run stays fresh while a paused / stopped / idle
-run goes stale — no new on-disk artifact needed.
+:func:`derive_run_phase` is the *one* place run-state is computed for the cycle
+list and any non-live reader — there is no second "is it running?" derivation.
+It composes lifecycle (terminal, from ``index.json::finished_at``) with the
+control flags and a freshness fallback. Freshness (``is_running``) is no longer
+the *definition* of running — the runner declares ``running`` / ``paused`` /
+``stopping`` onto the ledger and the dashboard projection writes them — it
+survives only as the signal that splits ``running`` from ``detached`` (an active
+cycle whose producer vanished without a terminal record).
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+
+from promptpotter.domain.phases import RunPhase
 
 
 def is_paused(runtime_dir: Path) -> bool:
@@ -41,25 +45,57 @@ def read_spend_cap(runtime_dir: Path) -> float | None:
     return float(value) if isinstance(value, int | float) else None
 
 
-# dashboard.json untouched for longer than this ⇒ the run is treated as
-# not-running. The loop bumps the file on every sample / progress tick / round
-# boundary, so a healthy run stays well inside the window even across long
-# backend calls. Shared by the /runstate endpoint and the cycle-list `running`
-# flag so both judge liveness against the same threshold.
+# dashboard.json untouched for longer than this ⇒ an active cycle's producer is
+# treated as vanished (detached). The loop bumps the file on every sample /
+# progress tick / round boundary, so a healthy run stays well inside the window
+# even across long backend calls. This is the sole remaining use of freshness —
+# it splits running from detached, it does not define "running".
 RUN_FRESH_S = 30.0
 
 
-def is_running(dashboard_path: Path, *, fresh_s: float) -> bool:
-    """True iff ``dashboard.json`` was written within ``fresh_s`` seconds.
-
-    The loop writes it on every sample / progress tick / round boundary, so a
-    live run stays inside the window even across long backend calls; a halted
-    run's file goes stale.
-    """
+def _producer_fresh(dashboard_path: Path, *, fresh_s: float) -> bool:
+    """True iff ``dashboard.json`` was written within ``fresh_s`` seconds."""
     try:
         return (time.time() - dashboard_path.stat().st_mtime) < fresh_s
     except OSError:
         return False
 
 
-__all__ = ["is_paused", "is_running", "is_stop_requested", "read_spend_cap"]
+def derive_run_phase(
+    cycle_dir: Path, *, is_terminal: bool, fresh_s: float = RUN_FRESH_S
+) -> RunPhase:
+    """The single run-phase derivation for the cycle list + non-live readers.
+
+    Composes lifecycle (``is_terminal`` — from ``index.json::finished_at``) with
+    the control flags + a freshness fallback, in priority order:
+
+    1. terminal — the cycle finished (a terminal record / ``finished_at`` exists).
+    2. stopping — ``stop.flag`` present (terminal-intent wins over a pause).
+    3. paused   — ``pause.flag`` present (reversible).
+    4. running  — producer fresh.
+    5. detached — active but the producer stopped writing (died without a
+       terminal record). The only branch that consults freshness.
+
+    The live single-cycle view does *not* call this — it reads
+    ``dashboard.json::run_phase`` (declared by the runner) and overlays its own
+    connection-freshness for ``detached``.
+    """
+    if is_terminal:
+        return RunPhase.TERMINAL
+    runtime = cycle_dir / ".runtime"
+    if is_stop_requested(runtime):
+        return RunPhase.STOPPING
+    if is_paused(runtime):
+        return RunPhase.PAUSED
+    if _producer_fresh(cycle_dir / "dashboard.json", fresh_s=fresh_s):
+        return RunPhase.RUNNING
+    return RunPhase.DETACHED
+
+
+__all__ = [
+    "RUN_FRESH_S",
+    "derive_run_phase",
+    "is_paused",
+    "is_stop_requested",
+    "read_spend_cap",
+]

@@ -65,6 +65,37 @@ The three below are architectural collapses, not sittings. Each is multi-file, h
 
 ### Standing entries
 
+- **`RunPhase.STOPPING` has a thin window for non-paused stops** —
+  the runner declares `stopping` (`application/run_phase_control.py`)
+  at its own cooperative checkpoints: the pause-barrier stop-check
+  (`runner/loop.py`) and the two scoring stop-checks
+  (`scoring/query_loop.py`, `scoring/sample_measurement.py`). For a
+  *running* (non-paused) stop, the operator's `stop.flag` is only
+  observed at the next scoring checkpoint, so a stop landing near a
+  round boundary can jump `running → terminal(interrupted)` without a
+  visible `stopping` frame. The honest single source for "stop
+  requested, not yet exited" is the moment the flag is written — the
+  `stop-cycle` command applier (`presentation/api/middleware/command_dispatcher.py::_apply_stop_cycle`),
+  which already has ledger access (it writes the `CommandRecord`).
+  **Action:** have `_apply_stop_cycle` append a `control`
+  `PhaseRecord(event="stopping")` to the target cycle ledger alongside
+  writing the flag, so `LiveDashboardView` projects `stopping` the
+  instant the operator clicks — independent of where the runner is in
+  the round. Then the three in-runner `declare_run_phase(…, STOPPING)`
+  calls become redundant and can be dropped (the flag-write is the
+  single declaration point).
+  **Load-bearing check:** confirm the dispatcher runs in-process with
+  the runner's `LiveDashboardView` subscriber (cycle-targeted commands
+  are applied by `RunnerCommandSubscriber` in the runner process) so
+  the appended record actually fires the projection; if the applier
+  runs in a context without the live subscriber, the declaration won't
+  surface until the runner next drains. Also verify the CLI Ctrl+C
+  path (no command) still goes straight to `terminal(interrupted)` —
+  it has no `stopping` frame by design.
+  **Pattern:** control-state declared at the actor's checkpoints
+  instead of at the point of intent; >2 days because the cross-process
+  in-vs-out-of-runner verification is the real work.
+
 - **TermNorm backend reports a provider slug, not a model** — backend
   `dashboard.json::spend.backend.model = "openrouter"` is the provider,
   not the actual upstream model (e.g. `mistralai/mistral-7b-instruct`).

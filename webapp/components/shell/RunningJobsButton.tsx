@@ -32,7 +32,7 @@ const POTTER_GLYPH = (
 
 export function RunningJobsButton({ onPicked }: Props) {
   const { cycles, campaigns, selectCycle } = useWorkspace();
-  const running = cycles.filter((c) => c.running);
+  const running = cycles.filter((c) => c.run_phase === "running");
   const n = running.length;
 
   // Missing button === idle: the absence IS the signal.

@@ -171,6 +171,16 @@ class LiveDashboardState(BaseModel):
     state: str = "init"
     state_since: str
 
+    # The single run-state vocabulary (RunPhase). Declared by the runner via
+    # control PhaseRecords and projected here, so a paused run reads as
+    # "paused" even after dashboard.json goes stale — freshness is no longer
+    # load-bearing for control state. ``state`` (above) stays the fine-grained
+    # activity (origin / scoring / l1_generate / …); ``run_phase`` is the
+    # coarse lifecycle+control axis every surface reads. Never "detached" here
+    # (a dead producer can't write) — that value is emitted only by the
+    # server-side ``derive_run_phase`` reader.
+    run_phase: str = "running"
+
     stop_reason: str | None = None
 
     # Current round / candidate / sample-progress markers.

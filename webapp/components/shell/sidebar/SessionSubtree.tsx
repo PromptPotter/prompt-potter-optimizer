@@ -38,8 +38,7 @@ export function SessionSubtree({
   const hasBranches = session.branches.length > 0;
   const selected = cid === campaignId && root.cycle_id === cycleId;
   const active = cid === activeCampaignId && root.cycle_id === activeCycleId;
-  const status = root.status;
-  const live = status === "running" || status === "optimizing";
+  const live = root.run_phase === "running";
 
   // Branch-kind chips (only on the row that owns the fork-tree twist).
   const counts = { fork: 0, sweep: 0, diag: 0 };

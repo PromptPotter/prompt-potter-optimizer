@@ -69,7 +69,7 @@ function UnitRow({
   active: boolean;
   onSelect: () => void;
 }) {
-  const live = unit.status === "running" || unit.status === "optimizing";
+  const live = unit.run_phase === "running";
   const kindLabel =
     unit.unit_kind === "session" ? null : UNIT_KIND_LABEL[unit.unit_kind];
   return (

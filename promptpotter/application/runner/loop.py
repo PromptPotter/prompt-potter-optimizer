@@ -23,6 +23,7 @@ from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.dispatch.hub import InjectionRenderError
 from promptpotter.application.optimization.l1 import execute_round
 from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.round import (
     close_round,
     escalate_or_stop,
@@ -31,6 +32,7 @@ from promptpotter.application.runner.round import (
 from promptpotter.application.runner.sweep import run_sweep_generation_only
 from promptpotter.domain.phases import (
     CampaignPhase,
+    RunPhase,
     StopLoop,
     StopReason,
     emit_phase,
@@ -90,11 +92,17 @@ async def run_round_loop(
         while clean_rounds < max_rounds and round_num < HARD_CAP:
             # Pause cooperation: block at the round boundary while the operator
             # has the pause flag set. Stop always wins — operator-requested
-            # exit during pause shouldn't hang in this loop.
-            while session.pause_check is not None and session.pause_check():
-                if session.stop_check is not None and session.stop_check():
-                    return StopReason.INTERRUPTED, None
-                await asyncio.sleep(2.0)
+            # exit during pause shouldn't hang in this loop. Declare the control
+            # phase so dashboard.json reads "paused" even after it goes stale
+            # (the run-state root fix); re-declare "running" on resume.
+            if session.pause_check is not None and session.pause_check():
+                declare_run_phase(session, RunPhase.PAUSED)
+                while session.pause_check is not None and session.pause_check():
+                    if session.stop_check is not None and session.stop_check():
+                        declare_run_phase(session, RunPhase.STOPPING)
+                        return StopReason.INTERRUPTED, None
+                    await asyncio.sleep(2.0)
+                declare_run_phase(session, RunPhase.RUNNING)
 
             is_probe = cycle.probe_next_round
             if is_probe:
