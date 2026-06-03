@@ -16,6 +16,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import build_stores
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
+from promptpotter.shared.errors import ErrorCategory
 from promptpotter.shared.identity import default_identity
 
 
@@ -218,30 +219,6 @@ def test_axis_index_no_persistence(indexed_stores: Any, tmp_path: Path) -> None:
     assert not (library / "samples.json").exists()
 
 
-def test_config_index_run_ids_match_archive_full_scan(indexed_stores: Any) -> None:
-    """ConfigIndex.run_ids_matching parity with measurements_for_config full scan."""
-    idx = AxisIndex()
-    idx.refresh(indexed_stores, "any-backend", dataset_name=None)
-
-    for predicate in (
-        {"llm_only": {"model": "X"}},
-        {"llm_only": {"temperature": 0.0}},
-        {"llm_only": {"model": "Z"}},
-        {},
-    ):
-        indexed_run_ids = idx.config_index.run_ids_matching(predicate)
-        full_scan = indexed_stores.archive.measurements_for_config("any-backend", predicate)
-        full_scan_run_ids = {m.run_id for m in full_scan}
-        assert indexed_run_ids == full_scan_run_ids, (
-            f"ConfigIndex/archive parity broken for predicate {predicate!r}"
-        )
-
-        indexed_load = indexed_stores.archive.measurements_for_config(
-            "any-backend", predicate, run_ids=indexed_run_ids
-        )
-        assert {m.run_id for m in indexed_load} == full_scan_run_ids
-
-
 def _seed_cross_cycle(
     archive: MeasurementArchive,
     *,
@@ -277,7 +254,8 @@ def _cross_cycle_item(
         "predicted": "ERROR" if error else "pred",
         "hit": hit,
         "fitness": fitness,
-        "error": error,
+        "error": "stub backend error" if error else None,
+        "error_category": ErrorCategory.PIPELINE if error else None,
         "pipeline_data": {"terminated_at": "llm_only"},
     }
 
@@ -339,38 +317,6 @@ def test_dead_queries_respects_min_observations() -> None:
 
     miss_only = axes.sample_index.dead(min_observations=5, include_always_hit=False)
     assert {r.query for r in miss_only} == {"proven_miss"}
-
-
-def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
-    store = build_stores(
-        default_identity(), projects_root=tmp_path / "projects", datasets_root=tmp_path / "datasets"
-    )
-    items = [
-        {"query": "a", "ground_truth": "A"},
-        {"query": "b", "ground_truth": "B"},
-        {"query": "c", "ground_truth": "C"},
-    ]
-    store.backends.save_dataset("train", items)
-
-    moved = store.backends.exclude_dataset_items(
-        "train",
-        [{"query": "b", "reason": "zero_signal", "hit_rate": 0.0, "observations": 7}],
-    )
-    assert moved == 1
-
-    data = store.backends.load_dataset("train")
-    assert data is not None
-    assert [d["query"] for d in data["items"]] == ["a", "c"]
-    assert len(data["excluded"]) == 1
-    assert data["excluded"][0]["item"]["query"] == "b"
-    assert data["excluded"][0]["reason"] == "zero_signal"
-
-    restored = store.backends.restore_dataset_items("train")
-    assert restored == 1
-    data = store.backends.load_dataset("train")
-    assert data is not None
-    assert {d["query"] for d in data["items"]} == {"a", "b", "c"}
-    assert data["excluded"] == []
 
 
 def test_update_theta_posterior_hits_raise_mean_misses_lower_it() -> None:

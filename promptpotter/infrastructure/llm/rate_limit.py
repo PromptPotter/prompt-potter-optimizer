@@ -113,6 +113,35 @@ def diagnose_rate_limit_scope(headers: Any, body: str | None) -> str:
     return "429"
 
 
+@dataclass(frozen=True)
+class RateLimitWait:
+    """A decided 429 retry pause. ``seconds`` already carries the +1s settle cushion."""
+
+    seconds: float
+    scope: str
+
+
+def decide_429_wait(
+    headers: object | None,
+    body: str | None,
+    attempt: int,
+    *,
+    max_attempts: int = MAX_429_ATTEMPTS,
+) -> RateLimitWait | None:
+    """Decide the pause for one 429 retry, or ``None`` to give up.
+
+    ``None`` ⇒ no usable ``Retry-After``, a non-positive wait, or attempts
+    exhausted — the caller surfaces the original failure unchanged. Otherwise
+    returns the cushioned wait plus the diagnosed window scope. The single
+    429 decision shared by the backend wire (`BackendClient.run_query`) and
+    the optimizer LLM call (`dispatch.llm_call`).
+    """
+    wait = parse_retry_after(headers)
+    if wait is None or wait <= 0 or attempt >= max_attempts - 1:
+        return None
+    return RateLimitWait(seconds=wait + 1.0, scope=diagnose_rate_limit_scope(headers, body))
+
+
 async def wait_with_countdown(total_sec: float, label: str) -> None:
     """Sleep `total_sec` while emitting a yellow single-line countdown to stderr."""
     end = time.monotonic() + total_sec
@@ -333,10 +362,12 @@ __all__ = [
     "OPENAI_RPM_HEADER",
     "OPENAI_TPM_HEADER",
     "RateLimitReservation",
+    "RateLimitWait",
     "RateLimiter",
     "acquire_reservation",
     "apply_discovered_caps",
     "build_rate_limiter",
+    "decide_429_wait",
     "diagnose_rate_limit_scope",
     "estimate_tokens",
     "parse_retry_after",

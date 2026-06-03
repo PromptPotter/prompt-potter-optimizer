@@ -238,10 +238,6 @@ class EventStreamView:
         for sub in subs:
             sub.close()
 
-    def subscriber_count(self) -> int:
-        with self._lock:
-            return len(self._subscribers)
-
     # ---- Snapshot reads ----
 
     def snapshot_payload(self) -> dict[str, Any]:

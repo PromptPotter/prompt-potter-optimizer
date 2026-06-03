@@ -61,8 +61,6 @@ Decision deferred until after the architectural skeleton is reviewed.
   No I/O, no logging beyond debug-level drops.
 - `extract_experiment` returns `(queries, index_terms)` — the index_terms
   list may be empty for connectors with no retrieval index.
-- `resolve_ground_truth(experiment_data, query)` returns `str | None` —
-  used by trace-ingestion flows; safe to return `None`.
 - **Revision pinning is opt-in.** A connector can set
   `Connector.expected_revision` (the backend SHA/version this rev was
   developed against) and a `Connector.version_check(http, base_url) -> str | None`

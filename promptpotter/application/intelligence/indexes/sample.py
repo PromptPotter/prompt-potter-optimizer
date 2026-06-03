@@ -5,14 +5,10 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from collections.abc import KeysView
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.domain.sample import Sample
 from promptpotter.shared.errors import is_error_result
-
-if TYPE_CHECKING:
-    from promptpotter.domain.sample import Measurement
-    from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 
 
 @dataclass
@@ -71,22 +67,6 @@ class SampleIndex:
     def sample_ids(self) -> KeysView[int]:
         """Live view of registered sample ids — iterates without copying."""
         return self._samples.keys()
-
-    def measurements(
-        self,
-        sample_id: int,
-        archive: MeasurementArchive,
-        backend_id: str,
-    ) -> list[Measurement]:
-        """All cross-campaign measurements for ``sample_id``.
-
-        Forwards to ``MeasurementArchive.measurements_for_sample``,
-        passing the cached ``Sample.run_ids`` so the archive skips the
-        index scan when the sample is registered here.
-        """
-        sample = self._samples.get(sample_id)
-        run_ids = sample.run_ids if sample else None
-        return archive.measurements_for_sample(backend_id, sample_id, run_ids=run_ids)
 
     def ingest_run(self, run_detail: dict[str, Any]) -> None:
         """Replay a measurement-archive entry into the index."""

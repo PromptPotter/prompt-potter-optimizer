@@ -164,7 +164,7 @@ def _classify_abort(
     state: _LoopState,
 ) -> str:
     """Abort reason on error or "" to continue. Mutates state.consecutive_errors."""
-    cat = error_category(result.get("error"))
+    cat = error_category(result)
     if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
         return f"skipped_after_{cat or 'pipeline'}_error"
     state.consecutive_errors += 1
@@ -367,7 +367,10 @@ async def run_query_loop(
                     len(remaining),
                 )
                 state.results.extend(
-                    _error_result(by_id[rsid], outcome.abort_reason) for rsid in remaining
+                    _error_result(
+                        by_id[rsid], outcome.abort_reason, category=ErrorCategory.PIPELINE
+                    )
+                    for rsid in remaining
                 )
                 return QueryLoopResult(
                     state.results, completed=False, stop_reason=outcome.abort_reason

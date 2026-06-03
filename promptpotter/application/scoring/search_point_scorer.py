@@ -75,7 +75,7 @@ def _build_scoring_error_signal(
     ]
     warning_types: dict[str, int] = {}
     for r in real_errors:
-        key = str(error_category(r.get("error")) or "unknown")
+        key = str(error_category(r) or "unknown")
         warning_types[key] = warning_types.get(key, 0) + 1
     last_error = ""
     for r in reversed(real_errors):

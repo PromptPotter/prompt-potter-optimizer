@@ -194,7 +194,7 @@ class LiveDisplay(DerivedView):
         if ev == "sample_started":
             return
         if ev == "sample_scored":
-            self.on_sample_scored(ci, ct, payload.get("result") or {}, qi, qt)
+            self.on_sample_scored(ci, payload.get("result") or {}, qi, qt)
         elif ev == "candidate_started":
             self.on_candidate_started(
                 ci, ct, payload.get("changes_description") or "", payload.get("pp_override")
@@ -288,7 +288,7 @@ class LiveDisplay(DerivedView):
                 self._phase_ctx["composite_fitness_formula"] = new_formula
 
     def on_sample_scored(
-        self, cand_idx: int, n_cands: int, result: dict[str, Any], sample_idx: int, n_samples: int
+        self, cand_idx: int, result: dict[str, Any], sample_idx: int, n_samples: int
     ) -> None:
         # cand_idx < 0 = paired-PoBB backfill sentinel; distinct prefix, no counter bump.
         if cand_idx < 0:

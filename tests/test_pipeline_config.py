@@ -3,7 +3,7 @@ CampaignConfig validation.
 
 Three named invariants:
   1. ``PipelineSchema`` derivation methods (``node_param_keys``,
-     ``obs_extraction_map``, ``exclude``, ``node_configs``, ``sp_hash``)
+     ``exclude``, ``node_configs``, ``sp_hash``)
      produce stable shapes; ``parse_pipeline_response`` builds a
      PipelineSchema with ordered, typed nodes from a self-describing
      backend response.
@@ -80,12 +80,6 @@ def test_derivation_methods():
         "rank": {"temperature"},
     }
     assert "cache" not in schema.node_param_keys()
-
-    # obs_extraction_map
-    obs_map = schema.obs_extraction_map()
-    assert set(obs_map.keys()) == {"search", "rank"}
-    assert obs_map["search"][0].pipeline_key == "results"
-    assert obs_map["rank"][0].is_llm is True
 
 
 def test_parse_pipeline_response():

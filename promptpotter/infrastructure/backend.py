@@ -13,8 +13,7 @@ import httpx
 
 from promptpotter.infrastructure.llm import (
     MAX_429_ATTEMPTS,
-    diagnose_rate_limit_scope,
-    parse_retry_after,
+    decide_429_wait,
     wait_with_countdown,
 )
 
@@ -240,25 +239,24 @@ class BackendClient:
 
             code = resp.status_code
             if code == 429:
-                wait_h = parse_retry_after(resp.headers)
-                if wait_h is None or wait_h <= 0 or attempt == MAX_429_ATTEMPTS - 1:
+                decision = decide_429_wait(resp.headers, resp.text, attempt)
+                if decision is None:
                     break
-                kind = diagnose_rate_limit_scope(resp.headers, resp.text)
                 logger.warning(
                     "Backend 429 [%s] (attempt %d/%d); waiting %.1fs",
-                    kind,
+                    decision.scope,
                     attempt + 1,
                     MAX_429_ATTEMPTS,
-                    wait_h,
+                    decision.seconds,
                 )
                 _warn(
                     "rate_limit",
                     attempt=attempt,
-                    wait_s=wait_h,
+                    wait_s=decision.seconds,
                     status_code=429,
-                    scope=kind,
+                    scope=decision.scope,
                 )
-                await wait_with_countdown(wait_h + 1.0, f"backend {kind}")
+                await wait_with_countdown(decision.seconds, f"backend {decision.scope}")
                 continue
 
             if 500 <= code < 600 and attempt < MAX_429_ATTEMPTS - 1:

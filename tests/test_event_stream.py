@@ -48,7 +48,7 @@ def test_event_stream_view_contract() -> None:
                 f"snapshot offset must mirror ledger.next_offset at subscribe, "
                 f"got {sub_a.start_offset}"
             )
-            assert view.subscriber_count() == 1
+            assert len(view._subscribers) == 1
 
             # --- Snapshot payload reflects dashboard.json + snapshot_at_offset ---
             snapshot_payload = view.snapshot_payload()
@@ -58,7 +58,7 @@ def test_event_stream_view_contract() -> None:
             # --- Multi-subscriber fan-out ---
             sub_b = view.subscribe()
             assert sub_b.start_offset == 42
-            assert view.subscriber_count() == 2
+            assert len(view._subscribers) == 2
 
             # --- Live tail: feed two records, both subscribers get both ---
             sub_a.attach_loop(asyncio.get_running_loop())
@@ -108,7 +108,7 @@ def test_event_stream_view_contract() -> None:
             # --- Drain closes every subscriber + clears registry-side fan-out ---
             view.drain()
             assert sub_a.closed and sub_b.closed
-            assert view.subscriber_count() == 0
+            assert len(view._subscribers) == 0
 
             # Post-drain publishes are no-ops (no exception)
             view.on_record(

@@ -138,8 +138,8 @@ archive/                            MeasurementArchive
 
 **Read paths** (both return `list[Measurement]`):
 
-- `measurements_for_sample(backend_id, sample_id)` — *"history of training example X"*. Caller: `SampleIndex.measurements()` (`indexes.py:205`).
-- `measurements_for_config(backend_id, predicate)` — *"runs whose config matches this subset"*. Front-routed through `ConfigIndex.run_ids_matching()` so the scan stays O(unique_configs).
+- `measurements_for_sample(backend_id, sample_id)` — *"history of training example X"*. Caller: `archive_views.measurements_for_sample()` (sweep toolkit).
+- `measurements_for_config(backend_id, predicate)` — *"runs whose config matches this subset"*. Optional `run_ids` hint keeps the scan O(K + matches).
 
 **Schema** (`domain/sample.py:77`, frozen dataclass): `run_id, content_hash, sample_id, query, ground_truth, predicted, hit, score, run_scores, node_configs, pipeline_data, created_at`.
 

@@ -192,9 +192,13 @@ def _compute_step_tokens(
 def _error_result(
     sample: Sample,
     error_msg: str,
+    *,
+    category: ErrorCategory,
 ) -> QueryMeasurement:
     """Build a standard error result dict.
 
+    ``category`` is the typed error channel — it owns "this sample errored"
+    (``is_error_result`` reads it); ``error`` is the plain human message.
     Error rows intentionally carry no ``hit``/``score`` — those fields are
     owned exclusively by ``rescore_results``, which skips error rows.
     """
@@ -204,6 +208,7 @@ def _error_result(
         ground_truth=sample.ground_truth,
         predicted="ERROR",
         error=error_msg or "unknown error",
+        error_category=category,
         pipeline_data=None,
     )
 
@@ -246,21 +251,21 @@ def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
     return body_text[:300]
 
 
-def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
-    """Classify an HTTP error into a tagged message."""
+def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str]:
+    """Classify an HTTP error into ``(category, plain message)``."""
     code = exc.response.status_code
     upstream = _extract_upstream_detail(exc)
     if code == 429:
         retry_after = exc.response.headers.get("Retry-After", "?")
         return (
-            f"[{ErrorCategory.CLIENT}] HTTP 429 rate-limited "
-            f"(Retry-After={retry_after}s, attempts exhausted): {upstream!r}"
+            ErrorCategory.CLIENT,
+            f"HTTP 429 rate-limited (Retry-After={retry_after}s, attempts exhausted): {upstream!r}",
         )
     if 400 <= code < 500:
         tail = f" :: {upstream}" if upstream else ""
-        return f"[{ErrorCategory.CLIENT}] HTTP {code} — caller config rejected by backend{tail}"
+        return ErrorCategory.CLIENT, f"HTTP {code} — caller config rejected by backend{tail}"
     tail = f" :: {upstream}" if upstream else ""
-    return f"[{ErrorCategory.SERVER}] HTTP {code} — backend transient error{tail}"
+    return ErrorCategory.SERVER, f"HTTP {code} — backend transient error{tail}"
 
 
 async def measure_sample(
@@ -312,8 +317,8 @@ async def measure_sample(
         if predicted == "ERROR":
             return _error_result(
                 sample,
-                f"[{ErrorCategory.PIPELINE}] Backend returned ERROR as candidate"
-                " — pipeline internal failure for this query.",
+                "Backend returned ERROR as candidate — pipeline internal failure for this query.",
+                category=ErrorCategory.PIPELINE,
             )
         gt_rank = next(
             (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth),
@@ -375,6 +380,7 @@ async def measure_sample(
             "predicted": predicted,
             "ground_truth": ground_truth,
             "error": None,
+            "error_category": None,
             "n_candidates": len(ranked),
             "ground_truth_rank": gt_rank,
             "pipeline_data": pd,
@@ -396,18 +402,18 @@ async def measure_sample(
         )
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
-        error_msg = _classify_http_error(exc)
+        category, error_msg = _classify_http_error(exc)
         logger.warning("measure_sample for %s: %s", query[:60], error_msg)
-        return _error_result(sample, error_msg)
+        return _error_result(sample, error_msg, category=category)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
-        error_msg = f"[{ErrorCategory.CONNECTION}] {exc} — Backend may be down or unreachable."
+        error_msg = f"{exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
-        return _error_result(sample, error_msg)
+        return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION)
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception as exc:
         logger.warning("measure_sample failed for %s: %s", query[:60], exc)
-        return _error_result(sample, str(exc))
+        return _error_result(sample, str(exc), category=ErrorCategory.UNKNOWN)
 
 
 # ---------------------------------------------------------------------------

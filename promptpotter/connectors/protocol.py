@@ -9,8 +9,6 @@ Hooks:
 - ``wire_adapter`` — outbound HTTP body shape for ``BackendClient.run_query``.
 - ``session_factory`` — fresh ``SessionProtocol`` instance per ``BackendClient``.
 - ``extract_experiment`` — backend experiment-data → ``(queries, index_terms)``.
-- ``resolve_ground_truth`` — single-query ground-truth lookup over experiment
-  data (currently unused by core paths but reserved for trace-ingestion flows).
 - ``preflight`` — async reachability probe invoked before any command that
   needs the backend live (R2). Raises :class:`BackendUnreachableError`
   when the connector reports the backend is down; in-process connectors
@@ -79,9 +77,6 @@ class Connector:
 
     extract_experiment: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], list[str]]]
     """Backend experiment data → ``(queries, index_terms)``."""
-
-    resolve_ground_truth: Callable[[dict[str, Any], str], str | None]
-    """Resolve ground truth for a single query string from experiment data."""
 
     expected_revision: str | None = None
     """Backend revision (git SHA, semver, …) this PromptPotter rev expects.

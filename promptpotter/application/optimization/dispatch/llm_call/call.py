@@ -39,10 +39,9 @@ from promptpotter.infrastructure.llm import (
     MAX_429_ATTEMPTS,
     LLMClientBase,
     LLMResponse,
-    diagnose_rate_limit_scope,
+    decide_429_wait,
     emit_token_usage,
     extract_parsed_json,
-    parse_retry_after,
     wait_with_countdown,
 )
 from promptpotter.infrastructure.store.stores import OptimizerCallCache, hash_call
@@ -317,20 +316,19 @@ async def llm_call(
                     body = getattr(resp, "text", None) if resp is not None else None
                     if body is None:
                         body = str(exc)
-                    wait = parse_retry_after(headers)
-                    if wait is None or wait <= 0 or attempt == MAX_429_ATTEMPTS - 1:
+                    decision = decide_429_wait(headers, body, attempt)
+                    if decision is None:
                         raise
-                    kind = diagnose_rate_limit_scope(headers, body)
                     label = node or "llm_call"
                     logger.warning(
                         "Rate limit on %s [%s] (attempt %d/%d); waiting %.1fs",
                         label,
-                        kind,
+                        decision.scope,
                         attempt + 1,
                         MAX_429_ATTEMPTS,
-                        wait,
+                        decision.seconds,
                     )
-                    await wait_with_countdown(wait + 1.0, f"{label} {kind}")
+                    await wait_with_countdown(decision.seconds, f"{label} {decision.scope}")
         finally:
             # Cancel the heartbeat whether the call succeeded or raised —
             # an in-flight task would otherwise survive the function exit

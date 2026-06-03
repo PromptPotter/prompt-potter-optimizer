@@ -14,7 +14,6 @@ only touches the tenant tree.
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -162,12 +161,6 @@ class TenantDatasetStore:
     def load_draft_cache(self, draft_id: str) -> dict[str, Any] | None:
         """Read a draft's parsed bank, or ``None`` if the draft is gone."""
         return read_json_optional(self.draft_dir(draft_id) / "cache.json")
-
-    def discard_draft(self, draft_id: str) -> None:
-        """Best-effort removal of a draft's staging dir. Idempotent."""
-        path = self.draft_dir(draft_id)
-        if path.is_dir():
-            shutil.rmtree(path, ignore_errors=True)
 
     # -- Commit ---------------------------------------------------------------
 

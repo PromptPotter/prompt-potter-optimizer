@@ -161,7 +161,7 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
             # (different model, less safety-triggering instruction).
             infra.add(adv)
 
-    if is_error_result(result) and error_category(result.get("error")) == ErrorCategory.CLIENT:
+    if is_error_result(result) and error_category(result) == ErrorCategory.CLIENT:
         fatals.add("backend:client_error")
 
     return ResultClassification(

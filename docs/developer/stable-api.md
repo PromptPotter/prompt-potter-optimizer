@@ -15,14 +15,13 @@ class Connector:
     wire_adapter: Callable[[str, dict | None], dict]                # outbound HTTP body shaper
     session_factory: Callable[[], SessionProtocol]                  # fresh session per BackendClient
     extract_experiment: Callable[[dict], tuple[list[dict], list[str]]]  # → (queries, index_terms)
-    resolve_ground_truth: Callable[[dict, str], str | None]
 ```
 
 `SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(terms)` (backend handshake; noop ok) · `async recover()` (re-establish after transport error).
 
 Each connector self-registers at import via `promptpotter/connectors/__init__.py::CONNECTORS`. Adding a connector is one new file under `promptpotter/connectors/` — no edits to `application/config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
 
-**Contracts beyond `protocol.py`:** wire adapters MUST be pure `(query, pipeline_params) → dict` — no I/O, no logging above debug · `extract_experiment` MUST return `(queries, index_terms)` (the latter may be empty) · `resolve_ground_truth` MUST return `str | None`.
+**Contracts beyond `protocol.py`:** wire adapters MUST be pure `(query, pipeline_params) → dict` — no I/O, no logging above debug · `extract_experiment` MUST return `(queries, index_terms)` (the latter may be empty).
 
 ---
 

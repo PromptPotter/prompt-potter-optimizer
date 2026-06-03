@@ -293,8 +293,7 @@ class MeasurementArchive:
         include_unknown: bool = False,
     ) -> list[Measurement]:
         """Every measurement under configs matching *predicate*, across samples. Empty predicate → [].
-        *run_ids* hint (from `ConfigIndex.run_ids_matching`) turns O(N) into O(K + matches); must
-        be dataset-scoped at source.
+        *run_ids* hint turns O(N) into O(K + matches); must be dataset-scoped at source.
         """
         if not predicate:
             return []

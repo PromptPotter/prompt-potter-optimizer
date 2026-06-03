@@ -99,11 +99,11 @@ class ResumeDivergenceError(RuntimeError):
 def is_error_result(result: Mapping[str, Any]) -> bool:
     """Return True if *result* represents a failed measurement.
 
-    Catches all error forms:
-    - Truthy ``error`` field (tagged error message from exception handling)
-    - ``predicted == "ERROR"`` (backend returned ERROR as candidate name)
+    Detection rides the typed ``error_category`` channel — the single owner of
+    "this sample errored". ``predicted == "ERROR"`` is a display token, not a
+    detection mechanism, and ``error`` is a plain human message.
     """
-    return bool(result.get("error")) or result.get("predicted") == "ERROR"
+    return result.get("error_category") is not None
 
 
 def has_pipeline_warnings(result: Mapping[str, Any]) -> bool:
@@ -136,17 +136,21 @@ def graceful(msg: str, *, level: int = logging.WARNING) -> Iterator[None]:
         logger.log(level, msg, exc_info=True)
 
 
-def error_category(error: str | None) -> ErrorCategory | None:
-    """Extract error category from a ``[TAG] ...`` prefixed error string."""
-    if error and error.startswith("["):
-        bracket_end = error.find("]")
-        if bracket_end > 0:
-            tag = error[1:bracket_end]
-            try:
-                return ErrorCategory(tag)
-            except ValueError:
-                return None
-    return None
+def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
+    """Read the typed error category off a measurement (``None`` when clean).
+
+    Tolerates the on-disk round-trip form: a persisted row read back from JSON
+    carries the bare ``StrEnum`` value (a plain ``str``), coerced back here.
+    """
+    cat = result.get("error_category")
+    if cat is None:
+        return None
+    if isinstance(cat, ErrorCategory):
+        return cat
+    try:
+        return ErrorCategory(cat)
+    except ValueError:
+        return None
 
 
 __all__ = [

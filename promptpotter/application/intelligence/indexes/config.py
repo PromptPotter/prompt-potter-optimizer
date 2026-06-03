@@ -56,40 +56,5 @@ class ConfigIndex:
         self._configs_to_node_configs.setdefault(key, node_configs)
         self._seen_runs.add(run_id)
 
-    def run_ids_matching(self, predicate: dict[str, dict[str, Any]]) -> set[str]:
-        """Run ids whose node_configs satisfy *predicate* (subset semantics).
-
-        ``predicate`` shape matches
-        :meth:`MeasurementArchive.measurements_for_config`: each
-        ``{node_name: required_subdict}`` entry must appear in the
-        stored chain with at least the required keys/values. Empty
-        predicate returns the empty set (consistent with the archive).
-        """
-        if not predicate:
-            return set()
-        out: set[str] = set()
-        for key, node_configs in self._configs_to_node_configs.items():
-            if _matches_subset_local(node_configs, predicate):
-                out |= self._configs_to_runs[key]
-        return out
-
-
-def _matches_subset_local(
-    stored: list[tuple[str, dict[str, Any]]],
-    predicate: dict[str, dict[str, Any]],
-) -> bool:
-    """Subset match — every node in *predicate* must appear in *stored*
-    with at least the required key/value pairs. Mirrors
-    :func:`measurement_archive._matches_subset` but operates on the
-    in-memory tuple form rather than archive index entries."""
-    by_name: dict[str, dict[str, Any]] = {n: c for n, c in stored if isinstance(c, dict)}
-    for node_name, subdict in predicate.items():
-        cfg = by_name.get(node_name)
-        if cfg is None:
-            return False
-        if subdict and not (subdict.items() <= cfg.items()):
-            return False
-    return True
-
 
 __all__ = ["ConfigIndex"]

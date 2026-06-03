@@ -155,20 +155,11 @@ def _extract_experiment(
     return queries, []
 
 
-def _resolve_ground_truth(experiment_data: dict[str, Any], query: str) -> str | None:
-    """Return the inner cycle's target score for the given task."""
-    for t in experiment_data.get("tasks", []):
-        if t.get("id") == query:
-            return str(t.get("target_score", ""))
-    return None
-
-
 CONNECTOR = Connector(
     name="promptpotter",
     wire_adapter=promptpotter_wire_adapter,
     session_factory=PromptPotterSession,
     extract_experiment=_extract_experiment,
-    resolve_ground_truth=_resolve_ground_truth,
 )
 
 

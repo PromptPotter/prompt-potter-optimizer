@@ -10,7 +10,7 @@ Generalize the connector boundary (TermNorm is currently the only registered con
 
 ## Status
 
-- **Connector boundary — shipped.** `Connector` dataclass at `connectors/protocol.py`; registry at `connectors/__init__.py`; TermNorm at `connectors/termnorm.py`. Four hooks per connector: `wire_adapter`, `session_factory`, `extract_experiment`, `resolve_ground_truth`.
+- **Connector boundary — shipped.** `Connector` dataclass at `connectors/protocol.py`; registry at `connectors/__init__.py`; TermNorm at `connectors/termnorm.py`. Three hooks per connector: `wire_adapter`, `session_factory`, `extract_experiment`.
 - **Webapp control plane** — the Control-remote contract at [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md); single-operator surface decayed into [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md).
 
 ## Open items

@@ -272,13 +272,6 @@ class PipelineSchema(BaseModel):
     def node_param_keys(self) -> dict[str, set[str]]:
         return {step.name: step.param_keys for step in self.nodes if step.param_keys}
 
-    def obs_extraction_map(self) -> dict[str, list[ObservationMapping]]:
-        return {
-            step.observation_name: step.observation_mappings
-            for step in self.nodes
-            if step.observation_name and step.observation_mappings
-        }
-
     def prompt_node_names(self) -> list[str]:
         """Node names whose output is affected by the prompt — ``prompt_meta`` set."""
         return [node.name for node in self.nodes if node.prompt_meta is not None]

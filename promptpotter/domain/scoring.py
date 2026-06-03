@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, NamedTuple, NotRequired, TypedDict
 
+from promptpotter.shared.errors import ErrorCategory
+
 
 class PipelineData(TypedDict, total=False):
     """Nested pipeline execution details within a QueryMeasurement."""
@@ -47,6 +49,9 @@ class QueryMeasurement(TypedDict):
     hit: NotRequired[bool]
     fitness: NotRequired[float]
     error: str | None
+    # Typed error channel: the category owns "this sample errored"; ``error`` is a
+    # plain human message (no ``[TAG]`` prefix). ``None``/absent ⇒ clean measurement.
+    error_category: NotRequired[ErrorCategory | None]
     pipeline_data: PipelineData | None
 
 

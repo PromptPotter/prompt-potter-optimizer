@@ -206,10 +206,6 @@ def _extract_experiment(
     return _extract_queries(experiment_data), _extract_index_terms(experiment_data)
 
 
-def _resolve_ground_truth(experiment_data: dict[str, Any], query: str) -> str | None:
-    return _extract_ground_truth_map(experiment_data).get(_split_query(query)[0])
-
-
 # ---------------------------------------------------------------------------
 # Reachability probe
 # ---------------------------------------------------------------------------
@@ -282,7 +278,6 @@ CONNECTOR = Connector(
     wire_adapter=termnorm_wire_adapter,
     session_factory=TermNormSession,
     extract_experiment=_extract_experiment,
-    resolve_ground_truth=_resolve_ground_truth,
     expected_revision=_EXPECTED_REVISION,
     version_check=_termnorm_version_check,
     preflight=_termnorm_preflight,
