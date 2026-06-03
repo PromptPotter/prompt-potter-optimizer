@@ -67,7 +67,7 @@ rides the `INJECTIONS` registry, `DispatchHub`, and the existing
 
 ## Wound 1 — L2 tends L1's `ValidationFailure`
 
-`L1_SCHEMA_COMPLIANCE` (`application/optimization/l1.py`) wraps `validate_overrides()` and runs at L1 parse time in `parse_population()`. When L1's `pipeline_params_override` proposes a value outside `PipelineSchema.available_models`, outside a node's `param_allowed_values`, mismatched against the declared `param_types`, or touches an operator-locked axis (`PARAM_FORBIDDEN_KEYS = {model, provider}`, gated by `OptimizationConfig.forbidden_axes_strict` — default on), the validator emits a `ValidatorOutcome` whose `evidence["failures"]` is `list[ValidationFailure(axis, value, allowed, reason)]`. `reason` is one of `not_in_available_models`, `not_in_param_allowed_values`, `type_mismatch`, or `forbidden_axis`.
+`L1_SCHEMA_COMPLIANCE` (`application/optimization/validators/l1_strict.py`) wraps `validate_overrides()` and runs at L1 parse time in `parse_population()`. When L1's `pipeline_params_override` proposes a value outside `PipelineSchema.available_models`, outside a node's `param_allowed_values`, mismatched against the declared `param_types`, or touches an operator-locked axis (`PARAM_FORBIDDEN_KEYS = {model, provider}`, gated by `OptimizationConfig.forbidden_axes_strict` — default on), the validator emits a `ValidatorOutcome` whose `evidence["failures"]` is `list[ValidationFailure(axis, value, allowed, reason)]`. `reason` is one of `not_in_available_models`, `not_in_param_allowed_values`, `type_mismatch`, or `forbidden_axis`.
 
 Failures land on `OptSearchPoint.wounds.validation_failures` — outer-layer optimizer state, not target-layer. Effect chain: `score_population()` shortcuts to a synthetic-0 report (Path 1) → inline winner-selection deprioritises the candidate → round checkpoint persists the failure.
 
@@ -101,7 +101,7 @@ L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPo
 
 ## Wound 4 — L3 tends L2's parsed-output failure
 
-`L2_OUTPUT_VALIDATORS` registry (`application/optimization/l2_validators.py`) — three starter validators, all `nurse_target="l3"`:
+`L2_OUTPUT_VALIDATORS` registry (`application/optimization/validators/l2_output.py`) — three starter validators, all `nurse_target="l3"`:
 
 | Validator id | Detects |
 |---|---|
@@ -187,6 +187,6 @@ Pick one of the four wounds based on producer/nurse pair:
 - New gen-time check on L1's output → **Wound 1**. Add a validator next to `L1_SCHEMA_COMPLIANCE`.
 - New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `score_population`.
 - New strategic-stall trigger → **Wound 3** isn't a registry; it's the patience timer.
-- New post-parse check on L2's output → **Wound 4**. Add a validator to `L2_OUTPUT_VALIDATORS` in `l2_validators.py`.
+- New post-parse check on L2's output → **Wound 4**. Add a validator to `L2_OUTPUT_VALIDATORS` in `validators/l2_output.py`.
 
 For each: declare `LLMOutputValidator` with stable id, write the `check` callable, append to the appropriate registry. Prompt-section render and persistence path are already wired — they iterate the registry, not a hard-coded list.

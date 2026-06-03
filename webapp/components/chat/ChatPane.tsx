@@ -7,14 +7,14 @@ import { headlineStats } from "@/lib/derivations/headline-stats";
 import { readSpend } from "@/lib/derivations/spend";
 import { fmtText, fmtDuration, fmtUsd } from "@/lib/format";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
-import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
-import { CyclePicker } from "@/components/dashboard/CyclePicker";
-import { TargetPipelineHero } from "@/components/dashboard/TargetPipelineHero";
-import { BackendNodeDetail } from "@/components/dashboard/BackendNodeDetail";
-import { SpendBudgetControl } from "@/components/dashboard/SpendBudgetControl";
+import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
+import { CyclePicker } from "@/components/shell/CyclePicker";
+import { TargetPipelineHero } from "@/components/dashboard/pipeline/TargetPipelineHero";
+import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
+import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetControl";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { targetNodeIds } from "@/lib/connector-nodes";
-import { useSelection } from "@/components/dashboard/SelectionContext";
+import { useSelection } from "@/lib/SelectionContext";
 
 interface Props {
   campaignId: string | null;

@@ -33,7 +33,7 @@ interface Ctx {
 
 const SelectionCtx = createContext<Ctx | null>(null);
 
-// Provider lives high in DashboardPane (above the shell) so selection
+// Provider lives high in AppShell (above the shell) so selection
 // persists across Chat/Dashboard/Files tab switches. Auto-clears when
 // the operator picks a different cycle: a stale candidate_id would
 // point into the wrong cycle's tree, a stale node would mismatch the

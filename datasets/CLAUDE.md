@@ -26,7 +26,7 @@ Optional:
 
 **Backend overlay (`nodes.{name}.config` in `pipeline.json`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
 
-`load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`promptpotter/application/config.py:344`) merges the overlay onto each wire payload. The sibling `llm_defaults` block is the `GET /pipeline` snapshot — keep it accurate, don't repurpose it.
+`load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`promptpotter/application/config.py:342`) merges the overlay onto each wire payload. The sibling `llm_defaults` block is the `GET /pipeline` snapshot — keep it accurate, don't repurpose it.
 
 ## Registered datasets
 
@@ -34,11 +34,12 @@ Optional:
 |---|---|---|
 | `lca-termnorm` | `termnorm` | Production TermNorm benchmark; M11 publication target. |
 | `bbeh` | `termnorm` | BBEH (M11 headline benchmark). |
-| `bbeh/mini`, `bbeh/medium` | `termnorm` | BBEH meta-campaign recon subsets. |
 | `gsm8k` | `termnorm` (llm_only mode) | Reasoning baseline; meta-campaign proxy benchmark. |
 | `hotpotqa` | `termnorm` | Multi-hop QA benchmark. |
 | `aime_2025` | `termnorm` (OpenRouter+Mistral overlay) | AIME competition math; overlay routes off Groq default. |
 | `justlogic` | `termnorm` | Logic reasoning at variable depth. |
+| `demo-tickets` | `termnorm` | Built-in try-and-learn demo (support tickets); surfaced while `User.demo_mode_enabled`. |
+| `email-tagging` | `termnorm` | Pilot: n8n inbox email-classification prompt. |
 | `promptpotter` | `promptpotter` | Outer cycle whose backend is the optimizer itself (L4 recursion). |
 | `promptpotter-self` | `promptpotter` | Optimizer-of-the-optimizer demo dataset. See [§ L4 below](#l4--promptpotter-self). |
 | `_optimizer/` | n/a | The optimizer's own `pipeline.json` + prompt variants — same shape as a target backend's pipeline.json (per §0 self-optimization commitment). |

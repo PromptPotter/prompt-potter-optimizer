@@ -83,33 +83,6 @@ Shape (`DraftCampaign`):
 
 Smart-default rationale: connector `termnorm` is the only registered connector today (per root CLAUDE.md); `exact_match` is the only universally-applicable scorer for `(query, ground_truth)` shape; `max_rounds=5` matches the M10 prompt-iteration framework default. Per-dataset model + `reasoning_effort` defaults are sourced from [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md) at commit time — the draft does not pin model identity (the matrix is the source of truth).
 
-### Draft-campaign object
-
-The server holds a canonical **draft-campaign** per ingest, mutated by both chat and the parameter panel until the operator commits. Lifecycle:
-
-1. **Created** on file drop (CSV uploaded → parsed → preview returned).
-2. **Mutated** by chat (assistant proposes edits via the existing `POST /commands/{kind}` highway) or by direct panel edits (operator clicks **Apply** in the panel; the panel-edit command rides the same highway).
-3. **Committed** on explicit operator action (chat "mint" verb or panel "Create campaign" button) — server writes the dataset dir + mints the campaign.
-4. **Discarded** by TTL or explicit discard.
-
-Shape (`DraftCampaign`):
-
-| Field | Source |
-|---|---|
-| `draft_id` | server-minted ULID |
-| `tenant_id` | from `IdentityContext` |
-| `slug` | `SafeName(filename_without_ext)` initially; operator-editable |
-| `sample_preview` | first 10 parsed rows (read-only after ingest; full set persisted alongside) |
-| `n_samples` | parsed row count |
-| `connector` | default `termnorm` (smart-default; operator-editable) |
-| `scoring_composite` | default `exact_match` (smart-default; operator-editable) |
-| `max_rounds` | default `5` (smart-default; operator-editable) |
-| `task_description` | default empty string; chat negotiates content |
-| `pipeline_overlay` | default `{}` (empty `nodes.*.config` overlay) |
-| `created_at`, `updated_at` | server timestamps |
-
-Smart-default rationale: connector `termnorm` is the only registered connector today (per root CLAUDE.md); `exact_match` is the only universally-applicable scorer for `(query, ground_truth)` shape; `max_rounds=5` matches the M10 prompt-iteration framework default. Per-dataset model + `reasoning_effort` defaults are sourced from [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md) at commit time — the draft does not pin model identity (the matrix is the source of truth).
-
 ### State binding
 
 The chat and panel are **two views over the same `DraftCampaign`**. Mutations propagate via:
@@ -143,11 +116,11 @@ On operator commit (chat verb or panel button → `POST /commands/mint-campaign-
 | `prompts/default.json` | rendered target prompt template | yes |
 | `campaign.json` | default-campaign config — `connector`, `scoring_composite`, `max_rounds`, `root_content_hash`, `optimizer_prompt_hash` | no (sibling) |
 
-After commit, the standard mint-campaign path runs against the new Origin slug. The frontend chat+panel surface replaces today's placeholder `NewCampaignModal`.
+After commit, the standard mint-campaign path runs against the new Origin slug. The frontend chat+panel surface supersedes the earlier placeholder modal (now shipped as `components/ingest/IngestPane.tsx`).
 
 **Open:** SSE event name (`DraftUpdatedRecord`) needs declaration in `m12-events-asyncapi.yaml` before a handler lands — out of slice 1 scope but on-deck for the wire-up PR.
 
-Demo CSV: `dev/sample-datasets/customer-tickets-eval.csv` (5 rows, two columns; precedent — `dev/oidc-local/` Dex harness). Matches the placeholder chip text at `webapp/components/dashboard/ChatPane.tsx:248`. Allowlisted under `dev/` in `.gitignore`.
+Demo CSV: `dev/sample-datasets/customer-tickets-eval.csv` (5 rows, two columns; precedent — `dev/oidc-local/` Dex harness). Matches the placeholder chip text at `webapp/components/chat/ChatPane.tsx:248`. Allowlisted under `dev/` in `.gitignore`.
 
 ## Cross-user data leverage
 
@@ -163,7 +136,7 @@ Cross-install sharing (install is a hard isolation boundary; the RLS adapter fro
 2. Project as first-class noun on disk (`projects/{tenant}/datasets/{slug}/` — `tenant_id` already collapses install + user per ADR-0002 no-drift gate #3; no extra `users/{uid}/projects/{pid}/` nesting). Identity-scoped per `IdentityContext`.
 3. Webapp project view (drop-three-things upload; campaign comparison rides existing per-cycle data).
 4. Chat shell, read-only (query optimizer state).
-5. Chat write-path (steer / interrupt / fork) — **unblocked: the M12 control-plane endpoints it reuses are shipped** ([`ADR-0001`](../adr/0001-m12-control-plane.md)). Remaining work is wiring `ChatPane` to those verbs + querying state via `/api/v1/live` (∴ after state-sync P3).
+5. Chat write-path (steer / interrupt / fork) — **unblocked: the M12 control-plane endpoints it reuses are shipped** ([`ADR-0001`](../adr/0001-m12-control-plane.md)). Remaining work is wiring `ChatPane` to those verbs + querying state via `/api/v1/sessions/active/live-state` (∴ after state-sync P3).
 6. Cross-user measurement panel.
 7. **Identity-foundation Stage 2** — considered when self-hosters demand native identity (no third-party dependency) and/or B2B SSO / SCIM. Front Zitadel / Ory / Keycloak / Authentik as a sibling process; the OIDC client we already wrote re-targets to our own issuer URL. No application-code rewrite.
 

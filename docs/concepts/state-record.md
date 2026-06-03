@@ -6,11 +6,11 @@ Every round carries one record forward — the *individual* (`OptSearchPoint`, o
 
 Two parameter namespaces co-exist on the record: **prompt fields** (persona / task intent / problem description / instruction / thinking style / answer format / few-shot examples / plan) and **pipeline parameters** (thresholds / model / temperature / retrieval budgets — anything the pipeline's nodes expose). Names can overlap; the namespaces are independent. L1 mutates both in one proposal; routing happens at individual-creation time.
 
-L1 writes prompt fields + operational memory each round. L2 (when it fires) writes any subset of: `brief`, `task_context`, `l1_overrides` (optimizer params), `scheme_overrides` / `text_overrides` / `template_override` (L1 surface levers), `action` (`normal_round` / `probe_round`). L3 writes `plan`. Lineage is set at creation; never mutated.
+L1 writes prompt fields + operational memory each round. L2 (when it fires) writes any subset of: `task_context`, `l1_layout` (the L1 surface lever), `l1_overrides` (optimizer params), `action` (`normal_round` / `probe_round`), `axis_targeted`. L3 writes `plan`. Lineage is set at creation; never mutated.
 
 The record is the optimizer's working memory for two independent reasons:
 
-- **Persistence.** Every round's record is serialized to `campaigns/{cycle_id}/rounds/round_NNNN.json`. Resume reads from the latest trial. State that's not on the record does not survive interruption.
+- **Persistence.** Every round's record is serialized to `<cycle_dir>/rounds/round_NNNN.json`. Resume reads from the latest trial. State that's not on the record does not survive interruption.
 - **Steering.** Every layer reads from the record to know what to do — L1 reads prompt fields + brief + surface overrides; L2 reads operational memory + surface state; L3 reads plan + runtime failures.
 
 ## What the record is NOT

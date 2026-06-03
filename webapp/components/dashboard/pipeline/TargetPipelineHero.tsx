@@ -2,7 +2,7 @@
 import type { NodeDataLike, PipelineView, PipelineViewNode } from "@/components/workflow/types";
 import type { ConnectorView } from "@/lib/types/connector";
 import { ConnectorInspector } from "./ConnectorInspector";
-import { useSelection } from "./SelectionContext";
+import { useSelection } from "@/lib/SelectionContext";
 
 interface Props {
   samplesOpen: boolean;

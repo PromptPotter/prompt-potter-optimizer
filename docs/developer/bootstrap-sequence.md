@@ -45,7 +45,7 @@ calling them out-of-order leaves the session under-wired.
 └─────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────────┐
-│  init_optimization_loop    (runner/entry.py)                         │
+│  init_optimization_loop    (bootstrap/scoring_context.py)            │
 │    ├─ origin scoring        (JobSearchPoint from config)             │
 │    ├─ Cycle(...)            (ledger, escalation state, axes index)   │
 │    ├─ fork-on-divergence?   (sibling mint via inherit_from)          │

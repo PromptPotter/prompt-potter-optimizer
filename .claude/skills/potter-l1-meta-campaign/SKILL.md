@@ -290,7 +290,7 @@ ls    .promptpotter/meta_campaigns/l1_generate/proposed_edits/
 | Sweep payloads | `datasets/{name}/sweep/NN_*.json` (skill-authored drafts in `sweep/proposed/`) |
 | Meta-campaign state + log | `.promptpotter/meta_campaigns/{prompt_id}/{state.json,log.jsonl}` |
 | Proposed edits awaiting operator | `.promptpotter/meta_campaigns/{prompt_id}/proposed_edits/{cycle_id}_{ts}.diff` |
-| Meta-prompt under iteration | `promptpotter/application/optimization/optimizer_pipeline.json::resolved_prompts['{prompt_id}/1']` |
+| Meta-prompt under iteration | `datasets/_optimizer/pipeline.json::resolved_prompts['{prompt_id}/1']` |
 | Review.md backfill helper | `scripts/render_review.py {cycle_dir} [--audit-dir {parent_or_self}/.runtime/cache/rounds]` |
 | Framework spec (origin of thresholds + verdict rules + top-issue rank) | `docs/specs/m10-prompt-iteration-framework.md` (Tracks 1, 3, 6, 7) |
 

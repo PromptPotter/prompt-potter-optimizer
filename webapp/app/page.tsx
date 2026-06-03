@@ -1,4 +1,4 @@
-import { DashboardPane } from "@/components/dashboard/DashboardPane";
+import { AppShell } from "@/components/shell/AppShell";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { WorkspaceProvider } from "@/lib/workspace";
 
@@ -8,7 +8,7 @@ export default function Home() {
   return (
     <ErrorBoundary>
       <WorkspaceProvider>
-        <DashboardPane />
+        <AppShell />
       </WorkspaceProvider>
     </ErrorBoundary>
   );

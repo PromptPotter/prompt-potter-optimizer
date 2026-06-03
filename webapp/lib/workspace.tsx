@@ -1,7 +1,7 @@
 "use client";
 // Single source of truth for workspace identity. One provider polls the
 // server's active pointer (`/sessions/active`) and the cycle list (`/cycles`)
-// together; every surface — DashboardPane, CyclePicker, Sidebar —
+// together; every surface — AppShell, CyclePicker, Sidebar —
 // subscribes here via `useWorkspace()` instead of fetching those
 // endpoints on its own.
 //

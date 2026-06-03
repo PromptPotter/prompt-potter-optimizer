@@ -7,7 +7,7 @@ import type { SelectedCandidate } from "@/lib/types/selection";
 import type { ScoreboardEntry } from "@/lib/types/round";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { Dialog } from "@/components/ui/Dialog";
-import { SteerForkPanel } from "@/components/dashboard/control-panel/SteerForkPanel";
+import { SteerForkPanel } from "@/components/dashboard/control/SteerForkPanel";
 
 interface Props {
   campaignId: string | null;

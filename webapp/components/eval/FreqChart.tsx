@@ -13,7 +13,7 @@ import {
 import { useWorkspace } from "@/lib/workspace";
 import { useRoundFile } from "@/lib/hooks/useRoundFile";
 import { CardFrame } from "@/components/ui/Card";
-import { useSelection } from "@/components/dashboard/SelectionContext";
+import { useSelection } from "@/lib/SelectionContext";
 import type { RawResultRow } from "@/lib/types/round";
 
 ensureChartRegistered();

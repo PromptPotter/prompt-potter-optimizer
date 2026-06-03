@@ -9,8 +9,8 @@ import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
-import { RunControlButton } from "./RunControlButton";
-import { type MeasurementDot } from "./hard-samples/columns";
+import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
+import { type MeasurementDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface Props {
@@ -30,7 +30,7 @@ interface Props {
   datasetSplitTest: number | null;
   // Per-sample archive measurement series, fetched server-side from
   // /datasets/{name}/measurement-series. Scope toggle (this campaign vs
-  // all campaigns on the dataset) is owned by DashboardPane and re-fetches
+  // all campaigns on the dataset) is owned by AppShell and re-fetches
   // this map; the heat-map merges live mid-round samples on top.
   archivePerSample: Map<number, ArchiveDot[]>;
   // True while the displayed dataset slice is from a prior (unit, scope).

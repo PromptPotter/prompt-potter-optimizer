@@ -540,8 +540,8 @@ the PR description.
   of "eval" vocabulary in the codebase. A future "rename eval to
   score" cleanup PR must not touch these — they're domain language,
   not a coincidence.
-- **`scripts/ppot_review.py` + `scripts/smoke_campaign.py`** —
-  operator-facing CLI helpers (cross-cycle leaderboard reader; smoke
+- **`scripts/render_review.py` + `scripts/smoke_campaign.py`** —
+  operator-facing CLI helpers (per-cycle review renderer; smoke
   test harness). Audit during cleanup §1 for accumulated cruft, but
   don't delete the underlying scripts without operator confirmation.
 - **`score_search_point()` gateway**

@@ -34,7 +34,7 @@ One injection is L2-only: `l1_signal_catalogue` — the menu of names L2 may put
 
 All fields are optional. Missing fields leave the corresponding OSP state untouched. The primary lever is `task_context` — broadcast to L1, L1_CRITIQUE, L2, L3 next round.
 
-`_parse_l2` (`escalation.py`) constructs a `TransitionResult`:
+`_parse_l2` (`escalation/firing/executor.py`) constructs a `TransitionResult`:
 
 - `task_context`: dict of refined framing fields, merged onto `opt_sp.task_context` via `TaskDecomposition.merge`. A non-empty proposal that produces zero delta is flagged as `l2_task_context_verbatim_repeat` → L3 heal trigger.
 - `action`: `"normal_round"` (default) or `"probe_round"`. Probe re-runs only the warned-query subset under the same OSP next round.
@@ -75,16 +75,16 @@ The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome
 
 ## Wound 4 — L2 self-healing via L3
 
-`run_l2_output_validators` (`l2_validators.py`) runs `L2_TASK_CONTEXT_VERBATIM_REPEAT` against the proposed/applied task_context pair. Layout HARD failures from `validate_l1_layout` are appended to the same `l2_guard_breaches` list. When the list is non-empty after `_apply_l2`, the escalation driver force-triggers L3 to heal — L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
+`run_l2_output_validators` (`validators/l2_output.py`) runs `L2_TASK_CONTEXT_VERBATIM_REPEAT` against the proposed/applied task_context pair. Layout HARD failures from `validate_l1_layout` are appended to the same `l2_guard_breaches` list. When the list is non-empty after `_apply_l2`, the escalation driver force-triggers L3 to heal — L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
 
 ## File-line anchors
 
-- L2 trigger gate: `promptpotter/application/optimization/escalation.py::escalate_l2`
-- `LayerStrategy`, `_parse_l2`, `_apply_l2`, `L2`: `escalation.py`
+- L2 trigger gate: `promptpotter/application/optimization/escalation/firing/executor.py::escalate_l2`
+- `_parse_l2`, `_apply_l2`, `escalate_l2`: `escalation/firing/executor.py` (trigger gates in `escalation/decide.py`)
 - `TransitionResult`: `promptpotter/application/optimization/transitions.py`
 - L2 prompt template: `optimizer_pipeline.json::resolved_prompts['l2_context/1']`
 - OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `task_context`, `l1_layout`, `l1_overrides`, `l2_guard_breaches`
 - Layout validators: `promptpotter/domain/l1_layout.py::validate_l1_layout`
-- Task-context verbatim-repeat: `promptpotter/application/optimization/l2_validators.py::L2_TASK_CONTEXT_VERBATIM_REPEAT`
+- Task-context verbatim-repeat: `promptpotter/application/optimization/validators/l2_output.py::L2_TASK_CONTEXT_VERBATIM_REPEAT`
 
 Cross-references: [`l1-generate-surface.md`](l1-generate-surface.md) (the layout L2 mutates + the dispatch hub both layers share); [`self-healing-internals.md`](self-healing-internals.md) (L2 is the nurse for Wounds 1 + 2; produces Wound 4).

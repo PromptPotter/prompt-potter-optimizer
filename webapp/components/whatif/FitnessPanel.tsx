@@ -10,7 +10,7 @@ import {
   type LiveCandidate,
 } from "@/lib/poll";
 import type { RoundSummary } from "@/lib/api/types";
-import { useSelection } from "@/components/dashboard/SelectionContext";
+import { useSelection } from "@/lib/SelectionContext";
 import { WhatIfGrid } from "./WhatIfGrid";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useFetch } from "@/lib/hooks/useFetch";

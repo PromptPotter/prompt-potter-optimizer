@@ -61,7 +61,7 @@ Declare in `m12-api-openapi.yaml` **before** any handler (gate #4):
 
 - `PUT /auth/api-keys/{provider}` — body `{api_key}`; writes the encrypted entry; `204`. Validates `provider ∈ {groq, openai, anthropic, openrouter}`. The key is **never** echoed back (request-only; the response carries `providers_set`, not the value).
 - `DELETE /auth/api-keys/{provider}` — clears it; `204`.
-- `GET /auth/api-keys` — returns `{providers_set: [...]}` only (which providers have a key, never the values). The existing `GET /llm/providers` gains a `key_source: "user" | "shared" | "none"` per provider so the IngestPane optimizer picker shows whether a campaign will spend the user's key or the host's.
+- `GET /auth/api-keys` — returns `{providers_set: [...]}` only (which providers have a key, never the values). The existing `GET /llm-providers` gains a `key_source: "user" | "shared" | "none"` per provider so the IngestPane optimizer picker shows whether a campaign will spend the user's key or the host's.
 
 These ride `/auth/*` (identity-router-owned, like `logout`), not the cycle command highway — they mutate tenant secret state, not a cycle ledger. Token boundary: the plaintext key appears only in the `PUT` request body and the encrypt call; it never lands on any ledger, log, trace, or response (ADR-0002 gate #2 — secrets never past the boundary).
 

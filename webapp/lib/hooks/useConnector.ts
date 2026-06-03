@@ -6,7 +6,7 @@
 // component — the prior shape — fanned the `/backends` + `/pipeline` reads
 // and the health poll out N times, flooding the backend's `/status`. Read
 // it with `useConnector()`; mount `ConnectorProvider` once above the
-// consumers (see `DashboardPaneInner`).
+// consumers (see `AppShellInner`).
 //
 // Three input streams, all orthogonal (no stitching — they describe
 // different facts, not the same fact at different freshness levels):

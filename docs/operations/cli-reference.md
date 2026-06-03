@@ -96,7 +96,7 @@ No read CLI. Everything is per-cycle — open the cycle dir you're running:
 | `<cycle_dir>/log.md` | Per-round digest, regenerated on every round-complete and at finalize |
 | `<cycle_dir>/index.json` | Campaign metadata + `final` block. Forks have a `parent_cycle_id` field. |
 | `<cycle_dir>/rounds/round_NNNN.json` | Per-round optimizer checkpoint |
-| `<cycle_dir>/.cache/rounds/round_NNNN.json` | Per-round node I/O (internal) |
+| `<cycle_dir>/.runtime/cache/rounds/round_NNNN.json` | Per-round node I/O (internal) |
 
 `<cycle_dir>` resolves to `campaigns/{campaign_id}/cycles/{cycle_id}/` for every cycle — root, fork, diag, sweep, all flat under `cycles/`. Each cycle owns its own `dashboard.json` + `output.log` (a fork's is seeded from its parent at the cut).
 

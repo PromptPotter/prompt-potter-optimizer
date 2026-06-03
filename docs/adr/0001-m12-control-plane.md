@@ -16,7 +16,7 @@ tags: [networking, control-plane, wire-contract, m12]
 
 ## Context and Problem Statement
 
-The optimizer ships today with a CLI + a read-only webapp (`/ui`) that polls `dashboard.json` every 2 s. M12 promotes the webapp into a fully interactive control plane: operators launch, pause, fork, rewind, and reconfigure cycles from the browser. Without a wire contract, every new screen invents an endpoint shape, a state mechanism, and a retry convention; the rich internals (PoBB, Rasch, CQRS ledger, four wound channels) leak through an unprincipled wire and the SaaS port becomes intractable.
+The optimizer ships today with a CLI + a read-only webapp (served at the domain root `/`) that polls `dashboard.json` every 2 s. M12 promotes the webapp into a fully interactive control plane: operators launch, pause, fork, rewind, and reconfigure cycles from the browser. Without a wire contract, every new screen invents an endpoint shape, a state mechanism, and a retry convention; the rich internals (PoBB, Rasch, CQRS ledger, four wound channels) leak through an unprincipled wire and the SaaS port becomes intractable.
 
 How do we constrain the M12 interactivity envelope so that the wire surface is a closed, machine-readable contract that subsequent code measures against — without bulldozing the scientific richness inside the optimizer loop?
 
@@ -155,7 +155,7 @@ First end-to-end command: **`pause-cycle`**. On certification, the dispatcher + 
 
 **Profile D** — `JobRegistry` (new at `application/jobs/`) becomes identity-scoped. Control routes reject cross-tenant `job_id`; SSE fans only the caller's tenant. No bare `tenant_id` parameters (identity-foundation no-drift gate #3). `projects/{install_id}/tenant.json` carries brand. On certification, isolation guarantees promote to `docs/operations/multi-tenant.md`; box 12 flips.
 
-**Profile E** — Webapp `usePoll` → SSE subscription. Every view state reachable via URL; every mutation routes through a command. No client-side optimistic mutations — clients believe only ack frames. Chat-panel launcher (`webapp/components/dashboard/ChatPane.tsx`) alongside the configuration form. On certification, the client contract promotes to `docs/developer/webapp-state-model.md`; boxes 16, 17 flip; `webapp/lib/usePoll.ts` is deleted.
+**Profile E** — Webapp `usePoll` → SSE subscription. Every view state reachable via URL; every mutation routes through a command. No client-side optimistic mutations — clients believe only ack frames. Chat-panel launcher (`webapp/components/chat/ChatPane.tsx`) alongside the configuration form. On certification, the client contract promotes to `docs/developer/webapp-state-model.md`; boxes 16, 17 flip; `webapp/lib/usePoll.ts` is deleted.
 
 ### Security checklist (20 boxes)
 

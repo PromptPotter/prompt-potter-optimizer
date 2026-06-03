@@ -8,7 +8,7 @@
 
 Live constraints (the ones still ahead of us):
 
-- **state-sync P3 (`GET /api/v1/live`) before any new webapp data panel** — chat state-queries, composite-fitness scatter, cross-user measurement panel. Anything built on `dashboard.json` polling is rewritten at the cutover. Data *rollups* (substrate-free) are exempt; only the rendered panel waits.
+- **state-sync P3 (`GET /api/v1/sessions/active/live-state`) before any new webapp data panel** — chat state-queries, composite-fitness scatter, cross-user measurement panel. Anything built on `dashboard.json` polling is rewritten at the cutover. Data *rollups* (substrate-free) are exempt; only the rendered panel waits.
 - **BYO per-user API keys — already overdue, not a future gate.** The beta is *live and serving allowlisted users on one shared `.env` key today*; every user spends the operator's quota/cost. This is a present liability, hence Lane A2.
 - **HTTP-edge abuse protection scales with the allowlist.** The public surface (`/auth/*`, the root webapp, `/health`) is internet-reachable now; Cloudflare edge + allowlist + per-user `JobRegistry` quotas bound it. App-level HTTP rate-limiting (C6) becomes due the moment the allowlist is removed.
 
@@ -45,13 +45,13 @@ Small ships (mostly <1 day). Must land before chat state-queries and new dashboa
 | # | Item | Status | Spec |
 |---|---|---|---|
 | B1 | state-sync P1 (identity collapse — absorbs the spend double-touch) | ✅ shipped 2026-05-30 | [`state-sync-cleanup`](state-sync-cleanup.md) |
-| B2 | state-sync P2–P4 (per-cycle `dashboard.json`, **`GET /api/v1/live`**, sidecar delete) | ✅ shipped 2026-05-30 | [`state-sync-cleanup`](state-sync-cleanup.md) |
+| B2 | state-sync P2–P4 (per-cycle `dashboard.json`, **`GET /api/v1/sessions/active/live-state`**, sidecar delete) | ✅ shipped 2026-05-30 | [`state-sync-cleanup`](state-sync-cleanup.md) |
 
 ### Lane C — product differentiator + capability (after A + B)
 
 | # | Item | Status | Spec |
 |---|---|---|---|
-| C1 | **Chat write-path** — wire the inert `ChatPane` to the *shipped* control-plane verbs; query state via `/api/v1/live` (∴ after B2/P3) | unblocked (control plane done) | [`m13-chat-first-user-web`](m13-chat-first-user-web.md) |
+| C1 | **Chat write-path** — wire the inert `ChatPane` to the *shipped* control-plane verbs; query state via `/api/v1/sessions/active/live-state` (∴ after B2/P3) | unblocked (control plane done) | [`m13-chat-first-user-web`](m13-chat-first-user-web.md) |
 | C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after B2/P3** | pending | [`m12-multi-connector`](m12-multi-connector.md) |
 | C3 | L4 closure — inner-cycle dispatch + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation (connector already registered) | pending | [`m12-multi-connector`](m12-multi-connector.md) |
 | C4 | Cross-user measurement panel (after B2/P3) | pending | [`m13-chat-first-user-web`](m13-chat-first-user-web.md) |

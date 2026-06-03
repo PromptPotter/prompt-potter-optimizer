@@ -4,7 +4,7 @@
 
 PromptPotter can optimize **its own meta-prompts**. The four optimizer LLM
 calls — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — are
-themselves prompts driven by the six-field `PromptTemplate` scheme. Expose
+themselves prompts driven by the eight-field `PromptTemplate` scheme. Expose
 those template fields as a connector's `pipeline_params`, point an outer
 PromptPotter cycle at them, and you get **PromptPotter optimizing
 PromptPotter**.

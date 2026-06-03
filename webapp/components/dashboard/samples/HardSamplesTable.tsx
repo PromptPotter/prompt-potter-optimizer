@@ -28,12 +28,12 @@ import {
   type ColId,
   type MeasurementDot,
   type PersistedState,
-} from "./hard-samples/columns";
-import { HardSamplesFooter } from "./hard-samples/HardSamplesFooter";
+} from "./columns";
+import { HardSamplesFooter } from "./HardSamplesFooter";
 import {
   HardSamplesHeatTip,
   HardSamplesPopover,
-} from "./hard-samples/HardSamplesPopover";
+} from "./HardSamplesPopover";
 
 interface Props {
   dash: DashboardSnapshot | null;

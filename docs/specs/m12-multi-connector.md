@@ -16,7 +16,6 @@ Generalize the connector boundary (TermNorm is currently the only registered con
 ## Open items
 
 - **Second connector — `promptpotter/connectors/promptpotter.py`** (PromptPotter-as-backend). Validates the boundary, unlocks Track 4, headlines the self-referential demo. Detailed at [`0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md) cross-ref.
-- **Config-driven connector lookup.** `bootstrap.py:514` hardcodes `connectors.get("termnorm")`; read `pipeline.json::backend_type`.
 - **Query parser registry.** `split_query_parts()` (`services/backend_client.py`) still TermNorm-shaped; hoist into per-connector hook when second connector lands.
 - **Workflow nodes** (M6 Wave 4 holdover) — unblocked by the connector boundary.
 - **Competitor numbers.** DSPy / MIPROv2 / GEPA / Promptomatix / adv-CoT / PromptWizard — cited; MIPROv2 reproduction only if reviewers object.

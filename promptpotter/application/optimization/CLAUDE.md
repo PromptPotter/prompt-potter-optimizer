@@ -110,7 +110,7 @@ Conceptually L2 / L3 / L4 are the same family — each mutates a slower-changing
 
 ## checkin — the fifth optimizer node (decomposition + origin resolution)
 
-There are **five** registered optimizer nodes, not four (`OPTIMIZER_RESPONSE_MODELS`, `dispatch/schemas.py`). The fifth is `checkin` — **renamed from `restructure`** (commit `269e9b87`); searching the tree for "restructure" finds nothing because the concept lives under this name now. It is **not a loop layer**: it runs *around* the loop, not inside it, and does **not** go through the `build_bundle → DispatchHub.fill_l1|fill_fixed` injection path. It's a non-ledger call straight through `run_optimizer_node → compile_prompt → llm_call` (`dispatch/llm_call/call.py:410`).
+There are **five** registered optimizer nodes, not four (`OPTIMIZER_RESPONSE_MODELS`, `dispatch/schemas.py`). The fifth is `checkin` — **renamed from `restructure`** (commit `269e9b87`); searching the tree for "restructure" finds nothing because the concept lives under this name now. It is **not a loop layer**: it runs *around* the loop, not inside it, and does **not** go through the `build_bundle → DispatchHub.fill_l1|fill_fixed` injection path. It's a non-ledger call straight through `run_optimizer_node → compile_prompt → llm_call` (`dispatch/llm_call/call.py:408`).
 
 **One node, two modes, one output schema (`CheckinOutput`).** Don't add a second decomposition/resolution node — the existing node already covers both, and they share one shape:
 

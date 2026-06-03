@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import type { PipelineDoc } from "./types";
 import { type DashboardSnapshot, roundOf } from "@/lib/poll";
 import { useRoundFile } from "@/lib/hooks/useRoundFile";
-import { useSelection } from "@/components/dashboard/SelectionContext";
+import { useSelection } from "@/lib/SelectionContext";
 import { phaseToNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
 import type { NodeBlock } from "@/lib/types/round";

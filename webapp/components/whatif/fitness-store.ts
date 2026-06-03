@@ -1,7 +1,7 @@
 "use client";
 // Cross-mount store for FitnessPanel toggles + selected evaluators.
 //
-// Both ChatPane (New Job tab) and DashboardPane (View Results) render their
+// Both ChatPane (New Job tab) and AppShell (View Results) render their
 // own <FitnessPanel/>, but only one tab is mounted at a time. Local
 // component state would reset every tab swap. This module-scoped store
 // keeps the chip toggles and what-if selection coherent across remounts.

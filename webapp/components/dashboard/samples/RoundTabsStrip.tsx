@@ -1,7 +1,7 @@
 "use client";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { availableRounds } from "@/lib/derivations/round-axis";
-import { useSelection } from "@/components/dashboard/SelectionContext";
+import { useSelection } from "@/lib/SelectionContext";
 
 interface Props {
   dash: DashboardSnapshot | null;

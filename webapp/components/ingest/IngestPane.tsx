@@ -25,11 +25,11 @@ import {
   type DatasetIndexEntry,
   type DraftCampaignWire,
 } from "@/lib/api";
-import { ChatIngestFlow } from "./ingest/ChatIngestFlow";
-import { ListAndMintFlow } from "./ingest/ListAndMintFlow";
-import { DraftCommitFlow, type WizardStep } from "./ingest/DraftCommitFlow";
-import { CheckinLoadingWindow } from "./ingest/CheckinLoadingWindow";
-import type { OnMinted } from "./ingest/types";
+import { ChatIngestFlow } from "./ChatIngestFlow";
+import { ListAndMintFlow } from "./ListAndMintFlow";
+import { DraftCommitFlow, type WizardStep } from "./DraftCommitFlow";
+import { CheckinLoadingWindow } from "./CheckinLoadingWindow";
+import type { OnMinted } from "./types";
 
 // How long the demo's simulated check-in window lingers before the prefilled
 // wizard lands — long enough to read the model + see the counter tick, short

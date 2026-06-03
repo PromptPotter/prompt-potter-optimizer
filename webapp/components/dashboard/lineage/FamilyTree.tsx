@@ -4,9 +4,9 @@ import { fetchCampaignLineage, postCleanupEmpty } from "@/lib/api";
 import { sessionIndexOf } from "@/lib/ids";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useFetch } from "@/lib/hooks/useFetch";
-import { buildTree, countDescendants, type CycleNode } from "./family-tree/layout";
-import { Forest } from "./family-tree/Forest";
-import { CleanupConfirmModal } from "./family-tree/CleanupConfirmModal";
+import { buildTree, countDescendants, type CycleNode } from "./layout";
+import { Forest } from "./Forest";
+import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface Props {

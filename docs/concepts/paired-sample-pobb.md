@@ -236,7 +236,7 @@ priors will surface as divergence via the candidate side).
 | File | Role |
 |---|---|
 | `promptpotter/application/optimization/pobb/elimination/checks.py::PoBBCheck` | Sample-keyed priors, `backfill_for_sample`, paired `check()`, `snapshot_priors`, `set_sample_universe` (budget for the dominance gate) |
-| `promptpotter/application/intelligence/adaptive_queue_mechanism.py` | Online adaptive queue mechanism: `update_theta_posterior`, `decision_information_gain`, `model_information_gain`, `pick_value`, `next_sample`, `expected_order` |
+| `promptpotter/application/intelligence/adaptive_queue_mechanism.py` | Online adaptive queue mechanism: `update_theta_posterior`, `decision_information_gain`, `pick_value`, `next_sample`, `expected_order` |
 | `promptpotter/application/optimization/l1/score.py::score_population` | Builds the `backfill_fn` closure + the `_next_sample(scored_outcomes)` closure; injects both into PoBB / the query loop |
 | `promptpotter/application/optimization/l1/score/candidate.py::score_one_candidate` | Builds `_backfill_for_sample(sample_id)` closure and passes it as `on_sample_pre_check` — reactive per-sample backfill, no upfront wall |
 | `promptpotter/application/scoring/query_loop.py::run_query_loop` | Per-step `next_sample(scored_outcomes)` + fires `on_sample_pre_check(sample.id)` after each sample lands, before degradation checks read prior coverage |
@@ -251,28 +251,21 @@ Backfill makes the paired comparison statistically valid; the per-candidate
 Item Response Theory online sequential selector — at each step it folds
 the candidate's measured `(δ_s, se_δ_s, hit)` outcomes into a Gaussian
 Laplace-approximation posterior on `θ_c`, then picks the next sample by
-maximizing one blended, one-step-greedy objective — the **pick-value**,
-two terms in nats:
+maximizing a one-step-greedy objective — the **pick-value**,
+in nats:
 
-- **decision information gain (exploit, dominant):** `I(Y_s ; verdict)`,
+- **decision information gain:** `I(Y_s ; verdict)`,
   the mutual information between the next outcome and the keep/abort
   verdict `θ_c > θ_s` against the seed (`μ_s` the seed prior's fitted
   ability). Picks the sample whose outcome maximally separates candidate
   from seed — directly minimizes expected queries to a confident verdict.
   The means-known limit recovers Bernoulli Chernoff information
   (Garivier-Kaufmann 2016).
-- **model information gain (explore, small weight):** `½·log(1 + w̄·se_δ²)`,
-  the expected reduction in a sample's difficulty uncertainty. A small
-  `explore_weight` pull toward poorly-characterized / never-solved
-  samples so the global Rasch model keeps improving; exactly zero when
-  `se_δ → 0`, so it never fights the decision term where the model is
-  already sharp.
-
-`pick_value = decision_information_gain + explore_weight ·
-model_information_gain`. Both terms are in nats, so `explore_weight`
-(`ExplorationConfig`, default 0.15) is dimensionless; kept well below 1
-the queue mechanism stays decision-dominated — PoBB *is* a keep/abort
-decision and that's what the evaluation budget should buy down.
+`pick_value = decision_information_gain` — a single objective (the earlier
+blended `+ explore_weight · model_information_gain` explore term was dropped
+2026-05; see [`../specs/verdict-resolution.md`](../specs/verdict-resolution.md)).
+PoBB *is* a keep/abort decision and that's what the evaluation budget should
+buy down.
 
 The heatmap's hardest-first `sample_order` (the spec's `|δ_s|` sort)
 lives on the per-cycle artifact for display; the artifact's

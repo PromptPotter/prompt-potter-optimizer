@@ -1,6 +1,6 @@
 # State-Sync Cleanup — Pre-Whitelabel Foundation
 
-**Status:** Phases 1 + 2 + 3 + 4 **shipped 2026-05-30**. Phase 1 = identity collapse; Phase 2 = per-cycle `dashboard.json`; Phase 3 = `GET /api/v1/live` (additive façade); Phase 4 = no-op `log_fork` sidecar deleted. **`dashboard.json` stays live-written — the teardown-only design is rejected (reverses folder-UI §0).** All phases complete.
+**Status:** Phases 1 + 2 + 3 + 4 **shipped 2026-05-30**. Phase 1 = identity collapse; Phase 2 = per-cycle `dashboard.json`; Phase 3 = `GET /api/v1/sessions/active/live-state` (additive façade); Phase 4 = no-op `log_fork` sidecar deleted. **`dashboard.json` stays live-written — the teardown-only design is rejected (reverses folder-UI §0).** All phases complete.
 
 Collapse five drifting state surfaces into two so CLI, file tree, and webapp render the same picture. Required before multi-tenant whitelabel — single-operator usage masks the drift today.
 
@@ -28,7 +28,7 @@ Observed drift: 3↔4 collisions on manual rename (`cycle_0c7c4ceee267` ↔ `cyc
 
 **Identity rule.** Directory name **IS** the cycle id. `index.json::campaign_id` is removed; `CampaignStore` reads `index_path.parent.name`. Rename the dir, you renamed the cycle.
 
-**Live view. ✅ Shipped 2026-05-30 (`04c94a94`).** `GET /api/v1/live` reads `active_session.json` → returns the session-family root's live `dashboard.json`. Stable façade keyed on the active pointer; new panels + chat state-reads code against it. Additive — `dashboard.json` polling is untouched. The file stays the live surface, so the façade reads it directly rather than re-deriving from the ledger.
+**Live view. ✅ Shipped 2026-05-30 (`04c94a94`).** `GET /api/v1/sessions/active/live-state` reads `active_session.json` → returns the session-family root's live `dashboard.json`. Stable façade keyed on the active pointer; new panels + chat state-reads code against it. Additive — `dashboard.json` polling is untouched. The file stays the live surface, so the façade reads it directly rather than re-deriving from the ledger.
 
 ## Phases
 

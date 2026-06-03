@@ -21,7 +21,9 @@ State-class composition uses `cx()` (`lib/cx.ts`), not template strings: `cx("hs
 
 ## Component conventions
 
-- **Anatomy: fetch lives in a hook, not a component.** A component that fetches *and* renders *and* owns selection/scroll state is the prototype smell this layer is moving off of. Put data access in a `lib/use*.ts` hook (peers: `useRoundFile`, `useDatasetPreview`, `useDashboard`); keep components presentational where possible. Reuse the pure `lib/derivations/*` for data→data shaping rather than re-deriving inline.
+- **Layout is three tiers, decided top-down.** Every file answers exactly one of: is it a **primitive** (`ui/`, `forms/` — kind-named by design), a piece of cross-surface **chrome** (`shell/` — Topbar, Sidebar, Console-adjacent, `AppShell`, `CriticalAlertBanner`, `CyclePicker`: anything that renders on more than one tab), or part of **one surface** (`chat/`, `dashboard/`, `verify/`, `tree/`=Files, `ingest/`)? A file that answers two — a dashboard view that's also the app root, a banner filed under `dashboard/` but shown on every tab — is mis-filed; that overload is what this layer was untangled from. Shared app state is a context in `lib/` (`SelectionContext`, `auth-context`, `workspace`, `poll`), never a component. `app/page.tsx` mounts `components/shell/AppShell.tsx` (the composition root — owns the `Tab` type and mounts every pane).
+- **Inside a surface, organize by domain region — one axis, never by widget kind.** `dashboard/` is `lineage/` · `samples/` · `scoring/` · `pipeline/` · `control/` · `layout/` — the §0 primitives the operator observes, so the names stay stable as milestones add views (M11 viz → `scoring/`, M12 multi-connector → `pipeline/`). Do **not** add kind-buckets (`charts/`, `detail/`); they collide with the region axis and rot. Cross-surface domain widgets that aren't owned by one pane stay as their own feature folders (`eval/`, `whatif/`, `workflow/`).
+- **Anatomy: fetch lives in a hook, not a component.** A component that fetches *and* renders *and* owns selection/scroll state is the prototype smell this layer is moving off of. Put data access in a `lib/hooks/use*.ts` hook (peers: `useRoundFile`, `useDatasetPreview`, `useDashboard`); keep components presentational where possible. Reuse the pure `lib/derivations/*` for data→data shaping rather than re-deriving inline.
 - **Primitive-first.** Do not hand-roll another modal / popover / dropdown / button. Reach for `components/ui/*`; if the primitive doesn't exist yet, add it there (with a `*.module.css` and an RTL test) so the next caller inherits it.
 - **Accessibility is positioning, not compliance** (`.impeccable.md`). Every interactive element — including SVG `<g>`/nodes — needs keyboard operability + `role`; dialogs trap focus + restore on close + close on ESC; state pairs color with a label or icon (HIT/MISS, pass/fail, live/stale), never color alone; focus rings stay visible (the `:focus-visible` accent outline); honor `prefers-reduced-motion` on the 2 s poll. Operator data (IDs, hashes, payloads) stays selectable — never inject hidden characters.
 
@@ -40,8 +42,8 @@ Next.js 16 has breaking changes from prior versions — APIs, file conventions, 
 Three guarantees the writer side MUST hold:
 
 1. **Always on disk.** `dashboard.json` exists after any ledger event in a cycle. Sole writer: `LiveDashboardView` (`promptpotter/infrastructure/projections/live_dashboard/view.py`). Sole writer of `round_NNNN.json`: `AuditTrailView` (`promptpotter/infrastructure/projections/audit_trail.py`). Both use atomic-swap (tmp + rename) — never partial-write, never torn read.
-2. **Settles within `_DASHBOARD_DEBOUNCE_S` (0.25 s) of the last event.** The writer debounces high-frequency events (sample-scored, token-usage, LLM-call progress) to coalesce bursts, but converges to current state at most 250 ms behind real-time. Constant at `view.py:78`; flush plumbing at `_schedule_persist()` (`view.py:429`).
-3. **Immediate (no debounce) at round boundaries.** `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` flush synchronously via `_flush_pending_persist()` (`view.py:453`). When a round ends, its file is current before the next round begins. **Do not remove these flushes.** Do not relax atomic-swap. Do not introduce a path that lets `dashboard.json` lag past a completed round.
+2. **Settles within `_DASHBOARD_DEBOUNCE_S` (0.25 s) of the last event.** The writer debounces high-frequency events (sample-scored, token-usage, LLM-call progress) to coalesce bursts, but converges to current state at most 250 ms behind real-time. Constant at `view.py:88`; flush plumbing at `_schedule_persist()` (`view.py:448`).
+3. **Immediate (no debounce) at round boundaries.** `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` flush synchronously via `_flush_pending_persist()` (`view.py:472`). When a round ends, its file is current before the next round begins. **Do not remove these flushes.** Do not relax atomic-swap. Do not introduce a path that lets `dashboard.json` lag past a completed round.
 
 If a future change wants to defer or skip a write, the question to answer first is: *can an operator who alt-tabs to the file tree right now still see the truth?* If no, the change is wrong.
 
@@ -50,15 +52,15 @@ If a future change wants to defer or skip a write, the question to answer first 
 Two on-disk surfaces back the dashboard. Read from the right one:
 
 - **`dashboard.json`** (polled every 2 s by `lib/poll.tsx` → `useCycleStream()`) — origin, in-flight `current_round`, and the `rounds[]` array of completed-round summaries. **Sole source** for the FitnessChart, TrendChart, TopStrip sparkline, LineageTree. Don't stitch in `round_NNNN.json` for chart data.
-- **`round_NNNN.json`** (lazy, fetched via `lib/useRoundFile.ts`) — deep audit per round: full LLM I/O, per-sample results, scoreboard with `per_sample`. Reach for it only when the operator drills into a specific round (FreqChart distribution, ScoringInspector composite/hits, OptimizerNodeDetail node-by-node inspection).
+- **`round_NNNN.json`** (lazy, fetched via `lib/hooks/useRoundFile.ts`) — deep audit per round: full LLM I/O, per-sample results, scoreboard with `per_sample`. Reach for it only when the operator drills into a specific round (FreqChart distribution, ScoringInspector composite/hits, OptimizerNodeDetail node-by-node inspection).
 
 If you find yourself adding a "merge in-flight with historical" or "fall back to round-file when dashboard hasn't written X yet" branch, you're re-introducing the stitch pattern the unification spec (`docs/specs/webapp-display-source-unification.md`) collapsed. Pick one source per data class.
 
 ## Polling shape
 
-- `GET /api/campaigns/{id}/cycles/{cid}/dashboard` supports `If-Modified-Since` → `304 Not Modified`. Client (`lib/poll.tsx`, `lastModifiedRef` at line 259) tracks the latest `Last-Modified` per `unitKey` and skips `setState` on 304.
+- `GET /api/campaigns/{id}/cycles/{cid}/dashboard` supports `If-Modified-Since` → `304 Not Modified`. Client (`lib/poll.tsx`, `lastModifiedRef` at line 329) tracks the latest `Last-Modified` per `unitKey` and skips `setState` on 304.
 - When `dashboard.json` does not yet exist (fresh campaign before origin completes), the route returns `{ warming_up: true, campaign_id, cycle_id, phase_hint: "origin" }` with HTTP 200 and `Last-Modified` from the session dir mtime. Client recognises `warming_up === true` and renders a friendly placeholder ("Origin running") rather than treating the cycle as offline.
-- `unitKey` change resets `lastModifiedRef` in the render-phase guard at `poll.tsx:273`. Required — without it, switching campaigns leaves stale `If-Modified-Since` on the wire.
+- `unitKey` change resets `lastModifiedRef` in the render-phase guard at `poll.tsx:343`. Required — without it, switching campaigns leaves stale `If-Modified-Since` on the wire.
 
 ## State reset on prop change
 
@@ -74,15 +76,15 @@ if (key !== prevKey) {
 
 It runs **during render**, so the reset and the re-render commit together — no stale frame. A `useEffect` reset runs after paint and flashes one frame of the prior unit's data; do not use it for this.
 
-Canonical sites: `lib/poll.tsx` (`unitKeyRef`, the `useRef` variant), `components/dashboard/SelectionContext.tsx`.
+Canonical sites: `lib/poll.tsx` (`unitKeyRef`, the `useRef` variant), `lib/SelectionContext.tsx`.
 
-A hook that owns a single state object may instead derive freshness purely — stamp the loaded data with the key it was fetched for and return `EMPTY` until the key matches (`lib/useDatasetPreview.ts`, `lib/useRoundFile.ts`). Also stale-frame-free.
+A hook that owns a single state object may instead derive freshness purely — stamp the loaded data with the key it was fetched for and return `EMPTY` until the key matches (`lib/hooks/useDatasetPreview.ts`, `lib/hooks/useRoundFile.ts`). Also stale-frame-free.
 
 ## Render-cost guards (do not regress)
 
 Per-poll re-renders cascade through the chart tree by default. The following guards exist to stop that and must stay:
 
-- `React.memo` on `FitnessChart` (`components/whatif/FitnessChart.tsx`), `TrendChart` (`components/eval/TrendChart.tsx`), `TopStrip` (`components/dashboard/TopStrip.tsx`), `LineageTree` (`components/dashboard/LineageTree.tsx`).
+- `React.memo` on `FitnessChart` (`components/whatif/FitnessChart.tsx`), `TrendChart` (`components/eval/TrendChart.tsx`), `TopStrip` (`components/dashboard/layout/TopStrip.tsx`), `LineageTree` (`components/dashboard/lineage/LineageTree.tsx`).
 - `LineageTree` keys its layout `useMemo` on a structural fingerprint (`l1RoundsKey` at line 73, dep at line 143), **not** on `dash` identity. Re-renders triggered by unrelated `dash` mutations don't recompute the tree.
 - Chart `useMemo`s key on narrow stable derivations (e.g. `dash?.rounds`), not on `dash`.
 

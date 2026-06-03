@@ -1,6 +1,6 @@
 # M12: Operator-Steered Fork (human-in-the-loop steer)
 
-> **Status:** Implemented. Stop → select a candidate → **Steer & fork** in the Scoring inspector ([`ScoringInspector.tsx`](../../webapp/components/dashboard/ScoringInspector.tsx) → [`control-panel/SteerForkPanel.tsx`](../../webapp/components/dashboard/control-panel/SteerForkPanel.tsx) in a `Dialog`): edit the candidate's evolved prompt + the full node config (model / params / provider, all `pipeline.json`-driven via `node_config_schema`, with the structured output shown read-only) + reconcile run limits → fork tagged `operator_steered`. Every operator fork carries a seed (the `ForkSeed` is required). Typed `ForkSpec`/`ForkSeed`/`LimitOverrides` ([`domain/run_records.py`](../../promptpotter/domain/run_records.py)); seed read once at the runner seam from `.overrides/seed.json` (`CycleOverrideMixin`); origin resolved fork-seed-first (`resolve_origin_opt_search_point`). The `fork-cycle` command **mints then launches** the fork (an implicit resume against the new cycle), so steer-and-fork continues optimizing in one gesture — minting alone left the fork seeded-but-idle when driven from the web (no manual CLI `resume` ever came). Rode the existing `fork-cycle` command + control-plane highway ([`ADR-0001`](../adr/0001-m12-control-plane.md)) — **no new verb.**
+> **Status:** Implemented. Stop → select a candidate → **Steer & fork** in the Scoring inspector ([`ScoringInspector.tsx`](../../webapp/components/dashboard/scoring/ScoringInspector.tsx) → [`control/SteerForkPanel.tsx`](../../webapp/components/dashboard/control/SteerForkPanel.tsx) in a `Dialog`): edit the candidate's evolved prompt + the full node config (model / params / provider, all `pipeline.json`-driven via `node_config_schema`, with the structured output shown read-only) + reconcile run limits → fork tagged `operator_steered`. Every operator fork carries a seed (the `ForkSeed` is required). Typed `ForkSpec`/`ForkSeed`/`LimitOverrides` ([`domain/run_records.py`](../../promptpotter/domain/run_records.py)); seed read once at the runner seam from `.overrides/seed.json` (`CycleOverrideMixin`); origin resolved fork-seed-first (`resolve_origin_opt_search_point`). The `fork-cycle` command **mints then launches** the fork (an implicit resume against the new cycle), so steer-and-fork continues optimizing in one gesture — minting alone left the fork seeded-but-idle when driven from the web (no manual CLI `resume` ever came). Rode the existing `fork-cycle` command + control-plane highway ([`ADR-0001`](../adr/0001-m12-control-plane.md)) — **no new verb.**
 
 ## What this covers
 
@@ -49,12 +49,12 @@ The fork-creation dialog is therefore **edit-the-searchpoint + reconcile-the-lim
 - **No new command verb.** This is `fork-cycle` with a richer payload, not a parallel write path.
 - **Not the L4 / multi-connector track.** Sits alongside [`m12-multi-connector.md`](m12-multi-connector.md) and ADR-0001, sharing the control plane; independent of L4 closure.
 
-## Code surface (when built)
+## Code surface (as built)
 
 | Area | Files |
 |---|---|
 | Command contract | [`m12-api-openapi.yaml`](m12-api-openapi.yaml) (`ForkCyclePayload`) |
 | Applier | `command_dispatcher.py` (`_apply_fork_cycle`), `ledger.py` (`inherit_from`) |
 | Resume-from-seed | `application/.../resume_and_fork/`, `for_session(seed_from_cycle_id=…)` |
-| Webapp write | `BackendNodeDetail.tsx` (flip `mode`), `ChatPane.tsx` / searchpoint selection, `_postCommand`/`postCreateFork` |
-| Editors (reuse) | `ingest/PipelineConfigEditor.tsx`, `ingest/PromptFieldsEditor.tsx` (already unwelded; flip to `mode="edit"`) |
+| Webapp write | `dashboard/scoring/ScoringInspector.tsx` → `dashboard/control/SteerForkPanel.tsx` (Dialog), searchpoint selection, `postForkCycle` |
+| Editors (reuse) | `dashboard/control/NodeConfigEditor.tsx`, `dashboard/control/PromptFieldsEditor.tsx` (the read-only inspect variant reuses the same rows) |

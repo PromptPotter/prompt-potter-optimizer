@@ -5,7 +5,7 @@ import { rootCycleId, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
 import { useStableContent } from "@/lib/stable";
 import { CardFrame } from "@/components/ui/Card";
-import { useSelection } from "./SelectionContext";
+import { useSelection } from "@/lib/SelectionContext";
 import { FamilyTree } from "./FamilyTree";
 import { roundCandidatesByRound } from "@/lib/derivations/round-candidates";
 import type { CandidateRow } from "@/lib/types/candidate";

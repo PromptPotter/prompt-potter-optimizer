@@ -9,13 +9,13 @@ consumer (the M11 PromptPotter-as-backend connector) is built.
 Sibling shape to `datasets/gsm8k/` and `datasets/lca-termnorm/` for the
 config files; the **rows themselves** live in
 `golden_traces.json` and conform to the row contract emitted by
-`promptpotter/application/datasets.py::load_potter_traces`.
+`promptpotter/application/datasets/traces.py::load_potter_traces`.
 
 ## What this dataset IS
 
 PromptPotter optimizes the L1 / L1_CRITIQUE / L2 / L3 **meta-prompts**
 themselves — the four optimizer LLM calls described by
-`promptpotter/application/optimization/optimizer_pipeline.json`. Each
+`datasets/_optimizer/pipeline.json`. Each
 sample is one round-to-round transition extracted from a previously-run
 campaign: the optimizer state at round N (`round_context`), the change
 the optimizer made (`next_brief`), and the accuracy delta that followed

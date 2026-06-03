@@ -265,10 +265,10 @@ scope for any "hide non-functional controls" sweep.
 | Placeholder | File | Future surface |
 |---|---|---|
 | Topbar search input (disabled) | `webapp/components/shell/Topbar.tsx:29` | M13+ analytics search |
-| ChatPane attach + textarea + send button (disabled) | `webapp/components/dashboard/ChatPane.tsx:273-279` | M13+ chat-first operator UX |
-| ChatPane Extended-thinking / Web-search / Code-execution toggles (`toggle locked`) | `webapp/components/dashboard/ChatPane.tsx:286-322` | M13+ chat-first feature toggles |
+| ChatPane attach + textarea + send button (disabled) | `webapp/components/chat/ChatPane.tsx:273-279` | M13+ chat-first operator UX |
+| ChatPane Extended-thinking / Web-search / Code-execution toggles (`toggle locked`) | `webapp/components/chat/ChatPane.tsx:286-322` | M13+ chat-first feature toggles |
 | ~~ChatPane "job-footer" — "Adjust spend / finishing criteria — wired in M12"~~ | — | **FULFILLED 2026-05-30.** The placeholder is now the live `SpendBudgetControl` (`change-spend-budget`) in the job-bar dropdown. No longer a placeholder. |
-| ~~ConfigMenu — gear icon + frozen-parameters panel~~ | — | **CONSOLIDATED 2026-06-02.** Replaced by `BackendNodeDetail` (`webapp/components/dashboard/BackendNodeDetail.tsx`), opened by clicking the backend node in `TargetPipelineHero`. Read-only config-on-the-node (model/thinking/lock + origin prompt), derived from the real `optimizer_locks` (no hardcoded map). The editable surface stays deferred to the M12 control-plane (`// M12` seam in `BackendNodeDetail`). |
+| ~~ConfigMenu — gear icon + frozen-parameters panel~~ | — | **CONSOLIDATED 2026-06-02.** Replaced by `BackendNodeDetail` (`webapp/components/dashboard/pipeline/BackendNodeDetail.tsx`), opened by clicking the backend node in `TargetPipelineHero`. Read-only config-on-the-node (model/thinking/lock + origin prompt), derived from the real `optimizer_locks` (no hardcoded map). The editable surface stays deferred to the M12 control-plane (`// M12` seam in `BackendNodeDetail`). |
 | AccountModal "Update profile" button (disabled) | `webapp/components/account/AccountModal.tsx:193-200` | M13+ profile-editing surface |
 | AccountModal "Remove account" menu item (disabled) | `webapp/components/account/AccountModal.tsx:251-258` | M13+ multi-provider account management |
 | AccountModal "+ Connect account" button (alerts then no-ops) | `webapp/components/account/AccountModal.tsx:267-278` | M13+ multi-provider account linking |

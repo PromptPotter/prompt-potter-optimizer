@@ -187,26 +187,20 @@ The persisted world is a four-entity containment hierarchy
 - **Adaptive queue mechanism** — the live per-step sample selector
   inside the PoBB loop. Maintains a Gaussian posterior on the
   candidate's latent ability `θ_c` and re-picks every measurement
-  by the blended pick-value objective.
+  by the pick-value objective.
   `application/intelligence/adaptive_queue_mechanism.py`.
 - **pick-value** — the adaptive queue mechanism's single one-step-greedy
-  objective: `decision_information_gain + explore_weight ·
-  model_information_gain`, both terms in nats. Drives the
-  per-step pick and the `pick_score` snapshot.
-- **Decision information gain** — the exploit (dominant) term of
-  pick-value: the mutual information between the next outcome and
+  objective: `decision_information_gain` (in nats). Drives the
+  per-step pick and the `pick_score` snapshot. (The earlier blended
+  `+ explore_weight · model_information_gain` term was dropped 2026-05;
+  see [`specs/verdict-resolution.md`](specs/verdict-resolution.md).)
+- **Decision information gain** — the pick-value objective: the
+  mutual information between the next outcome and
   the keep/abort verdict `θ_c > θ_s` against the seed. The
   means-known limit recovers Bernoulli Chernoff information.
-- **Model information gain** — the explore term of pick-value: the
-  expected reduction in a sample's difficulty uncertainty,
-  `½·log(1 + w̄·se_δ²)`. Zero when `se_δ → 0`, so it never fights
-  the decision term where the model is already sharp.
-- **explore_weight** — `ExplorationConfig` knob (default 0.15):
-  the small, dimensionless weight on pick-value's explore term.
-  Kept well below 1 so the queue mechanism stays decision-dominated.
 - **pick_score snapshot** — descriptive per-sample
   `pick_score.per_sample` on the hard-samples artifact: the
-  blended pick-value for a fresh mutation of the seed, ability
+  pick-value for a fresh mutation of the seed, ability
   prior `N(θ_seed, σ_θ²)` (centred on the parent, not the
   population-mean anchor 0). Consumed by the webapp dataset table;
   the live adaptive queue mechanism uses its own per-candidate

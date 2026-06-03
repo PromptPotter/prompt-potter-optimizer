@@ -107,7 +107,7 @@ Self-healing fires through a different door: failures route directly to the laye
 
 ## 3. Scoring node
 
-`score_search_point()` (`application/scoring/search_point_scorer.py:422`) is the only optimizer node that's **not LLM-driven**. It:
+`score_search_point()` (`application/scoring/search_point_scorer.py:115`) is the only optimizer node that's **not LLM-driven**. It:
 
 - Runs a frozen `JobSearchPoint` (rendered prompt + `pipeline_params`) against the **backend**, not the optimizer LLM.
 - Loops over the scoring dataset, calls the backend per sample, applies the scorer formula.
@@ -134,7 +134,7 @@ archive/                            MeasurementArchive
                                         sample)    config)  both)
 ```
 
-**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/loaders.py:397`) → `archive.save(run_id, data)` (`infrastructure/store/measurement_archive.py:97`) → `AxisIndex.refresh()` pulls via `load_since()` (`application/intelligence/indexes.py:721`).
+**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/loaders.py:368`) → `archive.save(run_id, data)` (`infrastructure/store/measurement_archive.py:101`) → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py:283`) pulls via `archive.load_since()`.
 
 **Read paths** (both return `list[Measurement]`):
 

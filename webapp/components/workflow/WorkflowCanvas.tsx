@@ -13,7 +13,7 @@ import { cx } from "@/lib/cx";
 import { getCss } from "@/lib/theme";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { availableRounds } from "@/lib/derivations/round-axis";
-import { useSelection } from "@/components/dashboard/SelectionContext";
+import { useSelection } from "@/lib/SelectionContext";
 import type { NodeDataLike, PipelineDoc } from "./types";
 
 // Edge variants — collapses three parallel switches (stroke colour key,

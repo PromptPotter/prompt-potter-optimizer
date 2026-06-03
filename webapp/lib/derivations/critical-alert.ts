@@ -5,7 +5,7 @@
 // alt-tabbed away would notice. This collapses the "something is wrong"
 // question to one boolean-ish verdict the top banner renders on every tab.
 //
-// Inputs are already-reconciled signals owned by DashboardPane (the same
+// Inputs are already-reconciled signals owned by AppShell (the same
 // `bannerStatus`/`bannerText`/`bannerHint` it feeds the StatusAssistant, plus
 // `dash` and the connection-aware `runPhaseResolved`) — no new state, no new
 // poll. Reader-side and pure, so it sits in the Vitest derivation scope.
@@ -60,7 +60,7 @@ export function criticalAlert({
   }
   // Every offline-class condition (fetch failure, stamp mismatch, no wallclock,
   // empty workspace) is already collapsed to `offline` by the poll + the
-  // DashboardPane reconciliation, so this one branch covers them all.
+  // AppShell reconciliation, so this one branch covers them all.
   if (bannerStatus === "offline") {
     return { severity: "critical", title: bannerText, detail: bannerHint };
   }

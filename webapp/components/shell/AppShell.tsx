@@ -11,35 +11,35 @@ import { applyChartDefaults } from "@/lib/theme";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { StatusAssistant } from "@/components/status/StatusAssistant";
-import { TopStrip } from "./TopStrip";
-import { ChatPane } from "./ChatPane";
-import { Lane } from "./Lane";
-import { LiveStateCard } from "./LiveStateCard";
-import { RoundTabsStrip } from "./round-samples/RoundTabsStrip";
-import { CyclePicker } from "./CyclePicker";
-import { SelectionProvider } from "./SelectionContext";
-import { IngestPane } from "./IngestPane";
-import { NowTriad } from "./NowTriad";
-import { RunErrorBanner } from "./RunErrorBanner";
-import { CriticalAlertBanner } from "./CriticalAlertBanner";
+import { TopStrip } from "@/components/dashboard/layout/TopStrip";
+import { ChatPane } from "@/components/chat/ChatPane";
+import { Lane } from "@/components/dashboard/layout/Lane";
+import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
+import { RoundTabsStrip } from "@/components/dashboard/samples/RoundTabsStrip";
+import { CyclePicker } from "@/components/shell/CyclePicker";
+import { SelectionProvider } from "@/lib/SelectionContext";
+import { IngestPane } from "@/components/ingest/IngestPane";
+import { NowTriad } from "@/components/dashboard/layout/NowTriad";
+import { RunErrorBanner } from "@/components/dashboard/layout/RunErrorBanner";
+import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { FilesPane } from "@/components/tree/FilesPane";
 import { VerifyPane } from "@/components/verify/VerifyPane";
 
 import type { PipelineDoc } from "@/components/workflow/types";
 
-export function DashboardPane() {
+export function AppShell() {
   // `campaignId` + `cycleId` are owned by WorkspaceProvider (the single
   // workspace-identity source of truth) — this only forwards them into the
   // dashboard's per-cycle data stream.
   const { campaignId, cycleId } = useWorkspace();
   return (
     <CycleStreamProvider campaignId={campaignId} cycleId={cycleId}>
-      <DashboardPaneInner />
+      <AppShellInner />
     </CycleStreamProvider>
   );
 }
 
-function DashboardPaneInner() {
+function AppShellInner() {
   // Workspace identity comes from the shared context — no local cycle
   // resolution, no independent /sessions/active poll. A `cycle_id` is unique only
   // within its campaign, so `campaignId` rides alongside `cycleId`.

@@ -5,9 +5,9 @@ import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { lockedParams } from "@/lib/optimizer-locks";
 import { RecapCard } from "./RecapCard";
 import { OptionalSettings } from "./OptionalSettings";
-import { LockTable } from "@/components/dashboard/control-panel/LockTable";
-import { AllowedValuesEditor } from "@/components/dashboard/control-panel/AllowedValuesEditor";
-import { PromptFieldsEditor } from "@/components/dashboard/control-panel/PromptFieldsEditor";
+import { LockTable } from "@/components/dashboard/control/LockTable";
+import { AllowedValuesEditor } from "@/components/dashboard/control/AllowedValuesEditor";
+import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsEditor";
 
 // Step 3 — one compact preview the operator reviews before launch: the
 // editable pipeline/optimizer config (model lock, allowed models, thinking

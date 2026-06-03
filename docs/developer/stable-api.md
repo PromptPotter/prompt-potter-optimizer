@@ -90,19 +90,18 @@ Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::C
 | `improvement_significance` | 1.0 | Significance gate (disabled by default; <1.0 requires p < this). |
 | `zero_signal_filter_enabled` | False | Round-boundary prune always-hit/always-miss samples from the dataset. |
 | `forbidden_axes_strict` | True | Reject L1 candidates that mutate operator-fixed axes (`model`, `provider`). |
-| `exploration.swap_out_delta_se` | 0.7 | Rasch SE threshold for the scoring-set swap-out. |
-| `exploration.swap_in_kg_threshold` | 0.01 | Rasch KG threshold for swap-in. |
-| `exploration.max_swaps_per_round` | 3 | Cap on scoring-set churn per round. |
+| `exploration.seed_heatmap_from_archive` | False | Round-end hard-sample Rasch fit folds in prior archive observations (cross-cycle δ_s ordering). |
+| `exploration.heatmap_show_archive_candidates` | False | When seeding from archive: also show archive candidate IDs on the heatmap Y-axis (else hidden from display). |
 
 **`optimizer_llm` knobs:** `provider` (`groq`/`openai`/`anthropic`/`openrouter`), `model` (provider-specific). Per-node temperature + max_tokens come from `datasets/_optimizer/pipeline.json`, not the campaign config.
 
-Constants moved out of `campaign.json` (they live next to their consumer): L1 candidate-generation temperature (`l1/generate.py::L1_CREATIVITY`), L2/L3 transition temperatures (`LayerStrategy.default_temperature` in `escalation/firing/{l2,l3}_driver.py`), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
+Constants moved out of `campaign.json` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`), L2/L3 transition temperatures (`optimizer_llm.temperature_for(layer_id)`), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
 
 The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. L2 and L3 are always-on architecture.
 
 ### Other files
 
-- **`prompts/{node}.json`** — 8-field `PromptTemplate` JSON per node. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `application/datasets.py`.
+- **`prompts/{node}.json`** — 8-field `PromptTemplate` JSON per node. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `application/datasets/prompts.py::load_node_prompt`.
 - **`task_description.md`** — free-form markdown; decomposed at `init` into the `task_context` dict on `OptSearchPoint`.
 - **`dataset.md`** — operator guide; free-form, not parsed.
 - **`scan_variants.json`** *(optional)* — per-dataset axis-mutation library for sensitivity scans.
@@ -154,7 +153,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 
 **Mutual exclusions:** `--sweep-batch` and `--diag` mutually exclusive on `new`.
 
-Other commands (`report`, `inspect`) have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them).
+Other subcommands (`sweep`, plus the maintenance verbs) have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them).
 
 ## 6. Ledger event types
 
@@ -162,7 +161,7 @@ Typed records in `events.jsonl` from `domain/run_records.py`:
 
 - **`PhaseRecord`** — phase enter/exit + round-boundary events. Fields: `record_type="phase"`, `phase`, `event`, `round`, `payload`.
 - **`SnapshotRecord`** — per-sample / per-candidate snapshots inside a round. Fields: `record_type="snapshot"`, `event`, `round`, `candidate_idx`, `candidate_total`, `sample_idx`, `sample_total`, `payload`.
-- **`ResumeCheckpointRecord`** — replayed-vs-archival decision rows feeding resume divergence checks. Fields: `record_type="checkpoint"`, `round`, `kind` (`ResumeCheckpointKind`), `payload`.
+- **`ResumeCheckpointRecord`** — replayed-vs-archival decision rows feeding resume divergence checks. Fields: `record_type="decision"`, `round`, `kind` (`ResumeCheckpointKind`), `payload`.
 - **`TokenUsageRecord`** — optimizer LLM token rollups for spend. Fields: `record_type="token_usage"`, `model`, `provider`, `input_tokens`, `output_tokens`, `usd_cost`, `round`, `node`.
 - **`LLMCallStartRecord`** — paired in-flight marker for live `dashboard.json::in_flight`. Fields: `record_type="llm_call_start"`, `call_id`, `node`, `model`, `round`, `candidate_idx`, `started_at_ms`.
 - **`LLMCallRecord`** — paired LLM-call audit record. Fields: `record_type="llm_call"`, `call_id`, `node`, `model`, `round`, `prompt`, `response`, `parsed`, `usage`, `latency_ms`.
@@ -189,7 +188,7 @@ Operator-visible files inside `campaigns/{cycle_id}/`. Webapp + downstream tooli
 | `.runtime/cache/rounds/round_NNNN.json` | `AuditTrailView.flush` | Per-round audit cache (writer-buffered until round close). |
 | `.runtime/cache/candidates/round_NNNN.json` | `CampaignStore.save_round_candidates` | Mid-round candidates checkpoint (deleted after L1 score on escalation). |
 | `.runtime/streams/round_NNNN_p_best.jsonl` | `PoBBStreamView._handle_snapshot` | Per-sample P(best) trajectory. |
-| `.runtime/stop.flag` | `presentation/api/routers/active.py` `POST /stop` | Operator stop signal; consumed by `session.stop_check`. |
+| `.runtime/stop.flag` | `api/middleware/command_dispatcher.py` (`POST /commands/{kind}`, kind=`stop-cycle`) | Operator stop signal; consumed by `session.stop_check`. |
 | `.runtime/archived/resumed_at_<ts>/` | `CampaignStore.rewind_to_round` | Rewound rounds + candidates moved here on `--from N`. |
 
 Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the root. Each carries its own per-cycle artifacts, including its own `dashboard.json` + `output.log` (a fork's is seeded from its parent at the cut). `.runtime/` shapes may change between minor versions — the public `rounds/round_NNNN.json` tree + `index.json` + `log.md` are the contract for any tool reading per-cycle results.

@@ -121,7 +121,7 @@ python -m promptpotter new bbeh --backend-url http://127.0.0.1:8000
 python -m promptpotter new --sweep-batch   # dispatches sweep-mode against the freshly-minted cycle
 ```
 
-**Reading results.** Side-by-side: `python scripts/ppot_review.py --sweep` (groups by parent root, sorts by `round_1_top_lift`, reports `proxy_lift_corr` once ≥4 paired sweep/full branches share an `l1_generate_hash`). **Sweep is screening, not validation** — promote winners to a full `new` run. L1-surface only; pipeline/scoring changes are intentionally absent from the operator file shape. Forks run sequentially (the active pointer doesn't tolerate concurrent mints).
+**Reading results.** Side-by-side: `python -m promptpotter sweep rank` (groups by parent root, sorts by `round_1_top_lift`, reports `proxy_lift_corr` once ≥4 paired sweep/full branches share an `l1_generate_hash`). **Sweep is screening, not validation** — promote winners to a full `new` run. L1-surface only; pipeline/scoring changes are intentionally absent from the operator file shape. Forks run sequentially (the active pointer doesn't tolerate concurrent mints).
 
 ## Steering composite scoring between rounds
 

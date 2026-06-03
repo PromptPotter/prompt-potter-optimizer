@@ -1,8 +1,8 @@
 "use client";
 import type { ConnectorView } from "@/lib/types/connector";
-import { PromptFieldsEditor } from "@/components/dashboard/control-panel/PromptFieldsEditor";
-import { NodeConfigEditor } from "@/components/dashboard/control-panel/NodeConfigEditor";
-import { NodeOutputSchemaView } from "@/components/dashboard/control-panel/NodeOutputSchemaView";
+import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsEditor";
+import { NodeConfigEditor } from "@/components/dashboard/control/NodeConfigEditor";
+import { NodeOutputSchemaView } from "@/components/dashboard/control/NodeOutputSchemaView";
 
 // Read-only config detail for a *target/backend* node, opened by clicking the
 // node in TargetPipelineHero. Renders the whole node as one unit — config

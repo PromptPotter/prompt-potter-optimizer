@@ -58,7 +58,7 @@ Trigger if any of: `.env` missing, backend `/status` unreachable, or requested d
 
 **Backend `/status` unreachable.** TermNorm is the canonical test backend. If it isn't local yet, `git clone https://github.com/runfish5/TermNorm-excel` to `../TermNorm-excel` (sibling of PromptPotter; operator can override the path). Once present, tell the operator to run `start-server-py-LLMs.bat` in their own terminal — same hand-off model as Phase 4 (`new` / `resume`). Wait for `/status` 200 before continuing. *Future improvement: spawn a dedicated terminal automatically once that capability lands.*
 
-**Dataset has no loader.** Anything already in `promptpotter/application/datasets.py::DATASET_LOADERS` (bundled benchmarks + `lca-termnorm` via `load_excel_ground_truth`) needs nothing — `new` picks them up. **New dataset:** the skill writes a custom loader for the operator. Vocabulary: a function returning `list[Sample]` (`promptpotter/domain/sample.py` — `query` + `ground_truth` + optional `id`/extras). Read the operator's data shape (CSV, Excel, JSON, HuggingFace, …), generate `load_<name>(...)`, and register it in `DATASET_LOADERS`. Then draft `datasets/<name>/{pipeline.json, campaign.json, dataset.md, prompts/<node>.json}` against the patterns in `datasets/bbeh/`. The operator just describes their data and answer keys — Claude does the wiring.
+**Dataset has no loader.** Anything already in `promptpotter/application/datasets/loaders.py::DATASET_LOADERS` (bundled benchmarks + `lca-termnorm` via `load_excel_ground_truth`) needs nothing — `new` picks them up. **New dataset:** the skill writes a custom loader for the operator. Vocabulary: a function returning `list[Sample]` (`promptpotter/domain/sample.py` — `query` + `ground_truth` + optional `id`/extras). Read the operator's data shape (CSV, Excel, JSON, HuggingFace, …), generate `load_<name>(...)`, and register it in `DATASET_LOADERS`. Then draft `datasets/<name>/{pipeline.json, campaign.json, dataset.md, prompts/<node>.json}` against the patterns in `datasets/bbeh/`. The operator just describes their data and answer keys — Claude does the wiring.
 
 ## Phase 0: Audit (silent)
 
@@ -66,7 +66,7 @@ Trigger if any of: `.env` missing, backend `/status` unreachable, or requested d
 2. `curl -s {backend_url}/status` — backend up?
 3. Active pointer → `index.json` + `dashboard.json` if present.
 
-**Print only if** no dataset arg, dataset not implemented (scorer in `promptpotter/application/scoring/formula/matchers.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets.py::DATASET_LOADERS`), or an anomaly from the allowlist below fires.
+**Print only if** no dataset arg, dataset not implemented (scorer in `promptpotter/application/scoring/formula/matchers.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets/loaders.py::DATASET_LOADERS`), or an anomaly from the allowlist below fires.
 
 If `datasets/{name}/` has never produced a `dataset_runs/` entry, suggest (don't auto-run): `python scripts/smoke_campaign.py --dataset {name}` (~90s).
 
@@ -112,7 +112,7 @@ CRITIQUE: {2-4 key lines — what failed, what to try next}
 NEXT:     {continue L1 / escalate to L2 / etc.}
 ```
 
-**Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{campaign_id}/dashboard.json` (active campaign + cycle ids in `projects/{tenant_id}/.workspace/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/ui/> — polls `dashboard.json` every 2 s; reload the page after a fresh `new <name>` mint. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-sample HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `resume` to continue.
+**Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{campaign_id}/dashboard.json` (active campaign + cycle ids in `projects/{tenant_id}/.workspace/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/> — polls `dashboard.json` every 2 s; reload the page after a fresh `new <name>` mint. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.runtime/cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-sample HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `resume` to continue.
 
 **Incremental persistence.** Every query lands in `archive/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 

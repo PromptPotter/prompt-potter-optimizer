@@ -33,11 +33,13 @@ A node emits `diagnostics.warnings[]`; PromptPotter counts them, synthesizes a `
 
 | Endpoint | Description |
 |----------|-------------|
-| `POST /promptpotter/v1/backends` · `GET …/backends` | Register / list backends |
-| `POST …/backends/{id}/sync` | Sync experiments from a backend |
+| `GET /api/v1/backends` · `…/backends/{id}` | List / detail |
+| `GET …/backends/{id}/experiments` · `…/experiments/{exp_id}` | Backend experiments |
 | `GET …/backends/{id}/pipeline` | Pipeline view (30 s cache) |
+| `GET …/backends/{id}/health` | Backend health |
 | `GET …/campaigns` · `…/campaigns/{id}` | List / detail |
-| `GET …/health` | Health |
+| `GET …/health` | Service health |
+| `POST …/commands/{kind}` | Mutations — register / sync a backend, stop / pause / steer a run (ADR-0001 command highway) |
 
 ```bash
 uvicorn promptpotter.main:app --port 8001 --reload   # Swagger: /docs

@@ -3,14 +3,14 @@
 The wire shape PromptPotter parses from `GET /pipeline` (or from a
 local file under `datasets/{name}/pipeline.json`). Every connector
 publishes this shape; the **same parser** consumes
-`promptpotter/application/optimization/optimizer_pipeline.json`
+`datasets/_optimizer/pipeline.json`
 unchanged. If you're writing a new connector or extending the
 optimizer manifest, this is the contract you implement against.
 
 Concept-level intro for the node model lives in
 [`node-standard.md`](node-standard.md); this doc is the strict
 field-level shape, pinned by
-[`tests/test_optimizer_pipeline_parity.py`](../../tests/test_optimizer_pipeline_parity.py).
+[`tests/test_pipeline_config.py`](../../tests/test_pipeline_config.py).
 
 ## Top-level shape
 
@@ -114,7 +114,7 @@ A minimal one — the GSM8K single-LLM-node pipeline — at
 ## `optimizer_pipeline.json` parity
 
 PromptPotter's own meta-prompt pipeline at
-`promptpotter/application/optimization/optimizer_pipeline.json` uses
+`datasets/_optimizer/pipeline.json` uses
 the **same shape** as a backend's `pipeline.json`:
 
 - Same `nodes` dict, keyed by node name (`l1_generate`, `l1_critique`,
@@ -135,7 +135,7 @@ M12 L4 self-optimization closure (see
 + [`docs/specs/m12-multi-connector.md`](../specs/m12-multi-connector.md)).
 
 The parity is enforced by
-[`tests/test_optimizer_pipeline_parity.py`](../../tests/test_optimizer_pipeline_parity.py)
+[`tests/test_pipeline_config.py`](../../tests/test_pipeline_config.py)
 — if `optimizer_pipeline.json` ever drifts from a backend
 pipeline's shape (parallel registries, ad-hoc keys, special-case
 fields), the test fails.

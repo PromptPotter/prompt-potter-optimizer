@@ -4,10 +4,10 @@ import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { OptimizerNodeDetail } from "@/components/workflow/OptimizerNodeDetail";
 import { isOptimizerNodeId } from "@/components/workflow/layout";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
-import { LineageTree } from "./LineageTree";
-import { RoundSamplesView } from "./round-samples/RoundSamplesView";
-import { ScoringInspector } from "./ScoringInspector";
-import { useSelection } from "./SelectionContext";
+import { LineageTree } from "@/components/dashboard/lineage/LineageTree";
+import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
+import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
+import { useSelection } from "@/lib/SelectionContext";
 import type { PipelineDoc } from "@/components/workflow/types";
 
 // The Now lane's main row + drill-down. Renders the triad (Fitness +
@@ -19,7 +19,7 @@ import type { PipelineDoc } from "@/components/workflow/types";
 // All three triad cards share `useSelection`: a click in any one
 // re-anchors the others through (candidate, round) — fitness ↔
 // lineage ↔ inspector ↔ samples are structurally locked together.
-// Extracted out of DashboardPane to keep the page-level component a
+// Extracted out of AppShell to keep the page-level component a
 // thin shell + lanes; the triad's own coupling lives here.
 
 interface Props {

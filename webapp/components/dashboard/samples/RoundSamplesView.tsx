@@ -6,7 +6,7 @@ import {
   type StatusKind,
 } from "@/lib/poll";
 import { CardFrame } from "@/components/ui/Card";
-import { useSelection } from "@/components/dashboard/SelectionContext";
+import { useSelection } from "@/lib/SelectionContext";
 import { useRoundFile } from "@/lib/hooks/useRoundFile";
 import { roundCandidatesByRound } from "@/lib/derivations/round-candidates";
 import {
