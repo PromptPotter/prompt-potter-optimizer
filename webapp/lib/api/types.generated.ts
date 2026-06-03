@@ -115,6 +115,16 @@ export interface DashboardError {
   stop_reason: string;
 }
 
+/** ``state.run_limits`` — the cycle's declared run-limit ceilings, written */
+export interface RunLimits {
+  max_rounds: number | null;
+  l1_patience: number;
+  l2_patience: number | null;
+  l3_patience: number | null;
+  pobb_epsilon: number;
+  spend_budget_usd: number | null;
+}
+
 /** ``dashboard.json`` — operator-facing snapshot, polled by the webapp. */
 export interface LiveDashboardState {
   campaign_id: string;
@@ -147,6 +157,7 @@ export interface LiveDashboardState {
   wallclock_serialized_at: string | null;
   n_variants: number;
   sp_budget_ttest: number;
+  run_limits: RunLimits | null;
   spend: SpendRollup;
   in_flight: InFlightCall | null;
   backfill_log: BackfillLogEntry[];

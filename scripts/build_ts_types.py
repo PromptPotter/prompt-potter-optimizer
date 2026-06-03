@@ -30,6 +30,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     InFlightCall,
     LiveDashboardState,
     LoopWarning,
+    RunLimits,
     SpendBucket,
     SpendRollup,
 )
@@ -85,6 +86,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     BackfillLogEntry,
     InFlightCall,
     DashboardError,
+    RunLimits,
     LiveDashboardState,
     # --- datasets router ---
     DatasetItem,

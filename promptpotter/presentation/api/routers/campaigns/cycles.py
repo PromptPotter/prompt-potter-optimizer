@@ -41,7 +41,7 @@ class CampaignCyclesResponse(BaseModel):
     cycles: list[CycleSummary] = Field(description="Every cycle in the campaign's lineage tree")
 
 
-class RoundSummary(BaseModel):
+class CycleRoundEntry(BaseModel):
     round: int = Field(description="Round number within the cycle")
     label: str = Field(description="Human-readable label (winner's L1 description)")
     accuracy: float | None = Field(default=None, description="Round-level accuracy (winner)")
@@ -51,7 +51,7 @@ class RoundSummary(BaseModel):
 class CycleDetailResponse(CycleSummary):
     backend_id: str = Field(default="", description="Backend this cycle optimizes against")
     best_round_id: str | None = Field(default=None, description="Round id of the best round")
-    rounds: list[RoundSummary] = Field(description="Ordered round summaries")
+    rounds: list[CycleRoundEntry] = Field(description="Ordered round summaries")
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/cycles", response_model=CampaignCyclesResponse)
@@ -78,8 +78,8 @@ async def list_campaign_cycles(store: StoreDep, campaign_id: str) -> CampaignCyc
     return CampaignCyclesResponse(campaign_id=campaign_id, cycles=cycles)
 
 
-def _round_summaries(index: dict[str, Any]) -> list[RoundSummary]:
-    out: list[RoundSummary] = []
+def _round_summaries(index: dict[str, Any]) -> list[CycleRoundEntry]:
+    out: list[CycleRoundEntry] = []
     rounds_raw = index.get("rounds")
     if not isinstance(rounds_raw, list):
         return out
@@ -90,7 +90,7 @@ def _round_summaries(index: dict[str, Any]) -> list[RoundSummary]:
         if not isinstance(rn, int):
             continue
         out.append(
-            RoundSummary(
+            CycleRoundEntry(
                 round=rn,
                 label=str(r.get("label") or ""),
                 accuracy=(

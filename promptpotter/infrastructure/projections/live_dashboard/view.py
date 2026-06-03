@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.results import candidate_label
+from promptpotter.domain.results import OriginSummary, RoundSummary, candidate_label
 from promptpotter.domain.run_records import (
     CycleRecord,
     ErrorRecord,
@@ -47,12 +47,21 @@ from promptpotter.infrastructure.projections.audit_trail import (
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_dashboard.factory import resolve_resume_state
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import build_round_summary
+from promptpotter.infrastructure.projections.live_dashboard.state import (
+    BackendWarning,
+    BackfillLogEntry,
+    DashboardError,
+    InFlightCall,
+    LiveDashboardState,
+    LoopWarning,
+    RunLimits,
+    SpendRollup,
+)
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
     apply_p_best_update,
     apply_phase,
     backfill_spend_rates,
-    empty_bucket,
     empty_spend,
     top_n_p_best,
 )
@@ -289,44 +298,38 @@ class LiveDashboardView(DerivedView):
         self._recorder = recorder
         self.patience_max = l1_patience
         r = resume_from or {}
-        self.state: dict[str, Any] = {
+        # The schema (LiveDashboardState) IS the on-disk shape — _persist dumps
+        # this instance directly, so every field's presence + type is enforced
+        # at write time. Pass identity + resume-inherited values; schema defaults
+        # supply the rest (run_phase="running", empty lists, None markers). The
+        # view only exists while a run is actively writing, so "running" is the
+        # right default — mark_stopped flips it to terminal, pause/resume declare
+        # transitions; it is never inherited from a resumed terminal/paused snapshot.
+        self.state = LiveDashboardState(
             # Self-identity stamp — never inherited from resume_from / phase event.
-            "campaign_id": campaign_id,
-            "cycle_id": cycle_id,
-            "session_id": session_id,
-            "state": r.get("state", "init"),
-            "state_since": datetime.now(UTC).isoformat(),
-            "stop_reason": r.get("stop_reason"),
+            campaign_id=campaign_id,
+            cycle_id=cycle_id,
+            session_id=session_id,
+            state=r.get("state", "init"),
+            state_since=datetime.now(UTC).isoformat(),
+            stop_reason=r.get("stop_reason"),
             # Inherit round so re-instantiation doesn't zero the operator-visible pointer.
-            "round": int(r.get("round") or 0),
-            "candidate": "",
-            "query": "",
-            "patience": f"0/{l1_patience}",
-            "origin": dict(r.get("origin") or {"accuracy": 0.0, "samples": 0}),
-            "rounds": list(r.get("rounds") or []),
-            "best": r.get("best", 0.0),
-            "current_acc": 0.0,
-            "composite_fitness_formula": r.get("composite_fitness_formula"),
-            "degraded_count": 0,
-            "error_count": 0,
-            "backend_retry_count": 0,
-            "recent_backend_warnings": [],
-            # Optimizer-loop degradations (zero-candidate rounds, L2 soft-rejects,
-            # injection truncations) — previously log-only. Rolling, capped like
-            # recent_backend_warnings. Sole writer: _handle_round_warning.
-            "recent_loop_warnings": [],
-            "total_queries_scored": r.get("total_queries_scored", 0),
-            "total_backend_calls": r.get("total_backend_calls", 0),
-            "current_query_payload": None,
-            "current_sample_id": None,
-            "hard_sample_order": None,
-            "last_query_elapsed_s": 0.0,
-            "wallclock_serialized_at": None,
-            "n_variants": n_variants,
-            "sp_budget_ttest": sp_budget_ttest,
-            "spend": backfill_spend_rates(r.get("spend") or empty_spend()),
-            "in_flight": None,
-        }
+            round=int(r.get("round") or 0),
+            patience=f"0/{l1_patience}",
+            # Merge onto defaults: a resumed snapshot may carry a partial origin
+            # (older data wrote accuracy without samples); fill the required field.
+            origin=OriginSummary.model_validate(
+                {"accuracy": 0.0, "samples": 0, **(r.get("origin") or {})}
+            ),
+            rounds=[RoundSummary.model_validate(x) for x in (r.get("rounds") or [])],
+            best=float(r.get("best") or 0.0),
+            composite_fitness_formula=r.get("composite_fitness_formula"),
+            total_queries_scored=int(r.get("total_queries_scored") or 0),
+            total_backend_calls=int(r.get("total_backend_calls") or 0),
+            n_variants=n_variants,
+            sp_budget_ttest=sp_budget_ttest,
+            spend=SpendRollup.model_validate(backfill_spend_rates(r.get("spend") or empty_spend())),
+        )
         self.short_formula_template: str | None = None
         self._buffer = _RoundBuffer()
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
@@ -334,9 +337,9 @@ class LiveDashboardView(DerivedView):
         # the audit-trail records the same event independently into its round flush.
         self._sticky_llm_calls: dict[str, dict[str, Any]] = dict(initial_llm_nodes or {})
         self._core = LiveStateCore(
-            round_num=int(self.state.get("round") or 0),
-            origin_acc=float((self.state.get("origin") or {}).get("accuracy") or 0.0),
-            best_acc=float(self.state.get("best") or 0.0),
+            round_num=self.state.round,
+            origin_acc=self.state.origin.accuracy,
+            best_acc=self.state.best,
         )
         # Debounce coalesces snapshot/token/LLM-call writes onto one disk
         # flush per ~250 ms (well under the 2 s poll cadence). RLock so the
@@ -414,8 +417,8 @@ class LiveDashboardView(DerivedView):
 
     def _set_state(self, name: str) -> None:
         """Liveness transition — keeps ``state`` and ``state_since`` in lockstep."""
-        self.state["state"] = name
-        self.state["state_since"] = datetime.now(UTC).isoformat()
+        self.state.state = name
+        self.state.state_since = datetime.now(UTC).isoformat()
 
     def mark_stopped(self, reason: str) -> None:
         """Finalize hook — writes terminal state + reason so dashboard tail-readers see it without index.json.
@@ -424,8 +427,8 @@ class LiveDashboardView(DerivedView):
         by :meth:`_handle_error` which subscribes to ``ErrorRecord`` on the
         canonical ledger; ``mark_stopped`` only flips the liveness state.
         """
-        self.state["stop_reason"] = reason
-        self.state["run_phase"] = "terminal"
+        self.state.stop_reason = reason
+        self.state.run_phase = "terminal"
         self._set_state("stopped")
         self._flush_pending_persist()
 
@@ -491,29 +494,29 @@ class LiveDashboardView(DerivedView):
             # the terminal `mark_stopped`. Flushing here bumps the file mtime at
             # the transition, so the 304-cached dashboard route serves the new
             # phase and a stale (paused) file still reads as paused.
-            if self.state.get("run_phase") not in ("terminal", record.event):
-                self.state["run_phase"] = record.event
+            if self.state.run_phase not in ("terminal", record.event):
+                self.state.run_phase = record.event
                 self._flush_pending_persist()
             return
 
         if record.phase == "backend" and record.event == "warning":
             # Surface backend retries (429 / 5xx / transport) — retry behaviour itself is unchanged.
             payload = dict(record.payload or {})
-            self.state["backend_retry_count"] = int(self.state.get("backend_retry_count") or 0) + 1
-            warning = {
-                "ts": datetime.now(UTC).isoformat(),
-                "kind": payload.get("kind", "unknown"),
-                "attempt": payload.get("attempt"),
-                "max_attempts": payload.get("max_attempts"),
-                "wait_s": payload.get("wait_s"),
-                "error_class": payload.get("error_class"),
-                "status_code": payload.get("status_code"),
-                "final": bool(payload.get("final", False)),
-                "query": payload.get("query"),
-            }
-            recent: list[dict[str, Any]] = list(self.state.get("recent_backend_warnings") or [])
-            recent.append(warning)
-            self.state["recent_backend_warnings"] = recent[-10:]
+            self.state.backend_retry_count += 1
+            warning = BackendWarning(
+                ts=datetime.now(UTC).isoformat(),
+                kind=payload.get("kind", "unknown"),
+                attempt=payload.get("attempt"),
+                max_attempts=payload.get("max_attempts"),
+                wait_s=payload.get("wait_s"),
+                error_class=payload.get("error_class"),
+                status_code=payload.get("status_code"),
+                final=bool(payload.get("final", False)),
+                query=payload.get("query"),
+            )
+            self.state.recent_backend_warnings = [*self.state.recent_backend_warnings, warning][
+                -10:
+            ]
             self._flush_pending_persist()
             return
 
@@ -526,12 +529,11 @@ class LiveDashboardView(DerivedView):
                 if self._recorder is not None:
                     self._recorder.set_l1_score(self._build_l1_score_block(round_result))
                 # Append round summary; re-firing the same round (replay / sweep) replaces in place.
-                summary_dict = build_round_summary(round_result).model_dump()
-                rounds_list: list[dict[str, Any]] = list(self.state.get("rounds") or [])
-                rounds_list = [r for r in rounds_list if r.get("round") != round_result.round]
-                rounds_list.append(summary_dict)
-                rounds_list.sort(key=lambda r: int(r.get("round") or 0))
-                self.state["rounds"] = rounds_list
+                summary = build_round_summary(round_result)
+                rounds_list = [r for r in self.state.rounds if r.round != round_result.round]
+                rounds_list.append(summary)
+                rounds_list.sort(key=lambda r: r.round)
+                self.state.rounds = rounds_list
                 self._flush_pending_persist()
             return
 
@@ -558,7 +560,7 @@ class LiveDashboardView(DerivedView):
         # L1_GENERATE:enter wipes the live candidate buffer (current_round.nodes.l1_score) —
         # historical `rounds[]` is untouched.
         if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
-            self._buffer.reset(int(self.state["round"]))
+            self._buffer.reset(self.state.round)
         self._flush_pending_persist()
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
@@ -570,9 +572,9 @@ class LiveDashboardView(DerivedView):
         qt = int(record.sample_total or 0)
         if ev == "sample_started":
             self._update_sample_markers(ci, ct, qi, qt)
-            self.state["current_query_payload"] = (payload.get("query_text") or "")[:120]
+            self.state.current_query_payload = (payload.get("query_text") or "")[:120]
             sid = payload.get("sample_id")
-            self.state["current_sample_id"] = int(sid) if sid is not None else None
+            self.state.current_sample_id = int(sid) if sid is not None else None
             self._set_state("scoring")
             self._schedule_persist()
         elif ev == "sample_scored":
@@ -606,7 +608,7 @@ class LiveDashboardView(DerivedView):
         elif ev == "sample_order_preview":
             order_raw = payload.get("sample_order")
             if isinstance(order_raw, list):
-                self.state["hard_sample_order"] = [int(sid) for sid in order_raw]
+                self.state.hard_sample_order = [int(sid) for sid in order_raw]
                 self._schedule_persist()
         elif ev == "pobb_backfill":
             self._append_backfill(
@@ -623,9 +625,9 @@ class LiveDashboardView(DerivedView):
     def _apply_phase(self, event: PhaseEvent, view: dict[str, Any] | None) -> None:
         s = self.state
         if event.round is not None:
-            s["round"] = event.round
+            s.round = event.round
         # L1_SCORE has no _PHASE_TO_STATE entry — sample_started/scored own its transitions.
-        if event.event == "enter" and s.get("state") != "stopped":
+        if event.event == "enter" and s.state != "stopped":
             mapped = _PHASE_TO_STATE.get(event.phase)
             if mapped is not None:
                 self._set_state(mapped)
@@ -636,7 +638,7 @@ class LiveDashboardView(DerivedView):
             if view is not None:
                 formula = view.get("composite_fitness_formula")
                 if formula is not None:
-                    s["composite_fitness_formula"] = formula
+                    s.composite_fitness_formula = formula
                 short = view.get("composite_fitness_formula_short")
                 if short is not None:
                     self.short_formula_template = short
@@ -648,53 +650,51 @@ class LiveDashboardView(DerivedView):
             # serializer can't walk). Origin accuracy + sample count ride the
             # view dict instead.
             if view is not None:
-                s["origin"] = {
-                    "accuracy": float(view.get("origin_acc") or 0.0),
-                    "samples": int(view.get("origin_samples") or 0),
-                }
-                s["composite_fitness_formula"] = view.get("composite_fitness_formula")
+                s.origin = OriginSummary(
+                    accuracy=float(view.get("origin_acc") or 0.0),
+                    samples=int(view.get("origin_samples") or 0),
+                )
+                s.composite_fitness_formula = view.get("composite_fitness_formula")
                 self.short_formula_template = view.get("composite_fitness_formula_short")
             opt = config.optimization
             self.patience_max = opt.l1_patience
-            s["patience"] = f"0/{self.patience_max}"
+            s.patience = f"0/{self.patience_max}"
             # Static run-limit surface — the operator-facing source for the
             # fork reconcile dialog ("3 of 6 rounds left"). `patience` above is
             # the live stall counter ("N/max"); this is the declared ceilings.
             # A fork re-emits this at its own INIT with the reconciled config,
             # so a steered fork's dashboard shows its own limits.
-            s["run_limits"] = {
-                "max_rounds": opt.max_rounds,
-                "l1_patience": opt.l1_patience,
-                "l2_patience": opt.l2_patience,
-                "l3_patience": opt.l3_patience,
-                "pobb_epsilon": opt.pobb_epsilon,
-                "spend_budget_usd": opt.spend_budget_usd,
-            }
+            s.run_limits = RunLimits(
+                max_rounds=opt.max_rounds,
+                l1_patience=opt.l1_patience,
+                l2_patience=opt.l2_patience,
+                l3_patience=opt.l3_patience,
+                pobb_epsilon=opt.pobb_epsilon,
+                spend_budget_usd=opt.spend_budget_usd,
+            )
         elif phase == "scoring_steer" and event.event == "applied":
             # Operator hot-swap — custom formulas render verbatim (no short form).
             new_formula = data.get("formula")
             if new_formula:
-                s["composite_fitness_formula"] = new_formula
+                s.composite_fitness_formula = new_formula
                 self.short_formula_template = None
         elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
-            new_round = int(data.get("round", s["round"]) or 0)
-            s["round"] = new_round
-            s["degraded_count"] = 0
+            new_round = int(data.get("round", s.round) or 0)
+            s.round = new_round
+            s.degraded_count = 0
             # Rewind/fork-in-place clamp: drop rounds this run will overwrite. Sole clamp writer;
             # `round:display` is the sole growth site.
-            prior = list(s.get("rounds") or [])
-            s["rounds"] = [r for r in prior if int(r.get("round") or 0) < new_round]
+            s.rounds = [r for r in s.rounds if r.round < new_round]
 
         # Mirror origin/best/round into the shared core for LiveDisplay parity.
         apply_phase(self._core, event, view)
-        if self._core.best_acc > float(s.get("best") or 0.0):
-            s["best"] = self._core.best_acc
+        if self._core.best_acc > s.best:
+            s.best = self._core.best_acc
 
     def _update_sample_markers(self, ci: int, ct: int, qi: int, qt: int) -> None:
         s = self.state
-        round_num = int(s.get("round") or 0)
-        s["candidate"] = f"{candidate_label(round_num, ci)}/{ct}"
-        s["query"] = f"{qi + 1}/{qt}"
+        s.candidate = f"{candidate_label(s.round, ci)}/{ct}"
+        s.query = f"{qi + 1}/{qt}"
 
     def _absorb_sample_scored(self, result: dict[str, Any], *, last_in_candidate: bool) -> None:
         s = self.state
@@ -703,20 +703,20 @@ class LiveDashboardView(DerivedView):
         is_cached = bool(result.get("cached", False))
 
         if result.get("error") or pd.get("error"):
-            s["error_count"] += 1
+            s.error_count += 1
         if has_pipeline_warnings(result):
-            s["degraded_count"] += 1
+            s.degraded_count += 1
 
-        s["total_queries_scored"] += 1
+        s.total_queries_scored += 1
         if not is_cached:
-            s["total_backend_calls"] += 1
+            s.total_backend_calls += 1
             # Backend spend rides the canonical ledger via emit_token_usage
             # at measure_sample (one TokenUsageRecord per pipeline node per
             # uncached sample); _handle_token_usage is the sole writer.
 
-        s["current_query_payload"] = None
-        s["current_sample_id"] = None
-        s["last_query_elapsed_s"] = round(query_time, 2)
+        s.current_query_payload = None
+        s.current_sample_id = None
+        s.last_query_elapsed_s = round(query_time, 2)
         self._set_state("between_candidates" if last_in_candidate else "between_samples")
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
@@ -728,24 +728,19 @@ class LiveDashboardView(DerivedView):
         tables the tokens. Per-record write keeps the projection self-contained:
         no parallel writer, no helper chain.
         """
-        spend = self.state["spend"]
-        bucket_key = "loop" if record.kind == "optimizer" else "backend"
-        bucket = spend.setdefault(bucket_key, empty_bucket())
+        spend = self.state.spend
+        bucket = spend.loop if record.kind == "optimizer" else spend.backend
         in_tok = int(record.input_tokens)
         out_tok = int(record.output_tokens)
-        bucket["input_tokens"] += in_tok
-        bucket["output_tokens"] += out_tok
-        if record.model and not bucket.get("model"):
-            bucket["model"] = record.model
+        bucket.input_tokens += in_tok
+        bucket.output_tokens += out_tok
+        if record.model and not bucket.model:
+            bucket.model = record.model
         usd = compute_usd(record.model, in_tok, out_tok, override_usd=record.cost_usd)
         if usd is not None:
-            bucket["used_usd"] = round(bucket["used_usd"] + usd, 6)
-            bucket["rate_known"] = True
-        spend["total_used_usd"] = round(
-            spend.get("backend", {}).get("used_usd", 0.0)
-            + spend.get("loop", {}).get("used_usd", 0.0),
-            6,
-        )
+            bucket.used_usd = round(bucket.used_usd + usd, 6)
+            bucket.rate_known = True
+        spend.total_used_usd = round(spend.backend.used_usd + spend.loop.used_usd, 6)
         self._schedule_persist()
 
     @property
@@ -754,23 +749,22 @@ class LiveDashboardView(DerivedView):
 
         Reads the live spend rollup the projection owns; the halt loop goes
         through this property so the dashboard remains the single owner of
-        spend semantics (no probe reaching into ``self.state['spend']``)."""
-        spend = self.state.get("spend") or {}
-        return float(spend.get("total_used_usd") or 0.0)
+        spend semantics (no probe reaching into ``self.state.spend``)."""
+        return self.state.spend.total_used_usd
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         """Publish the in-flight optimizer LLM call to `dashboard.json::in_flight` —
         kills the multi-minute blind spot during reasoning-heavy critique calls.
         Cleared by the paired `LLMCallRecord` in `_handle_llm_call`.
         """
-        self.state["in_flight"] = {
-            "call_id": record.call_id,
-            "node": record.node,
-            "model": record.model,
-            "round": record.round,
-            "candidate_idx": record.candidate_idx,
-            "started_at_ms": record.started_at_ms,
-        }
+        self.state.in_flight = InFlightCall(
+            call_id=record.call_id,
+            node=record.node,
+            model=record.model,
+            round=record.round,
+            candidate_idx=record.candidate_idx,
+            started_at_ms=record.started_at_ms,
+        )
         self._schedule_persist()
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
@@ -782,15 +776,11 @@ class LiveDashboardView(DerivedView):
         """
         self._sticky_llm_calls[record.node] = {
             **build_node_block(record),
-            "round": int(self.state.get("round") or 0),
+            "round": self.state.round,
         }
-        in_flight = self.state.get("in_flight")
-        if (
-            isinstance(in_flight, dict)
-            and record.call_id
-            and in_flight.get("call_id") == record.call_id
-        ):
-            self.state["in_flight"] = None
+        in_flight = self.state.in_flight
+        if in_flight is not None and record.call_id and in_flight.call_id == record.call_id:
+            self.state.in_flight = None
         self._schedule_persist()
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
@@ -809,11 +799,11 @@ class LiveDashboardView(DerivedView):
         operator-facing crash summary without parsing the traceback out
         of ``index.json``.
         """
-        self.state["error"] = {
-            "kind": record.kind,
-            "message": record.message,
-            "stop_reason": record.stop_reason,
-        }
+        self.state.error = DashboardError(
+            kind=record.kind,
+            message=record.message,
+            stop_reason=record.stop_reason,
+        )
         self._schedule_persist()
 
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:
@@ -825,27 +815,25 @@ class LiveDashboardView(DerivedView):
         operator (or the file-tree reader) must see without waiting on the
         debounce.
         """
-        warning = {
-            "ts": record.timestamp,
-            "kind": record.kind,
-            "severity": record.severity,
-            "message": record.message,
-            "round": record.round,
-            "detail": dict(record.detail),
-        }
-        recent: list[dict[str, Any]] = list(self.state.get("recent_loop_warnings") or [])
-        recent.append(warning)
-        self.state["recent_loop_warnings"] = recent[-10:]
+        warning = LoopWarning(
+            ts=record.timestamp,
+            kind=record.kind,
+            severity=record.severity,
+            message=record.message,
+            round=record.round,
+            detail=dict(record.detail),
+        )
+        self.state.recent_loop_warnings = [*self.state.recent_loop_warnings, warning][-10:]
         self._flush_pending_persist()
 
     def _update_current_acc(self, scores: dict[str, Any]) -> None:
-        self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)
+        self.state.current_acc = round(scores.get("accuracy", 0.0), 4)
 
     def _absorb_round_complete(self, accuracy: float, l1_stall_count: int) -> None:
         s = self.state
-        if accuracy > s["best"]:
-            s["best"] = round(accuracy, 4)
-        s["patience"] = f"{l1_stall_count}/{self.patience_max}"
+        if accuracy > s.best:
+            s.best = round(accuracy, 4)
+        s.patience = f"{l1_stall_count}/{self.patience_max}"
 
     # -- Round-state mutations (snapshot-record fan-out) ----------------------
     # The per-candidate / per-sample / P(best) writes live on the ``_RoundBuffer``
@@ -872,19 +860,17 @@ class LiveDashboardView(DerivedView):
         events can accumulate quickly: ~N samples × M priors × K candidates
         per round).
         """
-        log: list[dict[str, Any]] = list(self.state.get("backfill_log") or [])
+        log = list(self.state.backfill_log)
         log.append(
-            {
-                "round": int(round_num),
-                "candidate_idx": int(idx),
-                "candidate_total": int(total),
-                "sample_id": int(sample_id),
-                "prior_ids": list(prior_ids),
-            }
+            BackfillLogEntry(
+                round=int(round_num),
+                candidate_idx=int(idx),
+                candidate_total=int(total),
+                sample_id=int(sample_id),
+                prior_ids=list(prior_ids),
+            )
         )
-        if len(log) > 256:
-            log = log[-256:]
-        self.state["backfill_log"] = log
+        self.state.backfill_log = log[-256:]
 
     # -- Block builders (consumed by _persist) --------------------------------
 
@@ -902,7 +888,7 @@ class LiveDashboardView(DerivedView):
         ``self.short_formula_template``.
         """
         live = round_result is None
-        active_formula = self.state.get("composite_fitness_formula")
+        active_formula = self.state.composite_fitness_formula
         candidates = self._buffer.candidates
         round_num = self._buffer.round_num
         input_candidates: list[dict[str, Any]] = []
@@ -993,14 +979,19 @@ class LiveDashboardView(DerivedView):
         }
         ordered.update(nodes)
         s = self.state
-        s["current_round"] = {
+        s.current_round = {
             "round": self._buffer.round_num,
             "nodes": ordered,
             "pobb": self._build_pobb_block(),
         }
-
-        s["wallclock_serialized_at"] = datetime.now(UTC).isoformat()
-        write_json(self.state_path, s, default=str)
+        s.wallclock_serialized_at = datetime.now(UTC).isoformat()
+        # The typed model IS the on-disk shape: every scalar field's presence +
+        # type is guaranteed because the schema constructs it and `extra="forbid"`
+        # rejects setting any undeclared attribute at the mutation site — a field
+        # can no longer silently vanish (the run_phase bug) or appear undeclared
+        # (run_limits). `default=str` still coerces the free-form `current_round`
+        # block (LLM-node payloads) the same way the dict writer did.
+        write_json(self.state_path, s.model_dump(), default=str)
 
 
 __all__ = ["LiveDashboardView"]

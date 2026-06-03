@@ -138,8 +138,7 @@ def _variant_to_result(
     )
 
     rounds = list(cycle_result.rounds or [])
-    spend_state = observers.dashboard.state.get("spend") or {}
-    spend_usd_raw = float(spend_state.get("total_used_usd") or 0.0)
+    spend_usd_raw = observers.dashboard.spend_total_used_usd
     # ``StopReason.INTERRUPTED`` (Ctrl+C / asyncio cancel) lands the cycle
     # without a fair round-1 reading: either no rounds at all or a partial
     # panel cut mid-candidate. Rendering it as r1=0.000 / $0.0000 falsely

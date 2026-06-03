@@ -27,6 +27,7 @@ __all__ = [
     "InFlightCall",
     "LiveDashboardState",
     "LoopWarning",
+    "RunLimits",
     "SpendBucket",
     "SpendRollup",
 ]
@@ -142,6 +143,24 @@ class InFlightCall(BaseModel):
     started_at_ms: int
 
 
+class RunLimits(BaseModel):
+    """``state.run_limits`` — the cycle's declared run-limit ceilings, written
+    once at ``INIT:exit`` from the ``OptimizationConfig``. Static (unlike the
+    live ``patience`` "N/max" string): the operator-facing source the fork
+    reconcile dialog defaults against ("3 of 6 rounds left"). A steered fork
+    re-emits its own reconciled limits here at its INIT.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_rounds: int | None = None
+    l1_patience: int
+    l2_patience: int | None = None
+    l3_patience: int | None = None
+    pobb_epsilon: float
+    spend_budget_usd: float | None = None
+
+
 class LiveDashboardState(BaseModel):
     """``dashboard.json`` — operator-facing snapshot, polled by the webapp.
 
@@ -220,6 +239,10 @@ class LiveDashboardState(BaseModel):
 
     n_variants: int
     sp_budget_ttest: int
+
+    # Declared run-limit ceilings (max_rounds / patiences / pobb_epsilon /
+    # spend_budget). Written once at INIT:exit; None until then.
+    run_limits: RunLimits | None = None
 
     spend: SpendRollup = Field(default_factory=SpendRollup)
 

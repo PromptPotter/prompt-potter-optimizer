@@ -248,6 +248,12 @@ classes. Remaining productive angles for future re-audits:
    some may have drifted from current behavior.
 4. **INFO/WARN-level logging for events nobody actually surfaces** —
    log noise audit.
+5. **Error-raising style diverges by layer** — generic `Exception` catch in
+   `application/optimization/dispatch/hub/facade.py`, bare `raise` + asserts in
+   `infrastructure/store/campaign_store/cycles.py`, `HTTPException` in
+   `presentation/cli/commands/new.py` for the same class of validation failure.
+   An agent can't predict which to raise. M-sized standardization arc (domain
+   exception + one HTTP-mapping seam), not a single fix.
 
 ## M13+ intentional UI placeholders
 

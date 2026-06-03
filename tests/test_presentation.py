@@ -304,7 +304,7 @@ def test_live_dashboard_for_session_recovers_round_after_interrupt(
         sp_budget_ttest=20,
     )
     assert proj is not None
-    assert proj.state["round"] == 3
+    assert proj.state.round == 3
 
 
 def test_audit_trail_rejects_non_rounds_path(tmp_path: Path) -> None:

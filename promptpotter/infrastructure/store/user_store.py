@@ -36,7 +36,7 @@ class User(BaseModel):
         description="Per-UTC-day cap composed with the per-cycle cap at mint time.",
     )
     max_concurrent_cycles: int = Field(default=2, ge=1)
-    max_campaigns_per_day: int = Field(default=10, ge=1)
+    max_campaigns_per_day: int = Field(default=1000, ge=1)
     demo_mode_enabled: bool = Field(
         default=True,
         description="Surface the built-in try-and-learn demo dataset in the collection. On by default for new users; toggled in Account → Preferences.",

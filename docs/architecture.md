@@ -56,9 +56,8 @@ Two architectural commitments shape every bucket on this page:
   parameter shapes, and prompt slots all come from the backend's
   self-description — PromptPotter has zero hardcoded knowledge of the
   target system. New backend = new `pipeline.json`, no PromptPotter
-  code change. The `pipeline.json` contract is **to be pinned** in
-  `docs/developer/pipeline-json-contract.md` (deliverable per
-  m10-cleanup §3.5; not yet on disk).
+  code change. The `pipeline.json` contract is pinned in
+  [`docs/developer/pipeline-json-contract.md`](developer/pipeline-json-contract.md).
 - **Two-layer searchpoints + self-optimization.** `JobSearchPoint` is
   the frozen target spec being measured (prompt + pipeline params,
   content-hashed). `OptSearchPoint` is the optimizer's own working

@@ -93,8 +93,7 @@ async def _cmd_sweep_time_to(args: argparse.Namespace) -> CommandResult:
             human=f"{div}\n\n{_DIVERGENCE_HINT}",
         )
 
-    spend_state = observers.dashboard.state.get("spend") or {}
-    spend_usd = float(spend_state.get("total_used_usd") or 0.0)
+    spend_usd = observers.dashboard.spend_total_used_usd
     early_exit = _sweep_early_exit_reason(cycle_result.stop_reason)
     target_hit = early_exit == "target_hit"
 
