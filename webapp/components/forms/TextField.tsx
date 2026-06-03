@@ -1,6 +1,6 @@
 "use client";
 
-import { useAppliableField } from "@/lib/useAppliableField";
+import { useAppliableField } from "@/lib/hooks/useAppliableField";
 
 export function TextField({
   label,

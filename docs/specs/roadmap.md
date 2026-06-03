@@ -10,7 +10,7 @@ Live constraints (the ones still ahead of us):
 
 - **state-sync P3 (`GET /api/v1/live`) before any new webapp data panel** — chat state-queries, composite-fitness scatter, cross-user measurement panel. Anything built on `dashboard.json` polling is rewritten at the cutover. Data *rollups* (substrate-free) are exempt; only the rendered panel waits.
 - **BYO per-user API keys — already overdue, not a future gate.** The beta is *live and serving allowlisted users on one shared `.env` key today*; every user spends the operator's quota/cost. This is a present liability, hence Lane A2.
-- **HTTP-edge abuse protection scales with the allowlist.** The public surface (`/auth/*`, `/ui`, `/health`) is internet-reachable now; Cloudflare edge + allowlist + per-user `JobRegistry` quotas bound it. App-level HTTP rate-limiting (C6) becomes due the moment the allowlist is removed.
+- **HTTP-edge abuse protection scales with the allowlist.** The public surface (`/auth/*`, the root webapp, `/health`) is internet-reachable now; Cloudflare edge + allowlist + per-user `JobRegistry` quotas bound it. App-level HTTP rate-limiting (C6) becomes due the moment the allowlist is removed.
 
 Historical (already satisfied — kept for the record):
 
@@ -85,7 +85,7 @@ Verified against code on 2026-05-30 (the prior 17-row sequence listed much of th
 - **Control-plane command highway.** `CommandDispatcher` + `routers/commands.py` + SSE `EventStreamView`; verb sets `LifecycleKind` / `CycleScopedKind` (fork/stop/pause/resume/change-spend-budget/start-run/…) / `WorkspaceBackendKind`. → [`ADR-0001`](../adr/0001-m12-control-plane.md).
 - **Connector boundary + 2nd connector.** `termnorm` + `promptpotter` (self/L4) both registered; lookup config-driven via `pipeline.json::backend_type` (`bootstrap/wiring.py`), not hardcoded. Only the inner-cycle dispatch path for the L4 *run* remains (Lane C3).
 - **Token HQ.** `/auth/quota-status` + `/auth/activity` (per-user spend/tokens/requests). `/health` endpoint (`main.py:115`).
-- Onboarding lockout ([archived](archive/m10-onboarding-lockout.md)) · Ingest Slice 1 (CSV, `DraftCampaign`, `POST /datasets/ingest`, `mint-campaign-from-draft`, `TenantDatasetStore`, `IngestPane`) · webapp read-only surface (`/ui`).
+- Onboarding lockout ([archived](archive/m10-onboarding-lockout.md)) · Ingest Slice 1 (CSV, `DraftCampaign`, `POST /datasets/ingest`, `mint-campaign-from-draft`, `TenantDatasetStore`, `IngestPane`) · webapp read-only surface (served at the root).
 
 Reference: [`code-debt-cleanup`](code-debt-cleanup.md) (living debt backlog).
 

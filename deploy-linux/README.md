@@ -48,7 +48,7 @@ cp deploy.config.example deploy.config && $EDITOR deploy.config   # if not done 
 ./install-tunnel.sh
 ```
 
-After step 3, `https://$PUBLIC_HOSTNAME` should redirect to `/ui/` and load the dashboard.
+After step 3, `https://$PUBLIC_HOSTNAME` should load the dashboard at the root.
 
 ## Backend service (the optimizer needs one)
 

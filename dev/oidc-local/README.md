@@ -20,13 +20,13 @@ cd ../..
 PROMPTPOTTER_AUTH=on python -m uvicorn promptpotter.main:app --port 8001
 ```
 
-Open `http://localhost:8001/ui/login/`, click the Google button (Dex is
+Open `http://localhost:8001/login/`, click the Google button (Dex is
 configured as the Google slot — see § "How it works" below), enter:
 
 - **email:** `dev@promptpotter.local`
 - **password:** `password`
 
-You land on `/ui/` with a real authenticated session cookie. Subsequent
+You land on `/` with a real authenticated session cookie. Subsequent
 page loads, API calls, and any post-auth bug repros run exactly as they
 would on `app.promptpotter.dev`.
 

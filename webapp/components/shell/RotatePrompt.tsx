@@ -12,7 +12,7 @@
 // (heavy SVG layout calcs, etc.) — pass `skipRender` for that case.
 
 import { type ReactNode } from "react";
-import { useIsPortraitPhone } from "@/lib/useMediaQuery";
+import { useIsPortraitPhone } from "@/lib/hooks/useMediaQuery";
 
 interface Props {
   children: ReactNode;

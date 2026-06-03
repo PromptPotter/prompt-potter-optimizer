@@ -150,7 +150,7 @@ in `.env`, run `deploy-linux/install-allowlist-bot.sh`, then message the bot
   generalizes to them, but each is its own change that amends §0 when added.
 * **Authorization model** — the operator is the single deployment admin; per-admin RBAC
   is post-M13 (rides ADR-0002's `capabilities`).
-* **A webapp admin surface** — managing the allowlist from `/ui` would be a *human*
+* **A webapp admin surface** — managing the allowlist from the webapp would be a *human*
   OIDC-gated surface; possible later, orthogonal to this out-of-band channel.
 
 ### Cross-refs

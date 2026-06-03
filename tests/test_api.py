@@ -216,7 +216,7 @@ def test_dashboard_is_per_cycle_not_session_root(
 
 
 # ===========================================================================
-# Webapp preview — /active, /files, /file, /ui mount
+# Webapp preview — /sessions/active, /files, /file, root mount
 # ===========================================================================
 
 
@@ -225,14 +225,14 @@ def test_active_returns_404_when_pointer_missing(
 ) -> None:
     """No pointer file under the tenant's workspace dir → 404."""
     client, _, _ = seeded_tenant
-    resp = client.get("/api/v1/active")
+    resp = client.get("/api/v1/sessions/active")
     assert resp.status_code == 404
 
 
 def test_active_returns_pointer_when_present(
     seeded_tenant: tuple[TestClient, str, str],
 ) -> None:
-    """Pointer written through the per-tenant API surfaces on /active."""
+    """Pointer written through the per-tenant API surfaces on /sessions/active."""
     from promptpotter.infrastructure.store import save_active_pointer
 
     client, campaign_id, cycle_id = seeded_tenant
@@ -246,7 +246,7 @@ def test_active_returns_pointer_when_present(
         cycle_id,
         projects_root=stores.projects_root,
     )
-    resp = client.get("/api/v1/active")
+    resp = client.get("/api/v1/sessions/active")
     assert resp.status_code == 200
     body = resp.json()
     assert body == {
@@ -256,8 +256,8 @@ def test_active_returns_pointer_when_present(
         "cycle_id": cycle_id,
     }
 
-    # /live is the stable façade: active pointer → session-family live state.
-    live = client.get("/api/v1/live")
+    # /sessions/active/live-state is the stable façade: active pointer → live state.
+    live = client.get("/api/v1/sessions/active/live-state")
     assert live.status_code == 200
     body = live.json()
     assert body["round"] == 3
@@ -266,14 +266,14 @@ def test_active_returns_pointer_when_present(
     assert body["is_paused"] is False
     assert body["current_spend_cap_usd"] is None
 
-    # With a pause.flag + spend_cap.json on the active cycle, /live reflects
+    # With a pause.flag + spend_cap.json on the active cycle, /live-state reflects
     # both — the run controls read pause-state from here, not from telemetry
     # freshness (a paused runner emits no events).
     runtime = cycle_dir_for(stores.base_dir, campaign_id, cycle_id) / ".runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     (runtime / "pause.flag").write_text("requested_at=now\n", encoding="utf-8")
     (runtime / "spend_cap.json").write_text('{"max_usd": 4.5}', encoding="utf-8")
-    live2 = client.get("/api/v1/live").json()
+    live2 = client.get("/api/v1/sessions/active/live-state").json()
     assert live2["is_paused"] is True
     assert live2["current_spend_cap_usd"] == 4.5
 
@@ -558,10 +558,10 @@ def test_dataset_listing_gates_benchmarks_on_capability(
 
 
 def test_optimizer_pipeline_returns_view_topology() -> None:
-    """``/optimizer/pipeline`` must expose the bundled ``view`` block (nodes +
+    """``/optimizer-pipeline`` must expose the bundled ``view`` block (nodes +
     edges) — what the webapp renders the workflow from."""
     client = TestClient(app)
-    resp = client.get("/api/v1/optimizer/pipeline")
+    resp = client.get("/api/v1/optimizer-pipeline")
     assert resp.status_code == 200
     body = resp.json()
     assert "view" in body
@@ -572,9 +572,9 @@ def test_optimizer_pipeline_returns_view_topology() -> None:
     assert {"input", "l1_generate", "l1_score", "l1_critique", "output"} <= node_ids
 
 
-def test_ui_mount_serves_index_when_present() -> None:
+def test_root_mount_serves_index_when_present() -> None:
     client = TestClient(app)
-    resp = client.get("/ui/")
+    resp = client.get("/")
     if WEBAPP_DIR.exists() and (WEBAPP_DIR / "index.html").exists():
         assert resp.status_code == 200
         assert "<html" in resp.text.lower()

@@ -8,7 +8,7 @@ The publication arc — running PromptPotter against state-of-the-art prompt-opt
 
 ## Status
 
-- **Webapp read-only — shipped.** Next.js + TS + plain-CSS static export at `webapp/`; mounted under `/ui` by FastAPI. Hard-sample leaderboard, per-searchpoint score histogram, family-tree speciation, dataset-preview-on-drop all live.
+- **Webapp read-only — shipped.** Next.js + TS + plain-CSS static export at `webapp/`; mounted at the domain root by FastAPI. Hard-sample leaderboard, per-searchpoint score histogram, family-tree speciation, dataset-preview-on-drop all live.
 - **Benchmark priority — decided.** BBEH primary (ample headroom on `gpt-oss-120b`); HotPotQA pending saturation probe; GSM8K / AIME deprioritized (saturated). Decision recorded.
 - **Benchmark runs + ablations — open.** No PromptPotter runs against the head-to-head infrastructure yet; no ablation rows produced.
 - **PromptPotter-as-connector — open.** Smoke target for `datasets/promptpotter/` fixture; gates M12 L4 closure.
@@ -25,7 +25,7 @@ The publication arc — running PromptPotter against state-of-the-art prompt-opt
 
 - Head-to-head infra: `docs/research/bbeh-comparison/` (notebooks pin lib versions; archive `results_*.json` next to each).
 - Loaders + scorers: `promptpotter/application/datasets/`, `promptpotter/application/scoring/formula/`.
-- Webapp surface: `webapp/` (Next.js source + static export under `webapp/out/`); FastAPI mount at `/ui`.
+- Webapp surface: `webapp/` (Next.js source + static export under `webapp/out/`); FastAPI mount at the domain root.
 - BBEH score anomaly to verify before publication: see `MEMORY.md::project_bbeh_score_anomaly`.
 
 ## Webapp endpoint hardening (prereq for exposure beyond localhost)

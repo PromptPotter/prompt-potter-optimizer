@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { rootCycleId } from "@/lib/ids";
-import { useLocalStorage } from "@/lib/useLocalStorage";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { TERMS } from "@/lib/terms";
 import {
   COLLAPSED_STORAGE_KEY,

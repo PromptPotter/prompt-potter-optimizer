@@ -41,7 +41,7 @@ from promptpotter.infrastructure.store.archive_views import (
 )
 from promptpotter.presentation.api.deps import StoreDep, get_draft_registry
 
-_datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
+datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
 # `cycle` (one cycle's Rasch fit) / `campaign` (pooled) / `dataset` (cross-campaign archive).
 # Workspace scope would be meaningless (samples differ per dataset), so the tier stops at dataset.
@@ -75,7 +75,7 @@ class DatasetIndexResponse(BaseModel):
     datasets: list[DatasetIndexEntry]
 
 
-@_datasets_router.get("", response_model=DatasetIndexResponse)
+@datasets_router.get("", response_model=DatasetIndexResponse)
 async def list_datasets(store: StoreDep) -> DatasetIndexResponse:
     """Every dataset this identity may read — tenant Origins, demo origins (while
     demo mode is on), and install benchmarks (only with ``datasets.benchmarks.read``).
@@ -94,7 +94,7 @@ async def list_datasets(store: StoreDep) -> DatasetIndexResponse:
     )
 
 
-@_datasets_router.post("/ingest")
+@datasets_router.post("/ingest")
 async def ingest_dataset(
     request: Request,
     store: StoreDep,
@@ -166,7 +166,7 @@ async def ingest_dataset(
     return draft_wire_with_locks(draft)
 
 
-@_datasets_router.post("/{name}/draft")
+@datasets_router.post("/{name}/draft")
 async def draft_from_existing_dataset(
     name: str, request: Request, store: StoreDep
 ) -> dict[str, Any]:
@@ -342,7 +342,7 @@ class DatasetPreviewResponse(BaseModel):
     items: list[DatasetItem]
 
 
-@_datasets_router.get("/{name}/preview", response_model=DatasetPreviewResponse)
+@datasets_router.get("/{name}/preview", response_model=DatasetPreviewResponse)
 async def get_dataset_preview(
     name: str,
     store: StoreDep,
@@ -477,7 +477,7 @@ class MeasurementSeriesResponse(BaseModel):
     items: list[SampleSeries]
 
 
-@_datasets_router.get(
+@datasets_router.get(
     "/{name}/measurement-series",
     response_model=MeasurementSeriesResponse,
 )
@@ -583,7 +583,7 @@ class DatasetPipelineResponse(BaseModel):
     starting_prompt: dict[str, Any] | None
 
 
-@_datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
+@datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
 async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     """Return the dataset overlay's parsed pipeline schema, graph view, per-node
     config + output schema, and origin prompt.

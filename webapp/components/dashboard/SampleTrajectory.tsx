@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import type { RoundSummary } from "@/lib/api/types";
-import { CardFrame } from "@/components/ui/card";
+import { CardFrame } from "@/components/ui/Card";
 
 interface Props {
   rounds: RoundSummary[];

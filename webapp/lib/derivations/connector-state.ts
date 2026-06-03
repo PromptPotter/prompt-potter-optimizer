@@ -1,4 +1,4 @@
-// Single source of the connector reachability verdict. The ConnectorNode LED
+// Single source of the connector reachability verdict. The ConnectorInspector LED
 // (dot + footer) and the cross-tab CriticalAlertBanner are the two consumers —
 // they MUST agree, so the predicate lives here once, not inlined in each.
 //

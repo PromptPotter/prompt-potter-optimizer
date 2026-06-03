@@ -1,10 +1,13 @@
-"""Active-session pointer + read-only cycle list.
+"""Active-session pointer + read-only cycle list + optimizer/registry reads.
 
-Carries the read-only surface (``GET /active``, ``GET /cycles``,
-``GET /optimizer/pipeline``, ``GET /evaluators_meta``). Cycle mutations
-ride the closed-set command highway at ``POST /api/v1/commands/{kind}``
-(``docs/specs/m12-api-openapi.yaml`` for the wire contract;
-``presentation/api/routers/commands.py`` for the dispatch shell).
+Carries the tenant-global read-only surface: the active session
+(``GET /sessions/active``, ``GET /sessions/active/live-state``), the global
+cycle list (``GET /cycles``), and two registry reads
+(``GET /optimizer-pipeline``, ``GET /evaluators``, ``GET /llm-providers``).
+Routes are tagged per-resource for OpenAPI grouping since this router spans
+several resources. Cycle mutations ride the closed-set command highway at
+``POST /api/v1/commands/{kind}`` (``docs/specs/m12-api-openapi.yaml`` for the
+wire contract; ``presentation/api/routers/commands.py`` for the dispatch shell).
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from promptpotter.infrastructure.store import (
 )
 from promptpotter.presentation.api.deps import StoreDep
 
-_active_router = APIRouter(tags=["Active"])
+active_router = APIRouter()
 
 _OPTIMIZER_PIPELINE_PATH = (
     Path(__file__).resolve().parents[4] / "datasets" / "_optimizer" / "pipeline.json"
@@ -37,7 +40,7 @@ class ActiveSessionResponse(BaseModel):
     cycle_id: str = Field(description="Active cycle id within the campaign")
 
 
-@_active_router.get("/active", response_model=ActiveSessionResponse)
+@active_router.get("/sessions/active", response_model=ActiveSessionResponse, tags=["Sessions"])
 async def get_active_session(store: StoreDep) -> ActiveSessionResponse:
     """Return the caller-tenant's active-session pointer; 404 when none exists.
 
@@ -58,7 +61,7 @@ async def get_active_session(store: StoreDep) -> ActiveSessionResponse:
     )
 
 
-@_active_router.get("/live")
+@active_router.get("/sessions/active/live-state", tags=["Sessions"])
 async def get_live_state(store: StoreDep) -> dict[str, Any]:
     """Live state of the caller-tenant's **active** session — the stable
     surface every new web panel / chat state-read codes against.
@@ -153,7 +156,7 @@ class CyclesResponse(BaseModel):
     cycles: list[CycleListEntry]
 
 
-@_active_router.get("/cycles", response_model=CyclesResponse)
+@active_router.get("/cycles", response_model=CyclesResponse, tags=["Cycles"])
 async def get_cycles(store: StoreDep) -> CyclesResponse:
     """Every cycle on disk for the tenant + active pointer (one round-trip for the picker)."""
     _, active_cmp, active_cid = read_active_pointer(
@@ -168,14 +171,14 @@ async def get_cycles(store: StoreDep) -> CyclesResponse:
     )
 
 
-@_active_router.get("/optimizer/pipeline")
+@active_router.get("/optimizer-pipeline", tags=["Optimizer"])
 async def get_optimizer_pipeline() -> dict[str, Any]:
     """Bundled ``optimizer_pipeline.json`` — nodes + pipelines + ``view`` topology for the webapp workflow."""
     pipeline: dict[str, Any] = json.loads(_OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
     return pipeline
 
 
-@_active_router.get("/evaluators_meta")
+@active_router.get("/evaluators", tags=["Evaluators"])
 async def get_evaluators_meta() -> list[dict[str, Any]]:
     """Import-time evaluator registry (name/description/scope/direction/node_type) — feeds the What-If panel even when ``dashboard.json`` lacks ``cycle_info``."""
     from promptpotter.application.scoring.evaluators import evaluators_meta
@@ -183,7 +186,7 @@ async def get_evaluators_meta() -> list[dict[str, Any]]:
     return evaluators_meta()
 
 
-@_active_router.get("/llm/providers")
+@active_router.get("/llm-providers", tags=["LLM"])
 async def get_llm_providers() -> dict[str, Any]:
     """Available optimizer-LLM providers + a starter model list per provider.
 

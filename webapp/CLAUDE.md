@@ -1,6 +1,6 @@
 # webapp — CLAUDE.md
 
-Next.js 16.2.5 + React 19.2.4 + TypeScript, static export at `out/` mounted at `/ui` by FastAPI. Read-only dashboard: polls `dashboard.json` every 2 s, lazy-fetches `round_NNNN.json` on drill-in.
+Next.js 16.2.5 + React 19.2.4 + TypeScript, static export at `out/` mounted at the domain root by FastAPI (the app owns `/`; the API is the carved-out `/api/v1` namespace). Read-only dashboard: polls `dashboard.json` every 2 s, lazy-fetches `round_NNNN.json` on drill-in.
 
 ## Design — single source of truth
 
@@ -96,7 +96,7 @@ The webapp gate is **compile-time + smoke + a small Vitest scope**, enforced by 
 - `npx tsc --noEmit` — full strict typecheck (`next build` alone does not hard-fail on every type error, so this line is what makes `strict` real).
 - `npm run test` — Vitest, scoped to `lib/**/__tests__/` + `components/**/__tests__/` per `webapp/vitest.config.ts`. Reader-side derivations only (pure data → data helpers); display components stay covered by smoke. Cycle fixtures live at `tests/fixtures/cycles/` — recipe at [`docs/developer/cycle-fixtures.md`](../docs/developer/cycle-fixtures.md).
 - `npm run build` — the static export must succeed.
-- Manual smoke at `http://localhost:8001/ui/` after a behavioural change. Auth-on smoke uses the local Dex harness at [`dev/oidc-local/`](../dev/oidc-local/) — see [`docs/developer/local-oidc.md`](../docs/developer/local-oidc.md).
+- Manual smoke at `http://localhost:8001/` after a behavioural change. Auth-on smoke uses the local Dex harness at [`dev/oidc-local/`](../dev/oidc-local/) — see [`docs/developer/local-oidc.md`](../docs/developer/local-oidc.md).
 
 When to reach for a component-render test (`@testing-library/react`): pick a regression class that compile + smoke + the derivation tests can't catch — today's bug classes are reader-side and ride the existing Vitest scope.
 
@@ -105,9 +105,9 @@ When to reach for a component-render test (`@testing-library/react`): pick a reg
 ```bash
 cd webapp
 npm install                          # one-time
-npm run build                        # static export → webapp/out/, served at /ui by FastAPI
+npm run build                        # static export → webapp/out/, served at the root by FastAPI
 npm run lint
 npx tsc --noEmit
 ```
 
-`out/` is the route mounted by FastAPI (`StaticFiles(html=True)` at `/ui`). After any source change, rebuild and hard-reload the browser. Dev mode (`npm run dev`) proxies `/api/*` to `http://127.0.0.1:8001` via `next.config.ts::rewrites` — production has no proxy (same FastAPI origin).
+`out/` is the route mounted by FastAPI (`StaticFiles(html=True)` at `/`). After any source change, rebuild and hard-reload the browser. Dev mode (`npm run dev`) proxies `/api/*` to `http://127.0.0.1:8001` via `next.config.ts::rewrites` — production has no proxy (same FastAPI origin).

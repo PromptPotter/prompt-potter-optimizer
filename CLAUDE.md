@@ -28,12 +28,12 @@ python -m promptpotter new <file.csv> --set task_description=…  # fresh from R
 python -m promptpotter resume                                # resume active cycle; Ctrl+C: 1st saves, 2nd force-quits
 python -m promptpotter resume --from N                       # rewind in place
 python -m promptpotter resume --fork-on-divergence           # sibling cycle at divergence point
-python -m uvicorn promptpotter.main:app --port 8001          # read-only API + /ui webapp preview (http://localhost:8001/ui/)
+python -m uvicorn promptpotter.main:app --port 8001          # read-only API + webapp preview at the root (http://localhost:8001/)
 ```
 
 `new` and `resume` are the only write verbs; reads happen by opening files (no read CLI). `.env` with `GROQ_API_KEY` (or OPENAI/ANTHROPIC/OPENROUTER) required; provider is per-campaign in `campaign.json::optimizer_llm.provider`. **Before any commit:** `python -m ruff format promptpotter/ tests/ && python -m ruff check promptpotter/ tests/` — CI fails on format drift. CLI flags, identity/cycle/campaign identity, fork lineage → [`docs/operations/`](docs/operations/) + [`persistence-and-state.md`](docs/operations/persistence-and-state.md).
 
-The user is the operator. **The project file tree IS the dashboard**, plus a read-only `/ui` (Next.js at `webapp/`) polling the active cycle's `dashboard.json` every 2 s — used with the file tree, not in place of it. Onboarding: install → restart VS Code → `/potter-run`.
+The user is the operator. **The project file tree IS the dashboard**, plus a read-only webapp served at the root (Next.js at `webapp/`) polling the active cycle's `dashboard.json` every 2 s — used with the file tree, not in place of it. Onboarding: install → restart VS Code → `/potter-run`.
 
 ## Conventions
 

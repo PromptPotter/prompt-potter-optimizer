@@ -1,7 +1,7 @@
 "use client";
 import type { NodeDataLike, PipelineView, PipelineViewNode } from "@/components/workflow/types";
 import type { ConnectorView } from "@/lib/types/connector";
-import { ConnectorNode } from "./ConnectorNode";
+import { ConnectorInspector } from "./ConnectorInspector";
 import { useSelection } from "./SelectionContext";
 
 interface Props {
@@ -231,7 +231,7 @@ export function TargetPipelineHero({ samplesOpen, onToggle, cv }: Props) {
         </div>
       </button>
       <div className="wf-hero-arrow">
-        <ConnectorNode view={cv} />
+        <ConnectorInspector view={cv} />
       </div>
       {isSingle ? (
         <SingleNodeChip

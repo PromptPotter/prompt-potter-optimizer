@@ -1,10 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { postCreateFork, postStopCycle, type ForkSeed, type LimitOverrides } from "@/lib/api";
+import { postForkCycle, postStopCycle, type ForkSeed, type LimitOverrides } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
-import { useRoundFile } from "@/lib/useRoundFile";
-import { useConnector } from "@/lib/hooks/useConnectorView";
+import { useRoundFile } from "@/lib/hooks/useRoundFile";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { useAuth } from "@/lib/auth-context";
 import { candidateSearchPoint } from "@/lib/derivations/candidateSearchPoint";
 import { forkReconcileDefaults, limitOverridesFromDefaults } from "@/lib/derivations/forkReconcile";
@@ -82,7 +82,7 @@ export function SteerForkPanel({
       // The steer redirects the run — stop the live parent first so the
       // operator's next resume picks up the fork without racing the loop.
       if (isLive) await postStopCycle(campaignId, cycleId);
-      await postCreateFork(campaignId, cycleId, candidate.round, candidate.candidate_id, {
+      await postForkCycle(campaignId, cycleId, candidate.round, candidate.candidate_id, {
         seed: forkSeed,
         steeredBy,
       });

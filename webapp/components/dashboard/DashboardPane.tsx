@@ -2,11 +2,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchCycleFile, fetchPipeline, type HardSamplesScope } from "@/lib/api";
 import { CycleStreamProvider } from "@/lib/poll";
-import { ConnectorProvider } from "@/lib/hooks/useConnectorView";
+import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
-import { useDatasetPreview } from "@/lib/useDatasetPreview";
-import { useLocalStorage } from "@/lib/useLocalStorage";
+import { useDatasetPreview } from "@/lib/hooks/useDatasetPreview";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
@@ -43,7 +43,7 @@ export function DashboardPane() {
 
 function DashboardPaneInner() {
   // Workspace identity comes from the shared context — no local cycle
-  // resolution, no independent /active poll. A `cycle_id` is unique only
+  // resolution, no independent /sessions/active poll. A `cycle_id` is unique only
   // within its campaign, so `campaignId` rides alongside `cycleId`.
   const {
     campaignId,

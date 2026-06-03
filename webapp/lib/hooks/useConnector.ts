@@ -48,7 +48,7 @@ import {
 } from "@/lib/api";
 import { useAuthGate } from "@/lib/auth-context";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { usePoll } from "@/lib/usePoll";
+import { usePoll } from "@/lib/hooks/usePoll";
 import type { ConnectorView } from "@/lib/types/connector";
 import type { NodeDataLike, PipelineView } from "@/components/workflow/types";
 

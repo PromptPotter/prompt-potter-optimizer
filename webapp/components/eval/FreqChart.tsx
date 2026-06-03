@@ -11,8 +11,8 @@ import {
   type DashboardSnapshot,
 } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
-import { useRoundFile } from "@/lib/useRoundFile";
-import { CardFrame } from "@/components/ui/card";
+import { useRoundFile } from "@/lib/hooks/useRoundFile";
+import { CardFrame } from "@/components/ui/Card";
 import { useSelection } from "@/components/dashboard/SelectionContext";
 import type { RawResultRow } from "@/lib/types/round";
 

@@ -17,7 +17,7 @@ classifiers = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.109.0",        # why kept: read-only operator API + /ui webapp mount
+    "fastapi>=0.109.0",        # why kept: read-only operator API + root webapp mount
     "python-multipart>=0.0.7", # why kept: multipart/form-data transport for POST /datasets/ingest tabular-file upload (FastAPI fails at route registration without it)
     "scalar-fastapi>=1.0.0",   # why kept: API doc UI on the FastAPI app
     "uvicorn[standard]>=0.27.0",  # why kept: ASGI server for the read-only API

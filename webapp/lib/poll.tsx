@@ -20,7 +20,7 @@ import type {
   OriginSummary,
   RoundSummary,
 } from "./api/types";
-import { usePoll } from "./usePoll";
+import { usePoll } from "./hooks/usePoll";
 
 export type StatusKind = "live" | "stale" | "offline";
 

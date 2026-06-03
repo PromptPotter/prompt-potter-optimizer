@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.identity_bundle = build_identity_bundle(default_identity_paths())
     app.state.job_registry = JobRegistry(default_jobs_dir())
     app.state.draft_campaigns = DraftCampaignRegistry()
-    logger.info("Webapp available at: /ui/  (root / redirects there)")
+    logger.info("Webapp available at: /")
     logger.info("API docs available at: /docs")
     yield
     logger.info("Shutting down PromptPotter Optimizer")
@@ -118,7 +118,7 @@ async def no_store_on_api(
     per-cycle round files, file listings, active-session pointer. Any
     browser/intermediate caching is a freshness bug, not an optimization,
     because we already serve from in-memory state and the on-disk files
-    are tiny. Static webapp assets under ``/ui/`` are unaffected (served
+    are tiny. Static webapp assets at the root are unaffected (served
     by StaticFiles with its own caching defaults).
     """
     response = await call_next(request)
@@ -128,7 +128,7 @@ async def no_store_on_api(
 
 
 # Health check
-_health = APIRouter()
+_health = APIRouter(tags=["Health"])
 
 
 @_health.get("/health")
@@ -141,28 +141,27 @@ async def health_check() -> dict[str, str]:
     }
 
 
-# Include routers
-app.include_router(_health, prefix="/api/v1", tags=["Health"])
-app.include_router(api.backends_router, prefix="/api/v1", tags=["Backends"])
-app.include_router(api.campaigns_router, prefix="/api/v1", tags=["Campaigns"])
-app.include_router(api._active_router, prefix="/api/v1")
-app.include_router(api._datasets_router, prefix="/api/v1", tags=["Datasets"])
-app.include_router(api._measurements_router, prefix="/api/v1")
-app.include_router(api._verify_router, prefix="/api/v1")
+# Include routers. Each router owns its own tags (and prefix where it maps to a
+# single resource); the mount supplies only the shared /api/v1 version prefix.
+app.include_router(_health, prefix="/api/v1")
+app.include_router(api.backends_router, prefix="/api/v1")
+app.include_router(api.campaigns_router, prefix="/api/v1")
+app.include_router(api.active_router, prefix="/api/v1")
+app.include_router(api.datasets_router, prefix="/api/v1")
+app.include_router(api.measurements_router, prefix="/api/v1")
+app.include_router(api.verify_router, prefix="/api/v1")
 app.include_router(api.commands_router, prefix="/api/v1")
 app.include_router(api.auth_router, prefix="/api/v1")
 
-# Static webapp mount — read-only operator dashboard at /ui (Next.js export
-# from webapp/, built via `npm run build` in that directory).
+# Static webapp mount — read-only operator dashboard at the domain root
+# (Next.js export from webapp/, built via `npm run build` in that directory).
+# The app owns `/`; the API is the carved-out `/api/v1` namespace. This mount
+# is a catch-all and MUST stay the last route registered — every API router
+# plus FastAPI's auto /docs + /openapi.json are matched first by Starlette's
+# in-order resolution. `html=True` serves out/index.html at `/`.
 WEBAPP_DIR = Path(__file__).resolve().parents[1] / "webapp" / "out"
 if WEBAPP_DIR.exists():
-    app.mount("/ui", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
-
-    # Root redirect — Uvicorn's startup banner prints the bare host:port, so
-    # land the operator on the webapp instead of a 404.
-    @app.get("/", include_in_schema=False)
-    async def root_redirect() -> RedirectResponse:
-        return RedirectResponse(url="/ui/", status_code=307)
+    app.mount("/", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
 
 
 __all__ = ["WEBAPP_DIR", "app", "lifespan"]

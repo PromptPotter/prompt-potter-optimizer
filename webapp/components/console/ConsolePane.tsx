@@ -9,22 +9,12 @@
 // scrolls up (Replit/console convention), resumes once they scroll back to
 // the bottom. New lines append in-place — no flash, no jank.
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { fetchCycleFile } from "@/lib/api";
-import { useLocalStorage } from "@/lib/useLocalStorage";
-import { usePoll } from "@/lib/usePoll";
+import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { useConsoleTail } from "@/lib/hooks/useConsoleTail";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 const KEY = "promptpotter.console.open";
-const MAX_LINES = 200;
-const POLL_MS = 1000;
 
 interface Props {
   campaignId: string | null;
@@ -77,63 +67,20 @@ function ConsoleBody({
   campaignId: string | null;
   cycleId: string | null;
 }) {
-  const [lines, setLines] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // Data half lives in the hook (fetch-in-a-hook anatomy); this component
+  // owns only the scroll / sticky-bottom DOM concerns.
+  const { lines, error } = useConsoleTail(campaignId, cycleId);
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Sticky-to-bottom flag. True ⇒ new lines auto-scroll the view; flips
   // false the moment the operator scrolls up (browser console convention).
   const stickyBottomRef = useRef(true);
 
-  // Cycle change ⇒ wipe immediately so the prior cycle's tail can't linger
-  // visible during the first new fetch. The prev-prop pattern resets the
-  // React state (lines / error); the unit effect below resets the
-  // stickyBottom ref (refs MUST NOT be written during render).
-  const [prevCycleId, setPrevCycleId] = useState<string | null>(cycleId);
-  if (cycleId !== prevCycleId) {
-    setPrevCycleId(cycleId);
-    setLines([]);
-    setError(null);
-  }
-
-  // Latest viewed unit — lets a tick already in flight when the operator
-  // switches cycles discard its now-stale result.
-  const unit = campaignId && cycleId ? `${campaignId}::${cycleId}` : "";
-  const unitRef = useRef(unit);
+  // Fresh cycle ⇒ re-grab stick-to-bottom; the operator hasn't scrolled the
+  // new cycle's tail yet. Refs MUST NOT be written during render, so this
+  // rides an effect rather than the render-phase reset inside the hook.
   useEffect(() => {
-    unitRef.current = unit;
-    // Fresh cycle ⇒ re-grab stick-to-bottom; the operator hasn't scrolled
-    // the new cycle's tail yet.
     stickyBottomRef.current = true;
-  }, [unit]);
-
-  const tick = useCallback(
-    async (signal: AbortSignal) => {
-      if (!campaignId || !cycleId) return;
-      const launchedFor = unit;
-      try {
-        const r = await fetchCycleFile(
-          campaignId,
-          cycleId,
-          "cycle",
-          "output.log",
-          signal,
-        );
-        if (signal.aborted || unitRef.current !== launchedFor) return;
-        // Split, trim the trailing empty (the log ends with a newline),
-        // keep the last MAX_LINES so the DOM can't grow unbounded.
-        const split = (r.content ?? "").split("\n");
-        if (split.length > 0 && split[split.length - 1] === "") split.pop();
-        setLines(split.length > MAX_LINES ? split.slice(-MAX_LINES) : split);
-        setError(null);
-      } catch (e) {
-        if ((e as Error).name === "AbortError" || signal.aborted) return;
-        if (unitRef.current !== launchedFor) return;
-        setError((e as Error).message);
-      }
-    },
-    [campaignId, cycleId, unit],
-  );
-  usePoll(tick, { intervalMs: POLL_MS, enabled: !!campaignId && !!cycleId });
+  }, [campaignId, cycleId]);
 
   const onScroll = useCallback(() => {
     const el = containerRef.current;

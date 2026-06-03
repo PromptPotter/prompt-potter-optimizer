@@ -7,21 +7,20 @@ export const dynamic = "force-static";
 
 // The Web App Manifest — the browser-consumed app-identity surface (install
 // name, icons, splash colors), generated from the single brand source. Served
-// at /ui/manifest.webmanifest; Next auto-links it (basePath-aware). Icon paths
-// carry the /ui basePath explicitly because manifest icon `src` is resolved
-// against the authority root, not the manifest URL.
+// at /manifest.webmanifest; Next auto-links it. The app owns the domain root,
+// so start_url/scope/icon paths are root-relative.
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: BRAND.name,
     short_name: BRAND.shortName,
     description: BRAND.description,
-    start_url: "/ui/",
-    scope: "/ui/",
+    start_url: "/",
+    scope: "/",
     display: "standalone",
     background_color: BRAND.backgroundColor,
     theme_color: BRAND.themeColor,
     icons: [
-      { src: "/ui/brand/potter-mark.svg", sizes: "any", type: "image/svg+xml" },
+      { src: "/brand/potter-mark.svg", sizes: "any", type: "image/svg+xml" },
     ],
   };
 }

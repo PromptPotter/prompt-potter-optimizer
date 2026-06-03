@@ -5,9 +5,9 @@ import {
   type DashboardSnapshot,
   type StatusKind,
 } from "@/lib/poll";
-import { CardFrame } from "@/components/ui/card";
+import { CardFrame } from "@/components/ui/Card";
 import { useSelection } from "@/components/dashboard/SelectionContext";
-import { useRoundFile } from "@/lib/useRoundFile";
+import { useRoundFile } from "@/lib/hooks/useRoundFile";
 import { roundCandidatesByRound } from "@/lib/derivations/round-candidates";
 import {
   historicalSamplesFor,

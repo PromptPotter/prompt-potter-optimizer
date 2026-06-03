@@ -23,7 +23,7 @@ interface Props {
   view: ConnectorView;
 }
 
-export function ConnectorNode({ view }: Props) {
+export function ConnectorInspector({ view }: Props) {
   const {
     connector,
     backendType,

@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
-import { useRoundFile } from "@/lib/useRoundFile";
-import { useConnector } from "@/lib/hooks/useConnectorView";
+import { useRoundFile } from "@/lib/hooks/useRoundFile";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { fmtPct1 } from "@/lib/format";
 import type { SelectedCandidate } from "@/lib/types/selection";
 import type { ScoreboardEntry } from "@/lib/types/round";

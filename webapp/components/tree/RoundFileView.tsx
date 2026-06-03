@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { CardFrame } from "@/components/ui/card";
+import { CardFrame } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 

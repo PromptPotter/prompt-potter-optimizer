@@ -12,7 +12,7 @@ import { CyclePicker } from "@/components/dashboard/CyclePicker";
 import { TargetPipelineHero } from "@/components/dashboard/TargetPipelineHero";
 import { BackendNodeDetail } from "@/components/dashboard/BackendNodeDetail";
 import { SpendBudgetControl } from "@/components/dashboard/SpendBudgetControl";
-import { useConnector } from "@/lib/hooks/useConnectorView";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { targetNodeIds } from "@/lib/connector-nodes";
 import { useSelection } from "@/components/dashboard/SelectionContext";
 

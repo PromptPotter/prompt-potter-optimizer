@@ -14,7 +14,7 @@ import {
   type DatasetItem,
   type HardSamplesScope,
   type MeasurementDot,
-} from "./api";
+} from "../api";
 
 interface ScopeSlice {
   items: DatasetItem[];

@@ -398,7 +398,7 @@ function SecurityTab({ me }: { me: MeResponse }) {
     setSigningOut(true);
     try {
       await postLogout();
-      window.location.href = "/ui/login";
+      window.location.href = "/login";
     } catch (e) {
       setError(String(e));
       setSigningOut(false);

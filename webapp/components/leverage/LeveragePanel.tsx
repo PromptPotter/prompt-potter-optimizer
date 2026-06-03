@@ -5,7 +5,7 @@
 
 import { fetchLeverage, type PerQueryRow } from "@/lib/api";
 import { fmtPct0, fmtFitness, ageText } from "@/lib/format";
-import { useFetch } from "@/lib/useFetch";
+import { useFetch } from "@/lib/hooks/useFetch";
 import { Loading, ErrorNote } from "@/components/ui/states";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 

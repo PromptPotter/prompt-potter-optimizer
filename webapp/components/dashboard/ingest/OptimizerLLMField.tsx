@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchLLMProviders, type LLMProvider } from "@/lib/api";
-import { useAppliableField } from "@/lib/useAppliableField";
+import { useAppliableField } from "@/lib/hooks/useAppliableField";
 
 // Optimizer-LLM picker. Fetches the curated provider list at mount and
 // surfaces availability per provider — providers whose API key isn't

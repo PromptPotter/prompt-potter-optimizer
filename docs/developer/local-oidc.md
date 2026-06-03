@@ -17,7 +17,7 @@ cd ../..
 PROMPTPOTTER_AUTH=on python -m uvicorn promptpotter.main:app --port 8001
 ```
 
-Visit `http://localhost:8001/ui/login/`, click Google, log in as
+Visit `http://localhost:8001/login/`, click Google, log in as
 `dev@promptpotter.local` / `password`.
 
 Full walkthrough + troubleshooting + alternate IdP recipes:

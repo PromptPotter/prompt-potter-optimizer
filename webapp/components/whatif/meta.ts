@@ -1,6 +1,6 @@
 // Mirror of promptpotter/application/scoring/evaluators.py::evaluators_meta().
 // Inline copy so the panel renders without an API fetch. For the
-// current-cycle live registry, hit `/api/v1/active/evaluators_meta`.
+// current-cycle live registry, hit `/api/v1/evaluators`.
 
 export interface EvaluatorMeta {
   name: string;

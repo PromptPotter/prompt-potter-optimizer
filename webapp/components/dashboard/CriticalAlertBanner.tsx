@@ -2,7 +2,7 @@
 import { cx } from "@/lib/cx";
 import { connectorReachability } from "@/lib/derivations/connector-state";
 import { criticalAlert } from "@/lib/derivations/critical-alert";
-import { useConnector } from "@/lib/hooks/useConnectorView";
+import { useConnector } from "@/lib/hooks/useConnector";
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
 
 // The loud, can't-miss failure surface — a full-width sticky bar pinned under
@@ -29,7 +29,7 @@ export function CriticalAlertBanner({
   runPhaseResolved,
   onOpenFiles,
 }: Props) {
-  // Same connector reachability the ConnectorNode LED reads — one shared
+  // Same connector reachability the ConnectorInspector LED reads — one shared
   // `useConnector()` probe, one shared `down` verdict (connector-state.ts).
   const { health, connector } = useConnector();
   const { down: connectorDown } = connectorReachability(health);

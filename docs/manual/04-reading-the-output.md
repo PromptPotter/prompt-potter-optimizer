@@ -94,7 +94,7 @@ The optimizer has already handled it — these exist for audit, not to ask for i
   ```bash
   python -m uvicorn promptpotter.main:app --port 8001
   ```
-  then open <http://127.0.0.1:8001/ui/>. The page polls `dashboard.json` every 2 s. Reads `active_session.json` on load — `new` a fresh cycle ⇒ reload the page. Keep `python -m promptpotter resume` running in another terminal for live refresh.
+  then open <http://127.0.0.1:8001/>. The page polls `dashboard.json` every 2 s. Reads `active_session.json` on load — `new` a fresh cycle ⇒ reload the page. Keep `python -m promptpotter resume` running in another terminal for live refresh.
 - `output.log` — append-only HIT/MISS history, tail-friendly.
 
 Both live in the cycle's **own** dir. When you fork, the fork's dir is flat alongside its root at `campaigns/{campaign_id}/cycles/{fork_cycle_id}/`, and its `dashboard.json` / `output.log` live there too — each cycle owns its stream. Tail the cycle you're actually running.

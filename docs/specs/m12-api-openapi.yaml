@@ -1157,7 +1157,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
-  /llm/providers:
+  /llm-providers:
     get:
       operationId: listLlmProviders
       summary: List optimizer LLM providers + curated starter models, gated on installed API keys.
@@ -1869,7 +1869,7 @@ components:
             `openrouter`). Smart-default `groq` (free tier, fastest startup).
             Operator-editable via panel; the resolved list of providers
             available in this install — gated on whether the corresponding
-            API key is set — is served by `GET /llm/providers`.
+            API key is set — is served by `GET /llm-providers`.
         optimizer_model:
           type: string
           maxLength: 128
@@ -1878,7 +1878,7 @@ components:
             Optimizer LLM model id (e.g. `openai/gpt-oss-120b`,
             `claude-sonnet-4-6`). Empty string means "use the connector's
             recommended default for this provider"; the curated per-provider
-            model list is exposed by `GET /llm/providers`.
+            model list is exposed by `GET /llm-providers`.
         headers:
           type: array
           items: { type: string }
@@ -2195,7 +2195,7 @@ components:
       required: [name, display_name, available, env_var, models]
       additionalProperties: false
       description: |
-        One entry in the `GET /llm/providers` response. The `available` flag
+        One entry in the `GET /llm-providers` response. The `available` flag
         is computed from whether the install's environment carries the
         `env_var` API key. `models` is a curated starter list sourced from
         `docs/operations/dataset-reasoning-matrix.md`; the operator can

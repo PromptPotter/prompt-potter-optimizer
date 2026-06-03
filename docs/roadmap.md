@@ -7,7 +7,7 @@ PromptPotter is in alpha. This page is the short version. The full development p
 - **Prompt + pipeline optimization.** Three-layer optimizer loop (generate / score / critique → framing refinement → strategic replan) over the dataset's pipeline.
 - **Statistical early-stopping.** Posterior-based candidate elimination so weak candidates exit before they finish the full sample budget.
 - **Cross-run memory.** The MeasurementArchive records every per-sample measurement; future runs cache-hit on identical work and inform the next round's exploration.
-- **Read-only operator dashboard.** A live view of the active campaign at `/ui`, served from a static Next.js export.
+- **Read-only operator dashboard.** A live view of the active campaign at the domain root, served from a static Next.js export.
 - **Connector boundary + TermNorm.** The first registered connector; the wire adapter, session lifecycle, and experiment-data extraction sit behind one `Connector` shape.
 
 ## Next

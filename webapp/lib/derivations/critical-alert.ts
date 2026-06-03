@@ -27,7 +27,7 @@ interface Args {
   bannerHint?: string;
   dash: DashboardSnapshot | null;
   runPhaseResolved: string | null;
-  // The SAME connector reachability the ConnectorNode LED uses (`health != null
+  // The SAME connector reachability the ConnectorInspector LED uses (`health != null
   // && health.status !== "live"`), reconciled by the caller from `useConnector()`.
   // The backend is the run's dependency — when its probe goes red, this banner
   // is the loud, cross-tab twin of the LED. `connectorName`/`connectorDetail`
@@ -64,7 +64,7 @@ export function criticalAlert({
   if (bannerStatus === "offline") {
     return { severity: "critical", title: bannerText, detail: bannerHint };
   }
-  // Backend dependency down — the loud twin of the ConnectorNode LED. The
+  // Backend dependency down — the loud twin of the ConnectorInspector LED. The
   // PromptPotter API is up (else `offline` won above and the health probe would
   // be null anyway), but the backend it scores through fails its `/health`
   // probe, so the run can make no progress.

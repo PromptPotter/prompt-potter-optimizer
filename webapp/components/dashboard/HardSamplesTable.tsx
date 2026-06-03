@@ -13,7 +13,7 @@ import { type DashboardSnapshot } from "@/lib/poll";
 import { useStableContent } from "@/lib/stable";
 import { MeasHeatCell } from "./MeasHeatCell";
 import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
-import { useLocalStorage } from "@/lib/useLocalStorage";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import {
   autoWidthFor,
   cellFor,

@@ -124,7 +124,7 @@ done
 if [[ $ok -eq 1 ]]; then
     printf '\n\033[1;32mtunnel is live — https://%s\033[0m\n\n' "$PUBLIC_HOSTNAME"
     cat <<EOF
-  - dashboard: https://$PUBLIC_HOSTNAME/ui/
+  - dashboard: https://$PUBLIC_HOSTNAME/
   - api docs:  https://$PUBLIC_HOSTNAME/docs
   - health:    https://$PUBLIC_HOSTNAME$HEALTH_PATH
 

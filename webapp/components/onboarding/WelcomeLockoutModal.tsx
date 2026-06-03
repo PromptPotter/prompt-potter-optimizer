@@ -15,7 +15,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   // OIDC callback bounce-back: the FastAPI /auth/callback/{provider} route
-  // 303-redirects to /ui/?auth_error=<code>(&email=<addr>) on every failure
+  // 303-redirects to /?auth_error=<code>(&email=<addr>) on every failure
   // path. Topbar parses those params and passes them in here; we render a
   // one-line .account-error banner above the Continue-with-Google button.
   errorCode?: string | null;

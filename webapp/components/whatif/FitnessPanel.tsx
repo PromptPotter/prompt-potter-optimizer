@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { WHATIF_INLINE_META, buildRows, whatifIdentifiersInFormula, type Row } from "./meta";
 import { FitnessChart } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
-import { CardFrame } from "@/components/ui/card";
+import { CardFrame } from "@/components/ui/Card";
 import {
   liveL1Candidates,
   type DashboardSnapshot,
@@ -13,7 +13,7 @@ import type { RoundSummary } from "@/lib/api/types";
 import { useSelection } from "@/components/dashboard/SelectionContext";
 import { WhatIfGrid } from "./WhatIfGrid";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
-import { useFetch } from "@/lib/useFetch";
+import { useFetch } from "@/lib/hooks/useFetch";
 import { useWorkspace } from "@/lib/workspace";
 import { useFitnessBars } from "./useFitnessBars";
 

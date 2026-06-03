@@ -103,7 +103,7 @@ Vitest is scoped to `lib/**/` + `components/**/__tests__/` — pure
 data → data helpers and reader-side derivations that have no React
 rendering. Pure render components stay covered by the
 compile-time + smoke gate (`npm run lint`, `npx tsc --noEmit`,
-`npm run build`, manual smoke at `http://localhost:8001/ui/`).
+`npm run build`, manual smoke at `http://localhost:8001/`).
 
 If a regression turns out to need a component-render test, reach for
 `@testing-library/react` then; today's bug classes don't.

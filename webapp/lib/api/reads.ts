@@ -17,7 +17,7 @@ import type {
 } from "./types";
 
 export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse> {
-  return jget<ActiveSessionResponse>(`${API}/active`, signal);
+  return jget<ActiveSessionResponse>(`${API}/sessions/active`, signal);
 }
 
 // Server health + the single-source app version (`APP_VERSION`, surfaced by
@@ -39,7 +39,7 @@ export function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
 // so they're insulated from the eventual state-sync persistence swap. 404
 // when no session is active; `{warming_up: true, ...}` while origin runs.
 export function fetchLiveState(signal?: AbortSignal): Promise<Record<string, unknown>> {
-  return jget<Record<string, unknown>>(`${API}/live`, signal);
+  return jget<Record<string, unknown>>(`${API}/sessions/active/live-state`, signal);
 }
 
 // Run-control state for the VIEWED cycle now rides `dashboard.json::run_phase`
@@ -48,7 +48,7 @@ export function fetchLiveState(signal?: AbortSignal): Promise<Record<string, unk
 // folded into the same dashboard payload as `current_spend_cap_usd`.
 
 // Current identity envelope — drives the account modal (Profile + Security).
-// 401 when no session; the caller should treat that as "redirect to /ui/login".
+// 401 when no session; the caller should treat that as "redirect to /login".
 export interface ConnectedAccount {
   provider: string;
   email: string | null;
@@ -157,10 +157,10 @@ export function fetchDatasetIndex(signal?: AbortSignal): Promise<DatasetIndexRes
 }
 
 export function fetchPipeline(signal?: AbortSignal): Promise<unknown> {
-  return jget(`${API}/optimizer/pipeline`, signal);
+  return jget(`${API}/optimizer-pipeline`, signal);
 }
 
-/** One curated entry from ``GET /api/v1/llm/providers``. ``available`` is
+/** One curated entry from ``GET /api/v1/llm-providers``. ``available`` is
  * gated on the env-var being non-empty server-side — the picker dims
  * providers whose API key isn't configured rather than letting the operator
  * pick a provider that would fail at first call. */
@@ -176,7 +176,7 @@ export interface LLMProvidersResponse {
   providers: LLMProvider[];
 }
 export function fetchLLMProviders(signal?: AbortSignal): Promise<LLMProvidersResponse> {
-  return jget<LLMProvidersResponse>(`${API}/llm/providers`, signal);
+  return jget<LLMProvidersResponse>(`${API}/llm-providers`, signal);
 }
 
 // Target connector pipeline for a dataset. One-shot — topology is bound at
@@ -385,7 +385,7 @@ export function fetchDiagnosticRuns(
   signal?: AbortSignal,
 ): Promise<DiagnosticRunListResponse> {
   const qs = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
-  return jget<DiagnosticRunListResponse>(`${API}/workspace/diagnostic-runs${qs}`, signal);
+  return jget<DiagnosticRunListResponse>(`${API}/diagnostic-runs${qs}`, signal);
 }
 
 // Cycle detail — reads index.json via the generic cycle-file endpoint (the

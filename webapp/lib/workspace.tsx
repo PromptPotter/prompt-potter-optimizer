@@ -1,6 +1,6 @@
 "use client";
 // Single source of truth for workspace identity. One provider polls the
-// server's active pointer (`/active`) and the cycle list (`/cycles`)
+// server's active pointer (`/sessions/active`) and the cycle list (`/cycles`)
 // together; every surface — DashboardPane, CyclePicker, Sidebar —
 // subscribes here via `useWorkspace()` instead of fetching those
 // endpoints on its own.
@@ -36,7 +36,7 @@ import {
   type CycleListEntry,
   type LifecycleFilter,
 } from "./api";
-import { usePoll } from "./usePoll";
+import { usePoll } from "./hooks/usePoll";
 import { useRevalidation } from "./revalidate";
 import { useAuthGate } from "./auth-context";
 
@@ -190,7 +190,7 @@ export function WorkspaceProvider({
     if (cyclesRes.status === "fulfilled") {
       setCycles(cyclesRes.value.cycles);
       // `/cycles` also carries the active pointer — use it as a fallback
-      // only when `/active` itself failed this tick.
+      // only when `/sessions/active` itself failed this tick.
       if (activeRes.status !== "fulfilled") {
         if (cyclesRes.value.active_cycle_id) {
           nextActiveCycle = cyclesRes.value.active_cycle_id;

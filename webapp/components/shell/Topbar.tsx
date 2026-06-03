@@ -35,7 +35,7 @@ export function Topbar({ tab, onTabChange, onMenuToggle }: Props) {
   const { status } = useAuth();
 
   // OIDC callback bounce-back: /auth/callback/{provider} 303s to
-  // /ui/?auth_error=<code>(&email=<addr>) on failure. Auto-open the
+  // /?auth_error=<code>(&email=<addr>) on failure. Auto-open the
   // sign-in modal with the error banner, then strip the params from the
   // visible URL so a refresh doesn't replay. Read window.location
   // directly (not useSearchParams) to avoid the Suspense requirement

@@ -1,6 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { useLocalStorage } from "@/lib/useLocalStorage";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 
 // Collapsible signal section. Two of these stack on the Dashboard tab
 // (Now / Live state). Each lane's open/closed state persists in

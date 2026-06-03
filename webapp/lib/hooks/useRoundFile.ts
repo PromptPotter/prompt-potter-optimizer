@@ -11,8 +11,8 @@
 // flash on key change, no manual reset needed by the caller.
 
 import { useEffect, useState } from "react";
-import { fetchCycleFile } from "./api";
-import type { RoundFileDoc } from "./poll";
+import { fetchCycleFile } from "../api";
+import type { RoundFileDoc } from "../poll";
 
 export interface UseRoundFileState {
   doc: RoundFileDoc | null;

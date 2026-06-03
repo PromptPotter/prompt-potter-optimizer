@@ -4,7 +4,7 @@ import { Line } from "react-chartjs-2";
 import { ensureChartRegistered, lineChartDefaults } from "@/lib/chart-config";
 import { cssRgba, getCss, useThemeVersion } from "@/lib/theme";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { CardFrame } from "@/components/ui/card";
+import { CardFrame } from "@/components/ui/Card";
 
 ensureChartRegistered();
 

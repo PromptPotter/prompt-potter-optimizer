@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from promptpotter.infrastructure.store.archive_views import aggregate_per_query
 from promptpotter.presentation.api.deps import StoreDep
 
-_measurements_router = APIRouter(tags=["Measurements"])
+measurements_router = APIRouter(tags=["Measurements"])
 
 
 class PerQueryRow(BaseModel):
@@ -36,7 +36,7 @@ class LeverageResponse(BaseModel):
     per_query: list[PerQueryRow]
 
 
-@_measurements_router.get("/measurements/leverage", response_model=LeverageResponse)
+@measurements_router.get("/measurements/leverage", response_model=LeverageResponse)
 async def get_measurement_leverage(
     store: StoreDep,
     limit: int = Query(default=200, ge=1, le=5000),
@@ -58,4 +58,4 @@ async def get_measurement_leverage(
     )
 
 
-__all__ = ["LeverageResponse", "PerQueryRow", "_measurements_router"]
+__all__ = ["LeverageResponse", "PerQueryRow", "measurements_router"]

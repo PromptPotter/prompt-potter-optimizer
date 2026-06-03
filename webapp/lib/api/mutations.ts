@@ -77,7 +77,7 @@ export interface ForkSeed {
 
 // Mint an `operator_steered` fork rooted at the selected searchpoint, carrying
 // the operator's edits + reconciled limits. The single fork write path.
-export async function postCreateFork(
+export async function postForkCycle(
   campaignId: string,
   cycleId: string,
   round: number,
@@ -176,7 +176,7 @@ export async function postMintCampaign(
 // loop's `pause_check` blocks at the next round boundary while it's present.
 // Resume removes the flag; the wait-loop exits on its next tick. Both
 // idempotent. Cycle-scoped per `m12-api-openapi.yaml::pauseCycle/resumeCycle`.
-// Pause-state is read back from `GET /api/v1/live::is_paused`.
+// Pause-state is read back from `GET /api/v1/sessions/active/live-state::is_paused`.
 export async function postPauseCycle(
   campaignId: string,
   cycleId: string,
@@ -568,7 +568,7 @@ export async function postResolveOrigin(draftId: string): Promise<ResolveOriginR
 
 // Security pane sign-out. Not a command-highway POST (logout is
 // auth-router-owned); writes the session-cookie clear via the server-side
-// session store. On 200 the caller hard-redirects to /ui/login.
+// session store. On 200 the caller hard-redirects to /login.
 export async function postLogout(): Promise<void> {
   const r = await fetch(`${API}/auth/logout`, {
     method: "POST",

@@ -4,7 +4,7 @@ import type { DashboardSnapshot } from "@/lib/poll";
 import { rootCycleId, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
 import { useStableContent } from "@/lib/stable";
-import { CardFrame } from "@/components/ui/card";
+import { CardFrame } from "@/components/ui/Card";
 import { useSelection } from "./SelectionContext";
 import { FamilyTree } from "./FamilyTree";
 import { roundCandidatesByRound } from "@/lib/derivations/round-candidates";

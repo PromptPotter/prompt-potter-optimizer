@@ -34,7 +34,7 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 pip install -e ".[all]"
 python -m promptpotter new <dataset>     # e.g. llm_only or bbeh
 python -m uvicorn promptpotter.main:app --port 8001
-# Open http://localhost:8001/ui/
+# Open http://localhost:8001/
 ```
 
 The first command installs dependencies. The second mints a campaign and starts the optimization loop in your terminal. The third (in a separate terminal) serves the read-only dashboard webapp. Full walkthrough: [`docs/manual/`](docs/manual/README.md).

@@ -62,7 +62,7 @@ The leader-elimination check is built at one swap point: `build_elimination_chec
 pip install -e ".[all,dev]"
 python -m promptpotter new <your_dataset>          # mint campaign + cycle, run from round 0
 python -m promptpotter resume                      # resume the active cycle
-python -m uvicorn promptpotter.main:app --port 8001  # serve the read-only /ui webapp
+python -m uvicorn promptpotter.main:app --port 8001  # serve the read-only webapp at the root
 ```
 
 ## What you get for free

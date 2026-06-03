@@ -7,7 +7,7 @@
 
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { ageText, fmtFitness, fmtPct0 } from "@/lib/format";
-import { useFetch } from "@/lib/useFetch";
+import { useFetch } from "@/lib/hooks/useFetch";
 import { ErrorNote, Loading } from "@/components/ui/states";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 

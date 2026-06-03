@@ -4,7 +4,7 @@ Seven routes:
 
 * ``GET /auth/providers`` — list configured providers (drives the login page).
 * ``GET /auth/login/{provider}`` — issue a state token, redirect to the provider's consent screen.
-* ``GET /auth/callback/{provider}`` — verify the auth code, mint a server-side session, set the opaque cookie, redirect to ``/ui/``.
+* ``GET /auth/callback/{provider}`` — verify the auth code, mint a server-side session, set the opaque cookie, redirect to ``/``.
 * ``POST /auth/logout`` — delete the session + clear the cookie.
 * ``GET /auth/me`` — current identity envelope (401 when no session).
 * ``GET /auth/quota-status`` — Security pane: live quota knobs + today's usage.
@@ -173,13 +173,13 @@ def _redirect_with_error(code: str, *, email: str | None = None) -> RedirectResp
 
     Google's consent screen browser-navigates straight to /auth/callback/...;
     raising HTTPException there dumps raw JSON to the tab. Industry-standard
-    fix: 303 to the login surface (`/ui/`) with `?auth_error=<code>` so the
+    fix: 303 to the app root (`/`) with `?auth_error=<code>` so the
     React modal can render a friendly inline banner.
     """
     qs = f"auth_error={code}"
     if email:
         qs += f"&email={quote_plus(email)}"
-    return RedirectResponse(url=f"/ui/?{qs}", status_code=303)
+    return RedirectResponse(url=f"/?{qs}", status_code=303)
 
 
 @auth_router.get("/providers", response_model=ProvidersResponse)
@@ -212,7 +212,7 @@ async def callback(
     request: Request,
     provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
 ) -> RedirectResponse:
-    # All failure paths in this handler redirect to /ui/?auth_error=<code>
+    # All failure paths in this handler redirect to /?auth_error=<code>
     # instead of raising HTTPException — this route is browser-navigated by
     # the provider's consent screen, so a JSON 4xx renders as raw text in the
     # tab. The sibling routes (/login, /providers, /me, /logout) keep raising
@@ -272,7 +272,7 @@ async def callback(
         provider=identity.provider,
     )
 
-    response = RedirectResponse(url="/ui/", status_code=303)
+    response = RedirectResponse(url="/", status_code=303)
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_id,
