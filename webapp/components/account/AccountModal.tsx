@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { AboutUnit } from "./AboutUnit";
+import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
 import {
   fetchActivity,
   fetchMe,
@@ -227,23 +228,53 @@ function PreferencesTab() {
   };
 
   return (
+    <>
+      <div className="account-row">
+        <span className="account-label">Try &amp; learn</span>
+        <div className="account-row-main">
+          <label className="account-pref-toggle">
+            <input
+              type="checkbox"
+              checked={demo ?? false}
+              disabled={demo === null || busy}
+              onChange={(e) => void toggle(e.target.checked)}
+            />
+            <span>Show the try-and-learn demo dataset</span>
+          </label>
+          <p className="account-muted">
+            A small support-ticket dataset, ready to optimize, in your collection.
+            Turn it off once you&rsquo;re set up.
+          </p>
+          {error ? <p className="account-error">{error}</p> : null}
+        </div>
+      </div>
+      <ThemeRow />
+    </>
+  );
+}
+
+// Theme lives in settings (not the navbar) so it's reachable the same way on
+// every device — on phones the standalone navbar toggle is hidden. Client-only
+// state via lib/theme.ts; deliberately not a server-side user setting.
+function ThemeRow() {
+  useThemeVersion();
+  const dark = readStoredTheme() === "dark";
+  return (
     <div className="account-row">
-      <span className="account-label">Try &amp; learn</span>
+      <span className="account-label">Appearance</span>
       <div className="account-row-main">
         <label className="account-pref-toggle">
           <input
             type="checkbox"
-            checked={demo ?? false}
-            disabled={demo === null || busy}
-            onChange={(e) => void toggle(e.target.checked)}
+            checked={dark}
+            onChange={(e) => applyTheme(e.target.checked ? "dark" : "light")}
           />
-          <span>Show the try-and-learn demo dataset</span>
+          <span>Dark mode &mdash; DOOM/lava operator view</span>
         </label>
         <p className="account-muted">
-          A small support-ticket dataset, ready to optimize, in your collection.
-          Turn it off once you&rsquo;re set up.
+          The light, editorial register is the default. Switch to dark for deep
+          operator work; the choice is remembered on this device.
         </p>
-        {error ? <p className="account-error">{error}</p> : null}
       </div>
     </div>
   );

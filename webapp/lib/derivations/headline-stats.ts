@@ -1,9 +1,9 @@
 // Single source of truth for the headline run KPIs — best, origin, and the
-// delta between them. Before this, TopStrip, RunTelemetry, and ChatPane each
-// re-ran `typeof dash?.best === "number" ? …` and `best - origin` with subtly
+// delta between them. Before this, TopStrip and ChatPane each re-ran
+// `typeof dash?.best === "number" ? …` and `best - origin` with subtly
 // different finite-guards, so the same campaign could show a different
-// headline in the chat job-bar than in the console telemetry. One derivation,
-// they cannot disagree.
+// headline in the chat job-bar than elsewhere. One derivation, they cannot
+// disagree.
 //
 // Note the `origin` here is the headline "is-a-number" reading. The candidate
 // list (round-candidates.ts) keeps its own `accuracy > 0` guard — there

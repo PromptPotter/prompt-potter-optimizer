@@ -4,15 +4,13 @@ import { TERMS } from "@/lib/terms";
 import type { StatusKind } from "@/lib/poll";
 
 // Floating status assistant — Clippy-style chip pinned to the bottom-right
-// corner of the viewport, just above the Console pane. Initial state is
-// expanded (dot + status text + hint + Files → + ×). After
-// COLLAPSE_AFTER_MS of idle time it shrinks to a circular button showing
-// only the colour-coded status dot; clicking it re-expands. The timer
-// pauses while the operator hovers or focuses the chip so it never
-// vanishes mid-read, and re-expands automatically whenever the status
-// changes (live → stale → offline) so important transitions catch the
-// eye. Run-state telemetry (round / best / spend / last / updated) and
-// the Stop affordance live in the Console head — see RunTelemetry.
+// corner of the viewport. Initial state is expanded (dot + status text +
+// hint + Files → + ×). After COLLAPSE_AFTER_MS of idle time it shrinks to a
+// circular button showing only the colour-coded status dot; clicking it
+// re-expands. The timer pauses while the operator hovers or focuses the chip
+// so it never vanishes mid-read, and re-expands automatically whenever the
+// status changes (live → stale → offline) so important transitions catch the
+// eye.
 
 const COLLAPSE_AFTER_MS = 10_000;
 

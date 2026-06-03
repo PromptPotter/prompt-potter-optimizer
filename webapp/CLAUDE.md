@@ -74,7 +74,7 @@ if (key !== prevKey) {
 
 It runs **during render**, so the reset and the re-render commit together — no stale frame. A `useEffect` reset runs after paint and flashes one frame of the prior unit's data; do not use it for this.
 
-Canonical sites: `lib/poll.tsx` (`unitKeyRef`, the `useRef` variant), `components/dashboard/SelectionContext.tsx`, `components/console/ConsolePane.tsx`.
+Canonical sites: `lib/poll.tsx` (`unitKeyRef`, the `useRef` variant), `components/dashboard/SelectionContext.tsx`.
 
 A hook that owns a single state object may instead derive freshness purely — stamp the loaded data with the key it was fetched for and return `EMPTY` until the key matches (`lib/useDatasetPreview.ts`, `lib/useRoundFile.ts`). Also stale-frame-free.
 

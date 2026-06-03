@@ -42,13 +42,30 @@
    1fr chart row soaks up that extra height and `align-self:start` pins the
    chart directly under the title — the slack lands BELOW the chart, never
    as a gap above it. (Pre-fix the chart dropped to the bottom-left.) */
-.fitness-card.whatif-open{display:grid;grid-template-columns:432px minmax(0,1fr);grid-template-rows:auto 1fr;column-gap:18px;align-items:start}
+.fitness-card.whatif-open{display:grid;grid-template-columns:minmax(0,432px) minmax(0,1fr);grid-template-rows:auto 1fr;column-gap:18px;align-items:start}
 .fitness-card.whatif-open > .card-title{grid-column:1;grid-row:1;max-width:432px}
-.fitness-card.whatif-open > .fitness-body{display:contents}
-.fitness-card.whatif-open .fitness-chart-wrap{grid-column:1;grid-row:2;width:432px;align-self:start}
+/* min-width:0 lets .fitness-body shrink once the stacked layout below makes
+   it a flex item (flex default min-width:auto would pin it to the grid row). */
+.fitness-card.whatif-open > .fitness-body{display:contents;min-width:0}
+/* Chart caps at 432px but shrinks with the container (column is minmax(0,432px)),
+   so it never spills off a narrow card. */
+.fitness-card.whatif-open .fitness-chart-wrap{grid-column:1;grid-row:2;width:100%;max-width:432px;align-self:start}
 .fitness-card.whatif-open .fitness-whatif{grid-column:2;grid-row:1 / span 2;align-self:stretch;min-width:0;margin-top:0;padding-top:0;padding-left:18px;border-top:0;border-left:0.5px solid var(--color-border-tertiary)}
+/* Stacked layout: align-items:stretch (overriding the grid layout's `start`) so
+   flex children fill the card width instead of hugging their max-content (the
+   ~455px what-if grid row), which would overflow a narrow card. */
 @media (max-width:960px){
-  .fitness-card.whatif-open{display:flex;flex-direction:column}
+  .fitness-card.whatif-open{display:flex;flex-direction:column;align-items:stretch}
+  .fitness-card.whatif-open > .card-title{max-width:none}
+  .fitness-card.whatif-open > .fitness-body{display:flex;flex-direction:column}
+  .fitness-card.whatif-open .fitness-chart-wrap{width:100%}
+  .fitness-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border-tertiary);margin-top:0}
+}
+/* Same stack keyed on the card's CONTAINER width (the `.job-whatif` cell) not
+   the viewport — in the chat pane the @media query above never fires (wide
+   viewport, narrow cell). No-op elsewhere (no `whatif` container). */
+@container whatif (max-width:760px){
+  .fitness-card.whatif-open{display:flex;flex-direction:column;align-items:stretch}
   .fitness-card.whatif-open > .card-title{max-width:none}
   .fitness-card.whatif-open > .fitness-body{display:flex;flex-direction:column}
   .fitness-card.whatif-open .fitness-chart-wrap{width:100%}

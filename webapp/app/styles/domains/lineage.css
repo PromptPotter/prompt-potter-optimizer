@@ -28,17 +28,6 @@
 .inspector-key{color:var(--color-text-secondary)}
 .inspector-val{color:var(--color-text-primary)}
 .inspector-note{grid-column:1/-1;color:var(--color-text-secondary);font-style:italic;margin-top:6px}
-/* Cycle-level toolbar — Edit toggle + Stop button live on the breadcrumb
-   row next to the picker. Off by default; Edit mode reveals Stop and the
-   Fork action inside the ScoringInspector. */
-.cycle-toolbar{display:inline-flex;align-items:center;gap:6px;margin-left:14px}
-.edit-mode-toggle{background:transparent;border:1px solid var(--color-border);border-radius:6px;padding:2px 10px;font-size:12px;color:var(--color-text-secondary);cursor:pointer;font-family:inherit}
-.edit-mode-toggle:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
-.edit-mode-toggle.on{background:var(--color-status-warn,#b45309);color:#fff;border-color:var(--color-status-warn,#b45309)}
-.stop-button-wrap{display:inline-flex;align-items:center;gap:6px}
-.stop-button{background:var(--color-status-error,#c53030);color:#fff;border:0;border-radius:6px;padding:2px 12px;font-size:12px;cursor:pointer;font-family:inherit}
-.stop-button:disabled{background:var(--color-text-secondary);cursor:not-allowed;opacity:0.6}
-.stop-err{color:var(--color-status-error,#c53030);font-size:12px}
 /* Fork action inside the ScoringInspector — only rendered when Edit mode
    is on. After a successful POST the action is replaced by the CLI command
    to run the new fork. */

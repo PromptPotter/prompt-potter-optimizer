@@ -12,34 +12,29 @@
      forced by the shell itself. */
   .shell{min-height:0}
 
-  /* Topbar — surface the search icon (sidebar hamburger already
-     visible from the ≤bp-md band above). The disabled search input
-     itself stays in the DOM (M13+ placeholder rule) — collapses to
-     an icon; tapping the icon expands it inline by hiding the tabs
-     and letting the input span the row. */
+  /* Topbar — tighten padding + let the tabs scroll. The search is a
+     single magnifying-glass placeholder at all widths now (topbar.css),
+     so no input collapse/expand handling is needed here. */
   .topbar{padding:0 8px;gap:6px}
-  .topbar-search-icon{display:inline-flex;align-items:center;justify-content:center;width:var(--touch-target-min);height:var(--touch-target-min);background:transparent;border:0;cursor:pointer;color:var(--color-text-secondary);border-radius:var(--border-radius-md);font-family:inherit}
-  .topbar-search-icon:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-  .search{display:none}
-  .topbar.topbar-search-open .search{display:block;flex:1 1 auto;height:36px;font-size:16px}
-  .topbar.topbar-search-open .tabs{display:none}
   .tabs{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
   .tabs::-webkit-scrollbar{display:none}
   .tab{padding:0 10px;font-size:13px;height:52px}
 
-  /* Theme toggle + account/auth chips — keep them touch-sized but
-     compact. ThemeToggle is already 34×30; auth chips at 30h are
-     just under the 44px touch target so bump padding to compensate. */
+  /* Account/auth chips — keep them touch-sized but compact. Auth
+     chips at 30h are just under the 44px touch target so bump padding
+     to compensate. The standalone theme toggle drops off the phone
+     navbar so the account button is the single user control; theme
+     moves into Account → Preferences (PreferencesTab). */
+  .theme-toggle{display:none}
   .auth-chip{height:32px;padding:0 12px;font-size:12px}
 
-  /* Chat job bar — only rendered for authed-with-cycle, but when it
-     IS rendered the chip-row is absolute-centered which guarantees
-     overlap at narrow widths. Re-flow inline, allow wrap, drop the
-     chevron from `margin-left:auto` collapse. */
+  /* Chat job bar — only rendered for authed-with-cycle. The head already
+     wraps + flows the chips in normal order by default (chat.css); here we
+     just tighten gaps and chip sizing for the phone. */
   .chat-job-bar{padding:6px 10px 8px}
-  .chat-job-head{flex-wrap:wrap;gap:6px}
+  .chat-job-head{gap:6px}
   .chat-job-toggle{flex-wrap:wrap;min-height:0;padding:8px 10px;gap:6px}
-  .chat-job-toggle .chip-row{position:static;transform:none;flex-wrap:wrap;gap:6px;justify-content:flex-start}
+  .chat-job-toggle .chip-row{gap:6px}
   .chat-job-toggle .chip{padding:3px 10px;font-size:13px}
 
   /* Pipeline hero — on phones the flanking Input/Output boxes shrink to a

@@ -11,8 +11,6 @@ import { applyChartDefaults } from "@/lib/theme";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { StatusAssistant } from "@/components/status/StatusAssistant";
-import { RunTelemetry } from "@/components/status/RunTelemetry";
-import { ConsolePane } from "@/components/console/ConsolePane";
 import { TopStrip } from "./TopStrip";
 import { ChatPane } from "./ChatPane";
 import { Lane } from "./Lane";
@@ -86,10 +84,6 @@ function DashboardPaneInner() {
     archivePerSample,
     isStale: datasetStale,
   } = useDatasetPreview(campaignId, cycleId, hardSamplesScope);
-  // Edit mode — off by default; gates Stop run + Fork-from-here. Never
-  // persisted across reloads (no URL param, no localStorage) so the
-  // operator never finds risky affordances quietly enabled.
-  const [editMode, setEditMode] = useState(false);
   // Sidebar collapse — user-driven, persistent across reloads. Default
   // expanded; once the user collapses it, that sticks until they toggle
   // again. Tab switches never touch this state — that's the whole point
@@ -275,17 +269,6 @@ function DashboardPaneInner() {
                   <div className="breadcrumb">
                     Campaign »{" "}
                     <CyclePicker />
-                    <span className="cycle-toolbar">
-                      <button
-                        type="button"
-                        className={`edit-mode-toggle${editMode ? " on" : ""}`}
-                        onClick={() => setEditMode(!editMode)}
-                        aria-pressed={editMode}
-                        title={editMode ? "Editing — risky actions exposed" : "Read-only view"}
-                      >
-                        {editMode ? "● Editing" : "Edit"}
-                      </button>
-                    </span>
                   </div>
                 </div>
               </header>
@@ -323,21 +306,6 @@ function DashboardPaneInner() {
         ) : (
           <VerifyPane />
         )}
-        <ConsolePane
-          campaignId={campaignId}
-          cycleId={cycleId}
-          headSlot={
-            cycleId ? (
-              <RunTelemetry
-                campaignId={campaignId}
-                cycleId={cycleId}
-                dash={dash}
-                isLive={isLive}
-                runPhase={runPhaseResolved}
-              />
-            ) : null
-          }
-        />
       </main>
       <IngestPane
         open={newCampaignOpen}

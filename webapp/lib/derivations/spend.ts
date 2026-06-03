@@ -3,10 +3,9 @@
 // ledger TokenUsageRecord (loop bucket); OpenRouter ships USD on the wire,
 // other providers resolve through shared/spend.py's rate table.
 //
-// RunTelemetry (chip + tooltip) and ChatPane (efficiency + ETA chips) both
-// consume this. They format differently, but the *extraction* — the bucket
-// defaults, the `used_usd` type-guards, the total/fallback rule — lives here
-// once so the two surfaces can never disagree on the underlying numbers.
+// ChatPane (efficiency + ETA chips) consumes this. The *extraction* — the
+// bucket defaults, the `used_usd` type-guards, the total/fallback rule — lives
+// here once so every consuming surface agrees on the underlying numbers.
 
 import type { DashboardSnapshot } from "@/lib/poll";
 

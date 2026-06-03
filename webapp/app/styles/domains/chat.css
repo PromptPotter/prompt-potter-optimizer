@@ -2,14 +2,13 @@
    Lifted from vanilla webapp/index.html (chat-content section). */
 .chat-content{padding:0 0 20px;display:flex;flex-direction:column}
 .chat-job-bar{align-self:stretch;padding:6px 20px 8px;border-bottom:1px solid var(--color-border-tertiary)}
-/* The bar is a flex row: grid icon + unit switcher on the left, the chip-row
-   absolutely centred against the head (so it stays centred in the viewport
-   regardless of switcher width), the toggle button (chips + chevron) filling
-   the rest. The head is the positioning context for the chip-row. */
-.chat-job-head{display:flex;align-items:center;gap:10px;position:relative;width:100%}
-.chat-job-toggle{background:transparent;border:1px solid transparent;color:var(--color-text-secondary);display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s,color .15s;font-family:inherit;flex:1;min-width:0;text-align:left;min-height:44px}
+/* Wrapping flex row: grid icon + picker, then the content-sized toggle. When
+   they can't share a line the toggle wraps below, left-aligned. Chips ride
+   normal flow (no absolute centring) so the wrap is plain flex. */
+.chat-job-head{display:flex;align-items:center;flex-wrap:wrap;gap:10px;width:100%}
+.chat-job-toggle{background:transparent;border:1px solid transparent;color:var(--color-text-secondary);display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s,color .15s;font-family:inherit;flex:0 1 auto;min-width:0;text-align:left;min-height:44px}
 .chat-job-head .grid{flex:0 0 auto;color:var(--color-text-tertiary)}
-.chat-job-toggle .chip-row{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:12px;flex-wrap:nowrap;z-index:1}
+.chat-job-toggle .chip-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .chat-job-toggle .chip{display:inline-flex;align-items:center;gap:7px;padding:5px 14px;border:1px solid var(--color-border-tertiary);border-radius:999px;font-size:14px;font-weight:500;color:var(--color-text-secondary);background:var(--color-background-secondary);flex-shrink:0;font-family:var(--font-mono);line-height:1.3}
 .chat-job-toggle .chip-lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:600;font-family:inherit}
 .chat-job-toggle .chip strong{color:var(--color-text-primary);font-weight:600;font-size:14px}
@@ -20,8 +19,13 @@
 .chat-job-toggle[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--color-accent)}
 .chat-job-dropdown{margin-top:8px;background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:6px 14px 12px;display:grid;grid-template-columns:minmax(260px,300px) 1fr;gap:0 18px;align-items:start}
 .chat-job-dropdown .job-section{padding:8px 0 4px}
-.chat-job-dropdown .job-whatif{padding:8px 0 4px;border-left:1px solid var(--color-border-tertiary);padding-left:18px;min-width:0}
-@media (max-width:760px){.chat-job-dropdown{grid-template-columns:1fr}.chat-job-dropdown .job-whatif{border-left:none;padding-left:0;border-top:1px solid var(--color-border-tertiary);padding-top:12px}}
+/* What-if cell is its own inline-size container so the fitness card reflows on
+   the cell width (fitness.css `@container whatif`), not the viewport, and the
+   `1fr` track can shrink freely. */
+.chat-job-dropdown .job-whatif{padding:8px 0 4px;border-left:1px solid var(--color-border-tertiary);padding-left:18px;min-width:0;container:whatif / inline-size}
+/* Collapse to one column on the chat pane's own width (the `content` container
+   from dashboard.css), not the viewport. */
+@container content (max-width:760px){.chat-job-dropdown{grid-template-columns:1fr}.chat-job-dropdown .job-whatif{border-left:none;padding-left:0;border-top:1px solid var(--color-border-tertiary);padding-top:12px}}
 .chat-job-dropdown .section-title{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:700;padding:4px 0 6px;border-bottom:1px solid var(--color-border-tertiary);margin-bottom:4px}
 .chat-job-dropdown .row{display:flex;justify-content:space-between;align-items:origin;gap:14px;padding:6px 0;border-bottom:1px solid var(--color-border-tertiary)}
 .chat-job-dropdown .row:last-child{border-bottom:none}

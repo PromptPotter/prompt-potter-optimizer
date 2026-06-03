@@ -1,12 +1,14 @@
 
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
 .topbar{background:var(--color-background-primary);border-bottom:0.5px solid var(--color-border-tertiary);padding:0 20px;display:flex;align-items:center;gap:16px;height:52px;flex-shrink:0}
-.search{flex:0 0 200px;height:30px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:0 10px;font-size:14px;background:var(--color-background-secondary);color:var(--color-text-tertiary)}
-/* Mobile-only topbar affordances. Desktop hides both (sidebar is always
-   open, search input is always visible). Sweep-Group-A additions.
-   Hamburger appears at ≤bp-md (matches drawer-mode breakpoint), search
-   collapse only at ≤bp-sm (640) where the input runs out of room. */
-.topbar-menu,.topbar-search-icon{display:none}
+/* Search is a single magnifying-glass placeholder at every width (disabled —
+   M13+ scope). No input field; the icon just holds the spot + saves room. */
+.topbar-search-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:transparent;border:0;border-radius:var(--border-radius-md);color:var(--color-text-tertiary);cursor:pointer;font-family:inherit;flex-shrink:0;padding:0}
+.topbar-search-icon:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
+.topbar-search-icon:disabled{cursor:default}
+/* Hamburger is the only mobile-only topbar affordance — appears at ≤bp-md
+   (matches the sidebar drawer-mode breakpoint). */
+.topbar-menu{display:none}
 @media (max-width:880px){
   .topbar-menu{display:inline-flex;align-items:center;justify-content:center;width:var(--touch-target-min);height:var(--touch-target-min);background:transparent;border:0;cursor:pointer;color:var(--color-text-secondary);border-radius:var(--border-radius-md);font-family:inherit}
   .topbar-menu:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
