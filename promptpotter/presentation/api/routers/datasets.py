@@ -94,6 +94,39 @@ async def list_datasets(store: StoreDep) -> DatasetIndexResponse:
     )
 
 
+def _too_large(observed: int | str) -> HTTPException:
+    return HTTPException(
+        status_code=413,
+        detail={
+            "error": "payload_invalid",
+            "message": (
+                f"Upload {observed} bytes exceeds the per-file cap of {MAX_UPLOAD_BYTES} bytes."
+            ),
+        },
+    )
+
+
+async def _read_capped(request: Request, upload: UploadFile, cap: int) -> bytes:
+    """Read ``upload`` into memory, aborting with 413 the moment it exceeds ``cap``.
+
+    A buffer-then-check (``await upload.read()`` followed by a size test) would let
+    a multi-GB upload exhaust memory before the test fires. We fast-reject on the
+    declared ``Content-Length`` first, then stream in chunks as the real backstop
+    (the header can lie or be absent under chunked transfer-encoding).
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > cap:
+        raise _too_large(declared)
+
+    chunk_size = 1024 * 1024  # 1 MiB
+    buf = bytearray()
+    while chunk := await upload.read(chunk_size):
+        buf.extend(chunk)
+        if len(buf) > cap:
+            raise _too_large(len(buf))
+    return bytes(buf)
+
+
 @datasets_router.post("/ingest")
 async def ingest_dataset(
     request: Request,
@@ -112,18 +145,7 @@ async def ingest_dataset(
     """
     registry = get_draft_registry(request)
 
-    blob = await file.read()
-    if len(blob) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail={
-                "error": "payload_invalid",
-                "message": (
-                    f"Upload {len(blob)} bytes exceeds the per-file cap of "
-                    f"{MAX_UPLOAD_BYTES} bytes."
-                ),
-            },
-        )
+    blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
 
     # Parse → register the draft → persist its cache. Shared with the CLI
     # `ingest` verb (`application/datasets/ingest.py`) so both surfaces drive

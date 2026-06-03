@@ -39,7 +39,7 @@ class MLflowSink:
         if not self._initialized:
             tracking_uri = (self._archive_dir / "mlruns").resolve().as_uri()
             mlflow.set_tracking_uri(tracking_uri)
-            mlflow.set_experiment(name=f"{self._tenant_id}/{self._cycle_id}")
+            mlflow.set_experiment(experiment_name=f"{self._tenant_id}/{self._cycle_id}")
             self._initialized = True
 
         params: dict[str, str] = {

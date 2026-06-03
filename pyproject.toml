@@ -17,19 +17,20 @@ classifiers = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.109.0",        # why kept: read-only operator API + root webapp mount
-    "python-multipart>=0.0.7", # why kept: multipart/form-data transport for POST /datasets/ingest tabular-file upload (FastAPI fails at route registration without it)
+    "fastapi>=0.119.0",        # why kept: read-only operator API + root webapp mount.
+    "starlette>=1.0.1",        # why kept: FastAPI's ASGI core (not imported directly). Pinned because FastAPI's own floor (>=0.46.0) leaves the resolver on a Starlette with PYSEC-2026-161 / CVE-2025-54121 / CVE-2025-62727; this floor clears all three.
+    "python-multipart>=0.0.27", # why kept: multipart/form-data transport for POST /datasets/ingest tabular-file upload (FastAPI fails at route registration without it). Floor past CVE-2026-24486/40347/42561.
     "scalar-fastapi>=1.0.0",   # why kept: API doc UI on the FastAPI app
     "uvicorn[standard]>=0.27.0",  # why kept: ASGI server for the read-only API
     "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
     "pydantic-settings>=2.1.0",  # why kept: env-driven settings for connectors + LLM
     "openai>=1.10.0",          # why kept: OpenAI-compatible client (Groq, OpenRouter, OpenAI all route through)
-    "python-dotenv>=1.0.0",    # why kept: .env loading at bootstrap
+    "python-dotenv>=1.2.2",    # why kept: .env loading at bootstrap. Floor past CVE-2026-28684.
     "httpx>=0.26.0",           # why kept: BackendClient (TermNorm) wire transport
     "filelock>=3.12.0",        # why kept: MeasurementArchive index lock under concurrent writers
     "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
     "json-repair>=0.30,<1.0",  # why kept: structured repair of provider-returned JSON (invalid \X escapes, etc.) at the LLM boundary
-    "cryptography>=42.0",      # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002 — only new Python dep).
+    "cryptography>=46.0.7",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007.
 ]
 
 [project.optional-dependencies]
@@ -49,10 +50,11 @@ benchmarks = [
 ]
 observability = [
     "langfuse>=2.0.0",  # why kept: per-call trace mirror (events.jsonl + cloud)
-    "mlflow>=2.12.0",   # why kept: peer optional sink alongside Langfuse,
+    "mlflow>=3.1.0",    # why kept: peer optional sink alongside Langfuse,
                         # gated on settings.MLFLOW_ENABLED (off by default).
                         # Per §0 dormant-but-named — the import path stays
                         # so flipping the flag works without a code change.
+                        # Floor raised onto 3.x to clear the long 2.16 CVE tail.
 ]
 anthropic = [
     "anthropic>=0.18.0",  # why kept: Anthropic SDK as a peer of the OpenAI-compatible client
@@ -65,7 +67,7 @@ all = [
     "openpyxl>=3.1.0",
     "datasets>=2.14.0",
     "langfuse>=2.0.0",
-    "mlflow>=2.12.0",
+    "mlflow>=3.1.0",
     "anthropic>=0.18.0",
 ]
 dev = [
@@ -197,6 +199,7 @@ DEP002 = [
     "ipython",
     "uvicorn",
     "python-multipart",  # imported by FastAPI at runtime for multipart/form-data, never directly by promptpotter/
+    "starlette",         # FastAPI's ASGI core; pinned for a security floor, never imported directly by promptpotter/
 
     "jupyterlab",
     "pytest",

@@ -103,13 +103,17 @@ class Settings(BaseSettings):
     # Environment
     ENVIRONMENT: str = "development"
 
-    # CORS - stored as comma-separated string, parsed via property
-    ALLOWED_ORIGINS: str = "*"
+    # CORS - comma-separated allowlist, parsed via property. Empty by default:
+    # the webapp is same-origin (mounted at `/`) and the `npm run dev` proxy is
+    # same-origin too, so cross-origin access is opt-in. A cross-origin API
+    # client must set ALLOWED_ORIGINS explicitly — never `*`, since the app
+    # serves credentialed requests (`allow_credentials=True` in main.py).
+    ALLOWED_ORIGINS: str = ""
 
     @property
     def allowed_origins_list(self) -> list[str]:
-        """Parse ALLOWED_ORIGINS as comma-separated list."""
-        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
+        """Parse ALLOWED_ORIGINS as a comma-separated list, dropping blanks."""
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
     # LLM provider keys. Provider selection is per-campaign on
     # ``CampaignConfig.optimizer_llm.provider`` — there is no env-var default.

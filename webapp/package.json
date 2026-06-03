@@ -13,10 +13,13 @@
     "@tanstack/react-virtual": "^3.13.26",
     "chart.js": "^4.5.1",
     "marked": "^18.0.3",
-    "next": "16.2.6",
+    "next": "16.2.7",
     "react": "19.2.4",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "19.2.4"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",
@@ -26,7 +29,7 @@
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "^1.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.2.7",
     "jsdom": "^29.1.1",
     "typescript": "^5",
     "vitest": "^4.1.8"
