@@ -342,6 +342,27 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# A draft built from an existing on-disk origin (demo / benchmark / owned tenant
+# dataset) records ``source_file = "dataset:{slug}"`` in ``draft_from_dataset``;
+# a fresh CSV upload records the raw filename. The prefix is therefore the
+# "derived-from-existing vs new-upload" discriminator the commit path branches on
+# — no separate flag field. A derived draft mints against its canonical origin
+# instead of cloning a new ``datasets/{slug}/`` folder.
+_DERIVED_PREFIX = "dataset:"
+
+
+def derived_origin_slug(source_file: str) -> str | None:
+    """Canonical origin slug iff the draft was derived from an existing dataset.
+
+    Returns the slug after the ``dataset:`` prefix (the value
+    ``mint_campaign_command(dataset_name=...)`` resolves), or ``None`` for a
+    fresh CSV upload. Single source of truth for the prefix parse.
+    """
+    if source_file.startswith(_DERIVED_PREFIX):
+        return source_file[len(_DERIVED_PREFIX) :] or None
+    return None
+
+
 def default_slug_from_filename(filename: str) -> str:
     """Derive a tentative slug from an uploaded filename's stem.
 
@@ -369,4 +390,5 @@ __all__ = [
     "DraftCampaign",
     "DraftCampaignRegistry",
     "default_slug_from_filename",
+    "derived_origin_slug",
 ]

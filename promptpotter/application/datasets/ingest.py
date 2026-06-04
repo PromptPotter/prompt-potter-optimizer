@@ -169,12 +169,11 @@ def draft_from_dataset(
         except FileNotFoundError:
             starting_prompt = {}
 
-    base_slug = dataset_name.lower()
-    slug = (
-        stores.tenant_datasets.suggest_free_slug(base_slug)
-        if stores.tenant_datasets.slug_exists(base_slug)
-        else base_slug
-    )
+    # Keep the canonical slug — an existing origin (demo / benchmark / owned)
+    # is NOT a new dataset, so it must not uniquify into a `{slug}-N` clone. The
+    # `dataset:{name}` source_file marks this draft as derived, and the commit
+    # path mints against this canonical origin instead of materializing a folder.
+    slug = dataset_name.lower()
 
     # headers ["query","ground_truth"] auto-confirm the column mapping in
     # create(); the config knobs auto-confirm there too. We then state the

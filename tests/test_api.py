@@ -541,6 +541,89 @@ def test_mint_from_draft_503_preserves_draft_when_backend_unreachable(
         assert retry.json()["detail"]["error"] == "backend_unreachable"
 
 
+def test_open_existing_origin_mints_canonical_without_cloning(
+    seeded_tenant: tuple[TestClient, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opening an already-valid origin (demo / benchmark / owned) must mint a
+    campaign against the canonical dataset_name — never uniquify into a
+    ``{slug}-N`` clone, never materialize a new ``datasets/`` folder. Re-running
+    is a sibling campaign under the one origin, not a fresh dataset.
+
+    Guards the root fix: the draft is derived (``source_file = "dataset:{slug}"``),
+    so ``mint-campaign-from-draft`` skips ``commit_draft`` and mints directly.
+    """
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from promptpotter import connectors
+    from promptpotter.application.jobs import launcher
+
+    client, *_ = seeded_tenant
+    stores = app.dependency_overrides[build_stores_from_identity]()
+
+    # Seed a tenant-owned Origin — already complete on disk, so opening it is the
+    # "existing origin" path (same branch demo/benchmark take).
+    ds_dir = stores.tenant_datasets.dataset_dir("email-tagging")
+    ds_dir.mkdir(parents=True, exist_ok=True)
+    (ds_dir / "cache.json").write_text(
+        json.dumps({"items": [{"query": "q1", "ground_truth": "a1"}]}), encoding="utf-8"
+    )
+    (ds_dir / "pipeline.json").write_text(
+        json.dumps({"backend_type": "termnorm", "name": "email-tagging"}), encoding="utf-8"
+    )
+    (ds_dir / "campaign.json").write_text(
+        json.dumps(
+            {
+                "campaign_config": {
+                    "dataset_name": "email-tagging",
+                    "optimization": {
+                        "max_rounds": 5,
+                        "improvement_threshold": 0.0,
+                        "degradation_threshold": 0.0,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (ds_dir / "task_description.md").write_text("tag emails", encoding="utf-8")
+    assert stores.tenant_datasets.list_slugs() == ["email-tagging"]
+
+    # Opt out of the network preflight + replace the heavy mint with a stub that
+    # records the dataset_name it was asked to run.
+    no_preflight = replace(connectors.CONNECTORS["termnorm"], preflight=None)
+    monkeypatch.setitem(connectors.CONNECTORS, "termnorm", no_preflight)
+    minted_against: list[str] = []
+
+    async def _stub_mint(*, dataset_name: str, **_kw: object):
+        minted_against.append(dataset_name)
+        return f"{dataset_name}__deadbeef", "cycle_x", SimpleNamespace(job_id="job-x")
+
+    monkeypatch.setattr(launcher, "mint_campaign_command", _stub_mint)
+
+    with client:
+        # Open the existing origin → canonical slug, NOT email-tagging-2.
+        draft = client.post("/api/v1/datasets/email-tagging/draft")
+        assert draft.status_code == 200, draft.text
+        assert draft.json()["slug"] == "email-tagging"
+
+        mint = client.post(
+            "/api/v1/commands/mint-campaign-from-draft",
+            headers={"Idempotency-Key": "test-derived-mint"},
+            json={
+                "kind": "mint-campaign-from-draft",
+                "payload": {"draft_id": draft.json()["draft_id"]},
+            },
+        )
+        assert mint.status_code == 200, mint.text
+        assert mint.json()["campaign_id"] == "email-tagging__deadbeef"
+
+    # The mint ran against the canonical origin, and NO clone folder appeared.
+    assert minted_against == ["email-tagging"]
+    assert stores.tenant_datasets.list_slugs() == ["email-tagging"]
+
+
 def test_dataset_listing_gates_benchmarks_on_capability(
     seeded_tenant: tuple[TestClient, str, str],
 ) -> None:

@@ -34,6 +34,7 @@ from promptpotter.application.datasets.csv_ingest import Table, materialize_samp
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     DraftCampaignRegistry,
+    derived_origin_slug,
 )
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.jobs.quota import (
@@ -209,7 +210,18 @@ async def commit_draft_to_dataset(
     dataset that ``mint_campaign_command`` (web, detached) or CLI ``new``
     (inline) can mint + run identically. Shared by both entry points — the
     commit logic lives here, not duplicated per surface.
+
+    Fresh-upload drafts only. A draft derived from an existing origin
+    (``source_file = "dataset:{slug}"``) must mint against that canonical origin,
+    never materialize a clone — :func:`mint_campaign_from_draft_command` routes
+    it past here; the guard below makes that contract crash-safe.
     """
+    if derived_origin_slug(draft.source_file) is not None:
+        raise LaunchError(
+            "commit_draft_to_dataset called on a derived-from-existing draft; "
+            "mint against the canonical origin instead"
+        )
+
     if stores.tenant_datasets.slug_exists(draft.slug):
         raise LaunchError(
             f"slug collision at commit: {draft.slug!r} already exists in this tenant's collection"
@@ -268,11 +280,38 @@ async def mint_campaign_from_draft_command(
 ) -> tuple[str, str, Job]:
     """Commit a draft to disk + mint a campaign + spawn the runner (detached).
 
-    The web ``/commands/mint-campaign-from-draft`` entry: commits via
-    :func:`commit_draft_to_dataset`, then spawns a background run via
-    :func:`mint_campaign_command`. CLI ``new <file>`` shares the commit step but
-    runs the loop inline instead of detaching.
+    The web ``/commands/mint-campaign-from-draft`` entry. Two paths, forked on
+    draft provenance:
+
+    * **Derived from an existing origin** (demo / benchmark / owned tenant
+      dataset; ``source_file = "dataset:{slug}"``) — the origin already exists on
+      disk, so commit nothing. Keep the origin-readiness gate + preflight, then
+      mint a campaign DIRECTLY against the canonical ``dataset_name``. No
+      ``commit_draft``, no ``{slug}-N`` clone, no slug uniquify — re-running just
+      adds a sibling campaign under the one origin.
+    * **Fresh CSV upload** — commit via :func:`commit_draft_to_dataset` (one
+      tenant folder), then mint.
+
+    CLI ``new <file>`` shares the commit step but runs the loop inline; CLI
+    ``new <name>`` mints an existing dataset directly without ever drafting.
     """
+    canonical = derived_origin_slug(draft.source_file)
+    if canonical is not None:
+        # Existing origin — gate, then mint against it; never materialize a clone.
+        readiness = origin_readiness(draft)
+        if not readiness.complete:
+            raise OriginIncompleteError(readiness.gaps)
+        await _run_preflight(draft.connector, backend_url)
+        draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)
+        return await mint_campaign_command(
+            stores=stores,
+            dataset_name=canonical,
+            job_registry=job_registry,
+            halt_at_accuracy=halt_at_accuracy,
+            spend_budget_usd=spend_budget_usd,
+            backend_url=backend_url,
+        )
+
     slug = await commit_draft_to_dataset(
         stores=stores,
         draft=draft,
