@@ -17,6 +17,8 @@ Delete on sight — don't ask, don't TODO, don't "remove later":
 When a fix would compensate for something an upstream layer should already have made true, the fix belongs upstream — not at the site where the symptom shows up. Name the structural cause and propose the upstream fix <em>before</em> touching the visible surface. The operator can still pick the patch, but they pick it knowingly. Default to root, not to symptom.
 </root-fix>
 
+- **Never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask).
+
 ## Commands
 
 ```bash

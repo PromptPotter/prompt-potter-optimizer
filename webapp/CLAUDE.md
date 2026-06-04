@@ -84,8 +84,8 @@ A hook that owns a single state object may instead derive freshness purely — s
 
 Per-poll re-renders cascade through the chart tree by default. The following guards exist to stop that and must stay:
 
-- `React.memo` on `FitnessChart` (`components/whatif/FitnessChart.tsx`), `TrendChart` (`components/eval/TrendChart.tsx`), `TopStrip` (`components/dashboard/layout/TopStrip.tsx`), `LineageTree` (`components/dashboard/lineage/LineageTree.tsx`).
-- `LineageTree` keys its layout `useMemo` on a structural fingerprint (`l1RoundsKey` at line 73, dep at line 143), **not** on `dash` identity. Re-renders triggered by unrelated `dash` mutations don't recompute the tree.
+- `React.memo` on `FitnessChart` (`components/whatif/FitnessChart.tsx`), `TrendChart` (`components/eval/TrendChart.tsx`), `TopStrip` (`components/dashboard/layout/TopStrip.tsx`), `FamilyTree` (`components/dashboard/lineage/FamilyTree.tsx` — the unified lineage card).
+- The lineage geometry (`components/dashboard/lineage/layout.ts`) runs inside `Forest`'s `useMemo`, keyed on the content-stabilized `detailByCycle` (via `useStableContent` in `FamilyTree`) + the `expanded` set, **not** on `dash` identity. Re-renders triggered by unrelated `dash` mutations don't recompute the tree.
 - Chart `useMemo`s key on narrow stable derivations (e.g. `dash?.rounds`), not on `dash`.
 
 Any new chart that consumes `dash` follows the same pattern: `React.memo` wrap, `useMemo` keyed on the narrowest stable input.

@@ -416,6 +416,7 @@ export interface CampaignLineageCycle {
   status: string;
   dataset_name: string;
   best_accuracy: number | null;
+  origin_accuracy: number | null;
   rounds: CampaignLineageRound[];
 }
 

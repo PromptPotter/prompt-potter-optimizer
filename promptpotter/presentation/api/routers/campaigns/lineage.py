@@ -75,6 +75,10 @@ class CampaignLineageCycle(BaseModel):
     status: str
     dataset_name: str
     best_accuracy: float | None
+    # Origin (C0) accuracy for this cycle, read from index.json::origin_accuracy.
+    # Lets the cladogram draw the origin trunk node for completed cycles — the
+    # active cycle gets its live origin from dashboard.json instead.
+    origin_accuracy: float | None
     rounds: list[CampaignLineageRound]
 
 
@@ -103,6 +107,23 @@ def _extract_candidates(scoreboard: list[Any]) -> list[CampaignLineageCandidate]
             )
         )
     return out
+
+
+def _round_scoreboard(cycle_dir: Path, round_n: int) -> list[Any]:
+    """Per-round candidate scoreboard.
+
+    ``index.json::rounds[]`` carries only the round-level summary (accuracy,
+    hits, total) — the per-candidate scoreboard lives in the audit file
+    ``rounds/round_NNNN.json::scoreboard`` (``AuditTrailView`` output). The
+    cladogram's expanded candidate fan reads from there, so a non-live cycle
+    (one not overridden by ``dashboard.json``) still shows its candidates.
+    """
+    rf = read_json_optional(cycle_dir / "rounds" / f"round_{round_n:04d}.json")
+    if isinstance(rf, dict):
+        sb = rf.get("scoreboard")
+        if isinstance(sb, list):
+            return sb
+    return []
 
 
 def _fork_from_round_from_ledger(parent_dir: Path, child_cycle_id: str) -> int | None:
@@ -183,6 +204,7 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
                     status="missing",
                     dataset_name=entry["dataset_name"],
                     best_accuracy=None,
+                    origin_accuracy=None,
                     rounds=[],
                 )
             )
@@ -230,6 +252,11 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
                 rn = r.get("round")
                 if not isinstance(rn, int):
                     continue
+                # Candidates come from the round audit file; fall back to any
+                # index-side scoreboard (none today, but future-proof).
+                scoreboard = _round_scoreboard(cdir, rn)
+                if not scoreboard and isinstance(r.get("scoreboard"), list):
+                    scoreboard = r["scoreboard"]
                 rounds_out.append(
                     CampaignLineageRound(
                         round=rn,
@@ -239,7 +266,7 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
                             if isinstance(r.get("accuracy"), int | float)
                             else None
                         ),
-                        candidates=_extract_candidates(r.get("scoreboard") or []),
+                        candidates=_extract_candidates(scoreboard),
                     )
                 )
 
@@ -268,6 +295,11 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
                 best_accuracy=(
                     float(index["best_accuracy"])
                     if isinstance(index.get("best_accuracy"), int | float)
+                    else None
+                ),
+                origin_accuracy=(
+                    float(index["origin_accuracy"])
+                    if isinstance(index.get("origin_accuracy"), int | float)
                     else None
                 ),
                 rounds=rounds_out,

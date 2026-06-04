@@ -27,8 +27,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 )
 from promptpotter.application.origin import (
     CampaignOrigin,
-    extract_campaign_origin,
-    prepare_scoring_context,
+    establish_campaign_origin,
 )
 from promptpotter.application.run_observers import (
     ForkInfo,
@@ -185,17 +184,12 @@ async def run_optimization(
         )
 
     if origin is None:
-        _, _, campaign_rounds, _ = await prepare_scoring_context(
-            session.experiment_extract,
-            dataset,
-            campaign_config,
-            pipeline_params=session.pipeline_params,
-            pipeline_schema=session.pipeline_schema,
-            svc=session,
-            listener=cb,
-            fork_seed=fork_seed,
+        # Establish C0 through the single origin seam: a no-edit operator fork inherits
+        # its branch-point candidate's recorded accuracy (skipping the re-score, which
+        # would re-roll under a nondeterministic backend); everything else scores it.
+        origin = await establish_campaign_origin(
+            session, dataset, campaign_config, fork_seed=fork_seed, listener=cb
         )
-        origin = extract_campaign_origin(campaign_rounds)
         if observers.display is not None and hasattr(observers.display, "set_origin"):
             observers.display.set_origin(origin.origin_acc)
 

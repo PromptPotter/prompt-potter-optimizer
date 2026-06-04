@@ -4,7 +4,7 @@ import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { OptimizerNodeDetail } from "@/components/workflow/OptimizerNodeDetail";
 import { isOptimizerNodeId } from "@/components/workflow/layout";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
-import { LineageTree } from "@/components/dashboard/lineage/LineageTree";
+import { FamilyTree } from "@/components/dashboard/lineage/FamilyTree";
 import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
 import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
 import { useSelection } from "@/lib/SelectionContext";
@@ -49,7 +49,7 @@ export function NowTriad({
     <>
       <div className="dash-row-triad">
         <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} />
-        <LineageTree
+        <FamilyTree
           dash={dash}
           campaignId={campaignId}
           cycleId={cycleId}

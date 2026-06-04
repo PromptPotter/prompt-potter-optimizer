@@ -516,7 +516,18 @@ async def start_run_command(
 
     train_data = session.samples or []
     configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
+    # Bind the session to the EXISTING campaign/cycle before launch. Without this
+    # `_ensure_session_minted` (guards on an empty session_id) would mint a fresh
+    # random campaign + root cycle and steal the active pointer — stranding an
+    # operator-steered fork in its real campaign. The campaign was already loaded
+    # above, so auto-mint must never fire from this path. Mirrors CLI `cmd_resume`.
+    session.campaign_id = campaign_id
     session.state.cycle_id = cycle_id
+    index = stores.campaigns.load(campaign_id, cycle_id) or {}
+    session_id = str(index.get("parent_session_id") or "")
+    if not session_id:
+        raise LaunchError(f"cycle {cycle_id} in {campaign_id} has no parent_session_id")
+    session.session_id = session_id
 
     job = job_registry.create(
         user_id=str(stores.identity.user_id),

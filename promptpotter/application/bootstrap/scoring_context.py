@@ -137,7 +137,9 @@ def _build_cycle_and_bootstrap(
 
     if origin.origin_ps is None:
         raise ValueError("origin.origin_ps is required; run origin scoring first.")
-    origin_osp = OptSearchPoint.from_prompt_fields(origin.origin_ps)
+    # origin_ps is the resolved origin OptSearchPoint (lineage + memory intact) — use it
+    # directly; no re-roundtrip through from_prompt_fields, which would drop the lineage.
+    origin_osp = origin.origin_ps
     origin_round_scorer = (
         compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
     )

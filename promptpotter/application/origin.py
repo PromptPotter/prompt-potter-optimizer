@@ -27,11 +27,13 @@ __all__ = [
     "DatasetRunSummary",
     "DatasetSummary",
     "build_campaign_emitter",
+    "establish_campaign_origin",
     "extract_campaign_origin",
     "prepare_datasets",
     "prepare_scoring_context",
     "resolve_origin_opt_search_point",
     "summarize_archive_runs",
+    "try_inherit_fork_origin",
 ]
 
 
@@ -69,9 +71,11 @@ def build_campaign_emitter(
 
 
 class CampaignOrigin(NamedTuple):
-    """Extracted origin state from campaign_rounds."""
+    """Extracted origin state. ``origin_ps`` is the origin OptSearchPoint —
+    carrying its full lineage/memory, not just prompt strings — so the C0
+    individual keeps its ``source`` marker (e.g. ``fork_seed``) downstream."""
 
-    origin_ps: dict[str, Any] | None
+    origin_ps: OptSearchPoint | None
     origin_acc: float
     origin_results: list[Any] | None
     instruction: str
@@ -82,7 +86,7 @@ def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOr
     Walks reversed rounds for the last with scoring results; prompt_fields override to the tip."""
     if not campaign_rounds:
         return CampaignOrigin(
-            origin_ps={},
+            origin_ps=OptSearchPoint(instruction=""),
             origin_acc=0.0,
             origin_results=None,
             instruction="",
@@ -106,6 +110,89 @@ def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOr
         origin_acc=origin_acc,
         origin_results=origin_results,
         instruction=tip_ps.instruction,
+    )
+
+
+def try_inherit_fork_origin(
+    session: Session,
+    fork_seed: ForkSeed | None,
+    *,
+    origin_osp: OptSearchPoint,
+) -> CampaignOrigin | None:
+    """Inherit a no-modification operator fork's C0 from its branch-point candidate.
+
+    When an operator forks from a searchpoint WITHOUT editing it, that searchpoint
+    *is* the fork's origin — its accuracy was already measured in the parent round.
+    Re-scoring it would re-roll a different number under a nondeterministic backend
+    (the same prompt + samples does NOT reproduce the same accuracy), so C0 would no
+    longer equal the branch point and the lineage would jump. Instead we inherit the
+    recorded measurement and skip the origin scoring pass — the loop goes straight to
+    L1_generate.
+
+    *origin_osp* is the already-resolved fork origin (resolved once by
+    ``establish_campaign_origin``). Returns the inherited :class:`CampaignOrigin` only
+    when this is an operator-steered fork whose origin renders identically to the
+    ``from_candidate_id`` candidate in the parent's recorded round. Any miss (non-fork,
+    missing coords, edited prompt → different render) returns ``None`` and the caller
+    re-scores as before.
+    """
+    if fork_seed is None or not fork_seed.starting_prompt:
+        return None
+
+    store = session.store.campaigns
+    index = store.load(session.campaign_id, session.state.cycle_id)
+    if not isinstance(index, dict):
+        return None
+    fork = index.get("fork")
+    parent = index.get("parent_cycle_id")
+    if not isinstance(fork, dict) or not isinstance(parent, str) or not parent:
+        return None
+    from_round = fork.get("from_round")
+    from_candidate_id = fork.get("from_candidate_id")
+    if not isinstance(from_round, int) or not isinstance(from_candidate_id, str):
+        return None
+
+    parent_round = store.load_round_file(session.campaign_id, parent, from_round)
+    if not isinstance(parent_round, dict):
+        return None
+    scores = parent_round.get("candidate_scores")
+    if not isinstance(scores, list):
+        return None
+    cand = next(
+        (c for c in scores if isinstance(c, dict) and c.get("candidate_id") == from_candidate_id),
+        None,
+    )
+    if cand is None or not isinstance(cand.get("accuracy"), int | float):
+        return None
+    cand_fields = cand.get("prompt_fields")
+    if not isinstance(cand_fields, dict):
+        return None
+
+    # Identity gate: the fork origin's prompt must render identically to the
+    # branch-point candidate's. An operator edit changes the render → re-score.
+    if origin_osp.render() != OptSearchPoint.from_prompt_fields(cand_fields).render():
+        return None
+
+    origin_acc = float(cand["accuracy"])
+    logger.info(
+        "Fork %s: inheriting C0 from branch-point candidate %s (parent %s round %d) "
+        "acc=%.4f — skipping origin re-score, straight to L1",
+        session.state.cycle_id,
+        from_candidate_id,
+        parent,
+        from_round,
+        origin_acc,
+    )
+    # origin_results left empty: per-candidate per-sample results aren't in the round
+    # file, and the reuse cache is noisy under nondeterminism. Hard-sample seeding for
+    # round 1 starts clean; the inherited C0 accuracy (the operator-facing value) is exact.
+    # origin_ps carries the OSP object (not a prompt-field dict) so the inherited C0 keeps
+    # its lineage(source="fork_seed") — same shape the re-score path produces.
+    return CampaignOrigin(
+        origin_ps=origin_osp,
+        origin_acc=origin_acc,
+        origin_results=[],
+        instruction=origin_osp.instruction,
     )
 
 
@@ -191,6 +278,47 @@ def resolve_origin_opt_search_point(
     )
 
 
+async def establish_campaign_origin(
+    session: Session,
+    dataset: list[Sample],
+    campaign_config: CampaignConfig,
+    *,
+    fork_seed: ForkSeed | None,
+    listener: Any | None,
+) -> CampaignOrigin:
+    """The single origin-establishment seam: resolve the origin OSP once, then either
+    inherit it (no-modification operator fork) or score it.
+
+    A no-edit operator fork inherits its branch-point candidate's recorded C0 and skips
+    the scoring pass (straight to L1); everything else scores the origin via
+    ``prepare_scoring_context``. Both branches share the one resolved OSP, so the origin
+    is resolved exactly once and both paths return the same ``CampaignOrigin`` shape."""
+    origin_osp = resolve_origin_opt_search_point(
+        session.experiment_extract,
+        prompt_node_names=(
+            session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
+        ),
+        dataset_dir=getattr(session, "dataset_config_dir", None),
+        fork_seed=fork_seed,
+    )
+    inherited = try_inherit_fork_origin(session, fork_seed, origin_osp=origin_osp)
+    if inherited is not None:
+        return inherited
+
+    _, _, campaign_rounds, _ = await prepare_scoring_context(
+        session.experiment_extract,
+        dataset,
+        campaign_config,
+        pipeline_params=session.pipeline_params,
+        pipeline_schema=session.pipeline_schema,
+        svc=session,
+        listener=listener,
+        fork_seed=fork_seed,
+        origin=origin_osp,
+    )
+    return extract_campaign_origin(campaign_rounds)
+
+
 async def prepare_scoring_context(
     experiment_extract: dict[str, Any] | None,
     train_data: list[Sample] | None,
@@ -202,17 +330,22 @@ async def prepare_scoring_context(
     listener: Any | None = None,
     obs: Any | None = None,
     fork_seed: ForkSeed | None = None,
+    origin: OptSearchPoint | None = None,
 ) -> tuple[OptSearchPoint, list[Sample], list[dict[str, Any]], list[Any]]:
-    """Resolve origin (fork-seed wins), set dataset, produce a populated ``campaign_rounds[0]``."""
+    """Resolve origin (fork-seed wins), set dataset, produce a populated ``campaign_rounds[0]``.
+
+    *origin* lets the caller pass an already-resolved origin OSP (so it isn't resolved
+    twice on the runner path); when ``None`` it's resolved here (the notebook path)."""
     from promptpotter.application.datasets import sample_dataset
 
-    prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
-    origin = resolve_origin_opt_search_point(
-        experiment_extract or {},
-        prompt_node_names=prompt_nodes,
-        dataset_dir=getattr(svc, "dataset_config_dir", None),
-        fork_seed=fork_seed,
-    )
+    if origin is None:
+        prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
+        origin = resolve_origin_opt_search_point(
+            experiment_extract or {},
+            prompt_node_names=prompt_nodes,
+            dataset_dir=getattr(svc, "dataset_config_dir", None),
+            fork_seed=fork_seed,
+        )
     dataset = train_data or []
 
     campaign_rounds: list[dict[str, Any]] = []

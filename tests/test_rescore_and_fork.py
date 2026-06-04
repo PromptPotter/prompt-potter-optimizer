@@ -370,6 +370,82 @@ def test_resolve_origin_fork_seed_wins_over_experiment_prompt() -> None:
     assert plain.lineage.source == "origin"
 
 
+def test_inherit_fork_origin_unmodified_inherits_else_rescores(tmp_path: Path) -> None:
+    """A no-modification operator fork inherits its branch-point candidate's RECORDED
+    accuracy as C0 (no re-score under a nondeterministic backend); an edited prompt
+    renders differently and falls back to ``None`` → the caller re-scores."""
+    from types import SimpleNamespace
+
+    from promptpotter.application.origin import (
+        resolve_origin_opt_search_point,
+        try_inherit_fork_origin,
+    )
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+
+    tenant = "default"
+    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
+    parent = "cycle_inherit_parent"
+    fork = "cycle_inherit_parent_fork_abc123"
+    prompt = {"instruction": "do the thing", "persona": "you are precise"}
+
+    stores.campaigns.create(_CAMPAIGN, parent, {"sibling_kind": "root"})
+    stores.campaigns.save_round_file(
+        _CAMPAIGN,
+        parent,
+        {
+            "round_id": "round_1",
+            "round": 1,
+            "accuracy": 0.4,
+            "candidate_scores": [
+                {"candidate_id": "c1", "prompt_fields": prompt, "accuracy": 0.2},
+            ],
+        },
+    )
+    stores.campaigns.create(
+        _CAMPAIGN,
+        fork,
+        {
+            "sibling_kind": "fork",
+            "parent_cycle_id": parent,
+            "fork": {
+                "trigger": "operator_steered",
+                "from_round": 1,
+                "from_candidate_id": "c1",
+            },
+        },
+    )
+
+    session = SimpleNamespace(
+        store=stores,
+        campaign_id=_CAMPAIGN,
+        state=SimpleNamespace(cycle_id=fork),
+        experiment_extract={},
+        dataset_config_dir=None,
+    )
+
+    # Resolve the origin OSP exactly as ``establish_campaign_origin`` does (fork-seed wins).
+    unmodified_seed = ForkSeed(starting_prompt=dict(prompt))
+    unmodified_osp = resolve_origin_opt_search_point({}, fork_seed=unmodified_seed)
+    inherited = try_inherit_fork_origin(
+        session,  # type: ignore[arg-type]
+        unmodified_seed,
+        origin_osp=unmodified_osp,
+    )
+    assert inherited is not None
+    assert inherited.origin_acc == 0.2  # the branch point, NOT a re-rolled number
+    # C0 carries the OSP object, so the inherited origin keeps its fork_seed lineage.
+    assert isinstance(inherited.origin_ps, OptSearchPoint)
+    assert inherited.origin_ps.lineage.source == "fork_seed"
+
+    edited_seed = ForkSeed(starting_prompt={**prompt, "instruction": "do it differently"})
+    edited = try_inherit_fork_origin(
+        session,  # type: ignore[arg-type]
+        edited_seed,
+        origin_osp=resolve_origin_opt_search_point({}, fork_seed=edited_seed),
+    )
+    assert edited is None
+
+
 def test_apply_limit_overrides_snapshots_fork_limits_leaving_parent_intact() -> None:
     """A fork's reconciled ``LimitOverrides`` land on a fresh config snapshot —
     absolute values, an absent knob inherits the parent — and the seed's

@@ -315,7 +315,10 @@ def _ensure_session_minted(
     """Auto-mint session+cycle from origin OSP if missing (idempotent)."""
     from promptpotter.application.runner import build_origin_cycle_id
 
-    if session.session_id:
+    # Auto-mint is the genuine `new` flow only (no existing campaign). A
+    # resume/fork launch binds identity before this runs, so either field being
+    # set means the campaign already exists — never re-mint over it.
+    if session.session_id or session.campaign_id:
         return
 
     prompt_nodes = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
