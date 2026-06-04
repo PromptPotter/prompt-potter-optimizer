@@ -22,6 +22,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_max_round_complete,
 )
 from promptpotter.infrastructure.store.paths import root_cycle_id, sibling_kind
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         # (self-heals any index.json minted under an older scheme).
         existing.pop("cycle_id", None)
         existing.pop("campaign_id", None)
-        now = datetime.now(UTC).isoformat()
+        now = utcnow_iso()
         defaults: dict[str, Any] = {
             "created_at": existing.get("created_at", now),
             "updated_at": now,
@@ -124,7 +125,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         for key in remove:
             data.pop(key, None)
         data.update(updates)
-        data["updated_at"] = datetime.now(UTC).isoformat()
+        data["updated_at"] = utcnow_iso()
         write_json(path, data)
 
     def rewind_to_round(
@@ -217,7 +218,7 @@ class CycleIndexMixin(CampaignStoreKernel):
         data["n_rounds"] = len(rebuilt)
         data["best_accuracy"] = best["accuracy"] if best else 0.0
         data["best_round_id"] = best["round_id"] if best else None
-        data["updated_at"] = datetime.now(UTC).isoformat()
+        data["updated_at"] = utcnow_iso()
         write_json(index_path, data)
 
     def mark_finished(

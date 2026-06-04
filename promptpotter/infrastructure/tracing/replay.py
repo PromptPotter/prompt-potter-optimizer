@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +26,7 @@ from promptpotter.infrastructure.tracing.events import (
     QueryScoreStart,
 )
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -252,9 +252,7 @@ def push_all_runs(
     on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Replay all historical measurement runs through a Langfuse bridge."""
-    bridge = ObservabilityBridge.from_settings(
-        store.base_dir, backend_id, langfuse=LangfuseLogger()
-    )
+    bridge = ObservabilityBridge.from_settings(store.base_dir, langfuse=LangfuseLogger())
     lf_sink = bridge.langfuse_sink
     if lf_sink is None:
         return {"error": "Langfuse is disabled (missing credentials or LANGFUSE_ENABLED=false)"}
@@ -330,7 +328,7 @@ def push_all_runs(
                 bridge.flush()
                 _emit(f"    [{run_counter}/{new_runs}] flushed")
 
-        state["last_backfill_at"] = datetime.now(UTC).isoformat()
+        state["last_backfill_at"] = utcnow_iso()
         _save_state(store, backend_id, state)
 
         best_acc = max(accuracies) if accuracies else 0.0
@@ -343,7 +341,7 @@ def push_all_runs(
         }
 
     bridge.flush()
-    state["last_backfill_at"] = datetime.now(UTC).isoformat()
+    state["last_backfill_at"] = utcnow_iso()
     _save_state(store, backend_id, state)
 
     return {

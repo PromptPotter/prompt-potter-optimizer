@@ -23,6 +23,7 @@ from promptpotter.application.optimization.dispatch.llm_call import prompts as _
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ def build_sweep_result(
     base: dict[str, Any] = dict.fromkeys(SWEEP_RESULT_FIELDS)
     base["sweep_id"] = sweep_id or mint_sweep_id()
     base["verb"] = verb
-    base["timestamp"] = timestamp or datetime.now(UTC).isoformat()
+    base["timestamp"] = timestamp or utcnow_iso()
     base["l1_meta_prompt_hash"] = l1_meta_prompt_hash
     base["l1_meta_prompt_label"] = l1_meta_prompt_label
     base["dataset"] = dataset

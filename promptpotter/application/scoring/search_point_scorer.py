@@ -291,7 +291,7 @@ async def score_search_point(
         from promptpotter.shared.errors import graceful
 
         with graceful("DatasetRun emit failed"):
-            obs = session.state.obs or ObservabilityBridge.file_only(store.base_dir, backend_id)
+            obs = session.state.obs or ObservabilityBridge.file_only(store.base_dir)
             obs.emit(
                 DatasetRun(
                     campaign_id="",

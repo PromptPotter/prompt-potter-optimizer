@@ -13,7 +13,6 @@ import argparse
 import copy
 import logging
 import random
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.domain.results import DiagnosticRunRecord
@@ -24,6 +23,7 @@ from promptpotter.presentation.cli.commands._shared import (
     identity_from_args,
     init_services_cli,
 )
+from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
@@ -281,7 +281,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     samples_added = max(0, workspace_n - len(measured_ids))
 
     record = DiagnosticRunRecord(
-        ts=datetime.now(UTC).isoformat(),
+        ts=utcnow_iso(),
         dataset=campaign.dataset_name,
         source_campaign=campaign_id,
         source_cycle=cycle_id,

@@ -8,7 +8,6 @@ campaigns-per-day ceiling. Missing file ⇒ defaults via :meth:`get_or_create`.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,6 +16,7 @@ from promptpotter.infrastructure.store.base import (
     read_json_optional,
     write_json,
 )
+from promptpotter.shared.clock import utcnow_iso
 
 
 class User(BaseModel):
@@ -71,7 +71,7 @@ class UserStore:
             user_id=user_id,
             tenant_id=tenant_id,
             email=email,
-            created_at=datetime.now(UTC).isoformat(),
+            created_at=utcnow_iso(),
         )
         self.save(user)
         return user

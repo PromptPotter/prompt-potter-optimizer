@@ -12,7 +12,6 @@ import json
 import logging
 import traceback
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +41,7 @@ from promptpotter.domain.run_records import ForkSeed, ForkSpec, LimitOverrides
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.models import emit_error_record
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
 
 logger = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ async def run_optimization(
 ) -> CycleResult:
     """End-to-end optimization. *observers* MUST be pre-built (ledger bound before origin).
     *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
-    started_at = datetime.now(UTC).isoformat()
+    started_at = utcnow_iso()
     cb = observers.callbacks
 
     # Operator-steered fork: the edited searchpoint, declared at fork time, lives
@@ -316,7 +316,7 @@ async def run_optimization(
             stop_reason = StopReason.CRASHED
             cycle_error = CycleError(kind=kind, message=message, traceback=tb)
 
-        finished_at = datetime.now(UTC).isoformat()
+        finished_at = utcnow_iso()
         # Init-crash fallback: cycle_id was minted upstream, so mark_finished can still stamp final with traceback.
         if cycle is not None:
             best_sp = cycle.tracking.best_sp

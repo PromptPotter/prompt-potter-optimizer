@@ -26,11 +26,11 @@ from __future__ import annotations
 import threading
 import uuid
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
 from typing import Any
 
 from promptpotter.domain.identity import TenantId, safe_name
 from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
+from promptpotter.shared.clock import utcnow_iso
 
 DEFAULT_CONNECTOR = "termnorm"
 """Only registered connector today (per root CLAUDE.md); operator-editable."""
@@ -141,7 +141,7 @@ class DraftCampaign:
 
     def patch(self, **changes: Any) -> DraftCampaign:
         """Return a copy with ``updated_at`` refreshed and any provided fields replaced."""
-        return replace(self, updated_at=_now_iso(), **changes)
+        return replace(self, updated_at=utcnow_iso(), **changes)
 
     def confirm_columns(
         self, *, query_col: str | None = None, ground_truth_col: str | None = None
@@ -223,7 +223,7 @@ class DraftCampaignRegistry:
         one knob with no default framing, so it lands ``UNSET`` — the operator
         (or the resolver, high-confidence) must state what the prompt does.
         """
-        now = _now_iso()
+        now = utcnow_iso()
         column_query, column_ground_truth, resolved, sources = _seed_resolved(headers)
         draft = DraftCampaign(
             draft_id=_mint_draft_id(),
@@ -336,10 +336,6 @@ def _auto_detect_columns(
 def _mint_draft_id() -> str:
     """Stable, short, URL-safe draft id. ``d_`` prefix mirrors ``s_`` for sessions."""
     return f"d_{uuid.uuid4().hex[:16]}"
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 # A draft built from an existing on-disk origin (demo / benchmark / owned tenant

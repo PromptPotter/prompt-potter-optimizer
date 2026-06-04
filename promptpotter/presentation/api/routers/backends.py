@@ -12,7 +12,6 @@ through ``CommandDispatcher._apply_register_backend`` /
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -24,6 +23,7 @@ from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.presentation.api.deps import StoreDep, get_backend_or_404
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +143,7 @@ async def get_pipeline(backend_id: str, store: StoreDep) -> PipelineViewResponse
         backend_id=backend_id,
         backend_pipeline=schema.model_dump(),
         computed_nodes=[s.model_dump() for s in schema.nodes],
-        fetched_at=datetime.now(UTC).isoformat(),
+        fetched_at=utcnow_iso(),
         source=source,
     )
 
@@ -181,7 +181,7 @@ async def get_backend_health(backend_id: str, store: StoreDep) -> BackendHealthR
         backend_id=backend_id,
         base_url=backend.base_url,
         status=status,
-        checked_at=datetime.now(UTC).isoformat(),
+        checked_at=utcnow_iso(),
         detail=str(detail) if detail is not None else None,
     )
 

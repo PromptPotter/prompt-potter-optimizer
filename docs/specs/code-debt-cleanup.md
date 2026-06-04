@@ -1,6 +1,6 @@
 # Code-Debt Cleanup — Backlog
 
-**Status:** Reference — perpetual living backlog. Tiers 0–6 + polish arcs A–E + audits 1–3 closed by 2026-05-25. Active items: TermNorm wire model (cross-repo) + three deep-indirection architectural collapses (scoped, not slated). The M13+ intentional-UI-placeholder registry is permanent reference.
+**Status:** Reference — perpetual living backlog. Tiers 0–6 + polish arcs A–E + audits 1–3 closed by 2026-05-25. Active items: TermNorm wire model (cross-repo) + three deep-indirection architectural collapses (scoped, not slated). The 2026-06-04 seam-enforcement arc shipped. The M13+ intentional-UI-placeholder registry is permanent reference.
 
 **Scope is literal: code debt only.** Dead code, redundant guards,
 single-caller indirections, premature optimizations that no longer

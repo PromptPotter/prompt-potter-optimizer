@@ -19,11 +19,13 @@ Marker schema (`.promptpotter/identity/default_claimed.json`):
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import UTC, datetime
+from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from promptpotter.infrastructure.store.base import read_json, write_json
+from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.shared.identity import IdentityContext
@@ -48,7 +50,6 @@ def maybe_claim_default(
     renamed = False
 
     if not marker_path.is_file():
-        marker_path.parent.mkdir(parents=True, exist_ok=True)
         if default_dir.is_dir() and not user_dir.exists():
             try:
                 default_dir.rename(user_dir)
@@ -56,16 +57,9 @@ def maybe_claim_default(
                 logger.info("Claimed default tenant: %s → %s", default_dir, user_dir)
             except OSError as exc:
                 logger.warning("Failed to claim default tenant for %s: %s", user_id, exc)
-        marker_path.write_text(
-            json.dumps(
-                {
-                    "user_id": user_id,
-                    "claimed_at": datetime.now(UTC).isoformat(),
-                    "renamed": renamed,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
+        write_json(
+            marker_path,
+            {"user_id": user_id, "claimed_at": utcnow_iso(), "renamed": renamed},
         )
 
     if user_dir.is_dir():
@@ -104,8 +98,8 @@ def registered_user_id(marker_path: Path) -> str | None:
     if not marker_path.is_file():
         return None
     try:
-        uid = json.loads(marker_path.read_text(encoding="utf-8")).get("user_id")
-    except (OSError, json.JSONDecodeError):
+        uid = read_json(marker_path).get("user_id")
+    except (OSError, JSONDecodeError):
         return None
     return uid if isinstance(uid, str) and uid and uid != "default" else None
 
@@ -125,17 +119,15 @@ def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
         if not manifest.is_file():
             continue
         try:
-            data = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+            data = read_json(manifest)
+        except (OSError, JSONDecodeError) as exc:
             logger.warning("Skipping unreadable campaign.json at %s: %s", manifest, exc)
             continue
         current = data.get("owner_user_id")
         if current == user_id or (current not in (None, "", "default")):
             continue
         data["owner_user_id"] = user_id
-        tmp = manifest.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        tmp.replace(manifest)
+        write_json(manifest, data)
         rewritten += 1
     if rewritten:
         logger.info("Rebound %d campaigns to user %s", rewritten, user_id)

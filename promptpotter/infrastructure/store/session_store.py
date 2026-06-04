@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +11,7 @@ from promptpotter.infrastructure.store.base import (
     write_json,
 )
 from promptpotter.infrastructure.store.paths import session_dir_for
+from promptpotter.shared.clock import utcnow_iso
 
 
 class SessionStore:
@@ -35,7 +35,7 @@ class SessionStore:
         """Idempotent ``session.json`` write — preserves ``created_at``, merges over old, refreshes ``updated_at``."""
         path = self._state_path(session_id)
         existing = read_json_optional(path) or {}
-        now = datetime.now(UTC).isoformat()
+        now = utcnow_iso()
         data = {
             **existing,
             **state,
@@ -54,7 +54,7 @@ class SessionStore:
         path = self._state_path(session_id)
         data = read_json(path)
         data.update(updates)
-        data["updated_at"] = datetime.now(UTC).isoformat()
+        data["updated_at"] = utcnow_iso()
         write_json(path, data)
 
 

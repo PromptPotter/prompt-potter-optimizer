@@ -5,11 +5,11 @@ Spec: ``docs/specs/archive/hard-sample-sorter.md``.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import pick_value
 from promptpotter.application.intelligence.exploration import build_observations, fit_rasch
+from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.exploration import Observation, RaschPosterior
@@ -101,7 +101,7 @@ def empty_artifact(
     return {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "cycle_id": cycle_id,
-        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "generated_at": utcnow_iso(),
         "disabled": disabled,
         "truncated": False,
         "total_candidates": 0,
@@ -213,7 +213,7 @@ def build_hard_samples_artifact_from_observations(
     return {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "cycle_id": cycle_id,
-        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "generated_at": utcnow_iso(),
         "disabled": False,
         "truncated": truncated,
         "total_candidates": total_candidates,

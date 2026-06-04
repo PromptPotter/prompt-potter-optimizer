@@ -9,11 +9,11 @@ import hashlib
 import logging
 import random
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.sample import Sample
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
@@ -394,7 +394,7 @@ def build_dataset_run_data(
         "item_count": scores["total"],
         "scores": scores,
         "source": source,
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": utcnow_iso(),
         "measurements": list(results),
     }
     if pipeline_schema and search_point.pipeline_params:

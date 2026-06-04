@@ -2,6 +2,15 @@
 
 Next.js 16.2.5 + React 19.2.4 + TypeScript, static export at `out/` mounted at the domain root by FastAPI (the app owns `/`; the API is the carved-out `/api/v1` namespace). Read-only dashboard: polls `dashboard.json` every 2 s, lazy-fetches `round_NNNN.json` on drill-in.
 
+## Surface behavior contract
+
+What each user-facing control **must do**, per auth/data state, lives in
+[`../docs/specs/frontend-surface-contract.md`](../docs/specs/frontend-surface-contract.md).
+This file owns *implementation* invariants; that one owns *behavior* — read it
+before changing any control's states. Its five invariants (state-completeness,
+no-raw-transport-errors, affordance-honesty, auth-coherence, console-hygiene)
+are the bar for user-facing PRs.
+
 ## Design — single source of truth
 
 **Brand, palette, theme framing, copy register live in [`../.impeccable.md`](../.impeccable.md).** Read it before touching styles, brand assets, or any user-visible copy. It is the spec; `app/styles/foundation/tokens.css` + `app/styles/foundation/themes.css` are the canonical token implementation (dark `:root` defaults + the `[data-theme="light"]` block); every component reads `var(--…)`. Do not introduce a parallel design spec, design-tokens file, or theme-decision doc — extend `.impeccable.md` in place if direction changes.

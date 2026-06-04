@@ -35,7 +35,6 @@ import logging
 import re
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import HTTPException
@@ -61,6 +60,7 @@ from promptpotter.infrastructure.store import (
 )
 from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.paths import root_cycle_id
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -472,7 +472,7 @@ class CommandDispatcher:
         self._store.campaigns.mark_campaign_lifecycle(
             campaign_id,
             lifecycle_status=_LIFECYCLE_STATUS[kind],
-            lifecycle_changed_at=datetime.now(UTC).isoformat(),
+            lifecycle_changed_at=utcnow_iso(),
             lifecycle_reason=reason,
         )
 
@@ -537,7 +537,7 @@ class CommandDispatcher:
                     "message": f"Failed to sync from {backend.base_url}: {exc}",
                 },
             ) from exc
-        backend.last_synced_at = datetime.now(UTC).isoformat()
+        backend.last_synced_at = utcnow_iso()
         self._store.backends.update(backend)
 
     def _apply_stop_cycle(self, campaign_id: str, cycle_id: str) -> None:
@@ -547,7 +547,7 @@ class CommandDispatcher:
         runtime_dir = cycle_dir / ".runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
         flag = runtime_dir / "stop.flag"
-        flag.write_text(f"requested_at={datetime.now(UTC).isoformat()}\n", encoding="utf-8")
+        flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
 
     def _apply_pause_cycle(self, campaign_id: str, cycle_id: str) -> None:
         """Write ``.runtime/pause.flag``; ``Session.pause_check`` polls at
@@ -557,7 +557,7 @@ class CommandDispatcher:
         runtime_dir = cycle_dir / ".runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
         flag = runtime_dir / "pause.flag"
-        flag.write_text(f"requested_at={datetime.now(UTC).isoformat()}\n", encoding="utf-8")
+        flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
 
     def _apply_resume_cycle(self, campaign_id: str, cycle_id: str) -> None:
         """Remove ``.runtime/pause.flag``; the round loop's pause wait-loop

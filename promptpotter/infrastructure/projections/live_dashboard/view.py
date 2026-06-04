@@ -21,7 +21,6 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -70,6 +69,7 @@ from promptpotter.infrastructure.store import (
     session_dir_for,
     write_json,
 )
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import has_pipeline_warnings
 from promptpotter.shared.spend import compute_usd
@@ -319,7 +319,7 @@ class LiveDashboardView(DerivedView):
             cycle_id=cycle_id,
             session_id=session_id,
             state=r.get("state", "init"),
-            state_since=datetime.now(UTC).isoformat(),
+            state_since=utcnow_iso(),
             stop_reason=r.get("stop_reason"),
             # Inherit round so re-instantiation doesn't zero the operator-visible pointer.
             round=int(r.get("round") or 0),
@@ -426,7 +426,7 @@ class LiveDashboardView(DerivedView):
     def _set_state(self, name: str) -> None:
         """Liveness transition — keeps ``state`` and ``state_since`` in lockstep."""
         self.state.state = name
-        self.state.state_since = datetime.now(UTC).isoformat()
+        self.state.state_since = utcnow_iso()
 
     def mark_stopped(self, reason: str) -> None:
         """Finalize hook — writes terminal state + reason so dashboard tail-readers see it without index.json.
@@ -512,7 +512,7 @@ class LiveDashboardView(DerivedView):
             payload = dict(record.payload or {})
             self.state.backend_retry_count += 1
             warning = BackendWarning(
-                ts=datetime.now(UTC).isoformat(),
+                ts=utcnow_iso(),
                 kind=payload.get("kind", "unknown"),
                 attempt=payload.get("attempt"),
                 max_attempts=payload.get("max_attempts"),
@@ -1002,7 +1002,7 @@ class LiveDashboardView(DerivedView):
             "nodes": ordered,
             "pobb": self._build_pobb_block(),
         }
-        s.wallclock_serialized_at = datetime.now(UTC).isoformat()
+        s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape: every scalar field's presence +
         # type is guaranteed because the schema constructs it and `extra="forbid"`
         # rejects setting any undeclared attribute at the mutation site — a field

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import Any, NamedTuple
 
 from pydantic import BaseModel, Field
+
+from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
     "CampaignPhase",
@@ -180,7 +181,7 @@ class PhaseEvent(BaseModel):
     event: str
     round: int | None = None
     data: dict[str, Any] = Field(default_factory=dict)
-    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 def emit_phase(

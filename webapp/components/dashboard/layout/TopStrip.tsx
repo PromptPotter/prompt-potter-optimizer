@@ -5,7 +5,7 @@ import { cx } from "@/lib/cx";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { headlineStats } from "@/lib/derivations/headline-stats";
-import { fmtSecs } from "@/lib/format";
+import { fmtSecs, fmtPct0 } from "@/lib/format";
 
 // Single-line, frameless run summary. Everything the operator scans in
 // the first second sits on one inline row, separated by hairline dividers:
@@ -109,7 +109,7 @@ export const TopStrip = memo(function TopStrip({ dash, dashRound, runPhase }: Pr
       <span className="topstrip-best">
         <span className="topstrip-label">Best</span>
         <span className="topstrip-best-val">
-          {best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}%` : "—"}
+          {fmtPct0(best)}
         </span>
         {spark && (
           <svg className="topstrip-spark" viewBox={`0 0 ${spark.W} ${spark.H}`} aria-hidden="true">

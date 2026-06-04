@@ -202,7 +202,7 @@ function BackendWarnings({ dash }: { dash: DashboardSnapshot | null }) {
       <div className="var-label" style={{ marginTop: 14 }}>Recent backend retries (last {warnings.length})</div>
       <div className="payload-block" style={{ fontSize: 11, lineHeight: 1.5 }}>
         {warnings.slice().reverse().map((w, i) => {
-          const ts = w.ts ? new Date(w.ts).toLocaleTimeString() : "—";
+          const ts = fmtClock(w.ts);
           const code = w.status_code != null ? ` HTTP ${w.status_code}` : "";
           const err = w.error_class ? ` ${w.error_class}` : "";
           const wait = w.wait_s != null ? ` · wait ${Number(w.wait_s).toFixed(1)}s` : "";

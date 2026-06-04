@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from promptpotter.config.settings import settings
+from promptpotter.infrastructure.llm.rate_limit import decide_429_wait, parse_retry_after
 from promptpotter.shared.errors import graceful
 
 logger = logging.getLogger(__name__)
@@ -309,8 +310,11 @@ class LangfuseLogger:
                 return getattr(item, "id", None)
             except Exception as exc:
                 if "429" in str(exc) and attempt < _max_retries - 1:
-                    delay = 2**attempt
-                    logger.debug("Langfuse 429 rate limit, retry in %ds", delay)
+                    # SDK exception carries no headers reliably; honor Retry-After
+                    # when the wrapped response exposes it, else bounded backoff.
+                    headers = getattr(getattr(exc, "response", None), "headers", None)
+                    delay = parse_retry_after(headers) or float(2**attempt)
+                    logger.debug("Langfuse 429 rate limit, retry in %.0fs", delay)
                     time.sleep(delay)
                     continue
                 logger.warning("Failed to create Langfuse dataset item", exc_info=True)
@@ -390,23 +394,33 @@ class LangfuseLogger:
                     return True
 
                 if resp.status_code == 429:
-                    retry_after = int(resp.headers.get("Retry-After", "0"))
-                    remaining = int(resp.headers.get("X-RateLimit-Remaining", "-1"))
+                    retry_after = parse_retry_after(resp.headers) or 0.0
 
-                    # Daily quota exhausted (Retry-After > 5 min) — stop trying
-                    if retry_after > 300 or remaining == 0:
+                    # Daily quota exhausted (Retry-After > 5 min) — stop trying.
+                    # Langfuse-specific escape hatch: a daily reset is hours away,
+                    # so skip every remaining link instead of retrying for hours.
+                    if retry_after > 300 or resp.headers.get("X-RateLimit-Remaining") == "0":
                         self._rate_limit_until = time.time() + retry_after
                         logger.warning(
-                            "Langfuse daily rate limit hit (resets in %ds). "
+                            "Langfuse daily rate limit hit (resets in %.0fs). "
                             "Skipping remaining link_item_to_run calls.",
                             retry_after,
                         )
                         return False
 
-                    # Short-term rate limit — back off and retry
-                    wait = min(2**attempt, retry_after or 2**attempt)
-                    logger.debug("Rate limited, waiting %ds (attempt %d)", wait, attempt + 1)
-                    time.sleep(wait)
+                    # Short-term rate limit — defer to the canonical 429 decision.
+                    decision = decide_429_wait(
+                        resp.headers, resp.text, attempt, max_attempts=max_retries
+                    )
+                    if decision is None:
+                        return False
+                    logger.debug(
+                        "Rate limited (%s), waiting %.0fs (attempt %d)",
+                        decision.scope,
+                        decision.seconds,
+                        attempt + 1,
+                    )
+                    time.sleep(decision.seconds)
                     continue
 
                 # Other HTTP error

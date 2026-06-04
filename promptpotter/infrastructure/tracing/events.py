@@ -23,10 +23,6 @@ def generate_observation_id(length: int = 32) -> str:
     return f"{prefix}{suffix}"
 
 
-def utcnow_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
 @dataclass(frozen=True, slots=True)
 class DatasetRegistered:
     """Dataset items registered in file store and (optionally) Langfuse.
@@ -291,5 +287,4 @@ __all__ = [
     "RoundStart",
     "RoundWinnerChosen",
     "generate_observation_id",
-    "utcnow_iso",
 ]

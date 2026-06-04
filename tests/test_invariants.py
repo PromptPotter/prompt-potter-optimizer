@@ -499,7 +499,7 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
     tenant_root = tmp_path / "default"
     tenant_root.mkdir()
     entity_campaign = "ds__20260101-000000"
-    sink = FileSink(str(tenant_root), backend_id="bk_test", campaign_id=entity_campaign)
+    sink = FileSink(str(tenant_root), campaign_id=entity_campaign)
 
     cycle_id = "cycle_wire_parity"
     campaign_id = "cmp_wire_parity"
@@ -754,6 +754,93 @@ def test_no_direct_archive_access_outside_facade() -> None:
     assert not offenders, (
         "Direct MeasurementArchive access outside facade — route through archive_views:\n  "
         + "\n  ".join(offenders)
+    )
+
+
+# The two canonical I/O seams and their sanctioned exceptions.
+_IO_SEAM = (
+    ROOT / "infrastructure" / "store" / "base.py"
+)  # write_json/read_json/append_jsonl/_atomic_*
+_CLOCK_SEAM = ROOT / "shared" / "clock.py"  # utcnow_iso — sole UTC-timestamp minter
+# spend.py's rate cache (~/.promptpotter/rates.json) is a global, self-healing,
+# deliberately-compact (indent=0) blob — not a campaign artifact, so it stays out
+# of the pretty/atomic write_json seam by design.
+_COMPACT_CACHE = ROOT / "shared" / "spend.py"
+
+
+def _is_json_call(node: ast.AST, attr: str) -> bool:
+    """True if *node* is ``json.<attr>(...)``."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == attr
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "json"
+    )
+
+
+def test_no_hand_rolled_io_seam_bypass() -> None:
+    """No site re-implements a canonical I/O seam — the seam-enforcement lock.
+
+    Each pattern below is a hand-roll that bypasses (and drifts from / is
+    inferior to) the blessed helper:
+
+    * ``os.replace`` — an atomic rename missing the seam's WinError-5 retry +
+      long-path-prefix hardening (the real Windows torn-write/rename bug).
+    * ``<expr>.now(...).isoformat(...)`` — an inline UTC timestamp whose format
+      drifts from ``shared.clock.utcnow_iso``'s canonical ``...Z``.
+    * ``json.dump``/``json.load`` on a file handle — raw artifact JSON with no
+      long-path / atomic swap.
+    * ``.write_text(json.dumps(...))`` — a non-atomic JSON clobber (the torn
+      session/marker write this arc fixed).
+
+    Route writes through ``write_json``/``write_text``/``append_jsonl``, reads
+    through ``read_json``, and timestamps through ``utcnow_iso``.
+    """
+    offenders: list[str] = []
+    for path in ROOT.rglob("*.py"):
+        if path in (_IO_SEAM, _CLOCK_SEAM):
+            continue
+        rel = path.relative_to(ROOT.parent).as_posix()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if (
+                isinstance(fn, ast.Attribute)
+                and fn.attr == "replace"
+                and isinstance(fn.value, ast.Name)
+                and fn.value.id == "os"
+            ):
+                offenders.append(f"{rel}:{node.lineno}: os.replace — use write_json/write_text")
+            if (
+                isinstance(fn, ast.Attribute)
+                and fn.attr == "isoformat"
+                and isinstance(fn.value, ast.Call)
+                and isinstance(fn.value.func, ast.Attribute)
+                and fn.value.func.attr == "now"
+            ):
+                offenders.append(
+                    f"{rel}:{node.lineno}: inline now().isoformat() — use utcnow_iso()"
+                )
+            if _is_json_call(node, "dump") or _is_json_call(node, "load"):
+                offenders.append(
+                    f"{rel}:{node.lineno}: json.dump/load on a handle — use write_json/read_json"
+                )
+            if (
+                path != _COMPACT_CACHE
+                and isinstance(fn, ast.Attribute)
+                and fn.attr == "write_text"
+                and node.args
+                and _is_json_call(node.args[0], "dumps")
+            ):
+                offenders.append(
+                    f"{rel}:{node.lineno}: write_text(json.dumps(...)) — use write_json"
+                )
+    assert not offenders, (
+        "Hand-rolled bypass of a canonical I/O seam — route through "
+        "infrastructure/store/base.py (write_json/read_json/write_text/append_jsonl) "
+        "or shared/clock.py (utcnow_iso):\n  " + "\n  ".join(offenders)
     )
 
 

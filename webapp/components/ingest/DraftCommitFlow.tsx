@@ -16,7 +16,6 @@ import { originReadiness, plainLanguageRecap } from "@/lib/origin-readiness";
 import { TextField } from "@/components/forms/TextField";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
 import { OriginCheckinPanel } from "./OriginCheckinPanel";
-import { GapList } from "./GapList";
 import { PipelinePromptStep } from "./PipelinePromptStep";
 import { CheckinLoadingWindow } from "./CheckinLoadingWindow";
 import { useFetch } from "@/lib/hooks/useFetch";
@@ -172,7 +171,13 @@ export function DraftCommitFlow({
 
       {body}
 
-      {serverGaps ? <GapList gaps={serverGaps} tone="blocked" /> : null}
+      {serverGaps && serverGaps.length > 0 ? (
+        <ul className="origin-gaps origin-gaps--blocked">
+          {serverGaps.map((g) => (
+            <li key={g.field}>{g.hint}</li>
+          ))}
+        </ul>
+      ) : null}
       {error ? <p className="new-campaign-error">{error}</p> : null}
 
       <footer className="new-campaign-footer">

@@ -41,6 +41,7 @@ from promptpotter.infrastructure.store import (
     root_cycle_id,
     save_active_pointer,
 )
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -79,7 +80,7 @@ def _fork_sibling_setup(
         raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
     new_dir.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.now(UTC).isoformat()
+    now = utcnow_iso()
     record_data: dict[str, Any] = {
         "forked_at": now,
         "fork": payload.model_dump(mode="json"),

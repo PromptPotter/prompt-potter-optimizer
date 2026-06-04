@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +14,7 @@ from promptpotter.infrastructure.store.base import (
 )
 from promptpotter.infrastructure.store.campaign_store._kernel import CampaignStoreKernel
 from promptpotter.infrastructure.store.campaign_store.index_helpers import round_summary
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class RoundMixin(CampaignStoreKernel):
             data["best_accuracy"] = round_data["accuracy"]
             data["best_round_id"] = round_id
 
-        data["updated_at"] = datetime.now(UTC).isoformat()
+        data["updated_at"] = utcnow_iso()
         write_json(index_path, data)
 
         return detail_path

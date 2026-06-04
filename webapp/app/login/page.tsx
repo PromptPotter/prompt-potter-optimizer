@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { BRAND } from "@/lib/brand";
 
 type ProvidersResponse = { providers: string[] };
 
@@ -8,6 +9,16 @@ const PROVIDER_LABEL: Record<string, string> = {
   google: "Sign in with Google",
   github: "Sign in with GitHub",
 };
+
+// Bare host for the card's URL line ("promptpotter.com"). Falls back to the
+// raw string if it isn't a parseable URL — the value is build-time config.
+function siteHost(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
 
 export default function LoginPage() {
   const [providers, setProviders] = useState<string[] | null>(null);
@@ -52,6 +63,35 @@ export default function LoginPage() {
           </a>
         ))}
       </div>
+      {BRAND.marketing.url ? (
+        <>
+          <div className="login-or" role="separator" aria-label="or">
+            <span>or</span>
+          </div>
+          {/* Bookmark/embed card linking home to the origin marketing site —
+              the same shape a Notion paste of the URL renders. Hidden when a
+              whitelabel host clears NEXT_PUBLIC_MARKETING_URL. */}
+          <a
+            className="login-card"
+            href={BRAND.marketing.url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span className="login-card-body">
+              <span className="login-card-title">{BRAND.marketing.title}</span>
+              <span className="login-card-tagline">{BRAND.marketing.tagline}</span>
+              <span className="login-card-url">{siteHost(BRAND.marketing.url)}</span>
+            </span>
+            <img
+              className="login-card-mark"
+              src="/brand/potter-mark.svg"
+              alt=""
+              width={48}
+              height={48}
+            />
+          </a>
+        </>
+      ) : null}
     </main>
   );
 }

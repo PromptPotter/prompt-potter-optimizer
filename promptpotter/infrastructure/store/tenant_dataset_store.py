@@ -15,7 +15,6 @@ only touches the tenant tree.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +25,7 @@ from promptpotter.infrastructure.store.base import (
     write_text,
 )
 from promptpotter.infrastructure.store.paths import validate_dataset_name
+from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
@@ -133,7 +133,7 @@ class TenantDatasetStore:
         serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
         data: dict[str, Any] = {
             "name": draft_id,
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": utcnow_iso(),
             "source_file": source_file,
             "headers": list(headers),
             "row_count": len(serialized),

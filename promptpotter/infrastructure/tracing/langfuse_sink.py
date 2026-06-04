@@ -36,12 +36,10 @@ class LangfuseSink:
     def __init__(
         self,
         store_base_dir: str | Path,
-        backend_id: str,
         campaign_id: str,
         langfuse: LangfuseLogger,
     ) -> None:
         self._base = Path(store_base_dir)
-        self._backend_id = backend_id
         self._campaign_id = campaign_id
         self._lf = langfuse
 

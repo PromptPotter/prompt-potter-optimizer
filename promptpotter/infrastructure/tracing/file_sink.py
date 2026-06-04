@@ -36,8 +36,8 @@ from promptpotter.infrastructure.tracing.events import (
     RoundStart,
     RoundWinnerChosen,
     generate_observation_id,
-    utcnow_iso,
 )
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +45,8 @@ logger = logging.getLogger(__name__)
 class FileSink:
     """Append-only Langfuse-style file log per cycle."""
 
-    def __init__(self, store_base_dir: str | Path, backend_id: str, campaign_id: str = "") -> None:
+    def __init__(self, store_base_dir: str | Path, campaign_id: str = "") -> None:
         self._tenant_root = Path(store_base_dir)
-        self._backend_id = backend_id
         self._campaign_id = campaign_id
         self._cycle_id: str | None = None
         self._campaign_traces: dict[str, str] = {}

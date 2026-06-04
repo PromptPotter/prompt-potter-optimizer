@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import UTC, datetime
 
 from promptpotter.infrastructure.store import build_stores
 from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.presentation.cli.commands._shared import CommandResult, identity_from_args
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger("promptpotter.presentation.cli.lifecycle")
 
@@ -37,7 +37,7 @@ def _mark(args: argparse.Namespace, *, status: str) -> CommandResult:
             data={"campaign_id": campaign_id, "lifecycle_status": status, "noop": True},
             human=f"{campaign_id} is already {status}.",
         )
-    changed_at = datetime.now(UTC).isoformat()
+    changed_at = utcnow_iso()
     reason: str = getattr(args, "reason", None) or ""
     store.campaigns.mark_campaign_lifecycle(
         campaign_id,

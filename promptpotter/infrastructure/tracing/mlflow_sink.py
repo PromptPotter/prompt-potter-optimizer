@@ -17,11 +17,10 @@ from promptpotter.infrastructure.tracing.events import CampaignStart, RoundEnd
 class MLflowSink:
     """Logs each round as an MLflow run; experiment = ``{tenant_id}/{cycle_id}``."""
 
-    def __init__(self, store_base_dir: str | Path, backend_id: str) -> None:
+    def __init__(self, store_base_dir: str | Path) -> None:
         self._tenant_root = Path(store_base_dir)
         self._tenant_id = self._tenant_root.name
         self._archive_dir = self._tenant_root / "archive"
-        self._backend_id = backend_id
         self._cycle_id: str | None = None
         self._initialized = False
 

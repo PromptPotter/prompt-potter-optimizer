@@ -3,7 +3,6 @@
 import { useState } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { lockedParams } from "@/lib/optimizer-locks";
-import { RecapCard } from "./RecapCard";
 import { OptionalSettings } from "./OptionalSettings";
 import { LockTable } from "@/components/dashboard/control/LockTable";
 import { AllowedValuesEditor } from "@/components/dashboard/control/AllowedValuesEditor";
@@ -29,7 +28,12 @@ export function PipelinePromptStep({
 
   return (
     <>
-      <RecapCard text={recapText} />
+      <div className="origin-recap" role="status">
+        <span className="origin-recap-tick" aria-hidden="true">
+          ✓
+        </span>
+        <p>{recapText}</p>
+      </div>
 
       <section className="setup-preview">
         <header className="setup-preview-head">

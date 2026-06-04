@@ -11,11 +11,9 @@
 
 import {
   liveCandidate,
-  liveL1Candidates,
   type DashboardSnapshot,
   type RoundFileDoc,
 } from "@/lib/poll";
-import { liveCandidateId } from "@/lib/candidate-label";
 import { parseSampleLine } from "@/lib/sample-line";
 import type { SampleRow } from "@/lib/types/sample";
 
@@ -68,23 +66,6 @@ export function liveSamplesFor(
       });
     }
   });
-  return out;
-}
-
-// All live-mode samples across every in-flight candidate. Used by
-// RoundSamplesView when the operator wants the whole live tape rather
-// than one candidate's stream.
-export function liveSamplesAll(
-  dash: DashboardSnapshot | null,
-  round: number,
-): SampleRow[] {
-  const out: SampleRow[] = [];
-  for (const c of liveL1Candidates(dash)) {
-    const i = Number(c.idx);
-    if (!Number.isFinite(i) || i < 0) continue;
-    const candidate_id = liveCandidateId(round, i);
-    out.push(...liveSamplesFor(dash, round, candidate_id));
-  }
   return out;
 }
 

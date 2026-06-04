@@ -11,12 +11,14 @@ TTL: 7 days from creation; expired sessions are deleted on read miss.
 
 from __future__ import annotations
 
-import json
 import logging
 import secrets
 import time
 from dataclasses import dataclass
+from json import JSONDecodeError
 from pathlib import Path
+
+from promptpotter.infrastructure.store.base import read_json, write_json
 
 logger = logging.getLogger(__name__)
 
@@ -70,23 +72,18 @@ class SessionStore:
             created_at=now,
             expires_at=now + self._ttl_s,
         )
-        self._dir.mkdir(parents=True, exist_ok=True)
-        path = self._path(session_id)
-        path.write_text(
-            json.dumps(
-                {
-                    "user_id": data.user_id,
-                    "tenant_id": data.tenant_id,
-                    "issuer": data.issuer,
-                    "subject": data.subject,
-                    "email": data.email,
-                    "provider": data.provider,
-                    "created_at": data.created_at,
-                    "expires_at": data.expires_at,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
+        write_json(
+            self._path(session_id),
+            {
+                "user_id": data.user_id,
+                "tenant_id": data.tenant_id,
+                "issuer": data.issuer,
+                "subject": data.subject,
+                "email": data.email,
+                "provider": data.provider,
+                "created_at": data.created_at,
+                "expires_at": data.expires_at,
+            },
         )
         return session_id, data
 
@@ -98,8 +95,8 @@ class SessionStore:
         if not path.is_file():
             return None
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            raw = read_json(path)
+        except (OSError, JSONDecodeError):
             logger.warning("session %s unreadable, deleting", session_id)
             path.unlink(missing_ok=True)
             return None

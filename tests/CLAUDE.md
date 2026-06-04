@@ -65,7 +65,7 @@ When a contract is renamed, restructured, or replaced:
 Target **≤ 18 test files, ≤ 240 collected tests**. Above that, prune before
 adding. Canary (the non-`-q` collect prints the grand total; `-q` only prints
 per-file counts): `python -m pytest tests/ --collect-only 2>&1 | grep "tests collected"`.
-Currently at 238; two-test margin to the 240 ceiling.
+Currently at 239; one-test margin to the 240 ceiling.
 
 ## Fixtures (`conftest.py`)
 

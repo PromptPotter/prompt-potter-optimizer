@@ -27,6 +27,7 @@ from promptpotter.presentation.views.view_models import (
     SweepPayloadRow,
     SweepSummaryView,
 )
+from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
@@ -113,7 +114,7 @@ async def run_sweep_batch(
     campaign_id = root_ctx.campaign_id
     existing = existing_fork_source_files(store, campaign_id, parent_cycle_id)
 
-    started_at = datetime.now(UTC).isoformat()
+    started_at = utcnow_iso()
     # No underscores in batch_id — the cycle-id regex requires it.
     batch_id = datetime.now(UTC).strftime("b%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(2)
     family_root = root_cycle_id(parent_cycle_id)
@@ -264,7 +265,7 @@ async def run_sweep_batch(
 
     save_active_pointer(tenant_id, root_ctx.session_id, campaign_id, parent_cycle_id)
 
-    completed_at = datetime.now(UTC).isoformat()
+    completed_at = utcnow_iso()
     cycle_by_source = {
         p.name: cid for (p, _), cid in zip(sweep_payloads, new_cycle_ids, strict=False)
     }

@@ -43,6 +43,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from promptpotter.shared.clock import utcnow_iso
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -82,7 +84,7 @@ def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _wrap(models: dict[str, Any]) -> dict[str, Any]:
     """Wrap the stripped models dict with a fetched-at timestamp for TTL."""
-    return {"fetched_at": datetime.now(UTC).isoformat(timespec="seconds"), "models": models}
+    return {"fetched_at": utcnow_iso(), "models": models}
 
 
 def _cache_fresh() -> bool:

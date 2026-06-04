@@ -8,10 +8,11 @@ resume-checkpoint policy (gating, helpers, exhaustiveness check) lives in
 from __future__ import annotations
 
 import enum
-from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from promptpotter.shared.clock import utcnow_iso
 
 __all__ = [
     "CommandAckRecord",
@@ -47,10 +48,6 @@ class ResumeCheckpointKind(enum.StrEnum):
     FORK_CUT = "fork_cut"
 
 
-def _utcnow_iso() -> str:
-    return datetime.now(UTC).isoformat()
-
-
 class ResumeCheckpointRecord(BaseModel):
     """One recorded decision: ``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival."""
 
@@ -62,7 +59,7 @@ class ResumeCheckpointRecord(BaseModel):
     outcome: Any = None
     data: dict[str, Any] = Field(default_factory=dict)
     round: int | None = None
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
     def to_dict(self) -> dict[str, Any]:
         """Wire shape for round_data-JSON ``decisions`` payload."""
@@ -84,7 +81,7 @@ class PhaseRecord(BaseModel):
     event: str
     round: int | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class SnapshotRecord(BaseModel):
@@ -100,7 +97,7 @@ class SnapshotRecord(BaseModel):
     sample_idx: int | None = None
     sample_total: int | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class TokenUsageRecord(BaseModel):
@@ -122,7 +119,7 @@ class TokenUsageRecord(BaseModel):
     duration_s: float = 0.0
     cost_usd: float | None = None
     round: int | None = None
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class LLMCallStartRecord(BaseModel):
@@ -142,7 +139,7 @@ class LLMCallStartRecord(BaseModel):
     started_at_ms: int
     # Sets the operator's latency expectation on the in-flight line.
     prompt_chars: int = 0
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class LLMCallProgressRecord(BaseModel):
@@ -155,7 +152,7 @@ class LLMCallProgressRecord(BaseModel):
     node: str
     round: int | None = None
     elapsed_s: float
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class LLMCallRecord(BaseModel):
@@ -174,7 +171,7 @@ class LLMCallRecord(BaseModel):
     call_id: str = ""
     # Opaque action-dict consumed by AuditTrailView — new fields don't churn the schema.
     payload: dict[str, Any] = Field(default_factory=dict)
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class CommandRecord(BaseModel):
@@ -205,7 +202,7 @@ class CommandRecord(BaseModel):
     expected_version: int | None = None
     issued_by_user_id: str = ""
     client_metadata: dict[str, Any] = Field(default_factory=dict)
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class CommandAckRecord(BaseModel):
@@ -222,7 +219,7 @@ class CommandAckRecord(BaseModel):
     command_id: str
     status: Literal["applied", "rejected"]
     detail: str = ""
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class ErrorRecord(BaseModel):
@@ -254,7 +251,7 @@ class ErrorRecord(BaseModel):
     traceback: str | None = None
     stop_reason: Literal["CRASHED", "RENDER_ERROR", "DIVERGED"]
     round: int | None = None
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class RoundWarningRecord(BaseModel):
@@ -292,7 +289,7 @@ class RoundWarningRecord(BaseModel):
     message: str
     round: int | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
-    timestamp: str = Field(default_factory=_utcnow_iso)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 # Discriminated union by `record_type`; keep order alphabetical — hash-keyed snapshots go stale otherwise.

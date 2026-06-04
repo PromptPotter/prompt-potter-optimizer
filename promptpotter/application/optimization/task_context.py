@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +21,7 @@ from promptpotter.infrastructure.store.base import (
     validate_path_component,
     write_json,
 )
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ def save_decomposition_cache(
     cache = read_json_optional(path) or {}
     cache[rp_hash] = {
         "layer1_fields": layer1_fields,
-        "cached_at": datetime.now(UTC).isoformat(),
+        "cached_at": utcnow_iso(),
     }
     write_json(path, cache)
 

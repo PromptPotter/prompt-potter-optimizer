@@ -41,13 +41,6 @@ export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-// True when the primary pointer is coarse (touchscreen — phone, tablet,
-// touch-screen laptop). Drives tap-vs-hover affordance swaps where CSS
-// alone can't express the choice.
-export function useIsTouchPointer(): boolean {
-  return useMediaQuery("(pointer: coarse)");
-}
-
 // True when the viewport is a phone in portrait. The threshold is
 // `--bp-rotate` (768px) — the same value the CSS rotate-prompt block
 // uses. Drives the `<RotatePrompt>` JS-side gate; pure-CSS surfaces use

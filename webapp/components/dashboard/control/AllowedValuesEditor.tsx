@@ -60,7 +60,7 @@ function buildOverlay(
   return overlay as Record<string, unknown>;
 }
 
-export type AllowedValuesMode = "edit" | "demo";
+type AllowedValuesMode = "edit" | "demo";
 
 export function AllowedValuesEditor({
   locks,

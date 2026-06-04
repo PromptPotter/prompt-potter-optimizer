@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
+
+from promptpotter.infrastructure.store.base import append_jsonl, write_json
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -92,30 +93,25 @@ def _load_emails(path: Path) -> list[str]:
 
 
 def _write_emails(path: Path, emails: list[str]) -> None:
-    """Atomically write the ``{"emails": [...]}`` file (tmp + ``os.replace``)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps({"emails": emails}, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    """Atomically write the ``{"emails": [...]}`` file via the canonical seam."""
+    write_json(path, {"emails": emails})
 
 
 def _append_audit(
     audit_path: Path, *, action: str, email: str, actor: str, before: int, after: int
 ) -> None:
     """Append one change record to the identity-zone audit log."""
-    audit_path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(
+    append_jsonl(
+        audit_path,
         {
-            "ts": datetime.now(UTC).isoformat(),
+            "ts": utcnow_iso(),
             "action": action,
             "email": email,
             "actor": actor,
             "before_count": before,
             "after_count": after,
-        }
+        },
     )
-    with audit_path.open("a", encoding="utf-8") as fh:
-        fh.write(line + "\n")
 
 
 def _normalize(email: str) -> str:

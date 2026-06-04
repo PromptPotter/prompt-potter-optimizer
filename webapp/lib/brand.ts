@@ -30,6 +30,18 @@ export const BRAND = {
     name: "PromptPotter",
     url: "https://promptpotter.dev",
   },
+  // The origin marketing site this unit links home to. OUR hosted instance
+  // points back to promptpotter.com; a whitelabel distributor who resells /
+  // hosts for profit sets NEXT_PUBLIC_MARKETING_URL="" to drop the login
+  // "visit our website" card entirely — it must never funnel their paying
+  // users upstream. `??` (not `||`) so an explicit empty string opts out.
+  marketing: {
+    url: process.env.NEXT_PUBLIC_MARKETING_URL ?? "https://promptpotter.com",
+    title: process.env.NEXT_PUBLIC_MARKETING_TITLE || "PromptPotter",
+    tagline:
+      process.env.NEXT_PUBLIC_MARKETING_TAGLINE ||
+      "LLM-driven program evolution — fix a broken LLM pipeline in half a day, then it just works.",
+  },
   supportUrl: process.env.NEXT_PUBLIC_SUPPORT_URL || "https://promptpotter.dev/support",
   legalUrl: process.env.NEXT_PUBLIC_LEGAL_URL || "https://promptpotter.dev/legal",
   license: process.env.NEXT_PUBLIC_LICENSE || "https://promptpotter.dev/legal/license",

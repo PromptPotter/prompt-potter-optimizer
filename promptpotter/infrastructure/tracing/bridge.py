@@ -80,33 +80,31 @@ class ObservabilityBridge:
     def from_settings(
         cls,
         store_base_dir: str | Path,
-        backend_id: str,
         campaign_id: str = "",
         *,
         langfuse: LangfuseLogger | None,
     ) -> ObservabilityBridge:
 
-        file_sink = FileSink(store_base_dir, backend_id, campaign_id)
+        file_sink = FileSink(store_base_dir, campaign_id)
         lf_sink = (
-            LangfuseSink(store_base_dir, backend_id, campaign_id, langfuse)
+            LangfuseSink(store_base_dir, campaign_id, langfuse)
             if (langfuse and langfuse.enabled)
             else None
         )
-        mlflow_sink = MLflowSink(store_base_dir, backend_id) if settings.MLFLOW_ENABLED else None
+        mlflow_sink = MLflowSink(store_base_dir) if settings.MLFLOW_ENABLED else None
         return cls(file_sink=file_sink, langfuse_sink=lf_sink, mlflow_sink=mlflow_sink)
 
     @classmethod
     def file_only(
         cls,
         store_base_dir: str | Path,
-        backend_id: str,
         campaign_id: str = "",
     ) -> ObservabilityBridge:
 
         return cls(
-            file_sink=FileSink(store_base_dir, backend_id, campaign_id),
+            file_sink=FileSink(store_base_dir, campaign_id),
             langfuse_sink=None,
-            mlflow_sink=MLflowSink(store_base_dir, backend_id) if settings.MLFLOW_ENABLED else None,
+            mlflow_sink=MLflowSink(store_base_dir) if settings.MLFLOW_ENABLED else None,
         )
 
     def _fan(self, event: _E, *handlers: tuple[str, Callable[[_E], None] | None]) -> None:
@@ -276,7 +274,7 @@ class ObservabilityBridge:
 
         bridge: ObservabilityBridge | None = None
         with graceful("Failed to create ObservabilityBridge"):
-            bridge = cls.from_settings(project_root, backend_id, campaign_id, langfuse=langfuse)
+            bridge = cls.from_settings(project_root, campaign_id, langfuse=langfuse)
         if bridge is None:
             return None
 

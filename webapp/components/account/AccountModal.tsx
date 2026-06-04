@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { AboutUnit } from "./AboutUnit";
-import { fmtCompact } from "@/lib/format";
+import { fmtCompact, fmtUsd } from "@/lib/format";
 import { useFetch } from "@/lib/hooks/useFetch";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
@@ -440,10 +440,10 @@ function QuotaCard({ quota }: { quota: QuotaStatus }) {
       <li className="quota-cell">
         <span className="quota-cell-label">Spend today</span>
         <span className="quota-cell-value">
-          ${quota.spend_used_today_usd.toFixed(2)}
+          {fmtUsd(quota.spend_used_today_usd)}
         </span>
         <span className="quota-cell-sub">
-          {spendCap !== null ? `of $${spendCap.toFixed(2)} daily cap` : "no daily cap"}
+          {spendCap !== null ? `of ${fmtUsd(spendCap)} daily cap` : "no daily cap"}
         </span>
       </li>
       <li className="quota-cell">
@@ -515,7 +515,7 @@ function ActivityTab() {
       ) : null}
       <ActivityBarChart
         title="Spend"
-        valueLabel={data ? `$${data.total_spend_usd.toFixed(2)}` : "$0.00"}
+        valueLabel={data ? fmtUsd(data.total_spend_usd) : "$0.00"}
         buckets={data?.buckets ?? []}
         labels={labels}
         palette={palette}

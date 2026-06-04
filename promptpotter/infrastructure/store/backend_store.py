@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +13,7 @@ from promptpotter.infrastructure.store.base import (
     validate_path_component,
     write_json,
 )
+from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
@@ -113,7 +113,7 @@ class BackendStore:
         serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
         data: dict[str, Any] = {
             "name": name,
-            "created_at": datetime.now(UTC).isoformat(),
+            "created_at": utcnow_iso(),
             "source_file": source_file,
             "row_count": len(serialized),
             "items": serialized,

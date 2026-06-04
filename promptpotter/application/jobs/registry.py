@@ -14,16 +14,18 @@ would mislead the next operator.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import secrets
 import threading
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime
+from datetime import date
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Literal
 
+from promptpotter.infrastructure.store.base import read_json, write_json
 from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,7 @@ class JobRegistry:
         dataset_name: str,
     ) -> Job:
         job_id = secrets.token_urlsafe(12)
-        now = datetime.now(UTC).isoformat()
+        now = utcnow_iso()
         job = Job(
             job_id=job_id,
             user_id=user_id,
@@ -95,7 +97,7 @@ class JobRegistry:
         if job is None:
             return
         job.status = "running"
-        job.started_at = datetime.now(UTC).isoformat()
+        job.started_at = utcnow_iso()
         self._persist(job)
 
     def mark_finished(
@@ -105,7 +107,7 @@ class JobRegistry:
         if job is None:
             return
         job.status = status
-        job.finished_at = datetime.now(UTC).isoformat()
+        job.finished_at = utcnow_iso()
         job.stop_reason = stop_reason
         self._persist(job)
         with self._lock:
@@ -116,8 +118,8 @@ class JobRegistry:
         if not path.is_file():
             return None
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            raw = read_json(path)
+        except (OSError, JSONDecodeError):
             logger.warning("job %s file unreadable", job_id)
             return None
         return self._job_from_dict(raw)
@@ -126,8 +128,8 @@ class JobRegistry:
         out: list[Job] = []
         for path in self._dir.glob("*.json"):
             try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+                raw = read_json(path)
+            except (OSError, JSONDecodeError):
                 continue
             job = self._job_from_dict(raw)
             if user_id is not None and job.user_id != user_id:
@@ -145,9 +147,7 @@ class JobRegistry:
         return [j for j in self.list_all(user_id=user_id) if j.created_at.startswith(today)]
 
     def _persist(self, job: Job) -> None:
-        tmp = self._path(job.job_id).with_suffix(".tmp")
-        tmp.write_text(json.dumps(asdict(job), indent=2), encoding="utf-8")
-        tmp.replace(self._path(job.job_id))
+        write_json(self._path(job.job_id), asdict(job))
 
     def _path(self, job_id: str) -> Path:
         if not job_id or "/" in job_id or "\\" in job_id or job_id.startswith("."):
@@ -170,11 +170,11 @@ class JobRegistry:
         )
 
     def _mark_stale_on_startup(self) -> None:
-        now = datetime.now(UTC).isoformat()
+        now = utcnow_iso()
         for path in self._dir.glob("*.json"):
             try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+                raw = read_json(path)
+            except (OSError, JSONDecodeError):
                 continue
             status = raw.get("status")
             if status not in ("pending", "running"):
@@ -182,9 +182,7 @@ class JobRegistry:
             raw["status"] = "stopped"
             raw["finished_at"] = now
             raw["stop_reason"] = "server_restart"
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(raw, indent=2), encoding="utf-8")
-            tmp.replace(path)
+            write_json(path, raw)
             logger.info("marked stale job %s as stopped (server_restart)", path.stem)
 
 

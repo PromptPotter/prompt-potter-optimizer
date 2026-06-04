@@ -1,8 +1,8 @@
 """Pydantic model for the connected-backend record (one per registered backend)."""
 
-from datetime import UTC, datetime
-
 from pydantic import BaseModel, Field
+
+from promptpotter.shared.clock import utcnow_iso
 
 
 class BackendConnection(BaseModel):
@@ -12,7 +12,7 @@ class BackendConnection(BaseModel):
     name: str = Field(..., description="Human-readable name")
     backend_type: str = Field(..., description="Backend type, e.g. 'default'")
     base_url: str = Field(..., description="Backend API base URL")
-    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    created_at: str = Field(default_factory=utcnow_iso)
     last_synced_at: str | None = None
 
 
