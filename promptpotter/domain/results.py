@@ -26,6 +26,7 @@ __all__ = [
     "RoundSummaryCandidate",
     "SweepBatchResult",
     "candidate_label",
+    "is_round_winner",
 ]
 
 
@@ -34,6 +35,15 @@ def candidate_label(round_num: int, idx: int) -> str:
     if round_num == 0:
         return "C0"
     return f"C{round_num}.{idx + 1}"
+
+
+def is_round_winner(changes_description: str | None, winner_label: str) -> bool:
+    """The round winner is the candidate whose diff description equals the round's
+    elected label. Sole definition of the rule — the round-file scoreboard
+    (`_build_scoreboard`) and the dashboard round summary (`build_round_summary`)
+    both call this so the operator-visible winner flag can't diverge between the
+    two surfaces."""
+    return bool(changes_description) and changes_description == winner_label
 
 
 @dataclass(frozen=True)

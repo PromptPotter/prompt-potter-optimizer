@@ -10,10 +10,12 @@
 // live in-flight round.
 
 import {
+  liveCandidate,
   liveL1Candidates,
   type DashboardSnapshot,
   type RoundFileDoc,
 } from "@/lib/poll";
+import { liveCandidateId } from "@/lib/candidate-label";
 import { parseSampleLine } from "@/lib/sample-line";
 import type { SampleRow } from "@/lib/types/sample";
 
@@ -27,49 +29,45 @@ export function liveSamplesFor(
   candidate_id: string,
 ): SampleRow[] {
   const out: SampleRow[] = [];
-  for (const c of liveL1Candidates(dash)) {
-    const i = Number(c.idx);
-    if (!Number.isFinite(i) || i < 0) continue;
-    const thisId = `r${round}_${i}`;
-    if (thisId !== candidate_id) continue;
-    (c.samples ?? []).forEach((raw, ord) => {
-      if (typeof raw === "string") {
-        const p = parseSampleLine(raw);
-        const sid = typeof p.sampleId === "number" ? p.sampleId : null;
-        out.push({
-          key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
-          round,
-          candidate_id,
-          sample_id: sid,
-          status: p.status ?? null,
-          query: p.query ?? "",
-          predicted: p.predicted ?? "",
-          ground_truth: p.gt ?? "",
-          scorer: p.scorer ?? "",
-          elapsed_s: typeof p.elapsed === "number" ? p.elapsed : null,
-          has_error: false,
-          raw_line: p.raw,
-        });
-      } else if (raw && typeof raw === "object") {
-        const sid = typeof raw.sample_id === "number" ? raw.sample_id : null;
-        const status =
-          typeof raw.hit === "boolean" ? (raw.hit ? "HIT" : "MISS") : null;
-        out.push({
-          key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
-          round,
-          candidate_id,
-          sample_id: sid,
-          status,
-          query: "",
-          predicted: typeof raw.prediction === "string" ? raw.prediction : "",
-          ground_truth: "",
-          scorer: "",
-          elapsed_s: typeof raw.time_s === "number" ? raw.time_s : null,
-          has_error: false,
-        });
-      }
-    });
-  }
+  const c = liveCandidate(dash, round, candidate_id);
+  if (!c) return out;
+  (c.samples ?? []).forEach((raw, ord) => {
+    if (typeof raw === "string") {
+      const p = parseSampleLine(raw);
+      const sid = typeof p.sampleId === "number" ? p.sampleId : null;
+      out.push({
+        key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
+        round,
+        candidate_id,
+        sample_id: sid,
+        status: p.status ?? null,
+        query: p.query ?? "",
+        predicted: p.predicted ?? "",
+        ground_truth: p.gt ?? "",
+        scorer: p.scorer ?? "",
+        elapsed_s: typeof p.elapsed === "number" ? p.elapsed : null,
+        has_error: false,
+        raw_line: p.raw,
+      });
+    } else if (raw && typeof raw === "object") {
+      const sid = typeof raw.sample_id === "number" ? raw.sample_id : null;
+      const status =
+        typeof raw.hit === "boolean" ? (raw.hit ? "HIT" : "MISS") : null;
+      out.push({
+        key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
+        round,
+        candidate_id,
+        sample_id: sid,
+        status,
+        query: "",
+        predicted: typeof raw.prediction === "string" ? raw.prediction : "",
+        ground_truth: "",
+        scorer: "",
+        elapsed_s: typeof raw.time_s === "number" ? raw.time_s : null,
+        has_error: false,
+      });
+    }
+  });
   return out;
 }
 
@@ -84,7 +82,7 @@ export function liveSamplesAll(
   for (const c of liveL1Candidates(dash)) {
     const i = Number(c.idx);
     if (!Number.isFinite(i) || i < 0) continue;
-    const candidate_id = `r${round}_${i}`;
+    const candidate_id = liveCandidateId(round, i);
     out.push(...liveSamplesFor(dash, round, candidate_id));
   }
   return out;

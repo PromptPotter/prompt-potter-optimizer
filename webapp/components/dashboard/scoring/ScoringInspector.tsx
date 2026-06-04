@@ -5,7 +5,7 @@ import { useConnector } from "@/lib/hooks/useConnector";
 import { fmtPct1 } from "@/lib/format";
 import type { SelectedCandidate } from "@/lib/types/selection";
 import type { ScoreboardEntry } from "@/lib/types/round";
-import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
+import { liveCandidate, type DashboardSnapshot } from "@/lib/poll";
 import { Dialog } from "@/components/ui/Dialog";
 import { SteerForkPanel } from "@/components/dashboard/control/SteerForkPanel";
 
@@ -41,9 +41,7 @@ export function ScoringInspector({
   const data = useMemo<{ composite?: number; hits?: number; total?: number } | null>(() => {
     if (!selected) return null;
     if (isLive) {
-      const c = liveL1Candidates(dash).find(
-        (lc) => `r${selected.round}_${lc.idx}` === selected.candidate_id,
-      );
+      const c = liveCandidate(dash, selected.round, selected.candidate_id);
       if (!c?.stats) return null;
       return { composite: c.stats.composite_fitness, hits: c.stats.hits, total: c.stats.total };
     }

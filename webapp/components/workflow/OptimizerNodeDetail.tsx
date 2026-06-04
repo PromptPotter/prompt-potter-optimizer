@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 import type { PipelineDoc } from "./types";
 import { type DashboardSnapshot, roundOf } from "@/lib/poll";
+import { availableRounds } from "@/lib/derivations/round-axis";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useSelection } from "@/lib/SelectionContext";
 import { phaseToNodeId } from "./layout";
@@ -83,13 +84,11 @@ export function OptimizerNodeDetail({
   // live round, then to the most recent completed round.
   const { round: selectedRound } = useSelection();
   const liveRound = roundOf(dash);
-  const completedRounds = useMemo(() => {
-    const out = (dash?.rounds ?? []).map((r) => r.round);
-    return out.sort((a, b) => b - a);
-  }, [dash?.rounds]);
-  const activeRound =
-    selectedRound ?? liveRound ?? completedRounds[0] ?? null;
-  const lastFiredRound = completedRounds[0] ?? null;
+  // Completed rounds are owned by `availableRounds` (round-axis) — ascending,
+  // so the most recent fired round is the tail.
+  const completed = availableRounds(dash, isLive).completed;
+  const lastFiredRound = completed.at(-1) ?? null;
+  const activeRound = selectedRound ?? liveRound ?? lastFiredRound;
 
   // Live round: read inline (no fetch). Historical round: lazy-fetch the
   // round file; `block` is null until it lands. `useRoundSource` owns the

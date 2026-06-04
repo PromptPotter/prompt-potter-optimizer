@@ -15,6 +15,7 @@ from promptpotter.domain.results import (
     RoundResult,
     RoundSummary,
     RoundSummaryCandidate,
+    is_round_winner,
 )
 
 
@@ -44,11 +45,10 @@ def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
 def build_round_summary(rr: RoundResult) -> RoundSummary:
     """One :class:`RoundSummary` from a closed-round :class:`RoundResult`.
 
-    Winner detection follows ``_build_scoreboard`` in
-    ``application/optimization/cycle.py``: the candidate whose
-    ``changes_description`` matches the round's elected label is the
-    winner. The round label is set by the elected candidate's diff
-    description; this builder is the sole writer of the persisted
+    Winner detection rides the shared ``is_round_winner`` rule (also used by
+    ``_build_scoreboard`` in ``application/optimization/cycle.py``): the
+    candidate whose ``changes_description`` matches the round's elected label
+    is the winner. This builder is the sole writer of the persisted
     ``is_winner`` flag on the summary row.
     """
     winner_label = rr.label
@@ -64,7 +64,7 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
                 composite_fitness=float(cd.get("composite_fitness") or 0.0),
                 scored_samples=int(cd.get("scored_samples") or 0),
                 expected_samples=int(cd.get("expected_samples") or 0),
-                is_winner=bool(changes) and changes == winner_label,
+                is_winner=is_round_winner(changes, winner_label),
                 evaluators={k: float(v) for k, v in (cd.get("evaluators") or {}).items()},
                 changes_description=changes,
             )

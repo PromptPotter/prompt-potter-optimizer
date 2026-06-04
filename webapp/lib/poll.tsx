@@ -12,6 +12,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { liveCandidateId } from "@/lib/candidate-label";
 import { fetchDashboardConditional } from "./api";
 import { useAuthGate } from "./auth-context";
 import { resolveRunPhase } from "./run-phase";
@@ -205,6 +206,36 @@ export function liveL1InputCandidates(
   return l1?.input?.candidates ?? NO_INPUT_CANDIDATES;
 }
 
+// Match a selection's `candidate_id` back to its live output-candidate slot.
+// Read peer of `liveCandidateId` (which mints the slot's id): construction and
+// match ride one rule so a selection can't resolve on one surface and miss on
+// another. null when no in-flight candidate carries that id.
+export function liveCandidate(
+  dash: DashboardSnapshot | null,
+  round: number | null,
+  candidateId: string,
+): LiveCandidate | null {
+  for (const c of liveL1Candidates(dash)) {
+    const i = Number(c.idx);
+    if (!Number.isFinite(i) || i < 0) continue;
+    if (liveCandidateId(round, i) === candidateId) return c;
+  }
+  return null;
+}
+
+// Input-side peer of `liveCandidate` — the seed-able prompt_fields / pp_override
+// slot for steer-fork seeding from a still-in-flight candidate.
+export function liveInputCandidate(
+  dash: DashboardSnapshot | null,
+  round: number | null,
+  candidateId: string,
+): LiveInputCandidate | null {
+  for (const c of liveL1InputCandidates(dash)) {
+    if (liveCandidateId(round, c.idx) === candidateId) return c;
+  }
+  return null;
+}
+
 // Shape-agnostic round-file document. Deep audit consumers (FreqChart,
 // ScoringInspector, OptimizerNodeDetail) fetch one of these lazily via
 // `useRoundFile`; the stream itself no longer maintains a rolling array.
@@ -288,6 +319,13 @@ export interface BucketResult {
 export function roundOf(dash: DashboardSnapshot | null): number | null {
   const r = dash?.current_round?.round ?? dash?.round;
   return typeof r === "number" ? r : null;
+}
+
+// Seconds since the dashboard self-stamped `wallclock_serialized_at`. Sole
+// reader of that field's age — feeds `ageBucket`. Unparseable/missing → null.
+function wallclockAgeS(iso: string | undefined): number | null {
+  const wall = Date.parse(iso || "");
+  return Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
 }
 
 export function ageBucket(ageS: number | null): BucketResult {
@@ -424,8 +462,7 @@ function useCycleStreamSource(
       // bailed-out by React, so consumers don't re-render.
       if (resp.kind === "not_modified") {
         setState((prev) => {
-          const wall = Date.parse(prev.dash?.wallclock_serialized_at || "");
-          const ageS = Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
+          const ageS = wallclockAgeS(prev.dash?.wallclock_serialized_at);
           const bucket = ageBucket(ageS);
           if (prev.termKey === bucket.termKey) return prev;
           return {
@@ -500,8 +537,7 @@ function useCycleStreamSource(
       }
       // A matching payload clears any prior mismatch streak.
       stampMismatchRef.current = 0;
-      const wall = Date.parse(dash.wallclock_serialized_at || "");
-      const ageS = Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
+      const ageS = wallclockAgeS(dash.wallclock_serialized_at);
       const bucket = ageBucket(ageS);
       setState((prev) => ({
         ...prev,

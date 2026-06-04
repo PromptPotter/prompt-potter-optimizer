@@ -26,3 +26,16 @@ export function candidateLabel(
   if (r === 0) return i === 0 ? "C0" : `C0.${i + 1}!`;
   return `C${r}.${i + 1}`;
 }
+
+// Canonical in-flight candidate id `r{round}_{idx}` — the selection-routing
+// id minted backend-side by `_RoundBuffer` for a candidate still scoring (one
+// that has no persisted hash id yet). Peer of `candidateLabel`: the id↔label
+// pair is the candidate's identity projection, so both live here and no caller
+// hand-builds the string. Used to construct ids for in-flight candidates and
+// to match a selection against the live candidate slots.
+export function liveCandidateId(
+  round: number | null | undefined,
+  idx: number | null | undefined,
+): string {
+  return `r${round}_${idx}`;
+}

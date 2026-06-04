@@ -3,7 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { fetchCampaignLineage, postCleanupEmpty } from "@/lib/api";
 import type { CampaignLineageCycle } from "@/lib/api";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { candidateLabel } from "@/lib/candidate-label";
+import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
 import { rootCycleId, sessionIndexOf, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
 import { bumpRevalidation, useRevalidation } from "@/lib/revalidate";
@@ -48,7 +48,7 @@ function detailFromLineage(c: CampaignLineageCycle): CycleDetail {
     rounds: c.rounds.map((r) => ({
       round: r.round,
       candidates: r.candidates.map((cand, i) => ({
-        candidateId: cand.candidate_id || `r${r.round}_${i}`,
+        candidateId: cand.candidate_id || liveCandidateId(r.round, i),
         label: candidateLabel(r.round, i),
         accuracy: cand.accuracy,
         isWinner: cand.is_winner,

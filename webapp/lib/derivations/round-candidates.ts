@@ -13,7 +13,7 @@
 // in fitness pointed at different candidates. With one derivation,
 // the two surfaces cannot disagree.
 
-import { candidateLabel } from "@/lib/candidate-label";
+import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
 import {
   liveL1Candidates,
   roundOf,
@@ -97,7 +97,7 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         is_origin: false,
         // Fallback mirrors LineageTree's prior local id rule so any
         // selection persisted across the d183dcdb cutover still resolves.
-        candidate_id: c.candidate_id || `r${r.round}_${i}`,
+        candidate_id: c.candidate_id || liveCandidateId(r.round, i),
         label: candidateLabel(r.round, i),
         accuracy: c.accuracy,
         composite: c.composite_fitness,
@@ -129,7 +129,7 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         round: liveRound,
         idx: i,
         is_origin: false,
-        candidate_id: `r${liveRound}_${i}`,
+        candidate_id: liveCandidateId(liveRound, i),
         label: candidateLabel(liveRound, i),
         accuracy,
         composite,

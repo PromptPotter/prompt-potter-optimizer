@@ -13,7 +13,7 @@
 // fork bootstrap, keeping the dataset file immutable.
 
 import {
-  liveL1InputCandidates,
+  liveInputCandidate,
   roundOf,
   type DashboardSnapshot,
   type RoundFileDoc,
@@ -69,9 +69,7 @@ export function liveCandidateSearchPoint(
   if (!candidateId) return null;
   const liveRound = roundOf(dash);
   if (liveRound == null) return null;
-  const entry = liveL1InputCandidates(dash).find(
-    (c) => `r${liveRound}_${c.idx}` === candidateId,
-  );
+  const entry = liveInputCandidate(dash, liveRound, candidateId);
   if (!entry) return null;
   return {
     starting_prompt: entry.prompt_fields ?? {},

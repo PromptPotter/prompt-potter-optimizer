@@ -34,7 +34,16 @@ export function useRoundSource(
   dash: DashboardSnapshot | null,
 ): UseRoundSourceState {
   const liveRound = roundOf(dash);
-  const isLive = round != null && liveRound != null && round === liveRound;
+  // A round is live only while it is the in-flight round AND has not yet
+  // closed into `dash.rounds[]`. The round counter advances at scoring/close,
+  // so `current_round.round` lingers on an already-closed round number between
+  // a round closing and the next round scoring (and after an interrupt during
+  // next-round prep). Equality alone would then misroute a closed round to the
+  // in-flight projection — which by then holds the *next* round's partial prep,
+  // not the closed round's data. The `closed` check is the half topology can't
+  // see (mirrors `round-axis.ts`).
+  const closed = (dash?.rounds ?? []).some((r) => r.round === round);
+  const isLive = round != null && round === liveRound && !closed;
   // Idle the round-file fetch on the live round — its file doesn't exist
   // until round close, and the data is already in `dash`.
   const file = useRoundFile(campaignId, cycleId, isLive ? null : round);

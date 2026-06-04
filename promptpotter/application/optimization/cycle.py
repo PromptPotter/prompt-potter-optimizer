@@ -13,7 +13,7 @@ from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import RoundOrigin, RoundResult
+from promptpotter.domain.results import RoundOrigin, RoundResult, is_round_winner
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint
 
@@ -43,7 +43,7 @@ def _build_scoreboard(
     )
     rows: list[dict[str, Any]] = []
     for i, c in enumerate(ranked, start=1):
-        is_winner = bool(c.get("changes_description")) and c["changes_description"] == winner_label
+        is_winner = is_round_winner(c.get("changes_description"), winner_label)
         rows.append(
             {
                 "rank": i,
