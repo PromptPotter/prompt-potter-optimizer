@@ -35,23 +35,33 @@ modification. Three observations the next connector should heed:
    downstream pipeline. New connectors design their `experiment_data`
    shape to fit the loader, not the other way around.
 
-## Inner-cycle execution (still pending)
+## Execution mode (declared) + inner-cycle run (Lane C3)
 
-`promptpotter_wire_adapter` shapes the inner-cycle payload but the actual
-"run an inner cycle" path is not yet wired — see
-`docs/specs/m12-multi-connector.md` § Track 1.5. Two design
-options for that follow-up:
+A connector declares **how its backend runs** via `Connector.execution`
+(`ConnectorExecution`): `remote_http` (default — posts to a live `/matches`)
+or `in_process` (runs an inner PromptPotter cycle, L4). `BackendClient.run_query`
+**dispatches on this declared mode, never on the connector name** — so a new
+backend's transport is a capability it declares, not a branch in the core loop.
+`promptpotter` declares `execution="in_process"`; an `in_process` connector
+loads + validates normally, then `run_query` raises a pointed
+`NotImplementedError` on the first match request (instead of a confusing
+transport error against a backend that isn't there).
+
+What remains is the **inner-cycle run itself** — consuming the wire payload,
+running the inner cycle, producing the three proxy metrics. That is Lane C3
+(`docs/specs/m12-multi-connector.md` § Track 1.5). Two design options for *how*
+`in_process` executes, to settle when C3 lands:
 
 - **Localhost endpoint.** Add `POST /inner/matches` to the FastAPI app
-  (`promptpotter.main:app`). Outer cycle's `BackendClient` posts there;
-  endpoint runs the inner cycle synchronously, returns a `/matches`-shaped
-  response. Cleanest boundary; requires uvicorn running alongside.
-- **In-process dispatch.** Branch `BackendClient.run_query` on the
-  connector name; for `promptpotter`, dispatch to `runner.run_optimization`
-  directly with isolated stores under `.runtime/inner/`. Faster, no extra
-  process; introduces a fork in `BackendClient`.
+  (`promptpotter.main:app`). Cleanest boundary; generalizes to a worker/job in
+  the hosted multi-tenant world (aligns with per-user quotas); requires uvicorn
+  running alongside.
+- **In-process dispatch.** `run_query`'s `in_process` arm dispatches to
+  `runner.run_optimization` with isolated stores under `.runtime/inner/`.
+  Faster, no extra process; keeps everything in one runtime.
 
-Decision deferred until after the architectural skeleton is reviewed.
+The `execution` enum is the extension point — a future hosted `service` /
+`worker` mode is a new value, dispatched on uniformly, with no core-loop edit.
 
 ## Conventions
 

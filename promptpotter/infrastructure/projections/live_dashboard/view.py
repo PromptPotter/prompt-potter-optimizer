@@ -636,7 +636,7 @@ class LiveDashboardView(DerivedView):
 
     # -- Scalar mutations -----------------------------------------------------
 
-    def _apply_phase(self, event: PhaseEvent, view: dict[str, Any] | None) -> None:
+    def _apply_phase(self, event: PhaseEvent, view: Any) -> None:
         s = self.state
         if event.round is not None:
             s.round = event.round
@@ -650,10 +650,10 @@ class LiveDashboardView(DerivedView):
         if phase == CampaignPhase.INIT and event.event == "enter":
             # Stamp the formula early — origin scoring runs before INIT:exit; What-If needs a ref.
             if view is not None:
-                formula = view.get("composite_fitness_formula")
+                formula = getattr(view, "composite_fitness_formula", None)
                 if formula is not None:
                     s.composite_fitness_formula = formula
-                short = view.get("composite_fitness_formula_short")
+                short = getattr(view, "composite_fitness_formula_short", None)
                 if short is not None:
                     self.short_formula_template = short
         elif phase == CampaignPhase.INIT and event.event == "exit":
@@ -662,14 +662,14 @@ class LiveDashboardView(DerivedView):
             # ``RunCallbacks.on_phase`` before the record is persisted/streamed
             # (the live ``Cycle``/``Session`` hold the BackendStore the JSON
             # serializer can't walk). Origin accuracy + sample count ride the
-            # view dict instead.
+            # typed view instead (read by attribute — see ``apply_phase``).
             if view is not None:
                 s.origin = OriginSummary(
-                    accuracy=float(view.get("origin_acc") or 0.0),
-                    samples=int(view.get("origin_samples") or 0),
+                    accuracy=float(getattr(view, "origin_acc", 0.0) or 0.0),
+                    samples=int(getattr(view, "origin_samples", 0) or 0),
                 )
-                s.composite_fitness_formula = view.get("composite_fitness_formula")
-                self.short_formula_template = view.get("composite_fitness_formula_short")
+                s.composite_fitness_formula = getattr(view, "composite_fitness_formula", None)
+                self.short_formula_template = getattr(view, "composite_fitness_formula_short", None)
             opt = config.optimization
             self.patience_max = opt.l1_patience
             s.patience = f"0/{self.patience_max}"

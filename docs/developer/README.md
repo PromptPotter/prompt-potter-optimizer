@@ -171,6 +171,7 @@ Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 
 | Page | Covers |
 |------|--------|
+| [Adding a surface](adding-a-surface.md) | Golden-path recipes per expansion point (record/injection/view-field/decision-kind/connector/node) + the CI guard that catches each half-wiring |
 | [L2 internals](l2-internals.md) | L2 firing, output, OSP mutations, layout edits |
 | [L1 layout + dispatch hub](l1-generate-surface.md) | `INJECTIONS` registry, `L1Layout`, `DispatchHub` |
 | [Dispatch hub visual + index](dispatch-hub.md) | Mermaid flow diagram + per-placeholder source map |

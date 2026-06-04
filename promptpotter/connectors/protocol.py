@@ -22,12 +22,22 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.connector import SessionProtocol, WireAdapter
 
 if TYPE_CHECKING:
     import httpx
+
+# How a connector's backend runs, so the loop dispatches on a *declared*
+# capability instead of branching on the connector name. ``remote_http`` posts
+# to a live ``/matches`` endpoint (TermNorm + any external backend);
+# ``in_process`` runs an inner PromptPotter cycle (L4 self-recursion) with no
+# HTTP transport. The inner-cycle execution path itself is Lane C3 (see
+# ``docs/specs/m12-multi-connector.md`` § Track 1.5) — until it lands,
+# ``run_query`` raises on an ``in_process`` connector. A future hosted/worker
+# execution mode extends this enum without touching the loop.
+ConnectorExecution = Literal["remote_http", "in_process"]
 
 # Bootstrap calls a connector's version_check once at session init with the
 # BackendClient's live httpx client + base_url; the return is the backend's
@@ -77,6 +87,14 @@ class Connector:
 
     extract_experiment: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], list[str]]]
     """Backend experiment data → ``(queries, index_terms)``."""
+
+    execution: ConnectorExecution = "remote_http"
+    """How this connector's backend runs — the dispatch capability the loop
+    reads instead of branching on ``name``. ``remote_http`` (default) posts to
+    a live ``/matches`` endpoint; ``in_process`` runs an inner cycle (L4). The
+    ``in_process`` execution path is Lane C3 and not yet wired — ``BackendClient.run_query``
+    raises a pointed ``NotImplementedError`` for it rather than failing as a
+    confusing transport error against a backend that isn't there."""
 
     expected_revision: str | None = None
     """Backend revision (git SHA, semver, …) this PromptPotter rev expects.
@@ -140,6 +158,7 @@ class Connector:
 __all__ = [
     "BackendUnreachableError",
     "Connector",
+    "ConnectorExecution",
     "PreflightFn",
     "SessionProtocol",
     "VersionCheck",

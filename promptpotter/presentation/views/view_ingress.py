@@ -1,10 +1,11 @@
-"""Live ``PhaseEvent → typed View → wire dict`` ingress.
+"""Live ``PhaseEvent → typed View`` ingress.
 
-Two entry points:
-- ``from_phase_event`` (RunCallbacks): build view + apply ctx side effects
-  (round-num tracking, origin rolling, prompt-flat memo) in one pass;
-  serialized via ``view_to_wire_dict`` onto the ledger.
-- ``view_from_record``: identity-style reconstruction read by ledger subscribers.
+``from_phase_event`` (called by ``RunCallbacks.on_phase``) builds a typed view
+and applies ctx side effects (round-num tracking, origin rolling, prompt-flat
+memo) in one pass. The typed view rides ``PhaseRecord.payload['view']`` on the
+in-memory ledger fan-out — subscribers consume it directly (``to_text`` /
+attribute reads); Pydantic serializes it to its wire dict on persist + SSE, so
+no hand-rolled reconstruction is needed.
 
 Score-entry helpers (``pick_round_winner``, ``score_entry_from_dict``) are also
 consumed by ``presentation/writers.py`` for disk-derived ``log.md`` rendering.
@@ -12,8 +13,6 @@ consumed by ``presentation/writers.py`` for disk-derived ``log.md`` rendering.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import asdict
 from typing import Any
 
 from promptpotter.application.optimization.dispatch.hub import (
@@ -51,8 +50,6 @@ __all__ = [
     "from_phase_event",
     "pick_round_winner",
     "score_entry_from_dict",
-    "view_from_record",
-    "view_to_wire_dict",
 ]
 
 
@@ -386,26 +383,7 @@ def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
     return builder(event.data, ctx) if builder is not None else None
 
 
-def view_to_wire_dict(view: AnyView | None) -> dict[str, Any] | None:
-    """Convert a typed view to its JSON-shaped wire dict (for the ledger)."""
-    return asdict(view) if view is not None else None
-
-
-# --- wire-dict → typed reconstruction (for ledger subscribers) ------------
-
-
-def _sp_diff_from_dict(d: dict[str, Any] | None) -> SpDiffView:
-    if not d:
-        return SpDiffView((), None, None, (), 1.0, 0, 0)
-    return SpDiffView(
-        columns=tuple((c[0], dict(c[1])) for c in d.get("columns") or []),
-        node_param_keys=d.get("node_param_keys"),
-        round_num=d.get("round_num"),
-        clone_labels=tuple(d.get("clone_labels") or []),
-        l1_yield=float(d.get("l1_yield", 1.0)),
-        l1_n_no_op=int(d.get("l1_n_no_op", 0)),
-        l1_n_duplicate=int(d.get("l1_n_duplicate", 0)),
-    )
+# --- score-entry helpers (shared with presentation/writers disk render) ---
 
 
 def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
@@ -446,79 +424,3 @@ def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
         matched_origin_accuracy=float(s.get("matched_origin_accuracy", 0.0)),
         matched_origin_composite=s.get("matched_origin_composite"),
     )
-
-
-def _init_enter_from_dict(v: dict[str, Any]) -> InitEnterView:
-    return InitEnterView(
-        warnings=tuple(
-            WarningEntry(title=w.get("title", ""), detail=w.get("detail", ""))
-            for w in v.get("warnings") or []
-        ),
-        max_rounds=v.get("max_rounds", 0),
-        patience=v.get("patience", 0),
-        n_variants=v.get("n_variants", 0),
-        sp_budget_ttest=v.get("sp_budget_ttest", 0),
-        dataset_size=v.get("dataset_size", 0),
-        mde=v.get("mde", 0.0),
-        model=v.get("model", ""),
-        composite_fitness_formula=v.get("composite_fitness_formula"),
-        composite_fitness_formula_short=v.get("composite_fitness_formula_short"),
-    )
-
-
-def _l1_generate_exit_from_dict(v: dict[str, Any]) -> CandidatesGeneratedView:
-    return CandidatesGeneratedView(
-        **{k: v[k] for k in v if k != "sp_diff" and k != "clone_labels"},
-        clone_labels=tuple(v.get("clone_labels") or []),
-        sp_diff=_sp_diff_from_dict(v.get("sp_diff")),
-    )
-
-
-def _l1_score_exit_from_dict(v: dict[str, Any]) -> RoundCompleteView:
-    return RoundCompleteView(
-        **{k: v[k] for k in v if k != "scores"},
-        scores=tuple(score_entry_from_dict(s) for s in v.get("scores") or []),
-    )
-
-
-# Pure ``XxxView(**v)`` cases — registry of phase:event → dataclass.
-_PURE_RECONSTRUCT: dict[str, type[AnyView]] = {
-    "init:exit": InitExitView,
-    "l1_generate:enter": RoundStartView,
-    "escalation:enter": EscalationEnterView,
-    "refine_strategy:enter": L2RefineEnterView,
-    "refine_strategy:exit": L2RefineExitView,
-    "probe_round:exit": ProbeExitView,
-    "modify_plan:enter": PlanEnterView,
-    "modify_plan:exit": PlanExitView,
-}
-
-# Cases that need wire-dict adaptation (tuples, nested views, etc.).
-_CUSTOM_RECONSTRUCT: dict[str, Callable[[dict[str, Any]], AnyView]] = {
-    "init:enter": _init_enter_from_dict,
-    "l1_generate:exit": _l1_generate_exit_from_dict,
-    "l1_score:exit": _l1_score_exit_from_dict,
-    "escalation:exit": lambda v: EscalationExitView(
-        classifications=tuple((c[0], c[1]) for c in v.get("classifications") or []),
-    ),
-    "probe_round:enter": lambda v: ProbeEnterView(
-        n_probe_samples=v.get("n_probe_samples", 0),
-        probe_queries=tuple(v.get("probe_queries") or []),
-    ),
-}
-
-
-def view_from_record(record: dict[str, Any]) -> AnyView | None:
-    """Reconstruct a typed view from a wire-format ledger payload.
-
-    The wire dict is ``view_to_wire_dict(typed_view)``; this is its inverse.
-    """
-    v = record.get("view")
-    if v is None:
-        return None
-    key = f"{record.get('phase', '')}:{record.get('event', '')}"
-    if cls := _PURE_RECONSTRUCT.get(key):
-        return cls(**v)
-    if fn := _CUSTOM_RECONSTRUCT.get(key):
-        return fn(v)
-    return None

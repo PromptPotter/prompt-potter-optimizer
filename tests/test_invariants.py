@@ -86,10 +86,7 @@ def test_emitter_produces_all_artifacts(
     from promptpotter.domain.results import CycleResult, RoundResult
     from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
     from promptpotter.infrastructure.projections import LiveDashboardView
-    from promptpotter.presentation.views.view_ingress import (
-        from_phase_event,
-        view_to_wire_dict,
-    )
+    from promptpotter.presentation.views.view_ingress import from_phase_event
     from promptpotter.presentation.views.view_models import ViewContext
 
     session_dir, campaign_dir, cycle_dir = session_campaign_cycle_dirs
@@ -112,13 +109,13 @@ def test_emitter_produces_all_artifacts(
         sp_budget_ttest=20,
     )
 
-    # ``RunCallbacks`` would call ``from_phase_event`` once per event on a
-    # shared ctx, serialise via ``view_to_wire_dict``, and feed PhaseRecord records
-    # to the ledger; subscribers route them via ``on_record``. Mirror that here.
+    # ``RunCallbacks`` calls ``from_phase_event`` once per event on a shared
+    # ctx and feeds typed PhaseRecord records to the ledger; subscribers route
+    # them via ``on_record``. Mirror that here.
     phase_ctx = ViewContext()
 
     def fire(event: PhaseEvent) -> None:
-        view = view_to_wire_dict(from_phase_event(event, phase_ctx))
+        view = from_phase_event(event, phase_ctx)
         emitter.on_record(
             PhaseRecord(
                 phase=str(event.phase),
@@ -842,6 +839,84 @@ def test_no_hand_rolled_io_seam_bypass() -> None:
         "infrastructure/store/base.py (write_json/read_json/write_text/append_jsonl) "
         "or shared/clock.py (utcnow_iso):\n  " + "\n  ".join(offenders)
     )
+
+
+# Control-plane records ride the ledger but are applied by CommandDispatcher /
+# RunnerCommandSubscriber, never projected by DerivedView — so they have no
+# on_record dispatch arm by design.
+_CONTROL_PLANE_RECORDS = {"CommandRecord", "CommandAckRecord"}
+
+
+def test_every_cycle_record_is_dispatched_or_control_plane() -> None:
+    """Every ``CycleRecord`` union member is routed by ``DerivedView.on_record``
+    (or is an allowlisted control-plane record).
+
+    The emit_* expansion template's most error-prone step: add a ``*Record`` to
+    the union, forget the ``isinstance`` arm, and it silently drops from EVERY
+    projection (dashboard, audit, SSE). This locks that — a new record must wire
+    a dispatch arm + ``_handle_*``, or be declared control-plane.
+    """
+    import typing
+
+    from promptpotter.domain.run_records import CycleRecord
+
+    union = typing.get_args(CycleRecord)[0]  # strip the Annotated[..., Field] wrapper
+    members = {m.__name__ for m in typing.get_args(union)}
+
+    on_record = next(
+        n
+        for n in ast.walk(
+            ast.parse((ROOT / "infrastructure" / "projections" / "base.py").read_text())
+        )
+        if isinstance(n, ast.FunctionDef) and n.name == "on_record"
+    )
+    dispatched: set[str] = set()
+    for node in ast.walk(on_record):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "isinstance"
+            and len(node.args) == 2
+        ):
+            targets = node.args[1].elts if isinstance(node.args[1], ast.Tuple) else [node.args[1]]
+            dispatched |= {t.id for t in targets if isinstance(t, ast.Name)}
+
+    unrouted = members - dispatched - _CONTROL_PLANE_RECORDS
+    assert not unrouted, (
+        "CycleRecord members with no DerivedView.on_record arm (silent-drop from "
+        "every projection) — add an isinstance branch + _handle_*, or add to "
+        f"_CONTROL_PLANE_RECORDS if applied by the dispatcher: {sorted(unrouted)}"
+    )
+    stale = _CONTROL_PLANE_RECORDS - members
+    assert not stale, f"_CONTROL_PLANE_RECORDS names non-union records: {sorted(stale)}"
+
+
+def test_every_connector_implements_protocol() -> None:
+    """Every ``CONNECTORS`` row implements the full ``Connector`` protocol.
+
+    Adding a connector is one file + one ``CONNECTORS`` entry; this locks that
+    the entry is whole — registry key matches ``name``, the three required hooks
+    (``wire_adapter`` / ``extract_experiment`` / ``session_factory``) are callable,
+    the session factory builds a ``SessionProtocol``, and ``execution`` is a
+    declared mode ``BackendClient.run_query`` can dispatch on. A half-wired
+    connector would otherwise fail deep in ``BackendClient`` at run time, not here.
+    """
+    import typing
+
+    from promptpotter.connectors import CONNECTORS
+    from promptpotter.connectors.protocol import Connector, ConnectorExecution
+
+    valid_exec = set(typing.get_args(ConnectorExecution))
+    for key, c in CONNECTORS.items():
+        assert isinstance(c, Connector), f"{key}: not a Connector"
+        assert c.name == key, f"{key}: registry key != connector.name ({c.name!r})"
+        assert callable(c.wire_adapter), f"{key}: wire_adapter not callable"
+        assert callable(c.extract_experiment), f"{key}: extract_experiment not callable"
+        assert callable(c.session_factory), f"{key}: session_factory not callable"
+        session = c.session_factory()
+        assert callable(getattr(session, "set_terms", None)), f"{key}: session has no set_terms"
+        assert callable(getattr(session, "recover", None)), f"{key}: session has no recover"
+        assert c.execution in valid_exec, f"{key}: execution {c.execution!r} not in {valid_exec}"
 
 
 from promptpotter.application.optimization.resume_and_fork import (  # noqa: E402

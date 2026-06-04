@@ -20,6 +20,7 @@ from promptpotter.infrastructure.llm import (
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
+    from promptpotter.connectors.protocol import ConnectorExecution
     from promptpotter.domain.connector import SessionProtocol, WireAdapter
     from promptpotter.infrastructure.store import Stores
 
@@ -69,6 +70,7 @@ class BackendClient:
         *,
         wire_adapter: WireAdapter,
         session: SessionProtocol,
+        execution: ConnectorExecution = "remote_http",
         timeout: float = 30.0,
         auth_token: str | None = None,
     ):
@@ -76,6 +78,10 @@ class BackendClient:
         self.timeout = timeout
         self._wire_adapter: WireAdapter = wire_adapter
         self._guard: SessionProtocol = session
+        # The connector's declared execution mode. ``run_query`` dispatches on
+        # this — not the connector name — so a new backend's transport is a
+        # declared capability, not a core-loop branch.
+        self._execution: ConnectorExecution = execution
         self._auth_token = auth_token or ""
         self._http: httpx.AsyncClient | None = None
 
@@ -179,6 +185,16 @@ class BackendClient:
         """POST /matches. 400+session-in-detail → one-shot session recover + retry. *on_warning*
         fires on each retry (transport/429/5xx) for ledger telemetry — retry behaviour itself unchanged.
         """
+        if self._execution != "remote_http":
+            # Declared-mode dispatch: a non-HTTP connector (today only
+            # ``promptpotter``/L4, ``execution="in_process"``) has no
+            # ``/matches`` endpoint. Fail with a pointed message instead of a
+            # confusing transport error. Wiring the inner-cycle run is Lane C3.
+            raise NotImplementedError(
+                f"connector execution mode {self._execution!r} has no inner-cycle "
+                "dispatch yet — L4 self-recursion is Lane C3 "
+                "(docs/specs/m12-multi-connector.md § Track 1.5)"
+            )
         payload = self._wire_adapter(query, pipeline_params)
 
         client = self._get_http()

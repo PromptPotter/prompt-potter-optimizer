@@ -14,3 +14,14 @@
 .auth-link:hover{color:#60a5fa}
 .auth-legal-row{display:flex;justify-content:center;align-items:center;gap:8px;font-size:12px;color:var(--color-text-tertiary)}
 
+/* Shared auth core — the sign-in controls + copy reused by the /login page and
+   the WelcomeLockoutModal overlay. Owns its own internal spacing so it drops
+   into either parent (left-aligned) unchanged. */
+.auth-core{display:flex;flex-direction:column;gap:14px;width:100%;text-align:left}
+.auth-note{margin:0;color:var(--color-text-secondary);line-height:1.55}
+.auth-email-label{font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary);margin-bottom:-10px}
+.auth-continue{text-align:center}
+.auth-fineprint{margin:-4px 0 0;font-size:11px;color:var(--color-text-tertiary);line-height:1.5}
+/* Value headline — popup-only (the showcase carries the pitch on /login). */
+.auth-headline{margin:0;font-size:20px;line-height:1.3;font-weight:500;color:var(--color-text-primary)}
+

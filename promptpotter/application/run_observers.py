@@ -33,10 +33,7 @@ from promptpotter.infrastructure.projections import (
     deregister_event_stream,
     register_event_stream,
 )
-from promptpotter.presentation.views.view_ingress import (
-    from_phase_event,
-    view_to_wire_dict,
-)
+from promptpotter.presentation.views.view_ingress import from_phase_event
 from promptpotter.presentation.views.view_models import ViewContext
 from promptpotter.shared.errors import graceful
 
@@ -66,8 +63,8 @@ class RunCallbacks:
     """Single ingress: callbacks → typed CycleRecord → ``CycleEventLog.append``.
 
     Ledger required at construction (no deferred binding). PhaseRecord-view ctx
-    is owned here (``from_phase_event`` is stateful) and serialised onto
-    ``PhaseRecord.payload['view']``.
+    is owned here (``from_phase_event`` is stateful); the typed view it returns
+    rides ``PhaseRecord.payload['view']`` and Pydantic serialises it on persist.
 
     ``_round_token`` is the reset handle for the ``_CURRENT_ROUND`` ContextVar
     that ``emit_token_usage`` reads — set on every ``set_round`` call so the
@@ -85,15 +82,16 @@ class RunCallbacks:
             self.ledger.append(record)
 
     def on_phase(self, event: Any) -> None:
-        view = view_to_wire_dict(from_phase_event(event, self._phase_ctx))
+        view = from_phase_event(event, self._phase_ctx)
         # View derivation has already consumed any live runtime references
         # carried in ``event.data`` (the most opaque one is ``env=session``
         # which holds the BackendStore + LangfuseLogger handles those classes
-        # can't serialize). Strip them before the dict lands on the ledger so
-        # ``EventStreamView.on_record`` can ``model_dump(mode="json")``
-        # without a fallback. Replay reads ``payload["view"]`` (built above);
-        # ``payload["data"]`` is only consumed live, in-memory, where the
-        # caller still holds the originals.
+        # can't serialize). Strip them before the record lands on the ledger so
+        # ``EventStreamView.on_record`` can ``model_dump(mode="json")`` and the
+        # on-disk dump stay clean. The typed ``view`` rides the in-memory
+        # fan-out (subscribers read it directly); Pydantic serializes it to its
+        # wire dict on persist + SSE. ``payload["data"]`` is only consumed live,
+        # in-memory, where the caller still holds the originals.
         safe_data = {k: v for k, v in event.data.items() if k not in _DATA_KEYS_RUNTIME_ONLY}
         self._emit(
             PhaseRecord(

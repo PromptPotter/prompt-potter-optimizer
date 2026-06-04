@@ -126,6 +126,7 @@ async def get_pipeline(backend_id: str, store: StoreDep) -> PipelineViewResponse
         backend.base_url,
         wire_adapter=connector.wire_adapter,
         session=connector.session_factory(),
+        execution=connector.execution,
         auth_token=settings.TERMNORM_TOKEN or None,
     )
 
@@ -164,6 +165,7 @@ async def get_backend_health(backend_id: str, store: StoreDep) -> BackendHealthR
         backend.base_url,
         wire_adapter=connector.wire_adapter,
         session=connector.session_factory(),
+        execution=connector.execution,
         auth_token=settings.TERMNORM_TOKEN or None,
     )
     try:

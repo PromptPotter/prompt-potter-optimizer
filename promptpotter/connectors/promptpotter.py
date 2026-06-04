@@ -13,14 +13,15 @@ isolation under ``.runtime/inner/``, cost-realism warning.
 
 **This module is the architectural skeleton.** The five hooks are wired to
 the protocol; ``promptpotter_wire_adapter`` shapes the inner-cycle payload;
-``PromptPotterSession`` is the in-process noop session. The piece that
-actually runs an inner cycle (consuming the wire payload and producing
-result dicts with the three proxy metrics) lands in a follow-up — it
-requires either a localhost ``/inner/matches`` endpoint on the FastAPI app
-or an in-process dispatch path off ``BackendClient``. Until that lands, an
-outer cycle pointed at this connector will load the connector and validate
-the dataset config but raise ``NotImplementedError`` on the first inner
-match request.
+``PromptPotterSession`` is the in-process noop session. The connector declares
+``execution="in_process"`` — the capability the loop dispatches on. The piece
+that actually runs an inner cycle (consuming the wire payload and producing
+result dicts with the three proxy metrics) is Lane C3
+(``docs/specs/m12-multi-connector.md`` § Track 1.5). Until it lands, an outer
+cycle pointed at this connector loads + validates fine, then ``BackendClient.run_query``
+raises a pointed ``NotImplementedError`` on the first inner match request —
+keyed on the declared ``in_process`` mode, not a confusing transport error
+against a backend that isn't there.
 
 Exports the ``CONNECTOR`` binding consumed by
 :data:`promptpotter.connectors.CONNECTORS`.
@@ -157,6 +158,7 @@ def _extract_experiment(
 
 CONNECTOR = Connector(
     name="promptpotter",
+    execution="in_process",
     wire_adapter=promptpotter_wire_adapter,
     session_factory=PromptPotterSession,
     extract_experiment=_extract_experiment,

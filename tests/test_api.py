@@ -676,8 +676,9 @@ from promptpotter.connectors.termnorm import TermNormSession, termnorm_wire_adap
 from promptpotter.infrastructure.backend import BackendClient  # noqa: E402
 
 
-def test_termnorm_wire_adapter_default_shape() -> None:
-    """TermNorm adapter projects pipeline_params to {query, steps, node_config}."""
+def test_termnorm_wire_adapter_shapes_node_config() -> None:
+    """TermNorm adapter projects pipeline_params to {query, steps, node_config},
+    dropping non-dict per-node values (backend contract is a per-node config dict)."""
     payload = termnorm_wire_adapter(
         "what is X?",
         {
@@ -692,15 +693,9 @@ def test_termnorm_wire_adapter_default_shape() -> None:
         "entity_profiling": {"prompt": "rank by relevance"},
         "fuzzy_matching": {"max_results": 10},
     }
-
-
-def test_termnorm_wire_adapter_drops_non_dict_pipeline_params() -> None:
-    """Non-dict per-node values are dropped — backend contract is per-node config dict."""
-    payload = termnorm_wire_adapter(
-        "q",
-        {"steps": ["x"], "x": {"k": "v"}, "garbage": "string-not-dict"},
-    )
-    assert payload["node_config"] == {"x": {"k": "v"}}
+    # Non-dict per-node values are dropped — backend contract is per-node config dict.
+    dropped = termnorm_wire_adapter("q", {"steps": ["x"], "x": {"k": "v"}, "garbage": "str"})
+    assert dropped["node_config"] == {"x": {"k": "v"}}
 
 
 def test_pipeline_schema_to_params_is_sparse() -> None:

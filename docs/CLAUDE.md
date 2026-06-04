@@ -35,6 +35,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | What is the load-bearing surface? | [`architecture.md`](architecture.md) §0.5 |
 | What does this domain word mean? | [`glossary.md`](glossary.md) |
 | How does information flow through L1 / L2 / L3? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) |
+| How do I add a record / injection / view-field / connector without half-wiring it? | [`developer/adding-a-surface.md`](developer/adding-a-surface.md) (recipe + the CI guard per surface) |
 | How does a layer heal a failure? | [`developer/self-healing-internals.md`](developer/self-healing-internals.md) |
 | How is L1's evidence surface built? | [`developer/l1-generate-surface.md`](developer/l1-generate-surface.md) |
 | **What is L4 / how does PromptPotter optimize itself?** | [`concepts/optimizer-of-the-optimizer.md`](concepts/optimizer-of-the-optimizer.md) + [`specs/m12-multi-connector.md`](specs/m12-multi-connector.md) |

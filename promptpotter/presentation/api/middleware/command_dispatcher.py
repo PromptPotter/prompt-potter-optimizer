@@ -525,6 +525,7 @@ class CommandDispatcher:
             backend.base_url,
             wire_adapter=connector.wire_adapter,
             session=connector.session_factory(),
+            execution=connector.execution,
             auth_token=settings.TERMNORM_TOKEN or None,
         )
         try:

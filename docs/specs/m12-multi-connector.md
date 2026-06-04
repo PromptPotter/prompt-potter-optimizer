@@ -24,6 +24,19 @@ Generalize the connector boundary (TermNorm is currently the only registered con
 - **Multi-tenant `TenantId` / `UserId` newtypes + `IdentityContext`** — see [`ADR-0002 identity-foundation`](../adr/0002-identity-foundation.md) (contracts) + [`ADR-0003 spend-and-tenancy`](../adr/0003-spend-and-tenancy.md) (Stage-0 reification) + [`ADR-0001 m12-control-plane`](../adr/0001-m12-control-plane.md) (Stage-1 OIDC).
 - **Prompt-injection Phase 2.** First-pass `fence_untrusted` already wraps `diagnostics` / `validation_failures` / `runtime_failures` in the dispatch bundle. Phase 2 covers: separate `TrustedText` / `UntrustedText` renderer types so the type system catches accidental concatenation at the call site; L1 + L1-critique output validators that flag suspected prompt-injection echoes in generated candidates; a cross-call repeat-detection circuit breaker that halts a cycle when the optimizer's own outputs start echoing untrusted dataset content verbatim.
 
+## Track 1.5 — inner-cycle execution (L4 self-recursion)
+
+The connector boundary lets PromptPotter be its own backend (`connectors/promptpotter.py`); Track 1.5 is the path that actually *runs* an inner cycle when a connector is in-process.
+
+**Declared now (shipped).** A connector declares how its backend runs via `Connector.execution` (`ConnectorExecution`): `remote_http` (default — posts to a live `/matches`) or `in_process` (runs an inner cycle, L4). `BackendClient.run_query` **dispatches on this declared mode, never on the connector name** — transport is a capability a backend declares, not a branch in the core loop. `promptpotter` declares `execution="in_process"`; such a connector loads + validates normally (and is covered by the `test_every_connector_implements_protocol` completeness guard), then `run_query` raises a pointed `NotImplementedError` on the first match request rather than a confusing transport error against a backend that isn't there. A future hosted `service` / `worker` mode is a new enum value, dispatched on uniformly — no core-loop edit.
+
+**Deferred (Lane C3).** The inner-cycle **run** itself — consuming the wire payload, running the inner cycle, producing the three proxy metrics (`proxy_lift_corr` re-validation on the meta-task). Two design options to settle when C3 lands:
+
+- **Localhost endpoint.** Add `POST /inner/matches` to `promptpotter.main:app`. Cleanest boundary; generalizes to a worker/job in the hosted multi-tenant world (aligns with per-user quotas); requires uvicorn running alongside.
+- **In-process dispatch.** `run_query`'s `in_process` arm dispatches to `runner.run_optimization` with isolated stores under `.runtime/inner/`. Faster, no extra process; keeps everything in one runtime.
+
+Canonical layer doc: [`../../promptpotter/connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § "Execution mode (declared) + inner-cycle run (Lane C3)". Concept + cost realism: [`../concepts/optimizer-of-the-optimizer.md`](../concepts/optimizer-of-the-optimizer.md).
+
 ## Code surface
 
 | Area | Files |

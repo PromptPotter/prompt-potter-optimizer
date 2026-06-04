@@ -50,6 +50,7 @@ from promptpotter.presentation.views.live.phase import (
 )
 from promptpotter.presentation.views.live.sample import fmt_query_result
 from promptpotter.presentation.views.render import to_text
+from promptpotter.presentation.views.view_models import AnyView, InitExitView
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:
@@ -224,34 +225,23 @@ class LiveDisplay(DerivedView):
 
     # --- Public callback API (pre-ledger paths call these directly) ---
 
-    def on_phase(self, event: PhaseEvent, view: dict[str, Any] | None = None) -> None:
+    def on_phase(self, event: PhaseEvent, view: AnyView | None = None) -> None:
         if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
             self._write("\n" + _node_top("SCORE"))
-        if view is not None:
-            from promptpotter.presentation.views.view_ingress import view_from_record
-
-            record = {
-                "phase": event.phase,
-                "event": event.event,
-                "round": event.round,
-                "view": view,
-            }
-            typed = view_from_record(record)
-            if typed is not None and (rendered := to_text(typed)):
-                self._write(rendered)
+        if view is not None and (rendered := to_text(view)):
+            self._write(rendered)
         apply_phase(self._core, event, view)
         if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             self._round_best_acc = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
         # Patch the origin row's composite once INIT:exit surfaces it.
-        if event.phase == CampaignPhase.INIT and event.event == "exit" and view is not None:
-            origin_comp = view.get("origin_composite_fitness")
-            if origin_comp is not None:
-                for rd in self.campaign_rounds:
-                    if rd.get("label") == "origin" and rd.get("composite_fitness") is None:
-                        rd["composite_fitness"] = origin_comp
-                        break
+        if isinstance(view, InitExitView):
+            origin_comp = view.origin_composite_fitness
+            for rd in self.campaign_rounds:
+                if rd.get("label") == "origin" and rd.get("composite_fitness") is None:
+                    rd["composite_fitness"] = origin_comp
+                    break
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
             self.sample_counter = 0
         # Resume-rewind rebuild needs the live ``env``/``state`` objects, which
