@@ -184,7 +184,11 @@ async def score_population(
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
         callbacks.on_candidate_started(
-            idx, n, osp_c.lineage.changes_description or "", pipeline_params_override
+            idx,
+            n,
+            osp_c.lineage.changes_description or "",
+            pipeline_params_override,
+            osp_c.prompt_field_dict(),
         )
         # Bind PoBBCheck so this candidate's per-sample snapshot rides the telemetry stream tagged.
         elim_check.set_current(

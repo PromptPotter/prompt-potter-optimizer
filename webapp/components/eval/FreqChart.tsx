@@ -11,7 +11,7 @@ import {
   type DashboardSnapshot,
 } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
-import { useRoundFile } from "@/lib/hooks/useRoundFile";
+import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { CardFrame } from "@/components/ui/Card";
 import { useSelection } from "@/lib/SelectionContext";
 import type { RawResultRow } from "@/lib/types/round";
@@ -64,22 +64,19 @@ export function FreqChart({ dash }: Props) {
   const { campaignId, cycleId } = useWorkspace();
   const { round: selectedRound } = useSelection();
 
-  // Source-of-truth split (AGENTS.md no-stitch rule):
-  //   - live mode (selectedRound == null or matches the in-flight round)
-  //     reads only `dashboard.json`'s in-flight sample lines.
-  //   - historical mode (any other round) reads only `round_NNNN.json`'s
-  //     `results[]` via `useRoundFile`.
-  // No fallback chain between the two — a click on a historical round
-  // tab shows that round's bucket, even if it temporarily looks empty
-  // while the file loads. The chart never silently merges sources.
+  // Source-of-truth split (no-stitch rule): live mode reads only
+  // `dashboard.json`'s in-flight sample lines; historical mode reads only
+  // `round_NNNN.json`'s `results[]`. `useRoundSource` owns the guard —
+  // it idles the fetch on the live round, so there's no fallback chain.
+  // `null` selection follows the in-flight round.
   const liveRound = roundOf(dash);
-  const isLiveView =
-    selectedRound == null ||
-    (liveRound != null && selectedRound === liveRound);
-  // Only fetch a round file when we're actually in historical mode —
-  // null tells `useRoundFile` to stay idle.
-  const historicalRoundArg = isLiveView ? null : selectedRound;
-  const { doc: roundDoc } = useRoundFile(campaignId, cycleId, historicalRoundArg);
+  const effectiveRound = selectedRound ?? liveRound;
+  const { isLive: isLiveView, doc: roundDoc } = useRoundSource(
+    campaignId,
+    cycleId,
+    effectiveRound,
+    dash,
+  );
 
   const results: ResultRow[] = useMemo(() => {
     if (isLiveView) return liveResultsFrom(dash);
@@ -105,7 +102,7 @@ export function FreqChart({ dash }: Props) {
       title={<span title={TERMS.stub_score_freq}>Score Frequency</span>}
       actions={
         <span className="badge">
-          {isLiveView ? "live" : `R${selectedRound}`}
+          {isLiveView || selectedRound == null ? "live" : `R${selectedRound}`}
         </span>
       }
     >

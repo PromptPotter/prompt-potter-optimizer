@@ -7,7 +7,7 @@ import {
 } from "@/lib/poll";
 import { CardFrame } from "@/components/ui/Card";
 import { useSelection } from "@/lib/SelectionContext";
-import { useRoundFile } from "@/lib/hooks/useRoundFile";
+import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { roundCandidatesByRound } from "@/lib/derivations/round-candidates";
 import {
   historicalSamplesFor,
@@ -42,10 +42,15 @@ export function RoundSamplesView({ dash, status, campaignId, cycleId }: Props) {
   const liveRound = roundOf(dash);
   // null = follow live: fall through to the in-flight round when one
   // exists. A completed-round pick stays explicit until the operator
-  // clicks the live pill or another tab.
+  // clicks the live pill or another tab. `useRoundSource` owns the
+  // live/historical guard + the historical round-file fetch.
   const effectiveRound = selectedRound ?? liveRound;
-  const isLiveView =
-    effectiveRound != null && liveRound != null && effectiveRound === liveRound;
+  const {
+    isLive: isLiveView,
+    doc: roundDoc,
+    loading: roundLoading,
+    error: roundError,
+  } = useRoundSource(campaignId, cycleId, effectiveRound, dash);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [candFilter, setCandFilter] = useState<string>("all");
@@ -59,13 +64,6 @@ export function RoundSamplesView({ dash, status, campaignId, cycleId }: Props) {
     if (effectiveRound == null) return [];
     return (byRound.get(effectiveRound) ?? []).filter((c) => !c.is_origin);
   }, [byRound, effectiveRound]);
-
-  // Historical round file — fetched only when not in live view. The
-  // hook returns EMPTY until the (campaign, cycle, round) key matches,
-  // so a round switch can never surface the prior round's payload.
-  const historicalRoundArg = isLiveView ? null : effectiveRound;
-  const { doc: roundDoc, loading: roundLoading, error: roundError } =
-    useRoundFile(campaignId, cycleId, historicalRoundArg);
 
   // Build per-candidate samples lists. Live mode pulls directly from
   // the in-flight projection (compact string lines parsed once via

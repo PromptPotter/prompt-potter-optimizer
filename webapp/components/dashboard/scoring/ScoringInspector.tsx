@@ -1,11 +1,11 @@
 "use client";
 import { useMemo, useState } from "react";
-import { useRoundFile } from "@/lib/hooks/useRoundFile";
+import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { fmtPct1 } from "@/lib/format";
 import type { SelectedCandidate } from "@/lib/types/selection";
 import type { ScoreboardEntry } from "@/lib/types/round";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { Dialog } from "@/components/ui/Dialog";
 import { SteerForkPanel } from "@/components/dashboard/control/SteerForkPanel";
 
@@ -24,22 +24,35 @@ export function ScoringInspector({
   dash,
   onClose,
 }: Props) {
-  // Lazy-fetch the selected candidate's round file. The summary surface
-  // (dash.rounds[]) carries accuracy + is_winner per candidate but not the
-  // composite/hits/per_sample[] block — those are deep-audit fields, so the
-  // inspector reaches for the round file only when the operator opens it.
-  const { doc } = useRoundFile(campaignId, cycleId, selected?.round ?? null);
+  // Composite + hits are deep-audit fields. For a *completed* round they live
+  // in `round_NNNN.json::scoreboard`; for the *in-flight* round they live in
+  // `dashboard.json`'s live l1_score stats. `useRoundSource` picks one source
+  // per the no-stitch rule and never fetches the live round's not-yet-written
+  // file (the old 404 + degraded-panel bug).
+  const { isLive, doc } = useRoundSource(
+    campaignId,
+    cycleId,
+    selected?.round ?? null,
+    dash,
+  );
   const cv = useConnector();
   const [steerOpen, setSteerOpen] = useState(false);
 
-  const entry = useMemo<ScoreboardEntry | null>(() => {
-    if (!selected || !doc) return null;
-    const scoreboard = doc.scoreboard as ScoreboardEntry[] | undefined;
-    return scoreboard?.find((c) => (c.candidate_id ?? "") === selected.candidate_id) ?? null;
-  }, [doc, selected]);
+  const data = useMemo<{ composite?: number; hits?: number; total?: number } | null>(() => {
+    if (!selected) return null;
+    if (isLive) {
+      const c = liveL1Candidates(dash).find(
+        (lc) => `r${selected.round}_${lc.idx}` === selected.candidate_id,
+      );
+      if (!c?.stats) return null;
+      return { composite: c.stats.composite_fitness, hits: c.stats.hits, total: c.stats.total };
+    }
+    const scoreboard = doc?.scoreboard as ScoreboardEntry[] | undefined;
+    const e = scoreboard?.find((c) => (c.candidate_id ?? "") === selected.candidate_id);
+    return e ? { composite: e.composite, hits: e.hits, total: e.total } : null;
+  }, [selected, isLive, dash, doc]);
 
   if (!selected) return null;
-  const data = entry;
 
   return (
     <section className="scoring-inspector" aria-label="Scoring inspector">
@@ -82,8 +95,9 @@ export function ScoringInspector({
         </div>
         {data == null && (
           <div className="inspector-note">
-            Round file not yet on disk for R{selected.round} — showing only the
-            in-tree summary.
+            {isLive
+              ? `Scoring in progress for R${selected.round} — composite + hits appear as this candidate's samples land.`
+              : `Round file not yet on disk for R${selected.round} — showing only the in-tree summary.`}
           </div>
         )}
       </div>

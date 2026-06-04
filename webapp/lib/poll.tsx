@@ -149,11 +149,31 @@ export interface LiveCandidate {
     composite_fitness?: number;
     composite_fitness_formula?: string | null;
     evaluators?: Record<string, number>;
+    hits?: number;
+    total?: number;
   };
+}
+
+// `current_round.nodes.l1_score.input.candidates[]` shape — the *input* half
+// of the live l1_score block (mirrors round_NNNN.json::candidate_scores for
+// the seed-able fields). Carries the candidate's evolved searchpoint:
+// `prompt_fields` (OptSearchPoint.prompt_field_dict() shape) + `pp_override`
+// (its pipeline_params delta). Read by `liveCandidateSearchPoint` so the steer
+// panel can seed from a still-in-flight candidate without the round file.
+export interface LiveInputCandidate {
+  idx?: number;
+  label?: string;
+  changes_description?: string;
+  pp_override?: Record<string, unknown> | null;
+  prompt_fields?: Record<string, unknown>;
 }
 
 export interface L1ScoreOutput {
   candidates?: LiveCandidate[];
+}
+
+export interface L1ScoreInput {
+  candidates?: LiveInputCandidate[];
 }
 
 // Shared frozen empty result for the no-candidate path so every consumer
@@ -168,6 +188,21 @@ export function liveL1Candidates(dash: DashboardSnapshot | null): LiveCandidate[
   if (!nodes || typeof nodes !== "object") return NO_CANDIDATES;
   const l1 = (nodes as Record<string, { output?: L1ScoreOutput }>).l1_score;
   return l1?.output?.candidates ?? NO_CANDIDATES;
+}
+
+const NO_INPUT_CANDIDATES: LiveInputCandidate[] = Object.freeze(
+  [] as LiveInputCandidate[],
+) as LiveInputCandidate[];
+
+// The seed-able input half of the live l1_score block — the in-flight peer of
+// `round_NNNN.json::candidate_scores` for steer-fork seeding.
+export function liveL1InputCandidates(
+  dash: DashboardSnapshot | null,
+): LiveInputCandidate[] {
+  const nodes = dash?.current_round?.nodes;
+  if (!nodes || typeof nodes !== "object") return NO_INPUT_CANDIDATES;
+  const l1 = (nodes as Record<string, { input?: L1ScoreInput }>).l1_score;
+  return l1?.input?.candidates ?? NO_INPUT_CANDIDATES;
 }
 
 // Shape-agnostic round-file document. Deep audit consumers (FreqChart,

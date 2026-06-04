@@ -6,7 +6,7 @@ import type { DashboardSnapshot } from "@/lib/poll";
 import { candidateLabel } from "@/lib/candidate-label";
 import { rootCycleId, sessionIndexOf, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
-import { bumpRevalidation } from "@/lib/revalidate";
+import { bumpRevalidation, useRevalidation } from "@/lib/revalidate";
 import { CardFrame } from "@/components/ui/Card";
 import { useFetch } from "@/lib/hooks/useFetch";
 import { useExpandedDashboards } from "@/lib/hooks/useExpandedDashboards";
@@ -85,9 +85,17 @@ export const FamilyTree = memo(function FamilyTree({
   onSelectCycle,
 }: Props) {
   const [tick, setTick] = useState(0);
+  // Refetch the campaign-wide tree the instant any mutation resolves (fork,
+  // cleanup, lifecycle) — the same revalidation seam the poll loops ride. A
+  // fresh fork mints its index.json before `postForkCycle` returns + bumps
+  // revalidation, so the new lane lands here without waiting for a window
+  // refocus. `cycleId` is deliberately NOT a dep: /lineage is campaign-scoped,
+  // so a same-campaign cycle switch returns identical data — keying on it would
+  // only blank-flash the card for no gain.
+  const reval = useRevalidation();
   const { data } = useFetch(
     campaignId ? (s) => fetchCampaignLineage(campaignId, s) : null,
-    [campaignId, tick],
+    [campaignId, tick, reval],
   );
 
   // Independent per-cycle expand state — one unified tree where every cycle

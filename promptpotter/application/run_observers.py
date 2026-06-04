@@ -149,12 +149,21 @@ class RunCallbacks:
         total: int,
         changes_description: str,
         pp_override: dict[str, Any] | None,
+        prompt_fields: dict[str, Any],
     ) -> None:
+        # `prompt_fields` + `pp_override` are the candidate's evolved searchpoint
+        # (the seed-able half), surfaced live so the steer panel can fork from a
+        # still-in-flight candidate without the round file — the in-flight peer
+        # of round_NNNN.json::candidate_scores.
         self._snapshot(
             "candidate_started",
             idx,
             total,
-            {"changes_description": changes_description, "pp_override": pp_override},
+            {
+                "changes_description": changes_description,
+                "pp_override": pp_override,
+                "prompt_fields": prompt_fields,
+            },
         )
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:

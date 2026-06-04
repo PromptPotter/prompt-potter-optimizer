@@ -2,7 +2,7 @@
 import { useMemo } from "react";
 import type { PipelineDoc } from "./types";
 import { type DashboardSnapshot, roundOf } from "@/lib/poll";
-import { useRoundFile } from "@/lib/hooks/useRoundFile";
+import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useSelection } from "@/lib/SelectionContext";
 import { phaseToNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
@@ -89,14 +89,18 @@ export function OptimizerNodeDetail({
   }, [dash?.rounds]);
   const activeRound =
     selectedRound ?? liveRound ?? completedRounds[0] ?? null;
-  const activeIsLive = activeRound != null && activeRound === liveRound;
   const lastFiredRound = completedRounds[0] ?? null;
 
   // Live round: read inline (no fetch). Historical round: lazy-fetch the
-  // round file; `block` is null until it lands.
+  // round file; `block` is null until it lands. `useRoundSource` owns the
+  // guard — it idles the fetch on the live round.
   const liveBlock = liveNodeBlock(dash, id);
-  const historicalRound = activeIsLive ? null : activeRound;
-  const { doc: historicalDoc } = useRoundFile(campaignId, cycleId, historicalRound);
+  const { isLive: activeIsLive, doc: historicalDoc } = useRoundSource(
+    campaignId,
+    cycleId,
+    activeRound,
+    dash,
+  );
   const block: NodeBlock | null = useMemo(() => {
     if (activeRound == null) return null;
     if (activeIsLive) return liveBlock;

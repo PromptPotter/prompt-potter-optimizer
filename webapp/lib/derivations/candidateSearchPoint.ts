@@ -12,7 +12,12 @@
 // override delta layers back on top of the inherited dataset overlay at
 // fork bootstrap, keeping the dataset file immutable.
 
-import type { RoundFileDoc } from "@/lib/poll";
+import {
+  liveL1InputCandidates,
+  roundOf,
+  type DashboardSnapshot,
+  type RoundFileDoc,
+} from "@/lib/poll";
 
 // The seed-able half of a candidate's searchpoint. `limit_overrides` is
 // NOT here — it comes from the reconcile dialog, not the candidate.
@@ -48,5 +53,28 @@ export function candidateSearchPoint(
   return {
     starting_prompt: entry.prompt_fields ?? {},
     pipeline_overlay: entry.pipeline_params_override ?? {},
+  };
+}
+
+// Live peer of `candidateSearchPoint`: for a candidate in the *in-flight*
+// round the seed lives in `dashboard.json`'s l1_score input candidates (not
+// the round file, which isn't written until round close). Seeded at
+// `candidate_started` (`_RoundBuffer.seed_candidate`), so it's available the
+// moment a candidate begins scoring — lets the steer panel fork from a
+// still-running candidate. Matches by the live candidate id `r{round}_{idx}`.
+export function liveCandidateSearchPoint(
+  dash: DashboardSnapshot | null,
+  candidateId: string,
+): CandidateSearchPoint | null {
+  if (!candidateId) return null;
+  const liveRound = roundOf(dash);
+  if (liveRound == null) return null;
+  const entry = liveL1InputCandidates(dash).find(
+    (c) => `r${liveRound}_${c.idx}` === candidateId,
+  );
+  if (!entry) return null;
+  return {
+    starting_prompt: entry.prompt_fields ?? {},
+    pipeline_overlay: entry.pp_override ?? {},
   };
 }

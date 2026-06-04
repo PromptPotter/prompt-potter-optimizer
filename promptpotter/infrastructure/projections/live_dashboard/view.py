@@ -192,12 +192,20 @@ class _RoundBuffer:
         total: int,
         changes_description: str,
         pp_override: dict[str, Any] | None,
+        prompt_fields: dict[str, Any] | None,
     ) -> None:
-        """Seed a slot so CURRENT shows labelled pending rows before scoring lands."""
+        """Seed a slot so CURRENT shows labelled pending rows before scoring lands.
+
+        ``prompt_fields`` + ``pp_override`` are the candidate's evolved
+        searchpoint (``OptSearchPoint.prompt_field_dict()`` + pipeline delta) —
+        the seed-able half the steer panel forks from. Surfacing them live makes
+        an in-flight candidate steerable without its (not-yet-written) round file.
+        """
         entry = self.slot(idx, total)
         entry["total"] = total
         entry["changes_description"] = changes_description or ""
         entry["pp_override"] = pp_override
+        entry["prompt_fields"] = prompt_fields
 
     def append_sample(
         self,
@@ -589,8 +597,14 @@ class LiveDashboardView(DerivedView):
                 ct,
                 payload.get("changes_description") or "",
                 payload.get("pp_override"),
+                payload.get("prompt_fields"),
             )
-            # placeholder seed; next sample_scored / round_complete persists.
+            # Persist the bare seed now (samples empty, scores None) so the
+            # lineage draws the round's path the instant a candidate is known —
+            # the round is certain, it's only waiting on the first sample. The
+            # candidate renders as a pending node (null accuracy) until
+            # sample_scored fills it in.
+            self._schedule_persist()
         elif ev == "candidate_scored":
             scores = payload.get("scores") or {}
             self._update_current_acc(scores)
@@ -905,6 +919,10 @@ class LiveDashboardView(DerivedView):
                         cand.get("changes_description") or scores.get("changes_description") or ""
                     ),
                     "pp_override": cand.get("pp_override"),
+                    # The evolved prompt (OptSearchPoint.prompt_field_dict() shape).
+                    # Live peer of round_NNNN.json::candidate_scores[].prompt_fields
+                    # — `liveCandidateSearchPoint` reads it for steer-fork seeding.
+                    "prompt_fields": cand.get("prompt_fields"),
                 }
             )
             cand_evaluators = dict(scores.get("evaluators") or {})

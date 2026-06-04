@@ -22,7 +22,7 @@ from promptpotter.application.jobs import (
     QuotaExceededError,
     default_jobs_dir,
 )
-from promptpotter.config.logging import setup_logging
+from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
 from promptpotter.config.settings import APP_VERSION, settings
 from promptpotter.infrastructure.identity import (
     build_identity_bundle,
@@ -40,6 +40,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application startup and shutdown lifecycle."""
     logger.info("Starting %s v%s", app.title, app.version)
     logger.info("Environment: %s", settings.ENVIRONMENT)
+    # Quiet the benign Windows ProactorEventLoop disconnect noise (bpo-39010)
+    # that fires when a browser tab drops a kept-alive socket.
+    silence_proactor_disconnect_noise()
     app.state.identity_bundle = build_identity_bundle(default_identity_paths())
     app.state.job_registry = JobRegistry(default_jobs_dir())
     app.state.draft_campaigns = DraftCampaignRegistry()

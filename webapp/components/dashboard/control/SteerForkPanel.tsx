@@ -3,10 +3,13 @@
 import { useRef, useState } from "react";
 import { postForkCycle, postStopCycle, type ForkSeed, type LimitOverrides } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
-import { useRoundFile } from "@/lib/hooks/useRoundFile";
+import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useAuth } from "@/lib/auth-context";
-import { candidateSearchPoint } from "@/lib/derivations/candidateSearchPoint";
+import {
+  candidateSearchPoint,
+  liveCandidateSearchPoint,
+} from "@/lib/derivations/candidateSearchPoint";
 import { forkReconcileDefaults, limitOverridesFromDefaults } from "@/lib/derivations/forkReconcile";
 import type { SelectedCandidate } from "@/lib/types/selection";
 import type { DashboardSnapshot } from "@/lib/poll";
@@ -16,17 +19,22 @@ import { NodeOutputSchemaView } from "./NodeOutputSchemaView";
 import { LimitReconcile } from "./LimitReconcile";
 
 // The one operator-steered fork flow (decision H): the operator has selected a
-// searchpoint; this seeds its EVOLVED prompt + node-config from the round file
-// (decision F — rides `useRoundFile`, no new endpoint), lets them edit the
+// searchpoint; this seeds its EVOLVED prompt + node-config, lets them edit the
 // prompt, the node-config VALUES, and reconcile run limits, then mints a fork
 // tagged `operator_steered` (seed present) rooted at that candidate — stamped
 // with the operator who steered it. When the parent is still running, the
 // confirm stops it first (the steer IS a "stop → redirect" act).
 //
+// Seed source follows the no-stitch rule via `useRoundSource`: a *completed*
+// round's candidate seeds from `round_NNNN.json::candidate_scores`; an
+// *in-flight* round's candidate seeds from `dashboard.json`'s live l1_score
+// input (so you can steer-fork a still-running candidate without 404ing on its
+// not-yet-written round file).
+//
 // Shared by `ScoringInspector` (candidate drill-in) + `BackendNodeDetail`
-// (node click on a stopped cycle). Self-contained: it owns its round-file
-// fetch and the fork write, and reads the shared connector view via
-// `useConnector()`, so any caller under `ConnectorProvider` can mount it.
+// (node click on a stopped cycle). Self-contained: it owns its source pick and
+// the fork write, and reads the shared connector view via `useConnector()`, so
+// any caller under `ConnectorProvider` can mount it.
 
 export function SteerForkPanel({
   campaignId,
@@ -46,10 +54,20 @@ export function SteerForkPanel({
   onDone: () => void;
   onCancel: () => void;
 }) {
-  const { doc } = useRoundFile(campaignId, cycleId, candidate.round);
+  // `roundIsLive` (is `candidate.round` the in-flight round) is distinct from
+  // the `isLive` prop (is the parent cycle running). The live round's seed
+  // comes from `dashboard.json`; a completed round's from its round file.
+  const { isLive: roundIsLive, doc } = useRoundSource(
+    campaignId,
+    cycleId,
+    candidate.round,
+    dash,
+  );
   const cv = useConnector();
   const { me } = useAuth();
-  const seed = candidateSearchPoint(doc, candidate.candidate_id);
+  const seed = roundIsLive
+    ? liveCandidateSearchPoint(dash, candidate.candidate_id)
+    : candidateSearchPoint(doc, candidate.candidate_id);
   const seedPrompt = seed?.starting_prompt ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
 
@@ -103,8 +121,8 @@ export function SteerForkPanel({
 
       {!seed && (
         <p className="steer-fork-note" role="note">
-          The round file for R{candidate.round} isn&apos;t on disk yet — start
-          from the fields below (they seed the fork&apos;s origin prompt).
+          This searchpoint isn&apos;t loaded yet — start from the fields below
+          (they seed the fork&apos;s origin prompt).
         </p>
       )}
 

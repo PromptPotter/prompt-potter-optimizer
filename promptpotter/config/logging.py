@@ -1,9 +1,10 @@
 """Logging configuration. Call ``setup_logging()`` once from entry points."""
 
+import asyncio
 import logging
 import re
 import sys
-from typing import Literal, TextIO
+from typing import Any, Literal, TextIO
 
 from promptpotter.config.log_redaction import SecretRedactionFilter
 
@@ -98,4 +99,40 @@ def setup_logging(
     logging.getLogger("uvicorn.access").addFilter(_QuietPolls())
 
 
-__all__ = ["LOG_DATE_FORMAT", "LOG_FORMAT", "setup_logging"]
+def silence_proactor_disconnect_noise() -> None:
+    """Swallow the benign Windows ``ProactorEventLoop`` teardown error.
+
+    When a browser drops a kept-alive socket, ``_ProactorBasePipeTransport.
+    _call_connection_lost`` calls ``sock.shutdown(SHUT_RDWR)`` on an
+    already-reset socket and raises ``ConnectionResetError`` [WinError 10054],
+    which the loop dumps via its exception handler (Python bpo-39010). The
+    connection is already gone — nothing failed, it's pure log noise.
+
+    Install a loop exception handler that swallows *exactly* that case — a
+    ``ConnectionResetError`` raised inside ``_call_connection_lost`` — and
+    delegates everything else to the prior/default handler so real loop errors
+    still surface. Call once, from inside the running loop (lifespan startup).
+    """
+    loop = asyncio.get_running_loop()
+    prior = loop.get_exception_handler()
+
+    def handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        exc = context.get("exception")
+        if isinstance(exc, ConnectionResetError) and "_call_connection_lost" in repr(
+            context.get("handle")
+        ):
+            return
+        if prior is not None:
+            prior(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+
+
+__all__ = [
+    "LOG_DATE_FORMAT",
+    "LOG_FORMAT",
+    "setup_logging",
+    "silence_proactor_disconnect_noise",
+]
