@@ -5,7 +5,7 @@
 // change. `fetcher === null` means "not ready to fetch" — data stays
 // null, loading false; the caller's guard for an unresolved unit.
 //
-// Key-scoped per webapp/AGENTS.md: a `deps` change blanks data/error in
+// Key-scoped per webapp/CLAUDE.md: a `deps` change blanks data/error in
 // the same render (render-phase guarded reset), so the gap before the new
 // fetch lands shows loading, never the prior key's stale result. `deps`
 // are compared by value — pass primitives, as you would `useEffect` deps.

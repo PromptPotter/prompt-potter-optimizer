@@ -42,7 +42,8 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | What datasets do we use? Why didn't we use Y? | [`operations/dataset-selection-rationale.md`](operations/dataset-selection-rationale.md) |
 | What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT meta-campaign NOTES.md) |
 | What's the canonical split for this benchmark? | [`operations/adding-a-dataset.md`](operations/adding-a-dataset.md) |
-| How do I run the auth-on dashboard locally? | [`developer/local-oidc.md`](developer/local-oidc.md) (Dex harness at `dev/oidc-local/`) |
+| How do I run the auth-on dashboard locally? | [`developer/local-oidc.md`](developer/local-oidc.md) (Dex harness at `dev/oidc-local/`) — only needed for the real OIDC login round-trip |
+| How do I drive the authed/live UI surface (no OIDC, no spend)? | Relaunch with `PROMPTPOTTER_AUTH=off` → reads your real on-disk campaigns. Recipe + the per-control behavior bar: [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture + [`specs/frontend-surface-contract.md`](specs/frontend-surface-contract.md) |
 | How do I manage the sign-in allowlist / host securely? | [`operations/secure-hosting.md`](operations/secure-hosting.md) + [`adr/0004-operator-admin-channels.md`](adr/0004-operator-admin-channels.md) |
 | How do I freeze a buggy cycle as a test fixture? | [`developer/cycle-fixtures.md`](developer/cycle-fixtures.md) (`tests/fixtures/cycles/`) |
 

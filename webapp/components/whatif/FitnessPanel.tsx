@@ -13,6 +13,7 @@ import type { RoundSummary } from "@/lib/api/types";
 import { useSelection } from "@/lib/SelectionContext";
 import { WhatIfGrid } from "./WhatIfGrid";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
 import { useWorkspace } from "@/lib/workspace";
 import { useFitnessBars } from "./useFitnessBars";
@@ -78,9 +79,13 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   // keyed by source_label so the bars-assembly memo can attach diag data
   // to the matching candidate.
   const { campaignId } = useWorkspace();
+  // Gate on a confirmed session — diagnostic-runs is workspace-scoped and
+  // 401s for anon; `null` fetcher means useFetch fires nothing on the public
+  // preview (frontend-surface-contract.md § I5), matching VerifyPane.
+  const { status } = useAuth();
   const { data: diagRunsResp } = useFetch(
-    (s) => fetchDiagnosticRuns(undefined, s),
-    [campaignId, cycleId],
+    status === "authed" ? (s) => fetchDiagnosticRuns(undefined, s) : null,
+    [status, campaignId, cycleId],
   );
   const diagByLabel = useMemo(() => {
     const m = new Map<string, DiagnosticRunRecord>();

@@ -43,8 +43,10 @@ invariants:
                         input that silently discards what the user types.
   I4_auth_coherent:   anon never shows authed-only chrome (Log out); authed never shows anon CTAs
                       (Log in / Sign up). The two control sets are mutually exclusive by auth state.
-  I5_console_clean:   Expected anon 401s (auth/me, backends, diagnostic-runs probed before login)
-                      are swallowed to typed results by the fetch layer — not surfaced as console errors.
+  I5_no_anon_noise:   Anon fires no auth-gated request beyond the auth/me probe (consumers gate on
+                      useAuth().status==='authed'). The browser logs failed requests itself — the app
+                      can't swallow that — so the cure is not firing them. The auth/me 401 is the
+                      accepted floor (it's the probe that decides anon vs authed).
 ```
 
 ## Surfaces
@@ -78,12 +80,10 @@ controls:
         match the served origin (localhost vs 127.0.0.1 mismatch breaks the session cookie locally).
     status: ok
     gap: local redirect_uri is 127.0.0.1:8001 while preview is served on localhost:8001 — env-specific.
-  - id: email.continue
-    do: Email beta path. EITHER wire email sign-in, OR drop the editable field and present a single
-        explicit button "Ask about beta access on LinkedIn" (I3). An editable email box whose value
-        is discarded is a dark-pattern smell.
-    status: broken
-    gap: email field accepts input but Continue is a static link to a personal LinkedIn URL, ignoring input.
+  - id: no_google_fallback
+    do: No-Google-account path → "Open a GitHub issue to request beta access" (→ BRAND.supportUrl,
+        the repo issues; whitelabel-overridable). No editable field that discards input.
+    status: ok   # B4: email field + LinkedIn-Continue removed; GitHub-issue CTA; dead CSS pruned.
   - id: legal.{privacy,terms,imprint}
     do: External links to brand legal pages; must resolve 200.
     status: ok
@@ -105,18 +105,15 @@ controls:
     status: ok
   - id: campaign_list
     do: List campaigns under Active/Archived tabs.
-        anon: empty state "Sign in to see your campaigns" (resolve the 401 — I1).
+        anon: "Sign in to see your campaigns." (SignInPrompt).
         auth_empty: "No campaigns yet — start one."
-    status: gap
-    gap: rests on "loading…" permanently in anon (both tabs) — never resolves (violates I1).
+    status: ok   # B2: anon → SignInPrompt; workspace poll gated on authed.
   - id: support
-    do: Always-live link to help (docs/contact). Visible in every auth state.
-    status: broken
-    gap: inert <div>, no handler/href — does nothing.
+    do: Always-live link to help. Visible in every auth state.
+    status: ok   # B2: <a href={BRAND.supportUrl}> → repo issues (NEXT_PUBLIC_SUPPORT_URL-overridable).
   - id: logout
-    do: Call the logout endpoint, clear session, return to anon. Rendered ONLY when authed (I4).
-    status: broken
-    gap: inert <div>, no handler; also rendered while anon alongside Log in/Sign up (violates I4).
+    do: Call the logout endpoint, clear session, return to /login. Rendered ONLY when authed (I4).
+    status: ok   # B2: <button> → postLogout()+redirect; rendered only when status==='authed'.
 ```
 
 ### Chat surface
@@ -128,10 +125,9 @@ controls:
     do: Show/hide the pipeline strip (input/connector/node/output). Input+output toggles move together.
     status: ok
   - id: preview.connector
-    do: Probe the backend; resolve to a terminal chip state {connected, unreachable, unauthorized}.
-        anon: "Sign in to connect" — never an indefinite spinner (I1).
-    status: gap
-    gap: rests on "probing…" forever in anon (poll self-halts after 3 tries, but the chip never resolves).
+    do: Resolve to a terminal chip state. No resolved backend (anon / no dataset) → "idle" +
+        "no backend selected" (nothing is being probed). Resolved + probed → reachable / unreachable.
+    status: ok   # B3: ConnectorInspector shows "idle" when connector==null; "probing…" only while a real probe is in flight.
   - id: preview.node.llm
     do: Expand to model & params; "declares no configurable params" when none.
     status: ok
@@ -142,10 +138,9 @@ controls:
     do: Real toggle for "Optimize prompt while using (Beta)".
     status: ok
   - id: settings.{extended_thinking,web_search,code_execution}
-    do: If these are operable settings, render them as real switches with handlers. If they are a
-        feature showcase for anon preview, render as content/badges, NOT faux toggle rows (I3).
-    status: broken
-    gap: styled like the toggle rows but are inert (no switch role, no pointer, no handler).
+    do: Coming-soon features — render as a disabled ui/Switch (role=switch, aria-disabled,
+        aria-label "… (coming soon)") + a muted "Soon" pill. Legibly unavailable, not faux-operable.
+    status: ok   # B4: extracted ui/Switch (locked variant); "Soon" pills.
   - id: demo_thread
     do: Static scripted conversation shown in anon to illustrate the product. Clearly non-live.
     status: ok
@@ -185,10 +180,11 @@ surface: verify
 controls:
   - id: diagnostic_runs
     do: List diagnostic runs.
-        anon: "Sign in to view verification runs" (I1/I2).
+        anon: "Sign in to view workspace verification runs." + Sign-in CTA (→/login).
+        loading: spinner while status resolves.
         empty: "No runs yet."
-    status: broken
-    gap: renders raw "Failed to load diagnostic runs: 401 /api/v1/diagnostic-runs" (violates I2).
+        error (authed): "Couldn't load diagnostic runs — retry shortly." (never raw).
+    status: ok   # B1: gated on useAuth().status; SignInPrompt; raw-401 string removed.
 ```
 
 ### Files surface
@@ -214,17 +210,36 @@ surface: new_campaign
 controls:
   - id: body
     do: Dataset picker / ingest entry.
-        anon: "Sign in to start a campaign" + a CTA to the auth modal (I1/I2).
-    status: broken
-    gap: entire body is the raw string "401 /api/v1/datasets" (violates I2); modal otherwise empty in anon.
+        anon: "Sign in to start a campaign." + Sign-in CTA (→/login).
+        loading: "Loading your collection…"
+        error (authed): "Couldn't load your collection — retry shortly." (never raw).
+    status: ok   # B1: gated; needsAuth LoadState; raw-401 string removed.
   - id: close
     do: Close, restore focus, ESC + backdrop.
     status: ok
 ```
 
-## Coverage gap
+## Coverage
 
-The authenticated + live-campaign surface (real dashboard data, file tree, node
-inspectors, Verify runs, working Log out, campaign creation) is **unverified** —
-it is gated behind invite-only Google OIDC + a running campaign. The contract
-above for `live`/`warming` states is specified from intent, not yet exercised.
+The authenticated + live-campaign surface (dashboard topstrip/fitness/lineage/
+samples, What-If evaluator grid, scoring inspector with `round_NNNN.json`
+drill-in, Verify diagnostic table, Files tree + JSON preview) is **verified** —
+driven via `PROMPTPOTTER_AUTH=off` (`deps.py::resolve_identity` →
+`registered_or_default_identity`, the CLI's resolver) against the operator's
+real on-disk campaigns. Console clean (0 errors) across every tab; the connector
+rests at a terminal `unreachable` when the backend is down; frozen units show
+"UPDATED · Nh ago". No fixtures, no Docker, no spend.
+
+Two states remain **un-exercised** (not contract gaps — just unreached here):
+- `warming` (origin running, `dashboard.json` not yet written) — needs a live
+  starting campaign; verify on the next real run.
+- The real Google OIDC **login round-trip** + the known React #185 post-login
+  crash — `AUTH=off` bypasses the redirect, and #185 did NOT reproduce on authed
+  dashboard-mount, so it's redirect-path-specific. Verify on the live deploy.
+
+The B0–B7 hardening campaign that drove the surface to this contract (anon
+fires only the `auth/me` probe; full keyboard/a11y; one I5 leak in `FitnessPanel`
+fixed) is shipped. Post-alpha parallel work surfaces in real use against these
+same invariants: deep live-data edge cases, multi-campaign + Archived,
+offline/stale, the L2/L3-terminal loading bug, whitelabel theme variants, and the
+OIDC/#185 round-trip above.

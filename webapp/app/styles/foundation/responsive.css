@@ -98,7 +98,6 @@
   .account-modal-auth{height:auto;max-height:calc(var(--vh-full) - 32px)}
   .account-pane-body{padding:18px 16px 14px;gap:12px}
   .account-pane-body-auth{padding:18px 16px 14px;gap:12px}
-  .auth-email-input{height:auto}
   .login-button{padding:14px 16px;min-height:44px;font-size:14px}
 }
 

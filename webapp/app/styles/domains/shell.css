@@ -30,7 +30,9 @@
 .nav-item.disabled:hover{background:transparent;color:var(--color-text-secondary)}
 .nav-item.disabled svg{opacity:.4 !important}
 .sidebar-footer{margin-top:auto;padding:12px 16px;border-top:0.5px solid var(--color-border-tertiary)}
-.sidebar-footer-item{font-size:13px;color:var(--color-text-tertiary);padding:5px 0}
+.sidebar-footer-item{display:block;width:100%;text-align:left;font-size:13px;color:var(--color-text-tertiary);padding:5px 0;background:none;border:none;font-family:inherit;text-decoration:none;cursor:pointer}
+.sidebar-footer-item:hover{color:var(--color-text-primary)}
+.sidebar-footer-item:disabled{opacity:.5;cursor:default}
 /* Primary sidebar CTA — "+ New campaign". Matches the Replit-style
    "Create something new" pattern: full-width, prominent, sits between
    the brand and the campaign library. */

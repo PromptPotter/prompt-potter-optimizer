@@ -6,6 +6,7 @@ import { TERMS } from "@/lib/terms";
 import { headlineStats } from "@/lib/derivations/headline-stats";
 import { readSpend } from "@/lib/derivations/spend";
 import { fmtText, fmtDuration, fmtUsd } from "@/lib/format";
+import { Switch } from "@/components/ui/Switch";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
 import { CyclePicker } from "@/components/shell/CyclePicker";
@@ -271,9 +272,9 @@ export function ChatPane({
                     <path d="M8 4v4l3 2" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
                   </svg>
                 </span>
-                <div className="row-body"><div className="name">Extended thinking</div></div>
+                <div className="row-body"><div className="name">Extended thinking<span className="soon-tag">Soon</span></div></div>
               </div>
-              <div className="toggle locked" />
+              <Switch checked={false} locked label="Extended thinking" />
             </div>
             <div className="toggle-row">
               <div className="row-text">
@@ -283,9 +284,9 @@ export function ChatPane({
                     <path d="M2 8h12M8 2c2 1.8 2 10.2 0 12M8 2c-2 1.8-2 10.2 0 12" stroke="currentColor" strokeWidth="1.1" fill="none" />
                   </svg>
                 </span>
-                <div className="row-body"><div className="name">Web search</div></div>
+                <div className="row-body"><div className="name">Web search<span className="soon-tag">Soon</span></div></div>
               </div>
-              <div className="toggle locked" />
+              <Switch checked={false} locked label="Web search" />
             </div>
             <div className="toggle-row">
               <div className="row-text">
@@ -296,9 +297,9 @@ export function ChatPane({
                     <path d="M9.5 3.5l-3 9" opacity=".6" />
                   </svg>
                 </span>
-                <div className="row-body"><div className="name">Code execution</div></div>
+                <div className="row-body"><div className="name">Code execution<span className="soon-tag">Soon</span></div></div>
               </div>
-              <div className="toggle locked" />
+              <Switch checked={false} locked label="Code execution" />
             </div>
             <div className="row-separator" />
             <div className="toggle-row wand-row">
@@ -315,13 +316,10 @@ export function ChatPane({
                   <div className="desc">Quietly evolves parameters across your project</div>
                 </div>
               </div>
-              <button
-                type="button"
-                className={`toggle${wandOn ? " on" : ""}`}
-                role="switch"
-                aria-checked={wandOn}
-                aria-label="Optimize prompt while using"
-                onClick={() => setWandOn((v) => !v)}
+              <Switch
+                checked={wandOn}
+                onChange={() => setWandOn((v) => !v)}
+                label="Optimize prompt while using"
               />
               <span className="sparkle s1" /><span className="sparkle s2" /><span className="sparkle s3" /><span className="sparkle s4" />
               <span className="sparkle s5" /><span className="sparkle s6" /><span className="sparkle s7" /><span className="sparkle s8" />

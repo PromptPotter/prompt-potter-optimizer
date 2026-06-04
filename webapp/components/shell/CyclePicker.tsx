@@ -1,6 +1,7 @@
 "use client";
 import { memo, useMemo } from "react";
 import { useWorkspace } from "@/lib/workspace";
+import { useAuth } from "@/lib/auth-context";
 import { useCycleStream } from "@/lib/poll";
 import type { CycleListEntry } from "@/lib/api";
 import { rootCycleId, sessionIndexOf, campaignOriginHash, unitKey, UNIT_SEP } from "@/lib/ids";
@@ -57,6 +58,7 @@ export const CyclePicker = memo(function CyclePicker({
     selectCycle,
     followActive,
   } = useWorkspace();
+  const { status } = useAuth();
 
   const standalone = variant === "standalone";
 
@@ -90,7 +92,10 @@ export const CyclePicker = memo(function CyclePicker({
     return <span className="cycle-picker-err">campaigns: {cyclesError}</span>;
   }
   if (!cyclesLoaded) {
-    return <span>{standalone ? "New Job" : cycleId || "loading…"}</span>;
+    // Anon never loads the (auth-gated) workspace — show a terminal label, not a
+    // perpetual "loading…" (frontend-surface-contract.md § I1).
+    const restingLabel = status === "unauthed" ? "No campaign" : "loading…";
+    return <span>{standalone ? "New Job" : cycleId || restingLabel}</span>;
   }
   if (cycles.length === 0) {
     return <span>{standalone ? "New Job" : cycleId || "No campaigns yet"}</span>;

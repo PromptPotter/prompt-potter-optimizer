@@ -4,7 +4,7 @@
 // Both return the same `SampleRow[]` shape so the unified
 // RoundSamplesView mounts a single renderer.
 //
-// AGENTS.md rule: live vs historical never merge. These functions are
+// CLAUDE.md rule: live vs historical never merge. These functions are
 // deliberately separate, with no fallback chain between them — the
 // component picks one based on whether `selection.round` matches the
 // live in-flight round.

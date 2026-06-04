@@ -37,11 +37,18 @@ export function ConnectorInspector({ view }: Props) {
   // Reachability verdict — shared with the CriticalAlertBanner so the LED and
   // the top banner can never disagree (lib/derivations/connector-state.ts).
   const { reachable, stateCls, stateLabel } = connectorReachability(health);
-  const footText = !health
-    ? "probe pending…"
-    : reachable
-      ? `reachable · ${new Date(health.checked_at).toLocaleTimeString()}`
-      : `unreachable${health.detail ? ` · ${health.detail}` : ""}`;
+  // No resolved connector (anon preview / no dataset selected) means nothing is
+  // being probed — show a terminal "idle", not a perpetual "probing…" that
+  // never resolves (frontend-surface-contract.md § I1).
+  const noBackend = connector == null;
+  const label = noBackend ? "idle" : stateLabel;
+  const footText = noBackend
+    ? "no backend selected"
+    : !health
+      ? "probe pending…"
+      : reachable
+        ? `reachable · ${new Date(health.checked_at).toLocaleTimeString()}`
+        : `unreachable${health.detail ? ` · ${health.detail}` : ""}`;
   const interior = pipelineView ? pipelineView.nodes.filter((n) => n.kind !== "io") : [];
 
   return (
@@ -49,15 +56,14 @@ export function ConnectorInspector({ view }: Props) {
       <button
         type="button"
         className="connector-dot"
-        aria-label={`Connector ${connector ?? "—"} — ${stateLabel}`}
-        aria-haspopup="dialog"
+        aria-label={`Connector ${connector ?? "—"} — ${label}`}
       />
-      <div className="connector-pop" role="dialog" aria-label="Connector state">
+      <div className="connector-pop" role="group" aria-label="Connector state">
         <div className="connector-pop-head">
           <span className="dot" />
           <span className="name">{connector ?? "—"}</span>
           {backendType && <span className="kind">{backendType}</span>}
-          <span className="state">{stateLabel}</span>
+          <span className="state">{label}</span>
         </div>
         {baseUrl && (
           <div className="connector-pop-url" title={baseUrl}>

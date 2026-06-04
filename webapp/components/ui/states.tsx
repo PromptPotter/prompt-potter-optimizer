@@ -48,3 +48,24 @@ export function ErrorNote({
     </div>
   );
 }
+
+// The anon resting state for an auth-gated surface — what a panel shows
+// instead of firing a read that would 401 (frontend-surface-contract.md § I1).
+// The CTA links to the full-page sign-in (`/login`, the same route logout
+// redirects to); trailing slash matches `next.config.ts::trailingSlash`.
+export function SignInPrompt({
+  message,
+  className,
+}: {
+  message: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className} style={{ ...base, color: "var(--color-text-tertiary)" }}>
+      {message}{" "}
+      <a href="/login/" style={{ color: "var(--color-accent)", fontWeight: 600 }}>
+        Sign in
+      </a>
+    </div>
+  );
+}

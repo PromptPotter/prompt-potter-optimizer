@@ -10,8 +10,9 @@ from fastapi import Depends, HTTPException, Request
 
 from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
 from promptpotter.domain.backend import BackendConnection
+from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store import Stores, build_stores
-from promptpotter.shared.identity import IdentityContext, default_identity
+from promptpotter.shared.identity import IdentityContext
 
 PROMPTPOTTER_AUTH_OFF_ENV = "PROMPTPOTTER_AUTH"
 
@@ -23,14 +24,18 @@ def _auth_off() -> bool:
 def resolve_identity(request: Request) -> IdentityContext:
     """Stage-1 identity resolver.
 
-    ``PROMPTPOTTER_AUTH=off`` → :func:`default_identity` (single-operator
-    auth-off escape hatch). Otherwise consume the :class:`IdentityContext`
-    populated by :func:`install_oidc_middleware`; missing/expired session
-    raises 401 ``unauthenticated``. Every other API site keeps consuming
-    :data:`IdentityDep` / :data:`StoreDep` without modification.
+    ``PROMPTPOTTER_AUTH=off`` → :func:`registered_or_default_identity`, the
+    *same* single-operator resolution the CLI uses: a registered developer
+    (default-claim marker) resolves to their own tenant, else anonymous
+    ``default``. This keeps the auth-off web surface and terminal runs in one
+    workspace — auth-off web reading empty ``default`` while the CLI wrote to
+    the registered tenant was the drift. Otherwise consume the
+    :class:`IdentityContext` populated by :func:`install_oidc_middleware`;
+    missing/expired session raises 401 ``unauthenticated``. Every other API
+    site keeps consuming :data:`IdentityDep` / :data:`StoreDep` unchanged.
     """
     if _auth_off():
-        return default_identity()
+        return registered_or_default_identity()
     identity_ctx: IdentityContext | None = getattr(request.state, "identity_ctx", None)
     if identity_ctx is None:
         raise HTTPException(

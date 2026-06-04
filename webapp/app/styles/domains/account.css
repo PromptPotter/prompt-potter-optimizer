@@ -121,5 +121,4 @@
    These classes replace the inline styles formerly on the component. */
 .account-modal-auth{flex-direction:column;max-width:380px;width:100%;height:min(720px,92vh);min-height:0}
 .account-pane-body-auth{gap:14px;padding:22px 24px 18px;flex:1 1 auto}
-.auth-email-input{height:40px}
 

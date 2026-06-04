@@ -18,7 +18,7 @@ import type { CandidateRow } from "@/lib/types/candidate";
 
 // Single per-round samples surface. Live mode reads from
 // `dashboard.json` only; historical mode reads `round_NNNN.json`
-// only — the two paths never merge (AGENTS.md no-stitch rule).
+// only — the two paths never merge (CLAUDE.md no-stitch rule).
 // The candidate list comes from `roundCandidatesByRound` in both
 // modes so the displayed groups stay aligned with lineage + fitness.
 

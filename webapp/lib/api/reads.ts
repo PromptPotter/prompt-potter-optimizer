@@ -12,7 +12,6 @@ import type {
   FileContentResponse,
   FilesResponse,
   HardSamplesScope,
-  LeverageResponse,
   MeasurementSeriesResponse,
 } from "./types";
 
@@ -369,13 +368,6 @@ export function fetchCampaignLineage(
     `${API}/campaigns/${encodeURIComponent(campaignId)}/lineage`,
     signal,
   );
-}
-
-export function fetchLeverage(
-  limit = 200,
-  signal?: AbortSignal,
-): Promise<LeverageResponse> {
-  return jget<LeverageResponse>(`${API}/measurements/leverage?limit=${limit}`, signal);
 }
 
 // Workspace-scope diagnostic-run records — sidecars written by `verify` CLI.

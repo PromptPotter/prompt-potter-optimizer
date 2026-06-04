@@ -138,13 +138,21 @@ def test_stage1_identity_gates(monkeypatch, tmp_path: Path) -> None:
     assert uid1 != uid3, "same sub across different iss must yield different UserIds"
     assert safe_name(str(uid1)) == SafeName(str(uid1))
 
-    # PROMPTPOTTER_AUTH=off escape hatch — resolve_identity returns the
-    # default Stage-0 identity regardless of request state.
+    # PROMPTPOTTER_AUTH=off escape hatch — resolve_identity resolves the SAME
+    # way the CLI does (registered developer via default-claim marker, else
+    # anonymous default), so the auth-off web surface and terminal runs share
+    # one workspace. Parity is the contract, not a fixed value: both calls read
+    # the same marker, so this holds regardless of local registration state.
+    from promptpotter.infrastructure.identity.migration import registered_or_default_identity
+
     monkeypatch.setenv("PROMPTPOTTER_AUTH", "off")
     request = MagicMock()
     request.state.identity_ctx = None
     ctx = resolve_identity(request)
-    assert ctx == default_identity(), "PROMPTPOTTER_AUTH=off must return default_identity()"
+    assert ctx == registered_or_default_identity(), (
+        "PROMPTPOTTER_AUTH=off must resolve identically to the CLI "
+        "(registered_or_default_identity), not anonymous default"
+    )
 
     # When the env var is unset and no session is bound, resolve_identity
     # raises a 401 — that's the unauthenticated path.

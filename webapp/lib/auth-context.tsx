@@ -23,7 +23,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { fetchMe, type MeResponse } from "@/lib/api";
+import { ApiError, fetchMe, type MeResponse } from "@/lib/api";
 
 export type AuthStatus = "loading" | "authed" | "unauthed";
 
@@ -92,7 +92,7 @@ export function useAuth(): AuthCtx {
 // dead session and flipping `status` to "unauthed", which drops `authed` and
 // halts the loop. Without this a tab whose session died (e.g. server restart)
 // would 401-storm forever, since `/auth/me` is otherwise only re-probed on
-// window focus. Reads throw `Error("401 …")` (see lib/api/client.ts::jget).
+// window focus. Reads throw `ApiError` carrying `.status` (lib/api/client.ts::jget).
 export function useAuthGate(): {
   authed: boolean;
   onAuthError: (err: unknown) => void;
@@ -100,7 +100,7 @@ export function useAuthGate(): {
   const { status, refresh } = useAuth();
   const onAuthError = useCallback(
     (err: unknown) => {
-      if (err instanceof Error && err.message.startsWith("401 ")) refresh();
+      if (err instanceof ApiError && err.status === 401) refresh();
     },
     [refresh],
   );

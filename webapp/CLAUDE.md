@@ -9,7 +9,9 @@ What each user-facing control **must do**, per auth/data state, lives in
 This file owns *implementation* invariants; that one owns *behavior* — read it
 before changing any control's states. Its five invariants (state-completeness,
 no-raw-transport-errors, affordance-honesty, auth-coherence, console-hygiene)
-are the bar for user-facing PRs.
+are the bar for user-facing PRs. Drive the surface against it with the
+two-harness recipe in § Testing posture below (anon = `:8001`; authed+live =
+`PROMPTPOTTER_AUTH=off`).
 
 ## Design — single source of truth
 
@@ -107,7 +109,9 @@ The webapp gate is **compile-time + smoke + a small Vitest scope**, enforced by 
 - `npx tsc --noEmit` — full strict typecheck (`next build` alone does not hard-fail on every type error, so this line is what makes `strict` real).
 - `npm run test` — Vitest, scoped to `lib/**/__tests__/` + `components/**/__tests__/` per `webapp/vitest.config.ts`. Reader-side derivations only (pure data → data helpers); display components stay covered by smoke. Cycle fixtures live at `tests/fixtures/cycles/` — recipe at [`docs/developer/cycle-fixtures.md`](../docs/developer/cycle-fixtures.md).
 - `npm run build` — the static export must succeed.
-- Manual smoke at `http://localhost:8001/` after a behavioural change. Auth-on smoke uses the local Dex harness at [`dev/oidc-local/`](../dev/oidc-local/) — see [`docs/developer/local-oidc.md`](../docs/developer/local-oidc.md).
+- Manual smoke at `http://localhost:8001/` after a behavioural change. Two states, two harnesses:
+  - **anon** — open `:8001` as-is (no flag); drives the public-preview surface.
+  - **authed + live** — relaunch the server with `PROMPTPOTTER_AUTH=off`: `deps.py::resolve_identity` short-circuits to `registered_or_default_identity` (the CLI's resolver), so `/auth/me` returns 200 and every auth-gated read resolves to your **real on-disk campaigns** (zero spend, pure reads). This is the cheap way to exercise the contract's `live`/`warming` clauses — no Docker, no fixtures. Reserve the Dex harness ([`dev/oidc-local/`](../dev/oidc-local/), [`docs/developer/local-oidc.md`](../docs/developer/local-oidc.md)) for the one thing the flag can't reach: the real Google OIDC login round-trip.
 
 When to reach for a component-render test (`@testing-library/react`): pick a regression class that compile + smoke + the derivation tests can't catch — today's bug classes are reader-side and ride the existing Vitest scope.
 

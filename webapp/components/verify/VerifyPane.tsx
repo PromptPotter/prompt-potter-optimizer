@@ -6,18 +6,37 @@
 // (grey = source-campaign composite, red overlay = workspace composite).
 
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { ageText, fmtFitness, fmtPct0 } from "@/lib/format";
 import { useFetch } from "@/lib/hooks/useFetch";
-import { ErrorNote, Loading } from "@/components/ui/states";
+import { ErrorNote, Loading, SignInPrompt } from "@/components/ui/states";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 export function VerifyPane() {
-  const { data, error } = useFetch((s) => fetchDiagnosticRuns(undefined, s), []);
+  const { status } = useAuth();
+  // Gate on a confirmed session — `null` fetcher means useFetch fires nothing,
+  // so anon never 401s the protected read (frontend-surface-contract.md § I5).
+  const { data, error } = useFetch(
+    status === "authed" ? (s) => fetchDiagnosticRuns(undefined, s) : null,
+    [status],
+  );
+
+  if (status !== "authed") {
+    return (
+      <div className="verify-pane">
+        {status === "loading" ? (
+          <Loading />
+        ) : (
+          <SignInPrompt message="Sign in to view workspace verification runs." />
+        )}
+      </div>
+    );
+  }
 
   if (error) {
     return (
       <div className="verify-pane">
-        <ErrorNote>Failed to load diagnostic runs: {error}</ErrorNote>
+        <ErrorNote>Couldn’t load diagnostic runs — retry shortly.</ErrorNote>
       </div>
     );
   }

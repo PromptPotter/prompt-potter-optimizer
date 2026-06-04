@@ -3,6 +3,21 @@
 
 export const API = "/api/v1";
 
+// A non-2xx read. Carries the status as a field so callers branch on it
+// (`err.status === 401` → needs-auth state; see lib/auth-context.tsx) instead
+// of parsing the message string. The message stays technical for logs — a
+// user-facing surface must render its own copy, never `err.message` raw
+// (frontend-surface-contract.md § I2).
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly url: string,
+  ) {
+    super(`${status} ${url}`);
+    this.name = "ApiError";
+  }
+}
+
 // All reads are live (poll-driven). Pairs with the server-side
 // `Cache-Control: no-store` header on `/api/v1/*` so neither layer can
 // serve a stale response — the webapp is a real-time view of disk.
@@ -10,7 +25,7 @@ export async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {
   const init: RequestInit = { cache: "no-store" };
   if (signal) init.signal = signal;
   const r = await fetch(url, init);
-  if (!r.ok) throw new Error(`${r.status} ${url}`);
+  if (!r.ok) throw new ApiError(r.status, url);
   return (await r.json()) as T;
 }
 
@@ -35,6 +50,6 @@ export async function jgetConditional<T>(
   const r = await fetch(url, init);
   const lastModified = r.headers.get("Last-Modified");
   if (r.status === 304) return { kind: "not_modified", lastModified };
-  if (!r.ok) throw new Error(`${r.status} ${url}`);
+  if (!r.ok) throw new ApiError(r.status, url);
   return { kind: "ok", data: (await r.json()) as T, lastModified };
 }

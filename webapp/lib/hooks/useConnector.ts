@@ -15,7 +15,7 @@
 //      mount. Immutable within a session.
 //   2. `/datasets/{name}/pipeline` — dataset-overlay pipeline + the
 //      connector name and backend_type. One-shot per `datasetName`.
-//      Render-phase guarded reset (`webapp/AGENTS.md § State reset on
+//      Render-phase guarded reset (`webapp/CLAUDE.md § State reset on
 //      prop change`) clears all dataset-keyed slots atomically so a unit
 //      switch never shows a stale frame.
 //   3. `useDashboard()::dash.current_round.nodes` + `isLive` — live
@@ -105,21 +105,36 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     setStartingPrompt(null);
   }
 
-  // Backends — one-shot on mount; immutable within a session.
+  // Drop the backend list when `authed` goes false (logout / dead
+  // session) — render-phase guarded reset, so no stale list survives sign-out
+  // (webapp/CLAUDE.md § State reset on prop change).
+  const [prevAuthed, setPrevAuthed] = useState(authed);
+  if (authed !== prevAuthed) {
+    setPrevAuthed(authed);
+    if (!authed) setBackends([]);
+  }
+
+  // Backends — one-shot once a session is confirmed; immutable within it.
+  // Gated on `authed` so an anon preview never fires the protected `/backends`
+  // read (it would 401; frontend-surface-contract.md § I5).
   useEffect(() => {
+    if (!authed) return;
     let cancelled = false;
     (async () => {
       try {
         const list = await fetchBackends();
         if (!cancelled) setBackends(list);
-      } catch {
-        if (!cancelled) setBackends([]);
+      } catch (e) {
+        if (!cancelled) {
+          onAuthError(e);
+          setBackends([]);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authed, onAuthError]);
 
   // Dataset overlay — refetches on every datasetName change.
   useEffect(() => {
@@ -175,7 +190,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
   // Slow connector reachability probe. Server-side ping of the backend's own
   // GET /status; the connector node shows the result as a dot + footer line.
   // Separate from the 2 s dashboard poll — this is "is the dependency up", not
-  // "is the optimizer scoring". Drop stale health the render the backend changes.
+  // "is the optimizer scoring". Drop stale health when the backend changes.
   const [health, setHealth] = useState<BackendHealth | null>(null);
   const [prevActiveId, setPrevActiveId] = useState(activeId);
   if (activeId !== prevActiveId) {

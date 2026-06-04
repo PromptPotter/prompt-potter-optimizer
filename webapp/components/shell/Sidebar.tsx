@@ -1,6 +1,10 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWorkspace } from "@/lib/workspace";
+import { useAuth } from "@/lib/auth-context";
+import { postLogout } from "@/lib/api";
+import { BRAND } from "@/lib/brand";
+import { SignInPrompt } from "@/components/ui/states";
 import { rootCycleId } from "@/lib/ids";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { TERMS } from "@/lib/terms";
@@ -58,6 +62,21 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
   );
   // Dataset filter — null = all datasets. Not persisted; resets per visit.
   const [datasetFilter, setDatasetFilter] = useState<string | null>(null);
+
+  // Auth drives the footer (Log out is authed-only — anon sees the Topbar's
+  // Log in / Sign up instead; frontend-surface-contract.md § I4) and the
+  // campaign-list resting state (anon → sign-in prompt, not perpetual loading).
+  const { status } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
+  const handleSignOut = useCallback(async () => {
+    setSigningOut(true);
+    try {
+      await postLogout();
+      window.location.href = "/login/";
+    } catch {
+      setSigningOut(false);
+    }
+  }, []);
 
   const allGroups = useMemo(
     () => groupCampaigns(campaigns, cycles),
@@ -184,7 +203,18 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
             onSelect={setDatasetFilter}
           />
         )}
-        {!loaded && <div className="unit-library-note">loading…</div>}
+        {status !== "authed" ? (
+          status === "loading" ? (
+            <div className="unit-library-note">loading…</div>
+          ) : (
+            <SignInPrompt
+              className="unit-library-note"
+              message="Sign in to see your campaigns."
+            />
+          )
+        ) : (
+          !loaded && <div className="unit-library-note">loading…</div>
+        )}
         {loaded && groups.length === 0 && lifecycleFilter === "archived" && (
           <div className="unit-library-empty">
             <div className="empty-headline">No archived campaigns</div>
@@ -226,8 +256,24 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
         )}
       </div>
       <div className="sidebar-footer">
-        <div className="sidebar-footer-item">Support</div>
-        <div className="sidebar-footer-item">Log out</div>
+        <a
+          className="sidebar-footer-item"
+          href={BRAND.supportUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Support
+        </a>
+        {status === "authed" && (
+          <button
+            type="button"
+            className="sidebar-footer-item"
+            onClick={handleSignOut}
+            disabled={signingOut}
+          >
+            {signingOut ? "Signing out…" : "Log out"}
+          </button>
+        )}
       </div>
     </nav>
   );

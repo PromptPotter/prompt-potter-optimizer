@@ -29,7 +29,9 @@ import { ChatIngestFlow } from "./ChatIngestFlow";
 import { ListAndMintFlow } from "./ListAndMintFlow";
 import { DraftCommitFlow, type WizardStep } from "./DraftCommitFlow";
 import { CheckinLoadingWindow } from "./CheckinLoadingWindow";
+import { useAuth } from "@/lib/auth-context";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
+import { SignInPrompt } from "@/components/ui/states";
 import type { OnMinted } from "./types";
 
 // How long the demo's simulated check-in window lingers before the prefilled
@@ -53,10 +55,12 @@ interface Props {
 
 type LoadState =
   | { kind: "loading" }
+  | { kind: "needsAuth" }
   | { kind: "ready"; entries: DatasetIndexEntry[] }
-  | { kind: "error"; message: string };
+  | { kind: "error" };
 
 export function IngestPane({ open, onClose, onMinted }: Props) {
+  const { status } = useAuth();
   // Render-phase guarded reset on `open` toggles. Async fetch fires from a
   // bare effect that never synchronously setStates.
   const [prevOpen, setPrevOpen] = useState(open);
@@ -75,14 +79,29 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
   // Non-null while the demo's simulated check-in window is showing — carries the
   // model name to display. Cleared when the prefilled wizard lands.
   const [checkinModel, setCheckinModel] = useState<string | null>(null);
+  // The list's pre-fetch resting state, chosen by auth: a confirmed (or still
+  // resolving) session shows loading while the effect below fetches; an anon
+  // visitor shows the needs-auth prompt and the effect fires nothing
+  // (frontend-surface-contract.md § I1/I5).
+  const gatedInitial = (): LoadState =>
+    status === "authed" || status === "loading"
+      ? { kind: "loading" }
+      : { kind: "needsAuth" };
   if (open !== prevOpen) {
     setPrevOpen(open);
     if (open) {
-      setList({ kind: "loading" });
+      setList(gatedInitial());
       setDraft(null);
       setFlowError(null);
       setCheckinModel(null);
     }
+  }
+  // Re-resolve the resting state when auth settles while the modal is
+  // open (loading→authed kicks the fetch; →unauthed shows the prompt).
+  const [prevStatus, setPrevStatus] = useState(status);
+  if (status !== prevStatus) {
+    setPrevStatus(status);
+    if (open) setList(gatedInitial());
   }
   const draftId = draft?.draft_id ?? null;
   if (draftId !== prevDraftId) {
@@ -95,25 +114,22 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
 
   // Hand-rolled, not useFetch: `list` is mutable view state — onAddOrigin below
   // imperatively flips it back to the picker — not a read-only fetch result.
+  // Gated on a confirmed session: anon never fires the protected `/datasets`
+  // read (it would 401 and render raw; frontend-surface-contract.md § I1/I5).
   useEffect(() => {
-    if (!open) return;
+    if (!open || status !== "authed") return;
     let cancelled = false;
     fetchDatasetIndex()
       .then((r) => {
         if (!cancelled) setList({ kind: "ready", entries: r.datasets });
       })
-      .catch((e) => {
-        if (!cancelled) {
-          setList({
-            kind: "error",
-            message: e instanceof Error ? e.message : String(e),
-          });
-        }
+      .catch(() => {
+        if (!cancelled) setList({ kind: "error" });
       });
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, status]);
 
   if (!open) return null;
 
@@ -178,9 +194,15 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
       <div className="new-campaign-body">
         <em className="new-campaign-loading">Loading your collection…</em>
       </div>
+    ) : list.kind === "needsAuth" ? (
+      <div className="new-campaign-body">
+        <SignInPrompt message="Sign in to start a campaign." />
+      </div>
     ) : list.kind === "error" ? (
       <div className="new-campaign-body">
-        <p className="new-campaign-error">{list.message}</p>
+        <p className="new-campaign-error">
+          Couldn’t load your collection — retry shortly.
+        </p>
       </div>
     ) : ownedEntries.length === 0 ? (
       <ChatIngestFlow
