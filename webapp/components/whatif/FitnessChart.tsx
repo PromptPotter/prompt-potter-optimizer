@@ -138,7 +138,7 @@ export const FitnessChart = memo(function FitnessChart({
   }, [bars, labels]);
 
   // Per-bar border overlay — picks out the bar matching the shared
-  // SelectionContext. Driven by --color-selection (set in globals.css)
+  // SelectionContext. Driven by --color-selection (set in app/styles/foundation/themes.css)
   // so it matches the lineage tree's selected stub colour.
   const selectionBorder = useMemo(() => {
     if (selectedKey == null) return null;

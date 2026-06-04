@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from promptpotter.domain.escalation_signals import EscalationSignal
+    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.scoring import QueryMeasurement
 
 NurseTarget = Literal["l2", "l3"]
@@ -51,6 +52,20 @@ class LLMOutputValidator:
         return self.check(source_output, **context)
 
 
+def run_validators(
+    validators: tuple[LLMOutputValidator, ...],
+    source_output: Mapping[str, Any],
+    opt_sp: OptSearchPoint,
+) -> list[ValidatorOutcome]:
+    """Run every validator in ``validators``; return the non-``None`` outcomes."""
+    outcomes: list[ValidatorOutcome] = []
+    for validator in validators:
+        outcome = validator.run(source_output, opt_sp=opt_sp)
+        if outcome is not None:
+            outcomes.append(outcome)
+    return outcomes
+
+
 @runtime_checkable
 class StopRule(Protocol):
     """Mid-round stop rule on a running candidate's results stream.
@@ -70,4 +85,10 @@ class StopRule(Protocol):
     ) -> EscalationSignal | None: ...
 
 
-__all__ = ["LLMOutputValidator", "NurseTarget", "StopRule", "ValidatorOutcome"]
+__all__ = [
+    "LLMOutputValidator",
+    "NurseTarget",
+    "StopRule",
+    "ValidatorOutcome",
+    "run_validators",
+]

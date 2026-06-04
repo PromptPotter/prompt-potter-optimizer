@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
+from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome, run_validators
 
 PLAN_LENGTH_FLOOR_CHARS = 60
 
@@ -93,12 +93,7 @@ def run_l3_output_validators(
     opt_sp: OptSearchPoint,
 ) -> list[ValidatorOutcome]:
     """Run every registered L3-output validator; return non-None outcomes."""
-    outcomes: list[ValidatorOutcome] = []
-    for validator in L3_OUTPUT_VALIDATORS:
-        outcome = validator.run(source_output, opt_sp=opt_sp)
-        if outcome is not None:
-            outcomes.append(outcome)
-    return outcomes
+    return run_validators(L3_OUTPUT_VALIDATORS, source_output, opt_sp)
 
 
 __all__ = [

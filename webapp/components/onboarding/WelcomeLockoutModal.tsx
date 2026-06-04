@@ -8,8 +8,9 @@
 // from globals.css. New: .auth-divider (OR rule), .auth-link (blue
 // hyperlinks), .auth-legal-row (centered footer trio).
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { instance } from "@/lib/instance";
+import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 
 interface Props {
   open: boolean;
@@ -52,15 +53,9 @@ function authErrorMessage(code: string, email: string | null): string {
 
 export function WelcomeLockoutModal({ open, onClose, errorCode, errorEmail }: Props) {
   const [email, setEmail] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  // ESC + focus-trap + focus-restore from the shared hook; this modal keeps its
+  // own tall .account-modal-auth layout rather than Dialog's confirm-card.
+  const cardRef = useDialogA11y(open, onClose);
 
   if (!open) return null;
 
@@ -74,7 +69,7 @@ export function WelcomeLockoutModal({ open, onClose, errorCode, errorEmail }: Pr
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="account-modal account-modal-auth">
+      <div ref={cardRef} className="account-modal account-modal-auth">
         <header className="account-pane-head">
           <h3 id="auth-prompt-title">Log in or sign up</h3>
           <button

@@ -11,29 +11,19 @@
 // (PromptPotter, fixed). Provenance is reported honestly: `self-declared`
 // until a signed credential lands — never a "verified" pill before then.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 import { fetchHealth } from "@/lib/api";
+import { useFetch } from "@/lib/hooks/useFetch";
 
 export function AboutUnit() {
-  const [version, setVersion] = useState<string | null>(null);
   const [showHow, setShowHow] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchHealth()
-      .then((h) => {
-        if (!cancelled) setVersion(h.version);
-      })
-      .catch(() => {
-        // Health unreachable — leave version blank rather than invent one.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Health unreachable → version stays null (we render blank, never invent one).
+  const { data: health } = useFetch(() => fetchHealth(), []);
+  const version = health?.version ?? null;
 
   const verified = BRAND.verification === "verified";
   const raw = JSON.stringify(softwareApplicationLd(), null, 2);

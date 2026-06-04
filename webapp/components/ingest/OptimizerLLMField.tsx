@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { fetchLLMProviders, type LLMProvider } from "@/lib/api";
+import { fetchLLMProviders } from "@/lib/api";
 import { useAppliableField } from "@/lib/hooks/useAppliableField";
+import { useFetch } from "@/lib/hooks/useFetch";
 
 // Optimizer-LLM picker. Fetches the curated provider list at mount and
 // surfaces availability per provider — providers whose API key isn't
@@ -18,25 +18,15 @@ export function OptimizerLLMField({
   model: string;
   onApply: (provider: string, model: string) => void;
 }) {
-  const [providers, setProviders] = useState<LLMProvider[] | null>(null);
   const { local: localProvider, setLocal: setLocalProvider, dirty: providerDirty } =
     useAppliableField(provider);
   const { local: localModel, setLocal: setLocalModel, dirty: modelDirty } =
     useAppliableField(model);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchLLMProviders()
-      .then((r) => {
-        if (!cancelled) setProviders(r.providers);
-      })
-      .catch(() => {
-        if (!cancelled) setProviders([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // null while loading (renders the single-provider fallback option below);
+  // [] on error (empty dropdown), matching the prior hand-rolled behaviour.
+  const { data, error } = useFetch(() => fetchLLMProviders().then((r) => r.providers), []);
+  const providers = error ? [] : data;
 
   const selectedSpec = providers?.find((p) => p.name === localProvider);
   const dirty = providerDirty || modelDirty;

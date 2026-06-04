@@ -19,14 +19,12 @@ signal.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from typing import Any
 
+from promptpotter.application.optimization.validators._text import word_set_jaccard
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
-
-_WORD_RE = re.compile(r"\w+")
+from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome, run_validators
 
 DUPLICATE_INSERT_LINE_THRESHOLD = 3
 PARAPHRASE_REPEAT_JACCARD_THRESHOLD = 0.5
@@ -98,11 +96,7 @@ def _check_task_context_paraphrase_repeat(
         prior_value = prior.get(field_name, "")
         if not isinstance(prior_value, str) or not prior_value:
             continue
-        new_words = {w for w in _WORD_RE.findall(new_value.lower()) if len(w) > 2}
-        prior_words = {w for w in _WORD_RE.findall(prior_value.lower()) if len(w) > 2}
-        if not new_words or not prior_words:
-            continue
-        overlap = len(new_words & prior_words) / len(new_words | prior_words)
+        overlap = word_set_jaccard(new_value, prior_value)
         if overlap > worst_overlap:
             worst_overlap = overlap
             worst_field = field_name
@@ -336,14 +330,8 @@ def _check_supplemental_rule_duplicates_auto_trigger(
         )
         if not body or not rid:
             continue
-        new_words = {w for w in _WORD_RE.findall(body.lower()) if len(w) > 2}
-        if not new_words:
-            continue
         for auto_id, auto_body in AUTO_RULES.items():
-            auto_words = {w for w in _WORD_RE.findall(auto_body.lower()) if len(w) > 2}
-            if not auto_words:
-                continue
-            overlap = len(new_words & auto_words) / len(new_words | auto_words)
+            overlap = word_set_jaccard(body, auto_body)
             if overlap >= PARAPHRASE_REPEAT_JACCARD_THRESHOLD:
                 offenders.append((rid, auto_id, round(overlap, 3)))
                 break
@@ -416,12 +404,7 @@ def run_l2_output_validators(
     opt_sp: OptSearchPoint,
 ) -> list[ValidatorOutcome]:
     """Run every registered L2-output validator; return non-None outcomes."""
-    outcomes: list[ValidatorOutcome] = []
-    for validator in L2_OUTPUT_VALIDATORS:
-        outcome = validator.run(source_output, opt_sp=opt_sp)
-        if outcome is not None:
-            outcomes.append(outcome)
-    return outcomes
+    return run_validators(L2_OUTPUT_VALIDATORS, source_output, opt_sp)
 
 
 __all__ = [

@@ -20,6 +20,7 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.run_records import (
     CommandAckRecord,
     CommandRecord,
+    CycleRecord,
     ErrorRecord,
     RoundWarningRecord,
     TokenUsageRecord,
@@ -85,6 +86,22 @@ def reset_current_round(token: Token[int | None]) -> None:
     _CURRENT_ROUND.reset(token)
 
 
+def _append_record(record: CycleRecord) -> int | None:
+    """Append *record* to the active cycle ledger; return its offset.
+
+    No-ops to ``None`` when no ledger is bound (pure/test call paths stay
+    side-effect-free) or when the append raises (logged, never propagated —
+    telemetry must not break the call site)."""
+    ledger = _CYCLE_LEDGER.get()
+    if ledger is None:
+        return None
+    try:
+        return ledger.append(record)
+    except Exception:
+        logger.exception("ledger append failed for %s", type(record).__name__)
+        return None
+
+
 def emit_token_usage(
     *,
     node: str,
@@ -112,23 +129,18 @@ def emit_token_usage(
                 input_tokens,
                 threshold,
             )
-    ledger = _CYCLE_LEDGER.get()
-    if ledger is None:
-        return
-    record = TokenUsageRecord(
-        kind=kind,
-        node=node,
-        model=model,
-        input_tokens=int(input_tokens),
-        output_tokens=int(output_tokens),
-        duration_s=float(duration_s),
-        cost_usd=cost_usd,
-        round=_CURRENT_ROUND.get(),
+    _append_record(
+        TokenUsageRecord(
+            kind=kind,
+            node=node,
+            model=model,
+            input_tokens=int(input_tokens),
+            output_tokens=int(output_tokens),
+            duration_s=float(duration_s),
+            cost_usd=cost_usd,
+            round=_CURRENT_ROUND.get(),
+        )
     )
-    try:
-        ledger.append(record)
-    except Exception:
-        logger.exception("emit_token_usage append failed")
 
 
 def emit_command(
@@ -148,23 +160,17 @@ def emit_command(
     around its work. Returns the offset the record was appended at;
     ``None`` when no ledger is bound (informational — callers above
     the dispatcher already raised by then)."""
-    ledger = _CYCLE_LEDGER.get()
-    if ledger is None:
-        return None
-    record = CommandRecord(
-        command_id=command_id,
-        kind=kind,
-        payload=dict(payload),
-        idempotency_key=idempotency_key,
-        expected_version=expected_version,
-        issued_by_user_id=issued_by_user_id,
-        client_metadata=dict(client_metadata or {}),
+    return _append_record(
+        CommandRecord(
+            command_id=command_id,
+            kind=kind,
+            payload=dict(payload),
+            idempotency_key=idempotency_key,
+            expected_version=expected_version,
+            issued_by_user_id=issued_by_user_id,
+            client_metadata=dict(client_metadata or {}),
+        )
     )
-    try:
-        return ledger.append(record)
-    except Exception:
-        logger.exception("emit_command append failed")
-        return None
 
 
 def emit_command_ack(
@@ -177,14 +183,7 @@ def emit_command_ack(
 
     Same ContextVar surface as ``emit_command``; the actuator that applied
     (or refused) the command emits this through the same binding."""
-    ledger = _CYCLE_LEDGER.get()
-    if ledger is None:
-        return
-    record = CommandAckRecord(command_id=command_id, status=status, detail=detail)
-    try:
-        ledger.append(record)
-    except Exception:
-        logger.exception("emit_command_ack append failed")
+    _append_record(CommandAckRecord(command_id=command_id, status=status, detail=detail))
 
 
 def emit_error_record(
@@ -201,20 +200,15 @@ def emit_error_record(
     ``application/runner/{entry,loop}.py``; ``LiveDashboardView`` is the
     sole subscriber writing ``dashboard.json::error``. Errors emitted
     before the round loop entered carry ``round=None``."""
-    ledger = _CYCLE_LEDGER.get()
-    if ledger is None:
-        return
-    record = ErrorRecord(
-        kind=kind,
-        message=message,
-        traceback=traceback,
-        stop_reason=stop_reason,
-        round=_CURRENT_ROUND.get(),
+    _append_record(
+        ErrorRecord(
+            kind=kind,
+            message=message,
+            traceback=traceback,
+            stop_reason=stop_reason,
+            round=_CURRENT_ROUND.get(),
+        )
     )
-    try:
-        ledger.append(record)
-    except Exception:
-        logger.exception("emit_error_record append failed")
 
 
 def emit_round_warning(
@@ -231,20 +225,15 @@ def emit_round_warning(
     self-healed degradation visible on every channel (dashboard, round file,
     CLI) instead of only the server log. No-ops when no ledger is bound, so
     pure/test call paths stay side-effect-free."""
-    ledger = _CYCLE_LEDGER.get()
-    if ledger is None:
-        return
-    record = RoundWarningRecord(
-        kind=kind,
-        severity=severity,
-        message=message,
-        round=_CURRENT_ROUND.get(),
-        detail=dict(detail or {}),
+    _append_record(
+        RoundWarningRecord(
+            kind=kind,
+            severity=severity,
+            message=message,
+            round=_CURRENT_ROUND.get(),
+            detail=dict(detail or {}),
+        )
     )
-    try:
-        ledger.append(record)
-    except Exception:
-        logger.exception("emit_round_warning append failed")
 
 
 __all__ = [

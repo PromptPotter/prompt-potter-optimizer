@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
 import { marked } from "marked";
 import { fetchCycleFile } from "@/lib/api";
+import { useFetch } from "@/lib/hooks/useFetch";
 import { RoundFileView, type RoundDoc } from "./RoundFileView";
 
 interface Props {
@@ -47,74 +47,74 @@ function isRoundFile(selected: { scope: string; path: string } | null): boolean 
 }
 
 export function FileViewer({ campaignId, cycleId, selected }: Props) {
-  const hasSelection = !!(campaignId && cycleId && selected);
-  const [state, setState] = useState<ViewerState>(hasSelection ? LOADING : EMPTY);
+  // Bundle the non-null trio so the fetcher closure inherits the narrowing.
+  const ready = campaignId && cycleId && selected ? { campaignId, cycleId, selected } : null;
 
-  // Set the placeholder render-phase on a selection change — LOADING while
-  // the effect below fetches, EMPTY when nothing is selected. Keeps the
-  // effect itself free of synchronous setState.
-  const fileKey = `${campaignId}|${cycleId}|${selected?.scope ?? ""}|${selected?.path ?? ""}`;
-  const [prevFileKey, setPrevFileKey] = useState(fileKey);
-  if (fileKey !== prevFileKey) {
-    setPrevFileKey(fileKey);
-    setState(hasSelection ? LOADING : EMPTY);
-  }
+  // useFetch owns cancellation + the key-scoped reset (data blanks to null on a
+  // deps change, in-render) — so this component no longer hand-rolls either.
+  const { data, error } = useFetch<ViewerState>(
+    ready
+      ? async (): Promise<ViewerState> => {
+          const r = await fetchCycleFile(
+            ready.campaignId,
+            ready.cycleId,
+            ready.selected.scope,
+            ready.selected.path,
+          );
+          const ct = r.content_type ?? "";
+          const meta = `${r.size ?? "?"} B • ${ct || "text"}`;
+          if (r.content == null) {
+            return {
+              meta,
+              body:
+                (r.size ?? 0) > 2 * 1024 * 1024
+                  ? "(preview truncated — file > 2 MiB)"
+                  : "(preview unavailable — binary)",
+              contentType: ct,
+              isMarkdown: false,
+              roundDoc: null,
+              rawJson: "",
+              error: null,
+            };
+          }
+          if (ct === "json") {
+            let body = r.content;
+            let parsed: unknown = null;
+            try {
+              parsed = JSON.parse(r.content);
+              body = JSON.stringify(parsed, null, 2);
+            } catch {
+              /* keep raw */
+            }
+            const roundDoc =
+              isRoundFile(ready.selected) && parsed && typeof parsed === "object"
+                ? (parsed as RoundDoc)
+                : null;
+            return { meta, body, contentType: ct, isMarkdown: false, roundDoc, rawJson: body, error: null };
+          }
+          if (ct === "markdown") {
+            const html = await Promise.resolve(marked.parse(r.content));
+            return {
+              meta,
+              body: typeof html === "string" ? html : r.content,
+              contentType: ct,
+              isMarkdown: true,
+              roundDoc: null,
+              rawJson: "",
+              error: null,
+            };
+          }
+          return { meta, body: r.content, contentType: ct, isMarkdown: false, roundDoc: null, rawJson: "", error: null };
+        }
+      : null,
+    [campaignId, cycleId, selected?.scope ?? "", selected?.path ?? ""],
+  );
 
-  useEffect(() => {
-    if (!campaignId || !cycleId || !selected) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetchCycleFile(campaignId, cycleId, selected.scope, selected.path);
-        if (cancelled) return;
-        const ct = r.content_type ?? "";
-        const meta = `${r.size ?? "?"} B • ${ct || "text"}`;
-        if (r.content == null) {
-          setState({
-            meta,
-            body: (r.size ?? 0) > 2 * 1024 * 1024
-              ? "(preview truncated — file > 2 MiB)"
-              : "(preview unavailable — binary)",
-            contentType: ct,
-            isMarkdown: false,
-            roundDoc: null,
-            rawJson: "",
-            error: null,
-          });
-          return;
-        }
-        if (ct === "json") {
-          let body = r.content;
-          let parsed: unknown = null;
-          try {
-            parsed = JSON.parse(r.content);
-            body = JSON.stringify(parsed, null, 2);
-          } catch { /* keep raw */ }
-          const roundDoc = isRoundFile(selected) && parsed && typeof parsed === "object" ? (parsed as RoundDoc) : null;
-          setState({ meta, body, contentType: ct, isMarkdown: false, roundDoc, rawJson: body, error: null });
-        } else if (ct === "markdown") {
-          const html = await Promise.resolve(marked.parse(r.content));
-          setState({ meta, body: typeof html === "string" ? html : r.content, contentType: ct, isMarkdown: true, roundDoc: null, rawJson: "", error: null });
-        } else {
-          setState({ meta, body: r.content, contentType: ct, isMarkdown: false, roundDoc: null, rawJson: "", error: null });
-        }
-      } catch (e) {
-        if (cancelled) return;
-        setState({
-          meta: "",
-          body: `Failed to load: ${(e as Error).message}`,
-          contentType: "",
-          isMarkdown: false,
-          roundDoc: null,
-          rawJson: "",
-          error: (e as Error).message,
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [campaignId, cycleId, selected]);
+  const state: ViewerState = !ready
+    ? EMPTY
+    : error
+      ? { ...EMPTY, meta: "", body: `Failed to load: ${error}`, error }
+      : (data ?? LOADING);
 
   const headerPath = selected ? `${selected.scope}: ${selected.path}` : "(no file selected)";
   return (

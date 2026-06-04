@@ -91,7 +91,10 @@ CheckFn = Callable[[dict[str, Any], ValidatorContext], CheckResult]
 
 # --- helpers ---------------------------------------------------------------
 
-_WORD_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
+# Phrase-seed tokens: alphabetic-start, 3+ chars (distinct from the word-set
+# tokenizer in ``_text.py`` — this one excludes digits and underscore-first
+# tokens because it seeds noun-phrase substring matches, not set overlap).
+_PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 
 def _variant_text_blob(variant: dict[str, Any]) -> str:
@@ -113,7 +116,7 @@ def _variant_text_blob(variant: dict[str, Any]) -> str:
 def _key_phrases(text: str, *, min_len: int = 4, max_phrases: int = 6) -> list[str]:
     """Extract candidate noun phrases from a brief — substring-match seeds."""
     seen: list[str] = []
-    for token in _WORD_RE.findall(text or ""):
+    for token in _PHRASE_TOKEN_RE.findall(text or ""):
         lowered = token.lower()
         if len(lowered) < min_len or lowered in seen:
             continue

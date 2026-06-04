@@ -33,7 +33,7 @@ export const BRAND = {
   supportUrl: process.env.NEXT_PUBLIC_SUPPORT_URL || "https://promptpotter.dev/support",
   legalUrl: process.env.NEXT_PUBLIC_LEGAL_URL || "https://promptpotter.dev/legal",
   license: process.env.NEXT_PUBLIC_LICENSE || "https://promptpotter.dev/legal/license",
-  // Mirrors the dark-theme body background in app/globals.css + layout's
+  // Mirrors the dark-theme body background in app/styles/foundation/themes.css + layout's
   // themeColor — the install/splash chrome a browser paints from the manifest.
   themeColor: "#0d0d0d",
   backgroundColor: "#0d0d0d",

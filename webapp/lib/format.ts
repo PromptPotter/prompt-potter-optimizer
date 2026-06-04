@@ -44,6 +44,15 @@ export function fmtUsd(n: number): string {
   return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
 
+// Compact bare number — "3.4M" / "12.0k" / "840". For headline counts where
+// the unit is named elsewhere (a "Tokens" chart title); use fmtTokens when the
+// "tok" suffix belongs on the number itself.
+export function fmtCompact(v: number): string {
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
+  return v.toLocaleString();
+}
+
 // Token count — "920 tok" / "12k tok" / "3.4M tok".
 export function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;

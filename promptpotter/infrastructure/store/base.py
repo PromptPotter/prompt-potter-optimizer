@@ -8,7 +8,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 _SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
 
@@ -64,40 +64,40 @@ def _atomic_replace(tmp: str, path: Path) -> None:
         raise last_exc
 
 
+def _atomic_write(path: Path, write_fn: Callable[[IO[str]], object]) -> None:
+    """Atomic text write: create parent dirs, write via a temp file, then
+    :func:`_atomic_replace`. ``write_fn`` receives the open file and does the
+    format-specific write (json.dump / f.write). On any error the temp file is
+    removed and the original is left untouched.
+    """
+    ensure_parent_dir(path)
+    fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            write_fn(f)
+        _atomic_replace(tmp, path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def write_json(
     path: Path,
     data: Any,
     *,
     default: Callable[[Any], Any] | None = None,
 ) -> None:
-    """Write *data* as pretty JSON atomically via temp-file + :func:`_atomic_replace`.
+    """Write *data* as pretty JSON atomically.
 
     ``default`` forwards to ``json.dump`` for non-native types (e.g. ``str`` to coerce enums/datetimes).
     """
-    ensure_parent_dir(path)
-    fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False, default=default)
-        _atomic_replace(tmp, path)
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+    _atomic_write(path, lambda f: json.dump(data, f, indent=2, ensure_ascii=False, default=default))
 
 
 def write_text(path: Path, content: str) -> None:
-    """Write *content* atomically via temp-file + :func:`_atomic_replace`; creates parent dirs."""
-    ensure_parent_dir(path)
-    fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        _atomic_replace(tmp, path)
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+    """Write *content* atomically; creates parent dirs."""
+    _atomic_write(path, lambda f: f.write(content))
 
 
 def read_json(path: Path) -> Any:
@@ -108,17 +108,19 @@ def read_json(path: Path) -> Any:
 
 def read_json_optional(path: Path) -> Any | None:
     """Read JSON from *path*, returning ``None`` if it does not exist."""
-    if not path.exists():
+    try:
+        return read_json(path)
+    except FileNotFoundError:
         return None
-    return read_json(path)
 
 
 def read_text_optional(path: Path, default: str = "") -> str:
     """Read text from *path*, returning ``default`` if it does not exist."""
-    if not path.exists():
+    try:
+        with open(_long_path(path), encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
         return default
-    with open(_long_path(path), encoding="utf-8") as f:
-        return f.read()
 
 
 def append_jsonl(path: Path, item: dict[str, Any]) -> Path:

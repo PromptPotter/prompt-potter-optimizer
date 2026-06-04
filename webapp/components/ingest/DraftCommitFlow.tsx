@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   fetchUserSettings,
   IngestApiError,
@@ -19,6 +19,7 @@ import { OriginCheckinPanel } from "./OriginCheckinPanel";
 import { GapList } from "./GapList";
 import { PipelinePromptStep } from "./PipelinePromptStep";
 import { CheckinLoadingWindow } from "./CheckinLoadingWindow";
+import { useFetch } from "@/lib/hooks/useFetch";
 import type { OnMinted } from "./types";
 
 export type WizardStep = 1 | 2 | 3;
@@ -55,18 +56,8 @@ export function DraftCommitFlow({
   const [lastResolution, setLastResolution] = useState<OriginLastResolution | null>(null);
   // Demo mode (Account → Preferences) skips the check-in and treats prompt
   // edits as throwaway. Defaults closed until the one-shot fetch resolves.
-  const [demo, setDemo] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    fetchUserSettings()
-      .then((s) => {
-        if (!cancelled) setDemo(s.demo_mode_enabled);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: settings } = useFetch(() => fetchUserSettings(), []);
+  const demo = settings?.demo_mode_enabled ?? false;
 
   const readiness = originReadiness(draft);
   const taskReady = draft.resolved["task_description"] === "confirmed";

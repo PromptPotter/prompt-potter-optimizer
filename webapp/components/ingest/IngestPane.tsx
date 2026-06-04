@@ -29,6 +29,7 @@ import { ChatIngestFlow } from "./ChatIngestFlow";
 import { ListAndMintFlow } from "./ListAndMintFlow";
 import { DraftCommitFlow, type WizardStep } from "./DraftCommitFlow";
 import { CheckinLoadingWindow } from "./CheckinLoadingWindow";
+import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 import type { OnMinted } from "./types";
 
 // How long the demo's simulated check-in window lingers before the prefilled
@@ -88,7 +89,12 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
     setPrevDraftId(draftId);
     setStep(1);
   }
+  // ESC + focus-trap + focus-restore from the shared hook; this modal keeps its
+  // own .new-campaign-modal wizard layout rather than Dialog's confirm-card.
+  const cardRef = useDialogA11y(open, onClose);
 
+  // Hand-rolled, not useFetch: `list` is mutable view state — onAddOrigin below
+  // imperatively flips it back to the picker — not a read-only fetch result.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -208,7 +214,7 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="new-campaign-modal">
+      <div ref={cardRef} className="new-campaign-modal">
         <header className="new-campaign-header">
           <h2>
             {checkinModel !== null

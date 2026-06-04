@@ -6,6 +6,7 @@ import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/hooks/useDatasetPreview";
+import { useFetch } from "@/lib/hooks/useFetch";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
 import { Sidebar } from "@/components/shell/Sidebar";
@@ -62,7 +63,6 @@ function AppShellInner() {
   const [newCampaignOpen, setNewCampaignOpen] = useState(false);
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
-  const [pipeline, setPipeline] = useState<PipelineDoc | null>(null);
   // Hard-sample view scope — campaign = only the current campaign's cycles
   // (the default view), dataset = every campaign on this dataset, which is
   // the real series the optimizer's picker follows. Clicking the heat-map
@@ -116,23 +116,17 @@ function AppShellInner() {
   const dashState = useDashboard();
   const { dash, dashRound, isLive, runPhaseResolved } = dashState;
 
-  // One-shot pipeline (topology) lookup
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const p = await fetchPipeline();
-        if (!cancelled) setPipeline(p as PipelineDoc);
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // One-shot pipeline (topology) lookup. Errors → pipeline stays null (panes
+  // that need it render their own empty state); no retry needed for a static read.
+  const { data: pipeline } = useFetch<PipelineDoc>(
+    () => fetchPipeline().then((p) => p as PipelineDoc),
+    [],
+  );
 
-  // Cycle title (dataset name) from index.json
+  // Cycle title (dataset name) from index.json. Hand-rolled on purpose: it
+  // fans one fetch into two state slots (title + started-at) AND must KEEP the
+  // prior title across a unit switch — useFetch blanks data on a deps change,
+  // which would flash the raw cycle-id hash before the new index.json lands.
   useEffect(() => {
     if (!campaignId || !cycleId) return;
     let cancelled = false;

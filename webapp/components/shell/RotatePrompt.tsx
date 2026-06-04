@@ -6,7 +6,7 @@
 // On landscape or ≥768px the children render normally.
 //
 // Pure-CSS gating is preferred — the `.rotate-prompt-host` / `.rotate-
-// prompt-children` / `.rotate-prompt-card` classes in `globals.css` do
+// prompt-children` / `.rotate-prompt-card` classes in `app/styles/foundation/responsive.css` do
 // the work without involving React. The `useIsPortraitPhone()` branch
 // only matters when the children's effect tree should also be skipped
 // (heavy SVG layout calcs, etc.) — pass `skipRender` for that case.

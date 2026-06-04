@@ -10,6 +10,9 @@
 
 import { useEffect, useState } from "react";
 import { AboutUnit } from "./AboutUnit";
+import { fmtCompact } from "@/lib/format";
+import { useFetch } from "@/lib/hooks/useFetch";
+import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
 import {
   fetchActivity,
@@ -20,7 +23,6 @@ import {
   postLogout,
   type ActivityBucket,
   type ActivityGroupBy,
-  type ActivityResponse,
   type ActivityWindow,
   type MeResponse,
   type QuotaStatus,
@@ -32,6 +34,14 @@ interface Props {
 }
 
 type AccountTab = "profile" | "security" | "activity" | "preferences" | "about";
+
+const TAB_TITLES: Record<AccountTab, string> = {
+  profile: "Profile details",
+  security: "Security",
+  activity: "Activity",
+  preferences: "Preferences",
+  about: "About this unit",
+};
 
 const PROVIDER_LABEL: Record<string, string> = {
   google: "Google",
@@ -51,44 +61,13 @@ const ACTIVITY_WINDOWS: { id: ActivityWindow; label: string }[] = [
 ];
 
 export function AccountModal({ open, onClose }: Props) {
-  const [me, setMe] = useState<MeResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<AccountTab>("profile");
-  // Render-phase reset on (re-)open so stale error / data from a prior
-  // session don't flash into view. The sanctioned alternative to a
-  // setState-in-effect (see webapp CLAUDE.md).
-  const [prevOpen, setPrevOpen] = useState(open);
-  if (open !== prevOpen) {
-    setPrevOpen(open);
-    if (open) {
-      setError(null);
-      setMe(null);
-    }
-  }
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    fetchMe()
-      .then((data) => {
-        if (!cancelled) setMe(data);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  // `open` in the deps key means useFetch re-runs (and blanks me/error) on every
+  // open — stale data from a prior session never flashes in, so no separate reset.
+  const { data: me, error } = useFetch(open ? () => fetchMe() : null, [open]);
+  // ESC + focus-trap + focus-restore from the shared hook; this modal keeps its
+  // own two-pane .account-modal layout rather than Dialog's confirm-card.
+  const cardRef = useDialogA11y(open, onClose);
 
   if (!open) return null;
 
@@ -102,7 +81,7 @@ export function AccountModal({ open, onClose }: Props) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="account-modal">
+      <div ref={cardRef} className="account-modal">
         <nav className="account-nav" aria-label="Account sections">
           <div className="account-nav-head">
             <h2>Account</h2>
@@ -158,17 +137,7 @@ export function AccountModal({ open, onClose }: Props) {
         </nav>
         <section className="account-pane">
           <header className="account-pane-head">
-            <h3>
-              {tab === "profile"
-                ? "Profile details"
-                : tab === "security"
-                  ? "Security"
-                  : tab === "preferences"
-                    ? "Preferences"
-                    : tab === "about"
-                      ? "About this unit"
-                      : "Activity"}
-            </h3>
+            <h3>{TAB_TITLES[tab]}</h3>
             <button
               type="button"
               className="account-close"
@@ -200,6 +169,9 @@ function PreferencesTab() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Hand-rolled, not useFetch: `demo` is mutable local state the toggle below
+  // writes after each PATCH, not a read-only fetch result — the server load
+  // only seeds it.
   useEffect(() => {
     let cancelled = false;
     fetchUserSettings()
@@ -407,23 +379,11 @@ function ConnectedAccountsRow({ me }: { me: MeResponse }) {
 }
 
 function SecurityTab({ me }: { me: MeResponse }) {
-  const [quota, setQuota] = useState<QuotaStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data: quota, error: quotaError } = useFetch(() => fetchQuotaStatus(), []);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchQuotaStatus()
-      .then((q) => {
-        if (!cancelled) setQuota(q);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Either failure mode surfaces in the same banner; the quota read is the hook's.
+  const error = quotaError ?? signOutError;
 
   const handleSignOut = async () => {
     setSigningOut(true);
@@ -431,7 +391,7 @@ function SecurityTab({ me }: { me: MeResponse }) {
       await postLogout();
       window.location.href = "/login";
     } catch (e) {
-      setError(String(e));
+      setSignOutError(String(e));
       setSigningOut(false);
     }
   };
@@ -507,31 +467,9 @@ function QuotaCard({ quota }: { quota: QuotaStatus }) {
 function ActivityTab() {
   const [window, setWindow] = useState<ActivityWindow>("1d");
   const [groupBy, setGroupBy] = useState<ActivityGroupBy>("model");
-  const [data, setData] = useState<ActivityResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Render-phase reset when window or group_by changes so the old
-  // buckets don't briefly render against the new axis labels.
-  const [prevKey, setPrevKey] = useState(`${window}|${groupBy}`);
-  const key = `${window}|${groupBy}`;
-  if (key !== prevKey) {
-    setPrevKey(key);
-    setData(null);
-    setError(null);
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchActivity(window, groupBy)
-      .then((r) => {
-        if (!cancelled) setData(r);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [window, groupBy]);
+  // useFetch blanks data on the (window, group_by) key change in-render, so the
+  // old buckets never render against the new axis labels — the reset is built in.
+  const { data, error } = useFetch(() => fetchActivity(window, groupBy), [window, groupBy]);
 
   const labels = data?.series_labels ?? [];
   const palette = _palette(labels.length);
@@ -595,7 +533,7 @@ function ActivityTab() {
       />
       <ActivityBarChart
         title="Tokens"
-        valueLabel={data ? _formatCompact(data.total_tokens) : "0"}
+        valueLabel={data ? fmtCompact(data.total_tokens) : "0"}
         buckets={data?.buckets ?? []}
         labels={labels}
         palette={palette}
@@ -705,12 +643,6 @@ function _palette(n: number): string[] {
   const out: string[] = [];
   for (let i = 0; i < n; i += 1) out.push(_CHART_PALETTE[i % _CHART_PALETTE.length]);
   return out;
-}
-
-function _formatCompact(v: number): string {
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
-  return v.toLocaleString();
 }
 
 function ProviderIcon({ provider }: { provider: string }) {

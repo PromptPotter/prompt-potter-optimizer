@@ -464,7 +464,7 @@ export function HardSamplesTable({
               const meas = stablePerSample?.get(item.sample_id) ?? [];
               const byOrd = byOrdBySample.get(item.sample_id) ?? EMPTY_BY_ORD;
               // Mark every cell in the row currently being scored so the
-              // soft-blink keyframe (globals.css) animates the whole row,
+              // soft-blink keyframe (app/styles/domains/hard-samples.css) animates the whole row,
               // not just one cell. Independent of the sort-sync toggle.
               // Gated on `isLive` + the scoring phase so a stranded
               // `current_sample_id` (process killed mid-sample, or a

@@ -6,7 +6,7 @@
 // negative case), and the first client tick reads the real `matchMedia`
 // value. Same pattern as `useLocalStorage.ts`.
 //
-// Most responsive behaviour stays in CSS (`@media` rules in globals.css).
+// Most responsive behaviour stays in CSS (`@media` rules in app/styles/).
 // Reach for these hooks only when the component tree itself needs to
 // branch — e.g. skipping an expensive render subtree on portrait phone,
 // or swapping a hover affordance for a tap affordance.
