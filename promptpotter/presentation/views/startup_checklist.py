@@ -7,7 +7,7 @@ the sequence advance instead of staring at an opaque gap before origin
 scoring.
 
 Display-only: every fact echoed here is already persisted to disk
-(``campaign.json``, ``dashboard.json``, ``checkin_cache.json``, …) — this
+(``campaign.json``, ``dashboard.json``, ``task_context.json``, …) — this
 is a progress echo, not a new source of truth.
 """
 

@@ -1,8 +1,33 @@
 "use client";
-import type { NodeDataLike, PipelineView, PipelineViewNode } from "@/components/workflow/types";
+import type { PipelineView, PipelineViewNode } from "@/components/workflow/types";
 import type { ConnectorView } from "@/lib/types/connector";
+import type { NodeConfigParam } from "@/lib/api";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { useSelection } from "@/lib/SelectionContext";
+import { cx } from "@/lib/cx";
+
+// The backend target LLM is being called throughout L1 scoring (and origin).
+// `dash.state` cycles scoring → between_samples/between_candidates → scoring as
+// each sample lands, so all four count as active or the node would flicker to
+// "idle" between every sample. The optimizer phases (l1_generate / l2_refining /
+// …) are NOT here — there the optimizer LLM runs and the backend sits idle.
+const BACKEND_ACTIVE_PHASES = new Set([
+  "scoring",
+  "origin",
+  "between_samples",
+  "between_candidates",
+]);
+
+// The node's configured model from the dataset overlay (the `model` param in the
+// node-config schema). This is what to show when live — the live `current_round.
+// nodes` map only ever carries OPTIMIZER node calls, never the backend target.
+function configuredModel(
+  nodeId: string,
+  nodeConfigSchema: Record<string, NodeConfigParam[]> | null,
+): string | null {
+  const m = nodeConfigSchema?.[nodeId]?.find((p) => p.key === "model")?.value;
+  return typeof m === "string" && m ? m : null;
+}
 
 interface Props {
   samplesOpen: boolean;
@@ -77,24 +102,30 @@ function interiorNodes(view: PipelineView): PipelineViewNode[] {
 
 // Single-node case: keep the original glassmorphic LLM chip. The label text
 // stays "LLM" verbatim — even though the node id might be `llm_only`, the
-// chip is a brand surface, not a dump of the wire identifier. Model name
-// comes from dash.current_round.nodes; fall back to "idle" when the cycle
-// hasn't fired the node yet. Clickable — selects the node so BackendNodeDetail
-// opens (same SelectionContext.node axis the multi-node strip writes).
+// chip is a brand surface, not a dump of the wire identifier. Shows "idle" at
+// rest; when the run is live AND the backend is actually being called (scoring/
+// origin) it shows the configured model + an active pulse. Clickable — selects
+// the node so BackendNodeDetail opens (same SelectionContext.node axis the
+// multi-node strip writes).
 function SingleNodeChip({
   node,
-  currentNodes,
+  nodeConfigSchema,
+  phase,
+  isLive,
 }: {
   node: PipelineViewNode;
-  currentNodes: Record<string, NodeDataLike>;
+  nodeConfigSchema: Record<string, NodeConfigParam[]> | null;
+  phase: string | null;
+  isLive: boolean;
 }) {
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
-  const model = currentNodes[node.id]?.model ?? "idle";
+  const active = isLive && BACKEND_ACTIVE_PHASES.has(phase ?? "");
+  const model = active ? (configuredModel(node.id, nodeConfigSchema) ?? "running") : "idle";
   const isSelected = selected === node.id;
   return (
     <button
       type="button"
-      className={`wf-hero-node llm${isSelected ? " selected" : ""}`}
+      className={cx("wf-hero-node", "llm", isSelected && "selected", active && "active")}
       aria-pressed={isSelected}
       aria-label={`Node: ${node.label}`}
       onClick={() => setSelected(isSelected ? null : node.id)}
@@ -116,11 +147,15 @@ function SingleNodeChip({
 function MultiNodeStrip({
   view,
   connector,
-  currentNodes,
+  nodeConfigSchema,
+  phase,
+  isLive,
 }: {
   view: PipelineView;
   connector: string | null;
-  currentNodes: Record<string, NodeDataLike>;
+  nodeConfigSchema: Record<string, NodeConfigParam[]> | null;
+  phase: string | null;
+  isLive: boolean;
 }) {
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
   const interior = interiorNodes(view);
@@ -164,15 +199,21 @@ function MultiNodeStrip({
         {interior.map((n, i) => {
           const isSelected = selected === n.id;
           const isLlm = n.kind === "llm";
-          const model = isLlm ? currentNodes[n.id]?.model : null;
-          const cx = cxFor(i);
-          const dotCls = `node kind-${n.kind || "tool"}${isSelected ? " selected" : ""}`;
+          const active = isLlm && isLive && BACKEND_ACTIVE_PHASES.has(phase ?? "");
+          const model = active ? (configuredModel(n.id, nodeConfigSchema) ?? "running") : null;
+          const cxPos = cxFor(i);
+          const dotCls = cx(
+            "node",
+            `kind-${n.kind || "tool"}`,
+            isSelected && "selected",
+            active && "active",
+          );
           const parts = labelLines(n.label);
           return (
             <g
               key={n.id}
               className="wf-hero-multi-node"
-              transform={`translate(${cx} 0)`}
+              transform={`translate(${cxPos} 0)`}
               role="button"
               tabIndex={0}
               aria-pressed={isSelected}
@@ -236,10 +277,18 @@ export function TargetPipelineHero({ samplesOpen, onToggle, cv }: Props) {
       {isSingle ? (
         <SingleNodeChip
           node={interior[0] ?? { id: "llm", label: "LLM", kind: "llm" }}
-          currentNodes={cv.currentNodes}
+          nodeConfigSchema={cv.nodeConfigSchema}
+          phase={cv.phase}
+          isLive={cv.isLive}
         />
       ) : (
-        <MultiNodeStrip view={cv.view!} connector={cv.connector} currentNodes={cv.currentNodes} />
+        <MultiNodeStrip
+          view={cv.view!}
+          connector={cv.connector}
+          nodeConfigSchema={cv.nodeConfigSchema}
+          phase={cv.phase}
+          isLive={cv.isLive}
+        />
       )}
       <div className="wf-hero-arrow" />
       <button

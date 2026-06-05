@@ -11,6 +11,7 @@ import type {
 import {
   IngestApiError,
   postDraftFromDataset,
+  postEditDraftCampaign,
   postIngestDataset,
   postReplaceDataset,
   postResolveOrigin,
@@ -63,14 +64,20 @@ interface Props {
 // One durable chat message; the thread renders from a list of these.
 type ChatMsg =
   | { id: string; kind: "user-file"; name: string; rows: number | null }
+  | { id: string; kind: "user"; text: string }
   | { id: string; kind: "ai"; text: string }
   | { id: string; kind: "error"; text: string };
 
 // Transient ingest-pipeline status, separate from the durable thread — it's
-// replaced (not appended) as the upload → check-in → ready sequence advances.
+// replaced (not appended) as the upload → context → check-in → ready sequence
+// advances.
 type IngestPhase =
   | { stage: "idle" }
   | { stage: "uploading" }
+  // Parsed, but the operator hasn't said what the task is yet. The chat asks
+  // for context here and waits — the origin check-in needs it to configure
+  // anything, so we never burn the call on an empty task.
+  | { stage: "awaiting-context"; draft: DraftCampaignWire }
   | { stage: "checkin"; model: string }
   // A dropped file's name matches a dataset already in the collection. Rather
   // than a dead-end 409, the chat offers the safe choices (use existing / save
@@ -117,8 +124,11 @@ export function ChatPane({
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [phase, setPhase] = useState<IngestPhase>({ stage: "idle" });
   const [dragging, setDragging] = useState(false);
+  // The operator's one-message task description, typed while awaiting context.
+  const [inputText, setInputText] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const busy = phase.stage === "uploading" || phase.stage === "checkin";
+  const awaitingContext = phase.stage === "awaiting-context";
 
   // Drop a tabular file → upload → run the origin check-in → surface the recap
   // + the "Set up campaign" CTA. Any format the backend rejects (unsupported,
@@ -168,6 +178,28 @@ export function ChatPane({
       ),
     );
 
+    // A pre-filled draft (derived from an existing dataset) carries its task —
+    // resolve straight away. A fresh upload has none, so ask for context first
+    // rather than running the check-in on an empty task.
+    if (draft.task_description.trim()) {
+      await runCheckin(draft);
+      return;
+    }
+    setMessages((m) => [
+      ...m,
+      {
+        id: crypto.randomUUID(),
+        kind: "ai",
+        text: `Parsed ${draft.n_samples} rows. Describe the task in one message — as much as you can about what the model should do with each row. I’ll use it to set everything up.`,
+      },
+    ]);
+    setPhase({ stage: "awaiting-context", draft });
+  };
+
+  // The origin check-in — the single LLM call that configures the draft from
+  // the operator's context. Shared by the auto-path (pre-filled draft) and the
+  // context-submit path below.
+  const runCheckin = async (draft: DraftCampaignWire) => {
     setPhase({ stage: "checkin", model: draft.optimizer_model || "the check-in model" });
     let resolved = draft;
     let resolution: OriginLastResolution | null = null;
@@ -179,7 +211,7 @@ export function ChatPane({
       recap = resolution?.recap || resolution?.assessment || plainLanguageRecap(resolved);
     } catch (e) {
       // The check-in failed but the draft exists — let the operator proceed to
-      // the wizard (which has its own "Set up with AI" retry).
+      // the setup window, which surfaces the gaps.
       recap = plainLanguageRecap(resolved);
       setMessages((m) => [
         ...m,
@@ -188,6 +220,29 @@ export function ChatPane({
     }
     setMessages((m) => [...m, { id: crypto.randomUUID(), kind: "ai", text: recap }]);
     setPhase({ stage: "ready", draft: resolved, resolution });
+  };
+
+  // The operator answered the "describe the task" ask: write the context onto
+  // the draft, then run the one check-in call.
+  const submitContext = async () => {
+    if (phase.stage !== "awaiting-context") return;
+    const text = inputText.trim();
+    if (!text) return;
+    const draft = phase.draft;
+    setInputText("");
+    setMessages((m) => [...m, { id: crypto.randomUUID(), kind: "user", text }]);
+    let updated = draft;
+    try {
+      updated = await postEditDraftCampaign(draft.draft_id, { task_description: text });
+    } catch (e) {
+      setMessages((m) => [
+        ...m,
+        { id: crypto.randomUUID(), kind: "error", text: IngestApiError.toOperatorMessage(e) },
+      ]);
+      setPhase({ stage: "awaiting-context", draft });
+      return;
+    }
+    await runCheckin(updated);
   };
 
   const onDatasetFile = (file: File) => void ingestAndResolve(file);
@@ -411,6 +466,10 @@ export function ChatPane({
             {messages.map((msg) =>
               msg.kind === "user-file" ? (
                 <ChatFileChip key={msg.id} name={msg.name} rows={msg.rows} />
+              ) : msg.kind === "user" ? (
+                <div key={msg.id} className="chat-msg user">
+                  {msg.text}
+                </div>
               ) : msg.kind === "ai" ? (
                 <div key={msg.id} className="chat-msg ai">
                   {msg.text}
@@ -519,8 +578,33 @@ export function ChatPane({
                 <path d="M14.5 7.5 8 14a3.5 3.5 0 0 1-4.95-4.95L9.5 2.6a2.4 2.4 0 0 1 3.4 3.4L6.4 12.5a1.3 1.3 0 0 1-1.83-1.83L11 4.2" />
               </svg>
             </button>
-            <textarea className="chat-input" placeholder="Drop a CSV, TSV, JSON or Excel file…" rows={1} disabled aria-label="Chat input" />
-            <button className="chat-send" type="button" disabled>Send</button>
+            <textarea
+              className="chat-input"
+              placeholder={
+                awaitingContext
+                  ? "Describe the task in one message…"
+                  : "Drop a CSV, TSV, JSON or Excel file…"
+              }
+              rows={1}
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => {
+                if (awaitingContext && e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void submitContext();
+                }
+              }}
+              disabled={!awaitingContext}
+              aria-label="Chat input"
+            />
+            <button
+              className="chat-send"
+              type="button"
+              disabled={!awaitingContext || !inputText.trim()}
+              onClick={() => void submitContext()}
+            >
+              Send
+            </button>
           </div>
         </div>
 

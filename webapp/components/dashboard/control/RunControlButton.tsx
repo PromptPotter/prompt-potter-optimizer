@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { postPauseCycle, postResumeCycle, postStartRun, IngestApiError } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
+import { phasePauseLabel } from "@/lib/run-phase";
 import type { DashboardSnapshot } from "@/lib/poll";
 
 interface Props {
@@ -43,6 +44,19 @@ export function RunControlButton({ campaignId, cycleId, dash }: Props) {
     runPhase === "paused" ? "paused" : runPhase === "running" ? "running" : "stopped";
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // True from the moment Pause is clicked until the run actually declares
+  // `paused` — the run finishes the current sample (persisting its datapoint)
+  // before halting, so this window explains the wait instead of looking hung.
+  const [pausing, setPausing] = useState(false);
+
+  // Render-phase guarded reset (webapp/CLAUDE.md § State reset on prop change):
+  // clear the pausing affordance the instant the run leaves "running" — it has
+  // paused (or stopped/finished), so the "will pause…" message is done.
+  const [prevRunPhase, setPrevRunPhase] = useState(runPhase);
+  if (runPhase !== prevRunPhase) {
+    setPrevRunPhase(runPhase);
+    if (runPhase !== "running") setPausing(false);
+  }
 
   if (!campaignId || !cycleId) return null;
 
@@ -62,7 +76,10 @@ export function RunControlButton({ campaignId, cycleId, dash }: Props) {
   };
 
   const onPlayPause = () => {
-    if (phase === "running") return act(() => postPauseCycle(campaignId, cycleId));
+    if (phase === "running") {
+      setPausing(true);
+      return act(() => postPauseCycle(campaignId, cycleId));
+    }
     if (phase === "paused") return act(() => postResumeCycle(campaignId, cycleId));
     return act(() => postStartRun(campaignId, cycleId, "resume"));
   };
@@ -88,6 +105,11 @@ export function RunControlButton({ campaignId, cycleId, dash }: Props) {
       >
         {playing ? PAUSE_ICON : PLAY_ICON}
       </button>
+      {pausing && phase === "running" ? (
+        <span className="run-ctl-pausing" role="status" aria-live="polite">
+          Finishing {phasePauseLabel(dash?.state)} — will pause after the current sample.
+        </span>
+      ) : null}
       {err ? (
         <span className="run-ctl-err" role="alert">
           {err}

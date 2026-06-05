@@ -16,6 +16,7 @@ import pytest
 
 from promptpotter.application.datasets.csv_ingest import (
     IngestError,
+    closed_label_set,
     materialize_samples,
     read_tabular,
 )
@@ -23,7 +24,7 @@ from promptpotter.application.datasets.draft_campaign import DraftCampaignRegist
 from promptpotter.application.datasets.origin_readiness import origin_readiness, resolution_block
 from promptpotter.config.settings import settings
 from promptpotter.domain.identity import TenantId
-from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
+from promptpotter.domain.origin_provenance import Provenance
 
 
 def _xlsx_blob(rows: list[list[str]]) -> bytes:
@@ -72,14 +73,13 @@ def test_read_tabular_is_header_agnostic_across_formats(monkeypatch: pytest.Monk
 
 
 def test_readiness_gates_on_closed_set() -> None:
-    """Config knobs auto-confirm from template defaults; columns + task framing gate."""
+    """Only columns + task framing + answer space gate; config is not gated."""
     registry = DraftCampaignRegistry()
     tenant = TenantId("t1")
 
     # Non-literal headers → columns UNSET; task_description has no default → UNSET.
-    # The config knobs (connector/scoring/max_rounds/provider/model/node_config)
-    # auto-confirm at create, so they are NOT gaps — a hidden default is now a
-    # visible, confirmed, operator-overridable value.
+    # Config (connector/scoring/max_rounds/provider/model/node_config) is NOT
+    # gated — it carries a sane default the operator edits, so it is never a gap.
     draft = registry.create(
         tenant_id=tenant,
         slug="d1",
@@ -94,24 +94,20 @@ def test_readiness_gates_on_closed_set() -> None:
         "column.ground_truth",
         "task_description",
     }
-    # Auto-confirmed config knobs carry the AUTO source (a once-hidden default
-    # now visible); UNSET fields carry no source at all.
-    assert draft.sources["connector"] is ProvenanceSource.AUTO
-    assert "task_description" not in draft.sources
+    # Config carries no provenance entry — it's not gated.
+    assert "connector" not in draft.resolved
 
     # Confirm the columns (operator-stated) + state the framing → every
-    # closed-set field CONFIRMED, and the operator-set fields sourced STATED.
+    # gated field CONFIRMED.
     opened = draft.confirm_columns(query_col="input", ground_truth_col="gt").apply_resolution(
         values={"task_description": "Map lab-test names to codes."},
         provenance={"task_description": Provenance.CONFIRMED},
-        sources={"task_description": ProvenanceSource.STATED},
     )
     assert origin_readiness(opened).complete
-    assert opened.sources["column.query"] is ProvenanceSource.STATED
-    # The on-disk block carries the source axis alongside provenance.
+    assert opened.resolved["column.query"] is Provenance.CONFIRMED
+    # The on-disk block carries provenance per gated field.
     block = resolution_block(opened)
-    assert block["sources"]["connector"] == "auto"
-    assert block["sources"]["task_description"] == "stated"
+    assert block["provenance"]["task_description"] == "confirmed"
 
     # Literal headers auto-confirm the columns, but task_description still gates.
     literal = registry.create(
@@ -123,6 +119,42 @@ def test_readiness_gates_on_closed_set() -> None:
     )
     assert not origin_readiness(literal).complete
     assert {g.field for g in origin_readiness(literal).gaps} == {"task_description"}
+
+    # Closed-label target → the gate also requires every label be enumerated in
+    # the prompt, so the optimizer can't be handed a partial taxonomy (the bug
+    # that left non-`financial` rows unscoreable). `closed_label_set` is the
+    # open-vs-closed detector: a 4-way gold column closes, a 1:1 free-text
+    # column stays open.
+    assert closed_label_set(["a", "b", "a", "c", "d"], n_rows=8) == ("a", "b", "c", "d")
+    assert closed_label_set([str(i) for i in range(20)], n_rows=20) is None  # distinct ≈ n
+    assert closed_label_set(["only"], n_rows=4) is None  # single value isn't a choice
+
+    labels = ("actionable", "financial", "informational", "other")
+    classed = registry.create(
+        tenant_id=tenant,
+        slug="d5",
+        n_samples=8,
+        sample_preview=[{"query": "q", "ground_truth": "other"}],
+        headers=["query", "ground_truth"],
+        column_label_sets={"ground_truth": labels},
+    ).apply_resolution(
+        values={"task_description": "Sort the email. Pick another label."},
+        provenance={"task_description": Provenance.CONFIRMED},
+    )
+    # task_description names none of the labels (and "another" must NOT count as
+    # "other") → the answer_space gap is open, listing every missing label.
+    gap = next(g for g in origin_readiness(classed).gaps if g.field == "answer_space")
+    assert all(lab in gap.hint for lab in labels)
+    # A prompt that enumerates all four closes it (the proposer's job, gated here).
+    enumerated = classed.apply_resolution(
+        values={
+            "starting_prompt": {
+                "answer_format": "Reply with exactly one of: "
+                "actionable, financial, informational, other."
+            }
+        }
+    )
+    assert origin_readiness(enumerated).complete
 
 
 def test_low_confidence_proposal_blocks_until_confirmed() -> None:

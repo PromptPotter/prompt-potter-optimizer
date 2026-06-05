@@ -232,8 +232,13 @@ class TenantDatasetStore:
         campaign_json: dict[str, Any],
         task_description: str,
         prompt_default: dict[str, Any],
+        task_context: dict[str, Any],
     ) -> Path:
         """Atomic-rename ``.drafts/{draft_id}/`` to ``{slug}/`` + materialize the Origin files.
+
+        ``task_context.json`` is the run-start domain framing the check-in already
+        decomposed — written here so the run reads it instead of recomputing it via
+        a second LLM call.
 
         On collision raises ``FileExistsError`` (caller maps to 409 with a
         :meth:`suggest_free_slug` suggestion). On unknown draft raises
@@ -252,6 +257,7 @@ class TenantDatasetStore:
         write_json(dst / "pipeline.json", pipeline_json)
         write_json(dst / "campaign.json", campaign_json)
         write_text(dst / "task_description.md", task_description)
+        write_json(dst / "task_context.json", task_context)
         write_json(dst / "prompts" / "default.json", prompt_default)
         return dst
 

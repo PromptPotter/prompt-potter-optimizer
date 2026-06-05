@@ -28,7 +28,7 @@ import {
 } from "@/lib/api";
 import { ChatIngestFlow } from "./ChatIngestFlow";
 import { ListAndMintFlow } from "./ListAndMintFlow";
-import { DraftCommitFlow, type WizardStep } from "./DraftCommitFlow";
+import { DraftCommitFlow } from "./DraftCommitFlow";
 import { CheckinLoadingWindow } from "./CheckinLoadingWindow";
 import { useAuth } from "@/lib/auth-context";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
@@ -36,17 +36,9 @@ import { SignInPrompt } from "@/components/ui/states";
 import type { OnMinted } from "./types";
 
 // How long the demo's simulated check-in window lingers before the prefilled
-// wizard lands — long enough to read the model + see the counter tick, short
-// enough not to stall. The real flow shows the window for the actual call.
+// setup window lands — long enough to read the model + see the counter tick,
+// short enough not to stall. The real flow shows the window for the actual call.
 const DEMO_CHECKIN_MS = 2200;
-
-// Per-step modal titles — the 1-2-3 launch the operator walks. Pre-draft (the
-// drop / collection screen) keeps the plain title.
-const STEP_TITLES: Record<WizardStep, string> = {
-  1: "Step 1 of 3 · Your data & goal",
-  2: "Step 2 of 3 · Map columns",
-  3: "Step 3 of 3 · Pipeline & prompt",
-};
 
 interface Props {
   open: boolean;
@@ -85,10 +77,6 @@ export function IngestPane({
   const [draft, setDraft] = useState<DraftCampaignWire | null>(null);
   const [flowBusy, setFlowBusy] = useState(false);
   const [flowError, setFlowError] = useState<string | null>(null);
-  // Wizard step, owned here so the modal header can title each step. Resets to
-  // 1 whenever the active draft changes (a new drop / demo pick).
-  const [step, setStep] = useState<WizardStep>(1);
-  const [prevDraftId, setPrevDraftId] = useState<string | null>(null);
   // Non-null while the demo's simulated check-in window is showing — carries the
   // model name to display. Cleared when the prefilled wizard lands.
   const [checkinModel, setCheckinModel] = useState<string | null>(null);
@@ -117,11 +105,6 @@ export function IngestPane({
   if (status !== prevStatus) {
     setPrevStatus(status);
     if (open) setList(gatedInitial());
-  }
-  const draftId = draft?.draft_id ?? null;
-  if (draftId !== prevDraftId) {
-    setPrevDraftId(draftId);
-    setStep(1);
   }
   // ESC + focus-trap + focus-restore from the shared hook; this modal keeps its
   // own .new-campaign-modal wizard layout rather than Dialog's confirm-card.
@@ -199,8 +182,6 @@ export function IngestPane({
     ) : draft !== null ? (
       <DraftCommitFlow
         draft={draft}
-        step={step}
-        onStep={setStep}
         onDraftChange={setDraft}
         initialResolution={initialResolution}
         onClose={onClose}
@@ -258,7 +239,7 @@ export function IngestPane({
             {checkinModel !== null
               ? "Check-in"
               : draft !== null
-                ? STEP_TITLES[step]
+                ? "Set up campaign"
                 : "New campaign"}
           </h2>
           <button

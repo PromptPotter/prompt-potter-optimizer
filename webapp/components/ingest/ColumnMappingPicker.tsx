@@ -1,8 +1,8 @@
 "use client";
 
-import type { DraftCampaignWire, DraftPatch, ProvenanceSource, ProvenanceTag } from "@/lib/api";
+import type { DraftCampaignWire, DraftPatch, ProvenanceTag } from "@/lib/api";
 import { ORIGIN_KEY } from "@/lib/origin-readiness";
-import { ProvenanceBadge, SourceBadge } from "./ProvenanceBadges";
+import { ProvenanceBadge } from "./ProvenanceBadges";
 
 // The required tier: pick which uploaded header is the input and which is the
 // target. Selecting a column confirms it (rides `edit-draft-campaign` with
@@ -25,8 +25,6 @@ export function ColumnMappingPicker({
 
   const queryProv: ProvenanceTag = draft.resolved[ORIGIN_KEY.columnQuery] ?? "unset";
   const gtProv: ProvenanceTag = draft.resolved[ORIGIN_KEY.columnGroundTruth] ?? "unset";
-  const querySrc: ProvenanceSource | undefined = draft.sources[ORIGIN_KEY.columnQuery];
-  const gtSrc: ProvenanceSource | undefined = draft.sources[ORIGIN_KEY.columnGroundTruth];
   const sameColumn =
     !!draft.column_query && draft.column_query === draft.column_ground_truth;
 
@@ -37,7 +35,6 @@ export function ColumnMappingPicker({
         <label className="new-campaign-field">
           <span>
             Input column <ProvenanceBadge tag={queryProv} />
-            <SourceBadge source={querySrc} />
           </span>
           <select
             value={draft.column_query}
@@ -56,7 +53,6 @@ export function ColumnMappingPicker({
         <label className="new-campaign-field">
           <span>
             Target column <ProvenanceBadge tag={gtProv} />
-            <SourceBadge source={gtSrc} />
           </span>
           <select
             value={draft.column_ground_truth}

@@ -243,12 +243,6 @@ export async function postStartRun(
 // or `proposed` (the deterministic `origin_readiness` gate).
 export type ProvenanceTag = "unset" | "proposed" | "confirmed";
 
-// Mirror of `domain/origin_provenance.ProvenanceSource`. Orthogonal to the
-// provenance tag: `auto` = machine-set (template default, column auto-detect,
-// or resolver finding); `stated` = the operator set it via edit-draft-campaign.
-// Only valued fields carry a source. Audit-only — the gate reads `resolved`.
-export type ProvenanceSource = "auto" | "stated";
-
 // The backend-pipeline permission surface the new-campaign UI renders before
 // commit. A draft's `pipeline_overlay` is empty until commit, so the connector
 // node-config seed (TermNorm's reasoning clamp) is otherwise invisible — this
@@ -293,15 +287,13 @@ export interface DraftCampaignWire {
   // uploaded file's columns in order; `column_query` / `column_ground_truth`
   // are the operator-resolved input/target mapping (empty until picked);
   // `resolved` carries per-field provenance keyed by dotted field name
-  // (`column.query`, `column.ground_truth`, …). The mint gate blocks until
-  // both columns are `confirmed` and members of `headers`.
+  // (`column.query`, `column.ground_truth`, `task_description`). The mint gate
+  // blocks until both columns are `confirmed` and members of `headers`. Config
+  // is not gated — it carries no provenance entry.
   headers: string[];
   column_query: string;
   column_ground_truth: string;
   resolved: Record<string, ProvenanceTag>;
-  // Per-field source (`auto` / `stated`), orthogonal to `resolved`. Only
-  // valued fields appear; audit-only, never gates. See `ProvenanceSource`.
-  sources: Record<string, ProvenanceSource>;
   // The campaign's starting prompt — `PromptTemplate.prompt_field_dict()` shape
   // (the six string fields + optional `few_shot_examples`). Seeded by the
   // check-in decomposition or an authored dataset's prompt; operator-editable

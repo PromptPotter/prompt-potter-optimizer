@@ -11,8 +11,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
-from promptpotter.infrastructure.store.base import read_text_optional
+from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     _mint_session_and_cycle,
@@ -41,11 +40,13 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 # A raw file → resolved origin → committed tenant dataset, then the *same*
 # authored mint+run path below. The CLI owns no ingest/resolve/commit logic of
 # its own; every step is an application-layer call shared with the web
-# (`ingest_draft`, `resolve_origin_until_gated`, `commit_draft_to_dataset`).
+# (`ingest_draft`, `resolve_origin_turn`, `commit_draft_to_dataset`).
 # Spec: ``docs/specs/m10-origin-resolution-checkin.md``.
 
-# Checklist field id → ``DraftCampaign`` attribute a ``--set`` confirms. Mirrors
-# the resolver's finding setters; columns route through ``confirm_columns``.
+# Field id → ``DraftCampaign`` attribute a ``--set`` writes — the CLI parallel of
+# the web Advanced block. Only ``task_description`` is gated (CONFIRM opens the
+# readiness gate); the rest are config the operator overrides off its default.
+# Columns route through ``confirm_columns`` separately.
 _SET_ATTR: dict[str, str] = {
     "task_description": "task_description",
     "connector": "connector",
@@ -91,11 +92,15 @@ def _apply_sets(draft: DraftCampaign, sets: list[str]) -> DraftCampaign:
                 f"ERROR: --set field {field!r} is not settable. One of: "
                 f"{', '.join(sorted({*_SET_ATTR, 'column.query', 'column.ground_truth'}))}."
             )
-        draft = draft.apply_resolution(
-            values={attr: _coerce_set(field, raw)},
-            provenance={field: Provenance.CONFIRMED},
-            sources={field: ProvenanceSource.STATED},
-        )
+        value = _coerce_set(field, raw)
+        if field == "task_description":
+            # Gated — confirming the framing opens the origin-readiness gate.
+            draft = draft.apply_resolution(
+                values={attr: value}, provenance={field: Provenance.CONFIRMED}
+            )
+        else:
+            # Config — not gated, just set the value (parity with the web Advanced block).
+            draft = draft.apply_resolution(values={attr: value})
     return draft
 
 
@@ -133,7 +138,7 @@ async def _ingest_to_dataset(args: argparse.Namespace) -> str:
     from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
     from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
     from promptpotter.application.datasets.origin_readiness import origin_readiness
-    from promptpotter.application.datasets.origin_resolve import resolve_origin_until_gated
+    from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
     from promptpotter.application.jobs.launcher import (
         LaunchError,
         OriginIncompleteError,
@@ -172,9 +177,12 @@ async def _ingest_to_dataset(args: argparse.Namespace) -> str:
     last: Any = None
     if not origin_readiness(draft).complete:
         checkin_line("origin resolver", "running AI check-in")
-        draft, last = await resolve_origin_until_gated(
-            stores=stores, draft=draft, draft_registry=registry
-        )
+        # One turn: code owns the deterministic facts (the answer space) and the
+        # operator states the framing up front via --set, so the resolver only
+        # reads the columns + authors the prompt. A residual gap surfaces below
+        # with the --set instructions rather than spinning more LLM turns.
+        last = await resolve_origin_turn(stores=stores, draft=draft, draft_registry=registry)
+        draft = last.draft
 
     readiness = origin_readiness(draft)
     if not readiness.complete:
@@ -206,39 +214,43 @@ async def _checkin_task(
     task_file: str | None,
     task_text: str | None,
 ) -> None:
-    """Check in the task description; decomposed once into L1 fields.
-    ``{dataset_config_dir}/task_description.md`` is canonical; ``--task-file``/``--task-text`` override.
-    Content-hash cached — unchanged description is a free hit."""
+    """Resolve the run's ``task_context`` and stash it on session state.
+
+    ``{dataset_config_dir}/task_context.json`` is the canonical framing — written
+    at commit from the check-in's decomposition, or decomposed once on first sight
+    for a repo benchmark. ``--task-file``/``--task-text`` decompose an ad-hoc
+    override instead. Either way the result rides session state so ``resume`` /
+    ``sweep`` read it back; no second check-in call recomputes what ingest already
+    decomposed."""
     from promptpotter.application.config import create_llm_client
-    from promptpotter.application.optimization.task_context import decompose_task_context
+    from promptpotter.application.optimization.task_context import (
+        decompose_prompt_fields,
+        load_or_build_task_context,
+    )
+    from promptpotter.domain.search_point import TaskDecomposition
+
+    llm_client, model = create_llm_client(campaign_config)
 
     if task_file:
-        task_description = Path(task_file).read_text(encoding="utf-8")
-    elif task_text:
-        task_description = task_text
+        override: str | None = Path(task_file).read_text(encoding="utf-8")
     else:
-        cfg_dir = session.dataset_config_dir
-        task_description = (
-            read_text_optional(cfg_dir / "task_description.md") if cfg_dir is not None else ""
+        override = task_text
+    if override:
+        result = await decompose_prompt_fields(override, llm_client, model=model)
+        tc_dict = dict(result.get("task_context") or {})
+        tc_dict["raw_description"] = override
+        task_context = TaskDecomposition.from_dict(tc_dict)
+    else:
+        task_context = await load_or_build_task_context(
+            session.dataset_config_dir, llm_client, model
         )
 
-    if not task_description:
+    if not task_context:
         checkin_line("task check-in", "no task description — skipped")
         return
 
-    llm_client, model = create_llm_client(campaign_config)
-    task_context, _consultation, was_cached = await decompose_task_context(
-        task_description,
-        llm_client,
-        model,
-        store_base_dir=session.store.base_dir if session.store else None,
-        backend_id=session.backend_id,
-    )
     n = len(task_context)
-    checkin_line(
-        "task check-in",
-        f"{'cached' if was_cached else 'decomposed'} ({n} field{'' if n == 1 else 's'})",
-    )
+    checkin_line("task check-in", f"resolved ({n} field{'' if n == 1 else 's'})")
     state = session.store.sessions.read(session_id) or {}
     state["task_context"] = task_context.to_dict()
     session.store.sessions.update(session_id, state)

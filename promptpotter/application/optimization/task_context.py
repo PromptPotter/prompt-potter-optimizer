@@ -1,14 +1,15 @@
-"""One-time checkin pass: raw context → 8-field prompt + TaskDecomposition.
+"""Task-description check-in: raw context → Layer-1 prompt fields + task_context.
 
-Disk-cached at ``{base_dir}/{backend_id}/checkin_cache.json`` keyed by
-content hash; idempotent ``init`` against an unchanged task_description.md.
+One LLM decomposition, cached on disk as the dataset's ``task_context.json``.
+The web ingest path writes that file at commit (from the check-in it already ran);
+:func:`load_or_build_task_context` is the single run-start seam that reads it — or
+decomposes a repo benchmark's ``task_description.md`` once on first sight. No second
+check-in call recomputes what ingest already produced.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -18,19 +19,13 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm import LLMClientBase
 from promptpotter.infrastructure.store.base import (
     read_json_optional,
-    validate_path_component,
+    read_text_optional,
     write_json,
 )
-from promptpotter.shared.clock import utcnow_iso
-
-logger = logging.getLogger(__name__)
 
 __all__ = [
     "decompose_prompt_fields",
-    "decompose_prompt_fields_cached",
-    "decompose_task_context",
-    "load_cached_decomposition",
-    "save_decomposition_cache",
+    "load_or_build_task_context",
 ]
 
 
@@ -70,104 +65,36 @@ async def decompose_prompt_fields(
     )
     # Pydantic guarantees every Layer-1 + task_context field is present
     # (defaults to empty string on the model). Materialize to dict for
-    # cache persistence + downstream consumers that pre-date the typed
-    # boundary.
+    # downstream consumers that pre-date the typed boundary.
     return result.model_dump()
 
 
-def _decomposition_cache_path(base_dir: Path, backend_id: str) -> Path:
-    validate_path_component(backend_id)
-    return base_dir / backend_id / "checkin_cache.json"
-
-
-def load_cached_decomposition(
-    base_dir: Path,
-    backend_id: str,
-    rp_hash: str,
-) -> dict[str, Any] | None:
-    """Load the cached checkin result for *rp_hash* (one key — read == write)."""
-    cache = read_json_optional(_decomposition_cache_path(base_dir, backend_id))
-    if not cache:
-        return None
-    entry = cache.get(rp_hash)
-    if entry:
-        layer1_fields: dict[str, Any] = entry["layer1_fields"]
-        return layer1_fields
-    return None
-
-
-def save_decomposition_cache(
-    base_dir: Path,
-    backend_id: str,
-    rp_hash: str,
-    layer1_fields: dict[str, Any],
-) -> None:
-    """Persist checkin output keyed by *rp_hash*."""
-    path = _decomposition_cache_path(base_dir, backend_id)
-    cache = read_json_optional(path) or {}
-    cache[rp_hash] = {
-        "layer1_fields": layer1_fields,
-        "cached_at": utcnow_iso(),
-    }
-    write_json(path, cache)
-
-
-async def decompose_prompt_fields_cached(
-    context_input: Any,
+async def load_or_build_task_context(
+    dataset_config_dir: Path | None,
     llm_client: LLMClientBase,
-    *,
-    model: str | None = None,
-    store_base_dir: Path | None = None,
-    backend_id: str = "",
-    rp_hash: str,
-    force: bool = False,
-) -> tuple[dict[str, Any], bool]:
-    """Disk-cached decompose_prompt_fields; returns (layer1_fields, was_cached).
+    model: str | None,
+) -> TaskDecomposition:
+    """Run-start task framing — read the committed ``{dir}/task_context.json``, or
+    decompose ``task_description.md`` once on first sight and persist it.
 
-    *rp_hash* is the single content-hash key used for both the cache read
-    and the cache write — a re-run against an unchanged task description
-    hits the prior entry and skips the LLM call.
+    The single seam both the web mint path and CLI ``new`` funnel through: an
+    ingested dataset already carries ``task_context.json`` (written at commit from
+    the check-in's decomposition), so the run reads it with no LLM call. A repo
+    benchmark / pre-change dataset has only ``task_description.md`` — decompose it
+    once, write the file, and every later run is a free read. Empty framing when
+    neither file exists.
     """
-    can_cache = bool(store_base_dir and backend_id)
-
-    if can_cache and not force and rp_hash:
-        assert store_base_dir is not None
-        cached = load_cached_decomposition(store_base_dir, backend_id, rp_hash)
-        if cached is not None:
-            logger.debug("decompose_prompt_fields_cached: hit")
-            return cached, True
-
-    layer1_fields = await decompose_prompt_fields(context_input, llm_client, model=model)
-
-    if can_cache:
-        assert store_base_dir is not None
-        save_decomposition_cache(store_base_dir, backend_id, rp_hash, layer1_fields)
-
-    return layer1_fields, False
-
-
-async def decompose_task_context(
-    task_description: str,
-    llm_client: LLMClientBase,
-    model: str,
-    store_base_dir: Path | None = None,
-    backend_id: str = "",
-) -> tuple[TaskDecomposition, str | None, bool]:
-    """Decompose task description → ``(task_context, consultation, was_cached)`` (disk-cached)."""
+    if dataset_config_dir is None:
+        return TaskDecomposition()
+    existing = read_json_optional(dataset_config_dir / "task_context.json")
+    if existing:
+        return TaskDecomposition.from_dict(existing)
+    task_description = read_text_optional(dataset_config_dir / "task_description.md")
     if not task_description:
-        return TaskDecomposition(), None, False
-
-    rp_hash = hashlib.sha256(f"task_ctx:{task_description}".encode()).hexdigest()[:16]
-
-    result, was_cached = await decompose_prompt_fields_cached(
-        task_description,
-        llm_client,
-        model=model,
-        store_base_dir=store_base_dir,
-        backend_id=backend_id,
-        rp_hash=rp_hash,
-    )
-
-    tc_dict = result.get("task_context", {})
+        return TaskDecomposition()
+    result = await decompose_prompt_fields(task_description, llm_client, model=model)
+    tc_dict = dict(result.get("task_context") or {})
     tc_dict["raw_description"] = task_description
-    return TaskDecomposition.from_dict(tc_dict), result.get("consultation"), was_cached
+    task_context = TaskDecomposition.from_dict(tc_dict)
+    write_json(dataset_config_dir / "task_context.json", task_context.to_dict())
+    return task_context

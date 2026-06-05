@@ -375,7 +375,8 @@ class CheckinOutput(BaseModel):
     * **Origin resolution** (web ingest check-in) — a draft-campaign origin →
       ``assessment`` + ``findings`` (proposed field values, each evidence-cited)
       + ``next_action``, plus a ``task_description`` framing carried on the
-      relevant finding. The Layer-1 fields may stay empty.
+      relevant finding. The Layer-1 fields are ALSO authored here (decomposed
+      from the proposed task_description) to seed the campaign's starting prompt.
     """
 
     model_config = ConfigDict(extra="forbid")

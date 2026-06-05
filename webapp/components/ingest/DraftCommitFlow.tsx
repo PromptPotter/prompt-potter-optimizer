@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   IngestApiError,
   postEditDraftCampaign,
@@ -12,39 +12,35 @@ import {
   type OriginLastResolution,
 } from "@/lib/api";
 import { originReadiness, plainLanguageRecap } from "@/lib/origin-readiness";
+import { lockedParams } from "@/lib/optimizer-locks";
 import { TextField } from "@/components/forms/TextField";
+import { NumberField } from "@/components/forms/NumberField";
+import { SlugField } from "@/components/forms/SlugField";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
 import { OriginCheckinPanel } from "./OriginCheckinPanel";
-import { PipelinePromptStep } from "./PipelinePromptStep";
+import { OptimizerLLMField } from "./OptimizerLLMField";
 import { CheckinLoadingWindow } from "./CheckinLoadingWindow";
+import { AllowedValuesEditor } from "@/components/dashboard/control/AllowedValuesEditor";
+import { LockTable } from "@/components/dashboard/control/LockTable";
+import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsEditor";
 import type { OnMinted } from "./types";
 
-export type WizardStep = 1 | 2 | 3;
-
-// The setup wizard over one server-held draft, as a 1-2-3:
-//   1 · Your data & goal — sample count + the task context (task_description),
-//       plus the AI check-in that interprets it (skipped only for a draft
-//       pre-filled from an existing dataset — `draft.derived_from_dataset`).
-//   2 · Map columns — which uploaded column is the input, which is the target.
-//   3 · Pipeline & prompt — the locked pipeline config + the editable starting
-//       prompt the check-in authored.
-// `step` is owned by IngestPane so the modal header can title each step; this
-// component renders the active step's body + the shared Back/Next/Start footer.
+// One-window campaign setup over a single server-held draft. The old 1-2-3
+// wizard collapsed into a single scroll: state the goal → the check-in runs
+// itself (no "Set up with AI" button) → map columns → review the authored
+// prompt → Start. Optimizer/pipeline tunables ride an optional Advanced
+// expander — they default sensibly and the operator rarely touches them.
 export function DraftCommitFlow({
   draft,
-  step,
-  onStep,
   onDraftChange,
   initialResolution,
   onClose,
   onMinted,
 }: {
   draft: DraftCampaignWire;
-  step: WizardStep;
-  onStep: (s: WizardStep) => void;
   onDraftChange: (d: DraftCampaignWire) => void;
   // A check-in resolution run before the wizard opened (the chat file-drop) —
-  // seeds the panel so its assessment/questions show without a re-click.
+  // seeds the panel so its assessment/questions show without re-resolving.
   initialResolution?: OriginLastResolution | null;
   onClose: () => void;
   onMinted?: OnMinted;
@@ -60,16 +56,12 @@ export function DraftCommitFlow({
   );
   // A draft pre-filled from an existing dataset (a demo/benchmark pick) is
   // already fully resolved, so the AI check-in has nothing to add and prompt
-  // edits are throwaway. This is a per-draft fact (`derived_from_dataset`), NOT
-  // the global `demo_mode_enabled` preference — a fresh upload always gets the
-  // real check-in even while demo mode is on.
+  // edits are throwaway. Per-draft fact (`derived_from_dataset`), NOT the
+  // global `demo_mode_enabled` preference.
   const demo = draft.derived_from_dataset;
 
   const readiness = originReadiness(draft);
-  const taskReady = draft.resolved["task_description"] === "confirmed";
-  const columnsReady =
-    draft.resolved["column.query"] === "confirmed" &&
-    draft.resolved["column.ground_truth"] === "confirmed";
+  const recapText = lastResolution?.recap || plainLanguageRecap(draft);
 
   const applyPatch = async (patch: DraftPatch) => {
     setError(null);
@@ -81,20 +73,36 @@ export function DraftCommitFlow({
     }
   };
 
-  const handleResolve = async () => {
+  const hasContext = draft.task_description.trim().length > 0;
+
+  // Auto-run the check-in once per draft — this replaces the old "Set up with
+  // AI" button. It waits for the operator to provide context (the task): with
+  // no task there is nothing to configure the origin from, so we ask for it
+  // first rather than burning a call. Skipped for a demo draft (already
+  // resolved) and a chat-seeded resolution (initialResolution).
+  const autoResolved = useRef<string | null>(initialResolution ? draft.draft_id : null);
+  useEffect(() => {
+    if (demo || !hasContext || autoResolved.current === draft.draft_id) return;
+    autoResolved.current = draft.draft_id;
+    let cancelled = false;
     setResolving(true);
     setError(null);
-    setServerGaps(null);
-    try {
-      const r = await postResolveOrigin(draft.draft_id);
-      onDraftChange(r.draft);
-      setLastResolution(r.resolution.last_resolution ?? null);
-    } catch (e) {
-      setError(IngestApiError.toOperatorMessage(e));
-    } finally {
-      setResolving(false);
-    }
-  };
+    postResolveOrigin(draft.draft_id)
+      .then((r) => {
+        if (cancelled) return;
+        onDraftChange(r.draft);
+        setLastResolution(r.resolution.last_resolution ?? null);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(IngestApiError.toOperatorMessage(e));
+      })
+      .finally(() => {
+        if (!cancelled) setResolving(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [draft.draft_id, hasContext, demo, onDraftChange]);
 
   const handleCommit = async () => {
     setSubmitting(true);
@@ -114,69 +122,96 @@ export function DraftCommitFlow({
     }
   };
 
-  const body =
-    step === 1 ? (
-      <>
-        <p>
-          Parsed <strong>{draft.n_samples}</strong> rows from <code>{draft.slug}</code>. Describe
-          what the prompt should do — the check-in reads this to set up the pipeline.
-        </p>
-        <TextField
-          label="What should the prompt do?"
-          value={draft.task_description}
-          placeholder="e.g. Classify each support ticket into one category."
-          onApply={(task_description) => applyPatch({ task_description })}
-        />
-        {demo ? (
-          <p className="wizard-demo-note" role="note">
-            Pre-filled from an existing dataset — setup is ready and the AI check-in isn&apos;t needed.
-          </p>
-        ) : resolving ? (
-          <CheckinLoadingWindow model={draft.optimizer_model || "the check-in model"} />
-        ) : (
-          <OriginCheckinPanel
-            draft={draft}
-            resolving={resolving}
-            lastResolution={lastResolution}
-            onResolve={handleResolve}
-            onApply={applyPatch}
-          />
-        )}
-      </>
-    ) : step === 2 ? (
-      <>
-        <p>
-          Map your columns: which uploaded column is the <strong>input</strong> the model reads,
-          and which is the <strong>target</strong> it must match.
-        </p>
-        <ColumnMappingPicker draft={draft} onApply={applyPatch} />
-      </>
-    ) : (
-      <PipelinePromptStep
-        draft={draft}
-        demo={demo}
-        recapText={lastResolution?.recap || plainLanguageRecap(draft)}
-        onApply={applyPatch}
-      />
-    );
-
-  const nextDisabled = step === 1 ? !taskReady : !columnsReady;
-
   return (
     <div className="new-campaign-body">
-      <ol className="wizard-steps" aria-label={`Step ${step} of 3`}>
-        {[1, 2, 3].map((n) => (
-          <li
-            key={n}
-            className={`wizard-step${n === step ? " is-active" : ""}${n < step ? " is-done" : ""}`}
-            aria-current={n === step ? "step" : undefined}
-          >
-            {n}
-          </li>
-        ))}
-      </ol>
+      <p>
+        Parsed <strong>{draft.n_samples}</strong> rows from <code>{draft.slug}</code>. Describe
+        what the prompt should do — the check-in reads this to set up the campaign.
+      </p>
 
-      {body}
+      <TextField
+        label="What should the prompt do?"
+        value={draft.task_description}
+        placeholder="e.g. Classify each support ticket into one category."
+        onApply={(task_description) => applyPatch({ task_description })}
+      />
+
+      {demo ? (
+        <p className="wizard-demo-note" role="note">
+          Pre-filled from an existing dataset — setup is ready and the AI check-in isn&apos;t
+          needed.
+        </p>
+      ) : resolving ? (
+        <CheckinLoadingWindow model={draft.optimizer_model || "the check-in model"} />
+      ) : !hasContext && !lastResolution ? (
+        <p className="wizard-demo-note" role="note">
+          Describe the task in one message above — as much as you can about what the model should
+          do with each row. The check-in reads it once and fills in the rest.
+        </p>
+      ) : (
+        <OriginCheckinPanel draft={draft} lastResolution={lastResolution} onApply={applyPatch} />
+      )}
+
+      <ColumnMappingPicker draft={draft} onApply={applyPatch} />
+
+      {draft.sample_preview.length > 0 ? (
+        <details className="new-campaign-preview" open>
+          <summary>Sample preview ({draft.sample_preview.length})</summary>
+          <ul className="new-campaign-preview-list">
+            {draft.sample_preview.map((row, i) => (
+              <li key={i}>
+                <code>{row.query}</code> → <code>{row.ground_truth}</code>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
+      <div className="origin-recap" role="status">
+        <span className="origin-recap-tick" aria-hidden="true">
+          ✓
+        </span>
+        <p>{recapText}</p>
+      </div>
+
+      <section className="setup-preview">
+        <header className="setup-preview-head">
+          <span className="setup-preview-title">Starting prompt</span>
+          <span className="setup-preview-sub">
+            {demo ? "demo — edits reset on Start" : "the optimizer evolves this from here"}
+          </span>
+        </header>
+        <PromptFieldsEditor value={draft.starting_prompt} demo={demo} onApply={applyPatch} flat />
+      </section>
+
+      <details className="new-campaign-optional">
+        <summary>Optimizer &amp; pipeline (optional)</summary>
+        <div className="new-campaign-optional-body">
+          <AllowedValuesEditor
+            locks={draft.optimizer_locks}
+            overlayBase={draft.pipeline_overlay}
+            lockModel={draft.lock_model}
+            mode={demo ? "demo" : "edit"}
+            onApply={applyPatch}
+          />
+          <OptimizerLLMField
+            provider={draft.optimizer_provider}
+            model={draft.optimizer_model}
+            onApply={(optimizer_provider, optimizer_model) =>
+              applyPatch({ optimizer_provider, optimizer_model })
+            }
+          />
+          <NumberField
+            label="Max rounds"
+            value={draft.max_rounds}
+            min={1}
+            max={100}
+            onApply={(max_rounds) => applyPatch({ max_rounds })}
+          />
+          <SlugField slug={draft.slug} onApply={(slug) => applyPatch({ slug })} />
+          <LockTable params={lockedParams(draft.optimizer_locks)} />
+        </div>
+      </details>
 
       {serverGaps && serverGaps.length > 0 ? (
         <ul className="origin-gaps origin-gaps--blocked">
@@ -188,32 +223,17 @@ export function DraftCommitFlow({
       {error ? <p className="new-campaign-error">{error}</p> : null}
 
       <footer className="new-campaign-footer">
+        <button type="button" className="new-campaign-cancel" onClick={onClose}>
+          Cancel
+        </button>
         <button
           type="button"
-          className="new-campaign-cancel"
-          onClick={() => (step === 1 ? onClose() : onStep((step - 1) as WizardStep))}
+          className="new-campaign-submit"
+          disabled={submitting || resolving || !readiness.complete}
+          onClick={handleCommit}
         >
-          {step === 1 ? "Cancel" : "Back"}
+          {submitting ? "Starting…" : "Start campaign"}
         </button>
-        {step < 3 ? (
-          <button
-            type="button"
-            className="new-campaign-submit"
-            disabled={nextDisabled}
-            onClick={() => onStep((step + 1) as WizardStep)}
-          >
-            Next
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="new-campaign-submit"
-            disabled={submitting || !readiness.complete}
-            onClick={handleCommit}
-          >
-            {submitting ? "Starting…" : "Start campaign"}
-          </button>
-        )}
       </footer>
     </div>
   );

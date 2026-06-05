@@ -22,6 +22,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -333,10 +334,42 @@ def materialize_samples(table: Table, *, query_col: str, ground_truth_col: str) 
     return samples
 
 
+MAX_ENUMERATED_LABELS = 40
+"""Upper bound on a closed label set. Above this the target column reads as
+open-ended (free text / high-cardinality id), not a fixed taxonomy worth
+enumerating verbatim into the origin prompt."""
+
+
+def closed_label_set(
+    values: Iterable[str], *, n_rows: int, max_enum: int = MAX_ENUMERATED_LABELS
+) -> tuple[str, ...] | None:
+    """Distinct target-column values when the column reads as a CLOSED label set.
+
+    Returns the sorted distinct non-empty values when the column looks like a
+    fixed classification taxonomy (``2 <= distinct <= max_enum`` *and*
+    ``distinct <= n_rows // 2`` — so a free-text or numeric column, where
+    ``distinct ≈ n_rows``, reads as open-ended). Returns ``None`` for an
+    open-ended column: there's no small fixed answer space to enumerate.
+
+    The single cardinality gate is the closed-vs-open detector — a classifier's
+    gold column (e.g. ``{financial, actionable, informational, other}`` over 32
+    rows) returns its four labels; GSM8K's numeric answers (``distinct ≈ n``)
+    return ``None``. No scorer special-casing needed.
+    """
+    distinct = sorted({v.strip() for v in values if v and v.strip()})
+    if not 2 <= len(distinct) <= max_enum:
+        return None
+    if len(distinct) > n_rows // 2:
+        return None
+    return tuple(distinct)
+
+
 __all__ = [
+    "MAX_ENUMERATED_LABELS",
     "MAX_SAMPLES",
     "IngestError",
     "Table",
+    "closed_label_set",
     "format_from_filename",
     "materialize_samples",
     "read_tabular",

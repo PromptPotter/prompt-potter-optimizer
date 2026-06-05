@@ -378,10 +378,9 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
         assert draft["headers"] == ["query", "ground_truth"]
         assert draft["resolved"]["column.query"] == "confirmed"
         assert draft["resolved"]["column.ground_truth"] == "confirmed"
-        # The auto-detected column + the template-default config knobs are
-        # AUTO-sourced — once-hidden defaults made visible, not operator choices.
-        assert draft["sources"]["column.query"] == "auto"
-        assert draft["sources"]["connector"] == "auto"
+        # Config (connector, max_rounds, …) is not gated — it carries a default
+        # the operator edits, so it gets no provenance entry.
+        assert "connector" not in draft["resolved"]
         # Sparse edit lands a mutation; response is the full post-mutation shape.
         edit = client.post(
             "/api/v1/commands/edit-draft-campaign",
@@ -448,8 +447,6 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
         assert confirmed.status_code == 200, confirmed.text
         assert confirmed.json()["resolved"]["column.query"] == "confirmed"
         assert confirmed.json()["resolved"]["column.ground_truth"] == "confirmed"
-        # An operator edit overrides the seed → STATED source (not auto).
-        assert confirmed.json()["sources"]["column.query"] == "stated"
 
 
 def test_mint_from_draft_503_preserves_draft_when_backend_unreachable(

@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.run_phase_control import declare_run_phase
+from promptpotter.application.run_phase_control import declare_run_phase, pause_gate
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.sample_measurement import (
     _error_result,
@@ -332,7 +332,13 @@ async def run_query_loop(
             if sid is None:
                 break
             sample = by_id[sid]
-            if session.stop_check and session.stop_check():
+            # Mid-searchpoint pause/stop checkpoint. Sits between samples — every
+            # already-scored result is on disk (persist_fresh ran per fresh
+            # sample), so pausing here finishes the current sample then blocks,
+            # and a stop aborts with the accumulated datapoints saved. A pause
+            # resumes into the remaining samples; a stop (incl. one requested
+            # during the pause) falls through to the graceful return below.
+            if await pause_gate(session) or (session.stop_check and session.stop_check()):
                 logger.debug("Graceful stop after query %d/%d.", len(state.results), len(dataset))
                 declare_run_phase(session, RunPhase.STOPPING)
                 return QueryLoopResult(state.results, completed=False, stop_reason="graceful")

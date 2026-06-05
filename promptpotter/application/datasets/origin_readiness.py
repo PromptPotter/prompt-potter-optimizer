@@ -7,26 +7,27 @@ origin-aware version), and this checklist *gates*. Mint is blocked until the
 checklist passes; a false ``ready`` from the resolver is rejected and the open
 gaps are fed back.
 
-The checklist closed set is every origin knob that was a **hidden default**
-before — the field a campaign could mint with that the operator never stated.
-Two field kinds:
+The checklist gates only what the operator (or the resolver) must genuinely
+state — not config that has a sane default:
 
 * **Column mapping** (``column.query`` / ``column.ground_truth``) — satisfied
   only when CONFIRMED *and* a member of the uploaded headers.
-* **Config knobs** (task framing, connector, scorer, round cap, optimizer
-  provider/model, backend node overlay) — satisfied when CONFIRMED. They seed
-  from our ``pipeline.json`` / ``campaign.json`` template defaults and
-  auto-confirm at ``create()`` so the operator never has to click through a
-  value with one sane default; ``task_description`` is the one that lands
-  UNSET (no default framing — the operator must state what the prompt does).
+* **Task framing** (``task_description``) — satisfied when CONFIRMED. It's the
+  one field with no default; the operator states it or the resolver proposes it
+  high-confidence.
+* **Answer space** — a closed-label target must enumerate every label in the
+  committed prompt. Code owns this (``with_closed_answer_format`` writes the
+  labels into ``answer_format``), so it's a safety that passes — kept because it
+  is the real post-condition that a closed-label campaign can emit each label.
 
-Out of this slice's closed set: ``optimizer.reasoning_floor`` /
-``reasoning_ceiling`` / ``model_locked`` — they need new draft fields + campaign
-wiring and join the gate in a follow-up.
+Config (connector, scorer, round cap, optimizer provider/model, backend node
+overlay) is NOT gated: each carries a sane default the operator edits in the
+optional Advanced block. A default is not a hidden gap — it's a default.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -60,21 +61,6 @@ class OriginReadiness:
     gaps: tuple[FieldGap, ...]
 
 
-# The config-knob closed set: (field_key, label, hint-when-unset). Each is
-# satisfied by CONFIRMED provenance alone (its value seeds from a template
-# default). The column mapping is checked separately — it also gates on header
-# membership.
-_CONFIG_FIELDS: tuple[tuple[str, str, str], ...] = (
-    ("task_description", "task framing", "Describe what the prompt should do."),
-    ("connector", "backend connector", "Confirm which backend runs the pipeline."),
-    ("scoring_composite", "success metric", "Confirm how a prediction is scored."),
-    ("max_rounds", "round cap", "Confirm the optimization round cap."),
-    ("optimizer.provider", "optimizer provider", "Confirm the optimizer LLM provider."),
-    ("optimizer.model", "optimizer model", "Confirm the optimizer LLM model."),
-    ("backend.node_config", "backend node config", "Confirm the backend node overlay."),
-)
-
-
 def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
     """Gate ``draft`` for mint. Pure; the checklist — not the operator — decides."""
     gaps: list[FieldGap] = []
@@ -93,8 +79,15 @@ def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
         label="target",
         gaps=gaps,
     )
-    for field_key, label, hint in _CONFIG_FIELDS:
-        _check_confirmed(draft, field_key=field_key, label=label, hint=hint, gaps=gaps)
+    _check_confirmed(
+        draft,
+        field_key="task_description",
+        label="task framing",
+        hint="Describe what the prompt should do.",
+        gaps=gaps,
+    )
+
+    _check_answer_space(draft, gaps=gaps)
 
     return OriginReadiness(complete=not gaps, gaps=tuple(gaps))
 
@@ -138,14 +131,62 @@ def _check_confirmed(
     hint: str,
     gaps: list[FieldGap],
 ) -> None:
-    """A config knob is satisfied by CONFIRMED provenance — its value is whatever
-    template default or operator/resolver choice currently sits on the draft."""
+    """``task_description`` is satisfied by CONFIRMED provenance — the operator
+    stated it, or the resolver proposed it high-confidence. PROPOSED (low
+    confidence) blocks until the operator confirms or corrects the framing."""
     provenance = draft.resolved.get(field_key, Provenance.UNSET)
     if provenance is Provenance.CONFIRMED:
         return
     reason = "proposed_unconfirmed" if provenance is Provenance.PROPOSED else "unset"
     extra = " (proposed — confirm or correct)." if provenance is Provenance.PROPOSED else ""
     gaps.append(FieldGap(field=field_key, reason=reason, hint=f"{hint} [{label}]{extra}"))
+
+
+def _label_present(label: str, haystack: str) -> bool:
+    """Whole-token membership — so the label ``other`` isn't matched inside
+    ``another``/``mother``. Boundaries are non-alphanumeric, so multi-word
+    labels (``technical support``) and numeric labels still match cleanly."""
+    return re.search(rf"(?<![a-z0-9]){re.escape(label.lower())}(?![a-z0-9])", haystack) is not None
+
+
+def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
+    """Closed-label datasets must enumerate every target label in the prompt.
+
+    When the target column is a fixed taxonomy (:meth:`DraftCampaign.answer_space`),
+    the origin stays open until each label appears verbatim in the prompt that
+    will be committed — which is :attr:`starting_prompt` once the check-in has
+    authored it, else the ``task_description`` floor (mirrors
+    ``launcher._build_default_prompt``). The deterministic gate; the check-in
+    proposer (handed the same answer space) is what authors the enumeration. A
+    proposer that drops a label surfaces here as an open gap rather than minting a
+    campaign whose prompt can never emit it (the failure that left every
+    non-``financial`` row unscoreable). No-op for an open-ended target — there's
+    no small fixed set to enumerate."""
+    labels = draft.answer_space()
+    if not labels:
+        return
+    # Mirror the committed prompt: the authored Layer-1 fields win once present,
+    # else the task_description floor — checking their union would pass a draft
+    # whose labels live only in a task_description that never reaches the prompt.
+    committed = (
+        [str(v) for v in draft.starting_prompt.values()]
+        if draft.starting_prompt
+        else [draft.task_description]
+    )
+    haystack = " ".join(committed).lower()
+    missing = [lab for lab in labels if not _label_present(lab, haystack)]
+    if not missing:
+        return
+    gaps.append(
+        FieldGap(
+            field="answer_space",
+            reason="unset" if not draft.starting_prompt else "proposed_unconfirmed",
+            hint=(
+                "Enumerate every target label in the prompt so the model picks one: "
+                f"{', '.join(labels)}. Missing: {', '.join(missing)}."
+            ),
+        )
+    )
 
 
 def field_values(draft: DraftCampaign) -> dict[str, Any]:
@@ -158,12 +199,7 @@ def field_values(draft: DraftCampaign) -> dict[str, Any]:
         "column.query": lambda d: d.column_query,
         "column.ground_truth": lambda d: d.column_ground_truth,
         "task_description": lambda d: d.task_description,
-        "connector": lambda d: d.connector,
-        "scoring_composite": lambda d: d.scoring_composite,
-        "max_rounds": lambda d: d.max_rounds,
-        "optimizer.provider": lambda d: d.optimizer_provider,
-        "optimizer.model": lambda d: d.optimizer_model,
-        "backend.node_config": lambda d: dict(d.pipeline_overlay),
+        "answer_space": lambda d: list(d.answer_space() or ()),
     }
     return {key: getter(draft) for key, getter in getters.items()}
 
@@ -171,17 +207,16 @@ def field_values(draft: DraftCampaign) -> dict[str, Any]:
 def resolution_block(draft: DraftCampaign) -> dict[str, Any]:
     """Serialize the draft's checklist state for the on-disk ``cache.json``.
 
-    ``{complete, provenance: {field: tag}, sources: {field: auto|stated},
-    values: {field: value}, gaps: [{field, reason, hint}]}`` — the AI-readable
-    record of what blocks mint, the current value + provenance + source of every
-    gated field, and why each blocks. The resolver additionally stamps its last
-    ``OriginResolution`` alongside this block.
+    ``{complete, provenance: {field: tag}, values: {field: value},
+    gaps: [{field, reason, hint}]}`` — the AI-readable record of what blocks
+    mint, the current value + provenance of every gated field, and why each
+    blocks. The resolver additionally stamps its last ``OriginResolution``
+    alongside this block.
     """
     readiness = origin_readiness(draft)
     return {
         "complete": readiness.complete,
         "provenance": {field_name: prov.value for field_name, prov in draft.resolved.items()},
-        "sources": {field_name: src.value for field_name, src in draft.sources.items()},
         "values": field_values(draft),
         "gaps": [gap.to_wire() for gap in readiness.gaps],
     }

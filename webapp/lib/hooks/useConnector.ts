@@ -66,6 +66,7 @@ const EMPTY: ConnectorView = {
   nodeConfigSchema: null,
   nodeOutputSchema: null,
   startingPrompt: null,
+  phase: null,
 };
 
 // Connector reachability is rare-changing; a 5 s probe is plenty and stays
@@ -179,6 +180,8 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     () => (dash?.current_round?.nodes as Record<string, NodeDataLike> | undefined) ?? {},
     [dash],
   );
+  // Fine-grained activity phase — drives the hero's running/idle indicator.
+  const phase = typeof dash?.state === "string" ? dash.state : null;
 
   // Resolved backend id (dataset's connector name → registered backend). Drives
   // the reachability probe below; null until both streams resolve.
@@ -218,7 +221,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
   usePoll(healthTick, { intervalMs: HEALTH_INTERVAL_MS, enabled: !!activeId && authed });
 
   return useMemo<ConnectorView>(() => {
-    if (!datasetName) return { ...EMPTY, isLive, currentNodes };
+    if (!datasetName) return { ...EMPTY, isLive, currentNodes, phase };
     const active = connector ? backends.find((b) => b.name === connector) ?? null : null;
     const baseUrl = active?.base_url ?? null;
     return {
@@ -235,6 +238,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
       nodeConfigSchema,
       nodeOutputSchema,
       startingPrompt,
+      phase,
     };
   }, [
     datasetName,
@@ -248,6 +252,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     nodeConfigSchema,
     nodeOutputSchema,
     startingPrompt,
+    phase,
   ]);
 }
 

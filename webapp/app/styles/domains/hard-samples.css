@@ -23,6 +23,9 @@
 .run-ctl-fork:hover:not(:disabled){opacity:1;color:var(--color-accent)}
 .run-ctl-fork:disabled{opacity:0.3;cursor:not-allowed}
 .run-ctl-err{color:var(--color-danger,#c53030);font-size:11px;max-width:160px}
+/* Pause-pending hint — shown between the click and the run declaring `paused`,
+   explaining the graceful wait. Warn-toned to match the pause icon. */
+.run-ctl-pausing{color:var(--color-warn);font-size:11px;max-width:220px}
 /* Sample-trajectory mini button — fixed dimensions mirroring `.hs-heat-mini-btn`
    (57x22px, non-draggable). Inner `.st-mini` renders a miniature Series view
    (4px tiles) — same shape as the heat-map's mini, different palette. */

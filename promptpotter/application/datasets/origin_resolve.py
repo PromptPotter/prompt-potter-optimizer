@@ -46,7 +46,7 @@ from promptpotter.application.optimization.dispatch.llm_call import (
 from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
+from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import get_llm_client
 from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
@@ -55,21 +55,20 @@ from promptpotter.infrastructure.tracing import observed_node
 
 logger = logging.getLogger(__name__)
 
-# Checklist field id → DraftCampaign attribute the resolver may set. Fields not
-# here (backend.node_config) are not string-applicable from a finding this slice
-# and stay on their template default (operator edits via edit-draft-campaign).
+# Checklist field id → DraftCampaign attribute the resolver may set. ONLY the
+# genuinely-variable fields: the two column picks and the task framing. Config
+# (connector / scoring / optimizer LLM / max_rounds) is NOT proposed — those are
+# defaults the operator edits in the optional Advanced block, not facts the LLM
+# infers from the data. The closed answer space is code-owned (answer_format,
+# `with_closed_answer_format`). So the proposer authors framing + reads columns;
+# it does not negotiate config.
 _FINDING_SETTERS: dict[str, str] = {
     "column.query": "column_query",
     "column.ground_truth": "column_ground_truth",
     "task_description": "task_description",
-    "connector": "connector",
-    "scoring_composite": "scoring_composite",
-    "optimizer.provider": "optimizer_provider",
-    "optimizer.model": "optimizer_model",
-    "max_rounds": "max_rounds",
 }
 
-_PREVIEW_ROWS = 5
+_PREVIEW_ROWS = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +90,7 @@ def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
     provenance = {key: prov.value for key, prov in draft.resolved.items()}
     preview = [dict(row) for row in draft.sample_preview[:_PREVIEW_ROWS]]
 
-    state = {
+    state: dict[str, Any] = {
         "uploaded_columns": list(draft.headers),
         "n_samples": draft.n_samples,
         "sample_rows": preview,
@@ -99,6 +98,16 @@ def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
         "provenance": provenance,
         "open_gaps": [gap.to_wire() for gap in readiness.gaps],
     }
+    # When the target column reads as a closed label set, hand the proposer the
+    # FULL enumerated answer space (computed over the whole upload at ingest, not
+    # the truncated preview) so it stops inferring a partial taxonomy from the
+    # few visible rows and collapsing it to "(e.g., X)".
+    answer_space = draft.answer_space()
+    if answer_space is not None:
+        state["answer_space"] = {
+            "target_column": draft.column_ground_truth,
+            "labels": list(answer_space),
+        }
     operator_message = draft.task_description  # latest operator framing, if any
     user_content = (
         "DRAFT-CAMPAIGN ORIGIN to resolve. Propose values for the OPEN gaps "
@@ -110,9 +119,12 @@ def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
         user_content += f"\n\nOperator's stated framing so far:\n{operator_message}"
 
     consultation_instruction = (
-        "This is a draft-campaign origin. Respond in ORIGIN-RESOLUTION mode: "
-        "fill 'assessment', 'findings', and 'next_action' (and 'recap' only "
-        "when ready). Leave the Layer 1 + task_context fields empty."
+        "This is a draft-campaign origin. Fill 'assessment', 'findings', and "
+        "'next_action' (and 'recap' only when ready). ALSO decompose the "
+        "task_description you propose this turn into the Layer 1 prompt fields + "
+        "task_context — that decomposition seeds the campaign's starting prompt. "
+        "The closed answer space (when present) is filled in deterministically, "
+        "so frame the task around the labels rather than re-listing them."
     )
     return user_content, consultation_instruction
 
@@ -166,47 +178,12 @@ async def resolve_origin_turn(
     return OriginResolutionResult(resolution=block, draft=updated)
 
 
-async def resolve_origin_until_gated(
-    *,
-    stores: Stores,
-    draft: DraftCampaign,
-    draft_registry: DraftCampaignRegistry,
-    max_turns: int = 4,
-) -> tuple[DraftCampaign, OriginResolutionResult | None]:
-    """Auto-drive resolver turns until ``origin_readiness`` passes or progress
-    stalls. The web does one turn per operator click; a headless caller (the CLI
-    ``ingest`` verb) drives the loop itself. High-confidence findings auto-confirm
-    each turn, so the gaps shrink turn over turn.
-
-    Returns ``(final_draft, last_result)`` — ``last_result`` is ``None`` when the
-    draft was already complete (no turn ran). Bounded by ``max_turns`` (mirrors
-    the ``MAX_AUTO_REBASES`` backstop); a turn that applies nothing (``_apply_findings``
-    returns the same object) is the stall signal and stops the loop early — no
-    silent spin, the remaining gaps surface to the caller.
-    """
-    current = draft
-    last: OriginResolutionResult | None = None
-    for _ in range(max_turns):
-        if origin_readiness(current).complete:
-            break
-        result = await resolve_origin_turn(
-            stores=stores, draft=current, draft_registry=draft_registry
-        )
-        last = result
-        if result.draft is current:  # nothing applied this turn → stalled
-            break
-        current = result.draft
-    return current, last
-
-
 def _apply_findings(draft: DraftCampaign, output: CheckinOutput) -> DraftCampaign:
-    """Apply evidence-cited findings to the draft. High-confidence → CONFIRMED
-    (auto), low → PROPOSED. Either way the source is AUTO (machine-proposed) —
-    an operator confirmation later rides ``edit-draft-campaign`` and stamps
-    STATED. Evidence-less or unmappable findings are dropped."""
+    """Apply evidence-cited findings to the draft. High-confidence → CONFIRMED,
+    low → PROPOSED (waits for an operator confirmation via ``edit-draft-campaign``).
+    Evidence-less or unmappable findings are dropped."""
     values: dict[str, Any] = {}
     provenance: dict[str, Provenance] = {}
-    sources: dict[str, ProvenanceSource] = {}
     for finding in output.findings:
         attr = _FINDING_SETTERS.get(finding.field)
         if attr is None or not finding.evidence.strip():
@@ -218,7 +195,6 @@ def _apply_findings(draft: DraftCampaign, output: CheckinOutput) -> DraftCampaig
         provenance[finding.field] = (
             Provenance.CONFIRMED if finding.confidence == "high" else Provenance.PROPOSED
         )
-        sources[finding.field] = ProvenanceSource.AUTO
     # The same check-in node returns the decomposition half (the six Layer-1
     # prompt strings) alongside the origin findings — see the CheckinOutput
     # two-mode contract. Capture it as the draft's starting prompt; the operator
@@ -232,10 +208,26 @@ def _apply_findings(draft: DraftCampaign, output: CheckinOutput) -> DraftCampaig
     if prompt_fields:
         values["starting_prompt"] = {**draft.starting_prompt, **prompt_fields}
         provenance["starting_prompt"] = Provenance.CONFIRMED
-        sources["starting_prompt"] = ProvenanceSource.AUTO
+    # The check-in also decomposes the task into a 7-field ``task_context`` domain
+    # framing. Capture it onto the draft (it rides commit → ``task_context.json``)
+    # so the run reads it instead of recomputing via a second LLM call at run-start.
+    task_context = output.task_context.model_dump()
+    if any(str(value).strip() for value in task_context.values()):
+        values["task_context"] = task_context
     if not values:
         return draft
-    return draft.apply_resolution(values=values, provenance=provenance, sources=sources)
+    # A closed-label target's answer space is a deterministic fact — the distinct
+    # values of the ground-truth column, computed at ingest. Asking the LLM to
+    # transcribe every label into the prompt is what fails: it drops some, then
+    # the answer_space gate blocks mint forever (the campaign that listed only
+    # "financial | actionable" of {actionable, financial, informational, other}).
+    # So code owns the answer_format field — normalized on the FINAL draft, so a
+    # column finding that resolved the target *this same turn* is already in
+    # effect (reading answer_space off the pre-resolution draft would miss it).
+    # The optimizer + operator still edit the framing; the label set is always
+    # present verbatim, making the gate a safety that passes, not a tripwire.
+    updated = draft.apply_resolution(values=values, provenance=provenance)
+    return updated.with_closed_answer_format()
 
 
 def _coerce(field_key: str, proposed: str, draft: DraftCampaign) -> Any | None:
@@ -283,5 +275,4 @@ __all__ = [
     "OriginResolutionResult",
     "build_origin_consultation",
     "resolve_origin_turn",
-    "resolve_origin_until_gated",
 ]

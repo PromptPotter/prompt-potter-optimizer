@@ -20,6 +20,7 @@ from typing import Any
 from promptpotter.application.datasets.authored import read_authored_dataset
 from promptpotter.application.datasets.csv_ingest import (
     IngestError,
+    closed_label_set,
     format_from_filename,
     read_tabular,
 )
@@ -39,7 +40,7 @@ from promptpotter.application.datasets.prompts import (
     list_dataset_prompts,
     load_dataset_prompt,
 )
-from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
+from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import validate_dataset_name
 
@@ -49,6 +50,21 @@ from promptpotter.infrastructure.store.paths import validate_dataset_name
 # file the operator already chose, so it relies on the per-row cap in
 # ``read_tabular`` instead.
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
+def _column_label_sets(
+    headers: list[str], rows: list[dict[str, str]]
+) -> dict[str, tuple[str, ...]]:
+    """Per-column closed label set over the FULL upload (not the truncated
+    preview): the answer space the origin gate + check-in proposer need. Only
+    columns that read as a fixed taxonomy carry an entry; an open-ended column
+    (query text, numeric answers) is absent."""
+    n = len(rows)
+    return {
+        header: labels
+        for header in headers
+        if (labels := closed_label_set((row.get(header, "") for row in rows), n_rows=n))
+    }
 
 
 class SlugTakenError(Exception):
@@ -93,6 +109,7 @@ def ingest_draft(
         sample_preview=preview,
         headers=list(table.headers),
         source_file=filename or "",
+        column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
     )
     # Stash the raw rows + headers; materialization to Samples waits until the
     # column mapping is confirmed (at mint). The resolution block lets an
@@ -190,6 +207,7 @@ def draft_from_dataset(
         sample_preview=rows[:PREVIEW_ROWS],
         headers=["query", "ground_truth"],
         source_file=f"dataset:{dataset_name}",
+        column_label_sets=_column_label_sets(["query", "ground_truth"], rows),
     )
     draft = draft.apply_resolution(
         values={
@@ -203,7 +221,6 @@ def draft_from_dataset(
             "starting_prompt": starting_prompt,
         },
         provenance={"task_description": Provenance.CONFIRMED},
-        sources={"task_description": ProvenanceSource.AUTO},
     )
     registry.update(draft)
     stores.tenant_datasets.write_draft_cache(

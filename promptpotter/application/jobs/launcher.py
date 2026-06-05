@@ -27,6 +27,7 @@ from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
 from promptpotter.application.config import (
     CampaignConfig,
     configure_and_apply_pipeline,
+    create_llm_client,
     load_campaign_config,
 )
 from promptpotter.application.datasets import read_campaign_config_file
@@ -44,12 +45,13 @@ from promptpotter.application.jobs.quota import (
     effective_spend_cap_usd,
 )
 from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus
+from promptpotter.application.optimization.task_context import load_or_build_task_context
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner import build_origin_cycle_id
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, TaskDecomposition
 from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
@@ -168,6 +170,13 @@ async def mint_campaign_command(
         active_steps=list(pipeline_params.get("steps", [])),
     )
 
+    # Run-start framing: read the committed ``task_context.json`` (written at
+    # commit from the check-in's decomposition) — or decompose a benchmark's
+    # ``task_description.md`` once on first sight. No second LLM call once the
+    # file exists; the web mint path previously ran with EMPTY framing.
+    llm_client, model = create_llm_client(campaign_config)
+    task_context = await load_or_build_task_context(session.dataset_config_dir, llm_client, model)
+
     job = job_registry.create(
         user_id=str(stores.identity.user_id),
         campaign_id=campaign_id,
@@ -182,6 +191,7 @@ async def mint_campaign_command(
             train_data=train_data,
             job_registry=job_registry,
             job_id=job.job_id,
+            task_context=task_context,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
         ),
@@ -232,6 +242,14 @@ async def commit_draft_to_dataset(
             f"slug collision at commit: {draft.slug!r} already exists in this tenant's collection"
         )
 
+    # The closed answer space is a deterministic fact (the target column's label
+    # set), not the operator's to complete by hand — fill answer_format here so an
+    # otherwise-ready draft whose authored prompt under-enumerated the labels
+    # isn't blocked at the gate. No-op when already canonical or open-ended.
+    normalized = draft.with_closed_answer_format()
+    if normalized is not draft:
+        draft = draft_registry.update(normalized)
+
     # Deterministic origin gate BEFORE anything irreversible. A false-ready
     # never reaches mint — the checklist, not the operator, decides.
     readiness = origin_readiness(draft)
@@ -260,6 +278,7 @@ async def commit_draft_to_dataset(
     pipeline_json = _build_origin_pipeline_json(draft)
     campaign_json = _build_default_campaign_json(draft)
     prompt_default = _build_default_prompt(draft)
+    task_context = _build_task_context(draft)
 
     stores.tenant_datasets.commit_draft(
         draft.draft_id,
@@ -268,6 +287,7 @@ async def commit_draft_to_dataset(
         campaign_json=campaign_json,
         task_description=draft.task_description,
         prompt_default=prompt_default,
+        task_context=task_context,
     )
     draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)
     return draft.slug
@@ -466,6 +486,18 @@ def _build_default_prompt(draft: DraftCampaign) -> dict[str, Any]:
     return {"instruction": draft.task_description}
 
 
+def _build_task_context(draft: DraftCampaign) -> dict[str, Any]:
+    """The run-start domain framing, written to ``task_context.json``.
+
+    The check-in already decomposed the task into the 7-field ``task_context``
+    (carried on :attr:`DraftCampaign.task_context`); normalize it through
+    :class:`TaskDecomposition` with the verbatim ``raw_description`` so the run
+    reads it directly instead of re-decomposing via a second LLM call."""
+    return TaskDecomposition.from_dict(
+        {**draft.task_context, "raw_description": draft.task_description}
+    ).to_dict()
+
+
 async def start_run_command(
     *,
     stores: Stores,
@@ -524,6 +556,8 @@ async def start_run_command(
 
     train_data = session.samples or []
     configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
+    llm_client, model = create_llm_client(campaign_config)
+    task_context = await load_or_build_task_context(session.dataset_config_dir, llm_client, model)
     # Bind the session to the EXISTING campaign/cycle before launch. Without this
     # `_ensure_session_minted` (guards on an empty session_id) would mint a fresh
     # random campaign + root cycle and steal the active pointer — stranding an
@@ -551,6 +585,7 @@ async def start_run_command(
             train_data=train_data,
             job_registry=job_registry,
             job_id=job.job_id,
+            task_context=task_context,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
         ),
@@ -567,6 +602,7 @@ async def _run_in_background(
     train_data: list[Any],
     job_registry: JobRegistry,
     job_id: str,
+    task_context: TaskDecomposition,
     halt_at_accuracy: float | None,
     spend_budget_usd: float | None,
 ) -> None:
@@ -589,6 +625,7 @@ async def _run_in_background(
             session=session,
             observers=observers,
             experiment_id=session.experiment_id,
+            task_context=task_context,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
         )

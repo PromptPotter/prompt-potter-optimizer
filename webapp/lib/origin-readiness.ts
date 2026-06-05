@@ -12,9 +12,11 @@
 import type { DraftCampaignWire, DraftPatch, OriginGap, ProvenanceTag } from "./api";
 
 // The dotted field-key namespace the server's `origin_readiness` checklist
-// keys `draft.resolved` / `draft.sources` by. Single source for every site
-// that reads provenance by key (this module, plus the ingest column-mapping
-// and check-in panels). Mirror of the field ids in `origin_readiness.py`.
+// keys `draft.resolved` by. Single source for every site that reads provenance
+// by key (this module, plus the ingest column-mapping and check-in panels).
+// Mirror of the field ids in `origin_readiness.py`. Config keys are still
+// listed for `questionPatch` (a resolver question can set them), but they are
+// NOT gated — config carries a default the operator edits.
 export const ORIGIN_KEY = {
   columnQuery: "column.query",
   columnGroundTruth: "column.ground_truth",
@@ -60,21 +62,15 @@ function checkColumn(draft: DraftCampaignWire, check: ColumnCheck): OriginGap | 
   };
 }
 
-// The closed-set config knobs (beyond the column mapping). Each is satisfied by
-// `confirmed` provenance alone — its value seeds from a template default and
-// auto-confirms at ingest, so the operator overrides rather than fills them.
-// `task_description` is the one that lands `unset` (no default framing), so it
-// gates until the operator (or the resolver, high-confidence) states it. Mirror
-// of `_CONFIG_FIELDS` in `origin_readiness.py`.
-const CONFIG_FIELDS: Array<{ fieldKey: OriginKey; hint: string }> = [
-  { fieldKey: ORIGIN_KEY.taskDescription, hint: "Describe what the prompt should do." },
-  { fieldKey: ORIGIN_KEY.connector, hint: "Confirm which backend runs the pipeline." },
-  { fieldKey: ORIGIN_KEY.scoringComposite, hint: "Confirm how a prediction is scored." },
-  { fieldKey: ORIGIN_KEY.maxRounds, hint: "Confirm the optimization round cap." },
-  { fieldKey: ORIGIN_KEY.optimizerProvider, hint: "Confirm the optimizer LLM provider." },
-  { fieldKey: ORIGIN_KEY.optimizerModel, hint: "Confirm the optimizer LLM model." },
-  { fieldKey: ORIGIN_KEY.backendNodeConfig, hint: "Confirm the backend node overlay." },
-];
+// `task_description` is the one non-column field that gates: it has no default
+// framing, so it stays open until the operator (or the resolver, high-confidence)
+// states it. Config (connector / scorer / round cap / optimizer LLM / node
+// overlay) is NOT gated — each carries a default the operator edits. Mirror of
+// `origin_readiness.py`.
+const TASK_DESCRIPTION = {
+  fieldKey: ORIGIN_KEY.taskDescription,
+  hint: "Describe what the prompt should do.",
+};
 
 function checkConfirmed(
   draft: DraftCampaignWire,
@@ -89,9 +85,10 @@ function checkConfirmed(
   };
 }
 
-// The full closed set: the column mapping (header-membership-checked) plus the
-// once-hidden config defaults. A faithful projection of the shipped wire fields;
-// the `422 origin_incomplete` gaps remain authoritative.
+// The gated set: the column mapping (header-membership-checked) plus the task
+// framing. Config is not gated. A faithful projection of the shipped wire
+// fields; the `422 origin_incomplete` gaps (incl. answer_space) remain
+// authoritative.
 export function originReadiness(draft: DraftCampaignWire): OriginReadiness {
   const gaps: OriginGap[] = [];
   for (const check of [
@@ -101,10 +98,8 @@ export function originReadiness(draft: DraftCampaignWire): OriginReadiness {
     const gap = checkColumn(draft, check);
     if (gap) gaps.push(gap);
   }
-  for (const field of CONFIG_FIELDS) {
-    const gap = checkConfirmed(draft, field);
-    if (gap) gaps.push(gap);
-  }
+  const taskGap = checkConfirmed(draft, TASK_DESCRIPTION);
+  if (taskGap) gaps.push(taskGap);
   return { complete: gaps.length === 0, gaps };
 }
 

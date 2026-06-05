@@ -68,6 +68,11 @@
 .wf-hero-node-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent-glow)}
 .wf-hero-node-toggle[aria-pressed="true"]{border-color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent),0 0 14px var(--color-accent-glow)}
 .wf-hero-node.llm .val{color:var(--color-accent);align-self:center;text-align:center;max-width:220px}
+/* Backend LLM actively scoring (live + state in scoring/origin): success-tinted
+   border + glow pulse, reusing the workflow card keyframe. At rest the chip reads
+   "idle" with no pulse. Neutralized under prefers-reduced-motion (global rule). */
+.wf-hero-node.llm.active{border-color:var(--color-success-border);animation:wf-running-pulse 2s ease-in-out infinite}
+.wf-hero-node.llm.active .val{color:var(--color-success)}
 .wf-hero-arrow{
   flex:1;max-width:180px;min-width:65px;height:2px;position:relative;margin:0 -1px;
   background:linear-gradient(90deg,transparent 0%,var(--color-accent) 18%,var(--color-accent) 82%,transparent 100%);
@@ -157,6 +162,8 @@
 .wf-hero-multi-node .node{fill:var(--color-accent);stroke:var(--color-accent);stroke-width:1;filter:drop-shadow(0 0 4px var(--color-accent-glow));transition:transform .15s,filter .15s}
 .wf-hero-multi-node:hover .node{transform-box:fill-box;transform-origin:center;transform:scale(1.18)}
 .wf-hero-multi-node .node.selected{filter:drop-shadow(0 0 7px var(--color-accent-glow)) drop-shadow(0 0 11px var(--color-accent-glow))}
+/* Active backend LLM node — success fill + pulse, reusing the canvas keyframe. */
+.wf-hero-multi-node .node.active{fill:var(--color-success);stroke:var(--color-success);filter:drop-shadow(0 0 7px rgba(var(--color-success-rgb),0.55));animation:pulse-active 1.6s ease-in-out infinite}
 .wf-hero-multi-node .node.kind-tool{fill:var(--color-accent);opacity:.85}
 .wf-hero-multi-node .node.kind-retriever{fill:var(--color-accent);opacity:.85}
 .wf-hero-multi-node .node.kind-cache{fill:var(--color-text-tertiary);stroke:var(--color-text-tertiary);filter:drop-shadow(0 0 2px rgba(var(--color-accent-rgb),0.25))}

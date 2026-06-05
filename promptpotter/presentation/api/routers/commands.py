@@ -51,7 +51,7 @@ from promptpotter.application.jobs.launcher import (
     mint_campaign_from_draft_command,
 )
 from promptpotter.connectors import BackendUnreachableError
-from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
+from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.presentation.api.deps import StoreDep, get_draft_registry
 from promptpotter.presentation.api.middleware import CommandAcceptedBody, CommandDispatcher
 from promptpotter.presentation.api.middleware.command_dispatcher import (
@@ -309,12 +309,7 @@ async def edit_draft_campaign(
         )
 
     changes: dict[str, Any] = {}
-    # An operator edit is an operator-stated value → CONFIRMED provenance + a
-    # STATED source (it overrides whatever auto-confirmed default sat there).
-    # CONFIRMED is what opens the origin-readiness gate for a field the resolver
-    # left PROPOSED or `task_description` left UNSET.
     provenance: dict[str, Provenance] = {}
-    sources: dict[str, ProvenanceSource] = {}
     if patch.slug is not None and patch.slug != draft.slug:
         if store.tenant_datasets.slug_exists(patch.slug):
             suggested = store.tenant_datasets.suggest_free_slug(patch.slug)
@@ -327,26 +322,26 @@ async def edit_draft_campaign(
                 },
             )
         changes["slug"] = patch.slug
-    # (patch attr, draft attr, checklist field id)
-    for patch_val, draft_attr, field_key in (
-        (patch.connector, "connector", "connector"),
-        (patch.scoring_composite, "scoring_composite", "scoring_composite"),
-        (patch.max_rounds, "max_rounds", "max_rounds"),
-        (patch.task_description, "task_description", "task_description"),
-        (patch.pipeline_overlay, "pipeline_overlay", "backend.node_config"),
-        (patch.optimizer_provider, "optimizer_provider", "optimizer.provider"),
-        (patch.optimizer_model, "optimizer_model", "optimizer.model"),
-        (patch.starting_prompt, "starting_prompt", "starting_prompt"),
+    # Config + the authored prompt are not gated — just set the value.
+    for patch_val, draft_attr in (
+        (patch.connector, "connector"),
+        (patch.scoring_composite, "scoring_composite"),
+        (patch.max_rounds, "max_rounds"),
+        (patch.pipeline_overlay, "pipeline_overlay"),
+        (patch.optimizer_provider, "optimizer_provider"),
+        (patch.optimizer_model, "optimizer_model"),
+        (patch.starting_prompt, "starting_prompt"),
+        (patch.lock_model, "lock_model"),
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val
-            provenance[field_key] = Provenance.CONFIRMED
-            sources[field_key] = ProvenanceSource.STATED
 
-    # lock_model is a campaign-config toggle, not an origin-readiness checklist
-    # field — it carries no provenance, just flips the draft value.
-    if patch.lock_model is not None:
-        changes["lock_model"] = patch.lock_model
+    # task_description IS gated — an operator edit CONFIRMS the framing, which is
+    # what opens the origin-readiness gate for a field the resolver left PROPOSED
+    # or that started UNSET.
+    if patch.task_description is not None:
+        changes["task_description"] = patch.task_description
+        provenance["task_description"] = Provenance.CONFIRMED
 
     # Column mapping confirms the input/target headers — each must be a member
     # of the uploaded headers (422 otherwise), and confirming flips the
@@ -367,7 +362,7 @@ async def edit_draft_campaign(
                 },
             )
 
-    updated = draft.apply_resolution(values=changes, provenance=provenance, sources=sources)
+    updated = draft.apply_resolution(values=changes, provenance=provenance)
     if patch.column_query is not None or patch.column_ground_truth is not None:
         updated = updated.confirm_columns(
             query_col=patch.column_query, ground_truth_col=patch.column_ground_truth

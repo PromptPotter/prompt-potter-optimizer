@@ -25,15 +25,25 @@ from __future__ import annotations
 
 import threading
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 from promptpotter.domain.identity import TenantId, safe_name
-from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
+from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.shared.clock import utcnow_iso
 
 DEFAULT_CONNECTOR = "termnorm"
 """Only registered connector today (per root CLAUDE.md); operator-editable."""
+
+
+def closed_answer_format(labels: Sequence[str]) -> str:
+    """Canonical ``answer_format`` value for a closed label set: every label,
+    pipe-joined, so the prompt can emit any of them and the answer_space gate
+    passes deterministically. The single source for this string — both the
+    resolver (origin_resolve) and the commit gate (launcher) call it."""
+    return " | ".join(labels)
+
 
 DEFAULT_SCORING_COMPOSITE = "exact_match"
 """Only universally-applicable scorer for ``(query, ground_truth)`` shape."""
@@ -97,15 +107,21 @@ class DraftCampaign:
     headers: tuple[str, ...] = ()
     column_query: str = ""
     column_ground_truth: str = ""
+    # Per-column closed label set, computed ONCE over the full upload at ingest
+    # (``closed_label_set`` in ``csv_ingest``) and keyed by header name — only
+    # columns that read as a fixed taxonomy carry an entry. The target column's
+    # entry is the campaign's *answer space* (see :meth:`answer_space`); the
+    # origin gate uses it to require the labels be enumerated in the prompt, and
+    # the check-in proposer is handed it so it stops collapsing the taxonomy to
+    # "(e.g., X)". Empty for an open-ended target (numeric/free-text, where
+    # distinct ≈ n_rows).
+    column_label_sets: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Per-field origin-readiness provenance, keyed by dotted field name
-    # (`column.query`, `column.ground_truth`, …). The deterministic checklist
-    # gates on it; no field reaches mint while UNSET or PROPOSED.
+    # (`column.query`, `column.ground_truth`, `task_description`). The
+    # deterministic checklist gates on it; no field reaches mint while UNSET or
+    # PROPOSED. Only the three genuinely-stated fields carry an entry — config
+    # is not gated.
     resolved: dict[str, Provenance] = field(default_factory=dict)
-    # Per-field source — `auto` (template default / column auto-detect /
-    # resolver finding) vs `stated` (operator edit). Orthogonal to `resolved`;
-    # only fields that have a value (PROPOSED/CONFIRMED) carry a source. The
-    # audit sub-tag the spec's auto-confirm trail requires.
-    sources: dict[str, ProvenanceSource] = field(default_factory=dict)
     source_file: str = ""
     # Per-draft optimizer LLM config — what model runs the L1/L2/L3
     # meta-prompts. Distinct from the backend pipeline node's own LLM
@@ -119,6 +135,13 @@ class DraftCampaign:
     # operator-editable before commit, and written verbatim to
     # ``prompts/default.json`` at mint. Empty until the check-in fills it.
     starting_prompt: dict[str, Any] = field(default_factory=dict)
+    # The check-in's decomposition half also authors a ``task_context`` — the
+    # 7-field domain framing (:class:`CheckinTaskContext`) that every optimizer
+    # layer (L1/L1_CRITIQUE/L2/L3) reads via the ``task_context`` injection. It
+    # rides the draft to commit, lands in ``{slug}/task_context.json``, and the
+    # run reads it instead of re-decomposing at run-start (the second LLM call
+    # that used to recompute exactly this). Empty until the check-in fills it.
+    task_context: dict[str, Any] = field(default_factory=dict)
     # Whether the optimizer is barred from mutating model/provider campaign-wide
     # (the ``forbidden_axes_strict`` knob). Default locked — the conservative
     # floor. Operator-editable in the pipeline-config control panel; drives both
@@ -135,7 +158,17 @@ class DraftCampaign:
         return {
             "draft_id": self.draft_id,
             "slug": self.slug,
-            "sample_preview": [dict(row) for row in self.sample_preview],
+            # Project to the declared wire contract ({query, ground_truth}) using
+            # the resolved column mapping. The internal rows stay keyed by raw
+            # header names (the resolver reads those as sample_rows); only the
+            # wire boundary normalizes. Blank until the columns are confirmed.
+            "sample_preview": [
+                {
+                    "query": row.get(self.column_query, ""),
+                    "ground_truth": row.get(self.column_ground_truth, ""),
+                }
+                for row in self.sample_preview
+            ],
             "n_samples": self.n_samples,
             # True iff this draft was pre-filled from an existing on-disk dataset
             # (a demo/benchmark pick), vs. a fresh operator upload. The setup
@@ -154,12 +187,38 @@ class DraftCampaign:
             "column_query": self.column_query,
             "column_ground_truth": self.column_ground_truth,
             "resolved": {field_name: prov.value for field_name, prov in self.resolved.items()},
-            "sources": {field_name: src.value for field_name, src in self.sources.items()},
             "starting_prompt": dict(self.starting_prompt),
             "lock_model": self.lock_model,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+    def answer_space(self) -> tuple[str, ...] | None:
+        """The target column's closed label set, or ``None`` when the target is
+        unresolved or open-ended.
+
+        Keyed off the resolved/proposed ``column_ground_truth`` into
+        :attr:`column_label_sets` (computed over the full upload at ingest). This
+        is the campaign's enumerable answer space — the gate requires it land in
+        the prompt, the proposer is handed it to enumerate.
+        """
+        if not self.column_ground_truth:
+            return None
+        return self.column_label_sets.get(self.column_ground_truth)
+
+    def with_closed_answer_format(self) -> DraftCampaign:
+        """Return a draft whose ``answer_format`` prompt field enumerates the full
+        closed answer space. The label set is a deterministic fact (the target
+        column's distinct values), not the LLM's to transcribe — so code owns this
+        field and the answer_space gate becomes a safety that passes. No-op for an
+        open-ended target or a draft without an authored prompt yet."""
+        labels = self.answer_space()
+        if not labels or not self.starting_prompt:
+            return self
+        want = closed_answer_format(labels)
+        if self.starting_prompt.get("answer_format") == want:
+            return self
+        return self.patch(starting_prompt={**self.starting_prompt, "answer_format": want})
 
     def patch(self, **changes: Any) -> DraftCampaign:
         """Return a copy with ``updated_at`` refreshed and any provided fields replaced."""
@@ -172,43 +231,34 @@ class DraftCampaign:
 
         Membership of each header in :attr:`headers` is the caller's
         wire-validation concern (422); this only records the confirmed value.
-        An operator-picked column is STATED (the only caller is the
-        ``edit-draft-campaign`` operator path).
+        The only caller is the ``edit-draft-campaign`` operator path.
         """
         resolved = dict(self.resolved)
-        sources = dict(self.sources)
         changes: dict[str, Any] = {}
         if query_col is not None:
             changes["column_query"] = query_col
             resolved["column.query"] = Provenance.CONFIRMED
-            sources["column.query"] = ProvenanceSource.STATED
         if ground_truth_col is not None:
             changes["column_ground_truth"] = ground_truth_col
             resolved["column.ground_truth"] = Provenance.CONFIRMED
-            sources["column.ground_truth"] = ProvenanceSource.STATED
-        return self.patch(resolved=resolved, sources=sources, **changes)
+        return self.patch(resolved=resolved, **changes)
 
     def apply_resolution(
         self,
         *,
         values: dict[str, Any] | None = None,
         provenance: dict[str, Provenance] | None = None,
-        sources: dict[str, ProvenanceSource] | None = None,
     ) -> DraftCampaign:
         """Apply resolver/operator field changes + their per-field provenance.
 
         ``values`` are draft-attribute kwargs (``task_description=...``);
-        ``provenance`` merges checklist field-id → tag onto :attr:`resolved`;
-        ``sources`` merges field-id → ``auto``/``stated`` onto :attr:`sources`.
+        ``provenance`` merges checklist field-id → tag onto :attr:`resolved`.
         The single mutation route the origin-resolution loop drives.
         """
         resolved = dict(self.resolved)
         if provenance:
             resolved.update(provenance)
-        merged_sources = dict(self.sources)
-        if sources:
-            merged_sources.update(sources)
-        return self.patch(resolved=resolved, sources=merged_sources, **(values or {}))
+        return self.patch(resolved=resolved, **(values or {}))
 
 
 @dataclass
@@ -233,6 +283,7 @@ class DraftCampaignRegistry:
         sample_preview: list[dict[str, str]],
         headers: list[str],
         source_file: str = "",
+        column_label_sets: dict[str, tuple[str, ...]] | None = None,
     ) -> DraftCampaign:
         """Mint a fresh draft and register it.
 
@@ -246,7 +297,7 @@ class DraftCampaignRegistry:
         (or the resolver, high-confidence) must state what the prompt does.
         """
         now = utcnow_iso()
-        column_query, column_ground_truth, resolved, sources = _seed_resolved(headers)
+        column_query, column_ground_truth, resolved = _seed_resolved(headers)
         draft = DraftCampaign(
             draft_id=_mint_draft_id(),
             tenant_id=tenant_id,
@@ -261,8 +312,8 @@ class DraftCampaignRegistry:
             headers=tuple(headers),
             column_query=column_query,
             column_ground_truth=column_ground_truth,
+            column_label_sets=dict(column_label_sets or {}),
             resolved=resolved,
-            sources=sources,
             optimizer_provider=DEFAULT_OPTIMIZER_PROVIDER,
             optimizer_model=DEFAULT_OPTIMIZER_MODEL,
             created_at=now,
@@ -301,38 +352,17 @@ class DraftCampaignRegistry:
             return True
 
 
-# Config knobs that seed from our ``pipeline.json`` / ``campaign.json`` template
-# defaults and auto-confirm at create() — one sane default each, so the operator
-# overrides rather than fills them. ``task_description`` is deliberately absent:
-# it has no default framing (lands UNSET, the one operator-stated config gap).
-_AUTO_CONFIRMED_FIELDS: tuple[str, ...] = (
-    "connector",
-    "scoring_composite",
-    "max_rounds",
-    "optimizer.provider",
-    "optimizer.model",
-    "backend.node_config",
-)
-
-
 def _seed_resolved(
     headers: list[str],
-) -> tuple[str, str, dict[str, Provenance], dict[str, ProvenanceSource]]:
-    """Seed the full closed-set provenance + source at mint: columns
-    auto-detected, config knobs auto-confirmed from template defaults,
-    ``task_description`` UNSET. Every seeded value is ``AUTO`` (machine-set);
-    UNSET fields carry no source.
+) -> tuple[str, str, dict[str, Provenance]]:
+    """Seed the gated-field provenance at mint: columns auto-detected (literal
+    ``query`` / ``ground_truth`` headers confirm; else UNSET), ``task_description``
+    UNSET (no default framing). Config is not gated — it carries a default the
+    operator edits, so it gets no provenance entry.
     """
     query_col, ground_truth_col, resolved = _auto_detect_columns(headers)
-    sources: dict[str, ProvenanceSource] = {}
-    for column_key in ("column.query", "column.ground_truth"):
-        if resolved[column_key] is Provenance.CONFIRMED:
-            sources[column_key] = ProvenanceSource.AUTO
-    for field_key in _AUTO_CONFIRMED_FIELDS:
-        resolved[field_key] = Provenance.CONFIRMED
-        sources[field_key] = ProvenanceSource.AUTO
     resolved["task_description"] = Provenance.UNSET
-    return query_col, ground_truth_col, resolved, sources
+    return query_col, ground_truth_col, resolved
 
 
 def _auto_detect_columns(

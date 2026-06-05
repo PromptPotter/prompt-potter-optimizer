@@ -7,19 +7,6 @@ import {
   questionPatch,
 } from "../origin-readiness";
 
-// The config knobs auto-confirm at ingest (template defaults); a fresh draft
-// carries them `confirmed`. `task_description` lands `unset`. The fixture
-// mirrors that server-side seed.
-const CONFIG_CONFIRMED = {
-  connector: "confirmed",
-  scoring_composite: "confirmed",
-  max_rounds: "confirmed",
-  "optimizer.provider": "confirmed",
-  "optimizer.model": "confirmed",
-  "backend.node_config": "confirmed",
-  task_description: "unset",
-} as const;
-
 function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
   return {
     draft_id: "d_0123456789abcdef",
@@ -37,21 +24,12 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     headers: ["input", "gt"],
     column_query: "",
     column_ground_truth: "",
+    // Only the gated fields carry provenance: the two columns + task framing.
+    // Config is not gated (no entry); it carries a default the operator edits.
     resolved: {
       "column.query": "unset",
       "column.ground_truth": "unset",
-      ...CONFIG_CONFIRMED,
-    },
-    // Config knobs auto-confirm from template defaults → AUTO source; the
-    // gate ignores this axis, it is audit-only. Columns/task carry no source
-    // until set, mirroring the server seed.
-    sources: {
-      connector: "auto",
-      scoring_composite: "auto",
-      max_rounds: "auto",
-      "optimizer.provider": "auto",
-      "optimizer.model": "auto",
-      "backend.node_config": "auto",
+      task_description: "unset",
     },
     starting_prompt: {},
     lock_model: true,
@@ -72,7 +50,6 @@ function resolved(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     resolved: {
       "column.query": "confirmed",
       "column.ground_truth": "confirmed",
-      ...CONFIG_CONFIRMED,
       task_description: "confirmed",
     },
     ...over,
@@ -80,10 +57,10 @@ function resolved(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
 }
 
 describe("originReadiness", () => {
-  it("flags unset columns AND the unset task framing; config knobs auto-pass", () => {
+  it("flags unset columns AND the unset task framing; config is not gated", () => {
     const r = originReadiness(draft());
     expect(r.complete).toBe(false);
-    // The config knobs auto-confirm, so only the columns + task framing gap.
+    // Config is not gated, so only the columns + task framing gap.
     expect(new Set(r.gaps.map((g) => g.field))).toEqual(
       new Set(["column.query", "column.ground_truth", "task_description"]),
     );
@@ -104,7 +81,6 @@ describe("originReadiness", () => {
         resolved: {
           "column.query": "confirmed",
           "column.ground_truth": "confirmed",
-          ...CONFIG_CONFIRMED,
           task_description: "proposed",
         },
       }),

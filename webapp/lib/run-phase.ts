@@ -30,6 +30,24 @@ export function runPhaseLabel(
   return (runPhase && RUN_PHASE_LABEL[runPhase]) || runPhase || "—";
 }
 
+// Short, human label for the fine-grained activity phase (`dashboard.json::state`),
+// used in the pause affordance ("Finishing {…} — will pause"). Distinct register
+// from terms.ts (long tooltip sentences) and RUN_PHASE_LABEL (control words).
+const PHASE_PAUSE_LABEL: Record<string, string> = {
+  origin: "scoring origin",
+  scoring: "scoring samples",
+  between_samples: "scoring samples",
+  between_candidates: "scoring samples",
+  l1_generate: "generating candidates",
+  l2_refining: "refining strategy",
+  l3_replanning: "replanning",
+  escalation: "escalating",
+};
+
+export function phasePauseLabel(state: string | null | undefined): string {
+  return (state && PHASE_PAUSE_LABEL[state]) || "the current round";
+}
+
 // The connection-aware run phase for the *live single-cycle* view. The backend
 // declares running/paused/stopping/terminal into dashboard.json; only `running`
 // is ambiguous to a viewer whose poll has gone quiet — a fresh producer is

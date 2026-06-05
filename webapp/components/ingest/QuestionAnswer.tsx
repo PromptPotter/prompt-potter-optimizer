@@ -8,9 +8,9 @@ import { questionOptions, questionPatch } from "@/lib/origin-readiness";
 // the field's answer set: a picker when the resolver gave `options` (or for a
 // column-mapping question, the uploaded headers), else a free-text input.
 // Submitting maps the answer to an `edit-draft-campaign` patch via
-// `questionPatch` (server flips the field CONFIRMED + STATED) — the answer-back
-// half of the resolver loop. A field that isn't string-applicable yields no
-// patch and the control is omitted (only its prompt shows).
+// `questionPatch` (server flips the field CONFIRMED) — the answer-back half of
+// the resolver loop. A field that isn't string-applicable yields no patch and
+// the control is omitted (only its prompt shows).
 export function QuestionAnswer({
   question,
   draft,

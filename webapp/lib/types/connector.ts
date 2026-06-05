@@ -32,6 +32,11 @@ export interface ConnectorView {
   isTls: boolean | null;
   currentNodes: Record<string, NodeDataLike>;
   isLive: boolean;
+  // The viewed cycle's fine-grained activity phase (`dashboard.json::state`):
+  // "origin" | "scoring" | "l1_generate" | "l2_refining" | … The backend target
+  // LLM is actually being called only during "scoring"/"origin"; the hero uses
+  // this (with `isLive`) to show a node as running vs idle. Null when no run.
+  phase: string | null;
   // Connector reachability from the slow `/backends/{id}/health` probe. Null
   // until the first probe lands (or when no backend is resolved).
   health: BackendHealth | null;
