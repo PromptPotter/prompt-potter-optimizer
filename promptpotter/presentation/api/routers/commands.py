@@ -38,6 +38,10 @@ from fastapi import APIRouter, Header, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.datasets.csv_ingest import IngestError
+from promptpotter.application.datasets.dataset_replace import (
+    NothingToReplaceError,
+    version_and_repoint,
+)
 from promptpotter.application.datasets.origin_readiness import resolution_block
 from promptpotter.application.jobs import JobRegistry
 from promptpotter.application.jobs.launcher import (
@@ -246,6 +250,14 @@ class _ResolveOriginEnvelope(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: str = Field(pattern=r"^resolve-origin$")
+    payload: dict[str, Any] = Field(default_factory=dict)
+    client_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class _ReplaceDatasetEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(pattern=r"^replace-dataset$")
     payload: dict[str, Any] = Field(default_factory=dict)
     client_metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -484,6 +496,50 @@ async def mint_campaign_from_draft(
             },
         ) from exc
     return {"campaign_id": campaign_id, "cycle_id": cycle_id, "job_id": job.job_id}
+
+
+@commands_router.post("/replace-dataset")
+async def replace_dataset(
+    request: Request,
+    store: StoreDep,
+    envelope: _ReplaceDatasetEnvelope,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> dict[str, Any]:
+    """Version-and-repoint a colliding dataset so its name frees for new data.
+
+    Per ``docs/specs/m12-api-openapi.yaml::replaceDataset`` +
+    ``docs/specs/m13-dataset-bridge.md § 2.1``. Data-safe: never overwrites — the
+    old data + every prior campaign's results are preserved under ``{slug}-vN``.
+    Synchronous (the migration is a bounded set of renames + JSON rewrites); the
+    freed name is re-ingested in a separate ``/datasets/ingest`` call.
+    """
+    _ensure_idempotency_key(idempotency_key)
+    raw_slug = _require_string(envelope.payload, "slug", max_len=64)
+    if not _DATASET_NAME_PATTERN.fullmatch(raw_slug):
+        raise HTTPException(
+            422,
+            {
+                "error": "payload_invalid",
+                "message": "payload.slug must match ^[a-z][a-z0-9_-]*$",
+            },
+        )
+    try:
+        result = version_and_repoint(stores=store, slug=raw_slug)
+    except NothingToReplaceError as exc:
+        raise HTTPException(
+            409,
+            {
+                "error": "nothing_to_replace",
+                "message": str(exc),
+                "details": {"slug": exc.slug},
+            },
+        ) from exc
+    return {
+        "slug": result.slug,
+        "versioned_to": result.versioned_to,
+        "repointed_campaigns": result.repointed_campaigns,
+        "restamped_measurements": result.restamped_measurements,
+    }
 
 
 @commands_router.post("/{kind}", response_model=CommandAcceptedBody, status_code=202)

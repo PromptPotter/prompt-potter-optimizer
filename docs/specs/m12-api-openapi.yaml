@@ -935,17 +935,17 @@ paths:
   /commands/mint-campaign-from-draft:
     post:
       operationId: mintCampaignFromDraft
-      summary: Commit a `DraftCampaign` — write the Origin files + `campaign.json`, then mint.
+      summary: Commit a `DraftCampaign` — write the Dataset files + `campaign.json`, then mint.
       description: |
         Terminal verb in the draft lifecycle. Server:
         1. Looks up the draft by `draft_id`, tenant-scoped.
         2. Atomic-renames `projects/{tenant}/datasets/.drafts/{draft_id}/` to
            `projects/{tenant}/datasets/{slug}/`.
-        3. Writes the four Origin files (`cache.json`, `pipeline.json`,
+        3. Writes the four Dataset files (`cache.json`, `pipeline.json`,
            `task_description.md`, `prompts/default.json`) per the slot table
            in `docs/specs/m13-chat-first-user-web.md § Commit path`.
         4. Writes the sibling `campaign.json` (default-campaign config; not
-           part of the Origin's `JobSearchPoint.content_hash(dataset)`).
+           part of the Dataset's `JobSearchPoint.content_hash(dataset)`).
         5. Falls through to the existing mint-campaign path.
 
         Workspace-scoped — no `Expected-Version` (no prior cycle to gate
@@ -1015,6 +1015,68 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '503': { $ref: '#/components/responses/BackendUnreachable' }
+
+  /commands/replace-dataset:
+    post:
+      operationId: replaceDataset
+      summary: Version-and-repoint an existing dataset so its name frees for new data.
+      description: |
+        The data-safe answer to a name collision when the operator means
+        "supersede the data under this name" (`docs/specs/m13-dataset-bridge.md`
+        § 2.1). NEVER overwrites: the old data + its results are preserved,
+        renamed out of the way. Server, in crash-safe order:
+        1. Renames `projects/{tenant}/datasets/{slug}/` to the smallest free
+           `{slug}-v{n}/` (byte-identical data; self-reference fixed).
+        2. Repoints every dependent campaign — `campaign.json::dataset_name`
+           and each cycle `index.json::header.dataset_name` — onto `{slug}-vN`,
+           and re-stamps that data's measurement-archive entries. After this,
+           every prior campaign resolves the exact bytes it always ran on.
+        3. Returns; the freed `{slug}` is then re-ingested via `/datasets/ingest`
+           through the normal draft/check-in flow (a separate call).
+
+        A `datasets/.migrations/{id}.json` marker makes the migration resumable;
+        a crash between steps is healed before any run resolves a pin.
+        Workspace-scoped — no `Expected-Version`. `Idempotency-Key` required.
+      tags: [datasets]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: replace-dataset }
+                    payload: { $ref: '#/components/schemas/ReplaceDatasetPayload' }
+      responses:
+        '200':
+          description: |
+            The migration completed. `versioned_to` is the archival name the old
+            data now lives under; the counts are what moved with it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplaceDatasetResponse'
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '401':
+          description: Unauthenticated (no `IdentityContext` resolved at the middleware).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: |
+            `nothing_to_replace` — no committed dataset holds `slug` (the name
+            was removed between the collision 409 and this call).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
 
   /commands/resolve-origin:
     post:
@@ -1776,7 +1838,7 @@ components:
         - slug
         - sample_preview
         - n_samples
-        - derived_origin
+        - derived_from_dataset
         - connector
         - scoring_composite
         - max_rounds
@@ -1830,7 +1892,7 @@ components:
           type: integer
           minimum: 0
           description: Total parsed row count (preview is a head; this is the bank size).
-        derived_origin:
+        derived_from_dataset:
           type: boolean
           description: |
             True iff the draft was pre-filled from an existing on-disk dataset
@@ -2204,6 +2266,43 @@ components:
           description: |
             JobRegistry handle for the runner spawned against the new
             campaign. Clients use this to subscribe to the SSE stream.
+
+    ReplaceDatasetPayload:
+      type: object
+      required: [slug]
+      additionalProperties: false
+      description: |
+        Names the committed dataset whose data is being superseded. The new
+        data is NOT carried here — it is re-ingested under the freed name in a
+        separate `/datasets/ingest` call after this returns.
+      properties:
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[a-z][a-z0-9_-]*$'
+          description: The colliding dataset name to version-and-repoint away.
+
+    ReplaceDatasetResponse:
+      type: object
+      required: [slug, versioned_to, repointed_campaigns, restamped_measurements]
+      additionalProperties: false
+      description: Outcome of one version-and-repoint migration.
+      properties:
+        slug:
+          type: string
+          description: The name that was freed (the request's `slug`).
+        versioned_to:
+          type: string
+          description: 'Archival name the old data moved to (`{slug}-v{n}`).'
+        repointed_campaigns:
+          type: integer
+          minimum: 0
+          description: Campaigns whose pin (+ cycle headers) moved with the data.
+        restamped_measurements:
+          type: integer
+          minimum: 0
+          description: Measurement-archive entries re-stamped onto `versioned_to`.
 
     LLMProvider:
       type: object

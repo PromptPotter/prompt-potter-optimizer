@@ -242,7 +242,7 @@ Chronological log of what's been certified out of this ADR into the docs layer. 
 
 - OIDC client + middleware implementation — Profile C consumes [`0002-identity-foundation.md`](0002-identity-foundation.md) Stage 1.
 - `JobRegistry` internal data model — Profile D names the constraints; implementation lives elsewhere.
-- Webapp redesign (component-level) — design surface in `.impeccable.md`.
+- Webapp redesign (component-level) — design surface in `BRAND.md` / `VOICE.md`.
 - Multi-user merge / CRDT operations — identity-foundation Stage 2+.
 - Per-tenant rate limiting / quotas — M13+ backlog.
 - L4 inner-cycle execution path — [`m12-multi-connector.md`](../specs/m12-multi-connector.md) Track 1.5.

@@ -60,7 +60,23 @@ PREVIEW_ROWS = 10
 
 @dataclass(frozen=True, slots=True)
 class DraftCampaign:
-    """Server-held canonical state for an in-progress ingest. Frozen — mutate via :meth:`patch`."""
+    """Server-held canonical state for an in-progress ingest. Frozen — mutate via :meth:`patch`.
+
+    **It fuses two things on purpose.** The *dataset* half (``slug``,
+    ``task_description``, ``pipeline_overlay``, ``starting_prompt``, the column
+    mapping) materializes into the four dataset files; the *campaign-config*
+    half (``connector``, ``scoring_composite``, ``max_rounds``, ``optimizer_*``,
+    ``lock_model``) materializes into the sibling ``campaign.json``. The fusion
+    is correct for the one-form ingest UX — the operator fills both in one pass.
+
+    **The ``slug`` freezes at commit.** Before commit it's a mutable, operator-
+    editable name; the moment :func:`~promptpotter.application.jobs.launcher.commit_draft_to_dataset`
+    writes ``datasets/{slug}/``, the slug becomes the dataset's filesystem
+    identity *and* the pin every campaign resolves through. The only sanctioned
+    post-commit identity change is the ``-vN`` suffix a *Replace* applies
+    (``application/datasets/dataset_replace.py``) — see
+    ``docs/specs/m13-dataset-bridge.md`` § 1.
+    """
 
     draft_id: str
     tenant_id: TenantId
@@ -126,7 +142,7 @@ class DraftCampaign:
             # wizard keys its "pre-filled, no check-in needed" branch on this —
             # NOT on the global `demo_mode_enabled` preference, which only
             # controls whether demo datasets are surfaced in the collection.
-            "derived_origin": derived_origin_slug(self.source_file) is not None,
+            "derived_from_dataset": dataset_source_of(self.source_file) is not None,
             "connector": self.connector,
             "scoring_composite": self.scoring_composite,
             "max_rounds": self.max_rounds,
@@ -344,17 +360,17 @@ def _mint_draft_id() -> str:
     return f"d_{uuid.uuid4().hex[:16]}"
 
 
-# A draft built from an existing on-disk origin (demo / benchmark / owned tenant
+# A draft built from an existing on-disk dataset (demo / benchmark / owned tenant
 # dataset) records ``source_file = "dataset:{slug}"`` in ``draft_from_dataset``;
 # a fresh CSV upload records the raw filename. The prefix is therefore the
 # "derived-from-existing vs new-upload" discriminator the commit path branches on
-# — no separate flag field. A derived draft mints against its canonical origin
+# — no separate flag field. A derived draft mints against its canonical dataset
 # instead of cloning a new ``datasets/{slug}/`` folder.
 _DERIVED_PREFIX = "dataset:"
 
 
-def derived_origin_slug(source_file: str) -> str | None:
-    """Canonical origin slug iff the draft was derived from an existing dataset.
+def dataset_source_of(source_file: str) -> str | None:
+    """Source dataset slug iff the draft was derived from an existing dataset.
 
     Returns the slug after the ``dataset:`` prefix (the value
     ``mint_campaign_command(dataset_name=...)`` resolves), or ``None`` for a
@@ -391,6 +407,6 @@ __all__ = [
     "PREVIEW_ROWS",
     "DraftCampaign",
     "DraftCampaignRegistry",
+    "dataset_source_of",
     "default_slug_from_filename",
-    "derived_origin_slug",
 ]

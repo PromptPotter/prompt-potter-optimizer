@@ -126,7 +126,7 @@ The panel reads its state from the draft `cache.json` (gaps + per-field provenan
 
 ### Plain-language recap (proposed — Claude's addition, review me)
 
-Once `origin_readiness` passes, before mint the resolver emits one **plain-English recap card** — a jargon-free paragraph restating what the campaign will do ("You're optimizing a prompt that maps lab-test names to codes, starting from model X, success = exact match, up to 5 rounds"). The operator confirms *intent*, not field names. Rides the existing `origin_resolve` node (a final `ready`-turn output field) — no new infra. Fits the anti-nerdy / accessibility positioning ([`.impeccable.md`](../../.impeccable.md)): the operator never has to read the checklist's vocabulary to know what they approved.
+Once `origin_readiness` passes, before mint the resolver emits one **plain-English recap card** — a jargon-free paragraph restating what the campaign will do ("You're optimizing a prompt that maps lab-test names to codes, starting from model X, success = exact match, up to 5 rounds"). The operator confirms *intent*, not field names. Rides the existing `origin_resolve` node (a final `ready`-turn output field) — no new infra. Fits the anti-nerdy / accessibility positioning ([`VOICE.md`](../../VOICE.md)): the operator never has to read the checklist's vocabulary to know what they approved.
 
 ## Non-goals
 

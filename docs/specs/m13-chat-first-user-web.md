@@ -25,24 +25,24 @@ Chat is the **constant control surface**, not an onboarding wizard. Through it t
 
 The drop-three-things upload (dataset + framing + pipeline) is the user's entry into a Project. **Slice 1 = CSV-only ingest** — two required columns `query,ground_truth`. Later slices: XLSX (first sheet only), Parquet, JSON-lines.
 
-### The committed artifact is an Origin
+### The committed artifact is a Dataset
 
-On commit the ingest produces an **Origin** in the tenant's collection — not just "a dataset". Origin is the existing PromptPotter domain word: per [`architecture.md §0`](../architecture.md), `cycle_{target_hash[:12]}` is content-addressed from `JobSearchPoint.content_hash(dataset)`, which is the rendered target prompt + dataset + target `pipeline_params`. The four committed files at `projects/{tenant}/datasets/{slug}/` compose into exactly that hash:
+On commit the ingest produces a **Dataset** in the tenant's collection. The Dataset is more than its rows: per [`architecture.md §0`](../architecture.md), `cycle_{target_hash[:12]}` is content-addressed from `JobSearchPoint.content_hash(dataset)`, which is the rendered target prompt + dataset + target `pipeline_params`. The four committed files at `projects/{tenant}/datasets/{slug}/` compose into exactly that hash (the campaign's **origin** `OptSearchPoint` is then derived from this Dataset — "origin" is reserved for that starting point, never the artifact; see [`m13-dataset-bridge.md` §3.1](m13-dataset-bridge.md)):
 
-| File | Origin component |
+| File | Dataset component |
 |---|---|
 | `cache.json` | dataset rows (the sample bank) |
 | `pipeline.json` | target `pipeline_params` (initial `nodes.*.config` overlay) |
 | `task_description.md` | rendered target prompt's framing |
 | `prompts/default.json` | rendered target prompt template |
 
-The co-located `campaign.json` is **not** part of the Origin — it is the default campaign config that ships alongside (connector, scoring composite, max-rounds, optimizer-prompt hash). Two tenants who ingest structurally-identical Origins produce identical `cycle_{target_hash[:12]}` ids by construction.
+The co-located `campaign.json` is **not** part of the Dataset — it is the default campaign config that ships alongside (connector, scoring composite, max-rounds, optimizer-prompt hash). Two tenants who ingest structurally-identical Datasets produce identical `cycle_{target_hash[:12]}` ids by construction.
 
 ### Collection — `GET /datasets`
 
-A tenant's Origins are listed under `projects/{tenant}/datasets/` and exposed via the existing identity-scoped `GET /datasets`. Each returned entry carries a `tier` field:
+A tenant's datasets are listed under `projects/{tenant}/datasets/` and exposed via the existing identity-scoped `GET /datasets`. Each returned entry carries a `tier` field:
 
-- `tier: "yours"` — user-owned Origins under `projects/{tenant}/datasets/{slug}/`. Always visible to the owning identity.
+- `tier: "yours"` — user-owned datasets under `projects/{tenant}/datasets/{slug}/`. Always visible to the owning identity.
 - `tier: "benchmark"` — repo-root `datasets/` (today's `aime_2025`, `bbeh`, `gsm8k`, `hotpotqa`, `justlogic`, `lca-termnorm`, `promptpotter-self`, `_optimizer`). Visible only when the identity holds the capability `datasets.benchmarks.read`.
 
 Stage-0 capability grant: env var `PROMPTPOTTER_ADMIN=1` consumed by `default_identity()` (`shared/identity.py`) augments the default identity's capability set with `datasets.benchmarks.read`. Stage-1 OIDC grants the capability per-claim. The list endpoint is one read path; the surface is a flat list with a `tier` discriminator, not a two-section UI.
@@ -51,14 +51,14 @@ Stage-0 capability grant: env var `PROMPTPOTTER_ADMIN=1` consumed by `default_id
 
 The Dashboard's **New campaign** button is a two-mode entry against `GET /datasets`:
 
-- **Empty collection** (no `tier: "yours"` entries) → routes into the chat-ingest flow below. This is the onboarding ritual that produces the first Origin.
-- **Non-empty collection** → renders the collection as a list; the operator picks an Origin, then mints a campaign against it (the standard mint-campaign path, post-Origin). List-then-mint UX.
+- **Empty collection** (no `tier: "yours"` entries) → routes into the chat-ingest flow below. This is the onboarding ritual that produces the first dataset.
+- **Non-empty collection** → renders the collection as a list; the operator picks a dataset, then mints a campaign against it (the standard mint-campaign path, post-pick). List-then-mint UX.
 
-After onboarding, campaign launches are always list-then-mint against the existing collection. The chat-ingest flow is reachable from the list as a secondary "Add an Origin" action.
+After onboarding, campaign launches are always list-then-mint against the existing collection. The chat-ingest flow is reachable from the list as a secondary "Add a dataset" action.
 
 ### Draft-campaign object
 
-The server holds a canonical **draft-campaign** per ingest, mutated by both chat and the parameter panel until the operator commits. The name stays `DraftCampaign` (not `DraftOrigin`) because the chat surface negotiates BOTH the Origin components (slug, task_description, pipeline_overlay) AND the default campaign config (connector, scoring_composite, max_rounds). On commit, the Origin-shaped subset becomes the four content-hashed files; the campaign-config subset becomes `campaign.json`. Lifecycle:
+The server holds a canonical **draft-campaign** per ingest, mutated by both chat and the parameter panel until the operator commits. The name stays `DraftCampaign` (not `DraftDataset`) because the chat surface negotiates BOTH the Dataset components (slug, task_description, pipeline_overlay) AND the default campaign config (connector, scoring_composite, max_rounds). On commit, the Dataset-shaped subset becomes the four content-hashed files; the campaign-config subset becomes `campaign.json`. Lifecycle:
 
 1. **Created** on file drop (CSV uploaded → parsed → preview returned).
 2. **Mutated** by chat (assistant proposes edits via the existing `POST /commands/{kind}` highway) or by direct panel edits (operator clicks **Apply** in the panel; the panel-edit command rides the same highway).
@@ -106,9 +106,9 @@ Slug derivation: `SafeName` on the filename's basename minus extension; collisio
 
 ### Commit path
 
-On operator commit (chat verb or panel button → `POST /commands/mint-campaign-from-draft`, declared in `m12-api-openapi.yaml`), the server writes — atomically, single-writer per `architecture.md §0` — to `projects/{tenant}/datasets/{slug}/`. The four Origin files compose into `JobSearchPoint.content_hash(dataset)`; `campaign.json` is the sibling default-config:
+On operator commit (chat verb or panel button → `POST /commands/mint-campaign-from-draft`, declared in `m12-api-openapi.yaml`), the server writes — atomically, single-writer per `architecture.md §0` — to `projects/{tenant}/datasets/{slug}/`. The four Dataset files compose into `JobSearchPoint.content_hash(dataset)`; `campaign.json` is the sibling default-config:
 
-| File | Content | Origin? |
+| File | Content | Dataset file? |
 |---|---|---|
 | `cache.json` | full parsed sample bank (the dataset rows) | yes |
 | `pipeline.json` | initial overlay (empty `nodes.*.config` if operator did not override) | yes |
@@ -116,15 +116,15 @@ On operator commit (chat verb or panel button → `POST /commands/mint-campaign-
 | `prompts/default.json` | rendered target prompt template | yes |
 | `campaign.json` | default-campaign config — `connector`, `scoring_composite`, `max_rounds`, `root_content_hash`, `optimizer_prompt_hash` | no (sibling) |
 
-After commit, the standard mint-campaign path runs against the new Origin slug. The frontend chat+panel surface supersedes the earlier placeholder modal (now shipped as `components/ingest/IngestPane.tsx`).
+After commit, the standard mint-campaign path runs against the new dataset slug. The frontend chat+panel surface supersedes the earlier placeholder modal (now shipped as `components/ingest/IngestPane.tsx`).
 
 **Open:** SSE event name (`DraftUpdatedRecord`) needs declaration in `m12-events-asyncapi.yaml` before a handler lands — out of slice 1 scope but on-deck for the wire-up PR.
 
-First-run illustration: the chat pane's empty-state thread is a static mock (chip text at `webapp/components/chat/ChatPane.tsx`), so no checked-in CSV is needed to render it. Live ingest is exercised against the surviving `email-tagging` demo origin via `PROMPTPOTTER_AUTH=off` (the cheap authed-and-live harness — see [`../../webapp/CLAUDE.md`](../../webapp/CLAUDE.md) § Testing posture), not a drag-drop fixture.
+First-run illustration: the chat pane's empty-state thread is a static mock (chip text at `webapp/components/chat/ChatPane.tsx`), so no checked-in CSV is needed to render it. Live ingest is exercised against the surviving `email-tagging` demo dataset via `PROMPTPOTTER_AUTH=off` (the cheap authed-and-live harness — see [`../../webapp/CLAUDE.md`](../../webapp/CLAUDE.md) § Testing posture), not a drag-drop fixture.
 
 ## Cross-user data leverage
 
-Already works at the data layer: `archive/measurements/{content_hash}/` is content-addressed on `JobSearchPoint.content_hash(dataset)`. Two tenants who ingest structurally-identical Origins (same dataset rows + same target prompt + same `pipeline_params`) hash-collide into the same archive entries by construction — cross-tenant evidence pooling for free, no per-tenant duplication. What's missing is **surface** — the chat / project view doesn't show "this query was measured 14× by other users on this install." One read panel; no new persistence.
+Already works at the data layer: `archive/measurements/{content_hash}/` is content-addressed on `JobSearchPoint.content_hash(dataset)`. Two tenants who ingest structurally-identical Datasets (same dataset rows + same target prompt + same `pipeline_params`) hash-collide into the same archive entries by construction — cross-tenant evidence pooling for free, no per-tenant duplication. What's missing is **surface** — the chat / project view doesn't show "this query was measured 14× by other users on this install." One read panel; no new persistence.
 
 ## Non-goals
 

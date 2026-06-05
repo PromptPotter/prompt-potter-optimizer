@@ -26,7 +26,7 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     slug: "labtests",
     sample_preview: [{ query: "Na", ground_truth: "Sodium" }],
     n_samples: 42,
-    derived_origin: false,
+    derived_from_dataset: false,
     connector: "termnorm",
     scoring_composite: "exact_match",
     max_rounds: 5,

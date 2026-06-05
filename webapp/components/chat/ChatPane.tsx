@@ -12,6 +12,7 @@ import {
   IngestApiError,
   postDraftFromDataset,
   postIngestDataset,
+  postReplaceDataset,
   postResolveOrigin,
 } from "@/lib/api";
 import { plainLanguageRecap } from "@/lib/origin-readiness";
@@ -190,6 +191,26 @@ export function ChatPane({
   };
 
   const onDatasetFile = (file: File) => void ingestAndResolve(file);
+
+  // Collision choice: "Replace" — version-and-repoint the existing dataset so
+  // its name frees, then re-ingest the dropped file under it. Data-safe: the old
+  // data + every prior campaign's results are preserved under `{slug}-vN`, never
+  // overwritten (docs/specs/m13-dataset-bridge.md § 2.1). On the migration
+  // succeeding, `slug` is free, so the re-ingest runs the normal check-in flow.
+  const replaceWithDropped = async (file: File, slug: string, chipId: string) => {
+    setPhase({ stage: "uploading" });
+    try {
+      await postReplaceDataset(slug);
+    } catch (e) {
+      setPhase({ stage: "idle" });
+      setMessages((m) => [
+        ...m,
+        { id: crypto.randomUUID(), kind: "error", text: IngestApiError.toOperatorMessage(e) },
+      ]);
+      return;
+    }
+    await ingestAndResolve(file, slug, chipId);
+  };
 
   // Collision choice: start a new campaign on the dataset already in the
   // collection — no re-ingest. The derived-from-dataset draft is pre-filled, so
@@ -428,6 +449,16 @@ export function ChatPane({
                     }
                   >
                     Save as new ({phase.suggestedSlug})
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-cta-btn chat-collision-replace"
+                    title={`Archives the current ${phase.existingSlug} (and its campaigns) as a version, then takes its place`}
+                    onClick={() =>
+                      void replaceWithDropped(phase.file, phase.existingSlug, phase.chipId)
+                    }
+                  >
+                    Replace — keep old data as a version
                   </button>
                   <button
                     type="button"

@@ -94,6 +94,27 @@ class TenantDatasetStore:
                 return candidate
             n += 1
 
+    def suggest_free_version(self, slug: str) -> str:
+        """Return the smallest free ``{slug}-v{n}`` (``n>=1``) — the archival name the
+        old data moves to on Replace. Distinct namespace from
+        :meth:`suggest_free_slug` (``-N``, a sibling copy): ``-vN`` reads as
+        "an earlier version of this name", which is exactly what a version-and-
+        repoint Replace produces.
+        """
+        n = 1
+        while True:
+            candidate = f"{slug}-v{n}"
+            if not self.slug_exists(candidate):
+                return candidate
+            n += 1
+
+    # -- migration sidetree ---------------------------------------------------
+
+    def migrations_dir(self) -> Path:
+        """Resumable-migration marker home (``datasets/.migrations/``). Hidden, so
+        :meth:`list_slugs` already skips it — a marker is never a dataset."""
+        return self.datasets_root() / ".migrations"
+
     # -- Committed dataset I/O ------------------------------------------------
 
     def load_dataset(self, slug: str) -> dict[str, Any] | None:
@@ -163,6 +184,44 @@ class TenantDatasetStore:
         return read_json_optional(self.draft_dir(draft_id) / "cache.json")
 
     # -- Commit ---------------------------------------------------------------
+
+    def version_dataset(self, slug: str, versioned: str) -> Path:
+        """Atomic-rename a committed dataset ``{slug}/`` → ``{versioned}/`` and fix its
+        self-referential ``campaign.json::campaign_config.dataset_name``.
+
+        Step 1 of version-and-repoint Replace
+        (``application/datasets/dataset_replace.py``): preserves the bytes,
+        frees the canonical ``{slug}`` name for the newly-dropped data. Atomic
+        on the shared tenant filesystem. **Idempotent for crash recovery** — if
+        a prior run already moved the dir (``{slug}`` gone, ``{versioned}``
+        present) this returns the destination instead of raising, so the
+        repoint steps can re-run. Raises ``FileNotFoundError`` when neither
+        exists and ``FileExistsError`` when both do (a genuinely ambiguous
+        state the migration must not paper over).
+        """
+        src = self.dataset_dir(slug)
+        dst = self.dataset_dir(versioned)
+        if not src.is_dir():
+            if dst.is_dir():
+                return dst  # already versioned by a prior (crashed) run
+            raise FileNotFoundError(slug)
+        if dst.exists():
+            raise FileExistsError(versioned)
+        src.rename(dst)
+        self._rewrite_campaign_self_ref(dst, versioned)
+        return dst
+
+    def _rewrite_campaign_self_ref(self, dataset_dir: Path, new_name: str) -> None:
+        """Point the moved dataset's own ``campaign.json`` at its new name, so a later
+        ``draft_from_dataset`` off the versioned copy doesn't resurrect the old slug."""
+        path = dataset_dir / "campaign.json"
+        data = read_json_optional(path)
+        if not isinstance(data, dict):
+            return
+        cc = data.get("campaign_config")
+        if isinstance(cc, dict) and cc.get("dataset_name"):
+            cc["dataset_name"] = new_name
+            write_json(path, data)
 
     def commit_draft(
         self,

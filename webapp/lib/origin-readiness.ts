@@ -175,7 +175,7 @@ function shortTaskTitle(task: string): string | null {
 
 // A jargon-free, one-line restatement of what the campaign will do, built from
 // the confirmed draft fields — the operator approves *intent*, not field names
-// (.impeccable register: anti-nerdy, accessibility-first). Pending the LLM
+// (VOICE register: anti-nerdy, accessibility-first). Pending the LLM
 // resolver's authored `ready`-turn recap (origin-resolution step 4); until then
 // this is a deterministic restatement of the draft's own values. Kept to a
 // single short sentence — never the raw task brief, which can be a full doc.

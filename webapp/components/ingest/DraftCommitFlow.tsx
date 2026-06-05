@@ -24,7 +24,7 @@ export type WizardStep = 1 | 2 | 3;
 // The setup wizard over one server-held draft, as a 1-2-3:
 //   1 · Your data & goal — sample count + the task context (task_description),
 //       plus the AI check-in that interprets it (skipped only for a draft
-//       pre-filled from an existing dataset — `draft.derived_origin`).
+//       pre-filled from an existing dataset — `draft.derived_from_dataset`).
 //   2 · Map columns — which uploaded column is the input, which is the target.
 //   3 · Pipeline & prompt — the locked pipeline config + the editable starting
 //       prompt the check-in authored.
@@ -60,10 +60,10 @@ export function DraftCommitFlow({
   );
   // A draft pre-filled from an existing dataset (a demo/benchmark pick) is
   // already fully resolved, so the AI check-in has nothing to add and prompt
-  // edits are throwaway. This is a per-draft fact (`derived_origin`), NOT the
-  // global `demo_mode_enabled` preference — a fresh upload always gets the real
-  // check-in even while demo mode is on.
-  const demo = draft.derived_origin;
+  // edits are throwaway. This is a per-draft fact (`derived_from_dataset`), NOT
+  // the global `demo_mode_enabled` preference — a fresh upload always gets the
+  // real check-in even while demo mode is on.
+  const demo = draft.derived_from_dataset;
 
   const readiness = originReadiness(draft);
   const taskReady = draft.resolved["task_description"] === "confirmed";

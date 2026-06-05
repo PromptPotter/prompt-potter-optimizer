@@ -16,7 +16,7 @@ export function ProvenanceBadge({ tag }: { tag: ProvenanceTag }) {
 
 // Plain-language source labels — `auto` is a smart default the operator can
 // override; `stated` is a choice they made. Audit sub-tag, only shown once a
-// field has a value (.impeccable register: no jargon, accessibility-first).
+// field has a value (VOICE register: no jargon, accessibility-first).
 const SOURCE_LABEL: Record<ProvenanceSource, string> = {
   auto: "auto",
   stated: "you set",

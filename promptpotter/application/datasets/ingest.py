@@ -128,8 +128,8 @@ def draft_from_dataset(
     dataset as a CSV and confirming every field by hand.
 
     This is the direct path behind "open an existing dataset (demo / benchmark /
-    owned Origin) in the setup wizard": no browser-side CSV reconstruction, no
-    ``/preview`` round-trip, no field-by-field prefill. The dataset's pipeline
+    owned tenant dataset) in the setup wizard": no browser-side CSV reconstruction,
+    no ``/preview`` round-trip, no field-by-field prefill. The dataset's pipeline
     node config rides through as ``pipeline_overlay``, so committing the draft
     **preserves the backend model/provider** (a fresh CSV upload would instead
     fall back to connector defaults). The same ``ingest_draft`` → wizard → commit
@@ -174,10 +174,10 @@ def draft_from_dataset(
         except FileNotFoundError:
             starting_prompt = {}
 
-    # Keep the canonical slug — an existing origin (demo / benchmark / owned)
+    # Keep the canonical slug — an existing dataset (demo / benchmark / owned)
     # is NOT a new dataset, so it must not uniquify into a `{slug}-N` clone. The
     # `dataset:{name}` source_file marks this draft as derived, and the commit
-    # path mints against this canonical origin instead of materializing a folder.
+    # path mints against this canonical dataset instead of materializing a folder.
     slug = dataset_name.lower()
 
     # headers ["query","ground_truth"] auto-confirm the column mapping in

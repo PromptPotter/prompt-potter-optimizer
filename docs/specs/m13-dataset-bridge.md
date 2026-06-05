@@ -1,6 +1,6 @@
 # M13 — Dataset Bridge: identity, name collisions, and the version-and-repoint contract
 
-> **Status:** Phase 1 (safe collision choices) shipping; Phases 2–3 (version-and-repoint Replace, framing refactor) scoped here, design-approved, not yet built.
+> **Status:** Phases 1–3 SHIPPED. Phase 1 (safe collision choices), Phase 2 (version-and-repoint Replace, crash-safe + resumable), Phase 3 (framing refactor — `derived_origin*` → dataset-framed names, freeze-at-commit documented).
 > **Companion:** [`m13-chat-first-user-web.md`](m13-chat-first-user-web.md) (§ Ingest, § Commit path) — this spec deepens its *dataset-identity* model. Read that first.
 > **Audience:** the operator is a data scientist. Dataset identity must behave like a versioned data artifact, not a filename.
 
@@ -73,7 +73,7 @@ When a dropped file's slug matches an existing dataset, the chat must recognize 
 Replacing `email-tagging-eval` (which has prior campaigns/measurements) executes as an **atomic, crash-safe migration** — old data and its results are *preserved*, just renamed out of the way:
 
 1. **Version the old data.** Rename `datasets/email-tagging-eval/` → `datasets/email-tagging-eval-v1/` (smallest free `-vN`). The bank, config, and origin hash are byte-identical — only the directory name changes.
-2. **Move the pin with the data.** For every campaign whose `campaign.json::dataset_name == "email-tagging-eval"`, rewrite it to `email-tagging-eval-v1`. Re-stamp that campaign's measurement-archive entries (`dataset_name: email-tagging-eval → email-tagging-eval-v1`). After this step, every old campaign resolves to *the same bytes it always ran on* — now living under `-v1`.
+2. **Move the pin with the data.** For every campaign whose `campaign.json::dataset_name == "email-tagging-eval"`, rewrite it to `email-tagging-eval-v1` — **and** every cycle `index.json::header.dataset_name` under it (the cycle listing surfaces that header and only backfills from the manifest when it's *empty*, so a stale stamp would otherwise outlive the move). Re-stamp that campaign's measurement-archive entries (index summaries + detail files; `dataset_name: email-tagging-eval → email-tagging-eval-v1`). After this step, every old campaign resolves to *the same bytes it always ran on* — now living under `-v1`. Any lifecycle (active / archived / deleted) is repointed; an archived campaign's results must stay truthful too.
 3. **Land the new data.** Commit the freshly-dropped draft under the freed canonical name `email-tagging-eval`.
 
 Net: the friendly name now resolves to the newest data; every prior campaign is intact, truthful, and pinned to `-v1`. Nothing was overwritten.
@@ -149,18 +149,19 @@ The version-and-repoint contract (§2.1) is what *gives the name permission to m
 
 ## 4. Phasing & status
 
-- [ ] **Phase 1 — safe choices + glossary + copy** *(this commit)*
+- [x] **Phase 1 — safe choices + glossary + copy** *(shipped)*
   - 409 carries `details.slug`; `slug_collision` error code.
   - Chat collision card: **Use existing** + **Save as new** + Cancel.
   - Glossary: add `slug`/dataset-name, `origin` (disambiguated), tighten `Dataset`.
   - UI copy: "Origin" → "Dataset" across the ingest surface.
-- [ ] **Phase 2 — Replace = version-and-repoint** *(next, data-critical)*
-  - `datasets/{slug}/` → `{slug}-vN`; repoint dependent `campaign.json::dataset_name` + re-stamp measurements; commit new draft under the freed name.
-  - Resumable migration marker (`datasets/.migrations/{id}.json`); crash-safe ordering; no-dependents fast path.
-  - Chat: add the **Replace** button to the collision card (guarded copy: "keeps your existing campaigns on the old data as `…-v1`").
+- [x] **Phase 2 — Replace = version-and-repoint** *(shipped, data-critical)*
+  - `datasets/{slug}/` → `{slug}-vN` (`TenantDatasetStore.version_dataset`); repoint dependent `campaign.json::dataset_name` **+ cycle `index.json` headers** (`CampaignStore.repoint_dataset`) + re-stamp measurements (`MeasurementArchive.restamp_dataset`); the freed name is re-ingested through the normal draft/check-in flow.
+  - Resumable migration marker (`datasets/.migrations/{id}.json`); crash-safe ordering; idempotent `recover_pending_replacements` invoked at each replace **and** by the launcher before any run resolves a pin; zero-dependents degrades to a pure archive-old (no repoint). Orchestration: `application/datasets/dataset_replace.py`. Endpoint: typed sync `POST /commands/replace-dataset` (`replaceDataset`).
+  - Chat: **Replace** button on the collision card (cautionary outlined style; data-safe — old data archived as a version).
   - Tests: migration round-trip; old-campaign-still-resolves; measurement re-stamp; crash-between-steps recovery.
-- [ ] **Phase 3 — framing refactor** *(scoped in §3)*
-  - Rename `derived_origin`/`derived_origin_slug` → dataset-framed names; backend comment sweep; `DatasetName` newtype decision; `DraftCampaign` docstring/rename.
+- [x] **Phase 3 — framing refactor** *(shipped)*
+  - Renamed `derived_origin` → `derived_from_dataset` (wire field, openapi, webapp) and `derived_origin_slug()` → `dataset_source_of()`; backend "origin"→"dataset" comment sweep on the dataset-meaning uses (the optimizer-OSP `origin` is untouched). `DatasetName` newtype: **declined** — the minimal path (keep `slug`, document the freeze-at-commit + `-vN` as the only sanctioned post-commit identity change) is sufficient; the freeze now lives in the `DraftCampaign` docstring. `DraftCampaign` not renamed (the fusion is documented in its docstring instead — naming-only, low value).
+  - **Doc homonym sweep** (§3.1 row 5) — `m13-chat-first-user-web.md` was the canonical statement of the wrong usage ("Origin is the existing PromptPotter domain word" for the artifact, "Origin files / components / `DraftOrigin`", `tier:"yours"` "Origins", ~14 sites). Reframed in place to **Dataset** for the artifact, with one forward-pointer to this §3.1 (origin reserved for the OSP). Same sweep applied to `m12-api-openapi.yaml` ("the four Origin files" → "Dataset files") and `cli-reference.md` ("builds that origin" → "dataset"). This closes the contradiction with `glossary.md`, which already certified the rename.
 
 ### 4.1 Non-goals
 - Content-addressed dedup / "this is the same file" detection (operator chose name-only).

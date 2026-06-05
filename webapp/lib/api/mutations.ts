@@ -281,7 +281,7 @@ export interface DraftCampaignWire {
   // True iff pre-filled from an existing on-disk dataset (a demo/benchmark
   // pick) vs. a fresh upload. Drives the wizard's "pre-filled, AI check-in
   // not needed" branch — not the global `demo_mode_enabled` preference.
-  derived_origin: boolean;
+  derived_from_dataset: boolean;
   connector: string;
   scoring_composite: string;
   max_rounds: number;
@@ -449,6 +449,32 @@ export async function postDraftFromDataset(name: string): Promise<DraftCampaignW
   });
   if (!r.ok) await _throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
+}
+
+// Version-and-repoint an existing dataset so its name frees for new data —
+// the "Replace" collision choice. Data-safe: the old data + every prior
+// campaign's results are preserved under `{slug}-vN` (never overwritten); the
+// freed name is then re-ingested via `postIngestDataset(file, slug)`. Wire
+// contract: `docs/specs/m12-api-openapi.yaml::replaceDataset`.
+export interface ReplaceDatasetResponse {
+  slug: string;
+  versioned_to: string;
+  repointed_campaigns: number;
+  restamped_measurements: number;
+}
+
+export async function postReplaceDataset(slug: string): Promise<ReplaceDatasetResponse> {
+  const r = await fetch(`${API}/commands/replace-dataset`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": _mintIdempotencyKey(),
+    },
+    body: JSON.stringify({ kind: "replace-dataset", payload: { slug } }),
+    cache: "no-store",
+  });
+  if (!r.ok) await _throwApiError(r);
+  return (await r.json()) as ReplaceDatasetResponse;
 }
 
 export interface DraftPatch {

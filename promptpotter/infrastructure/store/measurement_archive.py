@@ -165,6 +165,41 @@ class MeasurementArchive:
         """Load a run detail file directly by run_id (no index scan)."""
         return read_json_optional(self._runs_dir(backend_id) / f"{run_id}.json")
 
+    def restamp_dataset(self, old_name: str, new_name: str) -> int:
+        """Rewrite every archive entry stamped *old_name* → *new_name* (index summary
+        + the matching detail file's ``dataset_name``). Returns the count restamped.
+
+        The measurement half of the dataset version-and-repoint migration
+        (``application/datasets/dataset_replace.py``): when a dataset's data is
+        archived under a ``-vN`` name, its prior campaigns' measurements move with
+        it so dataset-scoped reuse + filtering stay truthful. Idempotent — only
+        entries still stamped *old_name* are touched, so a re-run after a crash is
+        a no-op. ``backend_id`` is path-irrelevant here (the archive is
+        tenant-global), so it's elided. Index write is ``filelock``-protected
+        against a concurrent writer, mirroring :meth:`save`.
+        """
+        index_path = self._index_path("")
+        if not index_path.exists():
+            return 0
+        lock_path = index_path.with_suffix(".json.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        count = 0
+        with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+            index = read_json(index_path)
+            for entry in index.get("measurements", []):
+                if entry.get("dataset_name") != old_name:
+                    continue
+                entry["dataset_name"] = new_name
+                count += 1
+                run_id = entry.get("run_id", "")
+                detail = self.load_by_id("", run_id) if run_id else None
+                if detail is not None and detail.get("dataset_name") == old_name:
+                    detail["dataset_name"] = new_name
+                    write_json(self._runs_dir("") / f"{run_id}.json", detail)
+            if count:
+                write_json(index_path, index)
+        return count
+
     def list_all(
         self,
         backend_id: str,

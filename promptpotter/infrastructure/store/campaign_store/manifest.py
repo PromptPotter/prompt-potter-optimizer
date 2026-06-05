@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.campaign import Campaign
-from promptpotter.infrastructure.store.base import read_json, write_json
+from promptpotter.infrastructure.store.base import read_json, read_json_optional, write_json
 from promptpotter.infrastructure.store.campaign_store._kernel import CampaignStoreKernel
 from promptpotter.infrastructure.store.paths import root_cycle_id, session_index
 
@@ -25,6 +25,44 @@ class CampaignManifestMixin(CampaignStoreKernel):
         data = read_json(path)
         data.update(updates)
         write_json(path, data)
+
+    def repoint_dataset(self, old_name: str, new_name: str) -> int:
+        """Move every campaign pinned to *old_name* onto *new_name*. Returns the count.
+
+        The campaign half of the dataset version-and-repoint migration
+        (``application/datasets/dataset_replace.py``): rewrites both the
+        manifest pin (``campaign.json::dataset_name``, which resolution reads
+        live) *and* every cycle ``index.json::header.dataset_name`` (which the
+        cycle listing surfaces — the backfill only fires when that header is
+        empty, so a stale stamp would otherwise outlive the move). After this,
+        a prior campaign resolves the exact bytes it always ran on, now living
+        under *new_name*. Any lifecycle (active / archived / deleted) — an
+        archived campaign's data must stay truthful too. Idempotent: a campaign
+        already on *new_name* doesn't match and is skipped.
+        """
+        count = 0
+        for cid in self.list_campaign_ids():
+            campaign = self.load_campaign(cid)
+            if campaign is None or campaign.dataset_name != old_name:
+                continue
+            self.update_campaign(cid, {"dataset_name": new_name})
+            self._repoint_cycle_headers(cid, old_name, new_name)
+            count += 1
+        return count
+
+    def _repoint_cycle_headers(self, campaign_id: str, old_name: str, new_name: str) -> None:
+        """Rewrite ``header.dataset_name`` on every cycle index that still stamps *old_name*."""
+        cycles_dir = self.campaign_root_dir(campaign_id) / "cycles"
+        if not cycles_dir.exists():
+            return
+        for index_path in sorted(cycles_dir.glob("*/index.json")):
+            data = read_json_optional(index_path)
+            if not isinstance(data, dict):
+                continue
+            header = data.get("header")
+            if isinstance(header, dict) and header.get("dataset_name") == old_name:
+                header["dataset_name"] = new_name
+                write_json(index_path, data)
 
     def list_campaign_ids(self) -> list[str]:
         """Every campaign id on disk (dir with ``campaign.json``), sorted."""

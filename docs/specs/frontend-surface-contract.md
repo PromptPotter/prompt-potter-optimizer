@@ -2,7 +2,7 @@
 
 Minimal, dual-read spec of every user-facing surface in `webapp/` — what each
 control **must do**, per state. Companion to `webapp/CLAUDE.md` (implementation
-invariants) and `.impeccable.md` (brand/copy). This file owns *behavior*: the
+invariants) and `BRAND.md` / `VOICE.md` (brand/copy). This file owns *behavior*: the
 contract a PR is measured against, and the source of truth when reality drifts.
 
 **How to read.** Humans: skim the invariants, then the `status:` tags (`ok` /

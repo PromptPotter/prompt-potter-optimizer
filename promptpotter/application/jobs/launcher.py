@@ -31,10 +31,11 @@ from promptpotter.application.config import (
 )
 from promptpotter.application.datasets import read_campaign_config_file
 from promptpotter.application.datasets.csv_ingest import Table, materialize_samples
+from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     DraftCampaignRegistry,
-    derived_origin_slug,
+    dataset_source_of,
 )
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.jobs.quota import (
@@ -110,6 +111,10 @@ async def mint_campaign_command(
     the caller's 202 response goes out the moment this returns. Background
     progress shows up via the canonical ledger + `dashboard.json` stream.
     """
+    # Heal any dataset Replace interrupted mid-migration before resolving a pin —
+    # a crashed version-and-repoint can leave a campaign pointing at a name whose
+    # data has already moved to `-vN`. Cheap no-op when nothing's pending.
+    recover_pending_replacements(stores=stores)
     dataset_root = resolve_dataset_config_dir(stores, _repo_root(), dataset_name)
     if not dataset_root.is_dir():
         raise LaunchError(f"dataset not found: {dataset_name!r} (no {dataset_root}/)")
@@ -211,15 +216,15 @@ async def commit_draft_to_dataset(
     (inline) can mint + run identically. Shared by both entry points — the
     commit logic lives here, not duplicated per surface.
 
-    Fresh-upload drafts only. A draft derived from an existing origin
-    (``source_file = "dataset:{slug}"``) must mint against that canonical origin,
+    Fresh-upload drafts only. A draft derived from an existing dataset
+    (``source_file = "dataset:{slug}"``) must mint against that canonical dataset,
     never materialize a clone — :func:`mint_campaign_from_draft_command` routes
     it past here; the guard below makes that contract crash-safe.
     """
-    if derived_origin_slug(draft.source_file) is not None:
+    if dataset_source_of(draft.source_file) is not None:
         raise LaunchError(
             "commit_draft_to_dataset called on a derived-from-existing draft; "
-            "mint against the canonical origin instead"
+            "mint against the canonical dataset instead"
         )
 
     if stores.tenant_datasets.slug_exists(draft.slug):
@@ -283,21 +288,21 @@ async def mint_campaign_from_draft_command(
     The web ``/commands/mint-campaign-from-draft`` entry. Two paths, forked on
     draft provenance:
 
-    * **Derived from an existing origin** (demo / benchmark / owned tenant
-      dataset; ``source_file = "dataset:{slug}"``) — the origin already exists on
+    * **Derived from an existing dataset** (demo / benchmark / owned tenant
+      dataset; ``source_file = "dataset:{slug}"``) — the dataset already exists on
       disk, so commit nothing. Keep the origin-readiness gate + preflight, then
       mint a campaign DIRECTLY against the canonical ``dataset_name``. No
       ``commit_draft``, no ``{slug}-N`` clone, no slug uniquify — re-running just
-      adds a sibling campaign under the one origin.
+      adds a sibling campaign under the one dataset.
     * **Fresh CSV upload** — commit via :func:`commit_draft_to_dataset` (one
       tenant folder), then mint.
 
     CLI ``new <file>`` shares the commit step but runs the loop inline; CLI
     ``new <name>`` mints an existing dataset directly without ever drafting.
     """
-    canonical = derived_origin_slug(draft.source_file)
+    canonical = dataset_source_of(draft.source_file)
     if canonical is not None:
-        # Existing origin — gate, then mint against it; never materialize a clone.
+        # Existing dataset — gate, then mint against it; never materialize a clone.
         readiness = origin_readiness(draft)
         if not readiness.complete:
             raise OriginIncompleteError(readiness.gaps)
@@ -480,6 +485,9 @@ async def start_run_command(
     if kind not in ("new", "resume"):
         raise LaunchError(f"start-run kind must be 'new' or 'resume', got {kind!r}")
 
+    # Same recovery guard as the mint path — a resumed cycle must not resolve a
+    # pin a crashed Replace left dangling (see ``recover_pending_replacements``).
+    recover_pending_replacements(stores=stores)
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
         raise LaunchError(f"campaign not found or not owned: {campaign_id}")

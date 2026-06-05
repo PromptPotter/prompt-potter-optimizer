@@ -16,7 +16,7 @@ State files: [`persistence-and-state.md`](persistence-and-state.md). Rewind / fo
 
 | Verb | Behavior |
 |------|----------|
-| **`new <name\|file>`** | Mint a fresh session+cycle and run from round 0. A **dataset name** uses an already-authored `datasets/<name>/`. A **raw file** (CSV, columns named anything) is ingested → AI origin check-in → committed as a tenant dataset → run — the headless twin of the web onboarding; it builds that origin for you and resolves every once-hidden default to a confirmed, on-disk value before minting. Every invocation mints a fresh root cycle; on content-hash collision with an existing root, the `cycle_id` gets a `_r2` / `_r3` discriminator suffix so the new run lands in its own directory tree (separate dashboard, log, archive subtree). The prior campaign is preserved. |
+| **`new <name\|file>`** | Mint a fresh session+cycle and run from round 0. A **dataset name** uses an already-authored `datasets/<name>/`. A **raw file** (CSV, columns named anything) is ingested → AI origin check-in → committed as a tenant dataset → run — the headless twin of the web onboarding; it builds that dataset for you and resolves every once-hidden default to a confirmed, on-disk value before minting. Every invocation mints a fresh root cycle; on content-hash collision with an existing root, the `cycle_id` gets a `_r2` / `_r3` discriminator suffix so the new run lands in its own directory tree (separate dashboard, log, archive subtree). The prior campaign is preserved. |
 | **`resume`** | Pick up the active session at the latest completed round (or rewind/fork per the flags below). |
 
 Both `new <slug>` and `resume` operate on **tenant-ingested** datasets
