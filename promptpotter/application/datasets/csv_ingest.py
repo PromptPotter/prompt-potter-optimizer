@@ -5,8 +5,8 @@ Two stages, deliberately split (per ``docs/specs/m10-origin-resolution-checkin.m
 * :func:`read_tabular` decodes + parses an uploaded blob into a header-agnostic
   :class:`Table` (headers + raw rows). It does **not** require any particular
   column names — column identity is the origin-resolution job, gated at mint,
-  not at upload. Slice 1 supports CSV; future slices (XLSX first sheet,
-  Parquet, JSONL) add a branch on ``fmt`` here.
+  not at upload. Dispatches on ``fmt`` (derived from the filename by
+  :func:`format_from_filename`): CSV, TSV, JSON, JSONL, and XLSX (first sheet).
 * :func:`materialize_samples` turns a :class:`Table` into ``Sample`` rows once
   the input/target column mapping is confirmed. Run only at commit time.
 
@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from dataclasses import dataclass
+from typing import Any
 
 from promptpotter.domain.sample import Sample
 
@@ -32,6 +34,9 @@ Sized one order of magnitude above any benchmark we ship; revisit when a
 genuine large-dataset onboarding flow surfaces.
 """
 
+# Top-level JSON object keys that may wrap a record list ({"data": [...]}).
+_JSON_RECORD_KEYS = ("data", "rows", "items", "records", "examples")
+
 
 @dataclass(frozen=True, slots=True)
 class IngestError(Exception):
@@ -39,7 +44,8 @@ class IngestError(Exception):
 
     ``reason`` is a stable code declared in
     ``docs/specs/m12-api-openapi.yaml::ErrorEnvelope`` (``ingest_failed``
-    detail): ``bad_csv`` | ``empty`` | ``too_large`` | ``missing_column``.
+    detail): ``bad_csv`` | ``bad_json`` | ``empty`` | ``too_large`` |
+    ``missing_column`` | ``unsupported_format`` | ``hardened_blocked``.
     """
 
     reason: str
@@ -62,32 +68,82 @@ class Table:
     rows: tuple[dict[str, str], ...]
 
 
+# Operator-facing list of what ingest reads — kept in one place so the picker
+# hint, the unsupported-format error, and the docs stay in sync.
+SUPPORTED_FORMATS_HINT = "Drop a CSV, TSV, JSON, JSONL, or Excel (.xlsx) file."
+
+
+def format_from_filename(filename: str) -> str:
+    """Map an upload filename to a parse format. A recognised extension →
+    its format; ``.txt`` / blank / no extension → ``"csv"`` (best-effort text
+    parse so an extensionless CSV still reads); any other extension (``.png``,
+    ``.pdf``, …) → ``"unknown"`` so :func:`read_tabular` rejects it with a
+    friendly "unsupported file type" message rather than a UTF-8 decode error.
+    Recognised: ``csv`` | ``tsv`` | ``json`` | ``jsonl`` | ``xlsx``."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext in ("csv", "txt", ""):
+        return "csv"
+    if ext in ("tsv", "tab"):
+        return "tsv"
+    if ext == "json":
+        return "json"
+    if ext in ("jsonl", "ndjson"):
+        return "jsonl"
+    if ext in ("xlsx", "xlsm"):
+        return "xlsx"
+    return "unknown"
+
+
 def read_tabular(blob: bytes, *, fmt: str = "csv") -> Table:
     """Decode + parse an uploaded blob into a :class:`Table`; raise on shape failure.
 
-    Header-agnostic: any column names are accepted. UTF-8 with BOM tolerated
-    (Excel exports often ship one). Mixed line endings handled by
-    ``csv.DictReader``. Rows where every cell is blank are dropped (so a
-    trailing newline doesn't tank a valid upload). Raises :class:`IngestError`
-    on undecodable bytes, unparseable CSV, a missing header row, more than
-    :data:`MAX_SAMPLES` rows, or zero data rows.
+    Header-agnostic: any column names are accepted; the origin check-in reads the
+    columns + sample rows and proposes the input/target mapping. Dispatches on
+    ``fmt`` (see :func:`format_from_filename`). UTF-8 with BOM tolerated (Excel
+    CSV exports often ship one). Rows where every cell is blank are dropped.
+    Raises :class:`IngestError` on an unsupported type, undecodable bytes,
+    unparseable content, a missing header row, >:data:`MAX_SAMPLES` rows, or
+    zero data rows.
     """
-    if fmt != "csv":
-        raise IngestError(reason="bad_csv", message=f"Unsupported upload format: {fmt!r}.")
+    if fmt == "xlsx":
+        return _read_xlsx(blob)
+    if fmt in ("csv", "tsv"):
+        return _read_delimited(_decode(blob), "\t" if fmt == "tsv" else ",")
+    if fmt == "json":
+        return _read_json_records(_decode(blob))
+    if fmt == "jsonl":
+        return _read_jsonl(_decode(blob))
+    raise IngestError(
+        reason="unsupported_format",
+        message=f"That file type isn't supported. {SUPPORTED_FORMATS_HINT}",
+    )
 
-    try:
-        text = blob.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise IngestError(reason="bad_csv", message=f"CSV must be UTF-8 encoded: {exc}") from None
 
+def _decode(blob: bytes) -> str:
+    """UTF-8 (BOM-tolerant) decode for text formats; structured error otherwise.
+
+    A decode failure means the bytes aren't UTF-8 text — almost always a binary
+    file given a text extension — so the message points back at supported types
+    rather than leaking the raw codec error."""
     try:
-        reader = csv.DictReader(io.StringIO(text))
+        return blob.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise IngestError(
+            reason="unsupported_format",
+            message=f"That file isn't readable as text (expected UTF-8). {SUPPORTED_FORMATS_HINT}",
+        ) from None
+
+
+def _read_delimited(text: str, delimiter: str) -> Table:
+    """Parse CSV/TSV text into a :class:`Table` via ``csv.DictReader``."""
+    try:
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
         fieldnames = list(reader.fieldnames or [])
     except csv.Error as exc:
-        raise IngestError(reason="bad_csv", message=f"CSV parse failed: {exc}") from None
+        raise IngestError(reason="bad_csv", message=f"Parse failed: {exc}") from None
 
     if not fieldnames:
-        raise IngestError(reason="bad_csv", message="CSV has no header row.")
+        raise IngestError(reason="bad_csv", message="File has no header row.")
 
     rows: list[dict[str, str]] = []
     try:
@@ -102,12 +158,146 @@ def read_tabular(blob: bytes, *, fmt: str = "csv") -> Table:
                 )
             rows.append(cells)
     except csv.Error as exc:
-        raise IngestError(reason="bad_csv", message=f"CSV parse failed: {exc}") from None
+        raise IngestError(reason="bad_csv", message=f"Parse failed: {exc}") from None
 
     if not rows:
-        raise IngestError(reason="empty", message="CSV has a header row but zero data rows.")
+        raise IngestError(reason="empty", message="File has a header row but zero data rows.")
 
     return Table(headers=tuple(fieldnames), rows=tuple(rows))
+
+
+def _read_json_records(text: str) -> Table:
+    """Parse a JSON document into a :class:`Table`, permissively. Accepts a
+    top-level list of objects, an object wrapping a list under a known key
+    (``data``/``rows``/``items``/``records``/``examples``), or an
+    object-of-columns (every value an equal-length list → transposed)."""
+    try:
+        doc: Any = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise IngestError(reason="bad_json", message=f"JSON parse failed: {exc}") from None
+
+    records = _records_from_json(doc)
+    return _records_to_table(records)
+
+
+def _records_from_json(doc: Any) -> list[dict[str, Any]]:
+    """Normalise a parsed JSON document to a list of record dicts."""
+    if isinstance(doc, list):
+        return [r for r in doc if isinstance(r, dict)]
+    if isinstance(doc, dict):
+        for key in _JSON_RECORD_KEYS:
+            val = doc.get(key)
+            if isinstance(val, list):
+                return [r for r in val if isinstance(r, dict)]
+        # Object-of-columns: every value a list, all the same length → transpose.
+        cols = {k: v for k, v in doc.items() if isinstance(v, list)}
+        if cols and len(cols) == len(doc):
+            lengths = {len(v) for v in cols.values()}
+            if len(lengths) == 1:
+                n = lengths.pop()
+                return [{k: cols[k][i] for k in cols} for i in range(n)]
+    raise IngestError(
+        reason="bad_json",
+        message="JSON must be a list of objects, an object wrapping one, or an object of equal-length columns.",
+    )
+
+
+def _read_jsonl(text: str) -> Table:
+    """Parse JSONL/NDJSON (one JSON object per non-blank line) into a :class:`Table`."""
+    records: list[dict[str, Any]] = []
+    for ordinal, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            raise IngestError(
+                reason="bad_json", message=f"Line {ordinal}: JSON parse failed: {exc}"
+            ) from None
+        if isinstance(obj, dict):
+            records.append(obj)
+    return _records_to_table(records)
+
+
+def _records_to_table(records: list[dict[str, Any]]) -> Table:
+    """Flatten record dicts into a header-agnostic :class:`Table`. Headers are the
+    first-seen-ordered union of keys; cells are stringified (``json.dumps`` for
+    nested dict/list, ``""`` for ``None``). Blank rows dropped, cap enforced."""
+    headers: list[str] = []
+    seen: set[str] = set()
+    rows: list[dict[str, str]] = []
+    for rec in records:
+        for key in rec:
+            if key not in seen:
+                seen.add(key)
+                headers.append(key)
+        cells = {key: _stringify_cell(rec.get(key)) for key in rec}
+        if not any(cells.values()):
+            continue
+        if len(rows) >= MAX_SAMPLES:
+            raise IngestError(
+                reason="too_large",
+                message=f"Upload exceeds the per-file cap of {MAX_SAMPLES} rows.",
+            )
+        rows.append(cells)
+
+    if not headers:
+        raise IngestError(reason="bad_json", message="No object records found in the upload.")
+    if not rows:
+        raise IngestError(reason="empty", message="Upload parsed but has zero data rows.")
+
+    # Backfill every row to the full header set so the Table is rectangular.
+    full = [{h: row.get(h, "") for h in headers} for row in rows]
+    return Table(headers=tuple(headers), rows=tuple(full))
+
+
+def _stringify_cell(value: Any) -> str:
+    """Coerce one JSON cell value to a string: nested dict/list → compact JSON,
+    ``None`` → ``""``, scalars → ``str``."""
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value).strip()
+
+
+def _read_xlsx(blob: bytes) -> Table:
+    """Parse the first sheet of an ``.xlsx`` workbook into a :class:`Table`.
+
+    Gated by ``settings.HARDENED_MODE`` — Excel is a macro / zip-bomb / XXE
+    vector, so a hardened deployment rejects it rather than parses. ``openpyxl``
+    runs ``read_only`` (streams large sheets) + ``data_only`` (cached values,
+    not formulas) and never executes VBA."""
+    from promptpotter.config.settings import settings
+
+    if settings.HARDENED_MODE:
+        raise IngestError(
+            reason="hardened_blocked",
+            message="Excel uploads are disabled in hardened mode — export your sheet to CSV and drop it again.",
+        )
+
+    import openpyxl  # lazy: keep the import cost off the hot CSV/JSON path
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(blob), read_only=True, data_only=True)
+    except Exception as exc:  # openpyxl raises a grab-bag of errors on bad blobs
+        raise IngestError(reason="bad_csv", message=f"Excel parse failed: {exc}") from None
+    try:
+        ws = wb.active
+        if ws is None:
+            raise IngestError(reason="bad_csv", message="Excel workbook has no active sheet.")
+        rows_iter = ws.iter_rows(values_only=True)
+        header_row = next(rows_iter, None)
+        if not header_row:
+            raise IngestError(reason="bad_csv", message="Excel sheet has no header row.")
+        headers = [str(c).strip() if c is not None else "" for c in header_row]
+        records: list[dict[str, Any]] = []
+        for cells in rows_iter:
+            records.append({headers[i]: cells[i] for i in range(min(len(headers), len(cells)))})
+        return _records_to_table(records)
+    finally:
+        wb.close()
 
 
 def materialize_samples(table: Table, *, query_col: str, ground_truth_col: str) -> list[Sample]:
@@ -143,4 +333,11 @@ def materialize_samples(table: Table, *, query_col: str, ground_truth_col: str) 
     return samples
 
 
-__all__ = ["MAX_SAMPLES", "IngestError", "Table", "materialize_samples", "read_tabular"]
+__all__ = [
+    "MAX_SAMPLES",
+    "IngestError",
+    "Table",
+    "format_from_filename",
+    "materialize_samples",
+    "read_tabular",
+]

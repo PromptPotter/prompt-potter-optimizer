@@ -121,6 +121,12 @@ class DraftCampaign:
             "slug": self.slug,
             "sample_preview": [dict(row) for row in self.sample_preview],
             "n_samples": self.n_samples,
+            # True iff this draft was pre-filled from an existing on-disk dataset
+            # (a demo/benchmark pick), vs. a fresh operator upload. The setup
+            # wizard keys its "pre-filled, no check-in needed" branch on this —
+            # NOT on the global `demo_mode_enabled` preference, which only
+            # controls whether demo datasets are surfaced in the collection.
+            "derived_origin": derived_origin_slug(self.source_file) is not None,
             "connector": self.connector,
             "scoring_composite": self.scoring_composite,
             "max_rounds": self.max_rounds,

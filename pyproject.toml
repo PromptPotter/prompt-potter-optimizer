@@ -31,6 +31,7 @@ dependencies = [
     "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
     "json-repair>=0.30,<1.0",  # why kept: structured repair of provider-returned JSON (invalid \X escapes, etc.) at the LLM boundary
     "cryptography>=46.0.7",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007.
+    "openpyxl>=3.1.0",         # why kept: .xlsx upload ingest (application/datasets/csv_ingest.py::_read_xlsx) + ground-truth Excel build (datasets/dataset_builder.py). Default-installed; xlsx parsing is gated off by settings.HARDENED_MODE, not by absence.
 ]
 
 [project.optional-dependencies]
@@ -41,9 +42,6 @@ jupyter = [
 ]
 stats = [
     "scipy>=1.12.0",    # why kept: Rasch fit + statistical proportion test
-]
-excel = [
-    "openpyxl>=3.1.0",  # why kept: ground-truth Excel ingest (datasets/dataset_builder.py)
 ]
 benchmarks = [
     "datasets>=2.14.0", # why kept: HuggingFace BBEH loader (M11 benchmark track)
@@ -64,7 +62,6 @@ all = [
     "ipython>=8.0",
     "tqdm>=4.66",
     "scipy>=1.12.0",
-    "openpyxl>=3.1.0",
     "datasets>=2.14.0",
     "langfuse>=2.0.0",
     "mlflow>=3.1.0",

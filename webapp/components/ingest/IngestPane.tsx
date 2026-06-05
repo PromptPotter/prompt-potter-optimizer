@@ -24,6 +24,7 @@ import {
   postIngestDataset,
   type DatasetIndexEntry,
   type DraftCampaignWire,
+  type OriginLastResolution,
 } from "@/lib/api";
 import { ChatIngestFlow } from "./ChatIngestFlow";
 import { ListAndMintFlow } from "./ListAndMintFlow";
@@ -49,6 +50,12 @@ const STEP_TITLES: Record<WizardStep, string> = {
 
 interface Props {
   open: boolean;
+  // A draft pre-resolved elsewhere (the chat file-drop check-in) — when set, the
+  // wizard opens straight on it instead of the empty drop screen.
+  initialDraft?: DraftCampaignWire | null;
+  // The chat check-in's resolution, seeded into the wizard's check-in panel so
+  // its assessment/questions show immediately (no "Set up with AI" re-click).
+  initialResolution?: OriginLastResolution | null;
   onClose: () => void;
   onMinted?: OnMinted;
 }
@@ -59,7 +66,13 @@ type LoadState =
   | { kind: "ready"; entries: DatasetIndexEntry[] }
   | { kind: "error" };
 
-export function IngestPane({ open, onClose, onMinted }: Props) {
+export function IngestPane({
+  open,
+  initialDraft,
+  initialResolution,
+  onClose,
+  onMinted,
+}: Props) {
   const { status } = useAuth();
   // Render-phase guarded reset on `open` toggles. Async fetch fires from a
   // bare effect that never synchronously setStates.
@@ -91,7 +104,9 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
     setPrevOpen(open);
     if (open) {
       setList(gatedInitial());
-      setDraft(null);
+      // Seed a chat-resolved draft so the wizard opens straight on it; a plain
+      // "+ New" passes none and lands on the empty drop screen as before.
+      setDraft(initialDraft ?? null);
       setFlowError(null);
       setCheckinModel(null);
     }
@@ -187,6 +202,7 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
         step={step}
         onStep={setStep}
         onDraftChange={setDraft}
+        initialResolution={initialResolution}
         onClose={onClose}
         onMinted={onMinted}
       />

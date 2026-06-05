@@ -27,9 +27,9 @@ export function ChatIngestFlow({
   return (
     <div className="new-campaign-body">
       <p>
-        Drop a CSV to start your first Origin — any column names work.
-        You&rsquo;ll pick which column is the input and which is the target
-        on the next step.
+        Drop a CSV, TSV, JSON, or Excel file to start your first dataset — any
+        column names work. You&rsquo;ll pick which column is the input and which
+        is the target on the next step.
       </p>
       <FileDropZone busy={busy} onFile={onFile} />
       {uploadError ? <p className="new-campaign-error">{uploadError}</p> : null}

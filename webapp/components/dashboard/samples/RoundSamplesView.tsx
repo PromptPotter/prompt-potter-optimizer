@@ -180,6 +180,7 @@ export function RoundSamplesView({ dash, status, campaignId, cycleId }: Props) {
                 0,
               );
               const misses = g.samples.length - hits;
+              const cached = g.samples.reduce((n, s) => n + (s.cached ? 1 : 0), 0);
               const display = g.samples.slice(0, PER_GROUP_CAP);
               const truncated = g.samples.length - display.length;
               return (
@@ -209,6 +210,14 @@ export function RoundSamplesView({ dash, status, campaignId, cycleId }: Props) {
                     <span className="rsv-tally">
                       <span className="tag-hit">HIT {hits}</span>
                       <span className="tag-miss">MISS {misses}</span>
+                      {cached > 0 && (
+                        <span
+                          className="tag-cached"
+                          title="Samples reused from a prior identical searchpoint — no fresh backend call"
+                        >
+                          📖 {cached === g.samples.length ? "all cached" : `${cached} cached`}
+                        </span>
+                      )}
                     </span>
                   </button>
                   {g.samples.length === 0 ? (
@@ -256,6 +265,14 @@ function SampleRowItem({ row }: { row: SampleRow }) {
           <span className="elapsed">{row.elapsed_s.toFixed(1)}s</span>
         )}
         {row.scorer && <span className="scorer">{row.scorer}</span>}
+        {row.cached && (
+          <span
+            className="rsv-cached"
+            title="Reused from a prior identical searchpoint — no fresh backend call"
+          >
+            📖 cached
+          </span>
+        )}
         <span className="body">
           gt:{truncate(row.ground_truth, 22)} · pred:{truncate(pred, 22)}
           {row.query ? ` · q:${truncate(row.query, 36)}` : ""}

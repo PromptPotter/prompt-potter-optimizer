@@ -17,11 +17,6 @@
         "temperature": 0.0,
         "reasoning_effort": "low"
       },
-      "prompt_meta": {
-        "family": "llm_only",
-        "template_variables": ["query"],
-        "description": "System prompt for BBEH task evaluation"
-      },
       "optimizer": {
         "param_keys": ["provider", "temperature", "max_tokens", "model", "reasoning_effort", "persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
         "param_allowed_values": {

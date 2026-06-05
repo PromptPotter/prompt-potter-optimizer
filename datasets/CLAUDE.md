@@ -38,8 +38,7 @@ Optional:
 | `hotpotqa` | `termnorm` | Multi-hop QA benchmark. |
 | `aime_2025` | `termnorm` (OpenRouter+Mistral overlay) | AIME competition math; overlay routes off Groq default. |
 | `justlogic` | `termnorm` | Logic reasoning at variable depth. |
-| `demo-tickets` | `termnorm` | Built-in try-and-learn demo (support tickets); surfaced while `User.demo_mode_enabled`. |
-| `email-tagging` | `termnorm` | Pilot: n8n inbox email-classification prompt. |
+| `email-tagging` | `termnorm` | Built-in try-and-learn demo (n8n inbox email-classification); surfaced while `User.demo_mode_enabled`. |
 | `promptpotter` | `promptpotter` | Outer cycle whose backend is the optimizer itself (L4 recursion). |
 | `promptpotter-self` | `promptpotter` | Optimizer-of-the-optimizer demo dataset. See [§ L4 below](#l4--promptpotter-self). |
 | `_optimizer/` | n/a | The optimizer's own `pipeline.json` + prompt variants — same shape as a target backend's pipeline.json (per §0 self-optimization commitment). |

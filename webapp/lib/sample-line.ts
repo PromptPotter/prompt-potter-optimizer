@@ -12,6 +12,10 @@ export interface ParsedSample {
   sampleId?: number;
   status?: "HIT" | "MISS";
   scorer?: string;
+  // True when the line carries the 📖 cache glyph (measurement reused from a
+  // prior identical searchpoint). The glyph sits outside the scorer bracket,
+  // so it's read off the raw line, not a regex group.
+  cached?: boolean;
   predicted?: string;
   gt?: string;
   query?: string;
@@ -29,6 +33,7 @@ export function parseSampleLine(line: string): ParsedSample {
     sampleId: m[3] != null ? parseInt(m[3], 10) : undefined,
     status: m[4] as "HIT" | "MISS",
     scorer: m[5],
+    cached: line.includes("📖"),
     predicted: m[6],
     gt: m[7],
     query: m[8],

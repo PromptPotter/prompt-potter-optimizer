@@ -133,11 +133,12 @@ async def ingest_dataset(
     store: StoreDep,
     file: Annotated[
         UploadFile,
-        File(description="CSV blob with `query` + `ground_truth` columns."),
+        File(description="Tabular upload (CSV/TSV/JSON/JSONL/XLSX); any columns."),
     ],
     slug: Annotated[str | None, Form(description="Optional slug override.")] = None,
 ) -> dict[str, Any]:
-    """Parse an uploaded CSV; return a server-held :class:`DraftCampaign`.
+    """Parse an uploaded tabular file (CSV/TSV/JSON/XLSX); return a server-held
+    :class:`DraftCampaign`.
 
     Wire contract pinned in ``docs/specs/m12-api-openapi.yaml::POST /datasets/ingest``.
     NOT a Control-remote command — no ``CommandRecord`` lands until the
@@ -177,12 +178,16 @@ async def ingest_dataset(
             },
         ) from None
     except SlugTakenError as exc:
+        # The chat turns this into an in-flow choice (use existing / save as new),
+        # so it needs BOTH names: the colliding one (to offer "use existing") and
+        # the free suggestion (to offer "save as new"). See
+        # docs/specs/m13-dataset-bridge.md § 2.
         raise HTTPException(
             status_code=409,
             detail={
-                "error": "payload_invalid",
-                "message": f"Slug '{exc.slug}' already exists in your collection.",
-                "details": {"suggested_slug": exc.suggested},
+                "error": "slug_collision",
+                "message": f"A dataset named '{exc.slug}' already exists.",
+                "details": {"slug": exc.slug, "suggested_slug": exc.suggested},
             },
         ) from None
     return draft_wire_with_locks(draft)

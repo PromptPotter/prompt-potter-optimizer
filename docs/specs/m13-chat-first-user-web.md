@@ -99,7 +99,7 @@ Slice 1's one new endpoint. Workspace-scoped mutation (creates a draft, not yet 
 - **Request:** `multipart/form-data` with `file` (CSV blob) + optional `slug` (defaults to `SafeName(filename_without_ext)`).
 - **200:** `DraftCampaign` JSON (shape above) + `sample_preview` (first 10 rows).
 - **401:** unauthenticated (no `IdentityContext`).
-- **409:** slug collision — server suggests `{slug}-{n}` (smallest free `n`) in `details.suggested_slug`.
+- **409:** slug collision (`error: "slug_collision"`) — `details.slug` (the colliding name) + `details.suggested_slug` (smallest free `{slug}-{n}`). The chat turns this into an in-flow choice (use existing / save as new / replace); dataset-identity + the version-and-repoint Replace contract live in [`m13-dataset-bridge.md`](m13-dataset-bridge.md).
 - **422:** parse failure (CSV malformed, missing required columns `query` / `ground_truth`, zero rows, …) — `details.reason` carries the specific failure.
 
 Slug derivation: `SafeName` on the filename's basename minus extension; collisions resolved by operator picking the suggested `{slug}-{n}` or editing.
@@ -120,7 +120,7 @@ After commit, the standard mint-campaign path runs against the new Origin slug. 
 
 **Open:** SSE event name (`DraftUpdatedRecord`) needs declaration in `m12-events-asyncapi.yaml` before a handler lands — out of slice 1 scope but on-deck for the wire-up PR.
 
-Demo CSV: `dev/sample-datasets/customer-tickets-eval.csv` (5 rows, two columns; precedent — `dev/oidc-local/` Dex harness). Matches the placeholder chip text at `webapp/components/chat/ChatPane.tsx:248`. Allowlisted under `dev/` in `.gitignore`.
+First-run illustration: the chat pane's empty-state thread is a static mock (chip text at `webapp/components/chat/ChatPane.tsx`), so no checked-in CSV is needed to render it. Live ingest is exercised against the surviving `email-tagging` demo origin via `PROMPTPOTTER_AUTH=off` (the cheap authed-and-live harness — see [`../../webapp/CLAUDE.md`](../../webapp/CLAUDE.md) § Testing posture), not a drag-drop fixture.
 
 ## Cross-user data leverage
 

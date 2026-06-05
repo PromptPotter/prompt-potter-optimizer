@@ -9,24 +9,66 @@ the one field that lands UNSET (no default framing).
 
 from __future__ import annotations
 
-from promptpotter.application.datasets.csv_ingest import materialize_samples, read_tabular
+import io
+
+import openpyxl
+import pytest
+
+from promptpotter.application.datasets.csv_ingest import (
+    IngestError,
+    materialize_samples,
+    read_tabular,
+)
 from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
 from promptpotter.application.datasets.origin_readiness import origin_readiness, resolution_block
+from promptpotter.config.settings import settings
 from promptpotter.domain.identity import TenantId
 from promptpotter.domain.origin_provenance import Provenance, ProvenanceSource
 
 
-def test_read_tabular_is_header_agnostic_and_materializes_arbitrary_columns() -> None:
-    """`input` / `gt` (not the literal `query` / `ground_truth`) parse + map cleanly."""
-    table = read_tabular(b"input,gt\nq1,a1\nq2,a2\n")
-    assert table.headers == ("input", "gt")
-    assert len(table.rows) == 2
+def _xlsx_blob(rows: list[list[str]]) -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for row in rows:
+        ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
-    samples = materialize_samples(table, query_col="input", ground_truth_col="gt")
-    assert [(s.id, s.query, s.ground_truth) for s in samples] == [
-        (0, "q1", "a1"),
-        (1, "q2", "a2"),
-    ]
+
+def test_read_tabular_is_header_agnostic_across_formats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every supported format parses to the same header-agnostic table (the parser
+    never requires literal `query`/`ground_truth` — that's the resolver's job), a
+    confirmed mapping materializes Samples, and hardened mode bans Excel."""
+    expected = {"input": ("q1", "q2"), "gt": ("a1", "a2")}
+    xlsx = _xlsx_blob([["input", "gt"], ["q1", "a1"], ["q2", "a2"]])
+
+    def assert_shape(table: object) -> None:
+        t = table
+        assert isinstance(t, type(read_tabular(b"input,gt\nq1,a1\n")))
+        assert set(t.headers) == {"input", "gt"}
+        assert len(t.rows) == 2
+        for col, vals in expected.items():
+            assert tuple(r[col] for r in t.rows) == vals
+
+    csv = read_tabular(b"input,gt\nq1,a1\nq2,a2\n", fmt="csv")
+    assert_shape(csv)
+    assert_shape(read_tabular(b"input\tgt\nq1\ta1\nq2\ta2\n", fmt="tsv"))
+    assert_shape(read_tabular(b'[{"input":"q1","gt":"a1"},{"input":"q2","gt":"a2"}]', fmt="json"))
+    # JSON object-of-columns (HuggingFace-style) transposes to the same rows.
+    assert_shape(read_tabular(b'{"input":["q1","q2"],"gt":["a1","a2"]}', fmt="json"))
+    assert_shape(read_tabular(b'{"input":"q1","gt":"a1"}\n{"input":"q2","gt":"a2"}\n', fmt="jsonl"))
+    assert_shape(read_tabular(xlsx, fmt="xlsx"))
+
+    samples = materialize_samples(csv, query_col="input", ground_truth_col="gt")
+    assert [(s.id, s.query, s.ground_truth) for s in samples] == [(0, "q1", "a1"), (1, "q2", "a2")]
+
+    # Hardened mode bans Excel (macro/zip-bomb/XXE vector); text formats stay readable.
+    monkeypatch.setattr(settings, "HARDENED_MODE", True)
+    with pytest.raises(IngestError) as exc:
+        read_tabular(xlsx, fmt="xlsx")
+    assert exc.value.reason == "hardened_blocked"
+    assert read_tabular(b"input,gt\nq1,a1\n", fmt="csv").headers == ("input", "gt")
 
 
 def test_readiness_gates_on_closed_set() -> None:

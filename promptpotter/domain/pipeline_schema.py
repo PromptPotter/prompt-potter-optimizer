@@ -52,8 +52,11 @@ class NodeOutputSchema(BaseModel):
     json_schema: dict[str, Any] = Field(default_factory=dict)
 
 
-class NodePromptMeta(BaseModel):
-    """Resolved prompt metadata for a pipeline node."""
+class NodePromptInfo(BaseModel):
+    """Describes the prompt a node accepts — its presence marks the node as
+    prompt-bearing (the injection point for the candidate prompt); its fields
+    name the prompt family + template variables. The input-side companion to
+    :class:`NodeOutputSchema`."""
 
     model_config = {"frozen": True}
 
@@ -111,7 +114,7 @@ class PipelineNode(BaseModel):
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"
     output_schema: NodeOutputSchema | None = None
-    prompt_meta: NodePromptMeta | None = None
+    prompt_info: NodePromptInfo | None = None
     current_config: dict[str, Any] = Field(default_factory=dict)
 
     @property
@@ -273,14 +276,14 @@ class PipelineSchema(BaseModel):
         return {step.name: step.param_keys for step in self.nodes if step.param_keys}
 
     def prompt_node_names(self) -> list[str]:
-        """Node names whose output is affected by the prompt — ``prompt_meta`` set."""
-        return [node.name for node in self.nodes if node.prompt_meta is not None]
+        """Node names whose output is affected by the prompt — ``prompt_info`` set."""
+        return [node.name for node in self.nodes if node.prompt_info is not None]
 
 
 __all__ = [
     "NodeConfigParam",
     "NodeOutputSchema",
-    "NodePromptMeta",
+    "NodePromptInfo",
     "NodeType",
     "ObservationMapping",
     "PipelineNode",

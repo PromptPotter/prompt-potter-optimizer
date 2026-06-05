@@ -93,7 +93,7 @@ def test_duplicate_signature_attaches_validation_failure():
 def test_parse_population_attaches_forbidden_axis_failure_to_osp():
     from promptpotter.application.optimization.l1.population import parse_population
     from promptpotter.domain.pipeline_schema import (
-        NodePromptMeta,
+        NodePromptInfo,
         PipelineNode,
         PipelineSchema,
     )
@@ -101,7 +101,7 @@ def test_parse_population_attaches_forbidden_axis_failure_to_osp():
     schema = PipelineSchema(
         name="test",
         available_models=["openai/gpt-oss-120b"],
-        nodes=[PipelineNode(name="llm_only", prompt_meta=NodePromptMeta())],
+        nodes=[PipelineNode(name="llm_only", prompt_info=NodePromptInfo())],
     )
     parent = _parent()
     proposal = CandidateProposal(
@@ -1014,7 +1014,7 @@ from promptpotter.application.optimization.round_analysis import (  # noqa: E402
 )
 from promptpotter.domain.opt_search_point import FewShotExample  # noqa: E402
 from promptpotter.domain.pipeline_schema import (  # noqa: E402
-    NodePromptMeta,
+    NodePromptInfo,
     PipelineNode,
     PipelineSchema,
 )
@@ -1025,7 +1025,7 @@ from promptpotter.shared.hashing import content_hash  # noqa: E402
 
 
 def _schema_with_prompt_node(name: str = "llm_ranking") -> PipelineSchema:
-    return PipelineSchema(nodes=[PipelineNode(name=name, prompt_meta=NodePromptMeta())])
+    return PipelineSchema(nodes=[PipelineNode(name=name, prompt_info=NodePromptInfo())])
 
 
 def test_jsp_construct_frozen_and_render_reads_pipeline_params():

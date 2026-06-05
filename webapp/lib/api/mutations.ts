@@ -278,6 +278,10 @@ export interface DraftCampaignWire {
   slug: string;
   sample_preview: Array<{ query: string; ground_truth: string }>;
   n_samples: number;
+  // True iff pre-filled from an existing on-disk dataset (a demo/benchmark
+  // pick) vs. a fresh upload. Drives the wizard's "pre-filled, AI check-in
+  // not needed" branch — not the global `demo_mode_enabled` preference.
+  derived_origin: boolean;
   connector: string;
   scoring_composite: string;
   max_rounds: number;
@@ -324,6 +328,9 @@ export interface OriginGap {
 
 export interface IngestErrorDetail {
   reason?: string;
+  // On a `slug_collision` (409): the colliding dataset name + a free suggestion.
+  // The chat offers "use existing {slug}" / "save as new {suggested_slug}".
+  slug?: string;
   suggested_slug?: string;
   backend_type?: string;
   backend_url?: string;
@@ -335,6 +342,8 @@ export class IngestApiError extends Error {
   readonly status: number;
   readonly errorCode?: string;
   readonly reason?: string;
+  // `slug_collision` (409): the existing dataset name + a free suggestion.
+  readonly existingSlug?: string;
   readonly suggestedSlug?: string;
   readonly backendType?: string;
   readonly backendUrl?: string;
@@ -353,6 +362,7 @@ export class IngestApiError extends Error {
     this.status = status;
     this.errorCode = errorCode;
     this.reason = detail?.reason;
+    this.existingSlug = detail?.slug;
     this.suggestedSlug = detail?.suggested_slug;
     this.backendType = detail?.backend_type;
     this.backendUrl = detail?.backend_url;

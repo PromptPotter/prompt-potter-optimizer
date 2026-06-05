@@ -64,8 +64,27 @@ The persisted world is a four-entity containment hierarchy
 - **Workspace** — the tenant-level container and queryable datastore:
   every dataset, every campaign, the shared `archive/`. On disk
   `projects/{tenant}/`.
-- **Dataset** — the optimization target plus its config.
-  `datasets/{name}/`.
+- **Dataset** — an immutable bank of labeled examples
+  (`cache.json::items[]` of `{query, ground_truth}`) plus its origin
+  config: starting prompt (`prompts/default.json`), pipeline overlay
+  (`pipeline.json`), task framing (`task_description.md`), and the
+  sibling default `campaign.json`. Lives at `datasets/{name}/` (repo
+  benchmark) or `projects/{tenant}/datasets/{name}/` (tenant upload).
+  Data a campaign has touched is **never mutated in place** — see
+  **Dataset name** + [`specs/m13-dataset-bridge.md`](specs/m13-dataset-bridge.md).
+- **Dataset name** (a.k.a. **slug**) — the human-friendly handle for a
+  dataset (`email-tagging-eval`), validated `^[a-z][a-z0-9_-]*$` and used
+  as the directory segment. A *mutable alias*: it points at data, it is
+  **not** the data's identity. A campaign resolves its dataset live by
+  this name (`campaign.json::dataset_name`), so moving/replacing it is the
+  version-and-repoint contract, not an in-place overwrite
+  ([`specs/m13-dataset-bridge.md`](specs/m13-dataset-bridge.md)).
+- **Origin** — the optimizer's **starting point**: the origin
+  `OptSearchPoint` (`resolve_origin_opt_search_point`) the loop evolves
+  from, and the round-0 "origin accuracy" before any mutation. Reserve
+  this word for that meaning. The data a campaign starts from is a
+  **Dataset**, not an "origin" — historical UI/spec copy that called the
+  dataset an "Origin" is being renamed (m13-dataset-bridge § 3).
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, and the optimizer meta-prompts it runs
   under. A first-class entity holding one session root + its fork/diag/

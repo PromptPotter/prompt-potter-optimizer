@@ -1078,9 +1078,9 @@ paths:
   /datasets/ingest:
     post:
       operationId: ingestDataset
-      summary: Upload a CSV; receive a server-held `DraftCampaign` with parsed preview + smart defaults.
+      summary: Upload a tabular file; receive a server-held `DraftCampaign` with parsed preview + smart defaults.
       description: |
-        Slice 1 ingest path for the M13 chat-first user web (see
+        Ingest path for the M13 chat-first user web (see
         `docs/specs/m13-chat-first-user-web.md § Ingest`). Workspace-scoped,
         identity-bound by `IdentityContext.tenant_id` — the resulting draft
         (and on commit, the dataset directory) lands at
@@ -1089,11 +1089,13 @@ paths:
         NOT a Control-remote command — no `CommandRecord` lands on a ledger;
         the draft lives in the server's draft-campaign store until the operator
         commits via the separate `/commands/mint-campaign-from-draft` verb.
-        File type in slice 1: CSV. Ingest is header-agnostic — any column
-        names are accepted; the input/target column mapping is resolved on
-        the draft (`column_query` / `column_ground_truth`) and gated at mint,
-        not at upload. Future slices add XLSX (first sheet only), Parquet,
-        JSON-lines — declared in this file before each handler lands.
+        File type is detected from the filename extension: CSV, TSV, JSON,
+        JSONL/NDJSON, or XLSX (first sheet). XLSX parsing is gated off when the
+        server runs `HARDENED_MODE` (Office formats are a macro/zip-bomb vector).
+        Ingest is header-agnostic — any column names are accepted; for JSON the
+        check-in reads the structure and proposes the mapping. The input/target
+        column mapping is resolved on the draft (`column_query` /
+        `column_ground_truth`) and gated at mint, not at upload.
       tags: [datasets]
       requestBody:
         required: true
@@ -1106,7 +1108,7 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: CSV blob; any column headers (header-agnostic).
+                  description: Tabular file (CSV/TSV/JSON/JSONL/XLSX); any column headers (header-agnostic).
                 slug:
                   type: string
                   minLength: 1
@@ -1148,10 +1150,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '422':
           description: |
-            CSV parse / shape failure — undecodable bytes, unparseable CSV,
-            no header row, or zero data rows. `details.reason` carries the
-            specific failure (`bad_csv`, `empty`, `too_large`, `bad_slug`).
-            Column names are NOT validated here (header-agnostic ingest).
+            Parse / shape failure — undecodable bytes, unparseable file, no
+            header row, or zero data rows. `details.reason` carries the specific
+            failure (`bad_csv`, `bad_json`, `empty`, `too_large`, `bad_slug`,
+            `unsupported_format`, or `hardened_blocked` for an XLSX upload when
+            the server runs `HARDENED_MODE`). Column names are NOT validated
+            here (header-agnostic ingest).
           content:
             application/json:
               schema:
@@ -1334,9 +1338,11 @@ components:
               compose the "Start the backend and try again" message
               without re-parsing the `message` field.
             * `ingest_failed` (422 on `/datasets/ingest`) — `reason`
-              ∈ `bad_csv` | `empty` | `too_large` | `bad_slug`. (Ingest is
+              ∈ `bad_csv` | `bad_json` | `empty` | `too_large` | `bad_slug` |
+              `unsupported_format` | `hardened_blocked`. (Ingest is
               header-agnostic — it no longer rejects on column names; column
-              identity is resolved on the draft, gated at mint.)
+              identity is resolved on the draft, gated at mint. `hardened_blocked`
+              is an XLSX upload refused while the server runs `HARDENED_MODE`.)
             * `origin_incomplete` (422 on `/commands/mint-campaign-from-draft`)
               — `gaps`: a list of `{field, reason, hint}` objects naming each
               origin field that still blocks mint. `reason` ∈ `unset` |
@@ -1770,6 +1776,7 @@ components:
         - slug
         - sample_preview
         - n_samples
+        - derived_origin
         - connector
         - scoring_composite
         - max_rounds
@@ -1823,6 +1830,14 @@ components:
           type: integer
           minimum: 0
           description: Total parsed row count (preview is a head; this is the bank size).
+        derived_origin:
+          type: boolean
+          description: |
+            True iff the draft was pre-filled from an existing on-disk dataset
+            (`source_file` = `dataset:{slug}` — a demo/benchmark pick), vs. a
+            fresh operator upload. The setup wizard keys its "pre-filled, AI
+            check-in not needed" branch on this, NOT on the global
+            `demo_mode_enabled` preference (which only surfaces demo datasets).
         connector:
           type: string
           minLength: 1

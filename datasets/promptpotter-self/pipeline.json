@@ -12,7 +12,7 @@
       "node_role": "candidate_source",
       "description": "Inner cycle's L1-generate meta-prompt — produces inner candidate variants from inner panels (parent_origin, sibling_yield, escalation_panel, axis_memory).",
       "config": {},
-      "prompt_meta": {
+      "prompt_info": {
         "family": "l1_generate",
         "template_variables": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
         "description": "Six-field PromptTemplate scheme — outer L1 mutates these to evolve the inner L1's behavior."
@@ -31,7 +31,7 @@
       "node_role": "ranker",
       "description": "Inner cycle's L1-critique meta-prompt — narrates score deltas and proposes negative_critique + suggested_axes.",
       "config": {},
-      "prompt_meta": {
+      "prompt_info": {
         "family": "l1_critique",
         "template_variables": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
         "description": "Critique framing controls how the inner L1 rewards or penalizes specific axes."
@@ -50,7 +50,7 @@
       "node_role": "enricher",
       "description": "Inner cycle's L2 meta-prompt — refines task_context on inner-L1 stall.",
       "config": {},
-      "prompt_meta": {
+      "prompt_info": {
         "family": "l2_context",
         "template_variables": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
         "description": "L2 refinement framing — outer L1 mutates how the inner L2 shapes task_context."
@@ -69,7 +69,7 @@
       "node_role": "enricher",
       "description": "Inner cycle's L3 meta-prompt — replans strategy on inner-L2 stall.",
       "config": {},
-      "prompt_meta": {
+      "prompt_info": {
         "family": "l3_plan",
         "template_variables": ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
         "description": "L3 replan framing — outer L1 mutates how the inner L3 rewrites the plan-space."

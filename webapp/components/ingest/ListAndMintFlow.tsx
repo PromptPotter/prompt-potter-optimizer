@@ -60,7 +60,7 @@ export function ListAndMintFlow({
   return (
     <div className="new-campaign-body">
       <label className="new-campaign-field">
-        <span>Origin</span>
+        <span>Dataset</span>
         <select value={picked} onChange={(e) => setPicked(e.target.value)} required>
           {owned.map((d) => (
             <option key={d.name} value={d.name}>
@@ -91,7 +91,7 @@ export function ListAndMintFlow({
           </button>
         ) : null}
         <button type="button" className="new-campaign-cancel" onClick={onAddOrigin}>
-          Add an Origin
+          Add a dataset
         </button>
         <button
           type="button"

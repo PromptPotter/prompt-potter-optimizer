@@ -38,7 +38,7 @@ field-level shape, pinned by
 | `runtime` | required | `str` | One of `backend`, `optimizer`. Distinguishes connector-served nodes from optimizer-internal LLM calls. |
 | `short_circuit` | required | `bool` | Whether a successful match in this node bypasses downstream nodes. |
 | `config` | optional | `dict` | Node-local defaults. For LLM nodes typically `{model, temperature, max_tokens, ...}`. For optimizer nodes also `{prompt_family, prompt_version, schema_family, schema_version}` keys that index into the registries. |
-| `prompt_meta` | optional | `dict` | Inline `{family, template_variables, description}`. Used when no `resolved_prompts` registry is present (rare). |
+| `prompt_info` | optional | `dict` | Inline `{family, template_variables, description}` — marks the node as prompt-bearing (the candidate-prompt injection point). Used when no `resolved_prompts` registry is present. |
 | `output_schema` | optional | `dict` | Inline output schema. Same role as a `resolved_schemas` entry. |
 | `input_schema` | optional | `dict` | Reserved for future input-validation work. |
 | `optimizer` | optional | `dict` | See **`optimizer` sub-object**. Required for any node PromptPotter is allowed to mutate or trace. |
@@ -96,7 +96,7 @@ A minimal one — the GSM8K single-LLM-node pipeline — at
       "description": "Direct LLM generation on the TermNorm backend.",
       "short_circuit": false,
       "config": {"model": "...", "temperature": 0.0, "reasoning_effort": "medium"},
-      "prompt_meta": {"family": "llm_only", "template_variables": ["query"], "description": "..."},
+      "prompt_info": {"family": "llm_only", "template_variables": ["query"], "description": "..."},
       "optimizer": {
         "param_keys": ["temperature", "max_tokens", "model", "..."],
         "param_allowed_values": {"reasoning_effort": ["none", "default", "low", "medium", "high"]},

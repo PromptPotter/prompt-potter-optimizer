@@ -1,0 +1,77 @@
+email	category
+"From: NimbusCloud Billing <billing@nimbuscloud.io>
+Subject: Your Pro plan has renewed
+Direction: inbound
+
+Hi Tomas, your NimbusCloud Pro subscription renewed automatically. CHF 29.00 was charged to the card ending 4417. No action needed."	financial
+"From: Calendar <calendar-notification@meetinghub.app>
+Subject: Invitation: Project sync @ Thu 14:00
+Direction: inbound
+
+Lena Brunner invited you to ""Project sync"", Thu 5 Mar 14:00-14:30. Please respond: Yes / No / Maybe."	actionable
+"From: Orders <orders@parcelo.example>
+Subject: Update on your order #88213
+Direction: inbound
+
+Your parcel is delayed by about three days. As an apology we have refunded the CHF 12.00 shipping fee to your original payment method."	financial
+"From: Sozialdienst Musterstadt <revision@sd-musterstadt.example>
+Subject: Überprüfung Anspruch Sozialhilfegelder (Ref. 250645)
+Direction: inbound
+
+Sehr geehrter Herr Vetterli, zur Überprüfung Ihres Anspruchs auf Sozialhilfegelder benötigen wir Ihre aktuellen Kontoauszüge. Bitte reichen Sie die Unterlagen bis 20.03. ein."	financial
+"From: Olly <olly@senjafied.example>
+Subject: Why I almost shut it all down (and the MCP thing)
+Direction: inbound
+
+Big personal update this week, plus a new MCP server we just shipped. Hit reply if you want early access."	informational
+"From: Lukas Brand <lukas@openclaw.example>
+Subject: Meeting on the Openclaw launch?
+Direction: inbound
+
+Can we grab 30 minutes Thursday to decide the launch date? Let me know what works for you."	actionable
+"From: Accounts <accounts@devawarely.example>
+Subject: Invoice 1023 - DevAwarely
+Direction: inbound
+
+Please find attached invoice 1023, CHF 480.00, net 30.
+Attachment: PDF invoice — DevAwarely, total CHF 480.00, due 2026-04-15."	financial
+"From: Senjafied <no-reply@senjafied.example>
+Subject: Your annual license is active
+Direction: inbound
+
+Thanks! Your payment of CHF 99.00 for the annual Senjafied license was successful. Your plan is active for the next 12 months."	financial
+"From: Open Tab <digest@opentab.example>
+Subject: Open Tab: this week's essays
+Direction: inbound
+
+Five long reads on attention, AI and the long now. Enjoy the issue."	informational
+"From: Shop <shop@parcelo.example>
+Subject: Your order has shipped
+Direction: inbound
+
+Good news — your order is on its way. Track it with the link below. Expected delivery Tuesday."	informational
+"From: Mara Lindqvist <mara@helvetia-optics.example>
+Subject: Automatic reply: Out of office
+Direction: inbound
+
+I am away until 10 March with limited access to email. For urgent matters please contact the office."	other
+"From: Priya Nadel <priya@helvetia-optics.example>
+Subject: Confirm by Friday: vendor choice
+Direction: inbound
+
+We need your sign-off on whether we proceed with vendor X for the rollout. Please confirm by Friday."	actionable
+"From: Jonas Frei <jonas.frei@example.com>
+Subject: Refund for last month's overcharge
+Direction: inbound
+
+I was charged twice in February. Could you please refund the extra CHF 20.00 to my account?"	financial
+"From: Events <events@dreamleaplabs.example>
+Subject: Free webinar: KI-Learnings aus dem Weltraum
+Direction: inbound
+
+Join our free online session next Thursday. Register with a single click — seats are limited."	informational
+"From: TWINT Receipts <receipts@paytwint.example>
+Subject: Your payment
+Direction: inbound
+
+Payment sent: CHF 18.50 to Café Effi. Thanks for paying with TWINT."	financial

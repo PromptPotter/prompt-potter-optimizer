@@ -48,6 +48,11 @@ class QueryMeasurement(TypedDict):
     predicted: str
     hit: NotRequired[bool]
     fitness: NotRequired[float]
+    # True when this measurement was reused from a prior identical searchpoint
+    # instead of a fresh backend call. Stamped ``False`` at measurement time,
+    # ``True`` by ``_materialize_cached``. Always present so readers (the live
+    # tape + the per-candidate audit table) can show fresh-vs-cached uniformly.
+    cached: NotRequired[bool]
     error: str | None
     # Typed error channel: the category owns "this sample errored"; ``error`` is a
     # plain human message (no ``[TAG]`` prefix). ``None``/absent ⇒ clean measurement.

@@ -99,7 +99,6 @@ deploy-linux/*.local.md
 # Per-dataset HF/Excel cache — regenerable, dataset-name keyed
 datasets/*/cache.json
 # demo samples are hand-authored, not regenerable — commit them
-!datasets/demo-tickets/cache.json
 !datasets/email-tagging/cache.json
 
 # Recon-script raw data downloads (NaturalPlan GitHub JSON, etc.) — regenerable

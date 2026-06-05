@@ -18,6 +18,9 @@ export interface SampleRow {
   // or pre-stamped with only an ordinal.
   sample_id: number | null;
   status: SampleStatus | null;
+  // True when this measurement was reused from a prior identical searchpoint
+  // (📖) rather than a fresh backend call. Both source readers populate it.
+  cached: boolean;
   query: string;
   predicted: string;
   ground_truth: string;

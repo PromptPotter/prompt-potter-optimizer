@@ -152,6 +152,13 @@ class Settings(BaseSettings):
     LANGFUSE_ENABLED: bool = True
     LANGFUSE_PROMPTS_ENABLED: bool = False
 
+    # Security posture. When True, binary/Office uploads (.xlsx) are rejected at
+    # ingest rather than parsed — xlsx is a macro / zip-bomb / XXE vector. Default
+    # parses Excel; operators hardening a deployment set HARDENED_MODE=true. The
+    # hook for future upload-surface hardening, matching the zero-trust posture in
+    # docs/operations/secure-hosting.md.
+    HARDENED_MODE: bool = False
+
     # File-based observability (traces, events.jsonl)
     OBS_ENABLED: bool = True
 

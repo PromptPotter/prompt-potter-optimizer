@@ -16,7 +16,7 @@ from typing import Any
 from promptpotter.config.settings import WELL_KNOWN_PARAM_TYPES
 from promptpotter.domain.pipeline_schema import (
     NodeOutputSchema,
-    NodePromptMeta,
+    NodePromptInfo,
     ObservationMapping,
     PipelineNode,
     PipelineSchema,
@@ -121,9 +121,9 @@ def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
     )
 
 
-def _parse_resolved_prompt(resolved: dict[str, Any]) -> NodePromptMeta:
+def _parse_resolved_prompt(resolved: dict[str, Any]) -> NodePromptInfo:
     """Convert a resolved prompt dict from the enriched response."""
-    return NodePromptMeta(
+    return NodePromptInfo(
         family=resolved.get("family", ""),
         template_variables=resolved.get("template_variables", []),
         description=resolved.get("description", ""),
@@ -139,7 +139,7 @@ def _extract_resolved_metadata(
     ``"{family}/{version}"``.  Each node references its schema/prompt via
     ``schema_family``/``prompt_family`` config keys.
 
-    Returns mapping of ``node_name -> {"output_schema": ..., "prompt_meta": ...}``.
+    Returns mapping of ``node_name -> {"output_schema": ..., "prompt_info": ...}``.
     """
     schemas_raw = config.get("resolved_schemas", {})
     prompts_raw = config.get("resolved_prompts", {})
@@ -161,7 +161,7 @@ def _extract_resolved_metadata(
             pv = nc.get("prompt_version")
             key = f"{pf}/{pv}" if pv is not None else pf
             if key in prompts_raw:
-                entry["prompt_meta"] = _parse_resolved_prompt(prompts_raw[key])
+                entry["prompt_info"] = _parse_resolved_prompt(prompts_raw[key])
 
         if entry:
             metadata[node_name] = entry
@@ -276,12 +276,12 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         rm = resolved_metadata.get(name, {})
         if "output_schema" in rm:
             step_kwargs["output_schema"] = rm["output_schema"]
-        if "prompt_meta" in rm:
-            step_kwargs["prompt_meta"] = rm["prompt_meta"]
+        if "prompt_info" in rm:
+            step_kwargs["prompt_info"] = rm["prompt_info"]
 
-        # Inline prompt_meta (for static pipeline.json without resolved_prompts)
-        if "prompt_meta" not in step_kwargs and "prompt_meta" in node:
-            step_kwargs["prompt_meta"] = NodePromptMeta(**node["prompt_meta"])
+        # Inline prompt_info (for static pipeline.json without resolved_prompts)
+        if "prompt_info" not in step_kwargs and "prompt_info" in node:
+            step_kwargs["prompt_info"] = NodePromptInfo(**node["prompt_info"])
 
         steps.append(PipelineNode(**step_kwargs))
 

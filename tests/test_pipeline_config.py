@@ -36,7 +36,7 @@ from promptpotter.application.config import (
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
-    NodePromptMeta,
+    NodePromptInfo,
     ObservationMapping,
     PipelineNode,
     PipelineSchema,
@@ -131,7 +131,7 @@ def _three_node_schema() -> PipelineSchema:
             PipelineNode(
                 name="b",
                 param_keys={"temperature"},
-                prompt_meta=NodePromptMeta(family="p"),
+                prompt_info=NodePromptInfo(family="p"),
             ),
             PipelineNode(name="c"),
         ],

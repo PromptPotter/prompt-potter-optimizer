@@ -185,7 +185,7 @@
         "schema_family": "entity_profile",
         "schema_version": 1
       },
-      "prompt_meta": {
+      "prompt_info": {
         "family": "entity_profiling",
         "template_variables": ["query", "format_string", "combined_text"],
         "description": "System prompt for entity-profile extraction from web research data"
@@ -268,7 +268,7 @@
         "schema_family": "llm_ranking_output",
         "schema_version": 1
       },
-      "prompt_meta": {
+      "prompt_info": {
         "family": "llm_ranking",
         "template_variables": ["core_concept", "entity_profile_json", "matches"],
         "description": "System prompt for LLM-driven candidate re-ranking"

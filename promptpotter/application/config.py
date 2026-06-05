@@ -401,6 +401,20 @@ def configure_and_apply_pipeline(
     # Starting prompts from `{dataset_dir}/prompts/[<node>|default].json`, per prompt-bearing node.
     if dataset_dir is not None and filtered and has_dataset_prompts(dataset_dir):
         prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
+        if not prompt_nodes:
+            # The dataset ships starting prompts but no active node declares
+            # `prompt_info` — so the rendered prompt has nowhere to land and is
+            # dropped before the wire. Silent here = every backend call runs with
+            # an empty system prompt (the bug that made an ingested dataset score
+            # 0% on email-replies). Fail loud: a generation node must advertise
+            # `prompt_info` in GET /pipeline (or the dataset overlay).
+            logger.warning(
+                "configure_pipeline: dataset %r has starting prompts but NO "
+                "prompt-bearing node in the active pipeline %s — the prompt will "
+                "NOT reach the backend. A generation node must declare `prompt_info`.",
+                dataset_name,
+                active,
+            )
         for pnode in prompt_nodes:
             template = load_node_prompt(dataset_dir, pnode, "default")
             valid_overrides.setdefault(pnode, {})["prompt"] = template.render()

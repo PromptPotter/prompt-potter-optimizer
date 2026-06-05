@@ -42,13 +42,7 @@ def load_excel_ground_truth(
 ) -> list[dict[str, str]]:
     """Read sheets from an Excel file → staging dicts (carry ``source_sheet`` for
     ``split_train_test`` partitioning; ids assigned at split time for stable global index)."""
-    try:
-        import openpyxl
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError(
-            "openpyxl is required to load Excel files. "
-            'Install the Excel extras: pip install -e ".[excel]"'
-        ) from None
+    import openpyxl
 
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     rows: list[dict[str, str]] = []

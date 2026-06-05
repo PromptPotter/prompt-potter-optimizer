@@ -39,6 +39,7 @@ export function liveSamplesFor(
         candidate_id,
         sample_id: sid,
         status: p.status ?? null,
+        cached: p.cached ?? false,
         query: p.query ?? "",
         predicted: p.predicted ?? "",
         ground_truth: p.gt ?? "",
@@ -57,6 +58,7 @@ export function liveSamplesFor(
         candidate_id,
         sample_id: sid,
         status,
+        cached: raw.cached === true,
         query: "",
         predicted: typeof raw.prediction === "string" ? raw.prediction : "",
         ground_truth: "",
@@ -75,6 +77,7 @@ interface RawHistoricalSample {
   predicted?: string;
   ground_truth?: string;
   hit?: boolean;
+  cached?: boolean;
   fitness?: number;
   scorer?: string;
   elapsed_s?: number;
@@ -115,6 +118,7 @@ export function historicalSamplesFor(
       candidate_id,
       sample_id: sid,
       status,
+      cached: s.cached === true,
       query: typeof s.query === "string" ? s.query : "",
       predicted: typeof s.predicted === "string" ? s.predicted : "",
       ground_truth: typeof s.ground_truth === "string" ? s.ground_truth : "",

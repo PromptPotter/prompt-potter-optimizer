@@ -18,7 +18,11 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.application.datasets.authored import read_authored_dataset
-from promptpotter.application.datasets.csv_ingest import IngestError, read_tabular
+from promptpotter.application.datasets.csv_ingest import (
+    IngestError,
+    format_from_filename,
+    read_tabular,
+)
 from promptpotter.application.datasets.draft_campaign import (
     DEFAULT_CONNECTOR,
     DEFAULT_MAX_ROUNDS,
@@ -69,12 +73,13 @@ def ingest_draft(
 ) -> DraftCampaign:
     """Parse ``blob`` → register a ``DraftCampaign`` → persist its draft cache.
 
-    Raises :class:`~promptpotter.application.datasets.csv_ingest.IngestError`
-    (bad/empty/oversized CSV), :class:`ValueError` (bad slug), or
-    :class:`SlugTakenError` (slug collision). Byte-size capping is the wire
-    boundary's concern — not enforced here.
+    The format is detected from ``filename`` (CSV/TSV/JSON/JSONL/XLSX). Raises
+    :class:`~promptpotter.application.datasets.csv_ingest.IngestError`
+    (bad/empty/oversized/unsupported upload, or hardened-mode-blocked Excel),
+    :class:`ValueError` (bad slug), or :class:`SlugTakenError` (slug collision).
+    Byte-size capping is the wire boundary's concern — not enforced here.
     """
-    table = read_tabular(blob, fmt="csv")
+    table = read_tabular(blob, fmt=format_from_filename(filename or "upload.csv"))
     base_slug = (slug or default_slug_from_filename(filename or "upload")).lower()
     validate_dataset_name(base_slug)  # raises ValueError on a bad slug
     if stores.tenant_datasets.slug_exists(base_slug):
