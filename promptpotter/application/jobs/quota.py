@@ -9,7 +9,7 @@ slow enough that one bad actor can't drain the budget in a single burst.
 Spend-cap composition: at mint time, the per-cycle ``spend_budget_usd``
 collapses to ``min(requested, daily_cap - daily_spent_today)`` so the user's
 daily cap can't be exceeded by stacking N small per-cycle caps. Per-cycle
-enforcement still rides the existing ``spend_cap_probe`` in the runner.
+enforcement still rides the runner's ``BudgetGate`` (``runner/termination.py``).
 """
 
 from __future__ import annotations

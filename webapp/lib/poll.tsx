@@ -94,6 +94,7 @@ export interface DashboardSnapshot {
     l3_patience?: number | null;
     pobb_epsilon?: number;
     spend_budget_usd?: number | null;
+    token_budget?: number | null;
   };
   // Fresh-campaign placeholder — set by the server when `dashboard.json`
   // hasn't been written yet (origin still running). The companion

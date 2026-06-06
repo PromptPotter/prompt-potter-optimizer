@@ -50,6 +50,7 @@ from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner import build_origin_cycle_id
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, TaskDecomposition
 from promptpotter.infrastructure.store import Stores
@@ -285,7 +286,7 @@ async def commit_draft_to_dataset(
         slug=draft.slug,
         pipeline_json=pipeline_json,
         campaign_json=campaign_json,
-        task_description=draft.task_description,
+        task_description=draft.raw_task_description,
         prompt_default=prompt_default,
         task_context=task_context,
     )
@@ -376,13 +377,13 @@ def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     if connector.default_pipeline:
         pipeline["pipelines"] = {"default": list(connector.default_pipeline)}
 
-    nodes = _merged_backend_nodes(draft)
+    nodes = merge_pipeline_overlay(draft, connector)
     if nodes:
         pipeline["nodes"] = nodes
     return pipeline
 
 
-def _merged_backend_nodes(draft: DraftCampaign) -> dict[str, Any]:
+def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
     """Connector node-config seed (e.g. TermNorm's reasoning clamp) underneath,
     operator draft edits on top — the effective ``pipeline.json::nodes`` block.
 
@@ -391,7 +392,6 @@ def _merged_backend_nodes(draft: DraftCampaign) -> dict[str, Any]:
     committed pipeline.json builder and the wire-side optimizer-locks block so
     the two never drift.
     """
-    connector = connectors.get(draft.connector)
     nodes: dict[str, Any] = copy.deepcopy(dict(connector.default_node_config))
     for node_name, node_overlay in (draft.pipeline_overlay or {}).items():
         dst = nodes.setdefault(node_name, {})
@@ -413,12 +413,12 @@ def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
     ``pipeline_overlay`` is empty until commit, so without this the UI couldn't
     show that the optimizer is *locked out* of escalating these — not merely
     that ``low`` is a default. Mirrors the commit-time merge via
-    :func:`_merged_backend_nodes`.
+    :func:`merge_pipeline_overlay`.
     """
     connector = connectors.get(draft.connector)
     forbidden_strict = draft.lock_model
     node_locks: dict[str, Any] = {}
-    for node_name, overlay in _merged_backend_nodes(draft).items():
+    for node_name, overlay in merge_pipeline_overlay(draft, connector).items():
         optimizer = overlay.get("optimizer", {})
         node_locks[node_name] = {
             "config": dict(overlay.get("config", {})),
@@ -475,26 +475,26 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
 def _build_default_prompt(draft: DraftCampaign) -> dict[str, Any]:
     """The campaign's starting prompt, written to ``prompts/default.json``.
 
-    When the draft carries a ``starting_prompt`` (the check-in's decomposition,
+    When the draft carries ``origin_prompt_fields`` (the check-in's decomposition,
     an authored dataset's prompt, or the operator's edits) it's written
     verbatim — a valid ``PromptTemplate.prompt_field_dict()`` shape. Otherwise
     we floor the prompt on ``instruction`` from the task description (a real
     PromptTemplate field — the prior ``task_description``/``instructions`` keys
     were not, so the committed prompt loaded empty)."""
-    if draft.starting_prompt:
-        return dict(draft.starting_prompt)
-    return {"instruction": draft.task_description}
+    if draft.origin_prompt_fields:
+        return dict(draft.origin_prompt_fields)
+    return {"instruction": draft.raw_task_description}
 
 
 def _build_task_context(draft: DraftCampaign) -> dict[str, Any]:
     """The run-start domain framing, written to ``task_context.json``.
 
     The check-in already decomposed the task into the 7-field ``task_context``
-    (carried on :attr:`DraftCampaign.task_context`); normalize it through
+    (carried on :attr:`DraftCampaign.decomposed_task_context`); normalize it through
     :class:`TaskDecomposition` with the verbatim ``raw_description`` so the run
     reads it directly instead of re-decomposing via a second LLM call."""
     return TaskDecomposition.from_dict(
-        {**draft.task_context, "raw_description": draft.task_description}
+        {**draft.decomposed_task_context, "raw_description": draft.raw_task_description}
     ).to_dict()
 
 

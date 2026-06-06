@@ -95,16 +95,16 @@ def test_readiness_gates_on_closed_set() -> None:
         "task_description",
     }
     # Config carries no provenance entry — it's not gated.
-    assert "connector" not in draft.resolved
+    assert "connector" not in draft.field_provenance
 
     # Confirm the columns (operator-stated) + state the framing → every
     # gated field CONFIRMED.
     opened = draft.confirm_columns(query_col="input", ground_truth_col="gt").apply_resolution(
-        values={"task_description": "Map lab-test names to codes."},
+        values={"raw_task_description": "Map lab-test names to codes."},
         provenance={"task_description": Provenance.CONFIRMED},
     )
     assert origin_readiness(opened).complete
-    assert opened.resolved["column.query"] is Provenance.CONFIRMED
+    assert opened.field_provenance["column.query"] is Provenance.CONFIRMED
     # The on-disk block carries provenance per gated field.
     block = resolution_block(opened)
     assert block["provenance"]["task_description"] == "confirmed"
@@ -138,7 +138,7 @@ def test_readiness_gates_on_closed_set() -> None:
         headers=["query", "ground_truth"],
         column_label_sets={"ground_truth": labels},
     ).apply_resolution(
-        values={"task_description": "Sort the email. Pick another label."},
+        values={"raw_task_description": "Sort the email. Pick another label."},
         provenance={"task_description": Provenance.CONFIRMED},
     )
     # task_description names none of the labels (and "another" must NOT count as
@@ -148,7 +148,7 @@ def test_readiness_gates_on_closed_set() -> None:
     # A prompt that enumerates all four closes it (the proposer's job, gated here).
     enumerated = classed.apply_resolution(
         values={
-            "starting_prompt": {
+            "origin_prompt_fields": {
                 "answer_format": "Reply with exactly one of: "
                 "actionable, financial, informational, other."
             }
@@ -169,7 +169,7 @@ def test_low_confidence_proposal_blocks_until_confirmed() -> None:
     )
     # Resolver proposes a framing at low confidence → PROPOSED, still blocks.
     proposed = draft.apply_resolution(
-        values={"task_description": "maybe map codes"},
+        values={"raw_task_description": "maybe map codes"},
         provenance={"task_description": Provenance.PROPOSED},
     )
     verdict = origin_readiness(proposed)

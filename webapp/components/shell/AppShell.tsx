@@ -1,12 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import {
-  fetchCycleFile,
-  fetchPipeline,
-  type DraftCampaignWire,
-  type HardSamplesScope,
-  type OriginLastResolution,
-} from "@/lib/api";
+import { fetchCycleFile, fetchPipeline, type HardSamplesScope } from "@/lib/api";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -67,12 +61,6 @@ function AppShellInner() {
   // lives.
   const [tab, setTab] = useState<Tab>("chat");
   const [newCampaignOpen, setNewCampaignOpen] = useState(false);
-  // A draft resolved from a chat file-drop, handed to IngestPane so the setup
-  // wizard opens preloaded (skipping the empty drop screen). Cleared on
-  // close/mint so a plain "+ New" always starts fresh. `pendingResolution`
-  // seeds the wizard's check-in panel with the chat's assessment/questions.
-  const [pendingDraft, setPendingDraft] = useState<DraftCampaignWire | null>(null);
-  const [pendingResolution, setPendingResolution] = useState<OriginLastResolution | null>(null);
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
   // Hard-sample view scope — campaign = only the current campaign's cycles
@@ -266,11 +254,7 @@ function AppShellInner() {
             datasetStale={datasetStale}
             hardSamplesScope={hardSamplesScope}
             onHardSamplesScopeChange={setHardSamplesScope}
-            onOpenDraft={(draft, resolution) => {
-              setPendingDraft(draft);
-              setPendingResolution(resolution);
-              setNewCampaignOpen(true);
-            }}
+            onMinted={(sel) => selectCycle(sel.campaignId, sel.cycleId)}
           />
         ) : tab === "dashboard" ? (
           <div className="content" id="content-dashboard">
@@ -320,20 +304,11 @@ function AppShellInner() {
       </main>
       <IngestPane
         open={newCampaignOpen}
-        initialDraft={pendingDraft}
-        initialResolution={pendingResolution}
-        onClose={() => {
-          setNewCampaignOpen(false);
-          setPendingDraft(null);
-          setPendingResolution(null);
-        }}
+        onClose={() => setNewCampaignOpen(false)}
         onMinted={(sel) => {
-          setPendingDraft(null);
-          setPendingResolution(null);
-          // Fresh-CSV / from-draft mint returns the new (campaign, cycle) —
-          // select it now rather than waiting on the 2 s workspace poll. The
-          // existing-Origin and benchmark paths return null (the poll snaps).
-          if (sel) selectCycle(sel.campaignId, sel.cycleId);
+          // The from-draft mint returns the new (campaign, cycle) — select it
+          // now rather than waiting on the 2 s workspace poll.
+          selectCycle(sel.campaignId, sel.cycleId);
         }}
       />
     </div>

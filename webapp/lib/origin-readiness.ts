@@ -1,6 +1,6 @@
 // Client-side mirror of the server's `origin_readiness` checklist
 // (`promptpotter/application/datasets/origin_readiness.py`). The draft wire
-// carries the inputs the gate decides over — `resolved` provenance,
+// carries the inputs the gate decides over — `field_provenance`,
 // `headers`, and the `column_query` / `column_ground_truth` values — but not
 // the gap list itself, so the panel re-derives it here to render the
 // required-first tier *before* the operator clicks Create. It is a faithful
@@ -12,7 +12,7 @@
 import type { DraftCampaignWire, DraftPatch, OriginGap, ProvenanceTag } from "./api";
 
 // The dotted field-key namespace the server's `origin_readiness` checklist
-// keys `draft.resolved` by. Single source for every site that reads provenance
+// keys `draft.field_provenance` by. Single source for every site that reads provenance
 // by key (this module, plus the ingest column-mapping and check-in panels).
 // Mirror of the field ids in `origin_readiness.py`. Config keys are still
 // listed for `questionPatch` (a resolver question can set them), but they are
@@ -43,7 +43,7 @@ interface ColumnCheck {
 }
 
 function checkColumn(draft: DraftCampaignWire, check: ColumnCheck): OriginGap | null {
-  const provenance: ProvenanceTag = draft.resolved[check.fieldKey] ?? "unset";
+  const provenance: ProvenanceTag = draft.field_provenance[check.fieldKey] ?? "unset";
   if (provenance === "confirmed" && draft.headers.includes(check.value)) {
     return null;
   }
@@ -76,7 +76,7 @@ function checkConfirmed(
   draft: DraftCampaignWire,
   field: { fieldKey: string; hint: string },
 ): OriginGap | null {
-  const provenance: ProvenanceTag = draft.resolved[field.fieldKey] ?? "unset";
+  const provenance: ProvenanceTag = draft.field_provenance[field.fieldKey] ?? "unset";
   if (provenance === "confirmed") return null;
   return {
     field: field.fieldKey,
@@ -119,7 +119,7 @@ export function questionPatch(field: string, answer: string): DraftPatch | null 
     case ORIGIN_KEY.columnGroundTruth:
       return { column_ground_truth: value };
     case ORIGIN_KEY.taskDescription:
-      return { task_description: value };
+      return { raw_task_description: value };
     case ORIGIN_KEY.connector:
       return { connector: value };
     case ORIGIN_KEY.scoringComposite:
@@ -181,7 +181,7 @@ export function plainLanguageRecap(draft: DraftCampaignWire): string {
   const connector = CONNECTOR_LABELS[draft.connector] ?? draft.connector;
   const rounds = draft.max_rounds === 1 ? "1 round" : `up to ${draft.max_rounds} rounds`;
 
-  const title = shortTaskTitle(draft.task_description);
+  const title = shortTaskTitle(draft.raw_task_description);
   const lead = title
     ? `evolve a prompt for “${title}”`
     : `evolve a prompt that turns each “${input}” into the right “${target}”`;

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { LimitOverrides } from "@/lib/api";
 import { forkReconcileDefaults } from "@/lib/derivations/forkReconcile";
-import { fmtUsd } from "@/lib/format";
+import { fmtUsd, fmtTokens } from "@/lib/format";
 import type { DashboardSnapshot } from "@/lib/poll";
 
 // The run-limit reconcile half of the steer flow (decision E). A fork numbers
@@ -20,6 +20,7 @@ import type { DashboardSnapshot } from "@/lib/poll";
 interface Fields {
   rounds: string;
   spend: string;
+  tokens: string;
   l1: string;
   l2: string;
   l3: string;
@@ -41,6 +42,7 @@ export function LimitReconcile({
   const [f, setF] = useState<Fields>(() => ({
     rounds: defaults.roundsRemaining != null ? String(defaults.roundsRemaining) : "",
     spend: defaults.spendRemaining != null ? String(defaults.spendRemaining) : "",
+    tokens: "",
     l1: "",
     l2: "",
     l3: "",
@@ -58,6 +60,8 @@ export function LimitReconcile({
     if (r != null) limits.max_rounds = r;
     const s = Number.parseFloat(next.spend);
     if (next.spend.trim() !== "" && Number.isFinite(s) && s >= 0) limits.spend_budget_usd = s;
+    const tk = Number.parseInt(next.tokens, 10);
+    if (next.tokens.trim() !== "" && Number.isInteger(tk) && tk >= 0) limits.token_budget = tk;
     const l1 = intGte1(next.l1);
     if (l1 != null) limits.l1_patience = l1;
     const l2 = intGte1(next.l2);
@@ -116,6 +120,26 @@ export function LimitReconcile({
         <small className="limit-note">
           {defaults.parentBudgetUsd != null
             ? `${fmtUsd(defaults.spentUsd)} of ${fmtUsd(defaults.parentBudgetUsd)} spent — fork starts fresh`
+            : "parent uncapped — leave blank to inherit"}
+        </small>
+      </label>
+
+      <label className="limit-row">
+        <span className="limit-label">Token cap</span>
+        <input
+          type="number"
+          min={0}
+          step={1000}
+          inputMode="numeric"
+          className="limit-input"
+          value={f.tokens}
+          placeholder={ph(rl.token_budget, "inherit")}
+          aria-label="Fork token cap"
+          onChange={(e) => set({ ...f, tokens: e.target.value })}
+        />
+        <small className="limit-note">
+          {typeof rl.token_budget === "number"
+            ? `parent cap ${fmtTokens(rl.token_budget)} — blank inherits`
             : "parent uncapped — leave blank to inherit"}
         </small>
       </label>

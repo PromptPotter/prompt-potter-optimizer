@@ -7,7 +7,7 @@
 // Source: `round_NNNN.json::candidate_scores[]`, where each entry carries
 // `prompt_fields` (OptSearchPoint.prompt_field_dict() shape) and
 // `pipeline_params_override` (the candidate's node-config delta over the
-// dataset overlay). Together they ARE the ForkSeed `{starting_prompt,
+// dataset overlay). Together they ARE the fork seed `{origin_prompt_fields,
 // pipeline_overlay}` an operator edits before confirming the fork — the
 // override delta layers back on top of the inherited dataset overlay at
 // fork bootstrap, keeping the dataset file immutable.
@@ -22,7 +22,7 @@ import {
 // The seed-able half of a candidate's searchpoint. `limit_overrides` is
 // NOT here — it comes from the reconcile dialog, not the candidate.
 export interface CandidateSearchPoint {
-  starting_prompt: Record<string, unknown>;
+  origin_prompt_fields: Record<string, unknown>;
   pipeline_overlay: Record<string, unknown>;
 }
 
@@ -51,7 +51,7 @@ export function candidateSearchPoint(
   );
   if (!entry) return null;
   return {
-    starting_prompt: entry.prompt_fields ?? {},
+    origin_prompt_fields: entry.prompt_fields ?? {},
     pipeline_overlay: entry.pipeline_params_override ?? {},
   };
 }
@@ -72,7 +72,7 @@ export function liveCandidateSearchPoint(
   const entry = liveInputCandidate(dash, liveRound, candidateId);
   if (!entry) return null;
   return {
-    starting_prompt: entry.prompt_fields ?? {},
+    origin_prompt_fields: entry.prompt_fields ?? {},
     pipeline_overlay: entry.pp_override ?? {},
   };
 }

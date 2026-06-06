@@ -376,11 +376,11 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
         # Literal `query` / `ground_truth` headers auto-confirm the column
         # mapping deterministically (no LLM, no operator click).
         assert draft["headers"] == ["query", "ground_truth"]
-        assert draft["resolved"]["column.query"] == "confirmed"
-        assert draft["resolved"]["column.ground_truth"] == "confirmed"
+        assert draft["field_provenance"]["column.query"] == "confirmed"
+        assert draft["field_provenance"]["column.ground_truth"] == "confirmed"
         # Config (connector, max_rounds, …) is not gated — it carries a default
         # the operator edits, so it gets no provenance entry.
-        assert "connector" not in draft["resolved"]
+        assert "connector" not in draft["field_provenance"]
         # Sparse edit lands a mutation; response is the full post-mutation shape.
         edit = client.post(
             "/api/v1/commands/edit-draft-campaign",
@@ -389,12 +389,12 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
                 "kind": "edit-draft-campaign",
                 "payload": {
                     "draft_id": draft["draft_id"],
-                    "patch": {"task_description": "label tickets", "max_rounds": 3},
+                    "patch": {"raw_task_description": "label tickets", "max_rounds": 3},
                 },
             },
         )
         assert edit.status_code == 200
-        assert edit.json()["task_description"] == "label tickets"
+        assert edit.json()["raw_task_description"] == "label tickets"
         assert edit.json()["max_rounds"] == 3
         # Cross-tenant lookup: same draft_id, different tenant → 404, not 403.
         registry: DraftCampaignRegistry = client.app.state.draft_campaigns  # type: ignore[attr-defined]
@@ -409,8 +409,8 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
         assert agnostic.status_code == 200, agnostic.text
         ag = agnostic.json()
         assert ag["headers"] == ["foo", "bar"]
-        assert ag["resolved"]["column.query"] == "unset"
-        assert ag["resolved"]["column.ground_truth"] == "unset"
+        assert ag["field_provenance"]["column.query"] == "unset"
+        assert ag["field_provenance"]["column.ground_truth"] == "unset"
         # Mint is gated: unset column mapping → 422 origin_incomplete (the
         # checklist fires before the backend preflight, so no network touch).
         blocked = client.post(
@@ -445,8 +445,8 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
             },
         )
         assert confirmed.status_code == 200, confirmed.text
-        assert confirmed.json()["resolved"]["column.query"] == "confirmed"
-        assert confirmed.json()["resolved"]["column.ground_truth"] == "confirmed"
+        assert confirmed.json()["field_provenance"]["column.query"] == "confirmed"
+        assert confirmed.json()["field_provenance"]["column.ground_truth"] == "confirmed"
 
 
 def test_mint_from_draft_503_preserves_draft_when_backend_unreachable(
@@ -502,7 +502,7 @@ def test_mint_from_draft_503_preserves_draft_when_backend_unreachable(
                 "kind": "edit-draft-campaign",
                 "payload": {
                     "draft_id": draft["draft_id"],
-                    "patch": {"task_description": "label support tickets"},
+                    "patch": {"raw_task_description": "label support tickets"},
                 },
             },
         )

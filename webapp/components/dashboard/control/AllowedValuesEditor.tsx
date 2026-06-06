@@ -9,9 +9,8 @@ import { primaryNode } from "@/lib/optimizer-locks";
 // Model lock on/off, which models it may test, which thinking levels it may
 // use. Edits the locks/allowed-values shape (`{node:{config,optimizer:{
 // param_allowed_values}}}`), distinct from `NodeConfigEditor`, which edits the
-// flat `{node:{param:value}}` overlay a steered fork is seeded with. Two modes:
-//   - "edit" — interactive; persists (lock_model + merged pipeline_overlay).
-//   - "demo" — interactive; local-only, resets when the campaign starts.
+// flat `{node:{param:value}}` overlay a steered fork is seeded with. Every
+// change persists to the draft (lock_model + merged pipeline_overlay).
 
 const THINKING = ["low", "medium", "high"] as const;
 
@@ -60,19 +59,15 @@ function buildOverlay(
   return overlay as Record<string, unknown>;
 }
 
-type AllowedValuesMode = "edit" | "demo";
-
 export function AllowedValuesEditor({
   locks,
   overlayBase,
   lockModel: lockModelProp,
-  mode,
   onApply,
 }: {
   locks: OptimizerLocks;
   overlayBase: Record<string, unknown>;
   lockModel: boolean;
-  mode: AllowedValuesMode;
   onApply?: (patch: DraftPatch) => void;
 }) {
   const node = primaryNode(locks);
@@ -92,11 +87,10 @@ export function AllowedValuesEditor({
     return allowed.length > 0 ? allowed : [activeThinking];
   });
 
-  // Persist on every change — only in "edit" mode (demo resets on Start).
-  // lock_model is a top-level toggle; models + thinking ride a merged
-  // pipeline_overlay.
+  // Persist on every change. lock_model is a top-level toggle; models +
+  // thinking ride a merged pipeline_overlay.
   const persist = (next: { lockModel: boolean; models: string[]; thinking: string[] }) => {
-    if (mode !== "edit" || !node || !onApply) return;
+    if (!node || !onApply) return;
     onApply({
       lock_model: next.lockModel,
       pipeline_overlay: buildOverlay(overlayBase, node, {

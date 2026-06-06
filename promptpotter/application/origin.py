@@ -136,7 +136,7 @@ def try_inherit_fork_origin(
     missing coords, edited prompt → different render) returns ``None`` and the caller
     re-scores as before.
     """
-    if fork_seed is None or not fork_seed.starting_prompt:
+    if fork_seed is None or not fork_seed.origin_prompt_fields:
         return None
 
     store = session.store.campaigns
@@ -206,15 +206,15 @@ def resolve_origin_opt_search_point(
     """Resolve the origin OptSearchPoint by priority: fork-seed → experiment
     prompts → {dataset_dir}/prompts → empty.
 
-    A *fork_seed* with a non-empty ``starting_prompt`` wins outright — an
+    A *fork_seed* with non-empty ``origin_prompt_fields`` wins outright — an
     operator-steered fork's origin *is* the edited searchpoint, so we build the
     OSP straight from those fields and short-circuit (no dataset/experiment
     lookup). *dataset_dir* is the resolved config dir
     (``Session.dataset_config_dir``, tenant-first), so an ingested dataset's
     authored prompts are found the same way a repo benchmark's are."""
-    if fork_seed is not None and fork_seed.starting_prompt:
+    if fork_seed is not None and fork_seed.origin_prompt_fields:
         return OptSearchPoint.from_prompt_fields(
-            fork_seed.starting_prompt,
+            fork_seed.origin_prompt_fields,
             lineage=IndividualLineage(
                 changes_description="Operator-steered fork — edited searchpoint as origin",
                 source="fork_seed",

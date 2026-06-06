@@ -23,8 +23,8 @@ export function ColumnMappingPicker({
     );
   }
 
-  const queryProv: ProvenanceTag = draft.resolved[ORIGIN_KEY.columnQuery] ?? "unset";
-  const gtProv: ProvenanceTag = draft.resolved[ORIGIN_KEY.columnGroundTruth] ?? "unset";
+  const queryProv: ProvenanceTag = draft.field_provenance[ORIGIN_KEY.columnQuery] ?? "unset";
+  const gtProv: ProvenanceTag = draft.field_provenance[ORIGIN_KEY.columnGroundTruth] ?? "unset";
   const sameColumn =
     !!draft.column_query && draft.column_query === draft.column_ground_truth;
 

@@ -21,7 +21,8 @@ Wired kinds, by scope:
   ``.runtime/`` and re-read at the round boundary: ``pause-cycle`` +
   ``resume-cycle`` (``pause.flag``, polled by ``Session.pause_check`` —
   ``stop.flag`` overrides), ``change-spend-budget``
-  (``spend_cap.json``, re-read by the ``spend_cap_probe``).
+  (``spend_cap.json`` ``{max_usd, max_tokens}``, re-read by the round
+  loop's ``BudgetGate``).
 * Launcher (workspace-scoped): ``mint-campaign`` mints a fresh
   campaign+cycle and spawns the runner via :class:`JobRegistry` in one
   inline-apply; ``start-run`` (cycle-scoped) launches the runner against
@@ -215,16 +216,16 @@ class _EditDraftPatch(BaseModel):
     connector: str | None = Field(default=None, min_length=1, max_length=64)
     scoring_composite: str | None = Field(default=None, min_length=1, max_length=64)
     max_rounds: int | None = Field(default=None, ge=1, le=100)
-    task_description: str | None = Field(default=None, max_length=16384)
+    raw_task_description: str | None = Field(default=None, max_length=16384)
     pipeline_overlay: dict[str, Any] | None = None
     optimizer_provider: str | None = Field(default=None, min_length=1, max_length=32)
     optimizer_model: str | None = Field(default=None, max_length=128)
     column_query: str | None = Field(default=None, max_length=256)
     column_ground_truth: str | None = Field(default=None, max_length=256)
-    # Operator edits to the campaign's starting prompt (PromptTemplate field
+    # Operator edits to the campaign's origin prompt (PromptTemplate field
     # shape: the six string fields + optional few_shot_examples). Replaces the
-    # draft's starting_prompt wholesale — the editor sends the full object.
-    starting_prompt: dict[str, Any] | None = None
+    # draft's origin_prompt_fields wholesale — the editor sends the full object.
+    origin_prompt_fields: dict[str, Any] | None = None
     # Whether the optimizer is barred from mutating model/provider (the
     # forbidden_axes_strict knob). The pipeline-config control panel toggles it.
     lock_model: bool | None = None
@@ -330,17 +331,17 @@ async def edit_draft_campaign(
         (patch.pipeline_overlay, "pipeline_overlay"),
         (patch.optimizer_provider, "optimizer_provider"),
         (patch.optimizer_model, "optimizer_model"),
-        (patch.starting_prompt, "starting_prompt"),
+        (patch.origin_prompt_fields, "origin_prompt_fields"),
         (patch.lock_model, "lock_model"),
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val
 
-    # task_description IS gated — an operator edit CONFIRMS the framing, which is
-    # what opens the origin-readiness gate for a field the resolver left PROPOSED
-    # or that started UNSET.
-    if patch.task_description is not None:
-        changes["task_description"] = patch.task_description
+    # The task framing IS gated — an operator edit CONFIRMS it, which is what
+    # opens the origin-readiness gate for a field the resolver left PROPOSED or
+    # that started UNSET. The checklist field-id stays `task_description`.
+    if patch.raw_task_description is not None:
+        changes["raw_task_description"] = patch.raw_task_description
         provenance["task_description"] = Provenance.CONFIRMED
 
     # Column mapping confirms the input/target headers — each must be a member
@@ -622,15 +623,39 @@ async def post_command(
         extras["steered_by"] = _optional_string(payload, "steered_by", max_len=256)
     elif kind == "change-spend-budget":
         max_usd_raw = payload.get("max_usd")
-        if not isinstance(max_usd_raw, int | float) or max_usd_raw < 0:
+        max_tokens_raw = payload.get("max_tokens")
+        if max_usd_raw is not None:
+            if not isinstance(max_usd_raw, int | float) or max_usd_raw < 0:
+                raise HTTPException(
+                    422,
+                    {
+                        "error": "payload_invalid",
+                        "message": "payload.max_usd must be a non-negative number.",
+                    },
+                )
+            extras["max_usd"] = float(max_usd_raw)
+        if max_tokens_raw is not None:
+            if (
+                not isinstance(max_tokens_raw, int)
+                or isinstance(max_tokens_raw, bool)
+                or max_tokens_raw < 0
+            ):
+                raise HTTPException(
+                    422,
+                    {
+                        "error": "payload_invalid",
+                        "message": "payload.max_tokens must be a non-negative integer.",
+                    },
+                )
+            extras["max_tokens"] = int(max_tokens_raw)
+        if "max_usd" not in extras and "max_tokens" not in extras:
             raise HTTPException(
                 422,
                 {
                     "error": "payload_invalid",
-                    "message": "payload.max_usd must be a non-negative number.",
+                    "message": "change-spend-budget requires at least one of max_usd / max_tokens.",
                 },
             )
-        extras["max_usd"] = float(max_usd_raw)
     elif kind == "start-run":
         kind_raw = payload.get("kind")
         if kind_raw not in ("new", "resume"):

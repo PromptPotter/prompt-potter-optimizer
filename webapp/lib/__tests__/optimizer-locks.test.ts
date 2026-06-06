@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OptimizerLocks } from "../api";
-import { lockedParams, primaryNode, thinkingLadder } from "../optimizer-locks";
+import { lockedParams, primaryNode } from "../optimizer-locks";
 
 // Mirrors a fresh TermNorm draft's `optimizer_locks`: llm_only clamped to
 // reasoning_effort `low` (medium/high crossed out), model/provider forbidden.
@@ -14,17 +14,6 @@ const TERMNORM_LOCKS: OptimizerLocks = {
     },
   },
 };
-
-describe("thinkingLadder", () => {
-  it("marks low active+allowed, medium/high crossed out", () => {
-    const ladder = thinkingLadder(TERMNORM_LOCKS);
-    expect(ladder.value).toBe("low");
-    const byKey = Object.fromEntries(ladder.options.map((o) => [o.key, o]));
-    expect(byKey.low).toEqual({ key: "low", active: true, allowed: true });
-    expect(byKey.medium).toEqual({ key: "medium", active: false, allowed: false });
-    expect(byKey.high).toEqual({ key: "high", active: false, allowed: false });
-  });
-});
 
 describe("lockedParams", () => {
   it("locks forbidden axes + constrained params, frees the rest", () => {

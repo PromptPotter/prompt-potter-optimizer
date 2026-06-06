@@ -685,6 +685,7 @@ class LiveDashboardView(DerivedView):
                 l3_patience=opt.l3_patience,
                 pobb_epsilon=opt.pobb_epsilon,
                 spend_budget_usd=opt.spend_budget_usd,
+                token_budget=opt.token_budget,
             )
         elif phase == "scoring_steer" and event.event == "applied":
             # Operator hot-swap — custom formulas render verbatim (no short form).
@@ -765,6 +766,13 @@ class LiveDashboardView(DerivedView):
         through this property so the dashboard remains the single owner of
         spend semantics (no probe reaching into ``self.state.spend``)."""
         return self.state.spend.total_used_usd
+
+    @property
+    def spend_total_tokens(self) -> int:
+        """Token twin of ``spend_total_used_usd`` — the token halt probe's
+        source. Same single-owner discipline: the gate reads this accessor, not
+        ``self.state.spend`` directly."""
+        return self.state.spend.total_tokens_used
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         """Publish the in-flight optimizer LLM call to `dashboard.json::in_flight` —

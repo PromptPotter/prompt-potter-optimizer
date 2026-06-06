@@ -1,60 +1,41 @@
 "use client";
 import type { ConnectorView } from "@/lib/types/connector";
-import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsEditor";
-import { NodeConfigEditor } from "@/components/dashboard/control/NodeConfigEditor";
-import { NodeOutputSchemaView } from "@/components/dashboard/control/NodeOutputSchemaView";
+import type { DashboardSnapshot } from "@/lib/poll";
+import type { DraftCampaignWire } from "@/lib/api";
+import { resolveSearchPoint } from "@/lib/derivations/searchPoint";
+import { SearchPointPreview } from "./SearchPointPreview";
 
-// Read-only config detail for a *target/backend* node, opened by clicking the
-// node in TargetPipelineHero. Renders the whole node as one unit — config
-// (model + params + provider) + prompt + structured output — straight off the
-// server's `node_config_schema` / `node_output_schema` (built from
-// `pipeline.json`), so the inspect-the-node surface reads identically to the
-// steer panel's editor. No new fetch: it rides the shared `useConnector()` view.
+// Read-only searchpoint detail for a target/backend node, opened by clicking the
+// node in TargetPipelineHero. It resolves WHICH searchpoint to show by context —
+// a draft in origin setup, the live in-flight candidate, or the dataset origin
+// (`resolveSearchPoint`) — then renders the one shared `SearchPointPreview`. The
+// node-config schema / output schema ride the shared `useConnector()` view (no
+// new fetch); during draft setup the prompt is the draft's, the config row is
+// best-effort against the active view's schema (the ingest advanced expander is
+// the authoritative draft config editor).
 //
-// Steering is a separate act with its own home — the `ScoringInspector` opens
-// the `SteerForkPanel` Dialog directly when a candidate is selected. This panel
-// is inspect-only; it never forks.
+// Steering is a separate act with its own home — `ScoringInspector` opens the
+// `SteerForkPanel` Dialog. This panel is inspect-only; it never forks.
 
 interface Props {
   cv: ConnectorView;
+  dash: DashboardSnapshot | null;
+  // The active draft while a campaign is being set up; null otherwise. When set,
+  // the preview shows the draft's searchpoint rather than the origin / live one.
+  draft: DraftCampaignWire | null;
   onClose: () => void;
 }
 
-export function BackendNodeDetail({ cv, onClose }: Props) {
-  const startingPrompt = cv.startingPrompt;
+export function BackendNodeDetail({ cv, dash, draft, onClose }: Props) {
+  const { point, label } = resolveSearchPoint({ draft, dash, cv });
 
   return (
-    <div className="bnode">
-      <section className="setup-preview">
-        <header className="setup-preview-head">
-          <span className="setup-preview-title">Pipeline, optimizer &amp; prompt</span>
-          <span className="setup-preview-side">
-            <span className="setup-preview-sub">
-              {cv.isLive ? "read-only — running" : "read-only"}
-            </span>
-            <button
-              type="button"
-              className="bnode-close"
-              onClick={onClose}
-              aria-label="Close detail"
-              title="Close"
-            >
-              ×
-            </button>
-          </span>
-        </header>
-
-        <NodeConfigEditor schema={cv.nodeConfigSchema} seedOverlay={{}} readOnly />
-
-        <NodeOutputSchemaView schema={cv.nodeOutputSchema} />
-
-        <hr className="setup-preview-divider" />
-
-        {/* Always render the fields — when the dataset ships no authored prompt
-            the six labelled fields show empty (with their hint placeholders), so
-            the operator sees the prompt structure to reason against. */}
-        <PromptFieldsEditor value={startingPrompt ?? {}} demo readOnly flat />
-      </section>
-    </div>
+    <SearchPointPreview
+      point={point}
+      schema={cv.nodeConfigSchema}
+      outputSchema={cv.nodeOutputSchema}
+      label={label}
+      onClose={onClose}
+    />
   );
 }

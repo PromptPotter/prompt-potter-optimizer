@@ -199,7 +199,7 @@ async def draft_from_existing_dataset(
 ) -> dict[str, Any]:
     """Build a server-held :class:`DraftCampaign` from an authored dataset's files.
 
-    The direct path behind "open this dataset in the setup wizard" — a demo /
+    The direct path behind "open this dataset in the ingest panel" — a demo /
     benchmark / owned Origin becomes a prefilled draft without a browser-side CSV
     round-trip. Identity-gated through the same resolver as the other dataset
     reads; like ``/datasets/ingest`` it is NOT a Control-remote command — no
@@ -589,7 +589,7 @@ async def get_dataset_measurement_series(
 class DatasetPipelineResponse(BaseModel):
     """Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;
     `pipeline` is the full parsed schema for consumers needing per-node config; `connector` is
-    the original-cased name for chip labelling; `starting_prompt` is the origin PromptTemplate
+    the original-cased name for chip labelling; `origin_prompt_fields` is the origin PromptTemplate
     for the primary node (None when the dataset ships no `prompts/`).
     """
 
@@ -607,7 +607,7 @@ class DatasetPipelineResponse(BaseModel):
     # beside the config so the operator sees the WHOLE node (model + params +
     # prompt + the structured output it produces). None for nodes with no schema.
     node_output_schema: dict[str, NodeOutputSchema | None]
-    starting_prompt: dict[str, Any] | None
+    origin_prompt_fields: dict[str, Any] | None
 
 
 @datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
@@ -640,14 +640,14 @@ async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineRes
         forbidden_strict = cfg.optimization.forbidden_axes_strict
     # Origin prompt for the first pipeline step — read-only seed the node panel
     # shows. `load_node_prompt` resolves `{node}.json` → `default.json`; absent a
-    # `prompts/` dir it raises, which we surface as a null starting_prompt.
-    starting_prompt: dict[str, Any] | None = None
+    # `prompts/` dir it raises, which we surface as null origin_prompt_fields.
+    origin_prompt_fields: dict[str, Any] | None = None
     steps = schema.active_steps
     if steps:
         try:
-            starting_prompt = load_node_prompt(dataset_dir, steps[0]).model_dump()
+            origin_prompt_fields = load_node_prompt(dataset_dir, steps[0]).model_dump()
         except FileNotFoundError:
-            starting_prompt = None
+            origin_prompt_fields = None
     return DatasetPipelineResponse(
         name=name,
         connector=connector,
@@ -655,7 +655,7 @@ async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineRes
         view=schema.view.model_dump(by_alias=True) if schema.view is not None else None,
         node_config_schema=schema.node_config_schema(forbidden_strict),
         node_output_schema=schema.node_output_schemas(),
-        starting_prompt=starting_prompt,
+        origin_prompt_fields=origin_prompt_fields,
     )
 
 

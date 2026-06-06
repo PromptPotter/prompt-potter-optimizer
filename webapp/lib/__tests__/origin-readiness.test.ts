@@ -13,11 +13,10 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     slug: "labtests",
     sample_preview: [{ query: "Na", ground_truth: "Sodium" }],
     n_samples: 42,
-    derived_from_dataset: false,
     connector: "termnorm",
     scoring_composite: "exact_match",
     max_rounds: 5,
-    task_description: "",
+    raw_task_description: "",
     pipeline_overlay: {},
     optimizer_provider: "groq",
     optimizer_model: "",
@@ -26,12 +25,12 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     column_ground_truth: "",
     // Only the gated fields carry provenance: the two columns + task framing.
     // Config is not gated (no entry); it carries a default the operator edits.
-    resolved: {
+    field_provenance: {
       "column.query": "unset",
       "column.ground_truth": "unset",
       task_description: "unset",
     },
-    starting_prompt: {},
+    origin_prompt_fields: {},
     lock_model: true,
     created_at: "2026-05-30T00:00:00Z",
     updated_at: "2026-05-30T00:00:00Z",
@@ -46,8 +45,8 @@ function resolved(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
   return draft({
     column_query: "input",
     column_ground_truth: "gt",
-    task_description: "map names to codes",
-    resolved: {
+    raw_task_description: "map names to codes",
+    field_provenance: {
       "column.query": "confirmed",
       "column.ground_truth": "confirmed",
       task_description: "confirmed",
@@ -77,8 +76,8 @@ describe("originReadiness", () => {
   it("blocks on a proposed (low-confidence) framing until confirmed", () => {
     const r = originReadiness(
       resolved({
-        task_description: "maybe map codes",
-        resolved: {
+        raw_task_description: "maybe map codes",
+        field_provenance: {
           "column.query": "confirmed",
           "column.ground_truth": "confirmed",
           task_description: "proposed",
@@ -100,7 +99,7 @@ describe("questionPatch / questionOptions (resolver answer-back loop)", () => {
   it("maps each field id to its draft-patch key", () => {
     expect(questionPatch("column.query", "input")).toEqual({ column_query: "input" });
     expect(questionPatch("task_description", "map codes")).toEqual({
-      task_description: "map codes",
+      raw_task_description: "map codes",
     });
     expect(questionPatch("max_rounds", "8")).toEqual({ max_rounds: 8 });
   });
@@ -127,7 +126,7 @@ describe("plainLanguageRecap", () => {
       draft({
         column_query: "input",
         column_ground_truth: "gt",
-        task_description: "map lab-test names to their codes",
+        raw_task_description: "map lab-test names to their codes",
       }),
     );
     expect(text).toContain("map lab-test names to their codes");

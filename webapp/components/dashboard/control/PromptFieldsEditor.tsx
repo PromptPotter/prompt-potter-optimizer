@@ -4,10 +4,11 @@ import { useState } from "react";
 import type { DraftPatch } from "@/lib/api";
 
 // The starting-prompt control panel. The check-in's decomposition (or an
-// authored dataset's prompt) lands on `draft.starting_prompt` as a
+// authored dataset's prompt) lands on `draft.origin_prompt_fields` as a
 // PromptTemplate field dict; this surfaces the six string fields as editable
-// text. Non-demo edits persist via `edit-draft-campaign` on blur; in demo the
-// edits stay local (reset on Start) and a note says so.
+// text. Edits persist via `edit-draft-campaign` on blur, unless `readOnly`
+// (the minted-campaign node panel shows the origin prompt with no draft to
+// write to).
 
 // The six keys MUST stay in sync with `PROMPT_STRING_FIELDS` — the source of
 // truth at `promptpotter/config/settings.py`. They cross the TS/Py seam, so a
@@ -32,13 +33,11 @@ function asStrings(value: Record<string, unknown>): Record<string, string> {
 
 export function PromptFieldsEditor({
   value,
-  demo,
   onApply,
   flat = false,
   readOnly = false,
 }: {
   value: Record<string, unknown>;
-  demo: boolean;
   onApply?: (patch: DraftPatch) => void;
   // When true, render without the own card chrome (it nests inside another
   // card — the unified setup-preview panel).
@@ -60,14 +59,13 @@ export function PromptFieldsEditor({
 
   const setField = (key: string, v: string) => setFields((prev) => ({ ...prev, [key]: v }));
 
-  // Persist on blur — never in demo or readonly (edits are visual; mint uses
-  // the dataset's prompt). Merge over `value` so few_shot_examples / plan
-  // survive untouched.
+  // Persist on blur — never when readonly. Merge over `value` so
+  // few_shot_examples / plan survive untouched.
   const commit = () => {
-    if (demo || readOnly || !onApply) return;
+    if (readOnly || !onApply) return;
     const merged: Record<string, unknown> = { ...value };
     for (const f of FIELDS) merged[f.key] = fields[f.key];
-    onApply({ starting_prompt: merged });
+    onApply({ origin_prompt_fields: merged });
   };
 
   const fewShot = Array.isArray(value.few_shot_examples)
@@ -84,11 +82,6 @@ export function PromptFieldsEditor({
           <span className="prompt-editor-sub">the prompt the optimizer evolves — edit any field</span>
         </header>
       )}
-      {demo && !flat ? (
-        <p className="prompt-editor-demo-note" role="note">
-          Demo mode — changes here reset when you start the campaign.
-        </p>
-      ) : null}
       <div className="prompt-editor-grid">
         {FIELDS.map((f) => (
           <label key={f.key} className="prompt-field">

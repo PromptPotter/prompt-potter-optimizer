@@ -48,7 +48,7 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 # readiness gate); the rest are config the operator overrides off its default.
 # Columns route through ``confirm_columns`` separately.
 _SET_ATTR: dict[str, str] = {
-    "task_description": "task_description",
+    "task_description": "raw_task_description",
     "connector": "connector",
     "scoring_composite": "scoring_composite",
     "optimizer.provider": "optimizer_provider",

@@ -531,7 +531,7 @@ paths:
   /commands/change-spend-budget:
     post:
       operationId: changeSpendBudget
-      summary: Raise or lower a cycle's USD spend cap mid-flight.
+      summary: Raise or lower a cycle's USD and/or token spend cap mid-flight.
       tags: [budget]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1545,6 +1545,11 @@ components:
           minimum: 0
           nullable: true
           description: Absolute spend cap (USD) for the fork; `null` lifts the cap.
+        token_budget:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Absolute cumulative-token cap for the fork; `null` lifts the cap.
         l1_patience:
           type: integer
           minimum: 1
@@ -1609,8 +1614,13 @@ components:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
         - type: object
-          required: [max_usd]
           additionalProperties: false
+          minProperties: 1
+          description: |
+            At least one of `max_usd` / `max_tokens` must be present. A field
+            that is omitted leaves that ceiling unchanged (the applier merges
+            into the existing `.runtime/spend_cap.json`). Whichever ceiling is
+            met first halts the cycle.
           properties:
             max_usd:
               type: number
@@ -1619,6 +1629,14 @@ components:
                 New USD spend cap for the cycle. Setting `0` halts the
                 cycle at the next checkpoint; raising above current spend
                 releases the halt.
+            max_tokens:
+              type: integer
+              minimum: 0
+              description: |
+                New cumulative-token cap (optimizer + backend, input + output)
+                for the cycle. Setting `0` halts at the next checkpoint; raising
+                above current usage releases the halt. The model-portable twin of
+                `max_usd` — counts free-backend work the USD ceiling misses.
 
     ChangePipelineParamPayload:
       allOf:

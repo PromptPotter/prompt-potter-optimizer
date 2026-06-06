@@ -68,7 +68,7 @@ export function SteerForkPanel({
   const seed = roundIsLive
     ? liveCandidateSearchPoint(dash, candidate.candidate_id)
     : candidateSearchPoint(doc, candidate.candidate_id);
-  const seedPrompt = seed?.starting_prompt ?? {};
+  const seedPrompt = seed?.origin_prompt_fields ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
 
   // Captured working copies, read at confirm. Refs (not state) so a textarea
@@ -92,7 +92,7 @@ export function SteerForkPanel({
     setPending(true);
     setErr(null);
     const forkSeed: ForkSeed = {
-      starting_prompt: editedPrompt.current ?? seedPrompt,
+      origin_prompt_fields: editedPrompt.current ?? seedPrompt,
       pipeline_overlay: editedOverlay.current ?? overlay,
       limit_overrides: limits.current,
     };
@@ -128,9 +128,8 @@ export function SteerForkPanel({
 
       <PromptFieldsEditor
         value={seedPrompt}
-        demo={false}
         onApply={(p) => {
-          editedPrompt.current = p.starting_prompt ?? {};
+          editedPrompt.current = p.origin_prompt_fields ?? {};
         }}
         flat
       />

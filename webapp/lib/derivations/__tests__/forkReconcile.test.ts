@@ -5,11 +5,12 @@ import {
 } from "@/lib/derivations/forkReconcile";
 import type { DashboardSnapshot } from "@/lib/poll";
 
-// "3 of 6 rounds used → 3 left"; "$4 of $10 spent → $6 left".
+// "3 of 6 rounds used → 3 left"; "$4 of $10 spent → $6 left". The cap lives in
+// run_limits (the authoritative, gate-sourced field); `spend` only carries used.
 const dash = {
   rounds: [{ round: 1 }, { round: 2 }, { round: 3 }],
-  run_limits: { max_rounds: 6 },
-  spend: { total_used_usd: 4, budget_usd: 10 },
+  run_limits: { max_rounds: 6, spend_budget_usd: 10 },
+  spend: { total_used_usd: 4 },
 } as unknown as DashboardSnapshot;
 
 describe("forkReconcileDefaults", () => {

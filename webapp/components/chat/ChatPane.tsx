@@ -1,30 +1,15 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
-import type {
-  DatasetItem,
-  DraftCampaignWire,
-  HardSamplesScope,
-  MeasurementDot,
-  OriginLastResolution,
-} from "@/lib/api";
-import {
-  IngestApiError,
-  postDraftFromDataset,
-  postEditDraftCampaign,
-  postIngestDataset,
-  postReplaceDataset,
-  postResolveOrigin,
-} from "@/lib/api";
-import { plainLanguageRecap } from "@/lib/origin-readiness";
-import { cx } from "@/lib/cx";
+import type { DatasetItem, HardSamplesScope, MeasurementDot } from "@/lib/api";
+import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
+import { IngestConversation } from "@/components/ingest/IngestConversation";
+import type { OnMinted } from "@/components/ingest/types";
 import { TERMS } from "@/lib/terms";
 import { headlineStats } from "@/lib/derivations/headline-stats";
 import { readSpend } from "@/lib/derivations/spend";
-import { fmtText, fmtDuration, fmtUsd } from "@/lib/format";
+import { fmtText, fmtDuration, fmtUsd, fmtTokens } from "@/lib/format";
 import { Switch } from "@/components/ui/Switch";
-import { ChatFileChip } from "@/components/chat/ChatFileChip";
-import { CheckinLoadingWindow } from "@/components/ingest/CheckinLoadingWindow";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
 import { CyclePicker } from "@/components/shell/CyclePicker";
@@ -56,45 +41,35 @@ interface Props {
   datasetStale: boolean;
   hardSamplesScope: HardSamplesScope;
   onHardSamplesScopeChange: (s: HardSamplesScope) => void;
-  // Hand a resolved draft up to AppShell, which opens the setup wizard
-  // (IngestPane) preloaded with it — the "Set up campaign" CTA after check-in.
-  onOpenDraft: (draft: DraftCampaignWire, resolution: OriginLastResolution | null) => void;
+  // Fired when the inline ingest flow mints a campaign — AppShell selects the
+  // new cycle. The whole drop → context → check-in → Start path runs inline
+  // here via the shared `IngestConversation`; nothing is handed off to a modal.
+  onMinted: OnMinted;
 }
 
-// One durable chat message; the thread renders from a list of these.
-type ChatMsg =
-  | { id: string; kind: "user-file"; name: string; rows: number | null }
-  | { id: string; kind: "user"; text: string }
-  | { id: string; kind: "ai"; text: string }
-  | { id: string; kind: "error"; text: string };
-
-// Transient ingest-pipeline status, separate from the durable thread — it's
-// replaced (not appended) as the upload → context → check-in → ready sequence
-// advances.
-type IngestPhase =
-  | { stage: "idle" }
-  | { stage: "uploading" }
-  // Parsed, but the operator hasn't said what the task is yet. The chat asks
-  // for context here and waits — the origin check-in needs it to configure
-  // anything, so we never burn the call on an empty task.
-  | { stage: "awaiting-context"; draft: DraftCampaignWire }
-  | { stage: "checkin"; model: string }
-  // A dropped file's name matches a dataset already in the collection. Rather
-  // than a dead-end 409, the chat offers the safe choices (use existing / save
-  // as new) — see docs/specs/m13-dataset-bridge.md § 2.
-  | {
-      stage: "collision";
-      file: File;
-      chipId: string;
-      existingSlug: string;
-      suggestedSlug: string;
-    }
-  | { stage: "ready"; draft: DraftCampaignWire; resolution: OriginLastResolution | null };
+// ETA to budget — burn rate = used / cycle_age, ETA = remaining_budget / burn.
+// A plain module-level helper (not a component/hook) so the wallclock read is
+// allowed; returns "—" until spend is wired or when budget is uncapped / spent.
+function etaToBudget(
+  usedUsd: number | null,
+  budgetUsd: number | null,
+  cycleStartedAt: string | null,
+): string {
+  if (usedUsd == null || budgetUsd == null || !cycleStartedAt) return "—";
+  const startedMs = Date.parse(cycleStartedAt);
+  if (!Number.isFinite(startedMs)) return "—";
+  const ageSec = (Date.now() - startedMs) / 1000;
+  if (ageSec <= 0 || usedUsd <= 0) return "—";
+  if (usedUsd >= budgetUsd) return "spent";
+  const burn = usedUsd / ageSec; // $/sec
+  const remainingSec = (budgetUsd - usedUsd) / burn;
+  return fmtDuration(remainingSec);
+}
 
 // The Chat surface. The job-bar + pipeline hero + settings card are display-only
-// (control plane lands in M12). The live interactive path is dataset ingest:
-// drop a tabular file into the input row → upload → origin check-in (fills
-// metadata) → an AI recap + "Set up campaign" CTA that opens the setup wizard.
+// (control plane lands in M12). The live interactive path is dataset ingest,
+// rendered by the shared `IngestConversation` (same surface as the "New
+// campaign" modal): drop/pick → ask context if missing → one check-in → Start.
 export function ChatPane({
   campaignId,
   cycleId,
@@ -113,177 +88,16 @@ export function ChatPane({
   datasetStale,
   hardSamplesScope,
   onHardSamplesScopeChange,
-  onOpenDraft,
+  onMinted,
 }: Props) {
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
   const [samplesOpen, setSamplesOpen] = useState(false);
   const toggleSamples = () => setSamplesOpen((v) => !v);
 
-  // Dataset-ingest conversation. Starts empty; a dropped file grows it.
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [phase, setPhase] = useState<IngestPhase>({ stage: "idle" });
-  const [dragging, setDragging] = useState(false);
-  // The operator's one-message task description, typed while awaiting context.
-  const [inputText, setInputText] = useState("");
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const busy = phase.stage === "uploading" || phase.stage === "checkin";
-  const awaitingContext = phase.stage === "awaiting-context";
-
-  // Drop a tabular file → upload → run the origin check-in → surface the recap
-  // + the "Set up campaign" CTA. Any format the backend rejects (unsupported,
-  // hardened-blocked Excel, bad JSON) comes back as a friendly chat error — the
-  // UI never crashes on a stray drop. A name collision (409) is NOT an error —
-  // it routes to the choice card (use existing / save as new), § 2 of the spec.
-  // `slug` re-runs ingest under a chosen name ("save as new"); `chipId` reuses
-  // the already-rendered file chip instead of appending a duplicate.
-  const ingestAndResolve = async (file: File, slug?: string, chipId?: string) => {
-    if (busy) return; // ignore a second drop while one is in flight
-    const id = chipId ?? crypto.randomUUID();
-    if (!chipId) {
-      setMessages((m) => [...m, { id, kind: "user-file", name: file.name, rows: null }]);
-    }
-
-    setPhase({ stage: "uploading" });
-    let draft: DraftCampaignWire;
-    try {
-      draft = await postIngestDataset(file, slug);
-    } catch (e) {
-      if (
-        e instanceof IngestApiError &&
-        e.status === 409 &&
-        e.existingSlug &&
-        e.suggestedSlug
-      ) {
-        setPhase({
-          stage: "collision",
-          file,
-          chipId: id,
-          existingSlug: e.existingSlug,
-          suggestedSlug: e.suggestedSlug,
-        });
-        return;
-      }
-      setPhase({ stage: "idle" });
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), kind: "error", text: IngestApiError.toOperatorMessage(e) },
-      ]);
-      return;
-    }
-    // Backfill the chip's row count now that the file is parsed.
-    setMessages((m) =>
-      m.map((msg) =>
-        msg.id === id && msg.kind === "user-file" ? { ...msg, rows: draft.n_samples } : msg,
-      ),
-    );
-
-    // A pre-filled draft (derived from an existing dataset) carries its task —
-    // resolve straight away. A fresh upload has none, so ask for context first
-    // rather than running the check-in on an empty task.
-    if (draft.task_description.trim()) {
-      await runCheckin(draft);
-      return;
-    }
-    setMessages((m) => [
-      ...m,
-      {
-        id: crypto.randomUUID(),
-        kind: "ai",
-        text: `Parsed ${draft.n_samples} rows. Describe the task in one message — as much as you can about what the model should do with each row. I’ll use it to set everything up.`,
-      },
-    ]);
-    setPhase({ stage: "awaiting-context", draft });
-  };
-
-  // The origin check-in — the single LLM call that configures the draft from
-  // the operator's context. Shared by the auto-path (pre-filled draft) and the
-  // context-submit path below.
-  const runCheckin = async (draft: DraftCampaignWire) => {
-    setPhase({ stage: "checkin", model: draft.optimizer_model || "the check-in model" });
-    let resolved = draft;
-    let resolution: OriginLastResolution | null = null;
-    let recap = "";
-    try {
-      const r = await postResolveOrigin(draft.draft_id);
-      resolved = r.draft;
-      resolution = r.resolution.last_resolution ?? null;
-      recap = resolution?.recap || resolution?.assessment || plainLanguageRecap(resolved);
-    } catch (e) {
-      // The check-in failed but the draft exists — let the operator proceed to
-      // the setup window, which surfaces the gaps.
-      recap = plainLanguageRecap(resolved);
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), kind: "error", text: IngestApiError.toOperatorMessage(e) },
-      ]);
-    }
-    setMessages((m) => [...m, { id: crypto.randomUUID(), kind: "ai", text: recap }]);
-    setPhase({ stage: "ready", draft: resolved, resolution });
-  };
-
-  // The operator answered the "describe the task" ask: write the context onto
-  // the draft, then run the one check-in call.
-  const submitContext = async () => {
-    if (phase.stage !== "awaiting-context") return;
-    const text = inputText.trim();
-    if (!text) return;
-    const draft = phase.draft;
-    setInputText("");
-    setMessages((m) => [...m, { id: crypto.randomUUID(), kind: "user", text }]);
-    let updated = draft;
-    try {
-      updated = await postEditDraftCampaign(draft.draft_id, { task_description: text });
-    } catch (e) {
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), kind: "error", text: IngestApiError.toOperatorMessage(e) },
-      ]);
-      setPhase({ stage: "awaiting-context", draft });
-      return;
-    }
-    await runCheckin(updated);
-  };
-
-  const onDatasetFile = (file: File) => void ingestAndResolve(file);
-
-  // Collision choice: "Replace" — version-and-repoint the existing dataset so
-  // its name frees, then re-ingest the dropped file under it. Data-safe: the old
-  // data + every prior campaign's results are preserved under `{slug}-vN`, never
-  // overwritten (docs/specs/m13-dataset-bridge.md § 2.1). On the migration
-  // succeeding, `slug` is free, so the re-ingest runs the normal check-in flow.
-  const replaceWithDropped = async (file: File, slug: string, chipId: string) => {
-    setPhase({ stage: "uploading" });
-    try {
-      await postReplaceDataset(slug);
-    } catch (e) {
-      setPhase({ stage: "idle" });
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), kind: "error", text: IngestApiError.toOperatorMessage(e) },
-      ]);
-      return;
-    }
-    await ingestAndResolve(file, slug, chipId);
-  };
-
-  // Collision choice: start a new campaign on the dataset already in the
-  // collection — no re-ingest. The derived-from-dataset draft is pre-filled, so
-  // it opens the wizard directly (no check-in needed).
-  const startFromExistingDataset = async (slug: string) => {
-    setPhase({ stage: "uploading" });
-    try {
-      const draft = await postDraftFromDataset(slug);
-      setPhase({ stage: "idle" });
-      onOpenDraft(draft, null);
-    } catch (e) {
-      setPhase({ stage: "idle" });
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), kind: "error", text: IngestApiError.toOperatorMessage(e) },
-      ]);
-    }
-  };
+  // The dataset-ingest conversation, run inline on the chat tab. Same state
+  // machine + view the "New campaign" modal uses (one path, one check-in call).
+  const ingest = useIngestFlow({ onMint: (sel) => onMinted(sel) });
 
   // Shared connector view (one provider-level fetch + health poll).
   const cv = useConnector();
@@ -292,6 +106,13 @@ export function ChatPane({
   // the demo/preview hero with no view exposes the synthetic "llm" chip id.
   const showBackendDetail =
     selectedNode != null && targetNodeIds(cv.view).includes(selectedNode);
+  // While a campaign is being set up, the connector preview shows the DRAFT's
+  // searchpoint (not the prior cycle / origin). Carries through awaiting-context
+  // and ready — the two phases that hold a draft.
+  const previewDraft =
+    ingest.phase.stage === "ready" || ingest.phase.stage === "awaiting-context"
+      ? ingest.phase.draft
+      : null;
   // Auto-open once per mount as soon as a cycle is bound — saves the operator
   // one click on page reload. The ref guard means that if the user manually
   // closes the drawer and the cycle later changes (or a new cycle is bound),
@@ -315,33 +136,32 @@ export function ChatPane({
     loopUsd,
     usedUsd,
     budgetUsd,
+    budgetTokens,
     rateKnown,
     backendTokens,
     loopTokens,
+    totalTokens,
   } = readSpend(dash);
-  const budgetChip = budgetUsd != null ? `$${budgetUsd.toFixed(2)}` : "—";
+  // The collapsed toggle's BUDGET chip: spent / limit. USD when the rate is
+  // known and a USD ceiling is armed; otherwise the token ceiling (the
+  // free-backend case, where USD only sees optimizer cost).
+  const budgetChip = (() => {
+    if (rateKnown && budgetUsd != null)
+      return `${usedUsd != null ? fmtUsd(usedUsd) : "$0"} / ${fmtUsd(budgetUsd)}`;
+    if (budgetTokens != null) return `${fmtTokens(totalTokens)} / ${fmtTokens(budgetTokens)}`;
+    if (rateKnown && usedUsd != null) return fmtUsd(usedUsd);
+    return "—";
+  })();
   const deltaPerSpend =
     delta != null && usedUsd != null && usedUsd > 0 ? delta / usedUsd : null;
   const effChip =
     deltaPerSpend != null ? `${(deltaPerSpend * 100).toFixed(2)} pp/$` : "—";
 
-  // ETA to budget — pure client-side derivation. Burn rate = used / cycle_age,
-  // ETA = remaining_budget / burn. Renders "—" until spend is wired or when
-  // budget is uncapped / already spent.
-  const etaChip = (() => {
-    if (usedUsd == null || budgetUsd == null || !cycleStartedAt) return "—";
-    const startedMs = Date.parse(cycleStartedAt);
-    if (!Number.isFinite(startedMs)) return "—";
-    // Date.now reads the wallclock once per render to project an ETA; the
-    // re-render cadence is driven by dash polling so the value never goes
-    // stale visibly.
-    const ageSec = (Date.now() - startedMs) / 1000;
-    if (ageSec <= 0 || usedUsd <= 0) return "—";
-    if (usedUsd >= budgetUsd) return "spent";
-    const burn = usedUsd / ageSec; // $/sec
-    const remainingSec = (budgetUsd - usedUsd) / burn;
-    return fmtDuration(remainingSec);
-  })();
+  // ETA to budget — pure client-side derivation. The wallclock read lives in
+  // the module-level `etaToBudget` helper (not the component body) so React's
+  // purity rule stays satisfied; the re-render cadence is driven by dash polling
+  // so the value never goes stale visibly.
+  const etaChip = etaToBudget(usedUsd, budgetUsd, cycleStartedAt);
 
   return (
     <div className="content chat-content" id="content-chat">
@@ -394,7 +214,9 @@ export function ChatPane({
               <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${backendTokens} tok`}</span></div>
               <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${loopTokens} tok`}</span></div>
               <div className="row"><span className="lbl">Total</span><span className="val">{usedUsd != null ? fmtUsd(usedUsd) : "—"}</span></div>
-              <div className="row"><span className="lbl">Budget</span><span className="val">{budgetChip}</span></div>
+              <div className="row"><span className="lbl">Tokens</span><span className="val">{fmtTokens(totalTokens)}</span></div>
+              <div className="row"><span className="lbl">Spend cap</span><span className="val">{budgetUsd != null ? fmtUsd(budgetUsd) : "Uncapped"}</span></div>
+              <div className="row"><span className="lbl">Token cap</span><span className="val">{budgetTokens != null ? fmtTokens(budgetTokens) : "Uncapped"}</span></div>
             </div>
             <div className="job-whatif">
               <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} />
@@ -405,7 +227,9 @@ export function ChatPane({
                 campaignId={campaignId}
                 cycleId={cycleId}
                 currentBudgetUsd={budgetUsd}
+                currentBudgetTokens={budgetTokens}
                 usedUsd={usedUsd}
+                usedTokens={totalTokens}
               />
             </div>
           </div>
@@ -416,7 +240,12 @@ export function ChatPane({
       <div className="wf-hero">
         <TargetPipelineHero samplesOpen={samplesOpen} onToggle={toggleSamples} cv={cv} />
         {showBackendDetail && (
-          <BackendNodeDetail cv={cv} onClose={() => setSelectionForNode(null)} />
+          <BackendNodeDetail
+            cv={cv}
+            dash={dash}
+            draft={previewDraft}
+            onClose={() => setSelectionForNode(null)}
+          />
         )}
         {samplesOpen && (
           <HardSamplesHeatmap
@@ -443,169 +272,7 @@ export function ChatPane({
           <div className="chat-panel-header">
             <div className="chat-panel-title">New Chat</div>
           </div>
-          <div className="chat-messages" aria-live="polite">
-            {/* First-run illustration — left in place until the operator drops a
-                file, so a newcomer sees what this surface is for (drop your eval
-                set here). Replaced by the live ingest thread on first drop. */}
-            {messages.length === 0 && phase.stage === "idle" ? (
-              <>
-                <div className="chat-msg user">My pipeline above is stuck at 73%. Can&apos;t push past that.</div>
-                <div className="chat-msg ai">Share the eval set you&apos;re scoring against?</div>
-                <ChatFileChip name="email-tagging.csv" rows={15} />
-                <div className="chat-msg ai">Got your pipeline + the project. Flip on Auto-tune (BETA) — I&apos;ll find a better prompt for it. Want me to turn it on?</div>
-                <div className="chat-msg ai">Which parameter do you want to explore?</div>
-                <div className="chat-msg ai">
-                  Few things to tune this right:<br />
-                  • <strong>Which evaluators matter most?</strong> Easy picks: speed (time per query), # of websites checked, accuracy, cost per query — pick whatever you care about.<br />
-                  • <strong>Preferred LLM</strong>, or should I pick one?<br />
-                  • <strong>Pipeline type</strong> — LLM-driven (a model decides each step) or deterministic (fixed rules, no AI in the loop)?<br />
-                  • <strong>Time ceiling</strong> — any hard cap on how long one query is allowed to take?
-                </div>
-              </>
-            ) : null}
-            {messages.map((msg) =>
-              msg.kind === "user-file" ? (
-                <ChatFileChip key={msg.id} name={msg.name} rows={msg.rows} />
-              ) : msg.kind === "user" ? (
-                <div key={msg.id} className="chat-msg user">
-                  {msg.text}
-                </div>
-              ) : msg.kind === "ai" ? (
-                <div key={msg.id} className="chat-msg ai">
-                  {msg.text}
-                </div>
-              ) : (
-                <div key={msg.id} className="chat-msg ai chat-msg-error" role="alert">
-                  {msg.text}
-                </div>
-              ),
-            )}
-            {phase.stage === "uploading" ? (
-              <p className="checkin-loading" role="status" aria-live="polite">
-                Parsing your file…
-              </p>
-            ) : null}
-            {phase.stage === "checkin" ? <CheckinLoadingWindow model={phase.model} /> : null}
-            {phase.stage === "collision" ? (
-              <div className="chat-msg ai chat-collision" role="group" aria-label="Dataset name already exists">
-                <p>
-                  You already have a dataset named <strong>{phase.existingSlug}</strong>. What
-                  would you like to do?
-                </p>
-                <div className="chat-collision-actions">
-                  <button
-                    type="button"
-                    className="chat-cta-btn"
-                    onClick={() => void startFromExistingDataset(phase.existingSlug)}
-                  >
-                    Use existing → new campaign
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-cta-btn secondary"
-                    onClick={() =>
-                      void ingestAndResolve(phase.file, phase.suggestedSlug, phase.chipId)
-                    }
-                  >
-                    Save as new ({phase.suggestedSlug})
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-cta-btn chat-collision-replace"
-                    title={`Archives the current ${phase.existingSlug} (and its campaigns) as a version, then takes its place`}
-                    onClick={() =>
-                      void replaceWithDropped(phase.file, phase.existingSlug, phase.chipId)
-                    }
-                  >
-                    Replace — keep old data as a version
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-collision-cancel"
-                    onClick={() => setPhase({ stage: "idle" })}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            {phase.stage === "ready" ? (
-              <div className="chat-msg ai chat-cta">
-                <button
-                  type="button"
-                  className="chat-cta-btn"
-                  onClick={() => onOpenDraft(phase.draft, phase.resolution)}
-                >
-                  Set up campaign
-                </button>
-              </div>
-            ) : null}
-          </div>
-          <div
-            className={cx("chat-input-row", dragging && "is-dragover")}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragging(false);
-              const f = e.dataTransfer.files?.[0];
-              if (f) void onDatasetFile(f);
-            }}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              hidden
-              accept=".csv,.tsv,.json,.jsonl,.ndjson,.xlsx,text/csv,application/json"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void onDatasetFile(f);
-                e.target.value = "";
-              }}
-            />
-            <button
-              className="chat-attach"
-              type="button"
-              title="Attach a dataset file"
-              aria-label="Attach a dataset file"
-              disabled={busy}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14.5 7.5 8 14a3.5 3.5 0 0 1-4.95-4.95L9.5 2.6a2.4 2.4 0 0 1 3.4 3.4L6.4 12.5a1.3 1.3 0 0 1-1.83-1.83L11 4.2" />
-              </svg>
-            </button>
-            <textarea
-              className="chat-input"
-              placeholder={
-                awaitingContext
-                  ? "Describe the task in one message…"
-                  : "Drop a CSV, TSV, JSON or Excel file…"
-              }
-              rows={1}
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                if (awaitingContext && e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void submitContext();
-                }
-              }}
-              disabled={!awaitingContext}
-              aria-label="Chat input"
-            />
-            <button
-              className="chat-send"
-              type="button"
-              disabled={!awaitingContext || !inputText.trim()}
-              onClick={() => void submitContext()}
-            >
-              Send
-            </button>
-          </div>
+          <IngestConversation flow={ingest} variant="inline" />
         </div>
 
         <div className="chat-settings">

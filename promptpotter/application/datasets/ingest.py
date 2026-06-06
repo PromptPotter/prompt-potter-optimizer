@@ -1,13 +1,13 @@
 """``ingest_draft`` — parse an uploaded blob into a registered ``DraftCampaign``.
 
 The single orchestration seam both ingest surfaces call: the web
-``POST /datasets/ingest`` handler and the CLI ``ingest`` verb. Keeping the
+``POST /datasets/ingest`` handler and the CLI ``new <file>`` branch. Keeping the
 parse → slug-validate → draft-create → cache-write sequence here (not inline in
 the API handler) is what makes CLI/web parity real — neither surface owns the
 logic, both call this. The handler/CLI translate the raised errors to their own
 shape (HTTP status vs. stderr); the orchestration is identical.
 
-Spec: ``docs/specs/m10-origin-resolution-checkin.md`` (CLI parity) +
+Spec: ``docs/specs/m10-origin-resolution-checkin.md`` +
 ``docs/specs/m13-chat-first-user-web.md § Ingest``.
 """
 
@@ -145,12 +145,12 @@ def draft_from_dataset(
     dataset as a CSV and confirming every field by hand.
 
     This is the direct path behind "open an existing dataset (demo / benchmark /
-    owned tenant dataset) in the setup wizard": no browser-side CSV reconstruction,
+    owned tenant dataset) in the ingest panel": no browser-side CSV reconstruction,
     no ``/preview`` round-trip, no field-by-field prefill. The dataset's pipeline
     node config rides through as ``pipeline_overlay``, so committing the draft
     **preserves the backend model/provider** (a fresh CSV upload would instead
-    fall back to connector defaults). The same ``ingest_draft`` → wizard → commit
-    sequence runs from here on, so both surfaces share one commit path.
+    fall back to connector defaults). The same ``ingest_draft`` → context check-in
+    → commit sequence runs from here on, so both surfaces share one commit path.
     """
     cache = _read_json(dataset_dir / "cache.json")
     rows: list[dict[str, str]] = [
@@ -179,17 +179,17 @@ def draft_from_dataset(
     pipeline_overlay = authored.pipeline_nodes
 
     # The authored dataset's own starting prompt rides through as the draft's
-    # ``starting_prompt`` (its six string fields + few-shot), so committing a
+    # ``origin_prompt_fields`` (its six string fields + few-shot), so committing a
     # demo/benchmark/owned Origin preserves the prompt the optimizer evolves
     # from — a fresh CSV upload instead gets the check-in's decomposition.
-    starting_prompt: dict[str, Any] = {}
+    origin_prompt_fields: dict[str, Any] = {}
     prompt_names = list_dataset_prompts(dataset_dir)
     if prompt_names:
         name = "default" if "default" in prompt_names else prompt_names[0]
         try:
-            starting_prompt = load_dataset_prompt(dataset_dir, name).prompt_field_dict()
+            origin_prompt_fields = load_dataset_prompt(dataset_dir, name).prompt_field_dict()
         except FileNotFoundError:
-            starting_prompt = {}
+            origin_prompt_fields = {}
 
     # Keep the canonical slug — an existing dataset (demo / benchmark / owned)
     # is NOT a new dataset, so it must not uniquify into a `{slug}-N` clone. The
@@ -211,14 +211,14 @@ def draft_from_dataset(
     )
     draft = draft.apply_resolution(
         values={
-            "task_description": task,
+            "raw_task_description": task,
             "connector": connector,
             "scoring_composite": scoring,
             "max_rounds": max_rounds,
             "optimizer_provider": optimizer_provider,
             "optimizer_model": optimizer_model,
             "pipeline_overlay": pipeline_overlay,
-            "starting_prompt": starting_prompt,
+            "origin_prompt_fields": origin_prompt_fields,
         },
         provenance={"task_description": Provenance.CONFIRMED},
     )

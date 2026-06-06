@@ -1,21 +1,20 @@
 """Round loop — generate → score → escalate → stop. Sweep/diag short-circuit after one round;
-``halt_at_accuracy`` + ``spend_cap_probe`` are sweep-toolkit halts checked every clean round.
+``halt_at_accuracy`` + ``budget_gate`` are sweep-toolkit halts checked every clean round.
 
 Pause cooperation: at each iteration top the loop polls ``session.pause_check``
 (``.runtime/pause.flag`` per cycle dir, written by the ``pause-cycle`` command
 applier) and blocks until the flag clears. ``session.stop_check`` always wins —
 stop-during-pause exits cleanly via ``StopReason.INTERRUPTED``.
 
-Spend cap cooperation: ``spend_cap_probe`` is re-read every clean round so the
-``change-spend-budget`` command can raise / lower the cap mid-flight without
-restarting the loop."""
+Budget cooperation: ``budget_gate`` (see ``runner/termination.py``) re-reads its
+USD + token caps every clean round, so the ``change-spend-budget`` command can
+raise / lower a ceiling mid-flight without restarting the loop."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import traceback
-from collections.abc import Callable
 
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
@@ -30,6 +29,7 @@ from promptpotter.application.runner.round import (
     post_round,
 )
 from promptpotter.application.runner.sweep import run_sweep_generation_only
+from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.domain.phases import (
     CampaignPhase,
     StopLoop,
@@ -68,14 +68,13 @@ async def run_round_loop(
     sweep: bool = False,
     diag: bool = False,
     halt_at_accuracy: float | None = None,
-    spend_cap_probe: Callable[[], float | None] | None = None,
-    spend_probe: Callable[[], float] | None = None,
+    budget_gate: BudgetGate | None = None,
 ) -> tuple[StopReason, CycleError | None]:
     """Round loop. sweep/diag halt after round 2. ``halt_at_accuracy`` → TARGET_HIT;
-    ``spend_cap_probe`` + ``spend_probe`` → SPEND_BUDGET (omit either ⇒ no spend halt).
+    ``budget_gate.tripped()`` → SPEND_BUDGET / TOKEN_BUDGET (omit ⇒ no budget halt).
 
-    The cap probe is re-read every clean round so the ``change-spend-budget``
-    command (``.runtime/spend_cap.json``) can mutate the ceiling mid-flight.
+    The gate re-reads its caps every clean round so the ``change-spend-budget``
+    command (``.runtime/spend_cap.json``) can mutate a ceiling mid-flight.
 
     Returns ``(stop_reason, error)`` — ``error`` is set on ``RENDER_ERROR`` /
     ``CRASHED`` so the caller can populate ``CycleResult.error`` without
@@ -180,10 +179,10 @@ async def run_round_loop(
 
             if halt_at_accuracy is not None and cycle.tracking.best_accuracy >= halt_at_accuracy:
                 return StopReason.TARGET_HIT, None
-            if spend_cap_probe is not None and spend_probe is not None:
-                cap = spend_cap_probe()
-                if cap is not None and spend_probe() >= cap:
-                    return StopReason.SPEND_BUDGET, None
+            if budget_gate is not None:
+                budget_stop = budget_gate.tripped()
+                if budget_stop is not None:
+                    return budget_stop, None
 
             if sweep and clean_rounds >= 1:
                 await run_sweep_generation_only(cycle, session, cb, round_num)

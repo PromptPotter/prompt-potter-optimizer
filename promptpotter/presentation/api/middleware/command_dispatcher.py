@@ -31,6 +31,7 @@ Closed inbound set: ``docs/specs/m12-api-openapi.yaml``. Permanent contract:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import uuid
@@ -436,15 +437,26 @@ class CommandDispatcher:
             return lambda: self._apply_resume_cycle(campaign_id, cycle_id)
         if kind == "change-spend-budget":
             max_usd = payload_extras.get("max_usd")
-            if not isinstance(max_usd, int | float) or max_usd < 0:
+            max_tokens = payload_extras.get("max_tokens")
+            usd_val = float(max_usd) if isinstance(max_usd, int | float) else None
+            tok_val = (
+                int(max_tokens)
+                if isinstance(max_tokens, int) and not isinstance(max_tokens, bool)
+                else None
+            )
+            if (usd_val is None or usd_val < 0) and (tok_val is None or tok_val < 0):
                 raise HTTPException(
                     422,
                     {
                         "error": "payload_invalid",
-                        "message": "payload.max_usd must be a non-negative number.",
+                        "message": (
+                            "change-spend-budget requires a non-negative max_usd and/or max_tokens."
+                        ),
                     },
                 )
-            return lambda: self._apply_change_spend_budget(campaign_id, cycle_id, float(max_usd))
+            return lambda: self._apply_change_spend_budget(
+                campaign_id, cycle_id, max_usd=usd_val, max_tokens=tok_val
+            )
         if kind == "start-run":
             run_kind = str(payload_extras.get("kind", ""))
             halt = payload_extras.get("halt_at_accuracy")
@@ -567,14 +579,36 @@ class CommandDispatcher:
         flag = cycle_dir / ".runtime" / "pause.flag"
         flag.unlink(missing_ok=True)
 
-    def _apply_change_spend_budget(self, campaign_id: str, cycle_id: str, max_usd: float) -> None:
-        """Write ``.runtime/spend_cap.json``; the round loop's
-        ``spend_cap_probe`` re-reads it every clean round. Setting ``0`` halts
-        at the next round boundary; raising above current spend releases."""
+    def _apply_change_spend_budget(
+        self,
+        campaign_id: str,
+        cycle_id: str,
+        *,
+        max_usd: float | None,
+        max_tokens: int | None,
+    ) -> None:
+        """Write ``.runtime/spend_cap.json`` (``{max_usd, max_tokens}``); the
+        round loop's BudgetGate re-reads it every clean round. A ``None`` arg
+        leaves that ceiling untouched (merge into the existing file). Setting a
+        ceiling to ``0`` halts at the next round boundary; raising above current
+        usage releases."""
         cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
         runtime_dir = cycle_dir / ".runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
-        write_json(runtime_dir / "spend_cap.json", {"max_usd": max_usd})
+        cap_path = runtime_dir / "spend_cap.json"
+        caps: dict[str, float | int] = {}
+        if cap_path.is_file():
+            try:
+                existing = json.loads(cap_path.read_text(encoding="utf-8"))
+                if isinstance(existing, dict):
+                    caps.update(existing)
+            except json.JSONDecodeError:
+                pass  # malformed file → start clean; the new caps below win
+        if max_usd is not None:
+            caps["max_usd"] = max_usd
+        if max_tokens is not None:
+            caps["max_tokens"] = max_tokens
+        write_json(cap_path, caps)
 
     async def _apply_mint_campaign(self, payload: dict[str, Any]) -> None:
         """Mint a fresh campaign + cycle and spawn the runner in background.

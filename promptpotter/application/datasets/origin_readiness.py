@@ -101,7 +101,7 @@ def _check_column(
     gaps: list[FieldGap],
 ) -> None:
     """A column field is satisfied iff CONFIRMED *and* a member of the headers."""
-    provenance = draft.resolved.get(field_key, Provenance.UNSET)
+    provenance = draft.field_provenance.get(field_key, Provenance.UNSET)
     if provenance is Provenance.CONFIRMED and value in draft.headers:
         return
     if provenance is Provenance.PROPOSED:
@@ -134,7 +134,7 @@ def _check_confirmed(
     """``task_description`` is satisfied by CONFIRMED provenance — the operator
     stated it, or the resolver proposed it high-confidence. PROPOSED (low
     confidence) blocks until the operator confirms or corrects the framing."""
-    provenance = draft.resolved.get(field_key, Provenance.UNSET)
+    provenance = draft.field_provenance.get(field_key, Provenance.UNSET)
     if provenance is Provenance.CONFIRMED:
         return
     reason = "proposed_unconfirmed" if provenance is Provenance.PROPOSED else "unset"
@@ -154,8 +154,8 @@ def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
 
     When the target column is a fixed taxonomy (:meth:`DraftCampaign.answer_space`),
     the origin stays open until each label appears verbatim in the prompt that
-    will be committed — which is :attr:`starting_prompt` once the check-in has
-    authored it, else the ``task_description`` floor (mirrors
+    will be committed — which is :attr:`origin_prompt_fields` once the check-in has
+    authored it, else the ``raw_task_description`` floor (mirrors
     ``launcher._build_default_prompt``). The deterministic gate; the check-in
     proposer (handed the same answer space) is what authors the enumeration. A
     proposer that drops a label surfaces here as an open gap rather than minting a
@@ -166,12 +166,12 @@ def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
     if not labels:
         return
     # Mirror the committed prompt: the authored Layer-1 fields win once present,
-    # else the task_description floor — checking their union would pass a draft
-    # whose labels live only in a task_description that never reaches the prompt.
+    # else the raw_task_description floor — checking their union would pass a draft
+    # whose labels live only in a task description that never reaches the prompt.
     committed = (
-        [str(v) for v in draft.starting_prompt.values()]
-        if draft.starting_prompt
-        else [draft.task_description]
+        [str(v) for v in draft.origin_prompt_fields.values()]
+        if draft.origin_prompt_fields
+        else [draft.raw_task_description]
     )
     haystack = " ".join(committed).lower()
     missing = [lab for lab in labels if not _label_present(lab, haystack)]
@@ -180,7 +180,7 @@ def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
     gaps.append(
         FieldGap(
             field="answer_space",
-            reason="unset" if not draft.starting_prompt else "proposed_unconfirmed",
+            reason="unset" if not draft.origin_prompt_fields else "proposed_unconfirmed",
             hint=(
                 "Enumerate every target label in the prompt so the model picks one: "
                 f"{', '.join(labels)}. Missing: {', '.join(missing)}."
@@ -198,7 +198,7 @@ def field_values(draft: DraftCampaign) -> dict[str, Any]:
     getters: dict[str, Callable[[DraftCampaign], Any]] = {
         "column.query": lambda d: d.column_query,
         "column.ground_truth": lambda d: d.column_ground_truth,
-        "task_description": lambda d: d.task_description,
+        "task_description": lambda d: d.raw_task_description,
         "answer_space": lambda d: list(d.answer_space() or ()),
     }
     return {key: getter(draft) for key, getter in getters.items()}
@@ -210,13 +210,15 @@ def resolution_block(draft: DraftCampaign) -> dict[str, Any]:
     ``{complete, provenance: {field: tag}, values: {field: value},
     gaps: [{field, reason, hint}]}`` — the AI-readable record of what blocks
     mint, the current value + provenance of every gated field, and why each
-    blocks. The resolver additionally stamps its last ``OriginResolution``
+    blocks. The resolver additionally stamps its last resolution
     alongside this block.
     """
     readiness = origin_readiness(draft)
     return {
         "complete": readiness.complete,
-        "provenance": {field_name: prov.value for field_name, prov in draft.resolved.items()},
+        "provenance": {
+            field_name: prov.value for field_name, prov in draft.field_provenance.items()
+        },
         "values": field_values(draft),
         "gaps": [gap.to_wire() for gap in readiness.gaps],
     }

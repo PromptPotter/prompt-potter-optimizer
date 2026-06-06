@@ -24,14 +24,14 @@ describe("candidateSearchPoint", () => {
   it("projects the selected candidate's prompt + overlay", () => {
     const sp = candidateSearchPoint(doc, "cand-a");
     expect(sp).toEqual({
-      starting_prompt: { instruction: "evolved A", persona: "solver" },
+      origin_prompt_fields: { instruction: "evolved A", persona: "solver" },
       pipeline_overlay: { llm_only: { reasoning_effort: "high" } },
     });
   });
 
   it("defaults a null override to an empty overlay", () => {
     const sp = candidateSearchPoint(doc, "cand-b");
-    expect(sp?.starting_prompt).toEqual({ instruction: "evolved B" });
+    expect(sp?.origin_prompt_fields).toEqual({ instruction: "evolved B" });
     expect(sp?.pipeline_overlay).toEqual({});
   });
 

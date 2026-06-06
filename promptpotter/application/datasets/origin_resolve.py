@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 _FINDING_SETTERS: dict[str, str] = {
     "column.query": "column_query",
     "column.ground_truth": "column_ground_truth",
-    "task_description": "task_description",
+    "task_description": "raw_task_description",
 }
 
 _PREVIEW_ROWS = 10
@@ -87,7 +87,7 @@ def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
     """
     readiness = origin_readiness(draft)
     values = field_values(draft)
-    provenance = {key: prov.value for key, prov in draft.resolved.items()}
+    provenance = {key: prov.value for key, prov in draft.field_provenance.items()}
     preview = [dict(row) for row in draft.sample_preview[:_PREVIEW_ROWS]]
 
     state: dict[str, Any] = {
@@ -108,7 +108,7 @@ def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
             "target_column": draft.column_ground_truth,
             "labels": list(answer_space),
         }
-    operator_message = draft.task_description  # latest operator framing, if any
+    operator_message = draft.raw_task_description  # latest operator framing, if any
     user_content = (
         "DRAFT-CAMPAIGN ORIGIN to resolve. Propose values for the OPEN gaps "
         "below, each with cited evidence; write a plain-language "
@@ -206,14 +206,14 @@ def _apply_findings(draft: DraftCampaign, output: CheckinOutput) -> DraftCampaig
         if str(getattr(output, name, "")).strip()
     }
     if prompt_fields:
-        values["starting_prompt"] = {**draft.starting_prompt, **prompt_fields}
-        provenance["starting_prompt"] = Provenance.CONFIRMED
+        values["origin_prompt_fields"] = {**draft.origin_prompt_fields, **prompt_fields}
+        provenance["origin_prompt_fields"] = Provenance.CONFIRMED
     # The check-in also decomposes the task into a 7-field ``task_context`` domain
     # framing. Capture it onto the draft (it rides commit → ``task_context.json``)
     # so the run reads it instead of recomputing via a second LLM call at run-start.
-    task_context = output.task_context.model_dump()
-    if any(str(value).strip() for value in task_context.values()):
-        values["task_context"] = task_context
+    decomposed = output.task_context.model_dump()
+    if any(str(value).strip() for value in decomposed.values()):
+        values["decomposed_task_context"] = decomposed
     if not values:
         return draft
     # A closed-label target's answer space is a deterministic fact — the distinct
@@ -238,12 +238,6 @@ def _coerce(field_key: str, proposed: str, draft: DraftCampaign) -> Any | None:
         return None
     if field_key in ("column.query", "column.ground_truth"):
         return proposed if proposed in draft.headers else None
-    if field_key == "max_rounds":
-        try:
-            n = int(proposed)
-        except ValueError:
-            return None
-        return n if 1 <= n <= 100 else None
     return proposed
 
 

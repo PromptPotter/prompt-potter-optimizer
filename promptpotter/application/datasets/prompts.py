@@ -75,8 +75,7 @@ def load_dataset_prompt(dataset_dir: Path, name: str = "default") -> PromptTempl
     path = dataset_prompt_dir(dataset_dir) / f"{name}.json"
     if not path.exists():
         raise FileNotFoundError(
-            f"Dataset prompt not found: {path}. "
-            f"Create it, or change 'starting_prompt' in the campaign config."
+            f"Dataset prompt not found: {path}. Create it under the dataset's prompts/ dir."
         )
     data = json.loads(path.read_text(encoding="utf-8"))
     return PromptTemplate(**data)

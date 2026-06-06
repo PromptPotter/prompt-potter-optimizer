@@ -322,7 +322,7 @@ def test_mint_fork_operator_steered_writes_seed_and_typed_fork_block(
         from_round=2,
         from_candidate_id="cand_x",
         seed=ForkSeed(
-            starting_prompt={"instruction": "edited"},
+            origin_prompt_fields={"instruction": "edited"},
             pipeline_overlay={"llm_only": {"reasoning_effort": "high"}},
             limit_overrides=LimitOverrides(max_rounds=2),
         ),
@@ -345,12 +345,12 @@ def test_mint_fork_operator_steered_writes_seed_and_typed_fork_block(
     # The seed rides ``.overrides/seed.json`` (bootstrap-read), round-trips typed.
     read_back = stores.campaigns.read_fork_seed(_CAMPAIGN, new_cycle)
     assert read_back is not None
-    assert read_back.starting_prompt == {"instruction": "edited"}
+    assert read_back.origin_prompt_fields == {"instruction": "edited"}
     assert read_back.limit_overrides.max_rounds == 2
 
 
 def test_resolve_origin_fork_seed_wins_over_experiment_prompt() -> None:
-    """A fork seed's ``starting_prompt`` becomes the origin OSP — beating the
+    """A fork seed's ``origin_prompt_fields`` becomes the origin OSP — beating the
     experiment/dataset sources — and stamps ``source='fork_seed'`` lineage.
     No seed → falls through to the experiment-registry prompt (``source='origin'``)."""
     experiment_extract = {"dependencies": {"prompts": {"llm_only": {"template": "dataset origin"}}}}
@@ -358,7 +358,7 @@ def test_resolve_origin_fork_seed_wins_over_experiment_prompt() -> None:
     steered = resolve_origin_opt_search_point(
         experiment_extract,
         prompt_node_names=["llm_only"],
-        fork_seed=ForkSeed(starting_prompt={"instruction": "edited by operator"}),
+        fork_seed=ForkSeed(origin_prompt_fields={"instruction": "edited by operator"}),
     )
     assert steered.instruction == "edited by operator"
     assert steered.lineage.source == "fork_seed"
@@ -424,7 +424,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(tmp_path: Path) -
     )
 
     # Resolve the origin OSP exactly as ``establish_campaign_origin`` does (fork-seed wins).
-    unmodified_seed = ForkSeed(starting_prompt=dict(prompt))
+    unmodified_seed = ForkSeed(origin_prompt_fields=dict(prompt))
     unmodified_osp = resolve_origin_opt_search_point({}, fork_seed=unmodified_seed)
     inherited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
@@ -437,7 +437,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(tmp_path: Path) -
     assert isinstance(inherited.origin_ps, OptSearchPoint)
     assert inherited.origin_ps.lineage.source == "fork_seed"
 
-    edited_seed = ForkSeed(starting_prompt={**prompt, "instruction": "do it differently"})
+    edited_seed = ForkSeed(origin_prompt_fields={**prompt, "instruction": "do it differently"})
     edited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         edited_seed,

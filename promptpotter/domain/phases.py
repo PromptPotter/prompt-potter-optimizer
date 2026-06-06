@@ -64,6 +64,7 @@ class StopReason(enum.StrEnum):
     DIAG_COMPLETE = "diag_complete"
     TARGET_HIT = "target_hit"
     SPEND_BUDGET = "spend_budget"
+    TOKEN_BUDGET = "token_budget"
     RENDER_ERROR = "render_error"
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
     REBASED = "rebased_to_fork"
@@ -140,6 +141,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.INTERRUPTED: StopReasonInfo("Interrupted", StopOutcome.HALTED),
     StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED),
     StopReason.SPEND_BUDGET: StopReasonInfo("Spend budget reached", StopOutcome.HALTED),
+    StopReason.TOKEN_BUDGET: StopReasonInfo("Token budget reached", StopOutcome.HALTED),
     StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED),
     StopReason.RENDER_ERROR: StopReasonInfo("Render error", StopOutcome.FAILED),
     StopReason.DIVERGED: StopReasonInfo("Diverged", StopOutcome.FAILED),

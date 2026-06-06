@@ -58,6 +58,7 @@ async function _postCommand(
 export interface LimitOverrides {
   max_rounds?: number;
   spend_budget_usd?: number | null;
+  token_budget?: number | null;
   l1_patience?: number;
   l2_patience?: number | null;
   l3_patience?: number | null;
@@ -65,12 +66,12 @@ export interface LimitOverrides {
 }
 
 // The edited-searchpoint origin override — twin of the OpenAPI `ForkSeed`.
-// Required on every operator fork (all are `operator_steered`). `starting_prompt`
+// Required on every operator fork (all are `operator_steered`). `origin_prompt_fields`
 // is the PromptTemplate field shape; `pipeline_overlay` is the candidate's
 // `nodes.*.config` delta, carried verbatim and merged onto the dataset overlay
 // at fork bootstrap.
 export interface ForkSeed {
-  starting_prompt?: Record<string, unknown>;
+  origin_prompt_fields?: Record<string, unknown>;
   pipeline_overlay?: Record<string, unknown>;
   limit_overrides?: LimitOverrides;
 }
@@ -154,24 +155,6 @@ export async function postDeleteCampaign(
   return _postCommand("delete-campaign", payload);
 }
 
-// Mint a fresh campaign + spawn the runner in one command. The 202 returns
-// once the campaign is on disk; background progress surfaces via the
-// canonical ledger + dashboard.json poll.
-
-export async function postMintCampaign(
-  datasetName: string,
-  opts: { haltAtAccuracy?: number; spendBudgetUsd?: number } = {},
-): Promise<CommandAcceptedBody> {
-  const payload: Record<string, unknown> = { dataset_name: datasetName };
-  if (opts.haltAtAccuracy !== undefined) {
-    payload.halt_at_accuracy = opts.haltAtAccuracy;
-  }
-  if (opts.spendBudgetUsd !== undefined) {
-    payload.spend_budget_usd = opts.spendBudgetUsd;
-  }
-  return _postCommand("mint-campaign", payload);
-}
-
 // Pause / resume a running cycle. Pause writes `.runtime/pause.flag`; the
 // loop's `pause_check` blocks at the next round boundary while it's present.
 // Resume removes the flag; the wait-loop exits on its next tick. Both
@@ -191,21 +174,24 @@ export async function postResumeCycle(
   return _postCommand("resume-cycle", { campaign_id: campaignId, cycle_id: cycleId });
 }
 
-// Raise or lower a running cycle's USD spend cap mid-flight. Writes
-// `.runtime/spend_cap.json`; the round loop's `spend_cap_probe` re-reads it
-// every clean round — `0` halts at the next round boundary, raising above
-// current spend releases the halt. Cycle-scoped command per
-// `m12-api-openapi.yaml::changeSpendBudget`.
+// Raise or lower a running cycle's USD and/or token spend cap mid-flight. Writes
+// `.runtime/spend_cap.json` ({max_usd, max_tokens}); the round loop's BudgetGate
+// re-reads it every clean round — `0` on a ceiling halts at the next round
+// boundary, raising above current usage releases. Pass `null` for a ceiling to
+// leave it unchanged (the applier merges). At least one must be a number.
+// Cycle-scoped command per `m12-api-openapi.yaml::changeSpendBudget`.
 export async function postChangeSpendBudget(
   campaignId: string,
   cycleId: string,
-  maxUsd: number,
+  caps: { maxUsd?: number | null; maxTokens?: number | null },
 ): Promise<CommandAcceptedBody> {
-  return _postCommand("change-spend-budget", {
+  const payload: Record<string, unknown> = {
     campaign_id: campaignId,
     cycle_id: cycleId,
-    max_usd: maxUsd,
-  });
+  };
+  if (typeof caps.maxUsd === "number") payload.max_usd = caps.maxUsd;
+  if (typeof caps.maxTokens === "number") payload.max_tokens = caps.maxTokens;
+  return _postCommand("change-spend-budget", payload);
 }
 
 export async function postStartRun(
@@ -272,33 +258,29 @@ export interface DraftCampaignWire {
   slug: string;
   sample_preview: Array<{ query: string; ground_truth: string }>;
   n_samples: number;
-  // True iff pre-filled from an existing on-disk dataset (a demo/benchmark
-  // pick) vs. a fresh upload. Drives the wizard's "pre-filled, AI check-in
-  // not needed" branch — not the global `demo_mode_enabled` preference.
-  derived_from_dataset: boolean;
   connector: string;
   scoring_composite: string;
   max_rounds: number;
-  task_description: string;
+  raw_task_description: string;
   pipeline_overlay: Record<string, unknown>;
   optimizer_provider: string;
   optimizer_model: string;
   // Header-agnostic ingest (A3 origin-resolution gate). `headers` are the
   // uploaded file's columns in order; `column_query` / `column_ground_truth`
   // are the operator-resolved input/target mapping (empty until picked);
-  // `resolved` carries per-field provenance keyed by dotted field name
+  // `field_provenance` carries per-field provenance keyed by dotted field name
   // (`column.query`, `column.ground_truth`, `task_description`). The mint gate
   // blocks until both columns are `confirmed` and members of `headers`. Config
   // is not gated — it carries no provenance entry.
   headers: string[];
   column_query: string;
   column_ground_truth: string;
-  resolved: Record<string, ProvenanceTag>;
-  // The campaign's starting prompt — `PromptTemplate.prompt_field_dict()` shape
+  field_provenance: Record<string, ProvenanceTag>;
+  // The campaign's origin prompt — `PromptTemplate.prompt_field_dict()` shape
   // (the six string fields + optional `few_shot_examples`). Seeded by the
   // check-in decomposition or an authored dataset's prompt; operator-editable
   // before commit. Empty `{}` until the check-in fills it.
-  starting_prompt: Record<string, unknown>;
+  origin_prompt_fields: Record<string, unknown>;
   // Whether the optimizer is barred from changing model/provider campaign-wide
   // (the `forbidden_axes_strict` knob). Default `true` (locked). Toggled in the
   // pipeline-config control panel; drives `optimizer_locks.forbidden_axes`.
@@ -363,10 +345,9 @@ export class IngestApiError extends Error {
   }
 
   // Operator-facing error message. Every consumer that catches an
-  // IngestApiError should render via this method instead of reimplementing
-  // the per-error-code translation — the silent-failure gap in
-  // BenchmarkList was downstream of that drift. Static `from` helper
-  // wraps unknown errors so call sites are one line:
+  // IngestApiError renders via this method instead of reimplementing the
+  // per-error-code translation. Static `from` helper wraps unknown errors so
+  // call sites are one line:
   //   setError(IngestApiError.toOperatorMessage(e))
   toOperatorMessage(): string {
     if (this.errorCode === "backend_unreachable") {
@@ -429,7 +410,7 @@ export async function postIngestDataset(
 }
 
 // Open an existing dataset (demo / benchmark / owned Origin) in the setup
-// wizard: the server builds a fully-prefilled DraftCampaign straight from the
+// flow: the server builds a fully-prefilled DraftCampaign straight from the
 // dataset's files — no browser-side CSV reconstruction, and the dataset's
 // pipeline node config (backend model/provider) is preserved through commit.
 // Like `postIngestDataset`, no campaign exists until the operator commits the
@@ -474,18 +455,18 @@ export interface DraftPatch {
   connector?: string;
   scoring_composite?: string;
   max_rounds?: number;
-  task_description?: string;
+  raw_task_description?: string;
   pipeline_overlay?: Record<string, unknown>;
   optimizer_provider?: string;
   optimizer_model?: string;
   // Confirm the input/target column mapping. Each must be a member of the
   // draft's `headers` (server rejects with 422 otherwise); setting one flips
-  // `resolved["column.query|ground_truth"]` to `confirmed`.
+  // `field_provenance["column.query|ground_truth"]` to `confirmed`.
   column_query?: string;
   column_ground_truth?: string;
-  // Replace the starting prompt wholesale (PromptTemplate field shape). The
+  // Replace the origin prompt wholesale (PromptTemplate field shape). The
   // editor sends the full object, not a sparse field patch.
-  starting_prompt?: Record<string, unknown>;
+  origin_prompt_fields?: Record<string, unknown>;
   // Toggle the campaign-wide model/provider lock (forbidden_axes_strict).
   lock_model?: boolean;
 }

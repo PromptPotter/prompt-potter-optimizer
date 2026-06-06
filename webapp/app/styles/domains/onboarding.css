@@ -15,30 +15,13 @@
 .new-campaign-field select,.new-campaign-field input{padding:8px 10px;border:0.5px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:13px}
 .new-campaign-loading{color:var(--color-text-tertiary);font-style:italic;font-size:12px}
 .new-campaign-error{color:#e74c3c;font-size:12px;margin:0}
-.new-campaign-footer{display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:0.5px solid var(--color-border-tertiary)}
-.new-campaign-cancel,.new-campaign-submit{padding:8px 14px;border-radius:5px;font-size:13px;cursor:pointer;border:0.5px solid var(--color-border-tertiary)}
-.new-campaign-cancel{background:transparent;color:var(--color-text-secondary)}
-.new-campaign-cancel:hover{background:var(--color-background-hover)}
-.new-campaign-submit{background:var(--color-accent);border-color:var(--color-accent);color:white;font-weight:500}
-.new-campaign-submit:disabled{opacity:0.55;cursor:not-allowed}
-.new-campaign-demo{margin-right:auto;padding:8px 14px;border-radius:5px;font-size:13px;font-weight:500;cursor:pointer;border:0.5px solid var(--color-accent);background:transparent;color:var(--color-accent)}
-.new-campaign-demo:hover{background:var(--color-accent);color:white}
-.new-campaign-demo:disabled{opacity:0.55;cursor:not-allowed}
 .new-campaign-field textarea{padding:8px 10px;border:0.5px solid var(--color-border-tertiary);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:13px;font-family:inherit;resize:vertical}
 .new-campaign-field button{align-self:flex-end;padding:6px 12px;border-radius:5px;border:0.5px solid var(--color-border-tertiary);background:transparent;color:var(--color-text-secondary);font-size:12px;cursor:pointer}
 .new-campaign-field button:hover:not(:disabled){background:var(--color-background-hover)}
 .new-campaign-field button:disabled{opacity:0.45;cursor:not-allowed}
-.new-campaign-dropzone{border:1.5px dashed var(--color-border-tertiary);border-radius:6px;padding:24px;text-align:center;color:var(--color-text-tertiary);cursor:pointer;font-size:13px;transition:border-color 120ms,background 120ms}
-.new-campaign-dropzone:hover,.new-campaign-dropzone--active{border-color:var(--color-accent);background:var(--color-background-hover);color:var(--color-text-primary)}
-.new-campaign-preview-list{margin:8px 0 0 0;padding-left:18px;font-size:12px;color:var(--color-text-secondary);max-height:160px;overflow-y:auto}
-.new-campaign-preview-list code{font-size:11px}
-.new-campaign-benchmark-list{list-style:none;margin:6px 0 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
-.new-campaign-benchmark-list button{width:100%;text-align:left;padding:6px 10px;border-radius:5px;border:0.5px solid var(--color-border-tertiary);background:transparent;color:var(--color-text-primary);font-size:12px;cursor:pointer}
-.new-campaign-benchmark-list button:hover:not(:disabled){background:var(--color-background-hover)}
-.new-campaign-benchmark-list button:disabled{opacity:0.5;cursor:not-allowed}
 .new-campaign-warn{color:var(--color-warn);font-size:12px}
-/* A3 origin-resolution gate surfaces — required-tier column mapping,
-   per-field provenance badges, gap hints, and the plain-language recap. */
+/* A3 origin-resolution gate surfaces — required-tier column mapping
+   + per-field provenance badges. */
 .new-campaign-optional > summary{cursor:pointer;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary);padding:2px 0}
 .new-campaign-optional > summary:hover{color:var(--color-text-secondary)}
 .new-campaign-optional-body{display:flex;flex-direction:column;gap:14px;padding-top:12px}
@@ -51,12 +34,6 @@
 .origin-prov--confirmed{color:var(--color-success);background:var(--color-success-bg);border-color:var(--color-success-border)}
 .origin-prov--proposed{color:var(--color-warn);background:var(--color-warn-bg);border-color:var(--color-warn-border)}
 .origin-prov--unset{color:var(--color-text-tertiary)}
-.origin-gaps{list-style:none;margin:0;padding:10px 12px;border-radius:6px;font-size:12px;display:flex;flex-direction:column;gap:5px;border:0.5px solid}
-.origin-gaps--pending{color:var(--color-text-secondary);background:var(--color-warn-bg);border-color:var(--color-warn-border)}
-.origin-gaps--blocked{color:var(--color-text-primary);background:var(--color-danger-bg);border-color:var(--color-danger-border)}
-.origin-recap{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:6px;background:var(--color-success-bg);border:0.5px solid var(--color-success-border)}
-.origin-recap-tick{flex-shrink:0;width:18px;height:18px;border-radius:50%;background:var(--color-success);color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-top:1px}
-.origin-recap p{margin:0;font-size:13px;line-height:1.5;color:var(--color-text-primary)}
 /* Origin check-in — the setup-in-progress window (closed-set fields +
    AI resolver). Reads the same tokens as the rest of the ingest surface. */
 .origin-checkin{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-radius:6px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
@@ -87,18 +64,11 @@
 .opt-locks-tag{flex-shrink:0;font-size:10px;font-weight:600;padding:1px 7px;border-radius:9px;border:0.5px solid var(--color-border-tertiary);white-space:nowrap}
 .opt-locks-tag.is-locked{color:var(--color-text-secondary)}
 .opt-locks-tag.is-free{color:var(--color-text-tertiary)}
-/* Wizard step pips — the 1-2-3 launch indicator at the top of the draft body. */
-.wizard-steps{display:flex;gap:8px;list-style:none;margin:0 0 4px;padding:0}
-.wizard-step{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:600;color:var(--color-text-tertiary);border:0.5px solid var(--color-border-tertiary);background:transparent}
-.wizard-step.is-active{color:white;background:var(--color-accent);border-color:var(--color-accent)}
-.wizard-step.is-done{color:var(--color-success);border-color:var(--color-success)}
-.wizard-demo-note{margin:0;font-size:12px;line-height:1.5;color:var(--color-text-secondary);padding:8px 10px;border-radius:6px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary)}
 /* Starting-prompt control panel — the editable 6-field decomposition. */
 .prompt-editor{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:6px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
 .prompt-editor-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .prompt-editor-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-primary)}
 .prompt-editor-sub{font-size:11px;color:var(--color-text-tertiary)}
-.prompt-editor-demo-note{margin:0;font-size:11px;line-height:1.5;color:var(--color-text-secondary)}
 .prompt-editor-grid{display:flex;flex-direction:column;gap:8px}
 .prompt-field{display:grid;grid-template-columns:96px 1fr;align-items:start;gap:8px}
 .prompt-field-label{font-size:12px;font-weight:600;color:var(--color-text-primary);padding-top:6px}
@@ -146,7 +116,6 @@
   .new-campaign-overlay{padding:8px;align-items:flex-start;padding-top:24px}
   .new-campaign-modal{max-width:none;max-height:calc(var(--vh-full) - 32px)}
   .new-campaign-field select,.new-campaign-field input{font-size:16px;min-height:44px}
-  .new-campaign-cancel,.new-campaign-submit{min-height:44px;padding:10px 16px;font-size:14px}
   .origin-column-row{flex-direction:column;gap:14px}
 }
 

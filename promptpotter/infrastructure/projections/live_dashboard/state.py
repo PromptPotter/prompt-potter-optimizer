@@ -75,6 +75,17 @@ class SpendRollup(BaseModel):
     total_used_usd: float = 0.0
     budget_usd: float | None = None
 
+    @property
+    def total_tokens_used(self) -> int:
+        """Cumulative tokens across both buckets (input + output) — the token
+        halt probe's source, mirroring ``total_used_usd`` for the USD gate."""
+        return (
+            self.backend.input_tokens
+            + self.backend.output_tokens
+            + self.loop.input_tokens
+            + self.loop.output_tokens
+        )
+
 
 class BackendWarning(BaseModel):
     """One entry in ``recent_backend_warnings`` — backend transport retry / 429 / 5xx surface."""
@@ -159,6 +170,7 @@ class RunLimits(BaseModel):
     l3_patience: int | None = None
     pobb_epsilon: float
     spend_budget_usd: float | None = None
+    token_budget: int | None = None
 
 
 class LiveDashboardState(BaseModel):

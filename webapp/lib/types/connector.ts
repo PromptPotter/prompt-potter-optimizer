@@ -7,7 +7,7 @@
 // `BackendConnection` (promptpotter/domain/backend.py) is the mother
 // object on the Python side; `BackendInfo` is its wire shape. The match
 // from dataset's `backend_name` → registered backend by `name` happens
-// in `lib/hooks/useConnectorView.ts` (one place, one comment), so no
+// in `lib/hooks/useConnector.ts` (one place, one comment), so no
 // component is doing case-sensitive string lookups in its JSX.
 //
 // `view` and `currentNodes` cover the pipeline-graph display + live
@@ -48,5 +48,5 @@ export interface ConnectorView {
   // The per-node structured-output contract (read-only), shown beside the config
   // so the operator sees the whole node. Same fetch.
   nodeOutputSchema: Record<string, NodeOutputSchema | null> | null;
-  startingPrompt: Record<string, unknown> | null;
+  originPromptFields: Record<string, unknown> | null;
 }

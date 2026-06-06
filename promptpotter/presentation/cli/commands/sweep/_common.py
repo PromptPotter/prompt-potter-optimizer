@@ -41,6 +41,7 @@ def _sweep_early_exit_reason(stop_reason: str) -> str:
         StopReason.TARGET_HIT.value: "target_hit",
         StopReason.MAX_ROUNDS.value: "max_rounds",
         StopReason.SPEND_BUDGET.value: "spend_budget",
+        StopReason.TOKEN_BUDGET.value: "token_budget",
     }
     return mapping.get(stop_reason, stop_reason)
 

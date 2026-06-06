@@ -23,12 +23,15 @@ export interface SpendView {
   totalUsd: number;
   // totalUsd when > 0, else null — "no spend yet" vs "$0.00".
   usedUsd: number | null;
+  // The two armed ceilings, read from the authoritative `run_limits` block
+  // (the gate's source). `null` = that ceiling is disarmed.
   budgetUsd: number | null;
+  budgetTokens: number | null;
   // At least one bucket reported a USD rate; when false, USD is unreliable
   // and the caller should fall back to a token count.
   rateKnown: boolean;
   // Per-bucket input+output token sums (the no-rate fallback display), and
-  // their total.
+  // their total (the token ceiling's spent side).
   backendTokens: number;
   loopTokens: number;
   totalTokens: number;
@@ -40,7 +43,6 @@ export function readSpend(dash: DashboardSnapshot | null): SpendView {
         backend?: SpendBucket;
         loop?: SpendBucket;
         total_used_usd?: number;
-        budget_usd?: number | null;
       }
     | undefined;
   const backend = block?.backend ?? {};
@@ -51,12 +53,16 @@ export function readSpend(dash: DashboardSnapshot | null): SpendView {
     typeof block?.total_used_usd === "number" ? block.total_used_usd : backendUsd + loopUsd;
   const backendTokens = (backend.input_tokens ?? 0) + (backend.output_tokens ?? 0);
   const loopTokens = (loop.input_tokens ?? 0) + (loop.output_tokens ?? 0);
+  // The caps live in `run_limits` (written at INIT + re-emitted by forks), not
+  // in the `spend` rollup — `spend` only carries what's been *used*.
+  const limits = dash?.run_limits;
   return {
     backendUsd,
     loopUsd,
     totalUsd,
     usedUsd: totalUsd > 0 ? totalUsd : null,
-    budgetUsd: typeof block?.budget_usd === "number" ? block.budget_usd : null,
+    budgetUsd: typeof limits?.spend_budget_usd === "number" ? limits.spend_budget_usd : null,
+    budgetTokens: typeof limits?.token_budget === "number" ? limits.token_budget : null,
     rateKnown: !!(backend.rate_known || loop.rate_known),
     backendTokens,
     loopTokens,

@@ -331,6 +331,7 @@ class LimitOverrides(BaseModel):
 
     max_rounds: int | None = None
     spend_budget_usd: float | None = None
+    token_budget: int | None = None
     l1_patience: int | None = None
     l2_patience: int | None = None
     l3_patience: int | None = None
@@ -339,7 +340,7 @@ class LimitOverrides(BaseModel):
 
 class ForkSeed(BaseModel):
     """The edited-searchpoint origin override carried by every `operator_steered`
-    fork: a fork's origin = chosen searchpoint + operator edits. `starting_prompt`
+    fork: a fork's origin = chosen searchpoint + operator edits. `origin_prompt_fields`
     is a `PromptTemplate.prompt_field_dict()` shape → becomes the origin
     `OptSearchPoint` at bootstrap. `pipeline_overlay` merges ON TOP of the dataset
     overlay (seed > dataset > backend default) for this fork only — the dataset
@@ -348,7 +349,7 @@ class ForkSeed(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    starting_prompt: dict[str, Any] = Field(default_factory=dict)
+    origin_prompt_fields: dict[str, Any] = Field(default_factory=dict)
     pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
     limit_overrides: LimitOverrides = Field(default_factory=LimitOverrides)
 

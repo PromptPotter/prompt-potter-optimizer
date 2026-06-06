@@ -73,8 +73,8 @@ class DraftCampaign:
     """Server-held canonical state for an in-progress ingest. Frozen — mutate via :meth:`patch`.
 
     **It fuses two things on purpose.** The *dataset* half (``slug``,
-    ``task_description``, ``pipeline_overlay``, ``starting_prompt``, the column
-    mapping) materializes into the four dataset files; the *campaign-config*
+    ``raw_task_description``, ``pipeline_overlay``, ``origin_prompt_fields``, the
+    column mapping) materializes into the four dataset files; the *campaign-config*
     half (``connector``, ``scoring_composite``, ``max_rounds``, ``optimizer_*``,
     ``lock_model``) materializes into the sibling ``campaign.json``. The fusion
     is correct for the one-form ingest UX — the operator fills both in one pass.
@@ -96,7 +96,7 @@ class DraftCampaign:
     connector: str
     scoring_composite: str
     max_rounds: int
-    task_description: str
+    raw_task_description: str
     pipeline_overlay: dict[str, Any]
     created_at: str
     updated_at: str
@@ -121,27 +121,27 @@ class DraftCampaign:
     # deterministic checklist gates on it; no field reaches mint while UNSET or
     # PROPOSED. Only the three genuinely-stated fields carry an entry — config
     # is not gated.
-    resolved: dict[str, Provenance] = field(default_factory=dict)
+    field_provenance: dict[str, Provenance] = field(default_factory=dict)
     source_file: str = ""
     # Per-draft optimizer LLM config — what model runs the L1/L2/L3
     # meta-prompts. Distinct from the backend pipeline node's own LLM
     # (lives in ``pipeline_overlay::nodes.{name}.config``).
     optimizer_provider: str = DEFAULT_OPTIMIZER_PROVIDER
     optimizer_model: str = DEFAULT_OPTIMIZER_MODEL
-    # The campaign's starting prompt — a ``PromptTemplate.prompt_field_dict()``
-    # shape (the six string fields + optional ``few_shot_examples``). Seeded by
-    # the check-in node's decomposition half (``CheckinOutput`` carries it), or
-    # from an authored dataset's prompt on the ``draft_from_dataset`` path;
-    # operator-editable before commit, and written verbatim to
-    # ``prompts/default.json`` at mint. Empty until the check-in fills it.
-    starting_prompt: dict[str, Any] = field(default_factory=dict)
-    # The check-in's decomposition half also authors a ``task_context`` — the
-    # 7-field domain framing (:class:`CheckinTaskContext`) that every optimizer
+    # The campaign's origin prompt — a ``PromptTemplate.prompt_field_dict()``
+    # shape (the six string fields + optional ``few_shot_examples``). This is the
+    # origin OSP's prompt fields: seeded by the check-in node's decomposition half
+    # (``CheckinOutput`` carries it), or from an authored dataset's prompt on the
+    # ``draft_from_dataset`` path; operator-editable before commit, and written
+    # verbatim to ``prompts/default.json`` at mint. Empty until the check-in fills it.
+    origin_prompt_fields: dict[str, Any] = field(default_factory=dict)
+    # The check-in's decomposition half also authors the decomposed task context —
+    # the 7-field domain framing (:class:`CheckinTaskContext`) that every optimizer
     # layer (L1/L1_CRITIQUE/L2/L3) reads via the ``task_context`` injection. It
     # rides the draft to commit, lands in ``{slug}/task_context.json``, and the
     # run reads it instead of re-decomposing at run-start (the second LLM call
     # that used to recompute exactly this). Empty until the check-in fills it.
-    task_context: dict[str, Any] = field(default_factory=dict)
+    decomposed_task_context: dict[str, Any] = field(default_factory=dict)
     # Whether the optimizer is barred from mutating model/provider campaign-wide
     # (the ``forbidden_axes_strict`` knob). Default locked — the conservative
     # floor. Operator-editable in the pipeline-config control panel; drives both
@@ -170,24 +170,20 @@ class DraftCampaign:
                 for row in self.sample_preview
             ],
             "n_samples": self.n_samples,
-            # True iff this draft was pre-filled from an existing on-disk dataset
-            # (a demo/benchmark pick), vs. a fresh operator upload. The setup
-            # wizard keys its "pre-filled, no check-in needed" branch on this —
-            # NOT on the global `demo_mode_enabled` preference, which only
-            # controls whether demo datasets are surfaced in the collection.
-            "derived_from_dataset": dataset_source_of(self.source_file) is not None,
             "connector": self.connector,
             "scoring_composite": self.scoring_composite,
             "max_rounds": self.max_rounds,
-            "task_description": self.task_description,
+            "raw_task_description": self.raw_task_description,
             "pipeline_overlay": dict(self.pipeline_overlay),
             "optimizer_provider": self.optimizer_provider,
             "optimizer_model": self.optimizer_model,
             "headers": list(self.headers),
             "column_query": self.column_query,
             "column_ground_truth": self.column_ground_truth,
-            "resolved": {field_name: prov.value for field_name, prov in self.resolved.items()},
-            "starting_prompt": dict(self.starting_prompt),
+            "field_provenance": {
+                field_name: prov.value for field_name, prov in self.field_provenance.items()
+            },
+            "origin_prompt_fields": dict(self.origin_prompt_fields),
             "lock_model": self.lock_model,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -213,12 +209,12 @@ class DraftCampaign:
         field and the answer_space gate becomes a safety that passes. No-op for an
         open-ended target or a draft without an authored prompt yet."""
         labels = self.answer_space()
-        if not labels or not self.starting_prompt:
+        if not labels or not self.origin_prompt_fields:
             return self
         want = closed_answer_format(labels)
-        if self.starting_prompt.get("answer_format") == want:
+        if self.origin_prompt_fields.get("answer_format") == want:
             return self
-        return self.patch(starting_prompt={**self.starting_prompt, "answer_format": want})
+        return self.patch(origin_prompt_fields={**self.origin_prompt_fields, "answer_format": want})
 
     def patch(self, **changes: Any) -> DraftCampaign:
         """Return a copy with ``updated_at`` refreshed and any provided fields replaced."""
@@ -233,15 +229,15 @@ class DraftCampaign:
         wire-validation concern (422); this only records the confirmed value.
         The only caller is the ``edit-draft-campaign`` operator path.
         """
-        resolved = dict(self.resolved)
+        provenance = dict(self.field_provenance)
         changes: dict[str, Any] = {}
         if query_col is not None:
             changes["column_query"] = query_col
-            resolved["column.query"] = Provenance.CONFIRMED
+            provenance["column.query"] = Provenance.CONFIRMED
         if ground_truth_col is not None:
             changes["column_ground_truth"] = ground_truth_col
-            resolved["column.ground_truth"] = Provenance.CONFIRMED
-        return self.patch(resolved=resolved, **changes)
+            provenance["column.ground_truth"] = Provenance.CONFIRMED
+        return self.patch(field_provenance=provenance, **changes)
 
     def apply_resolution(
         self,
@@ -251,14 +247,14 @@ class DraftCampaign:
     ) -> DraftCampaign:
         """Apply resolver/operator field changes + their per-field provenance.
 
-        ``values`` are draft-attribute kwargs (``task_description=...``);
-        ``provenance`` merges checklist field-id → tag onto :attr:`resolved`.
+        ``values`` are draft-attribute kwargs (``raw_task_description=...``);
+        ``provenance`` merges checklist field-id → tag onto :attr:`field_provenance`.
         The single mutation route the origin-resolution loop drives.
         """
-        resolved = dict(self.resolved)
+        merged = dict(self.field_provenance)
         if provenance:
-            resolved.update(provenance)
-        return self.patch(resolved=resolved, **(values or {}))
+            merged.update(provenance)
+        return self.patch(field_provenance=merged, **(values or {}))
 
 
 @dataclass
@@ -292,12 +288,12 @@ class DraftCampaignRegistry:
         ``ground_truth`` (the unambiguous, deterministic case), and otherwise
         lands ``UNSET`` for the operator to confirm. The config knobs seed from
         our template defaults and auto-confirm (one sane default each, so the
-        operator overrides rather than fills them); ``task_description`` is the
+        operator overrides rather than fills them); ``raw_task_description`` is the
         one knob with no default framing, so it lands ``UNSET`` — the operator
         (or the resolver, high-confidence) must state what the prompt does.
         """
         now = utcnow_iso()
-        column_query, column_ground_truth, resolved = _seed_resolved(headers)
+        column_query, column_ground_truth, provenance = _seed_provenance(headers)
         draft = DraftCampaign(
             draft_id=_mint_draft_id(),
             tenant_id=tenant_id,
@@ -307,13 +303,13 @@ class DraftCampaignRegistry:
             connector=DEFAULT_CONNECTOR,
             scoring_composite=DEFAULT_SCORING_COMPOSITE,
             max_rounds=DEFAULT_MAX_ROUNDS,
-            task_description="",
+            raw_task_description="",
             pipeline_overlay={},
             headers=tuple(headers),
             column_query=column_query,
             column_ground_truth=column_ground_truth,
             column_label_sets=dict(column_label_sets or {}),
-            resolved=resolved,
+            field_provenance=provenance,
             optimizer_provider=DEFAULT_OPTIMIZER_PROVIDER,
             optimizer_model=DEFAULT_OPTIMIZER_MODEL,
             created_at=now,
@@ -352,7 +348,7 @@ class DraftCampaignRegistry:
             return True
 
 
-def _seed_resolved(
+def _seed_provenance(
     headers: list[str],
 ) -> tuple[str, str, dict[str, Provenance]]:
     """Seed the gated-field provenance at mint: columns auto-detected (literal
@@ -360,9 +356,9 @@ def _seed_resolved(
     UNSET (no default framing). Config is not gated — it carries a default the
     operator edits, so it gets no provenance entry.
     """
-    query_col, ground_truth_col, resolved = _auto_detect_columns(headers)
-    resolved["task_description"] = Provenance.UNSET
-    return query_col, ground_truth_col, resolved
+    query_col, ground_truth_col, provenance = _auto_detect_columns(headers)
+    provenance["task_description"] = Provenance.UNSET
+    return query_col, ground_truth_col, provenance
 
 
 def _auto_detect_columns(
@@ -378,11 +374,11 @@ def _auto_detect_columns(
     header_set = set(headers)
     query_col = "query" if "query" in header_set else ""
     ground_truth_col = "ground_truth" if "ground_truth" in header_set else ""
-    resolved = {
+    provenance = {
         "column.query": Provenance.CONFIRMED if query_col else Provenance.UNSET,
         "column.ground_truth": Provenance.CONFIRMED if ground_truth_col else Provenance.UNSET,
     }
-    return query_col, ground_truth_col, resolved
+    return query_col, ground_truth_col, provenance
 
 
 def _mint_draft_id() -> str:

@@ -75,6 +75,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "improvement_significance"): "policy",
     ("optimization", "zero_signal_filter_enabled"): "policy",
     ("optimization", "spend_budget_usd"): "policy",
+    ("optimization", "token_budget"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
     ("optimization", "rebase_capability"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
@@ -137,7 +138,7 @@ class OptimizationConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    max_rounds: int | None = Field(10, description="Max rounds (None = unlimited)")
+    max_rounds: int | None = Field(50, description="Max rounds (None = unlimited)")
     l1_patience: int = Field(3, description="Stop after N consecutive non-improving L1 rounds")
     n_variants: int = Field(5, description="Candidates per round")
     improvement_threshold: float = Field(..., description="Min accuracy delta")
@@ -169,12 +170,27 @@ class OptimizationConfig(BaseModel):
     zero_signal_filter_enabled: bool = Field(False)
 
     spend_budget_usd: float | None = Field(
-        None,
+        0.025,
         description=(
             "Halt this cycle when cumulative spend (optimizer + backend) ≥ this "
             "value in USD. CLI ``--spend-budget`` overrides the config value when "
-            "both are supplied. Tenant-wide enforcement is M12 / JobRegistry work; "
-            "this gate halts the current cycle at the next round boundary."
+            "both are supplied. Default ≈ a 5-round run on the free-backend setup "
+            "(measured ~$0.019) with headroom; raise ``max_rounds`` and let this be "
+            "the binding limit. ``None`` disarms the USD ceiling. Tenant-wide "
+            "enforcement is M12 / JobRegistry work; this gate halts the current "
+            "cycle at the next round boundary."
+        ),
+    )
+
+    token_budget: int | None = Field(
+        210_000,
+        description=(
+            "Halt this cycle when cumulative tokens (optimizer + backend, input + "
+            "output) ≥ this value. The model-portable twin of ``spend_budget_usd``: "
+            "a free backend reports $0 so the USD ceiling sees only optimizer cost, "
+            "while this counts backend work too. Default ≈ a 5-round run (measured "
+            "~158k tokens) with headroom. Whichever of the two ceilings trips first "
+            "halts the cycle. ``None`` disarms the token ceiling."
         ),
     )
 

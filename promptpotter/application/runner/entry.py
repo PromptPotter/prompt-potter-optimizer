@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 import traceback
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +33,7 @@ from promptpotter.application.run_observers import (
     build_run_observers,
 )
 from promptpotter.application.runner.loop import run_round_loop
+from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import CycleError, CycleResult
@@ -53,42 +53,55 @@ logger = logging.getLogger(__name__)
 MAX_AUTO_REBASES = 10
 
 
-def _build_spend_probe(observers: RunObservers, spend_budget_usd: float | None) -> Any:
-    """Return a no-arg callable returning the dashboard's spend rollup, or
-    ``None`` when no budget is set. Binds ``observers`` at definition time
-    so the rebase loop's per-iteration observer rebuild can't poison this
-    closure with a stale reference."""
-    if spend_budget_usd is None:
+def _build_budget_gate(
+    observers: RunObservers,
+    cycle_dir: Path,
+    *,
+    usd_cap: float | None,
+    token_cap: int | None,
+) -> BudgetGate | None:
+    """Assemble the cycle's :class:`BudgetGate` from the two starting ceilings.
+
+    A ceiling is armed iff its starting cap is non-``None``; if both are
+    disarmed the gate itself is ``None`` (no budget halt). ``observers`` is
+    bound here so the rebase loop's per-iteration observer rebuild can't leave
+    the spent-probes reading a stale reference. The cap probes re-read
+    ``.runtime/spend_cap.json`` (``{max_usd, max_tokens}``, written by the
+    ``change-spend-budget`` applier) each tick, falling back to the starting
+    cap when the file is absent / malformed — so a ceiling can be moved
+    mid-flight without restarting the loop."""
+    if usd_cap is None and token_cap is None:
         return None
     dashboard = observers.dashboard
-    return lambda: dashboard.spend_total_used_usd
-
-
-def _build_spend_cap_probe(cycle_dir: Path, initial: float | None) -> Callable[[], float | None]:
-    """Return a callable resolving the current spend cap.
-
-    Reads ``.runtime/spend_cap.json::max_usd`` per cycle dir (written by the
-    ``change-spend-budget`` command applier); falls back to *initial* (the
-    CLI / campaign-config starting cap) when the file is absent or malformed.
-    The round loop polls every clean round so the cap can be raised / lowered
-    mid-flight without restarting the loop."""
     cap_path = cycle_dir / ".runtime" / "spend_cap.json"
 
-    def probe() -> float | None:
+    def _saved_caps() -> dict[str, Any]:
         if cap_path.is_file():
             try:
                 data = json.loads(cap_path.read_text(encoding="utf-8"))
-                value = data.get("max_usd")
-                if isinstance(value, int | float):
-                    return float(value)
+                if isinstance(data, dict):
+                    return data
             except Exception:
                 logger.warning(
-                    "spend_cap.json at %s unreadable; falling back to initial cap",
+                    "spend_cap.json at %s unreadable; falling back to starting caps",
                     cap_path,
                 )
-        return initial
+        return {}
 
-    return probe
+    def _usd_cap() -> float | None:
+        value = _saved_caps().get("max_usd")
+        return float(value) if isinstance(value, int | float) else usd_cap
+
+    def _token_cap() -> int | None:
+        value = _saved_caps().get("max_tokens")
+        return int(value) if isinstance(value, int) else token_cap
+
+    return BudgetGate(
+        usd_spent=(lambda: dashboard.spend_total_used_usd) if usd_cap is not None else None,
+        usd_cap=_usd_cap if usd_cap is not None else None,
+        tokens_spent=(lambda: dashboard.spend_total_tokens) if token_cap is not None else None,
+        tokens_cap=_token_cap if token_cap is not None else None,
+    )
 
 
 def _apply_limit_overrides(
@@ -109,6 +122,7 @@ def _apply_limit_overrides(
         for k, v in {
             "max_rounds": limits.max_rounds,
             "spend_budget_usd": limits.spend_budget_usd,
+            "token_budget": limits.token_budget,
             "l1_patience": limits.l1_patience,
             "l2_patience": limits.l2_patience,
             "l3_patience": limits.l3_patience,
@@ -165,7 +179,7 @@ async def run_optimization(
     # Operator-steered fork: the edited searchpoint, declared at fork time, lives
     # at `.overrides/seed.json` (read-once-at-bootstrap, keyed by the known fork
     # cycle_id — set before this seam by both the CLI resume and API start-run
-    # launchers). It re-homes the origin (`starting_prompt`) and layers its
+    # launchers). It re-homes the origin (`origin_prompt_fields`) and layers its
     # `pipeline_overlay` ON TOP of the dataset overlay (seed > dataset > backend).
     # Read here — the single runner seam every launch path funnels through — not
     # threaded through each launcher + every `configure_and_apply_pipeline` caller.
@@ -254,13 +268,14 @@ async def run_optimization(
                 observers.callbacks._phase_ctx = parent_phase_ctx
                 cb = observers.callbacks
 
-            # Halt probe reads LiveDashboardView's clean accessor; the dashboard
-            # is the sole owner of the spend rollup, so the probe goes through
-            # the projection that already accumulates the records — not a
-            # parallel reader. Bind `observers` explicitly so the rebase loop's
-            # next-iteration rebuild can't make this probe read a stale ref.
-            # Cap probe re-reads `.runtime/spend_cap.json` each tick so the
-            # `change-spend-budget` command can mutate the ceiling mid-flight.
+            # The BudgetGate's spent-probes read LiveDashboardView's clean
+            # accessors (spend_total_used_usd / spend_total_tokens): the dashboard
+            # is the sole owner of the spend rollup, so the gate goes through the
+            # projection that already accumulates the records — not a parallel
+            # reader. `observers` is bound in the builder so the rebase loop's
+            # next-iteration rebuild can't leave it reading a stale ref. The cap
+            # probes re-read `.runtime/spend_cap.json` each tick so the
+            # `change-spend-budget` command can move a ceiling mid-flight.
             cycle_dir_for_probe = (
                 session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
                 if session.state.cycle_id
@@ -286,8 +301,14 @@ async def run_optimization(
                 sweep=sweep,
                 diag=diag,
                 halt_at_accuracy=halt_at_accuracy,
-                spend_probe=_build_spend_probe(observers, spend_budget_usd),
-                spend_cap_probe=_build_spend_cap_probe(cycle_dir_for_probe, spend_budget_usd),
+                budget_gate=_build_budget_gate(
+                    observers,
+                    cycle_dir_for_probe,
+                    usd_cap=spend_budget_usd
+                    if spend_budget_usd is not None
+                    else campaign_config.optimization.spend_budget_usd,
+                    token_cap=campaign_config.optimization.token_budget,
+                ),
             )
         except (KeyboardInterrupt, asyncio.CancelledError) as exc:
             cause = (
