@@ -1,6 +1,6 @@
 // Node-config rows for the operator-steered fork's value editor. The steer
 // panel lets the operator edit a fork's node-config VALUES — the flat
-// `{node:{param:value}}` overlay that `ForkSeed.pipeline_overlay` merges onto
+// `{node:{param:value}}` overlay that `OperatorForkOverride.pipeline_overlay` merges onto
 // `session.pipeline_params` at bootstrap.
 //
 // Source is the server's `node_config_schema` (`GET /datasets/{name}/pipeline`)

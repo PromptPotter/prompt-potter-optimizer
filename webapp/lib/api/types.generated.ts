@@ -8,7 +8,7 @@ export interface OriginSummary {
   samples: number;
 }
 
-/** Display-summary row for `dashboard.json::rounds[].candidates` — chart/lineage/sparkline subset of `CandidateScore`. */
+/** Display-summary row for `dashboard.json::rounds[].candidates` — chart/lineage/sparkline subset of `ScoredCandidate`. */
 export interface RoundSummaryCandidate {
   candidate_id: string;
   label: string;
@@ -123,6 +123,7 @@ export interface RunLimits {
   l3_patience: number | null;
   pobb_epsilon: number;
   spend_budget_usd: number | null;
+  token_budget: number | null;
 }
 
 /** ``dashboard.json`` — operator-facing snapshot, polled by the webapp. */
@@ -464,6 +465,7 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'interrupted': 'Interrupted',
   'escalation_abort': 'Escalation abort',
   'spend_budget': 'Spend budget reached',
+  'token_budget': 'Token budget reached',
   'crashed': 'Crashed',
   'render_error': 'Render error',
   'diverged': 'Diverged',

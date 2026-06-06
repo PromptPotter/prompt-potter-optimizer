@@ -201,14 +201,14 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         source=f"verify:{campaign_id}:{args.label}",
     )
 
-    merged_pp = _deep_merge(pipeline_params, pp_override)
+    effective_pipeline_params = _deep_merge(pipeline_params, pp_override)
     schema = session.pipeline_schema
-    jsp = osp.to_job_search_point(merged_pp, schema=schema)
+    jsp = osp.to_job_search_point(effective_pipeline_params, schema=schema)
     if schema is None:
         raise SystemExit("ERROR: pipeline schema unavailable; cannot resolve candidate config.")
-    node_configs = schema.node_configs(merged_pp or {})
+    node_configs = schema.node_configs(effective_pipeline_params or {})
     predicate: dict[str, dict[str, Any]] = dict(node_configs)
-    config_hash = schema.sp_hash(merged_pp or {})
+    config_hash = schema.sp_hash(effective_pipeline_params or {})
 
     # Find samples this exact config has not yet been measured on.
     prior = archive_views.measurements_for_config(

@@ -15,7 +15,7 @@ import type { DashboardSnapshot } from "@/lib/poll";
 //
 // Emits a sparse `LimitOverrides` on every edit: a field is included only when
 // the operator's value is present + valid, so blank = inherit. Self-contained
-// presentational input; the parent panel folds the result into the ForkSeed.
+// presentational input; the parent panel folds the result into the OperatorForkOverride.
 
 interface Fields {
   rounds: string;

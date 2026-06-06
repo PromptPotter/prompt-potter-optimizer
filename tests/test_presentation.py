@@ -48,7 +48,7 @@ def _candidate_score_dict(
     total: int,
     aborted: bool = False,
 ) -> dict:
-    """Mirror what ``CandidateScore.to_dict`` writes into ``round_data.candidate_scores``."""
+    """Mirror what ``ScoredCandidate.to_dict`` writes into ``round_data.candidate_scores``."""
     ci_lo, ci_hi = wilson_ci(hits, total)
     return {
         "candidate_id": candidate_id,

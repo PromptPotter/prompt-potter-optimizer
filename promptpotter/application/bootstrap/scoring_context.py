@@ -131,20 +131,20 @@ def _build_cycle_and_bootstrap(
     cycle_id: str | None,
     resume_from_round_override: int | None,
 ) -> tuple[Cycle, OptSearchPoint, str | None, int]:
-    """Build origin OSP + Cycle.start + bootstrap storage; raise on missing origin_ps."""
+    """Build origin OSP + Cycle.start + bootstrap storage; raise on missing resolved_origin."""
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.scoring.formula import compile_round_scorer
 
-    if origin.origin_ps is None:
-        raise ValueError("origin.origin_ps is required; run origin scoring first.")
-    # origin_ps is the resolved origin OptSearchPoint (lineage + memory intact) — use it
+    if origin.resolved_origin is None:
+        raise ValueError("origin.resolved_origin is required; run origin scoring first.")
+    # resolved_origin is the resolved origin OptSearchPoint (lineage + memory intact) — use it
     # directly; no re-roundtrip through from_prompt_fields, which would drop the lineage.
-    origin_osp = origin.origin_ps
+    resolved_origin = origin.resolved_origin
     origin_round_scorer = (
         compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
     )
     cycle = Cycle.start(
-        origin_osp,
+        resolved_origin,
         origin.origin_acc,
         task_context=task_context,
         schema=session.pipeline_schema,
@@ -158,7 +158,7 @@ def _build_cycle_and_bootstrap(
     base_pp = session.pipeline_params or (
         session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
     )
-    origin_jsp = origin_osp.to_job_search_point(
+    origin_jsp = resolved_origin.to_job_search_point(
         base_pipeline_params=base_pp, schema=session.pipeline_schema
     )
     resolved_cycle_id, resumed_from_round = bootstrap_cycle(
@@ -169,7 +169,7 @@ def _build_cycle_and_bootstrap(
         cycle_id,
         resume_from_round_override=resume_from_round_override,
     )
-    return cycle, origin_osp, resolved_cycle_id, resumed_from_round
+    return cycle, resolved_origin, resolved_cycle_id, resumed_from_round
 
 
 def _start_observability_and_scoring(
@@ -217,7 +217,7 @@ def _apply_resume_fork(
     session: Session,
     cycle: Cycle,
     origin: CampaignOrigin,
-    origin_osp: OptSearchPoint,
+    resolved_origin: OptSearchPoint,
     resolved_cycle_id: str | None,
     resumed_from_round: int,
     *,
@@ -246,7 +246,7 @@ def _apply_resume_fork(
             resumed_from_round = fork_result.new_resumed_from_round
     if session.store:
         archive_views.register_prompt_alias(
-            session.store, session.backend_id, origin.instruction, origin_osp.render()
+            session.store, session.backend_id, origin.instruction, resolved_origin.render()
         )
     return resolved_cycle_id, resumed_from_round
 
@@ -321,7 +321,7 @@ async def init_optimization_loop(
     """Build Cycle + attach loop infra: origin, resume/fork, obs, scoring, axes."""
     await _emit_preflight_and_init_session(config, dataset, cb, session)
 
-    cycle, origin_osp, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(
+    cycle, resolved_origin, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(
         origin,
         task_context,
         scoring_round_formula,
@@ -350,7 +350,7 @@ async def init_optimization_loop(
         session,
         cycle,
         origin,
-        origin_osp,
+        resolved_origin,
         resolved_cycle_id,
         resumed_from_round,
         no_divergence_check=no_divergence_check,

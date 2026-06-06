@@ -154,9 +154,8 @@ def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
 
     When the target column is a fixed taxonomy (:meth:`DraftCampaign.answer_space`),
     the origin stays open until each label appears verbatim in the prompt that
-    will be committed — which is :attr:`origin_prompt_fields` once the check-in has
-    authored it, else the ``raw_task_description`` floor (mirrors
-    ``launcher._build_default_prompt``). The deterministic gate; the check-in
+    will be committed — :meth:`DraftCampaign.committed_prompt_fields`, the one
+    encoding the prompt writer also uses. The deterministic gate; the check-in
     proposer (handed the same answer space) is what authors the enumeration. A
     proposer that drops a label surfaces here as an open gap rather than minting a
     campaign whose prompt can never emit it (the failure that left every
@@ -165,15 +164,10 @@ def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
     labels = draft.answer_space()
     if not labels:
         return
-    # Mirror the committed prompt: the authored Layer-1 fields win once present,
-    # else the raw_task_description floor — checking their union would pass a draft
-    # whose labels live only in a task description that never reaches the prompt.
-    committed = (
-        [str(v) for v in draft.origin_prompt_fields.values()]
-        if draft.origin_prompt_fields
-        else [draft.raw_task_description]
-    )
-    haystack = " ".join(committed).lower()
+    # Mirror the committed prompt exactly — checking the union of fields + the raw
+    # description would pass a draft whose labels live only in a task description
+    # that never reaches the prompt.
+    haystack = " ".join(str(v) for v in draft.committed_prompt_fields().values()).lower()
     missing = [lab for lab in labels if not _label_present(lab, haystack)]
     if not missing:
         return

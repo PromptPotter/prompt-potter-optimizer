@@ -12,7 +12,7 @@ from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
-from promptpotter.domain.run_records import ForkSeed
+from promptpotter.domain.run_records import OperatorForkOverride
 from promptpotter.domain.sample import Sample
 
 if TYPE_CHECKING:
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ORIGIN_RESOLUTION_PRIORITY",
     "CampaignOrigin",
     "DatasetRunSummary",
     "DatasetSummary",
@@ -71,11 +72,11 @@ def build_campaign_emitter(
 
 
 class CampaignOrigin(NamedTuple):
-    """Extracted origin state. ``origin_ps`` is the origin OptSearchPoint —
+    """Extracted origin state. ``resolved_origin`` is the origin OptSearchPoint —
     carrying its full lineage/memory, not just prompt strings — so the C0
     individual keeps its ``source`` marker (e.g. ``fork_seed``) downstream."""
 
-    origin_ps: OptSearchPoint | None
+    resolved_origin: OptSearchPoint | None
     origin_acc: float
     origin_results: list[Any] | None
     instruction: str
@@ -83,10 +84,11 @@ class CampaignOrigin(NamedTuple):
 
 def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOrigin:
     """Origin prompt state, accuracy, results from campaign rounds.
-    Walks reversed rounds for the last with scoring results; prompt_fields override to the tip."""
+    Walks reversed rounds for the last with scoring results; the origin OSP rides
+    the tip's ``origin_search_point`` slot."""
     if not campaign_rounds:
         return CampaignOrigin(
-            origin_ps=OptSearchPoint(instruction=""),
+            resolved_origin=OptSearchPoint(instruction=""),
             origin_acc=0.0,
             origin_results=None,
             instruction="",
@@ -103,10 +105,10 @@ def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOr
             origin_results = rd["results"]
             break
 
-    tip_ps = tip["prompt_fields"]
+    tip_ps = tip["origin_search_point"]
 
     return CampaignOrigin(
-        origin_ps=tip_ps,
+        resolved_origin=tip_ps,
         origin_acc=origin_acc,
         origin_results=origin_results,
         instruction=tip_ps.instruction,
@@ -115,9 +117,9 @@ def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOr
 
 def try_inherit_fork_origin(
     session: Session,
-    fork_seed: ForkSeed | None,
+    fork_seed: OperatorForkOverride | None,
     *,
-    origin_osp: OptSearchPoint,
+    resolved_origin: OptSearchPoint,
 ) -> CampaignOrigin | None:
     """Inherit a no-modification operator fork's C0 from its branch-point candidate.
 
@@ -129,7 +131,7 @@ def try_inherit_fork_origin(
     recorded measurement and skip the origin scoring pass — the loop goes straight to
     L1_generate.
 
-    *origin_osp* is the already-resolved fork origin (resolved once by
+    *resolved_origin* is the already-resolved fork origin (resolved once by
     ``establish_campaign_origin``). Returns the inherited :class:`CampaignOrigin` only
     when this is an operator-steered fork whose origin renders identically to the
     ``from_candidate_id`` candidate in the parent's recorded round. Any miss (non-fork,
@@ -170,7 +172,7 @@ def try_inherit_fork_origin(
 
     # Identity gate: the fork origin's prompt must render identically to the
     # branch-point candidate's. An operator edit changes the render → re-score.
-    if origin_osp.render() != OptSearchPoint.from_prompt_fields(cand_fields).render():
+    if resolved_origin.render() != OptSearchPoint.from_prompt_fields(cand_fields).render():
         return None
 
     origin_acc = float(cand["accuracy"])
@@ -186,14 +188,24 @@ def try_inherit_fork_origin(
     # origin_results left empty: per-candidate per-sample results aren't in the round
     # file, and the reuse cache is noisy under nondeterminism. Hard-sample seeding for
     # round 1 starts clean; the inherited C0 accuracy (the operator-facing value) is exact.
-    # origin_ps carries the OSP object (not a prompt-field dict) so the inherited C0 keeps
+    # resolved_origin carries the OSP object (not a prompt-field dict) so the inherited C0 keeps
     # its lineage(source="fork_seed") — same shape the re-score path produces.
     return CampaignOrigin(
-        origin_ps=origin_osp,
+        resolved_origin=resolved_origin,
         origin_acc=origin_acc,
         origin_results=[],
-        instruction=origin_osp.instruction,
+        instruction=resolved_origin.instruction,
     )
+
+
+ORIGIN_RESOLUTION_PRIORITY = (
+    "fork_seed",  # operator-steered fork: the edited searchpoint IS the origin
+    "experiment",  # experiment_extract dependencies' prompt registry
+    "dataset",  # {dataset_dir}/prompts/{node}.json (tenant-first)
+    "empty",  # no prompt node active — param-only optimization
+)
+"""Origin-OSP resolution order, highest wins — the single legible statement of the
+precedence that ``resolve_origin_opt_search_point`` walks branch by branch."""
 
 
 def resolve_origin_opt_search_point(
@@ -201,10 +213,10 @@ def resolve_origin_opt_search_point(
     prompt_node_names: list[str] | None = None,
     dataset_dir: Path | None = None,
     *,
-    fork_seed: ForkSeed | None = None,
+    fork_seed: OperatorForkOverride | None = None,
 ) -> OptSearchPoint:
-    """Resolve the origin OptSearchPoint by priority: fork-seed → experiment
-    prompts → {dataset_dir}/prompts → empty.
+    """Resolve the origin OptSearchPoint by :data:`ORIGIN_RESOLUTION_PRIORITY`
+    (fork-seed → experiment prompts → {dataset_dir}/prompts → empty).
 
     A *fork_seed* with non-empty ``origin_prompt_fields`` wins outright — an
     operator-steered fork's origin *is* the edited searchpoint, so we build the
@@ -283,7 +295,7 @@ async def establish_campaign_origin(
     dataset: list[Sample],
     campaign_config: CampaignConfig,
     *,
-    fork_seed: ForkSeed | None,
+    fork_seed: OperatorForkOverride | None,
     listener: Any | None,
 ) -> CampaignOrigin:
     """The single origin-establishment seam: resolve the origin OSP once, then either
@@ -293,7 +305,7 @@ async def establish_campaign_origin(
     the scoring pass (straight to L1); everything else scores the origin via
     ``prepare_scoring_context``. Both branches share the one resolved OSP, so the origin
     is resolved exactly once and both paths return the same ``CampaignOrigin`` shape."""
-    origin_osp = resolve_origin_opt_search_point(
+    resolved_origin = resolve_origin_opt_search_point(
         session.experiment_extract,
         prompt_node_names=(
             session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
@@ -301,7 +313,7 @@ async def establish_campaign_origin(
         dataset_dir=getattr(session, "dataset_config_dir", None),
         fork_seed=fork_seed,
     )
-    inherited = try_inherit_fork_origin(session, fork_seed, origin_osp=origin_osp)
+    inherited = try_inherit_fork_origin(session, fork_seed, resolved_origin=resolved_origin)
     if inherited is not None:
         return inherited
 
@@ -314,7 +326,7 @@ async def establish_campaign_origin(
         svc=session,
         listener=listener,
         fork_seed=fork_seed,
-        origin=origin_osp,
+        resolved_origin=resolved_origin,
     )
     return extract_campaign_origin(campaign_rounds)
 
@@ -329,18 +341,18 @@ async def prepare_scoring_context(
     svc: Any = None,
     listener: Any | None = None,
     obs: Any | None = None,
-    fork_seed: ForkSeed | None = None,
-    origin: OptSearchPoint | None = None,
+    fork_seed: OperatorForkOverride | None = None,
+    resolved_origin: OptSearchPoint | None = None,
 ) -> tuple[OptSearchPoint, list[Sample], list[dict[str, Any]], list[Any]]:
     """Resolve origin (fork-seed wins), set dataset, produce a populated ``campaign_rounds[0]``.
 
-    *origin* lets the caller pass an already-resolved origin OSP (so it isn't resolved
-    twice on the runner path); when ``None`` it's resolved here (the notebook path)."""
+    *resolved_origin* lets the caller pass an already-resolved origin OSP (so it isn't
+    resolved twice on the runner path); when ``None`` it's resolved here (the notebook path)."""
     from promptpotter.application.datasets import sample_dataset
 
-    if origin is None:
+    if resolved_origin is None:
         prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
-        origin = resolve_origin_opt_search_point(
+        resolved_origin = resolve_origin_opt_search_point(
             experiment_extract or {},
             prompt_node_names=prompt_nodes,
             dataset_dir=getattr(svc, "dataset_config_dir", None),
@@ -351,9 +363,12 @@ async def prepare_scoring_context(
     campaign_rounds: list[dict[str, Any]] = []
     origin_results: list[Any] = []
     if not (
-        campaign_config is not None and svc is not None and dataset and origin.render().strip()
+        campaign_config is not None
+        and svc is not None
+        and dataset
+        and resolved_origin.render().strip()
     ):
-        return origin, dataset, campaign_rounds, origin_results
+        return resolved_origin, dataset, campaign_rounds, origin_results
 
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -377,7 +392,7 @@ async def prepare_scoring_context(
         with graceful("Dataset registration in origin scoring failed"):
             obs.register_dataset(DATASET_NAME, scoring_set)
 
-    sp = origin.to_job_search_point(
+    sp = resolved_origin.to_job_search_point(
         base_pipeline_params=pipeline_params,
         schema=pipeline_schema,
     )
@@ -420,7 +435,7 @@ async def prepare_scoring_context(
         {
             "round": 0,
             "label": "origin",
-            "prompt_fields": origin,
+            "origin_search_point": resolved_origin,
             "accuracy": scores["accuracy"],
             "hits": scores["hits"],
             "total": scores["total"],
@@ -428,7 +443,7 @@ async def prepare_scoring_context(
         }
     ]
 
-    return origin, dataset, campaign_rounds, origin_results
+    return resolved_origin, dataset, campaign_rounds, origin_results
 
 
 class DatasetSummary(NamedTuple):

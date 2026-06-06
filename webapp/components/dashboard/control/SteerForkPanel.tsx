@@ -1,7 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { postForkCycle, postStopCycle, type ForkSeed, type LimitOverrides } from "@/lib/api";
+import {
+  postForkCycle,
+  postStopCycle,
+  type LimitOverrides,
+  type OperatorForkOverride,
+} from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useConnector } from "@/lib/hooks/useConnector";
@@ -91,7 +96,7 @@ export function SteerForkPanel({
     if (!campaignId || !cycleId) return;
     setPending(true);
     setErr(null);
-    const forkSeed: ForkSeed = {
+    const forkSeed: OperatorForkOverride = {
       origin_prompt_fields: editedPrompt.current ?? seedPrompt,
       pipeline_overlay: editedOverlay.current ?? overlay,
       limit_overrides: limits.current,

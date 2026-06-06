@@ -19,13 +19,13 @@ __all__ = [
     "CommandRecord",
     "CycleRecord",
     "ErrorRecord",
-    "ForkSeed",
     "ForkSpec",
     "ForkTrigger",
     "LLMCallProgressRecord",
     "LLMCallRecord",
     "LLMCallStartRecord",
     "LimitOverrides",
+    "OperatorForkOverride",
     "OperatorSweepFile",
     "PhaseRecord",
     "ResumeCheckpointKind",
@@ -338,7 +338,7 @@ class LimitOverrides(BaseModel):
     pobb_epsilon: float | None = None
 
 
-class ForkSeed(BaseModel):
+class OperatorForkOverride(BaseModel):
     """The edited-searchpoint origin override carried by every `operator_steered`
     fork: a fork's origin = chosen searchpoint + operator edits. `origin_prompt_fields`
     is a `PromptTemplate.prompt_field_dict()` shape → becomes the origin
@@ -375,7 +375,7 @@ class ForkSpec(BaseModel):
     from_round: int | None = None
     from_candidate_id: str | None = None
     l1_layout: dict[str, list[str]] | None = None
-    seed: ForkSeed | None = None
+    seed: OperatorForkOverride | None = None
 
 
 class RebaseRequest(BaseModel):

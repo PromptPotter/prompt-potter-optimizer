@@ -395,14 +395,14 @@ def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
 
 
 def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
-    """``CandidateScore.to_dict()`` / ``asdict(ScoreEntry)`` → ``ScoreEntry``; Wilson CI recomputed when missing."""
+    """``ScoredCandidate.to_dict()`` / ``asdict(ScoreEntry)`` → ``ScoreEntry``; Wilson CI recomputed when missing."""
     hits = int(s.get("hits", 0))
     total = int(s.get("total", 0))
     if "ci_lo" in s and "ci_hi" in s:
         ci_lo, ci_hi = float(s["ci_lo"]), float(s["ci_hi"])
     else:
         ci_lo, ci_hi = wilson_ci(hits, total)
-    # Two sources: CandidateScore.to_dict() carries ``invalid`` +
+    # Two sources: ScoredCandidate.to_dict() carries ``invalid`` +
     # ``validation_failures`` (derive reason); asdict(ScoreEntry) carries
     # ``invalid_reason`` top-level.
     invalid_reason: str | None = s.get("invalid_reason")

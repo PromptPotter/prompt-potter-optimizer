@@ -1,7 +1,7 @@
 """Per-round display summary for ``dashboard.json::rounds[]``.
 
 Pure projection over a :class:`RoundResult` — emits the strict subset of
-``CandidateScore`` fields the webapp's chart, lineage tree, and trend
+``ScoredCandidate`` fields the webapp's chart, lineage tree, and trend
 sparkline consume. Deep audit (per-sample rows, full evaluator output,
 prompt content) stays in ``.runtime/cache/rounds/round_NNNN.json`` and
 is fetched on demand by the deep-inspection consumers.

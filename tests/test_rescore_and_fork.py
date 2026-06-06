@@ -16,10 +16,10 @@ from promptpotter.application.scoring.search_point_scorer import (
 )
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import (
-    ForkSeed,
     ForkSpec,
     ForkTrigger,
     LimitOverrides,
+    OperatorForkOverride,
     ResumeCheckpointKind,
     ResumeCheckpointRecord,
 )
@@ -321,7 +321,7 @@ def test_mint_fork_operator_steered_writes_seed_and_typed_fork_block(
         issued_by="nieena",
         from_round=2,
         from_candidate_id="cand_x",
-        seed=ForkSeed(
+        seed=OperatorForkOverride(
             origin_prompt_fields={"instruction": "edited"},
             pipeline_overlay={"llm_only": {"reasoning_effort": "high"}},
             limit_overrides=LimitOverrides(max_rounds=2),
@@ -358,7 +358,7 @@ def test_resolve_origin_fork_seed_wins_over_experiment_prompt() -> None:
     steered = resolve_origin_opt_search_point(
         experiment_extract,
         prompt_node_names=["llm_only"],
-        fork_seed=ForkSeed(origin_prompt_fields={"instruction": "edited by operator"}),
+        fork_seed=OperatorForkOverride(origin_prompt_fields={"instruction": "edited by operator"}),
     )
     assert steered.instruction == "edited by operator"
     assert steered.lineage.source == "fork_seed"
@@ -424,24 +424,26 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(tmp_path: Path) -
     )
 
     # Resolve the origin OSP exactly as ``establish_campaign_origin`` does (fork-seed wins).
-    unmodified_seed = ForkSeed(origin_prompt_fields=dict(prompt))
+    unmodified_seed = OperatorForkOverride(origin_prompt_fields=dict(prompt))
     unmodified_osp = resolve_origin_opt_search_point({}, fork_seed=unmodified_seed)
     inherited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         unmodified_seed,
-        origin_osp=unmodified_osp,
+        resolved_origin=unmodified_osp,
     )
     assert inherited is not None
     assert inherited.origin_acc == 0.2  # the branch point, NOT a re-rolled number
     # C0 carries the OSP object, so the inherited origin keeps its fork_seed lineage.
-    assert isinstance(inherited.origin_ps, OptSearchPoint)
-    assert inherited.origin_ps.lineage.source == "fork_seed"
+    assert isinstance(inherited.resolved_origin, OptSearchPoint)
+    assert inherited.resolved_origin.lineage.source == "fork_seed"
 
-    edited_seed = ForkSeed(origin_prompt_fields={**prompt, "instruction": "do it differently"})
+    edited_seed = OperatorForkOverride(
+        origin_prompt_fields={**prompt, "instruction": "do it differently"}
+    )
     edited = try_inherit_fork_origin(
         session,  # type: ignore[arg-type]
         edited_seed,
-        origin_osp=resolve_origin_opt_search_point({}, fork_seed=edited_seed),
+        resolved_origin=resolve_origin_opt_search_point({}, fork_seed=edited_seed),
     )
     assert edited is None
 

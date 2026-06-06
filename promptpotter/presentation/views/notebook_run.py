@@ -205,7 +205,7 @@ async def prepare_origin_notebook(
         experiment_id=experiment_id,
     )
 
-    _origin_osp, dataset, campaign_rounds, _results = await _prepare_scoring_context(
+    _resolved_origin, dataset, campaign_rounds, _results = await _prepare_scoring_context(
         session.experiment_extract,
         train_data,
         campaign_config,

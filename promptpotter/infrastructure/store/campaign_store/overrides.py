@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from promptpotter.domain.run_records import ForkSeed
+from promptpotter.domain.run_records import OperatorForkOverride
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
 from promptpotter.infrastructure.store.campaign_store._kernel import CampaignStoreKernel
 
@@ -31,18 +31,18 @@ class CycleOverrideMixin(CampaignStoreKernel):
     def _overrides_dir(self, campaign_id: str, cycle_id: str) -> Path:
         return self.cycle_dir(campaign_id, cycle_id) / ".overrides"
 
-    def write_fork_seed(self, campaign_id: str, cycle_id: str, seed: ForkSeed) -> Path:
+    def write_fork_seed(self, campaign_id: str, cycle_id: str, seed: OperatorForkOverride) -> Path:
         """Persist the operator-steered fork seed (read once at bootstrap)."""
         path = self._overrides_dir(campaign_id, cycle_id) / "seed.json"
         write_json(path, seed.model_dump(mode="json"))
         return path
 
-    def read_fork_seed(self, campaign_id: str, cycle_id: str) -> ForkSeed | None:
+    def read_fork_seed(self, campaign_id: str, cycle_id: str) -> OperatorForkOverride | None:
         """Load the fork seed, or ``None`` when this cycle wasn't operator-steered."""
         data = read_json_optional(self._overrides_dir(campaign_id, cycle_id) / "seed.json")
         if data is None:
             return None
-        return ForkSeed.model_validate(data)
+        return OperatorForkOverride.model_validate(data)
 
 
 __all__ = ["CycleOverrideMixin"]

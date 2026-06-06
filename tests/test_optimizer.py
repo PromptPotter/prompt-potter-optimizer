@@ -32,7 +32,7 @@ from promptpotter.application.optimization.validators.l3_output import (
 )
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint, WoundChannels
-from promptpotter.domain.results import CandidateProposal, CandidateScore
+from promptpotter.domain.results import CandidateProposal, ScoredCandidate
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, ResumeCheckpointKind
 from promptpotter.domain.search_point import TaskDecomposition
 
@@ -535,8 +535,8 @@ def _cs(
     escalation_aborted: bool = False,
     elimination_stopped: bool = False,
     degradation_context: dict | None = None,
-) -> CandidateScore:
-    return CandidateScore(
+) -> ScoredCandidate:
+    return ScoredCandidate(
         candidate_id=candidate_id,
         label=candidate_id,
         changes_description="",

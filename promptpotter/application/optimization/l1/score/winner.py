@@ -25,9 +25,9 @@ from promptpotter.application.scoring.metrics import (
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     CandidateProposal,
-    CandidateScore,
     RoundOrigin,
     RoundResult,
+    ScoredCandidate,
 )
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
@@ -46,7 +46,7 @@ def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[
     return (composite_fitness if composite_fitness is not None else accuracy, accuracy)
 
 
-def is_leader_eligible(cs: CandidateScore) -> bool:
+def is_leader_eligible(cs: ScoredCandidate) -> bool:
     """Eligibility for round-leader election. Disqualifies (a) escalation-aborted-without-PoBB
     (mid-run failure outside measured-comparison) and (b) degradation/scoring_error_abort
     (partial subset accuracy can fake-inflate above origin). PoBB-eliminated candidates stay
@@ -79,7 +79,7 @@ async def l1_score(
     schema = session.pipeline_schema
     assert schema is not None, "l1_score requires pipeline_schema"
 
-    osp_population, merged_pp = parse_population(
+    osp_population, effective_pipeline_params = parse_population(
         candidates,
         pipeline_params,
         schema,
@@ -89,7 +89,7 @@ async def l1_score(
     all_candidate_results, candidate_scores, escalation_signal = await score_population(
         cycle,
         osp_population,
-        merged_pp,
+        effective_pipeline_params,
         candidates,
         dataset,
         degradation_checks=degradation_checks,
@@ -223,7 +223,9 @@ async def l1_score(
             **best_osp.prompt_field_dict(),
             "lineage": best_osp.lineage.model_dump(),
         },
-        pipeline_params=merged_pp[winner_idx] if winner_idx is not None else pipeline_params,
+        pipeline_params=effective_pipeline_params[winner_idx]
+        if winner_idx is not None
+        else pipeline_params,
         results=best_results,
         all_candidate_results=dict(all_candidate_results),
         candidates_scored=len(scored),

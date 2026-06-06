@@ -202,6 +202,20 @@ class DraftCampaign:
             return None
         return self.column_label_sets.get(self.column_ground_truth)
 
+    def committed_prompt_fields(self) -> dict[str, Any]:
+        """The prompt fields this draft commits at mint — the one encoding of
+        "the prompt this draft commits," shared by the prompt writer
+        (``launcher._build_default_prompt``) and the answer-space gate
+        (``origin_readiness._check_answer_space``) so they can't drift.
+
+        The authored Layer-1 fields (``origin_prompt_fields``) win once present;
+        otherwise we floor on ``instruction`` from the task description (a real
+        ``PromptTemplate`` field — the prior ``task_description``/``instructions``
+        keys were not, so the committed prompt loaded empty)."""
+        if self.origin_prompt_fields:
+            return dict(self.origin_prompt_fields)
+        return {"instruction": self.raw_task_description}
+
     def with_closed_answer_format(self) -> DraftCampaign:
         """Return a draft whose ``answer_format`` prompt field enumerates the full
         closed answer space. The label set is a deterministic fact (the target

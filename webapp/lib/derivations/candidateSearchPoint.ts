@@ -26,7 +26,7 @@ export interface CandidateSearchPoint {
   pipeline_overlay: Record<string, unknown>;
 }
 
-interface RawCandidateScore {
+interface RawScoredCandidate {
   candidate_id?: string;
   prompt_fields?: Record<string, unknown>;
   pipeline_params_override?: Record<string, unknown> | null;
@@ -44,10 +44,10 @@ export function candidateSearchPoint(
   const scores = doc.candidate_scores;
   if (!Array.isArray(scores)) return null;
   const entry = scores.find(
-    (c): c is RawCandidateScore =>
+    (c): c is RawScoredCandidate =>
       !!c &&
       typeof c === "object" &&
-      (c as RawCandidateScore).candidate_id === candidateId,
+      (c as RawScoredCandidate).candidate_id === candidateId,
   );
   if (!entry) return null;
   return {

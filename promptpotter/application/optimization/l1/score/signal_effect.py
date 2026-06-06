@@ -65,7 +65,7 @@ def decode_signal_effect(
     *,
     results: list[Any],
     dataset: list[Any],
-    merged_pp: dict[str, Any] | None,
+    effective_pipeline_params: dict[str, Any] | None,
     round_num: int,
     elim_check: PoBBCheck,
     candidate_id: str,
@@ -88,12 +88,12 @@ def decode_signal_effect(
     if elimination_stopped and signal.check_name == "degradation":
         rf_kind: str | None = "degradation_check"
         dominant = cr.get("dominant_warning", "unknown:unknown")
-        node_cfg = (merged_pp or {}).get(dominant.split(":", 1)[0], {})
+        node_cfg = (effective_pipeline_params or {}).get(dominant.split(":", 1)[0], {})
         rate = float(cr.get("degraded_rate", 0.0))
     elif scoring_error_abort:
         rf_kind = "scoring_error_abort"
         dominant = str(cr.get("dominant_warning") or "scoring_error")
-        node_cfg = merged_pp or {}
+        node_cfg = effective_pipeline_params or {}
         dc_tmp = int(cr.get("degraded_count", 0))
         te_tmp = int(cr.get("total_scored", len(results)))
         rate = (dc_tmp / te_tmp) if te_tmp else 0.0

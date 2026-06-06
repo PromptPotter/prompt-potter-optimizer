@@ -29,7 +29,7 @@ from promptpotter.application.optimization.resume_and_fork import (
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.escalation_signals import EscalationSignal, RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import CandidateScore, candidate_label
+from promptpotter.domain.results import ScoredCandidate, candidate_label
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 
@@ -47,7 +47,7 @@ class CandidateRunResult:
 
     outcome: CandidateOutcome
     results: list[QueryMeasurement] = field(default_factory=list)
-    report: CandidateScore = None  # type: ignore[assignment]
+    report: ScoredCandidate = None  # type: ignore[assignment]
     runtime_failure: RuntimeFailure | None = None
     escalation_signal: EscalationSignal | None = None
 
@@ -60,12 +60,12 @@ async def score_one_candidate(
     cycle: Cycle,
     dataset: list[Sample],
     n_total: int,
-    merged_pp: dict[str, Any] | None,
+    effective_pipeline_params: dict[str, Any] | None,
     elim_check: PoBBCheck,
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None,
     decisions: list[ResumeCheckpointRecord] | None,
-    candidate_scores: list[CandidateScore],
+    candidate_scores: list[ScoredCandidate],
     round_num: int,
     l1_diversity: float,
     next_sample: Callable[[dict[int, bool]], int | None] | None = None,
@@ -100,7 +100,7 @@ async def score_one_candidate(
         )
 
     candidate_sp = osp_c.to_job_search_point(
-        base_pipeline_params=merged_pp, schema=cycle.session.pipeline_schema
+        base_pipeline_params=effective_pipeline_params, schema=cycle.session.pipeline_schema
     )
 
     async def _catch_priors_up(sample: Sample) -> None:
@@ -148,7 +148,7 @@ async def score_one_candidate(
         signal,
         results=results,
         dataset=dataset,
-        merged_pp=merged_pp,
+        effective_pipeline_params=effective_pipeline_params,
         round_num=round_num,
         elim_check=elim_check,
         candidate_id=osp_c.lineage.id,

@@ -617,8 +617,8 @@ async def post_command(
         extras["candidate_id"] = _optional_string(payload, "candidate_id", max_len=128)
         # Operator-steered seed (edited searchpoint + reconciled limit overrides)
         # + the editor's identity. The seed is required — every operator fork is
-        # `operator_steered`. The dispatcher validates it into a typed `ForkSeed`
-        # (schema: m12-api-openapi.yaml::ForkSeed).
+        # `operator_steered`. The dispatcher validates it into a typed `OperatorForkOverride`
+        # (schema: m12-api-openapi.yaml::OperatorForkOverride).
         extras["seed"] = payload.get("seed")
         extras["steered_by"] = _optional_string(payload, "steered_by", max_len=256)
     elif kind == "change-spend-budget":

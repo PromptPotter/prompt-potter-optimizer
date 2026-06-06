@@ -278,7 +278,7 @@ async def commit_draft_to_dataset(
 
     pipeline_json = _build_origin_pipeline_json(draft)
     campaign_json = _build_default_campaign_json(draft)
-    prompt_default = _build_default_prompt(draft)
+    prompt_default = draft.committed_prompt_fields()
     task_context = _build_task_context(draft)
 
     stores.tenant_datasets.commit_draft(
@@ -470,20 +470,6 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
             "optimizer_llm": optimizer_llm,
         },
     }
-
-
-def _build_default_prompt(draft: DraftCampaign) -> dict[str, Any]:
-    """The campaign's starting prompt, written to ``prompts/default.json``.
-
-    When the draft carries ``origin_prompt_fields`` (the check-in's decomposition,
-    an authored dataset's prompt, or the operator's edits) it's written
-    verbatim — a valid ``PromptTemplate.prompt_field_dict()`` shape. Otherwise
-    we floor the prompt on ``instruction`` from the task description (a real
-    PromptTemplate field — the prior ``task_description``/``instructions`` keys
-    were not, so the committed prompt loaded empty)."""
-    if draft.origin_prompt_fields:
-        return dict(draft.origin_prompt_fields)
-    return {"instruction": draft.raw_task_description}
 
 
 def _build_task_context(draft: DraftCampaign) -> dict[str, Any]:

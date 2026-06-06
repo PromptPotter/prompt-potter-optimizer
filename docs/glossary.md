@@ -133,21 +133,22 @@ The persisted world is a four-entity containment hierarchy
   when steered — its `.overrides/seed.json` (bootstrap read). Carries
   `{trigger, reason, issued_by, from_round, from_candidate_id, seed}`.
   Absorbs the old free-dict `index.json::fork` + ledger `ForkPayload`.
-- **ForkSeed** — the edited-searchpoint origin override carried by every
-  operator-steered fork's `ForkSpec` (`domain/run_records.py`):
-  `{starting_prompt, pipeline_overlay, limit_overrides}`. The seed prompt
+- **OperatorForkOverride** — the edited-searchpoint origin override carried by
+  every operator-steered fork's `ForkSpec` (`domain/run_records.py`; domain twin
+  of the wire `OperatorForkOverride` schema):
+  `{origin_prompt_fields, pipeline_overlay, limit_overrides}`. The seed prompt
   becomes the fork's origin `OptSearchPoint` (`resolve_origin_opt_search_point`,
   lineage `source="fork_seed"`) and `pipeline_overlay` layers onto the dataset
   overlay (seed > dataset) for that fork only. The dataset file stays immutable.
   Non-operator triggers (sweep / diag / rebase) carry no seed.
 - **operator_steered** — the `ForkTrigger` for an operator-initiated fork:
   the operator picks a searchpoint, edits its prompt / node config / run
-  limits, and forks from it (the `ForkSeed` is required). Restarts round
+  limits, and forks from it (the `OperatorForkOverride` is required). Restarts round
   numbering at 1. Replaced the free-string `operator_hitl`. Queryable in the
   lineage tree (`lineage.py`).
 - **Cycle override store** — `CycleOverrideMixin` (`store/campaign_store/`)
   writes/reads `cycles/{id}/.overrides/seed.json`, the **read-once**
-  per-cycle override home (a steered fork's `ForkSeed`), distinct from
+  per-cycle override home (a steered fork's `OperatorForkOverride`), distinct from
   `.runtime/{stop,pause,spend_cap}` which are **polled** per round. The
   dir name encodes read-cadence; the seed is read at the single runner
   seam (`runner/entry.py::run_optimization`) keyed by the fork `cycle_id`.

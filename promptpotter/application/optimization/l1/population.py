@@ -1,6 +1,6 @@
 """L1 population shaping: project proposals → OSP + build score reports.
 
-Sits between L1 generation (``CandidateProposal``) and L1 scoring (``CandidateScore``).
+Sits between L1 generation (``CandidateProposal``) and L1 scoring (``ScoredCandidate``).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import (
     CandidateProposal,
-    CandidateScore,
+    ScoredCandidate,
 )
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,7 @@ def build_score_report(
     invalid: bool = False,
     new_runtime_failure: RuntimeFailure | None = None,
     l1_diversity: float = 1.0,
-) -> CandidateScore:
+) -> ScoredCandidate:
     """Typed candidate score report — stable shape, defaults always present.
 
     ``label`` is the persisted display identity (``C0`` origin / ``CN.M`` L1).
@@ -129,7 +129,7 @@ def build_score_report(
     (DegradationCheck abort) are mutually exclusive — renderer branches on which is non-empty.
     """
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
-    return CandidateScore(
+    return ScoredCandidate(
         candidate_id=osp.lineage.id,
         label=label,
         changes_description=osp.lineage.changes_description or "",

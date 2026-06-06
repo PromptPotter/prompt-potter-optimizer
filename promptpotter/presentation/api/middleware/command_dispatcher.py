@@ -46,7 +46,7 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
-from promptpotter.domain.run_records import CommandRecord, ForkSeed
+from promptpotter.domain.run_records import CommandRecord, OperatorForkOverride
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import (
@@ -751,8 +751,8 @@ def _optional_float(raw: object) -> float | None:
     return None
 
 
-def _parse_fork_seed(raw: object) -> ForkSeed:
-    """Validate the required ``fork-cycle`` seed into a typed :class:`ForkSeed`.
+def _parse_fork_seed(raw: object) -> OperatorForkOverride:
+    """Validate the required ``fork-cycle`` seed into a typed :class:`OperatorForkOverride`.
 
     Every operator fork is `operator_steered` and carries a seed (the edited
     searchpoint + reconciled limits). A missing or malformed seed is a 422 (the
@@ -763,7 +763,7 @@ def _parse_fork_seed(raw: object) -> ForkSeed:
             422, {"error": "payload_invalid", "message": "payload.seed (object) is required."}
         )
     try:
-        return ForkSeed.model_validate(raw)
+        return OperatorForkOverride.model_validate(raw)
     except ValidationError as exc:
         raise HTTPException(
             422, {"error": "payload_invalid", "message": f"payload.seed invalid: {exc}"}

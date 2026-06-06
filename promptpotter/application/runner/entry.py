@@ -37,7 +37,7 @@ from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import CycleError, CycleResult
-from promptpotter.domain.run_records import ForkSeed, ForkSpec, LimitOverrides
+from promptpotter.domain.run_records import ForkSpec, LimitOverrides, OperatorForkOverride
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.models import emit_error_record
@@ -141,7 +141,7 @@ def _apply_limit_overrides(
     return new_config, effective_spend
 
 
-def _read_fork_seed(session: Session) -> ForkSeed | None:
+def _read_fork_seed(session: Session) -> OperatorForkOverride | None:
     """Read this cycle's declared-at-fork seed, or ``None`` for a non-steered run.
 
     The fork cycle_id is known (active-pointer / override, not hashed) and set on

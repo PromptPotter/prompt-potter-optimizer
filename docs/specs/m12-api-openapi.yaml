@@ -1496,9 +1496,9 @@ components:
                 Operator identity stamped into lineage as the human who steered
                 this fork. Recorded, not gated — operators may act; we record it.
             seed:
-              $ref: '#/components/schemas/ForkSeed'
+              $ref: '#/components/schemas/OperatorForkOverride'
 
-    ForkSeed:
+    OperatorForkOverride:
       type: object
       additionalProperties: false
       description: |
@@ -1507,7 +1507,7 @@ components:
         (all are `operator_steered`). Persisted to the fork's `.overrides/seed.json`
         (read once at bootstrap) and onto the parent's `FORK_CUT` ledger record.
       properties:
-        starting_prompt:
+        origin_prompt_fields:
           type: object
           additionalProperties: true
           description: |
@@ -1856,22 +1856,21 @@ components:
         - slug
         - sample_preview
         - n_samples
-        - derived_from_dataset
         - connector
         - scoring_composite
         - max_rounds
-        - task_description
+        - raw_task_description
         - pipeline_overlay
         - optimizer_provider
         - optimizer_model
         - headers
         - column_query
         - column_ground_truth
-        - resolved
-        - sources
+        - field_provenance
+        - origin_prompt_fields
+        - lock_model
         - created_at
         - updated_at
-        - optimizer_locks
       additionalProperties: false
       description: |
         Server-held canonical state for an in-progress dataset ingest. Mutated
@@ -1899,25 +1898,21 @@ components:
           minItems: 0
           maxItems: 10
           description: |
-            First 10 parsed rows; read-only. Header-agnostic — each row is
-            the raw uploaded record keyed by its own column headers (not yet
-            mapped to `query` / `ground_truth`; that mapping is `column_query`
-            / `column_ground_truth`, resolved on the draft and gated at mint).
+            First 10 parsed rows; read-only. Projected to the `{query,
+            ground_truth}` wire shape using the resolved `column_query` /
+            `column_ground_truth` mapping (the internal bank stays keyed by raw
+            headers). Both fields are blank until the columns are confirmed.
           items:
             type: object
-            additionalProperties: { type: string }
+            required: [query, ground_truth]
+            additionalProperties: false
+            properties:
+              query: { type: string }
+              ground_truth: { type: string }
         n_samples:
           type: integer
           minimum: 0
           description: Total parsed row count (preview is a head; this is the bank size).
-        derived_from_dataset:
-          type: boolean
-          description: |
-            True iff the draft was pre-filled from an existing on-disk dataset
-            (`source_file` = `dataset:{slug}` — a demo/benchmark pick), vs. a
-            fresh operator upload. The setup wizard keys its "pre-filled, AI
-            check-in not needed" branch on this, NOT on the global
-            `demo_mode_enabled` preference (which only surfaces demo datasets).
         connector:
           type: string
           minLength: 1
@@ -1942,7 +1937,7 @@ components:
           description: |
             Smart-default `5` (matches the M10 prompt-iteration framework
             default). Operator-editable.
-        task_description:
+        raw_task_description:
           type: string
           maxLength: 16384
           description: Free-form framing; chat negotiates content. Empty string on first ingest.
@@ -1958,22 +1953,25 @@ components:
           type: string
           minLength: 1
           maxLength: 32
-          default: groq
+          default: openrouter
           description: |
             Optimizer LLM provider name (`groq`, `openai`, `anthropic`,
-            `openrouter`). Smart-default `groq` (free tier, fastest startup).
-            Operator-editable via panel; the resolved list of providers
-            available in this install — gated on whether the corresponding
-            API key is set — is served by `GET /llm-providers`.
+            `openrouter`). Smart-default `openrouter` — NOT `groq`: the optimizer
+            meta-prompt is ~20k+ tokens, which blows Groq's free `on_demand` tier
+            (8k TPM) on round 1, so every wired benchmark runs the optimizer on
+            OpenRouter. Operator-editable via panel; the resolved list of
+            providers available in this install — gated on whether the
+            corresponding API key is set — is served by `GET /llm-providers`.
         optimizer_model:
           type: string
           maxLength: 128
-          default: ''
+          default: openai/gpt-oss-120b
           description: |
             Optimizer LLM model id (e.g. `openai/gpt-oss-120b`,
-            `claude-sonnet-4-6`). Empty string means "use the connector's
-            recommended default for this provider"; the curated per-provider
-            model list is exposed by `GET /llm-providers`.
+            `claude-sonnet-4-6`). Pinned default `openai/gpt-oss-120b` (valid on
+            the OpenRouter provider default, reproducible committed
+            `campaign.json`); the curated per-provider model list is exposed by
+            `GET /llm-providers`.
         headers:
           type: array
           items: { type: string }
@@ -1995,101 +1993,48 @@ components:
           description: |
             Which uploaded header carries the target string. Same resolution
             rules as `column_query` (literal `ground_truth` auto-confirms).
-        resolved:
+        field_provenance:
           type: object
           additionalProperties:
             type: string
             enum: [unset, proposed, confirmed]
           description: |
-            Per-field provenance for the origin-readiness checklist. Keys are
-            dotted field names spanning the closed set: the column mapping
-            (`column.query`, `column.ground_truth`), `task_description`, and the
-            config knobs (`connector`, `scoring_composite`, `max_rounds`,
-            `optimizer.provider`, `optimizer.model`, `backend.node_config`).
+            Per-field provenance for the origin-readiness checklist. Keys are the
+            checklist field ids — only the genuinely-stated fields: the column
+            mapping (`column.query`, `column.ground_truth`) and `task_description`.
             Values are `unset` (no value), `proposed` (an inference awaiting
             confirmation), or `confirmed` (operator-stated or auto-confirmed).
-            The config knobs auto-confirm from template defaults at ingest;
-            `task_description` lands `unset` (no default framing). No field
-            reaches mint while `unset` or `proposed`. The deterministic
-            checklist gates; see
-            `docs/specs/m10-origin-resolution-checkin.md`.
-        sources:
+            `task_description` lands `unset` (no default framing); a column
+            auto-confirms only on a literal `query` / `ground_truth` header.
+            Config knobs carry a default and are not gated, so they get no entry.
+            No field reaches mint while `unset` or `proposed`. The deterministic
+            checklist gates; see `docs/specs/m10-origin-resolution-checkin.md`.
+        origin_prompt_fields:
           type: object
-          additionalProperties:
-            type: string
-            enum: [auto, stated]
+          additionalProperties: true
           description: |
-            Per-field source — orthogonal to `resolved`. `auto` = the value was
-            machine-set (a template default auto-confirmed at ingest, a literal
-            column auto-detect, or a resolver finding); `stated` = the operator
-            set it explicitly via `edit-draft-campaign`. Only fields that have a
-            value (`proposed` / `confirmed`) appear here; `unset` fields carry no
-            source. A `confirmed + auto` entry is a once-hidden default now made
-            visible; `confirmed + stated` is an operator choice. Audit-only — the
-            gate verdict reads `resolved`, never this.
+            The campaign's origin prompt — a `PromptTemplate.prompt_field_dict()`
+            shape (the six string fields + optional `few_shot_examples`). Seeded
+            by the check-in node's decomposition, or from an authored dataset's
+            prompt on the derived-draft path; operator-editable before commit and
+            written verbatim to `prompts/default.json` at mint. `{}` until the
+            check-in fills it (the commit then floors on `raw_task_description`).
+        lock_model:
+          type: boolean
+          default: true
+          description: |
+            Whether the optimizer is barred from mutating model/provider
+            campaign-wide (the `forbidden_axes_strict` knob). Default locked —
+            the conservative floor; operator-editable in the pipeline-config
+            panel. Drives the committed
+            `campaign.json::optimization.forbidden_axes_strict` and the derived
+            optimizer-locks permission view.
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-        optimizer_locks:
-          type: object
-          required: [pipeline, forbidden_axes, nodes]
-          additionalProperties: false
-          description: |
-            The backend-pipeline permission surface the new-campaign UI renders
-            *before* commit — the connector's node-config seed (which a draft's
-            empty `pipeline_overlay` otherwise hides) merged with any operator
-            overlay edit, plus the campaign-wide forbidden axes. Read-only,
-            server-derived per request; it exists to show that the optimizer is
-            *locked out* of escalating certain params (model/provider campaign-
-            wide; `reasoning_effort` above the connector floor), not merely that
-            a value is the default. Mirrors the commit-time
-            `pipeline.json::nodes` merge so the two never drift.
-          properties:
-            pipeline:
-              type: array
-              items: { type: string }
-              description: |
-                The connector's first-tenant default pipeline step list
-                (`Connector.default_pipeline`) — e.g. `["llm_only"]` for a fresh
-                TermNorm CSV. Empty means "no override; the backend's
-                `GET /pipeline` default stands."
-            forbidden_axes:
-              type: array
-              items: { type: string }
-              description: |
-                Params the optimizer may never permute on any node when
-                `forbidden_axes_strict` is on (the default) — `["model",
-                "provider"]`. Empty when strict mode is off.
-            nodes:
-              type: object
-              additionalProperties:
-                type: object
-                required: [config, param_allowed_values]
-                additionalProperties: false
-                properties:
-                  config:
-                    type: object
-                    additionalProperties: true
-                    description: |
-                      The effective per-node config floor (connector seed +
-                      overlay) — e.g. `{ "reasoning_effort": "low",
-                      "temperature": 0.0 }`. The active value of each control.
-                  param_allowed_values:
-                    type: object
-                    additionalProperties:
-                      type: array
-                      items: { type: string }
-                    description: |
-                      The closed set of values the optimizer may permute per
-                      param — e.g. `{ "reasoning_effort": ["none","default",
-                      "low"] }`. Any ladder value absent here renders crossed-out
-                      (optimizer locked out).
-              description: |
-                Per-node permission block, keyed by node name. Mirrors the merged
-                `pipeline.json::nodes` the commit step writes.
 
     ResolveOriginPayload:
       type: object
@@ -2099,7 +2044,7 @@ components:
         One resolver turn against an existing `DraftCampaign`. Tenant-scoped —
         a `draft_id` resolving to a different `IdentityContext.tenant_id`
         returns 404 (existence-leak gate). The operator's latest framing is
-        read off the draft's `task_description`; no separate message field this
+        read off the draft's `raw_task_description`; no separate message field this
         slice.
       properties:
         draft_id:
@@ -2110,7 +2055,7 @@ components:
 
     OriginResolution:
       type: object
-      required: [complete, provenance, sources, values, gaps]
+      required: [complete, provenance, values, gaps]
       additionalProperties: true
       description: |
         The draft's checklist state after a resolver turn, mirroring the
@@ -2127,14 +2072,6 @@ components:
             type: string
             enum: [unset, proposed, confirmed]
           description: Per-field provenance for every closed-set checklist field.
-        sources:
-          type: object
-          additionalProperties:
-            type: string
-            enum: [auto, stated]
-          description: |
-            Per-field source (`auto` / `stated`) — the audit sub-tag mirroring
-            `DraftCampaign.sources`. Only valued fields appear.
         values:
           type: object
           additionalProperties: true
@@ -2211,9 +2148,12 @@ components:
               type: integer
               minimum: 1
               maximum: 100
-            task_description:
+            raw_task_description:
               type: string
               maxLength: 16384
+              description: |
+                Sets the task framing. An operator edit CONFIRMS it, opening the
+                origin-readiness gate for the field (checklist id `task_description`).
             pipeline_overlay:
               type: object
               additionalProperties: true
@@ -2231,14 +2171,24 @@ components:
               description: |
                 Confirm which uploaded header is the input column. Must be a
                 member of the draft's `headers` (422 otherwise). Setting it
-                moves `resolved["column.query"]` to `confirmed`.
+                moves `field_provenance["column.query"]` to `confirmed`.
             column_ground_truth:
               type: string
               maxLength: 256
               description: |
                 Confirm which uploaded header is the target column. Same
-                membership rule; moves `resolved["column.ground_truth"]` to
-                `confirmed`.
+                membership rule; moves `field_provenance["column.ground_truth"]`
+                to `confirmed`.
+            origin_prompt_fields:
+              type: object
+              additionalProperties: true
+              description: |
+                Replaces (not deep-merges) the draft's origin prompt — the editor
+                sends the full `PromptTemplate.prompt_field_dict()` object.
+            lock_model:
+              type: boolean
+              description: |
+                Toggle the campaign-wide model/provider lock (`forbidden_axes_strict`).
 
     MintCampaignFromDraftPayload:
       type: object

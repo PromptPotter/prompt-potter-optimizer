@@ -13,7 +13,6 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
 __all__ = [
     "CandidateProposal",
-    "CandidateScore",
     "CycleResult",
     "DiagnosticRunRecord",
     "OriginSummary",
@@ -24,6 +23,7 @@ __all__ = [
     "RoundResult",
     "RoundSummary",
     "RoundSummaryCandidate",
+    "ScoredCandidate",
     "SweepBatchResult",
     "candidate_label",
     "is_round_winner",
@@ -47,7 +47,7 @@ def is_round_winner(changes_description: str | None, winner_label: str) -> bool:
 
 
 @dataclass(frozen=True)
-class CandidateScore:
+class ScoredCandidate:
     """One candidate's L1 score report. Typed in `score_population`, flattened via `to_dict`."""
 
     candidate_id: str
@@ -272,7 +272,7 @@ class DiagnosticRunRecord(BaseModel):
 
 
 class RoundSummaryCandidate(BaseModel):
-    """Display-summary row for `dashboard.json::rounds[].candidates` — chart/lineage/sparkline subset of `CandidateScore`."""
+    """Display-summary row for `dashboard.json::rounds[].candidates` — chart/lineage/sparkline subset of `ScoredCandidate`."""
 
     model_config = ConfigDict(frozen=True)
 

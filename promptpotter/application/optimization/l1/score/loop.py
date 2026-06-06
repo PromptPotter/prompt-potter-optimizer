@@ -26,7 +26,7 @@ from promptpotter.application.optimization.resume_and_fork import ResumeCheckpoi
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import CandidateProposal, CandidateScore
+from promptpotter.domain.results import CandidateProposal, ScoredCandidate
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.tracing import CandidateScored
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 async def score_population(
     cycle: Cycle,
     population: list[OptSearchPoint],
-    merged_pp: list[dict[str, Any] | None],
+    effective_pipeline_params: list[dict[str, Any] | None],
     proposals: list[CandidateProposal],
     dataset: list[Sample],
     *,
@@ -52,14 +52,14 @@ async def score_population(
     round_num: int = 0,
     decisions: list[ResumeCheckpointRecord] | None = None,
     l1_diversity: float = 1.0,
-) -> tuple[dict[str, list[QueryMeasurement]], list[CandidateScore], EscalationSignal | None]:
+) -> tuple[dict[str, list[QueryMeasurement]], list[ScoredCandidate], EscalationSignal | None]:
     """Score each individual; per-candidate body in `score_one_candidate`. Owns the ESCALATED break."""
     session = cycle.session
     obs = session.state.obs
     n = len(population)
 
     all_candidate_results: dict[str, list[QueryMeasurement]] = {}
-    candidate_scores: list[CandidateScore] = []
+    candidate_scores: list[ScoredCandidate] = []
     escalation_signal: EscalationSignal | None = None
 
     async def _pobb_backfill(sp: JobSearchPoint, samples: list[Sample]) -> list[QueryMeasurement]:
@@ -253,7 +253,7 @@ async def score_population(
             cycle=cycle,
             dataset=dataset,
             n_total=n,
-            merged_pp=merged_pp[idx],
+            effective_pipeline_params=effective_pipeline_params[idx],
             elim_check=elim_check,
             callbacks=callbacks,
             degradation_checks=degradation_checks,

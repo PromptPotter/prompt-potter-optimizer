@@ -12,7 +12,7 @@ All :class:`ForkTrigger` variants wired:
   (``fork_from_round=0`` + ``sweep_batch_id`` + ``sweep_source_file``).
 * ``OPERATOR_STEERED`` — operator fork from the lineage/control panel
   (``fork_from_round=0``, ``_fork_`` id), carrying an edited-searchpoint
-  ``ForkSeed`` written to ``.overrides/seed.json``. Application entry:
+  ``OperatorForkOverride`` written to ``.overrides/seed.json``. Application entry:
   ``operator_fork.py::mint_operator_fork``.
 
 A fork is a new *cycle* inside the **same campaign** — all cycles land

@@ -1,6 +1,6 @@
 # Code-Debt Cleanup — Backlog
 
-**Status:** Reference — perpetual living backlog. Tiers 0–6 + polish arcs A–E + audits 1–3 closed by 2026-05-25. Active items: TermNorm wire model (cross-repo) + three deep-indirection architectural collapses (scoped, not slated). The 2026-06-04 seam-enforcement arc shipped. The M13+ intentional-UI-placeholder registry is permanent reference.
+**Status:** Reference — perpetual living backlog. Tiers 0–6 + polish arcs A–E + audits 1–3 closed by 2026-05-25. Active items: TermNorm wire model (cross-repo) + the 2026-06-06 ingest/origin model-alignment slate + three deep-indirection architectural collapses (scoped, not slated). The 2026-06-04 seam-enforcement arc + the 2026-06-06 ingest/origin teardown (commit `fdb5d95f`) shipped. The M13+ intentional-UI-placeholder registry is permanent reference.
 
 **Scope is literal: code debt only.** Dead code, redundant guards,
 single-caller indirections, premature optimizations that no longer
@@ -35,6 +35,16 @@ patterns.
 Remaining after the 2026-05-28 unblocker arc (shipped: webapp source maps, connector revision pinning, local Dex OIDC harness at `dev/oidc-local/`, cycle fixtures + Vitest harness at `tests/fixtures/cycles/` and `webapp/lib/**/__tests__/`, React #185 render-phase fix, L2/L3-terminal empty-historical fix):
 
 1. **TermNorm wire `model`** — cross-repo edit at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`. With the connector revision-pin landed (`promptpotter/connectors/protocol.py::Connector.{expected_revision, version_check}`), the TermNorm-side PR adds `model` to the per-request response + a `/version` endpoint; this repo bumps `termnorm.py::_EXPECTED_REVISION` to the new SHA and deletes the `_synth_legacy_backend_record` back-fill in `presentation/api/routers/auth.py`.
+
+### Ingest/origin model-alignment slate (2026-06-06)
+
+The ingest/origin unify + name-alignment arc (commit `fdb5d95f`) landed the `field_provenance` / `origin_prompt_fields` / `raw_task_description` / `decomposed_task_context` renames and tore out the intermediate-state residue (a dead `_coerce` branch, the duplicate `thinkingLadder` derivation, a doubled "Starting prompt" header, wizard-era CSS, ~8 stale breadcrumbs). The items below finish aligning the optimizer/origin code to the §0 model — **one shape per concept, fewer lines, AI-legible names.**
+
+Shipped this session (git log is the history): item 1 (`committed_prompt_fields()` collapse), item 2 (the `origin_search_point` in-memory slot rename), item 3 (the optimizer/origin symbol-rename cluster → `resolved_origin` / `OperatorForkOverride` / `ScoredCandidate` / `effective_pipeline_params` + `ORIGIN_RESOLUTION_PRIORITY`), item 4 (dropped — the `HardSamplesScope` "origin" homonym does not exist; scopes are already `cycle`/`campaign`/`dataset`), item 6 (OpenAPI `DraftCampaign` reconciled to the shipped `to_wire()`). The two below stay — both gated on a live L1 round.
+
+5. **L1 delta keys `*_override` → `*_updates` (on-disk contract — do last, live-verify)** — `prompt_fields_override` / `task_context_override` / `pp_override`(+`pipeline_params_override`) are merges, not replacements, but the name says "override." Rename the schema (`dispatch/schemas.py`) + parser (`l1/generate.py`) + the `l1_generate` meta-prompt text + the dashboard candidate writers AND the webapp readers (`poll.tsx` `LiveInputCandidate`, `candidateSearchPoint.ts`, `searchPoint.ts`) together — the webapp readers were intentionally left on the old keys pending this. **Load-bearing check:** changes the optimizer LLM's structured-output contract + invalidates on-disk cycles — verify a live L1 round still parses before landing. **Blocker:** one live round (operator-gated).
+
+7. **Webapp duplicate searchpoint projection** (do alongside item 5) — `searchPoint.ts::liveInFlightSearchPoint` and `candidateSearchPoint.ts` both map wire `prompt_fields`/`pp_override` → `{origin_prompt_fields, pipeline_overlay}`. **Action:** one `wireToCandidateSearchPoint(wire)` helper both call — also collapses item 5's reader change to a single site.
 
 ### Operator-steered-fork drift (v0.8.1 — found 2026-06-03)
 

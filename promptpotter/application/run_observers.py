@@ -329,7 +329,7 @@ def _ensure_session_minted(
         return
 
     prompt_nodes = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
-    origin_osp = resolve_origin_opt_search_point(
+    resolved_origin = resolve_origin_opt_search_point(
         session.experiment_extract or {},
         prompt_node_names=prompt_nodes,
         dataset_dir=session.dataset_config_dir,
@@ -337,9 +337,9 @@ def _ensure_session_minted(
     auto_mint_session(
         session,
         campaign_config,
-        cycle_id=build_origin_cycle_id(origin_osp, session.pipeline_schema, dataset),
+        cycle_id=build_origin_cycle_id(resolved_origin, session.pipeline_schema, dataset),
         origin_acc=origin_accuracy,
-        origin_prompt_fields=origin_osp.prompt_field_dict(),
+        origin_prompt_fields=resolved_origin.prompt_field_dict(),
         dataset_size=len(dataset),
         experiment_id=experiment_id,
     )

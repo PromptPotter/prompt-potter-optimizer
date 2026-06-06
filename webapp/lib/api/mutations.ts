@@ -65,12 +65,12 @@ export interface LimitOverrides {
   pobb_epsilon?: number;
 }
 
-// The edited-searchpoint origin override — twin of the OpenAPI `ForkSeed`.
-// Required on every operator fork (all are `operator_steered`). `origin_prompt_fields`
-// is the PromptTemplate field shape; `pipeline_overlay` is the candidate's
-// `nodes.*.config` delta, carried verbatim and merged onto the dataset overlay
-// at fork bootstrap.
-export interface ForkSeed {
+// The edited-searchpoint origin override — twin of the OpenAPI
+// `OperatorForkOverride`. Required on every operator fork (all are
+// `operator_steered`). `origin_prompt_fields` is the PromptTemplate field shape;
+// `pipeline_overlay` is the candidate's `nodes.*.config` delta, carried verbatim
+// and merged onto the dataset overlay at fork bootstrap.
+export interface OperatorForkOverride {
   origin_prompt_fields?: Record<string, unknown>;
   pipeline_overlay?: Record<string, unknown>;
   limit_overrides?: LimitOverrides;
@@ -83,7 +83,7 @@ export async function postForkCycle(
   cycleId: string,
   round: number,
   candidateId: string,
-  opts: { seed: ForkSeed; steeredBy?: string },
+  opts: { seed: OperatorForkOverride; steeredBy?: string },
 ): Promise<CommandAcceptedBody> {
   const payload: Record<string, unknown> = {
     campaign_id: campaignId,

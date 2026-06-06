@@ -90,16 +90,16 @@ def _merge_into_cumulative(
 
 
 def _build_initial_opt_sp(
-    origin_osp: OptSearchPoint, task_context: TaskDecomposition
+    resolved_origin: OptSearchPoint, task_context: TaskDecomposition
 ) -> OptSearchPoint:
     """Seed the optimizer state from a scored origin: nest task_context + a copied
     l1_overrides dict under ``memory`` so L2/L3 mutations don't share references."""
-    return origin_osp.model_copy(
+    return resolved_origin.model_copy(
         update={
-            "memory": origin_osp.memory.model_copy(
+            "memory": resolved_origin.memory.model_copy(
                 update={
                     "task_context": task_context,
-                    "l1_overrides": dict(origin_osp.memory.l1_overrides),
+                    "l1_overrides": dict(resolved_origin.memory.l1_overrides),
                 }
             ),
         }
@@ -211,7 +211,7 @@ class Cycle:
     @classmethod
     def start(
         cls,
-        origin_osp: OptSearchPoint,
+        resolved_origin: OptSearchPoint,
         origin_accuracy: float,
         *,
         task_context: TaskDecomposition,
@@ -231,7 +231,7 @@ class Cycle:
             if origin_results and schema is not None
             else origin_accuracy
         )
-        opt_sp = _build_initial_opt_sp(origin_osp, task_context)
+        opt_sp = _build_initial_opt_sp(resolved_origin, task_context)
         # Pass session.pipeline_params (carries dataset overlay) — schema.to_pipeline_params() is sparse and strips operator config.
         sp = opt_sp.to_job_search_point(
             base_pipeline_params=session.pipeline_params or None,
