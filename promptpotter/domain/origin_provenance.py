@@ -7,7 +7,7 @@ the field has no value yet (``UNSET``), an inference is awaiting confirmation
 deterministic ``origin_readiness`` checklist gates on it.
 
 Frozen domain vocabulary, shared by the application-layer checklist + the
-draft-campaign object. Spec: ``docs/specs/m10-origin-resolution-checkin.md``.
+draft-campaign object. Spec: ``docs/specs/roadmap.md``.
 """
 
 from __future__ import annotations

@@ -2,8 +2,6 @@
 
 This is the **architecture reference** — the single page (plus the
 load-bearing surface list in §0.5) that every PR measures against.
-Extracted from `docs/specs/archive/m10-cleanup.md` (cleanup spec
-complete + archived) per its Execution order step 0.
 
 **AI assistant readers, start here.** §0 below is the **entry
 point**. Read it first to know the shape of the project. It fits on

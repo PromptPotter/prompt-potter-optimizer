@@ -1,7 +1,7 @@
 """Origin-resolution loop — one resolver turn against a ``DraftCampaign``.
 
 The proposer half of the proposer/gate split (spec:
-``docs/specs/m10-origin-resolution-checkin.md``). One turn:
+``docs/specs/roadmap.md``). One turn:
 
 1. Assemble a deterministic origin-context message from the draft + open gaps +
    the operator's latest message (``build_origin_consultation`` — no LLM

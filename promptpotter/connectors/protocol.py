@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 # to a live ``/matches`` endpoint (TermNorm + any external backend);
 # ``in_process`` runs an inner PromptPotter cycle (L4 self-recursion) with no
 # HTTP transport. The inner-cycle execution path itself is Lane C3 (see
-# ``docs/specs/m12-multi-connector.md`` § Track 1.5) — until it lands,
+# ``docs/specs/roadmap.md`` § Track 1.5) — until it lands,
 # ``run_query`` raises on an ``in_process`` connector. A future hosted/worker
 # execution mode extends this enum without touching the loop.
 ConnectorExecution = Literal["remote_http", "in_process"]

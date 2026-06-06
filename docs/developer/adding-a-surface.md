@@ -164,7 +164,7 @@ at `get()`, and an `in_process` connector raises a pointed `NotImplementedError`
 at `run_query`. The execution-mode *declaration* + dispatch seam + completeness
 guard are in place; what's deferred is only the inner-cycle **run** itself
 (in-process vs localhost endpoint + the three proxy metrics) — Lane C3 /
-[`specs/m12-multi-connector.md`](../specs/m12-multi-connector.md) § Track 1.5.
+[`specs/roadmap.md`](../specs/roadmap.md) § Track 1.5.
 
 Contract: [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
 

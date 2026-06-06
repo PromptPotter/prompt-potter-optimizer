@@ -6,7 +6,7 @@ PromptPotter cycle's meta-prompts (``l1_generate`` / ``l1_critique`` /
 cheap proxy benchmark; the outer L1's mutation surface is the inner
 meta-prompt template fields, exposed via ``pipeline_params``.
 
-See ``docs/specs/m12-multi-connector.md`` for the full design —
+See ``docs/specs/roadmap.md`` for the full design —
 five-hook contract, three composable inner-cycle proxies
 (``first_round_delta`` / ``after_N_rounds_delta`` / ``rounds_to_N``), inner
 isolation under ``.runtime/inner/``, cost-realism warning.
@@ -17,7 +17,7 @@ the protocol; ``promptpotter_wire_adapter`` shapes the inner-cycle payload;
 ``execution="in_process"`` — the capability the loop dispatches on. The piece
 that actually runs an inner cycle (consuming the wire payload and producing
 result dicts with the three proxy metrics) is Lane C3
-(``docs/specs/m12-multi-connector.md`` § Track 1.5). Until it lands, an outer
+(``docs/specs/roadmap.md`` § Track 1.5). Until it lands, an outer
 cycle pointed at this connector loads + validates fine, then ``BackendClient.run_query``
 raises a pointed ``NotImplementedError`` on the first inner match request —
 keyed on the declared ``in_process`` mode, not a confusing transport error

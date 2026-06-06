@@ -1,6 +1,6 @@
 # Spec: Verdict-Resolution Adaptive Queue Mechanism
 
-**Status:** Phase 1 **shipped** (`c714bffd`) — `explore_weight`, `model_information_gain`, `predictive_hit_prob` removed from `promptpotter/`; ranking unified on `decision_information_gain`. Supersedes [`bayesian-sample-picker.md`](archive/bayesian-sample-picker.md). Phase 2 (origin-relative observation weighting) deferred.
+**Status:** Phase 1 **shipped** (`c714bffd`) — `explore_weight`, `model_information_gain`, `predictive_hit_prob` removed from `promptpotter/`; ranking unified on `decision_information_gain`. Supersedes `bayesian-sample-picker.md`. Phase 2 (origin-relative observation weighting) deferred.
 
 ---
 
@@ -152,4 +152,4 @@ To be answered with the operator before implementation:
 - Observation: `promptpotter/application/intelligence/exploration.py:38-44`
 - Persisted ranking writer: `promptpotter/application/intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`
 - Companion: [`hard-sample-sorter.md`](hard-sample-sorter.md)
-- Superseded: [`bayesian-sample-picker.md`](archive/bayesian-sample-picker.md)
+- Superseded: `bayesian-sample-picker.md`

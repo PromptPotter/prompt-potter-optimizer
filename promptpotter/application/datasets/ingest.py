@@ -7,8 +7,8 @@ the API handler) is what makes CLI/web parity real — neither surface owns the
 logic, both call this. The handler/CLI translate the raised errors to their own
 shape (HTTP status vs. stderr); the orchestration is identical.
 
-Spec: ``docs/specs/m10-origin-resolution-checkin.md`` +
-``docs/specs/m13-chat-first-user-web.md § Ingest``.
+Spec: ``docs/specs/roadmap.md`` +
+``docs/specs/roadmap.md § Ingest``.
 """
 
 from __future__ import annotations

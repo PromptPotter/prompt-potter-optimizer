@@ -1,6 +1,6 @@
 """Hard-sample-sorter — ``(candidate, sample, hit)`` → θ_c-ranked × δ_s-ranked matrix.
 
-Spec: ``docs/specs/archive/hard-sample-sorter.md``.
+Spec: ``git log``.
 """
 
 from __future__ import annotations

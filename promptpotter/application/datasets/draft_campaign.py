@@ -1,7 +1,7 @@
 """Server-held ``DraftCampaign`` + the in-memory registry that owns them.
 
 Wire shape pinned in ``docs/specs/m12-api-openapi.yaml::DraftCampaign``;
-prose at ``docs/specs/m13-chat-first-user-web.md § Draft-campaign object``.
+prose at ``docs/specs/roadmap.md § Draft-campaign object``.
 
 A draft is the mutable target of both surfaces (chat tool-calls + the
 panel "Apply" button). The Origin-shaped subset (slug, task_description,

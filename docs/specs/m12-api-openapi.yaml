@@ -885,7 +885,7 @@ paths:
       summary: Patch a sparse subset of mutable `DraftCampaign` fields.
       description: |
         Drives the chat ↔ panel dual-surface mutation path (see
-        `docs/specs/m13-chat-first-user-web.md § State binding`). Both the
+        `docs/specs/roadmap.md § State binding`). Both the
         assistant tool-call surface and the panel "Apply" button ride this
         same verb. Workspace-scoped — the draft is server-held state, not
         yet a ledger-bearing cycle, so no `Expected-Version`.
@@ -943,7 +943,7 @@ paths:
            `projects/{tenant}/datasets/{slug}/`.
         3. Writes the four Dataset files (`cache.json`, `pipeline.json`,
            `task_description.md`, `prompts/default.json`) per the slot table
-           in `docs/specs/m13-chat-first-user-web.md § Commit path`.
+           in `docs/specs/roadmap.md § Commit path`.
         4. Writes the sibling `campaign.json` (default-campaign config; not
            part of the Dataset's `JobSearchPoint.content_hash(dataset)`).
         5. Falls through to the existing mint-campaign path.
@@ -1084,7 +1084,7 @@ paths:
       summary: Run one origin-resolver turn against a `DraftCampaign`.
       description: |
         The proposer half of the origin proposer/gate split (see
-        `docs/specs/m10-origin-resolution-checkin.md`). One turn: the
+        `docs/specs/roadmap.md`). One turn: the
         origin-aware `checkin` node inspects the draft (headers, sample rows,
         current per-field provenance, open gaps) plus the operator's latest
         framing and proposes evidence-cited values for the unresolved
@@ -1143,7 +1143,7 @@ paths:
       summary: Upload a tabular file; receive a server-held `DraftCampaign` with parsed preview + smart defaults.
       description: |
         Ingest path for the M13 chat-first user web (see
-        `docs/specs/m13-chat-first-user-web.md § Ingest`). Workspace-scoped,
+        `docs/specs/roadmap.md § Ingest`). Workspace-scoped,
         identity-bound by `IdentityContext.tenant_id` — the resulting draft
         (and on commit, the dataset directory) lands at
         `projects/{tenant}/datasets/{slug}/`.
@@ -1428,7 +1428,7 @@ components:
               origin field that still blocks mint. `reason` ∈ `unset` |
               `proposed_unconfirmed`. The deterministic origin-readiness
               checklist — not the operator — is the source of truth for
-              completeness (see `docs/specs/m10-origin-resolution-checkin.md`).
+              completeness (see `docs/specs/roadmap.md`).
 
     # ---- Per-kind command payloads (v0 closed set) ----
     # Each `*Payload` schema is the `payload` field of one command kind.
@@ -2026,7 +2026,7 @@ components:
             auto-confirms only on a literal `query` / `ground_truth` header.
             Config knobs carry a default and are not gated, so they get no entry.
             No field reaches mint while `unset` or `proposed`. The deterministic
-            checklist gates; see `docs/specs/m10-origin-resolution-checkin.md`.
+            checklist gates; see `docs/specs/roadmap.md`.
         origin_prompt_fields:
           type: object
           additionalProperties: true
@@ -2348,7 +2348,7 @@ components:
         deferred to the read-surface PR — pinned here so the wire shape is
         fixed before the read handler lands). Flat list with a `tier`
         discriminator; no two-section UI per
-        `docs/specs/m13-chat-first-user-web.md § Collection`.
+        `docs/specs/roadmap.md § Collection`.
       properties:
         slug:
           type: string

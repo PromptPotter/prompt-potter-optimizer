@@ -1,7 +1,7 @@
 """``origin_readiness`` — the deterministic gate between ingest and mint.
 
 Pure function, no I/O. The proposer/gate split (spec:
-``docs/specs/m10-origin-resolution-checkin.md``) puts *two* parties on
+``docs/specs/roadmap.md``) puts *two* parties on
 "is this origin complete": an LLM resolver *proposes* (the ``checkin`` node,
 origin-aware version), and this checklist *gates*. Mint is blocked until the
 checklist passes; a false ``ready`` from the resolver is rejected and the open

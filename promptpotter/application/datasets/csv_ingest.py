@@ -1,6 +1,6 @@
 """Tabular blob → ``Table`` → ``list[Sample]`` for the chat-first ingest path.
 
-Two stages, deliberately split (per ``docs/specs/m10-origin-resolution-checkin.md``):
+Two stages, deliberately split (per ``docs/specs/roadmap.md``):
 
 * :func:`read_tabular` decodes + parses an uploaded blob into a header-agnostic
   :class:`Table` (headers + raw rows). It does **not** require any particular

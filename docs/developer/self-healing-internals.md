@@ -41,7 +41,7 @@ producer→nurse channel — one detector, one failure record, one nurse
 layer, one prompt slot. Uniform by design.
 
 The **prompt-budget unit** (full spec:
-[`../specs/archive/dispatch-prompt-budget.md`](../specs/archive/dispatch-prompt-budget.md))
+`git log`)
 is a different kind of mechanism — the project's most sophisticated
 healing unit. It guards one concern, the size of a composed optimizer
 meta-prompt, with **four healing modes stacked on one another**:

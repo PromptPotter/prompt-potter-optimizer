@@ -9,7 +9,7 @@ entry is **delete** (or inline, or strip) — verify-first when the
 evidence isn't on disk.
 
 **Not debt — goes elsewhere:**
-- Forward-looking webapp perf / feature work → [`m12-plus-backlog.md` § Webapp Perf](m12-plus-backlog.md)
+- Forward-looking webapp perf / feature work → [`roadmap.md` § Webapp Perf](roadmap.md)
 - New milestones / specs → `docs/specs/`, indexed at [`CLAUDE.md`](CLAUDE.md)
 - Architectural decisions → `docs/architecture.md`
 
@@ -250,7 +250,7 @@ root `CLAUDE.md` is explicit: "Document current state, not
 half-done plans." **Verify the "future" actually isn't on the
 roadmap before flagging** — `ForkTrigger.L2_REBASE` / `L3_REBASE` /
 `OPERATOR_REWIND` looked like vibe-coded scaffolding behind a
-`NotImplementedError` branch, but `m10-prompt-iteration-framework.md`
+`NotImplementedError` branch, but `roadmap.md`
 explicitly schedules them for wiring. They're now active backlog
 ("Wire rebase emission") instead of a delete candidate.
 

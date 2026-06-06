@@ -49,7 +49,7 @@ transport error against a backend that isn't there).
 
 What remains is the **inner-cycle run itself** — consuming the wire payload,
 running the inner cycle, producing the three proxy metrics. That is Lane C3
-(`docs/specs/m12-multi-connector.md` § Track 1.5). Two design options for *how*
+(`docs/specs/roadmap.md` § Track 1.5). Two design options for *how*
 `in_process` executes, to settle when C3 lands:
 
 - **Localhost endpoint.** Add `POST /inner/matches` to the FastAPI app

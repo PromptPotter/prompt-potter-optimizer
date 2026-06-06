@@ -325,7 +325,7 @@ approximating it via a tunable multiplier.
   catches every backfilled `(leader_sp, sample)` measurement.
 * `docs/operations/rewind-and-fork.md` — how decision replay drives
   divergence + fork behavior.
-* `docs/specs/archive/hard-sample-sorter.md` — the artifact contract carrying
+* `git log` — the artifact contract carrying
   the heatmap's `sample_order` (δ_s desc) and the descriptive
   `pick_score.per_sample` blended-pick-value snapshot.
 * `promptpotter/application/intelligence/adaptive_queue_mechanism.py` —

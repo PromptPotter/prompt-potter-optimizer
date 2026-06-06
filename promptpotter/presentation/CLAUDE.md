@@ -58,7 +58,7 @@ operator-admin channel.
   as a `CommandRecord`; inline-applied; paired `CommandAckRecord` written
   by the same dispatcher (workspace + lifecycle) or by
   `RunnerCommandSubscriber` (cycle-scoped).
-- `POST /datasets/ingest` — multipart CSV upload; returns a server-held `DraftCampaign` (declared in `docs/specs/m12-api-openapi.yaml`; spec at `docs/specs/m13-chat-first-user-web.md § Ingest`). Workspace-scoped, identity-bound; no `CommandRecord` lands on a ledger until the operator commits via the separate `/commands/mint-campaign-from-draft` verb.
+- `POST /datasets/ingest` — multipart CSV upload; returns a server-held `DraftCampaign` (declared in `docs/specs/m12-api-openapi.yaml`; spec at `docs/specs/roadmap.md § Ingest`). Workspace-scoped, identity-bound; no `CommandRecord` lands on a ledger until the operator commits via the separate `/commands/mint-campaign-from-draft` verb.
 
 ## Display constraint
 

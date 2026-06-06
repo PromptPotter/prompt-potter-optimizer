@@ -27,7 +27,7 @@ No data justifying a choice ⇒ do not gamble. Random exploration is reserved fo
 
 If a panel field speaks against a mutation, `l1_generate` does not propose it.
 
-Each emitted variant declares an `evidence_grounding: {field, citation}` naming the panel entry that justifies the mutation. `field ∈ EVIDENCE_GROUNDING_FIELDS`; `stall_exploration` is the escape hatch and is only valid when `escalation_panel.exploration_budget ∈ {normal, wide}`. Variants without a real citation fail the `evidence_grounding_present` behavior check (`validators/l1_behavior.py`) — surfaced in `review.md` and `round_NNNN.json`. The Track 4 healing rule that converts this signal into an L2 `task_context` nudge lives behind `docs/specs/m10-prompt-iteration-framework.md#track-7--l2-self-diagnosis-surface`.
+Each emitted variant declares an `evidence_grounding: {field, citation}` naming the panel entry that justifies the mutation. `field ∈ EVIDENCE_GROUNDING_FIELDS`; `stall_exploration` is the escape hatch and is only valid when `escalation_panel.exploration_budget ∈ {normal, wide}`. Variants without a real citation fail the `evidence_grounding_present` behavior check (`validators/l1_behavior.py`) — surfaced in `review.md` and `round_NNNN.json`. The Track 4 healing rule that converts this signal into an L2 `task_context` nudge lives behind `docs/specs/roadmap.md#track-7--l2-self-diagnosis-surface`.
 
 Channel: `task_context` (L2-refined task framing) and `plan` (L3-set strategy) arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill_l1` walking `opt_sp.memory.l1_layout` over the `INJECTIONS` registry (`dispatch/hub/injections/registry.py`).
 
@@ -106,7 +106,7 @@ Avoid hardcoded round thresholds inside the loops. `params_unlocked` derives fro
 
 L4 is **not** a 4th `LayerStrategy` driver inside this package. There is no `l4_*.py` and there will not be one. L4 is the same PromptPotter applied to itself via the `promptpotter` connector: an outer cycle whose backend is an inner cycle, mutating the inner's meta-prompt template fields (`l1_generate` / `l1_critique` / `l2_context` / `l3_plan`) as `pipeline_params`.
 
-Conceptually L2 / L3 / L4 are the same family — each mutates a slower-changing surface of the level below (L2 → `task_context`; L3 → `plan`; L4 → meta-prompt templates). Structurally L2 and L3 live here as escalation strategies; L4 lives at the connector seam (`../../connectors/promptpotter.py`) and at the dataset (`datasets/promptpotter-self/`). Spec: [`../../../docs/specs/m12-multi-connector.md#track-15--promptpotter-as-connector`](../../../docs/specs/m12-multi-connector.md). Concept: [`../../../docs/concepts/optimizer-of-the-optimizer.md`](../../../docs/concepts/optimizer-of-the-optimizer.md).
+Conceptually L2 / L3 / L4 are the same family — each mutates a slower-changing surface of the level below (L2 → `task_context`; L3 → `plan`; L4 → meta-prompt templates). Structurally L2 and L3 live here as escalation strategies; L4 lives at the connector seam (`../../connectors/promptpotter.py`) and at the dataset (`datasets/promptpotter-self/`). Spec: [`../../../docs/specs/roadmap.md#track-15--promptpotter-as-connector`](../../../docs/specs/roadmap.md). Concept: [`../../../docs/concepts/optimizer-of-the-optimizer.md`](../../../docs/concepts/optimizer-of-the-optimizer.md).
 
 ## checkin — the fifth optimizer node (decomposition + origin resolution)
 

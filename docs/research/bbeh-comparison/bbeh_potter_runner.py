@@ -65,7 +65,7 @@ def build_campaign_config(
     if sp_budget_ttest is not None:
         cfg["sp_budget_ttest"] = sp_budget_ttest
 
-    # Rasch-validation run scaffolding (docs/specs/archive/rasch-validation-plan.md):
+    # Rasch-validation run scaffolding (git log):
     # large l1_patience defers L2/L3 firing for the run window so the
     # per-round adaptive queue mechanism has time to accumulate δ evidence.
     cfg["optimization"] = {

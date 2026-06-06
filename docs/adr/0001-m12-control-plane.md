@@ -245,12 +245,12 @@ Chronological log of what's been certified out of this ADR into the docs layer. 
 - Webapp redesign (component-level) — design surface in `BRAND.md` / `VOICE.md`.
 - Multi-user merge / CRDT operations — identity-foundation Stage 2+.
 - Per-tenant rate limiting / quotas — M13+ backlog.
-- L4 inner-cycle execution path — [`m12-multi-connector.md`](../specs/m12-multi-connector.md) Track 1.5.
+- L4 inner-cycle execution path — [`roadmap.md`](../specs/roadmap.md) Track 1.5.
 
 ### Cross-refs
 
 - [`0002-identity-foundation.md`](0002-identity-foundation.md) — foundation Profile C lights up Stage 1 of.
 - [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md) — the highway template this ADR mirrors verbatim (first consumer of the identity seam).
-- [`docs/specs/m12-multi-connector.md`](../specs/m12-multi-connector.md) — orthogonal track (L4 self-recursion).
-- [`docs/specs/state-sync-cleanup.md`](../specs/state-sync-cleanup.md) — Phase 1 prerequisite.
-- [`docs/specs/m13-chat-first-user-web.md`](../specs/m13-chat-first-user-web.md) — end-state product surface.
+- [`docs/specs/roadmap.md`](../specs/roadmap.md) — orthogonal track (L4 self-recursion).
+- [`docs/specs/roadmap.md`](../specs/roadmap.md) — Phase 1 prerequisite.
+- [`docs/specs/roadmap.md`](../specs/roadmap.md) — end-state product surface.

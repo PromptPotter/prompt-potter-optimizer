@@ -16,7 +16,7 @@ tags: [spend, tokens, ledger, identity, highway]
 
 ## Context and Problem Statement
 
-[`0002-identity-foundation.md`](0002-identity-foundation.md) decides the identity contract (OIDC wire + RLS data + SCIM model). Its Stage-0 deliverable — the `IdentityContext` seam — needs a real payload riding it before downstream consumers ([`0001-m12-control-plane.md`](0001-m12-control-plane.md), [`../specs/m13-chat-first-user-web.md`](../specs/m13-chat-first-user-web.md)) build on it. Spend tracking (LLM token cost) is the chosen first payload: every LLM call (optimizer-loop AND backend) already exists in the codebase and emits one record per call; the question is *what path that record takes through the system*.
+[`0002-identity-foundation.md`](0002-identity-foundation.md) decides the identity contract (OIDC wire + RLS data + SCIM model). Its Stage-0 deliverable — the `IdentityContext` seam — needs a real payload riding it before downstream consumers ([`0001-m12-control-plane.md`](0001-m12-control-plane.md), [`../specs/roadmap.md`](../specs/roadmap.md)) build on it. Spend tracking (LLM token cost) is the chosen first payload: every LLM call (optimizer-loop AND backend) already exists in the codebase and emits one record per call; the question is *what path that record takes through the system*.
 
 Two questions resolve here. **(1)** Does spend ride the canonical per-cycle `events.jsonl` ledger like every other record, or a parallel pipeline? **(2)** Does identity attach to each record, or ride the cycle dir's tenant prefix?
 
@@ -205,5 +205,5 @@ Every claim names a file. Path existence asserted by `tests/test_control_plane_d
 
 - [`0002-identity-foundation.md`](0002-identity-foundation.md) — **the foundation this ADR consumes.** The two contracts (OIDC wire + RLS data), the `IdentityContext` shape, the three-stage staging, the no-drift gates. Read it first.
 - [`0001-m12-control-plane.md`](0001-m12-control-plane.md) — Stage-1 OIDC client, `JobRegistry` identity-scoping, hub mode (next consumer of identity-foundation).
-- [`../specs/m13-chat-first-user-web.md`](../specs/m13-chat-first-user-web.md) — `Install` is the user-facing name for `TenantId` (mapped onto OIDC `iss`); vocabulary shifts, on-disk identity unchanged.
-- [`../specs/state-sync-cleanup.md`](../specs/state-sync-cleanup.md) — Phase 1 dependency (identity collapse touches the same store-seam files).
+- [`../specs/roadmap.md`](../specs/roadmap.md) — `Install` is the user-facing name for `TenantId` (mapped onto OIDC `iss`); vocabulary shifts, on-disk identity unchanged.
+- [`../specs/roadmap.md`](../specs/roadmap.md) — Phase 1 dependency (identity collapse touches the same store-seam files).

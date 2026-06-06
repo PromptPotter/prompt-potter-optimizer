@@ -5,7 +5,7 @@ ingests live at ``{tenant_root}/datasets/.drafts/{draft_id}/cache.json``.
 Commit = atomic rename of the draft dir to ``{slug}/`` plus the four
 Origin files (`cache.json`, `pipeline.json`, `task_description.md`,
 `prompts/default.json`) and the sibling `campaign.json` per
-``docs/specs/m13-chat-first-user-web.md § Commit path``.
+``docs/specs/roadmap.md § Commit path``.
 
 Built-in benchmark datasets (`aime_2025`, `bbeh`, `gsm8k`, …) stay under
 repo ``datasets/`` and are served by :class:`BackendStore`; this store

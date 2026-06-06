@@ -20,6 +20,6 @@ This file is a **thin index over the per-layer CLAUDE.md tree** for the `promptp
 ## Cross-cutting
 
 - **The agent contracts (L1 / L2 / L3) live in [`application/optimization/CLAUDE.md`](application/optimization/CLAUDE.md)** — that's where the code is.
-- **L4 = recursion via the `promptpotter` connector**, not a 4th layer driver. Spec: [`../docs/specs/m12-multi-connector.md`](../docs/specs/m12-multi-connector.md); concept: [`../docs/concepts/optimizer-of-the-optimizer.md`](../docs/concepts/optimizer-of-the-optimizer.md).
+- **L4 = recursion via the `promptpotter` connector**, not a 4th layer driver. Spec: [`../docs/specs/roadmap.md`](../docs/specs/roadmap.md); concept: [`../docs/concepts/optimizer-of-the-optimizer.md`](../docs/concepts/optimizer-of-the-optimizer.md).
 - **Info-flow doc** (channels, signal routing, four wound channels): [`../docs/developer/dispatch-hub.md`](../docs/developer/dispatch-hub.md).
 - **Layer-import invariant** (enforced by `tests/test_invariants.py`): `application/intelligence/` MUST NOT import from `application/optimization/`.

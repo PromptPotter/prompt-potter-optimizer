@@ -193,7 +193,7 @@ class BackendClient:
             raise NotImplementedError(
                 f"connector execution mode {self._execution!r} has no inner-cycle "
                 "dispatch yet — L4 self-recursion is Lane C3 "
-                "(docs/specs/m12-multi-connector.md § Track 1.5)"
+                "(docs/specs/roadmap.md § Track 1.5)"
             )
         payload = self._wire_adapter(query, pipeline_params)
 

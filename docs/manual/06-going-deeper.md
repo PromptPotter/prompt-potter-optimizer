@@ -50,4 +50,4 @@ You've run a campaign. Pointers below for the next layer.
 
 Hand-tuning `l1_generate` (or another optimizer meta-prompt) is owned by [`/potter-l1-meta-campaign`](../../.claude/skills/potter-l1-meta-campaign/SKILL.md) — a same-command-every-tick strategist that reads cycle artifacts, applies the round-1 verdict + top-issue ranking, and writes one proposed edit per non-healthy cycle to `.promptpotter/meta_campaigns/{prompt_id}/proposed_edits/`. State persists on disk; ten ticks in a row produce ten consistent decisions.
 
-Full design spec: [`../specs/m10-prompt-iteration-framework.md`](../specs/m10-prompt-iteration-framework.md).
+Full design spec: [`../specs/roadmap.md`](../specs/roadmap.md).

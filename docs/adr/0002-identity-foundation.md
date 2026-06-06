@@ -8,8 +8,8 @@ relates:
   - docs/adr/0001-m12-control-plane.md
   - docs/adr/0003-spend-and-tenancy.md
   - docs/adr/0004-operator-admin-channels.md
-  - docs/specs/m13-chat-first-user-web.md
-  - docs/specs/state-sync-cleanup.md
+  - docs/specs/roadmap.md
+  - docs/specs/roadmap.md
 supersedes: []
 superseded-by: []
 tags: [identity, oidc, rls, scim, multi-tenancy, foundation]
@@ -19,7 +19,7 @@ tags: [identity, oidc, rls, scim, multi-tenancy, foundation]
 
 ## Context and Problem Statement
 
-The codebase ships today as a single-operator CLI plus a read-only webapp. Every downstream multi-tenant spec ([`0001-m12-control-plane.md`](0001-m12-control-plane.md), [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md), [`../specs/m13-chat-first-user-web.md`](../specs/m13-chat-first-user-web.md), [`../specs/state-sync-cleanup.md`](../specs/state-sync-cleanup.md)) sits on top of *some* identity contract. Without a foundation pick, each consumer invents its own — "thread `TenantContext` everywhere, we'll figure out auth later" is the path that produces every rewrite-the-identity-layer story in the industry.
+The codebase ships today as a single-operator CLI plus a read-only webapp. Every downstream multi-tenant spec ([`0001-m12-control-plane.md`](0001-m12-control-plane.md), [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md), [`../specs/roadmap.md`](../specs/roadmap.md), [`../specs/roadmap.md`](../specs/roadmap.md)) sits on top of *some* identity contract. Without a foundation pick, each consumer invents its own — "thread `TenantContext` everywhere, we'll figure out auth later" is the path that produces every rewrite-the-identity-layer story in the industry.
 
 How do we shape the codebase's identity + data-isolation seams now so the same application code runs unchanged from one operator on a laptop (Stage 0) through small-SaaS multi-user (Stage 1) all the way to Facebook / Netflix-shape (Stage 2)?
 
@@ -126,7 +126,7 @@ The tenant boundary is enforced **at the data engine**, not by every `WHERE tena
 - **Today's file-based layout is the degenerate case.** `projects/{tenant_id}/` is a one-tenant-per-directory isolation primitive enforced by the OS. The contract shape — "every storage operation is scoped to `IdentityContext.tenant_id`, no exceptions" — is the same.
 - **Stage-2 form** — every tenant-scoped table carries a `tenant_id` column; an RLS policy of the form `USING (tenant_id = current_setting('app.tenant_id')::uuid)` is attached; the application sets `SET LOCAL app.tenant_id = …` at the start of each request inside a transaction. The store adapter (below) is the single place this happens.
 - **Store adapter** — `infrastructure/store/stores.py::build_stores(identity: IdentityContext, …)` is the single construction route. Stage 0 returns file-backed stores rooted at `projects/{tenant_id}/`. Stage 2 returns Postgres-backed stores that set the RLS session variable. **No application caller knows which.** The RLS adapter is a swap, not a rewrite.
-- **Cross-tenant primitives.** `archive/measurements/` is dataset-scoped + cross-campaign by design (per `docs/architecture.md` §0). It stays cross-tenant within a single install; cross-*install* sharing is an explicit non-goal (per `../specs/m13-chat-first-user-web.md`). The RLS policy on archive tables omits the tenant filter; install-level isolation comes from running separate databases per install.
+- **Cross-tenant primitives.** `archive/measurements/` is dataset-scoped + cross-campaign by design (per `docs/architecture.md` §0). It stays cross-tenant within a single install; cross-*install* sharing is an explicit non-goal (per `../specs/roadmap.md`). The RLS policy on archive tables omits the tenant filter; install-level isolation comes from running separate databases per install.
 
 ### Data model — SCIM 2.0 Core + EnterpriseUser
 
@@ -288,7 +288,7 @@ Stage-0 work (the `IdentityContext` seam — shipped) does **not** require the a
 
 ### Out of scope (forever, or for other documents)
 
-- **Feature surface** — login screens, settings UI, profile pages, account-merge flows. Those land in [`../specs/m13-chat-first-user-web.md`](../specs/m13-chat-first-user-web.md) and live below this foundation.
+- **Feature surface** — login screens, settings UI, profile pages, account-merge flows. Those land in [`../specs/roadmap.md`](../specs/roadmap.md) and live below this foundation.
 - **Provider choice for Stage 2** — Ory vs Zitadel vs Keycloak vs Authentik. The table above is pre-vetting; the decision is made when Stage 2 is imminent.
 - **Implementation timing.** This ADR doesn't schedule Stage 1 or Stage 2. The cluster's milestone specs (M12 / M13) own scheduling.
 - **OAuth 2.1 / third-party access tokens for our API.** Stage 2+. First-party use case (a user signs into our webapp) doesn't need it.
@@ -302,7 +302,7 @@ Stage-0 work (the `IdentityContext` seam — shipped) does **not** require the a
 
 - [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md) — **first consumer.** Lands the `IdentityContext` reification at Stage 0; spend tracking is the payload demonstrating the seam works end-to-end.
 - [`0001-m12-control-plane.md`](0001-m12-control-plane.md) — **second consumer.** Stage 1 OIDC client lands here; `JobRegistry` scopes on `IdentityContext`; auth-off mode is the Stage-0 fallback.
-- [`../specs/m13-chat-first-user-web.md`](../specs/m13-chat-first-user-web.md) — **third consumer.** Install / User / Project nouns map onto OIDC claims (`Install = iss`, `User = sub`, project scoping rides `tenant_id` claim). Stage 2 considered when self-hosters demand native identity.
-- [`../specs/state-sync-cleanup.md`](../specs/state-sync-cleanup.md) — convergence: identity-collapse touches the same store-seam files; sequence Phase 1 before the Stage-0 `IdentityContext` reification to avoid touching `index.json` writers twice.
+- [`../specs/roadmap.md`](../specs/roadmap.md) — **third consumer.** Install / User / Project nouns map onto OIDC claims (`Install = iss`, `User = sub`, project scoping rides `tenant_id` claim). Stage 2 considered when self-hosters demand native identity.
+- [`../specs/roadmap.md`](../specs/roadmap.md) — convergence: identity-collapse touches the same store-seam files; sequence Phase 1 before the Stage-0 `IdentityContext` reification to avoid touching `index.json` writers twice.
 - [`0004-operator-admin-channels.md`](0004-operator-admin-channels.md) — **administrative-write facet.** How privileged identity/deployment mutations (allowlist edits) are delivered in-zone, outbound-only, without exposing an inbound route.
 - [`../architecture.md`](../architecture.md) §0 — `Identity` I/O kind amendment lands here at Stage 1.

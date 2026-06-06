@@ -40,7 +40,7 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 # authored mint+run path below. The CLI owns no ingest/resolve/commit logic of
 # its own; every step is an application-layer call shared with the web
 # (`ingest_draft`, `resolve_origin_turn`, `commit_draft_to_dataset`).
-# Spec: ``docs/specs/m10-origin-resolution-checkin.md``.
+# Spec: ``docs/specs/roadmap.md``.
 
 # Field id → ``DraftCampaign`` attribute a ``--set`` writes — the CLI parallel of
 # the web Advanced block. Only ``task_description`` is gated (CONFIRM opens the

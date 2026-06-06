@@ -215,7 +215,7 @@ async def commit_draft_to_dataset(
 
     Materializes the four Origin files (`cache.json`, `pipeline.json`,
     `task_description.md`, `prompts/default.json`) and the sibling
-    `campaign.json` per ``docs/specs/m13-chat-first-user-web.md § Commit path``.
+    `campaign.json` per ``docs/specs/roadmap.md § Commit path``.
     Once this returns, ``projects/{tenant}/datasets/{slug}/`` is a first-class
     dataset that ``mint_campaign_command`` (web, detached) or CLI ``new``
     (inline) can mint + run identically. Shared by both entry points — the

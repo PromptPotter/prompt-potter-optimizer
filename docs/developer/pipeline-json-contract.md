@@ -131,8 +131,8 @@ projection / tracing / observability pathway PromptPotter applies to
 a target pipeline applies to the optimizer itself — that's the
 foundation for the M11 PromptPotter-as-backend connector and the
 M12 L4 self-optimization closure (see
-[`docs/specs/m11-publication-benchmarks.md`](../specs/m11-publication-benchmarks.md)
-+ [`docs/specs/m12-multi-connector.md`](../specs/m12-multi-connector.md)).
+[`docs/specs/roadmap.md`](../specs/roadmap.md)
++ [`docs/specs/roadmap.md`](../specs/roadmap.md)).
 
 The parity is enforced by
 [`tests/test_pipeline_config.py`](../../tests/test_pipeline_config.py)

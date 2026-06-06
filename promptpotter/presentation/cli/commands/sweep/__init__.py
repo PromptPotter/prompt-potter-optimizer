@@ -23,7 +23,7 @@ __all__ = ["cmd_sweep"]
 
 async def cmd_sweep(args: argparse.Namespace) -> CommandResult:
     """Dispatch ``sweep <verb>`` — ``time-to`` / ``round1`` / ``round2`` /
-    ``rank`` per ``docs/specs/m10-prompt-iteration-framework.md``."""
+    ``rank`` per ``docs/specs/roadmap.md``."""
     verb = args.sweep_verb
     if verb == "time-to":
         return await _cmd_sweep_time_to(args)

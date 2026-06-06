@@ -1,93 +1,120 @@
 # Roadmap
 
-> **Beta.** Forward todo in execution order. Spec `Status:` lines are truth for what shipped.
+> **Beta.** Forward todo in execution order; this file absorbs the per-milestone specs (git log holds their full prose). The two `m12-*.yaml` files + the ADRs are the only other live contracts.
 >
-> **Live now:** deployed at `https://app.promptpotter.dev` (Cloudflare Tunnel + systemd, OIDC + allowlist — see [`deploy-linux/`](../../deploy-linux/README.md)). Allowlist-gated but internet-reachable, and running on **one shared LLM key** from `.env` — so the sequence below is "harden a thing that's already serving users," not "prep before launch."
+> **Live now:** deployed at `https://app.promptpotter.dev` (Cloudflare Tunnel + systemd, OIDC + allowlist — see [`deploy-linux/`](../../deploy-linux/README.md)). Allowlist-gated but internet-reachable, on **one shared LLM key** from `.env` — so the sequence below is "harden a thing already serving users," not "prep before launch."
 
 ## Hard ordering (violate → rebuild)
 
-Live constraints (the ones still ahead of us):
+- **state-sync P3 (`GET /api/v1/sessions/active/live-state`) before any new webapp data panel** — chat state-queries, composite-fitness scatter, cross-user panel. Anything on `dashboard.json` polling is rewritten at the cutover; substrate-free rollups are exempt. *(P3 itself shipped — this guards new panels built on the old seam.)*
+- **BYO per-user API keys — overdue, not a future gate.** The beta serves allowlisted users on one shared `.env` key today; every user spends the operator's quota. Present liability → Lane A2.
+- **HTTP-edge abuse protection scales with the allowlist.** Cloudflare edge + allowlist + per-user `JobRegistry` quotas bound the public surface now; app-level rate-limiting (C6) is due the moment the allowlist is removed.
 
-- **state-sync P3 (`GET /api/v1/sessions/active/live-state`) before any new webapp data panel** — chat state-queries, composite-fitness scatter, cross-user measurement panel. Anything built on `dashboard.json` polling is rewritten at the cutover. Data *rollups* (substrate-free) are exempt; only the rendered panel waits.
-- **BYO per-user API keys — already overdue, not a future gate.** The beta is *live and serving allowlisted users on one shared `.env` key today*; every user spends the operator's quota/cost. This is a present liability, hence Lane A2.
-- **HTTP-edge abuse protection scales with the allowlist.** The public surface (`/auth/*`, the root webapp, `/health`) is internet-reachable now; Cloudflare edge + allowlist + per-user `JobRegistry` quotas bound it. App-level HTTP rate-limiting (C6) becomes due the moment the allowlist is removed.
-
-Historical (already satisfied — kept for the record):
-
-- ~~state-sync P1 before spend reification~~ — spend shipped *first*; state-sync P1 now re-touches the `index.json` seam spend already modified (the double-touch the rule existed to prevent; <1 day, absorb it).
-- ~~spend before composite P2–P4~~ — spend shipped; composite P1 (= the spend data) is satisfied.
-- ~~identity Stage 0 before the 2nd connector~~ — both shipped.
-- ~~control plane + identity Stage 1 before any chat write-path~~ — both shipped; the chat write-path is now **unblocked**, not gated.
-- webapp hardening still built **once, multi-tenant** — identity Stage 1 is live, so any new endpoint is multi-tenant by default.
+Historical (satisfied): spend shipped before composite/state-sync; identity Stage 0 + 2nd connector shipped; control plane + identity Stage 1 shipped → the chat write-path is unblocked, not gated. Any new endpoint is multi-tenant by default.
 
 ## Lane 0 — daily hygiene
 
-Drain before feature work: [`code-debt-cleanup`](code-debt-cleanup.md) + [`state-sync-cleanup`](state-sync-cleanup.md). **state-sync P1 (Lane B1) is the do-first** (<1 day; unblocks Lane B2 / C panels).
+Drain before feature work: [`code-debt-cleanup`](code-debt-cleanup.md).
 
 ## Sequence
 
-The flat 17-row list this replaced was mostly *already shipped* (verdict P1, engine exit gate, spend, identity Stage 1, the control-plane command highway, the 2nd connector + config-driven lookup — see **Already shipped**). What remains is sequenced into lanes by dependency, not by milestone number. **Front priority = Lane A + the publication lane, concurrent** (they share no seam — beta web-stack vs. engine internals). Lane B then C follow.
+Sequenced into lanes by dependency, not milestone number. **Front priority = Lane A + the publication lane, concurrent** (no shared seam). Lane B is closed; Lane C follows A.
 
-### Lane A — beta usable for allowlisted web users, end-to-end (front)
+### Lane A — beta usable for allowlisted web users, end-to-end
 
-Minimum for an external allowlisted user to log in (shipped), ingest their data, and launch a campaign without the CLI or hidden defaults. Ordered.
+| # | Item | Status |
+|---|---|---|
+| A1 | React #185 post-login crash fix | **blocker — verify still reproducing** (known-issues memory) |
+| A2 | BYO per-user API keys | pending — **overdue** (see § BYO keys); token HQ at `/auth/{quota-status,activity}` already shipped |
 
-| # | Item | Status | Spec |
-|---|---|---|---|
-| A1 | React #185 post-login crash fix | **blocker — verify still reproducing** | known-issues memory |
-| A2 | BYO per-user API keys | pending — **overdue: the live beta serves allowlisted users on one shared `.env` key today** (token HQ at `/auth/{quota-status,activity}` already shipped) | *needs slice spec* |
-| A3 | Origin-resolution check-in | pending — kills hidden defaults + literal-column rejection so messy CSVs ingest | [`m10-origin-resolution-checkin`](m10-origin-resolution-checkin.md) |
+### Lane B — foundations (closed)
 
-### Lane B — foundations before any new web surface (no teardown)
+state-sync P1–P4 shipped 2026-05-30 (per-cycle `dashboard.json`, `GET /api/v1/sessions/active/live-state`, sidecar delete). See § State-sync.
 
-Small ships (mostly <1 day). Must land before chat state-queries and new dashboard panels.
+### Lane C — product differentiator + capability (after A)
 
-| # | Item | Status | Spec |
-|---|---|---|---|
-| B1 | state-sync P1 (identity collapse — absorbs the spend double-touch) | ✅ shipped 2026-05-30 | [`state-sync-cleanup`](state-sync-cleanup.md) |
-| B2 | state-sync P2–P4 (per-cycle `dashboard.json`, **`GET /api/v1/sessions/active/live-state`**, sidecar delete) | ✅ shipped 2026-05-30 | [`state-sync-cleanup`](state-sync-cleanup.md) |
+| # | Item | Status |
+|---|---|---|
+| C1 | **Chat write-path** — wire the inert `ChatPane` to the shipped control-plane verbs; query state via `/api/v1/sessions/active/live-state` (∴ after P3) | unblocked (see § Ingest + chat-first web) |
+| C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § Connectors + L4) |
+| C3 | L4 closure — inner-cycle dispatch + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation (connector registered) | pending (see § Connectors + L4) |
+| C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
+| C5 | MCP server mode · user-editable `pipeline.json` in UI | pending |
+| C6 | Public-service hardening (Docker, metrics, rate-limit, billing) — `/health` shipped; **pull rate-limit/metrics forward if the beta opens past the allowlist** | pending |
+| C7 | Non-prompt targets + evolutionary operators · multimodal · research extensions | pending |
 
-### Lane C — product differentiator + capability (after A + B)
+**Parallel lane — publication (front, concurrent with Lane A).** Engine exit gate (`rounds_to_95`) shipped → this is *running experiments + write-up*: BBEH primary (headroom on `gpt-oss-120b`), HotPotQA pending a saturation probe, GSM8K/AIME deprioritized; 3 seeds + Wilson CIs + McNemar vs CAPO/DSPy; ablation rows L1 / L1+L2 / full · scan · SearchMemory · critique · zero-signal-filter. Competitor + L4 numbers wait on C3. **Verify the [BBEH score anomaly](../research/) before publishing.** Endpoint hardening P0 (auth dep on every router, pinned `ALLOWED_ORIGINS`, `extra=forbid` on request models, poll rate-limit) lands before any non-localhost open.
 
-| # | Item | Status | Spec |
-|---|---|---|---|
-| C1 | **Chat write-path** — wire the inert `ChatPane` to the *shipped* control-plane verbs; query state via `/api/v1/sessions/active/live-state` (∴ after B2/P3) | unblocked (control plane done) | [`m13-chat-first-user-web`](m13-chat-first-user-web.md) |
-| C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after B2/P3** | pending | [`m12-multi-connector`](m12-multi-connector.md) |
-| C3 | L4 closure — inner-cycle dispatch + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation (connector already registered) | pending | [`m12-multi-connector`](m12-multi-connector.md) |
-| C4 | Cross-user measurement panel (after B2/P3) | pending | [`m13-chat-first-user-web`](m13-chat-first-user-web.md) |
-| C5 | MCP server mode · user-editable `pipeline.json` in UI | pending | [`m12-plus-backlog`](m12-plus-backlog.md) |
-| C6 | Public-service hardening (Docker, metrics, rate-limit, billing) — `/health` shipped; **pull rate-limit/metrics forward if the beta opens past the allowlist** | pending | [`m12-plus-backlog`](m12-plus-backlog.md) |
-| C7 | Non-prompt targets + evolutionary operators · multimodal · research extensions | pending | [`m12-plus-backlog`](m12-plus-backlog.md) |
-
-**Parallel lane — publication (front, concurrent with Lane A).** The engine exit gate (`rounds_to_95`) is shipped, so this is now *running experiments + write-up*, not engineering: BBEH + ablations run now; competitor numbers + L4 results wait on **C3**. → [`m11-publication-benchmarks`](m11-publication-benchmarks.md)
-
-**Far-horizon (unscheduled).** Synthetic dataset from one hold-out ([`synthetic-data`](synthetic-data.md)) · AlphaEvolve code-harness · L3 fork authority → AlphaZero MCTS.
+**Far-horizon (unscheduled).** Synthetic dataset from one hold-out question (removes the dataset-provision requirement; the real metric is synthetic→real transfer of *optimizer lift*, anchored on the single genuine hold-out) · AlphaEvolve code-harness · L3 fork authority → AlphaZero-shaped MCTS over the lineage.
 
 ## Permanent contracts (constitutions, not steps)
 
 - **Identity foundation** — OIDC wire + PostgreSQL RLS; three-stage staging. → [`ADR-0002`](../adr/0002-identity-foundation.md)
 - **Spend + tenancy** — `TokenUsageRecord` on the canonical ledger via `emit_token_usage`. → [`ADR-0003`](../adr/0003-spend-and-tenancy.md)
 - **Control plane** — Control-remote I/O kind; closed in/out sets ([`m12-api-openapi.yaml`](m12-api-openapi.yaml) + [`m12-events-asyncapi.yaml`](m12-events-asyncapi.yaml)). → [`ADR-0001`](../adr/0001-m12-control-plane.md)
+- **Frontend surface** — per-control behavior per auth/data state. → [`frontend-surface-contract`](frontend-surface-contract.md)
+- **Verdict resolution** — the statistical model behind the live adaptive queue + `hard_samples_*.json`. → [`verdict-resolution`](verdict-resolution.md)
+
+---
+
+## Design notes (folded specs)
+
+Terse landing for the per-milestone specs that were consolidated here. Status is truth; full original prose is in `git log`.
+
+### Origin-resolution check-in — SHIPPED 2026-05-30
+Messy CSVs ingest without hidden defaults or a literal-column requirement: an LLM proposer + deterministic readiness checklist resolve the origin and auto-confirm high-confidence fields before mint.
+- **Provenance:** every origin field is `unset | proposed | confirmed`; no field mints while `unset`/`proposed`; `high`-confidence findings auto-promote `proposed→confirmed`. Orthogonal `ProvenanceSource` axis `auto | stated` (`domain/origin_provenance.py`), persisted to `cache.json::sources`; the gate verdict reads `resolved`, never `sources`.
+- **As-built (diverges from the original design):** no separate `origin_resolve` node/model — reuses the `checkin/2` node with an origin block on `CheckinOutput`; consultation rides the LLM `user_content` (`build_origin_consultation`), not template placeholders; resolve-turn spend goes to the tenant workspace ledger (`CycleEventLog.open_workspace`). One resolver turn per request.
+- **Struck from the operator surface:** `reasoning_floor/ceiling` (`reasoning_effort` is backend-node-only; floor rides `backend.node_config`) and `model_locked` (= `OptimizationConfig.forbidden_axes_strict`, a developer policy).
+- **CLI fold:** `new <name|file>` dispatches on `Path(arg).is_file()`; the file branch shares `ingest.py::ingest_draft` + `launcher.py::commit_draft_to_dataset`; enabler is `resolve_dataset_config_dir` on `Session.dataset_config_dir`.
+
+### Ingest + chat-first web — partially shipped (Ingest Slice 1 done; ChatPane still inert)
+Four nouns map to OIDC: Install=`iss`, User=`sub` (`user_id=f"{iss}:{sub}"`, SCIM 2.0 Core names verbatim), Project=`tenant_id` claim (today's `datasets/{name}/`), Campaign=cycle 1:1.
+- **The committed artifact is a Dataset, not a campaign:** 4 content-hashed files at `projects/{tenant}/datasets/{slug}/` (`cache.json` rows, `pipeline.json` overlay, `task_description.md`, `prompts/default.json`) compose into `JobSearchPoint.content_hash`; the sibling `campaign.json` is NOT in the hash. Identical datasets → identical `cycle_{target_hash[:12]}` + shared `archive/measurements/` (free cross-tenant pooling).
+- **Draft-campaign object:** `DraftCampaign` negotiates both the Dataset and campaign config; smart defaults `connector=termnorm`/`exact_match`/`max_rounds=5`; model + `reasoning_effort` resolved from the dataset-reasoning-matrix at *commit*, not pinned on the draft. Chat + panel are two views over one server-side draft, synced via `edit-draft-campaign` + SSE `DraftUpdatedRecord` (declare in asyncapi before the handler).
+- **Endpoints:** `POST /datasets/ingest` (multipart; 409 `slug_collision`→`{slug,suggested_slug}`, version-and-repoint Replace never overwrites; 422 parse). `GET /datasets` flat list with `tier: yours|benchmark` (benchmark gated by `datasets.benchmarks.read`, Stage-0 via `PROMPTPOTTER_ADMIN=1`). Commit path = `mint-campaign-from-draft`.
+
+### Connectors + L4 inner-cycle execution — partially shipped (boundary + TermNorm + self-connector + control plane + composite-P1 done; L4 run + composite P2–P4 + competitor numbers open)
+- **Connector contract:** `Connector` dataclass (`connectors/protocol.py`), 3 hooks `wire_adapter`/`session_factory`/`extract_experiment`; `backend_type` read from `pipeline.json`, never hardcoded.
+- **Execution mode (the L4 self-recursion seam):** `Connector.execution = remote_http (default) | in_process`; `BackendClient.run_query` dispatches on the *declared mode*, never the connector name. The `promptpotter` connector declares `in_process` → raises a pointed `NotImplementedError` until Lane C3. C3's open choice: localhost `POST /inner/matches` vs in-process dispatch to `runner.run_optimization` under `.runtime/inner/`. Concept: [`optimizer-of-the-optimizer`](../concepts/optimizer-of-the-optimizer.md).
+- **Composite fitness phases:** P1 surface (done) · P2 per-candidate rollup + scatter · P3 `compile_post_aggregate_fitness(formula)` + `campaign.json::scoring_post_aggregate` · P4 Pareto-PoBB (stretch).
+- **Prompt-injection Phase 2:** `TrustedText`/`UntrustedText` renderer types + L1/critique injection-echo validators + a repeat-detection circuit breaker.
+
+### Prompt-iteration framework + exit gate — partially shipped (gate not yet met)
+- **Exit gate:** `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules).
+- `_mint_fork(parent, fork_from_round, payload)` is the single entry for all 6 `ForkTrigger` variants (one `ForkPayload`); L2/L3 auto-rebase capped at `MAX_AUTO_REBASES = 10`/invocation, gated by `OptimizationConfig.rebase_capability`.
+- **Round-1 verdict (conformance-anchored):** 0 ✗ → healthy · 1 ✗ → degraded · ≥2 ✗ (or persistent `forbidden_axes_honored`) → broken; behavior checks are pure `(round_dict, ctx) → CheckResult`. The Track-7 L2 self-diagnosis rule turns a missing `evidence_grounding` citation into an L2 `task_context` nudge.
+- Sweep results: `archive/sweeps/{l1_meta_prompt_hash}/{dataset}/{verb}_{ts}.json`; `sweep rank` keys `(l1_generate_hash, rounds_to_95 asc, behavior_pass_rate desc)`. Live mechanism = `/potter-l1-meta-campaign`.
+
+### BYO per-user API keys — spec-only (Lane A2)
+- **Resolution order:** per-tenant key → `.env` global (auth-off/unset) → clean `MissingApiKeyError` (422 `no_api_key`). An authed user with no key and no global must never silently bill the host.
+- **Single choke point:** `get_llm_client(provider, *, api_key=None)` (registry stays identity-free); `application/config.py::create_llm_client` + `origin_resolve.py::resolve_origin_turn` resolve via `resolve_api_key(identity, provider, stores)`.
+- **Store:** `TenantApiKeyStore` at `projects/{tenant}/api_keys.json` — Fernet ciphertext (`SECRETS_FERNET_KEY`, no plaintext fallback) + a plaintext `providers_set` index; the key is never echoed/logged/traced.
+- **Verbs (openapi-first):** `PUT/DELETE /auth/api-keys/{provider}` (204), `GET /auth/api-keys` (`providers_set` only); `GET /llm-providers` gains `key_source: user|shared|none`. BYO does not lift quotas.
+
+### Operator-steered fork — SHIPPED
+Rides the existing `fork-cycle` command (no new verb); payload extended to `{from_searchpoint, pipeline_overlay, origin_prompt_fields, limit_overrides, steered_by}`. `fork-cycle` **mints then launches** (minting alone left web forks idle). The override seed is written to the fork's own cycle dir (`.overrides/seed.json`, read once at the runner seam via `CycleOverrideMixin`); origin resolves fork-seed-first; no dataset-origin mutation. `max_rounds` is an absolute target (the fork's counter continues from the parent), reconciled consumed-vs-remaining in the dialog.
+
+### State-sync — SHIPPED 2026-05-30
+Collapsed 5 state surfaces → 2: `active_session.json` (ground truth for what's running: `{tenant_id, session_id, cycle_id}`, sole writers mint/fork/sweep_restore via `save_active_pointer`) + per-cycle `dashboard.json` (live read-out, ≤0.25s debounce + synchronous round-boundary flush). **Teardown-only design was rejected — do not re-propose** (it reverses the folder-UI §0 commitment). Directory name IS the cycle id (`index.json::campaign_id` removed). Run-state is owned: the runner declares `running/paused/stopping/terminal` as a `control` `PhaseRecord` → `dashboard.json::run_phase` (`RunPhase`, `domain/phases.py`), read off the 2s poll via `derive_run_phase`; the old `/runstate` probe is gone.
+
+### Plus-backlog (opportunistic, unscheduled)
+Hard-Sample Sorter Phase 2/3 (Phase 1 `build_hard_samples_artifact` shipped) · Webapp Perf: SSE client cutover (backend `events:subscribe` shipped, client still 2s poll), SWR/TanStack (blocked on a vitest harness — now present), `HardSamplesTable` virtualization, strip redundant memos under React Compiler (keep `l1RoundsKey` fingerprints) · MCP server mode · research extensions.
 
 ## Captured — pending triage
 
-- **Export / copy from dashboard** — one-click "copy" on the optimizer box (winning prompt + state); first slice of broader export. Not specced.
-- **Origin check-in plain-language recap** — folded into [`m10-origin-resolution-checkin`](m10-origin-resolution-checkin.md) § Operator surface; pending review.
-- **Webapp perf** — SWR/TanStack migration (needs vitest harness first), virtualize `HardSamplesTable`, strip redundant memos under React Compiler.
+- **Export / copy from dashboard** — one-click "copy" on the optimizer box (winning prompt + state); first slice of broader export.
+- **Origin check-in plain-language recap** — folded into the origin check-in flow; pending review.
 
 ## Already shipped
 
-Verified against code on 2026-05-30 (the prior 17-row sequence listed much of this as pending):
-
-- **Engine.** Verdict-resolution P1 — `explore_weight` / `model_information_gain` / `predictive_hit_prob` removed (`c714bffd`). Engine exit gate — `rounds_to_95` computed (`application/optimization/l1/stats.py`, `runner/entry.py`).
-- **Spend reification (= composite P1).** `emit_token_usage`, `TokenUsageRecord`, `LiveDashboardView._handle_token_usage`, `spend_total_used_usd` — all wired. → [`ADR-0003`](../adr/0003-spend-and-tenancy.md).
-- **Identity Stage 1.** OIDC middleware mounted (`main.py:89`); real Google + GitHub code exchange (`infrastructure/identity/`); server-side sessions; allowlist; `/auth/{login,callback,me,logout,quota-status,activity}`; per-user quotas (`UserStore`, `user.json`). *Stage 0.5 caveat:* OIDC wire is live but RLS / SCIM multi-tenant data isolation is not yet enforced. → [`ADR-0002`](../adr/0002-identity-foundation.md).
-- **Control-plane command highway.** `CommandDispatcher` + `routers/commands.py` + SSE `EventStreamView`; verb sets `LifecycleKind` / `CycleScopedKind` (fork/stop/pause/resume/change-spend-budget/start-run/…) / `WorkspaceBackendKind`. → [`ADR-0001`](../adr/0001-m12-control-plane.md).
-- **Connector boundary + 2nd connector.** `termnorm` + `promptpotter` (self/L4) both registered; lookup config-driven via `pipeline.json::backend_type` (`bootstrap/wiring.py`), not hardcoded. Only the inner-cycle dispatch path for the L4 *run* remains (Lane C3).
-- **Token HQ.** `/auth/quota-status` + `/auth/activity` (per-user spend/tokens/requests). `/health` endpoint (`main.py:115`).
-- Onboarding lockout ([archived](archive/m10-onboarding-lockout.md)) · Ingest Slice 1 (CSV, `DraftCampaign`, `POST /datasets/ingest`, `mint-campaign-from-draft`, `TenantDatasetStore`, `IngestPane`) · webapp read-only surface (served at the root).
-
-Reference: [`code-debt-cleanup`](code-debt-cleanup.md) (living debt backlog).
+Verified against code 2026-05-30+:
+- **Engine.** Verdict-resolution P1 (`c714bffd`); engine exit gate `rounds_to_95` (`l1/stats.py`, `runner/entry.py`).
+- **Spend (= composite P1).** `emit_token_usage`, `TokenUsageRecord`, `LiveDashboardView._handle_token_usage`, `spend_total_used_usd`. → [`ADR-0003`](../adr/0003-spend-and-tenancy.md).
+- **Identity Stage 1.** OIDC middleware (`main.py:89`); Google + GitHub code exchange (`infrastructure/identity/`); server-side sessions; allowlist; `/auth/{login,callback,me,logout,quota-status,activity}`; per-user quotas (`UserStore`). *Stage 0.5 caveat:* OIDC wire live, RLS/SCIM isolation not yet enforced. → [`ADR-0002`](../adr/0002-identity-foundation.md).
+- **Control-plane highway.** `CommandDispatcher` + `routers/commands.py` + SSE `EventStreamView`; `LifecycleKind`/`CycleScopedKind`/`WorkspaceBackendKind`. → [`ADR-0001`](../adr/0001-m12-control-plane.md).
+- **Connector boundary + 2nd connector.** `termnorm` + `promptpotter` registered; lookup config-driven via `pipeline.json::backend_type` (`bootstrap/wiring.py`). Only the inner-cycle dispatch for the L4 run remains (C3).
+- **Origin-resolution check-in + Ingest Slice 1** (CSV, `DraftCampaign`, `POST /datasets/ingest`, `mint-campaign-from-draft`, `TenantDatasetStore`, `IngestPane`) · onboarding lockout · webapp read-only surface (served at root).
 
 ## Non-functional requirements
 
