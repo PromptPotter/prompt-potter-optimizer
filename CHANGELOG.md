@@ -6,6 +6,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-06-06
+
+> Beta-hardening release. `0.8.0` was an interim version bump with no changelog entry; this section covers everything since (29 commits: 8 feat, 14 refactor, 5 fix, docs).
+
+### Highlights
+
+- **Chat-first ingest, end to end.** Drop a file into chat → multi-format parse → dataset-bridge (name-collision UX + version-and-repoint Replace) → one-LLM-call origin check-in (provenance gate `unset|proposed|confirmed`, no hidden defaults, no literal-column requirement) → mint. CLI `new <file>` shares the same `ingest → commit` path.
+- **Operator-steered fork (HITL).** Stop a run, pick a searchpoint, edit its full node config + prompt, reconcile spend/round limits, and fork-continue. Rides the existing `fork-cycle` verb (mint-then-launch); config-on-node consolidated the old ConfigMenu into `BackendNodeDetail`.
+- **One error envelope, one mint seam.** Every API error serializes to the flat `{error, message, details?}` the OpenAPI spec declares (typed `PotterError` taxonomy; ~92 `raise HTTPException` removed; one `@app.exception_handler`). Fresh-mint logic collapsed to a single `application/jobs/mint.py` seam shared by CLI + web.
+- **`ScoredCandidate` is the round-file shape.** A frozen Pydantic model whose `model_dump`/`model_validate` *are* the wire format (the hand-rolled `to_dict` is gone); `ci_lo`/`ci_hi` are computed fields, collapsing three Wilson-CI sites to one.
+
+### Added
+
+- Operator-steered fork: backend + read-side plumbing, webapp steer flow, live connection monitoring.
+- Unified lineage cladogram — fork tree + intra-loop candidate tree in one expand/collapse view; a no-edit fork inherits the branch-point accuracy as C0 (skips a nondeterministic re-score).
+- Connector `execution` mode declaration (`remote_http | in_process`) — the L4 self-recursion seam.
+- Project-agnostic Linux deploy kit + one-command update (`deploy-linux/`).
+
+### Changed
+
+- Webapp reshaped to a claude.ai-style surface served at the domain root: RESTful API paths, de-underscored routers, 3-tier component layout (surfaces / chrome / dashboard regions), mobile polish, frontend-hardening alpha gate + auth-aware surface.
+- Run-state is owned, typed live-state on `dashboard.json::run_phase`; quotas surface `429`.
+- Clock + I/O writes routed through enforced seams; the typed-View persistence roundtrip collapsed (producer emits the view, Pydantic serializes it — nothing to reconstruct); backend + webapp de-duplicated.
+- Docs: forward specs consolidated into one `roadmap.md` (per-milestone specs + the `archive/` dir removed — git log is the history); `code-debt-cleanup.md` trimmed to open items only.
+
+### Fixed
+
+- Security: CORS default closed, upload stream-cap, dependency CVE floors (serving path CVE-clean).
+- Webapp: closed rounds route to the historical source (kills the in-flight 404 + degraded inspector); derived-origin drafts mint a canonical dataset instead of cloning per-slug.
+- `llm_ranking` re-enabled now that the backend validates structured output.
+
+### Internal
+
+- `APP_VERSION` + `pyproject.toml` → 0.8.1.
+
 ## [0.7.0] — 2026-05-26
 
 > Note: existing entries below predate M9. Headline M10 beta-hosting (OIDC + lifecycle + quotas + browser start surface), Stage-1 identity foundation, M12 control-plane (ADR-0001/0002/0003), webapp Next.js port, and the mypy-strict-default migration are not enumerated here — see the v0.7.0 GitHub release notes for the headline summary.
