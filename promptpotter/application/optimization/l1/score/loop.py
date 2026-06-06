@@ -272,7 +272,7 @@ async def score_population(
                 cr_result.runtime_failure,
             ]
         candidate_scores.append(cr_result.report)
-        callbacks.on_candidate_scored(idx, n, cr_result.report.to_dict())
+        callbacks.on_candidate_scored(idx, n, cr_result.report.model_dump())
         if obs:
             with graceful("CandidateScored emit failed"):
                 obs.emit_write_point(
@@ -280,7 +280,7 @@ async def score_population(
                     campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
                     candidate_idx=idx,
-                    report=cr_result.report.to_dict(),
+                    report=cr_result.report.model_dump(),
                 )
 
         if cr_result.outcome == CandidateOutcome.ESCALATED:

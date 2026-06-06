@@ -10,8 +10,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.shared.statistics import wilson_ci
-
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
@@ -208,7 +206,7 @@ def _scoreboard(
 ) -> str:
     """Format ranked candidate scoreboard as a box with 95% CI.
 
-    ``candidate_scores`` items: {candidate_id, accuracy, composite_fitness?, hits, total,
+    ``candidate_scores`` items: {candidate_id, accuracy, composite_fitness?, ci_lo, ci_hi,
     matched_origin_accuracy?}. When a row carries ``matched_origin_accuracy`` (PoBB-locked
     candidates only ran a subset), the Δ column compares against origin on that
     same subset; otherwise the full-set ``origin_accuracy`` fallback applies.
@@ -239,7 +237,7 @@ def _scoreboard(
     for i, s in enumerate(ranked, 1):
         label = (s.get("label") or "")[:8]
         acc = s["accuracy"]
-        ci_str = fmt_ci(*wilson_ci(s.get("hits", 0), s.get("total", 0)))
+        ci_str = fmt_ci(s.get("ci_lo", 0.0), s.get("ci_hi", 0.0))
         # Per-row matched-pair origin: when present, compares this candidate's
         # accuracy against origin on the *same samples this candidate ran*
         # (PoBB-locked rows). Falls back to the full-set origin for rows the

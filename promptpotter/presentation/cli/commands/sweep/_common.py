@@ -192,8 +192,8 @@ def _panel_stats_from_round(round_result: Any, panel_size: int) -> dict[str, flo
     from promptpotter.application.sweep import compute_panel_stats
 
     scores = list(round_result.candidate_scores or [])
-    accuracies = [float(s.get("accuracy") or 0.0) for s in scores]
-    pps = [s.get("pipeline_params_override") or {} for s in scores]
+    accuracies = [s.accuracy for s in scores]
+    pps = [s.pipeline_params_override or {} for s in scores]
     return compute_panel_stats(
         candidates_planned=panel_size,
         candidate_accuracies=accuracies,

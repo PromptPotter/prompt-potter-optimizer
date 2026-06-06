@@ -84,10 +84,10 @@ def render_round_stats(
     total = round_result.total
     deprecated = round_result.deprecated
     if total == 0 and round_result.candidate_scores:
-        best = max(round_result.candidate_scores, key=lambda s: s.get("accuracy", 0))
-        hits = best.get("hits", 0)
-        total = best.get("total", 0)
-        deprecated = best.get("deprecated", 0)
+        best = max(round_result.candidate_scores, key=lambda s: s.accuracy)
+        hits = best.hits
+        total = best.total
+        deprecated = 0
     suffix = f"  ({deprecated} deprecated)" if deprecated else ""
     lines.append(
         _node_line(

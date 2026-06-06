@@ -1,6 +1,6 @@
 # Code-Debt Cleanup — Backlog
 
-**Status:** Reference — perpetual living backlog. Tiers 0–6 + polish arcs A–E + audits 1–3 closed by 2026-05-25. Active items: TermNorm wire model (cross-repo) + the 2026-06-06 ingest/origin model-alignment slate + three deep-indirection architectural collapses (scoped, not slated). The 2026-06-04 seam-enforcement arc + the 2026-06-06 ingest/origin teardown (commit `fdb5d95f`) shipped. The M13+ intentional-UI-placeholder registry is permanent reference.
+**Status:** Reference — perpetual living backlog; `git log` is the history layer, this file holds only open debt. Active: TermNorm wire `model` (cross-repo) + the ingest/origin delta-key rename (items 5+7, live-gated) + a handful of standing entries. The M13+ intentional-UI-placeholder registry is permanent reference.
 
 **Scope is literal: code debt only.** Dead code, redundant guards,
 single-caller indirections, premature optimizations that no longer
@@ -30,114 +30,15 @@ confidence after verification (call sites traced + bodies read), not
 "I spotted a code smell." See § Audit guidance below for the
 patterns.
 
-### M10-readiness curation slate (approved 2026-06-06 — execute in order)
-
-Five deep audits (type-shape / error-arch / structural-seams / naming / test-gate)
-found the codebase is round almost everywhere — suite lean (240/240), dead code
-gone — and the remaining out-sticking units **cluster at one seam: the
-`application/` ↔ entry-point (CLI/web/API) boundary.** Arcs make it spherical,
-each its own commit + full gate, no push. Order respects deps.
-
-**Arc A — one application mint seam. ✅ SHIPPED.** Extracted the fresh-mint
-prologue (pipeline overlay → origin OSP → cycle_id → `auto_mint_session`) into
-`application/jobs/mint.py` (`resolve_cycle_plan` + `prepare_fresh_cycle`, typed
-`CyclePlan`/`MintedCycle`). Web `launcher.mint_campaign_command` and CLI `new`
-both call `prepare_fresh_cycle`; `resume`'s drift recompute calls
-`resolve_cycle_plan`. Deleted the presentation layer-leak
-(`_shared.py::_prepare_cycle`/`_mint_session_and_cycle`). Load-bearing check:
-the two non-draft mints shared an identical `{**profile, **file_config}` merge
-order (no silent divergence) — the dup was a hand-synced layer leak, now one
-seam. Resume-binding collapse (`start_run_command` ‖ `cmd_resume`) was left
-out: the two paths legitimately diverge (CLI resume owns drift detection +
-rewind/diag forks + the divergence menu; web `start_run` is a bare bind). Lock:
-generalized `test_observers_built_via_shared_helper` →
-`test_entry_points_route_through_application_seams` (per-path banned-symbol map;
-bans direct `auto_mint_session` in launcher + `new.py`) — net-zero test count.
-
-**Arc B — one error taxonomy + ONE flat envelope, end to end. ✅ FULLY SHIPPED
-(live-verified).** The whole API now serializes every error to the single flat
-`ErrorEnvelope` the OpenAPI spec already declared — `{"error", "message",
-"details"?}` top-level, no `detail` wrapper. Spec ↔ impl ↔ webapp now agree
-(they had drifted: impl wrapped under `detail`, the webapp parsed `body.detail`).
-- `shared/errors.py`: `PotterError(Exception)` base (`http_status`/`code`/
-  `message`/`details`, per-instance `code=` override) + the full status family —
-  `BadRequestError`(400)/`UnauthorizedError`(401)/`ForbiddenError`(403)/
-  `NotFoundError`(404)/`ConflictError`(409)/`ContentTooLargeError`(413)/
-  `PayloadInvalidError`(422)/`ServiceUnavailableError`(503). `QuotaExceededError`
-  (429) + `BackendUnreachableError`(503) reclassed; `LaunchError`/
-  `OriginIncompleteError`→`PayloadInvalidError`. (`PayloadInvalidError`, not
-  `ValidationError`, to dodge the Pydantic clash.)
-- **All ~92 `raise HTTPException` across `presentation/api/` (14 files: deps,
-  command_dispatcher, commands, datasets, auth + the 8 read routers) converted to
-  typed `PotterError`.** `main.py`: ONE `@app.exception_handler(PotterError)` +
-  the `RequestValidationError` (`request_invalid`) and catch-all (`internal_error`)
-  handlers all emit the flat envelope. `command_dispatcher._record_and_apply`:
-  ONE central `except PotterError` (emit rejected ack → re-raise; no HTTPException).
-- Webapp `_throwApiError` reads the flat envelope top-level (tolerant `detail`
-  fallback for Starlette's built-in 404/405). OpenAPI enum extended with the
-  generic codes.
-- Lock: folded a "no raw `HTTPException` in `presentation/api/`" AST scan into
-  `test_entry_points_route_through_application_seams` (net-zero test count, 240).
-- **Live-verified** (TermNorm up, `PROMPTPOTTER_AUTH=off`, Playwright): curl'd
-  404/400/422 across routes → all flat `{error,message,details?}`; the dashboard
-  renders against real campaigns with zero console errors.
-*Untouched (correct):* control-flow exceptions
-(`InjectionRenderError`/`MetaPromptParseError`/`ResumeDivergenceError`) + loop
-asserts — they never cross the boundary. `IngestError` stays a `@dataclass`
-(route-mapped to `PayloadInvalidError`); `_DeleteCycleRejectedError` stays the
-internal ack-rejected control signal.
-
-**Arc C — `ScoredCandidate` is the round-file shape. ⏸ DEFERRED (needs a live
-resume/fork round-trip — re-scoped after inspection).**
-The original framing under-counted the blast radius. `RoundResult.candidate_scores`
-is wired as `list[dict[str, Any]]` through ~13 reader/writer files (not ~9 dict.get
-readers): `cycle._build_scoreboard`, `axis`, `round_analysis`, `origin` (disk-read),
-`review`, `round_summary`, `view_ingress`, plus the **tracing event shapes**
-(`tracing/events.py::candidate_scores: list[dict]` → `file_sink` / `langfuse_sink`).
-Two findings make this unsafe to land blind: (1) the round-file JSON is the
-**on-disk contract resume / fork / decision-replay read back** — "byte-identical"
-must be proven by round-tripping a real cycle, not asserted; (2) promoting
-`ci_lo`/`ci_hi` to computed fields implies converting `ScoredCandidate`
-dataclass→Pydantic (it's used with `replace()` + `field(default_factory=…)` in
-`l1/score/loop.py` + `winner.py`), and Pydantic must serialize in the EXACT
-`to_dict()` key order to stay byte-identical. *Action when picked up:* land behind
-a live fresh-cycle + resume + fork round-trip (same protocol as D); add `from_dict()`
-+ the byte-identical fixture guard FIRST as a pin, then convert writer→readers in
-one pass. *Commit:* `refactor(results): ScoredCandidate is the round-file shape — drop the dict shadow`
-
-**Arc E — gate hardening. ⏸ NOT DONE (no safe autonomous deliverable).** The
-Prettier `format:check` would add a **new dependency** (the webapp uses
-eslint-config-next + vitest, no Prettier) and reformat every webapp file —
-against the repo's "fewest dependencies possible" rule, large churn, unverifiable
-gain. CI is already well-hardened (Python: ruff lint+format+deptry+mypy+pytest+cov;
-webapp: lint+tsc+vitest+anti-rot grep+build), so there's no real gap to close.
-The "one dispatch/L1-parse failure-mode test" is marginal value at the 240
-ceiling (charter: prune-before-add). Revisit only if the operator wants Prettier
-adopted webapp-wide (its own arc: add dep + config + one-shot reformat + script +
-CI), or surfaces a concrete failure-path coverage gap worth a net-zero swap.
-Notebook-into-ruff/mypy still bundles with the deferred notebook rewrite
-(knowingly broken — would red the gate now).
-
-**D — deferred (needs 1 live L1 round).** This is items 5+7 below, **corrected:**
-unify the 4-named delta to **`pipeline_overlay`** (glossary's sanctioned word),
-NOT the `*_updates` coinage. C lands first so D renames a typed field, not dict
-keys. The §"Execution scope for 5 + 7" map below stands, with that target swap.
-
----
-
 ### This week (execution slate)
-
-Remaining after the 2026-05-28 unblocker arc (shipped: webapp source maps, connector revision pinning, local Dex OIDC harness at `dev/oidc-local/`, cycle fixtures + Vitest harness at `tests/fixtures/cycles/` and `webapp/lib/**/__tests__/`, React #185 render-phase fix, L2/L3-terminal empty-historical fix):
 
 1. **TermNorm wire `model`** — cross-repo edit at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`. With the connector revision-pin landed (`promptpotter/connectors/protocol.py::Connector.{expected_revision, version_check}`), the TermNorm-side PR adds `model` to the per-request response + a `/version` endpoint; this repo bumps `termnorm.py::_EXPECTED_REVISION` to the new SHA and deletes the `_synth_legacy_backend_record` back-fill in `presentation/api/routers/auth.py`.
 
 ### Ingest/origin model-alignment slate (2026-06-06)
 
-The ingest/origin unify + name-alignment arc (commit `fdb5d95f`) landed the `field_provenance` / `origin_prompt_fields` / `raw_task_description` / `decomposed_task_context` renames and tore out the intermediate-state residue (a dead `_coerce` branch, the duplicate `thinkingLadder` derivation, a doubled "Starting prompt" header, wizard-era CSS, ~8 stale breadcrumbs). The items below finish aligning the optimizer/origin code to the §0 model — **one shape per concept, fewer lines, AI-legible names.**
+Aligning optimizer/origin code to the §0 model — one shape per concept, fewer lines, AI-legible names. Items 1–4 + 6 shipped (git log). The two below stay, both gated on a live L1 round:
 
-Shipped this session (git log is the history): item 1 (`committed_prompt_fields()` collapse), item 2 (the `origin_search_point` in-memory slot rename), item 3 (the optimizer/origin symbol-rename cluster → `resolved_origin` / `OperatorForkOverride` / `ScoredCandidate` / `effective_pipeline_params` + `ORIGIN_RESOLUTION_PRIORITY`), item 4 (dropped — the `HardSamplesScope` "origin" homonym does not exist; scopes are already `cycle`/`campaign`/`dataset`), item 6 (OpenAPI `DraftCampaign` reconciled to the shipped `to_wire()`). The two below stay — both gated on a live L1 round.
-
-5. **L1 delta keys `*_override` → `*_updates` (on-disk contract — do last, live-verify)** — `prompt_fields_override` / `task_context_override` / `pp_override`(+`pipeline_params_override`) are merges, not replacements, but the name says "override." Land together with item 7. **Blocker:** one live L1 round (operator-gated). Full execute-ready map below.
+5. **L1 delta keys `*_override` → updates (on-disk contract — do last, live-verify)** — `prompt_fields_override` / `task_context_override` / `pp_override`(+`pipeline_params_override`) are merges, not replacements, but the name says "override." For the pipeline-delta pair use the glossary word **`pipeline_overlay`** (not a coined `pp_updates`); see the Decision below. Land together with item 7. **Blocker:** one live L1 round (operator-gated). Full execute-ready map below.
 
 7. **Webapp duplicate searchpoint projection** (do *with* item 5, same commit) — `searchPoint.ts::liveInFlightSearchPoint` and `candidateSearchPoint.ts` both map wire `prompt_fields`/`pp_override` → `{origin_prompt_fields, pipeline_overlay}`. **Action:** one `wireToCandidateSearchPoint(wire)` helper both call — collapses item 5's reader change to a single site. **Blocker:** none on its own, but bundle with 5 so the reader key rename lands once.
 
@@ -154,7 +55,7 @@ These are one arc: item 5's wire-key rename is exactly what item 7's helper cons
 | `pipeline_params_override` | `pipeline_params_updates` | L1Variant schema field + `round_NNNN.json::candidate_scores[]` key + validators + CLI display + verify |
 | `pp_override` | `pp_updates` | the SHORT dashboard/wire alias: `dashboard.json` candidate entry + CLI display + **webapp readers** |
 
-**Decision to settle first (one axis):** `pp_override` (dashboard wire) and `pipeline_params_override` (round-file + schema) are two names for one delta. Either (a) rename both to the `*_updates` pair above (keeps the short/long split), or (b) **unify to one** `pp_updates` everywhere (kills the two-name tax — preferred, matches the arc's "one shape per concept"). Pick before starting; the table assumes (a), option (b) drops `pipeline_params_updates` in favor of `pp_updates` at every site.
+**Decision to settle first (one axis):** `pp_override` (dashboard wire) and `pipeline_params_override` (round-file + schema) are two names for one delta. Either (a) rename both to the `*_updates` pair above (keeps the short/long split), or (b) **unify to one `pipeline_overlay`** everywhere (glossary's sanctioned word; kills the two-name tax — preferred, matches the arc's "one shape per concept"). Pick before starting; the table assumes (a), option (b) drops `pipeline_params_updates`/`pp_updates` in favor of `pipeline_overlay` at every site. (The prompt/context deltas stay `*_updates` either way — only the pipeline delta has a glossary word.)
 
 **Python sites (writer + reader together — no shims):**
 - Schema (source of truth): `dispatch/schemas.py::L1Variant` (3 fields + their docstrings) → JSON schema the LLM sees is built from these field names by `validators/l1_strict.py::build_l1_output_schema` (reads `variant_props["pipeline_params_override"]`), so the rename auto-propagates to the LLM contract.
@@ -178,41 +79,14 @@ These are one arc: item 5's wire-key rename is exactly what item 7's helper cons
 
 ### Operator-steered-fork drift (v0.8.1 — found 2026-06-03)
 
-The large steer-fork feature (10 phases + 4 refinements + the chat-Origin consolidation) left these. Knots 1–4 shipped in the v0.8.1 panel-fix arc: `operator_endorse` collapsed (seed now required; `OPERATOR_STEERED` is the sole operator trigger); the twin editors split + renamed (`PipelineConfigEditor` → `AllowedValuesEditor` for ingest allowed-values; `NodeConfigEditor` is the steer/value editor, now also rendering the read-only node detail schema-driven); the dashboard→chat steer routing collapsed (`ScoringInspector` opens the steer `Dialog` directly — no tab hop, no node+candidate co-presence inference); the unregistered "Substitute candidates" ghost button cut. The dead `optimizer_locks` read path went with them (`PipelineSchema.optimizer_locks()` + the served field + `cv.optimizerLocks` deleted; ingest keeps its own `derive_optimizer_locks` draft path). Remaining:
+Knots 1–4 shipped in the v0.8.1 panel-fix arc (git log). Remaining:
 
 1. **Reconcile defaults snapshot `dash` at mount while the parent keeps polling.** `forkReconcileDefaults`/`LimitReconcile` freeze spend/round "remaining" via `useState(() => …)`; a long edit session shows mount-time remaining, not current. *Why debt:* latent staleness seam — intentional (avoids clobbering the operator's typed values) but undocumented, so a future reader may "fix" it into a clobber. **Action:** one-line comment affirming the snapshot is deliberate, or recompute-on-reopen. **Blocker:** none.
 
-### Entries
+### Considered, not debt (don't re-open)
 
-### Deep indirection — scoped, not slated
-
-The three below are architectural collapses, not sittings. Each is multi-file, has plausibly load-bearing constraints worth verifying before committing, and is sized for spec-buddy to draft a mini-spec ahead of the work. Read the entry's *load-bearing check* before assuming the collapse is free.
-
-> **DX-marathon resolution (2026-06-04).** All three were worked. **Item 1 shipped** (focused — the reconstruction half only). **Items 2 and 3 are withdrawn — not debt**: each load-bearing check found the collapse would *lose* something real. The original analyses are kept below for context; the status tag on each is the current truth.
-
-- **✅ SHIPPED (focused).** **Typed-view roundtrip on every `PhaseRecord` is a back-compat shim against a constraint this project doesn't have** —
-  *Resolution:* deleted the **reconstruction** half — `view_to_wire_dict`, `view_from_record`, both reconstructor registries, the `_*_from_dict` helpers. The producer now puts the **typed** view object on `payload['view']`; Pydantic serializes it **byte-identically** to disk (`dump_json(fallback=str)`) and SSE (`model_dump(mode="json")`), so there's zero wire-shape change and nothing to reconstruct. The framing below was half-wrong: `payload['view']` was never a back-compat shim — it's the JSON wire form — but the typed object serializes to it for free, so the *reconstruction* was the only waste. The 3rd fold (`from_disk_round`) is **not** subsumed; see that entry. Original analysis:
-  `presentation/views/view_models.py` (404) + `presentation/views/view_ingress.py` (523) carry a 4-stage transform: `PhaseEvent` → `from_phase_event(event, ctx)` → typed `AnyView` dataclass → `view_to_wire_dict(view)` → JSON dict → embedded in `PhaseRecord.payload['view']` on the ledger → subscriber reads it back through `view_from_record(record)` (with paired `_pure_reconstruct` + `_custom_reconstruct` registries) → typed `AnyView` again. The roundtrip's purpose is to persist a typed view through JSON so future readers see the same shape — i.e. ledger-format compatibility across View-shape changes. CLAUDE.md says no back-compat: there is nothing on disk to be compatible with, and no released versions. Every View field today must be updated in three places (dataclass + `from_phase_event` arm + `_*_from_dict` reconstructor) to keep the roundtrip honest.
-  **Action:** stop embedding the view in `PhaseRecord.payload['view']`. `RunCallbacks.on_phase` emits just `PhaseRecord(phase, event, round, payload={"data": event.data})`. Subscribers (`live/display.py`, `webapp` SSE) compute the rendered shape on demand from `payload["data"]` + the phase/event key — same code path, no roundtrip. Drop `view_to_wire_dict`, `view_from_record`, both reconstructor registries, the corresponding `_*_from_dict` helpers, and `from_phase_event`'s view-construction branches (keep only its `ViewContext` side effects if any survive scrutiny).
-  **Load-bearing check:** confirm no subscriber today reads `payload['view']` from a *historical* record — i.e. one written by a prior version. If `EventStreamView` SSE replay leans on the embedded view, the collapse needs the subscriber to gain a render path first. Grep: `payload.get("view"` + `record["view"`.
-  **Estimated delta:** ~500 LOC removed across `view_ingress.py` (most of it) + `view_models.py` (per-event dataclasses; keep the small renderer-input shapes like `ScoreEntry` if `live/display.py` still consumes them) + ~5 lines in `run_observers.py`.
-  **Pattern:** serialization roundtrip whose only purpose is shape-compat — eliminated by the no-back-compat rule.
-
-- **⊘ WITHDRAWN — not debt.** **Two writer APIs over the canonical ledger (`RunCallbacks` ↔ `emit_*`)** —
-  *Resolution:* the load-bearing check called it. `_phase_ctx: ViewContext` on `RunCallbacks` **is** write-then-read across phase events (round tracking, origin rolling, sp-diff prev-vs-current) — owned cross-event state. Folding `RunCallbacks` → `emit_*` would force that owned state into an ambient ContextVar (an implicit mutable global) — a downgrade, not a simplification. The two shapes encode a real distinction: `emit_*` is stateless because the deep-async sites have **no ledger handle** (only the `_CYCLE_LEDGER` ContextVar); `RunCallbacks` is stateful because the runner **owns** the ledger and the `ViewContext`. The actual pain (devs guessing which to use) was a docs gap — now closed by [`developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1, which states the one rule. Original analysis:
-  `application/run_observers.py::RunCallbacks` is the typed-event constructor over `CycleEventLog.append` (one method per event class, ledger held as instance state). `infrastructure/llm/models.py::emit_*` (per-call telemetry like `emit_token_usage`, `emit_command`, `emit_command_ack`) is the kwargs-only helper that reads the active ledger from `_CYCLE_LEDGER` ContextVar and appends. Both write the same `CycleRecord` discriminated union to the same `events.jsonl`. CLAUDE.md (application/CLAUDE.md "Per-call telemetry from deep async chains uses the `emit_*` shape") frames them as different *use cases* (high-frequency runner-driven vs deep-async per-call), but mechanically they're two ingresses for one channel — the ContextVar makes the instance-held ledger redundant.
-  **Action:** fold `RunCallbacks` methods into `emit_*` helpers reading `_CYCLE_LEDGER`. `on_phase` becomes `emit_phase(phase, event, round, data)`; `on_round_complete` becomes `emit_round_display(...)`; etc. `build_run_observers` sets the ContextVar at runner startup (it already does, for the existing `emit_*` callers — `set_cycle_ledger`); every callsite stops carrying a `RunCallbacks` reference. The `ViewContext`-stateful pieces (round tracking, origin rolling, prompt-flat memo) either move into projection state or become explicit ContextVars alongside `_CYCLE_LEDGER` / `_CURRENT_ROUND`.
-  **Load-bearing check:** the stateful `_phase_ctx: ViewContext` on `RunCallbacks` is the real architectural question — if any of its fields are *write-then-read* across phase events within the same cycle (not just stamping records with current state), the collapse needs a named home for that state. Best candidate: a `PhaseContextView` projection that subscribes to the ledger and exposes the same fields the live display reads.
-  **Estimated delta:** ~80 LOC removed from `run_observers.py` (the class + its methods); ~30 LOC added across `infrastructure/llm/models.py` for the new `emit_phase` / `emit_round_display` / `emit_snapshot` helpers. Net negative ~50 LOC and one fewer ingress to reason about. Compounds with item above (the typed-view roundtrip is what `on_phase` exists to do).
-  **Pattern:** two ingresses for one channel; the older one is now indistinguishable from the newer except by method-vs-function shape.
-
-- **⊘ WITHDRAWN — not debt (genuine separate source).** **`from_disk_round` / `from_disk_log` rebuild the same shapes the live ingress already emits** —
-  *Resolution:* the load-bearing check's "worth a second pass" found real foreign-cycle callers. `_render_campaign_log_md` (`writers.py:410`) folds **fork-sibling** cycles into the campaign digest via `from_disk_log(..., fork_indices=…)`, and `scripts/render_review.py` re-renders **historical** cycles post-mortem. Both render cycles with no live in-memory view objects and no ledger (the ledger is cycle-scoped, destroyed on cycle exit; `AuditTrailView.drain()` only exists for the cycle running in *this* process). On-disk `round_NNNN.json` is the **only** source for a foreign cycle — so these are a genuine separate source, not a roundtrip shim. They rebuild the same *shape* from a different *lifecycle*; `test_round_complete_view_roundtrip` keeps the two factories honest against one View. Original analysis:
-  `presentation/writers.py:162-204` (`from_disk_round`) + `:234+` (`from_disk_log`) read `round_NNNN.json` + `index.json` from disk and reconstruct `RoundCompleteView` / `LogMdView`. The live path (`from_phase_event`) builds the *same* views from `PhaseEvent`. So a View's field set must be reachable from both the event stream AND from the persisted JSON — every new field needs both producers. `round_NNNN.json` is itself an `AuditTrailView` projection of the ledger, so this is: ledger → projection → JSON → reverse-projection → View. Two of those four hops exist only because the writer doesn't subscribe to the ledger itself.
-  **Action:** have `write_log_md` / `write_review_md` subscribe to the ledger like other projections (or accept a streaming view from the existing audit projection), instead of reading the on-disk JSON back and reconstructing. Eliminates the disk-replay reconstructors entirely.
-  **Load-bearing check:** post-cycle markdown writes today happen at runner milestones (not from a live subscriber) because the writer wants the *complete* round set, not in-flight events. Verify whether the live `AuditTrailView` already exposes a "drain to final shape on cycle end" hook — it does (`DerivedView.drain()`); the writer should be able to receive the drained snapshot directly. The only real question is whether `from_disk_log` / `from_disk_round` are also called from post-mortem analysis paths (operator opens an old cycle dir and re-renders) — `grep` says no external callers, but worth a second pass.
-  **Estimated delta:** ~250 LOC removed across `writers.py` (the two reconstructors + their helpers). Largely dependent on item 1 above landing first — if the typed-view roundtrip stays, the writer either keeps the disk-replay or grows a different ledger subscription.
-  **Pattern:** parallel reconstruction paths for the same shape — collapses once the writer reads the canonical source instead of its on-disk projection.
+- **`RunCallbacks` ↔ `emit_*`** — two writer APIs, but `RunCallbacks._phase_ctx: ViewContext` is owned write-then-read cross-event state; folding it into an ambient ContextVar is a downgrade. The "which do I use" rule is in [`developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1.
+- **`from_disk_round` / `from_disk_log`** — looks like a roundtrip shim, but it's a genuine separate source: foreign fork-sibling + historical cycles have no live ledger, so on-disk `round_NNNN.json` is the only source. `test_round_complete_view_roundtrip` keeps both factories honest against one View.
 
 ### Standing entries
 
@@ -430,8 +304,6 @@ scope for any "hide non-functional controls" sweep.
 | Topbar search input (disabled) | `webapp/components/shell/Topbar.tsx:29` | M13+ analytics search |
 | ChatPane attach + textarea + send button (disabled) | `webapp/components/chat/ChatPane.tsx:273-279` | M13+ chat-first operator UX |
 | ChatPane Extended-thinking / Web-search / Code-execution toggles (`toggle locked`) | `webapp/components/chat/ChatPane.tsx:286-322` | M13+ chat-first feature toggles |
-| ~~ChatPane "job-footer" — "Adjust spend / finishing criteria — wired in M12"~~ | — | **FULFILLED 2026-05-30.** The placeholder is now the live `SpendBudgetControl` (`change-spend-budget`) in the job-bar dropdown. No longer a placeholder. |
-| ~~ConfigMenu — gear icon + frozen-parameters panel~~ | — | **CONSOLIDATED 2026-06-02.** Replaced by `BackendNodeDetail` (`webapp/components/dashboard/pipeline/BackendNodeDetail.tsx`), opened by clicking the backend node in `TargetPipelineHero`. Read-only config-on-the-node (model/thinking/lock + origin prompt), derived from the real `optimizer_locks` (no hardcoded map). The editable surface stays deferred to the M12 control-plane (`// M12` seam in `BackendNodeDetail`). |
 | AccountModal "Update profile" button (disabled) | `webapp/components/account/AccountModal.tsx:193-200` | M13+ profile-editing surface |
 | AccountModal "Remove account" menu item (disabled) | `webapp/components/account/AccountModal.tsx:251-258` | M13+ multi-provider account management |
 | AccountModal "+ Connect account" button (alerts then no-ops) | `webapp/components/account/AccountModal.tsx:267-278` | M13+ multi-provider account linking |

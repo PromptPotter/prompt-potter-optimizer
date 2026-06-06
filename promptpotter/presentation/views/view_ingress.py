@@ -24,6 +24,7 @@ from promptpotter.domain.opt_search_point import (
     flatten_sp_summary,
 )
 from promptpotter.domain.phases import PhaseEvent
+from promptpotter.domain.results import ScoredCandidate
 from promptpotter.presentation.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
@@ -44,7 +45,7 @@ from promptpotter.presentation.views.view_models import (
     ViewContext,
     WarningEntry,
 )
-from promptpotter.shared.statistics import min_detectable_effect, wilson_ci
+from promptpotter.shared.statistics import min_detectable_effect
 
 __all__ = [
     "from_phase_event",
@@ -395,32 +396,27 @@ def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
 
 
 def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:
-    """``ScoredCandidate.to_dict()`` / ``asdict(ScoreEntry)`` → ``ScoreEntry``; Wilson CI recomputed when missing."""
-    hits = int(s.get("hits", 0))
-    total = int(s.get("total", 0))
-    if "ci_lo" in s and "ci_hi" in s:
-        ci_lo, ci_hi = float(s["ci_lo"]), float(s["ci_hi"])
-    else:
-        ci_lo, ci_hi = wilson_ci(hits, total)
-    # Two sources: ScoredCandidate.to_dict() carries ``invalid`` +
-    # ``validation_failures`` (derive reason); asdict(ScoreEntry) carries
-    # ``invalid_reason`` top-level.
-    invalid_reason: str | None = s.get("invalid_reason")
-    if invalid_reason is None and s.get("invalid"):
-        vfs = s.get("validation_failures") or []
-        if vfs and isinstance(vfs[0], dict):
-            reason = vfs[0].get("reason")
-            invalid_reason = str(reason) if reason else None
+    """``ScoredCandidate`` dict (``model_dump``) → narrow ``ScoreEntry`` renderer row.
+
+    ``ci_lo``/``ci_hi`` ride the validated candidate (sole Wilson site); the
+    scoreboard's ``invalid_reason`` is derived from the first validation failure.
+    """
+    sc = ScoredCandidate.model_validate(s)
+    invalid_reason: str | None = None
+    if sc.invalid and sc.validation_failures:
+        first = sc.validation_failures[0]
+        reason = first.get("reason") if isinstance(first, dict) else None
+        invalid_reason = str(reason) if reason else None
     return ScoreEntry(
-        label=s.get("label", ""),
-        accuracy=float(s.get("accuracy", 0.0)),
-        composite_fitness=s.get("composite_fitness"),
-        hits=hits,
-        total=total,
-        ci_lo=ci_lo,
-        ci_hi=ci_hi,
-        escalation_aborted=bool(s.get("escalation_aborted", False)),
+        label=sc.label,
+        accuracy=sc.accuracy,
+        composite_fitness=sc.composite_fitness,
+        hits=sc.hits,
+        total=sc.total,
+        ci_lo=sc.ci_lo,
+        ci_hi=sc.ci_hi,
+        escalation_aborted=sc.escalation_aborted,
         invalid_reason=invalid_reason,
-        matched_origin_accuracy=float(s.get("matched_origin_accuracy", 0.0)),
-        matched_origin_composite=s.get("matched_origin_composite"),
+        matched_origin_accuracy=sc.matched_origin_accuracy,
+        matched_origin_composite=sc.matched_origin_composite,
     )

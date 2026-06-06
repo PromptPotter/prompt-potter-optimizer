@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
@@ -46,71 +45,59 @@ def is_round_winner(changes_description: str | None, winner_label: str) -> bool:
     return bool(changes_description) and changes_description == winner_label
 
 
-@dataclass(frozen=True)
-class ScoredCandidate:
-    """One candidate's L1 score report. Typed in `score_population`, flattened via `to_dict`."""
+class ScoredCandidate(BaseModel):
+    """One candidate's L1 score report — the single shape for round-file scores.
+
+    ``model_dump()`` *is* the wire format; ``model_validate()`` reads it back.
+    ``ci_lo``/``ci_hi`` are computed from ``hits``/``total`` (sole Wilson site),
+    so they round-trip through serialization without being stored or recomputed
+    by readers.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     candidate_id: str
     label: str
-    changes_description: str
+    changes_description: str = ""
     accuracy: float
     composite_fitness: float
     hits: int
     total: int
-    evaluators: dict[str, float]
+    evaluators: dict[str, float] = Field(default_factory=dict)
     pipeline_params_override: dict[str, Any] | None = None
     # The candidate's evolved prompt (``OptSearchPoint.prompt_field_dict()`` shape).
     # Paired with ``pipeline_params_override`` this is the full searchpoint an
     # operator selects to seed an operator-steered fork (read side, Decision F).
-    prompt_fields: dict[str, Any] = field(default_factory=dict)
+    prompt_fields: dict[str, Any] = Field(default_factory=dict)
     escalation_aborted: bool = False
     elimination_stopped: bool = False
     scored_samples: int = 0
     expected_samples: int = 0
     invalid: bool = False
     resumed_from_cache: bool = False
-    validation_failures: list[dict[str, Any]] = field(default_factory=list)
-    runtime_failures: list[dict[str, Any]] = field(default_factory=list)
-    elimination_context: dict[str, Any] = field(default_factory=dict)
-    degradation_context: dict[str, Any] = field(default_factory=dict)
+    validation_failures: list[dict[str, Any]] = Field(default_factory=list)
+    runtime_failures: list[dict[str, Any]] = Field(default_factory=list)
+    elimination_context: dict[str, Any] = Field(default_factory=dict)
+    degradation_context: dict[str, Any] = Field(default_factory=dict)
     # Origin restricted to this candidate's measured samples — apples-to-apples
     # when PoBB locks mid-budget; equals full-set origin when fully scored.
     matched_origin_accuracy: float = 0.0
     matched_origin_hits: int = 0
     matched_origin_composite: float = 0.0
 
-    def to_dict(self) -> dict[str, Any]:
-        """Flat dict representation for wire format / JSON serialization."""
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def ci_lo(self) -> float:
         from promptpotter.shared.statistics import wilson_ci
 
-        ci_lo, ci_hi = wilson_ci(self.hits, self.total)
-        return {
-            "candidate_id": self.candidate_id,
-            "label": self.label,
-            "changes_description": self.changes_description,
-            "pipeline_params_override": self.pipeline_params_override,
-            "prompt_fields": dict(self.prompt_fields),
-            "accuracy": self.accuracy,
-            "composite_fitness": self.composite_fitness,
-            "hits": self.hits,
-            "total": self.total,
-            "ci_lo": ci_lo,
-            "ci_hi": ci_hi,
-            "evaluators": dict(self.evaluators),
-            "escalation_aborted": self.escalation_aborted,
-            "elimination_stopped": self.elimination_stopped,
-            "scored_samples": self.scored_samples,
-            "expected_samples": self.expected_samples,
-            "invalid": self.invalid,
-            "resumed_from_cache": self.resumed_from_cache,
-            "validation_failures": list(self.validation_failures),
-            "runtime_failures": list(self.runtime_failures),
-            "elimination_context": dict(self.elimination_context),
-            "degradation_context": dict(self.degradation_context),
-            "matched_origin_accuracy": self.matched_origin_accuracy,
-            "matched_origin_hits": self.matched_origin_hits,
-            "matched_origin_composite": self.matched_origin_composite,
-        }
+        return wilson_ci(self.hits, self.total)[0]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def ci_hi(self) -> float:
+        from promptpotter.shared.statistics import wilson_ci
+
+        return wilson_ci(self.hits, self.total)[1]
 
 
 class CandidateProposal(BaseModel):
@@ -182,7 +169,7 @@ class RoundPayload(BaseModel):
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     candidates_scored: int
-    candidate_scores: list[dict[str, Any]] = Field(default_factory=list)
+    candidate_scores: list[ScoredCandidate] = Field(default_factory=list)
     # ResumeCheckpoint records consumed by the divergence-replay walker.
     decisions: list[dict[str, Any]] = Field(default_factory=list)
     evaluators: dict[str, float] = Field(default_factory=dict)

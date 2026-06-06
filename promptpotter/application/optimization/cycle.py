@@ -13,7 +13,12 @@ from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import RoundOrigin, RoundResult, is_round_winner
+from promptpotter.domain.results import (
+    RoundOrigin,
+    RoundResult,
+    ScoredCandidate,
+    is_round_winner,
+)
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint
 
@@ -33,33 +38,32 @@ __all__ = ["Cycle", "CycleRoundState"]
 
 
 def _build_scoreboard(
-    candidate_scores: list[dict[str, Any]], winner_label: str
+    candidate_scores: list[ScoredCandidate], winner_label: str
 ) -> list[dict[str, Any]]:
     """Trial-JSON `scoreboard`: rank by (composite_fitness, accuracy) desc; tag winner."""
     ranked = sorted(
         candidate_scores,
-        key=lambda c: (c["composite_fitness"], c["accuracy"]),
+        key=lambda c: (c.composite_fitness, c.accuracy),
         reverse=True,
     )
     rows: list[dict[str, Any]] = []
     for i, c in enumerate(ranked, start=1):
-        is_winner = is_round_winner(c.get("changes_description"), winner_label)
         rows.append(
             {
                 "rank": i,
-                "candidate_id": c.get("candidate_id"),
-                "label": c.get("changes_description", ""),
-                "accuracy": c.get("accuracy"),
-                "composite_fitness": c.get("composite_fitness"),
-                "hits": c.get("hits"),
-                "total": c.get("total"),
-                "ci_lo": c.get("ci_lo"),
-                "ci_hi": c.get("ci_hi"),
-                "is_winner": is_winner,
-                "escalation_aborted": c.get("escalation_aborted", False),
-                "matched_origin_accuracy": c.get("matched_origin_accuracy", 0.0),
-                "matched_origin_hits": c.get("matched_origin_hits", 0),
-                "matched_origin_composite": c.get("matched_origin_composite"),
+                "candidate_id": c.candidate_id,
+                "label": c.changes_description,
+                "accuracy": c.accuracy,
+                "composite_fitness": c.composite_fitness,
+                "hits": c.hits,
+                "total": c.total,
+                "ci_lo": c.ci_lo,
+                "ci_hi": c.ci_hi,
+                "is_winner": is_round_winner(c.changes_description, winner_label),
+                "escalation_aborted": c.escalation_aborted,
+                "matched_origin_accuracy": c.matched_origin_accuracy,
+                "matched_origin_hits": c.matched_origin_hits,
+                "matched_origin_composite": c.matched_origin_composite,
             }
         )
     return rows
@@ -340,7 +344,7 @@ class Cycle:
             _rf_dedup_key(rf.model_dump()) for rf in self.opt_sp.memory.wounds.runtime_failures
         }
         for cs in rr.candidate_scores:
-            for rf_dict in cs.get("runtime_failures") or []:
+            for rf_dict in cs.runtime_failures:
                 k = _rf_dedup_key(rf_dict)
                 if k in existing_keys:
                     continue
@@ -399,7 +403,7 @@ class Cycle:
             "results": rr.results,
             "all_candidate_results": dict(rr.all_candidate_results),
             "candidates_scored": rr.candidates_scored,
-            "candidate_scores": list(rr.candidate_scores),
+            "candidate_scores": [c.model_dump() for c in rr.candidate_scores],
             "decisions": list(rr.decisions),
             "evaluators": dict(rr.evaluators),
             "critique": rr.critique,

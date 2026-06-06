@@ -117,6 +117,8 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             "composite_fitness": s.composite_fitness,
             "hits": s.hits,
             "total": s.total,
+            "ci_lo": s.ci_lo,
+            "ci_hi": s.ci_hi,
             "escalation_aborted": s.escalation_aborted,
             "invalid_reason": s.invalid_reason,
             "matched_origin_accuracy": s.matched_origin_accuracy,

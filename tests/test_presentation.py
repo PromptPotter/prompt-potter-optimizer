@@ -48,7 +48,7 @@ def _candidate_score_dict(
     total: int,
     aborted: bool = False,
 ) -> dict:
-    """Mirror what ``ScoredCandidate.to_dict`` writes into ``round_data.candidate_scores``."""
+    """Mirror what ``ScoredCandidate.model_dump`` writes into ``round_data.candidate_scores``."""
     ci_lo, ci_hi = wilson_ci(hits, total)
     return {
         "candidate_id": candidate_id,
@@ -87,6 +87,7 @@ def test_round_complete_view_roundtrip() -> None:
     # Labels follow the canonical CN.M scheme (round=1, idx=0/1/2 → C1.1/C1.2/C1.3).
     candidate_scores = [
         {
+            "candidate_id": "cand_0",
             "label": "C1.1",
             "accuracy": 0.40,
             "composite_fitness": 0.45,
@@ -95,6 +96,7 @@ def test_round_complete_view_roundtrip() -> None:
             "escalation_aborted": False,
         },
         {
+            "candidate_id": "cand_1",
             "label": "C1.2",
             "accuracy": winner_acc,
             "composite_fitness": winner_composite_fitness,
@@ -103,6 +105,7 @@ def test_round_complete_view_roundtrip() -> None:
             "escalation_aborted": False,
         },
         {
+            "candidate_id": "cand_2",
             "label": "C1.3",
             "accuracy": 0.20,
             "composite_fitness": 0.25,
@@ -184,6 +187,7 @@ def test_round_complete_view_no_improvement() -> None:
     origin_acc = 0.50
     candidate_scores = [
         {
+            "candidate_id": "cand_0",
             "label": "C1.1",
             "accuracy": 0.40,
             "composite_fitness": 0.42,

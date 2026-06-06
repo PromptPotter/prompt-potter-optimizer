@@ -54,19 +54,17 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
     winner_label = rr.label
     candidates: list[RoundSummaryCandidate] = []
     for c in rr.candidate_scores:
-        cd: dict[str, Any] = c
-        changes = str(cd.get("changes_description") or "")
         candidates.append(
             RoundSummaryCandidate(
-                candidate_id=str(cd.get("candidate_id") or ""),
-                label=str(cd.get("label") or ""),
-                accuracy=float(cd.get("accuracy") or 0.0),
-                composite_fitness=float(cd.get("composite_fitness") or 0.0),
-                scored_samples=int(cd.get("scored_samples") or 0),
-                expected_samples=int(cd.get("expected_samples") or 0),
-                is_winner=is_round_winner(changes, winner_label),
-                evaluators={k: float(v) for k, v in (cd.get("evaluators") or {}).items()},
-                changes_description=changes,
+                candidate_id=c.candidate_id,
+                label=c.label,
+                accuracy=c.accuracy,
+                composite_fitness=c.composite_fitness,
+                scored_samples=c.scored_samples,
+                expected_samples=c.expected_samples,
+                is_winner=is_round_winner(c.changes_description, winner_label),
+                evaluators=dict(c.evaluators),
+                changes_description=c.changes_description,
             )
         )
     selection = _measurement_order(rr.all_candidate_results or {})

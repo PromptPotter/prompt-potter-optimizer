@@ -4,7 +4,6 @@ composite, elects by `round_winner_key`, produces `RoundResult`.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.optimization.l1.population import parse_population
@@ -143,13 +142,14 @@ async def l1_score(
         cs_idx = cs_by_id.get(ind.lineage.id)
         if cs_idx is not None:
             evaluators = {**(s.get("evaluators") or {}), "l1_diversity": yield_stats.l1_yield}
-            candidate_scores[cs_idx] = replace(
-                candidate_scores[cs_idx],
-                composite_fitness=s["composite_fitness"],
-                evaluators=evaluators,
-                matched_origin_accuracy=matched["accuracy"],
-                matched_origin_hits=matched["hits"],
-                matched_origin_composite=matched["composite_fitness"],
+            candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
+                update={
+                    "composite_fitness": s["composite_fitness"],
+                    "evaluators": evaluators,
+                    "matched_origin_accuracy": matched["accuracy"],
+                    "matched_origin_hits": matched["hits"],
+                    "matched_origin_composite": matched["composite_fitness"],
+                }
             )
         # Running max via shared `round_winner_key` so live + SCOREBOARD agree. Matched-origin
         # `delta_ok` below decides `improved`, not who won.
@@ -229,7 +229,7 @@ async def l1_score(
         results=best_results,
         all_candidate_results=dict(all_candidate_results),
         candidates_scored=len(scored),
-        candidate_scores=[cs.to_dict() for cs in candidate_scores],
+        candidate_scores=candidate_scores,
         decisions=[d.to_dict() for d in decisions],
         degraded_samples=count_degraded_samples(best_results),
         deprecated=base["deprecated"],

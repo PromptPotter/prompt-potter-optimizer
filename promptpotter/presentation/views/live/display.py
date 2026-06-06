@@ -269,7 +269,7 @@ class LiveDisplay(DerivedView):
                         "improved": rr.improved,
                         "results": rr.results,
                         "candidates_scored": rr.candidates_scored,
-                        "candidate_scores": list(rr.candidate_scores),
+                        "candidate_scores": [c.model_dump() for c in rr.candidate_scores],
                     }
                 )
         if event.phase == "scoring_steer" and event.event == "applied":
@@ -424,7 +424,7 @@ class LiveDisplay(DerivedView):
                 "prompt_fields": OptSearchPoint.from_prompt_fields(round_result.prompt_fields),
                 "results": round_result.results,
                 "candidates_scored": round_result.candidates_scored,
-                "candidate_scores": list(round_result.candidate_scores),
+                "candidate_scores": [c.model_dump() for c in round_result.candidate_scores],
             }
         )
 

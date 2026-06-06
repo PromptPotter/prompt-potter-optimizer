@@ -372,7 +372,7 @@ class AxisIndex:
         if len(rounds) < 2 or not (rounds[-2].results and rounds[-1].results):
             return
         desc = (
-            rounds[-1].candidate_scores[0].get("changes_description", "")
+            rounds[-1].candidate_scores[0].changes_description
             if rounds[-1].candidate_scores
             else ""
         )

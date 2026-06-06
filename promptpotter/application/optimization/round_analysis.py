@@ -303,8 +303,8 @@ def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
     for cand_id, results in all_results.items():
         desc = cand_id
         for cs in candidate_scores:
-            if cs.get("label") == cand_id or str(cs.get("idx")) == cand_id:
-                desc = cs.get("changes_description", cand_id)[:60]
+            if cs.candidate_id == cand_id:
+                desc = (cs.changes_description or cand_id)[:60]
                 break
         for r in results:
             q = r.get("query", "")
