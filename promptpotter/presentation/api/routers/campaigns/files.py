@@ -8,12 +8,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import HTTPException, Query
+from fastapi import Query
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.store import campaign_root_dir_for, cycle_dir_for
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
+from promptpotter.shared.errors import BadRequestError, ContentTooLargeError, NotFoundError
 
 # Campaign-level file artifacts that live at the campaign dir, not a cycle dir.
 # ``dashboard.json`` is NOT here — it is session-scoped and lives in the
@@ -72,13 +73,13 @@ def _iso_mtime(p: Path) -> str:
 def _resolve_safe_file(scope_root: Path, raw_path: str) -> Path:
     """Validate *raw_path* against escape attempts and confine it under *scope_root*."""
     if not raw_path or ".." in raw_path or "\\" in raw_path or raw_path.startswith("/"):
-        raise HTTPException(400, "Invalid path")
+        raise BadRequestError("Invalid path")
     scope_root_resolved = scope_root.resolve()
     resolved = (scope_root / raw_path).resolve()
     if not resolved.is_relative_to(scope_root_resolved):
-        raise HTTPException(400, "Path escapes scope root")
+        raise BadRequestError("Path escapes scope root")
     if not resolved.is_file():
-        raise HTTPException(404, f"File not found: {raw_path}")
+        raise NotFoundError(f"File not found: {raw_path}")
     return resolved
 
 
@@ -103,7 +104,7 @@ async def list_cycle_files(store: StoreDep, campaign_id: str, cycle_id: str) -> 
     cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     campaign_dir = campaign_root_dir_for(store.base_dir, campaign_id)
     if not cycle_dir.exists():
-        raise HTTPException(404, f"Cycle '{campaign_id}/{cycle_id}' not found")
+        raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
 
     entries: list[FileEntry] = []
     for f in _walk_files(cycle_dir):
@@ -116,7 +117,7 @@ async def list_cycle_files(store: StoreDep, campaign_id: str, cycle_id: str) -> 
             )
         )
         if len(entries) > _MAX_FILE_ENTRIES:
-            raise HTTPException(413, f"Too many entries in cycle dir (>{_MAX_FILE_ENTRIES})")
+            raise ContentTooLargeError(f"Too many entries in cycle dir (>{_MAX_FILE_ENTRIES})")
 
     for name in _CAMPAIGN_FILE_LEVEL_ARTIFACTS:
         f = campaign_dir / name
@@ -150,7 +151,7 @@ async def get_cycle_file(
     else:
         scope_root = campaign_root_dir_for(store.base_dir, campaign_id)
     if not scope_root.exists():
-        raise HTTPException(404, f"Scope root not found: {campaign_id}/{cycle_id}")
+        raise NotFoundError(f"Scope root not found: {campaign_id}/{cycle_id}")
 
     resolved = _resolve_safe_file(scope_root, path)
     size = resolved.stat().st_size

@@ -13,12 +13,13 @@ import argparse
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
     CommandResult,
-    _prepare_cycle,
     campaign_result_human,
     confirm_tty,
+    get_verbose,
     identity_from_args,
     init_services_cli,
     log_startup_summary,
@@ -66,11 +67,12 @@ def _prepare_cycle_for_resume(
     )
 
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
-    pipeline_params, _origin, expected_cycle_id = _prepare_cycle(
-        session, campaign_config, train_data
+    plan = resolve_cycle_plan(
+        session, campaign_config, train_data, log=logger.info if get_verbose() else None
     )
+    pipeline_params = plan.pipeline_params
     # build_origin_cycle_id yields ``cycle_<hash>``; campaign.json stores the bare hash.
-    current_hash = expected_cycle_id.removeprefix("cycle_")
+    current_hash = plan.cycle_id.removeprefix("cycle_")
 
     campaign = session.store.campaigns.load_campaign(ctx.campaign_id)
     if campaign is None:

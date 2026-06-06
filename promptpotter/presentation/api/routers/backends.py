@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from promptpotter import connectors
@@ -24,6 +24,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.presentation.api.deps import StoreDep, get_backend_or_404
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +96,8 @@ async def list_experiments(backend_id: str, store: StoreDep) -> dict[str, Any]:
     # Fall back to individual files
     experiments = store.backends.list_synced_experiments(backend_id)
     if not experiments:
-        raise HTTPException(
-            status_code=404,
-            detail="No synced experiments. Run POST /commands/sync-backend-experiments first.",
+        raise NotFoundError(
+            "No synced experiments. Run POST /commands/sync-backend-experiments first."
         )
     return {"experiments": experiments}
 
@@ -110,9 +110,9 @@ async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep) -
         backend_id, f"experiments/{experiment_id}.json"
     )
     if not data:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Experiment '{experiment_id}' not synced. Run POST /commands/sync-backend-experiments first.",
+        raise NotFoundError(
+            f"Experiment '{experiment_id}' not synced. "
+            "Run POST /commands/sync-backend-experiments first."
         )
     return data
 

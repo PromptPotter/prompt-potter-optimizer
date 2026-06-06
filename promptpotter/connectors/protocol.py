@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.connector import SessionProtocol, WireAdapter
+from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
     import httpx
@@ -51,15 +52,18 @@ VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
 PreflightFn = Callable[[str], Awaitable[None]]
 
 
-class BackendUnreachableError(RuntimeError):
+class BackendUnreachableError(PotterError):
     """Raised by ``Connector.preflight`` when the configured backend isn't
-    responding.
+    responding (503).
 
-    Carries the backend type + URL so the API layer's central 503 mapping
-    (in :class:`CommandDispatcher._record_and_apply`) can compose the
+    Carries the backend type + URL on ``details`` so the central
+    :class:`~promptpotter.shared.errors.PotterError` mapping seam composes the
     ``details.backend_type`` + ``details.backend_url`` envelope without
     re-parsing the message.
     """
+
+    http_status = 503
+    code = "backend_unreachable"
 
     def __init__(self, backend_type: str, backend_url: str, detail: str = "") -> None:
         self.backend_type = backend_type
@@ -67,7 +71,8 @@ class BackendUnreachableError(RuntimeError):
         self.detail = detail
         super().__init__(
             f"Backend '{backend_type}' at {backend_url} is not reachable. "
-            f"Start the backend and try again." + (f" ({detail})" if detail else "")
+            f"Start the backend and try again." + (f" ({detail})" if detail else ""),
+            details={"backend_type": backend_type, "backend_url": backend_url},
         )
 
 

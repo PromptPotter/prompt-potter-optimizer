@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from promptpotter.domain.cycle_paths import CycleDir
@@ -26,6 +25,7 @@ from promptpotter.infrastructure.store.base import read_json_optional
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
+from promptpotter.shared.errors import NotFoundError
 
 # An operator-steered fork is a clean offshoot: numbering restarts at 1, so all
 # its rounds are post-divergence by definition and the lane sits one column past
@@ -181,7 +181,7 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
     The tree is built from each cycle's ``parent_cycle_id``.
     """
     if store.campaigns.load_campaign(campaign_id) is None:
-        raise HTTPException(404, f"Campaign not found: {campaign_id}")
+        raise NotFoundError(f"Campaign not found: {campaign_id}")
     enum_entries = [
         e for e in store.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id
     ]

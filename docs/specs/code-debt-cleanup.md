@@ -30,6 +30,101 @@ confidence after verification (call sites traced + bodies read), not
 "I spotted a code smell." See § Audit guidance below for the
 patterns.
 
+### M10-readiness curation slate (approved 2026-06-06 — execute in order)
+
+Five deep audits (type-shape / error-arch / structural-seams / naming / test-gate)
+found the codebase is round almost everywhere — suite lean (240/240), dead code
+gone — and the remaining out-sticking units **cluster at one seam: the
+`application/` ↔ entry-point (CLI/web/API) boundary.** Arcs make it spherical,
+each its own commit + full gate, no push. Order respects deps.
+
+**Arc A — one application mint seam. ✅ SHIPPED.** Extracted the fresh-mint
+prologue (pipeline overlay → origin OSP → cycle_id → `auto_mint_session`) into
+`application/jobs/mint.py` (`resolve_cycle_plan` + `prepare_fresh_cycle`, typed
+`CyclePlan`/`MintedCycle`). Web `launcher.mint_campaign_command` and CLI `new`
+both call `prepare_fresh_cycle`; `resume`'s drift recompute calls
+`resolve_cycle_plan`. Deleted the presentation layer-leak
+(`_shared.py::_prepare_cycle`/`_mint_session_and_cycle`). Load-bearing check:
+the two non-draft mints shared an identical `{**profile, **file_config}` merge
+order (no silent divergence) — the dup was a hand-synced layer leak, now one
+seam. Resume-binding collapse (`start_run_command` ‖ `cmd_resume`) was left
+out: the two paths legitimately diverge (CLI resume owns drift detection +
+rewind/diag forks + the divergence menu; web `start_run` is a bare bind). Lock:
+generalized `test_observers_built_via_shared_helper` →
+`test_entry_points_route_through_application_seams` (per-path banned-symbol map;
+bans direct `auto_mint_session` in launcher + `new.py`) — net-zero test count.
+
+**Arc B — one error taxonomy + ONE flat envelope, end to end. ✅ FULLY SHIPPED
+(live-verified).** The whole API now serializes every error to the single flat
+`ErrorEnvelope` the OpenAPI spec already declared — `{"error", "message",
+"details"?}` top-level, no `detail` wrapper. Spec ↔ impl ↔ webapp now agree
+(they had drifted: impl wrapped under `detail`, the webapp parsed `body.detail`).
+- `shared/errors.py`: `PotterError(Exception)` base (`http_status`/`code`/
+  `message`/`details`, per-instance `code=` override) + the full status family —
+  `BadRequestError`(400)/`UnauthorizedError`(401)/`ForbiddenError`(403)/
+  `NotFoundError`(404)/`ConflictError`(409)/`ContentTooLargeError`(413)/
+  `PayloadInvalidError`(422)/`ServiceUnavailableError`(503). `QuotaExceededError`
+  (429) + `BackendUnreachableError`(503) reclassed; `LaunchError`/
+  `OriginIncompleteError`→`PayloadInvalidError`. (`PayloadInvalidError`, not
+  `ValidationError`, to dodge the Pydantic clash.)
+- **All ~92 `raise HTTPException` across `presentation/api/` (14 files: deps,
+  command_dispatcher, commands, datasets, auth + the 8 read routers) converted to
+  typed `PotterError`.** `main.py`: ONE `@app.exception_handler(PotterError)` +
+  the `RequestValidationError` (`request_invalid`) and catch-all (`internal_error`)
+  handlers all emit the flat envelope. `command_dispatcher._record_and_apply`:
+  ONE central `except PotterError` (emit rejected ack → re-raise; no HTTPException).
+- Webapp `_throwApiError` reads the flat envelope top-level (tolerant `detail`
+  fallback for Starlette's built-in 404/405). OpenAPI enum extended with the
+  generic codes.
+- Lock: folded a "no raw `HTTPException` in `presentation/api/`" AST scan into
+  `test_entry_points_route_through_application_seams` (net-zero test count, 240).
+- **Live-verified** (TermNorm up, `PROMPTPOTTER_AUTH=off`, Playwright): curl'd
+  404/400/422 across routes → all flat `{error,message,details?}`; the dashboard
+  renders against real campaigns with zero console errors.
+*Untouched (correct):* control-flow exceptions
+(`InjectionRenderError`/`MetaPromptParseError`/`ResumeDivergenceError`) + loop
+asserts — they never cross the boundary. `IngestError` stays a `@dataclass`
+(route-mapped to `PayloadInvalidError`); `_DeleteCycleRejectedError` stays the
+internal ack-rejected control signal.
+
+**Arc C — `ScoredCandidate` is the round-file shape. ⏸ DEFERRED (needs a live
+resume/fork round-trip — re-scoped after inspection).**
+The original framing under-counted the blast radius. `RoundResult.candidate_scores`
+is wired as `list[dict[str, Any]]` through ~13 reader/writer files (not ~9 dict.get
+readers): `cycle._build_scoreboard`, `axis`, `round_analysis`, `origin` (disk-read),
+`review`, `round_summary`, `view_ingress`, plus the **tracing event shapes**
+(`tracing/events.py::candidate_scores: list[dict]` → `file_sink` / `langfuse_sink`).
+Two findings make this unsafe to land blind: (1) the round-file JSON is the
+**on-disk contract resume / fork / decision-replay read back** — "byte-identical"
+must be proven by round-tripping a real cycle, not asserted; (2) promoting
+`ci_lo`/`ci_hi` to computed fields implies converting `ScoredCandidate`
+dataclass→Pydantic (it's used with `replace()` + `field(default_factory=…)` in
+`l1/score/loop.py` + `winner.py`), and Pydantic must serialize in the EXACT
+`to_dict()` key order to stay byte-identical. *Action when picked up:* land behind
+a live fresh-cycle + resume + fork round-trip (same protocol as D); add `from_dict()`
++ the byte-identical fixture guard FIRST as a pin, then convert writer→readers in
+one pass. *Commit:* `refactor(results): ScoredCandidate is the round-file shape — drop the dict shadow`
+
+**Arc E — gate hardening. ⏸ NOT DONE (no safe autonomous deliverable).** The
+Prettier `format:check` would add a **new dependency** (the webapp uses
+eslint-config-next + vitest, no Prettier) and reformat every webapp file —
+against the repo's "fewest dependencies possible" rule, large churn, unverifiable
+gain. CI is already well-hardened (Python: ruff lint+format+deptry+mypy+pytest+cov;
+webapp: lint+tsc+vitest+anti-rot grep+build), so there's no real gap to close.
+The "one dispatch/L1-parse failure-mode test" is marginal value at the 240
+ceiling (charter: prune-before-add). Revisit only if the operator wants Prettier
+adopted webapp-wide (its own arc: add dep + config + one-shot reformat + script +
+CI), or surfaces a concrete failure-path coverage gap worth a net-zero swap.
+Notebook-into-ruff/mypy still bundles with the deferred notebook rewrite
+(knowingly broken — would red the gate now).
+
+**D — deferred (needs 1 live L1 round).** This is items 5+7 below, **corrected:**
+unify the 4-named delta to **`pipeline_overlay`** (glossary's sanctioned word),
+NOT the `*_updates` coinage. C lands first so D renames a typed field, not dict
+keys. The §"Execution scope for 5 + 7" map below stands, with that target swap.
+
+---
+
 ### This week (execution slate)
 
 Remaining after the 2026-05-28 unblocker arc (shipped: webapp source maps, connector revision pinning, local Dex OIDC harness at `dev/oidc-local/`, cycle fixtures + Vitest harness at `tests/fixtures/cycles/` and `webapp/lib/**/__tests__/`, React #185 render-phase fix, L2/L3-terminal empty-historical fix):

@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
@@ -32,6 +32,7 @@ from promptpotter.infrastructure.projections import (
 )
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
+from promptpotter.shared.errors import NotFoundError
 
 __all__ = ["stream_cycle_events"]
 
@@ -126,12 +127,9 @@ async def stream_cycle_events(
     del store  # IdentityDep enforces tenant scope; cycle id is the rest of trust.
     view = get_event_stream(campaign_id, cycle_id)
     if view is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"No active stream for {campaign_id}/{cycle_id} — the cycle "
-                "is not currently running. Start a run before subscribing."
-            ),
+        raise NotFoundError(
+            f"No active stream for {campaign_id}/{cycle_id} — the cycle "
+            "is not currently running. Start a run before subscribing."
         )
     subscriber = view.subscribe()
     return StreamingResponse(

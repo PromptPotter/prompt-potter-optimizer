@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import HTTPException, Query
+from fastapi import Query
 from pydantic import BaseModel, Field
 
 from promptpotter.domain.cycle_paths import CycleDir
@@ -14,6 +14,7 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import Stores, campaign_root_dir_for, cycle_dir_for
 from promptpotter.presentation.api.deps import StoreDep, read_text_or_404
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
+from promptpotter.shared.errors import NotFoundError
 
 
 class CycleRecordEnvelope(BaseModel):
@@ -71,7 +72,7 @@ def _open_cycle_ledger_or_404(campaign_id: str, cycle_id: str, store: Stores) ->
     """Open the per-cycle ledger; 404 if the cycle dir doesn't exist."""
     cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     if not cycle_dir.exists():
-        raise HTTPException(404, f"Cycle '{campaign_id}/{cycle_id}' not found")
+        raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
     return CycleEventLog.open(CycleDir(cycle_dir))
 
 
@@ -114,10 +115,10 @@ async def get_cycle_hard_samples(
     """
     cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     if not cycle_dir.exists():
-        raise HTTPException(404, f"Cycle '{campaign_id}/{cycle_id}' not found")
+        raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
     path = cycle_dir / "hard_samples.json"
     if not path.is_file():
-        raise HTTPException(404, "hard_samples.json not present (cycle has no rounds yet)")
+        raise NotFoundError("hard_samples.json not present (cycle has no rounds yet)")
     artifact: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     return artifact
 

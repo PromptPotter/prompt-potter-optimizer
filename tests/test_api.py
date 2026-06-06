@@ -422,7 +422,7 @@ def test_dataset_ingest_flows_through_draft_and_tenant_scope(
             },
         )
         assert blocked.status_code == 422, blocked.text
-        gate = blocked.json()["detail"]
+        gate = blocked.json()  # flat ErrorEnvelope: {error, message, details}
         assert gate["error"] == "origin_incomplete"
         # Closed set: unset columns + the once-hidden `task_description` (no
         # default framing) gate; the config knobs auto-confirm from templates.
@@ -517,10 +517,10 @@ def test_mint_from_draft_503_preserves_draft_when_backend_unreachable(
             },
         )
         assert mint.status_code == 503, mint.text
-        detail = mint.json()["detail"]
-        assert detail["error"] == "backend_unreachable"
-        assert detail["details"]["backend_type"] == "termnorm"
-        assert detail["details"]["draft_id"] == draft["draft_id"]
+        envelope = mint.json()  # flat ErrorEnvelope: {error, message, details}
+        assert envelope["error"] == "backend_unreachable"
+        assert envelope["details"]["backend_type"] == "termnorm"
+        assert envelope["details"]["draft_id"] == draft["draft_id"]
 
         # Retry: draft is preserved (not 404 "draft not found") — operator can
         # fix the backend and retry without re-uploading. Still 503 here
@@ -535,7 +535,7 @@ def test_mint_from_draft_503_preserves_draft_when_backend_unreachable(
             },
         )
         assert retry.status_code == 503, retry.text
-        assert retry.json()["detail"]["error"] == "backend_unreachable"
+        assert retry.json()["error"] == "backend_unreachable"
 
 
 def test_open_existing_origin_mints_canonical_without_cloning(

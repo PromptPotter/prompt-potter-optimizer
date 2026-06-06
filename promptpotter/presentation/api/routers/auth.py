@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 from urllib.parse import quote_plus
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -54,6 +54,7 @@ from promptpotter.presentation.api.middleware import SESSION_COOKIE_NAME
 from promptpotter.presentation.api.middleware.oidc import (
     _identity_context_from_session,
 )
+from promptpotter.shared.errors import NotFoundError, ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -152,20 +153,32 @@ class MeResponse(BaseModel):
 def _require_bundle(request: Request) -> IdentityBundle:
     bundle: IdentityBundle | None = getattr(request.app.state, "identity_bundle", None)
     if bundle is None:
-        raise HTTPException(503, {"error": "identity_not_initialised"})
+        raise ServiceUnavailableError(
+            "identity backend not initialised", code="identity_not_initialised"
+        )
     return bundle
 
 
 def _require_provider_client(bundle: IdentityBundle, provider: str) -> Any:
     if provider == "google":
         if bundle.google is None:
-            raise HTTPException(404, {"error": "provider_not_configured", "provider": provider})
+            raise NotFoundError(
+                f"provider {provider!r} not configured",
+                code="provider_not_configured",
+                details={"provider": provider},
+            )
         return bundle.google
     if provider == "github":
         if bundle.github is None:
-            raise HTTPException(404, {"error": "provider_not_configured", "provider": provider})
+            raise NotFoundError(
+                f"provider {provider!r} not configured",
+                code="provider_not_configured",
+                details={"provider": provider},
+            )
         return bundle.github
-    raise HTTPException(404, {"error": "provider_unknown", "provider": provider})
+    raise NotFoundError(
+        f"unknown provider {provider!r}", code="provider_unknown", details={"provider": provider}
+    )
 
 
 def _redirect_with_error(code: str, *, email: str | None = None) -> RedirectResponse:
@@ -194,7 +207,11 @@ async def login(
     provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
 ) -> RedirectResponse:
     if provider not in _SUPPORTED_PROVIDERS:
-        raise HTTPException(404, {"error": "provider_unknown", "provider": provider})
+        raise NotFoundError(
+            f"unknown provider {provider!r}",
+            code="provider_unknown",
+            details={"provider": provider},
+        )
     bundle = _require_bundle(request)
     client = _require_provider_client(bundle, provider)
     state = secrets.token_urlsafe(32)
@@ -363,7 +380,9 @@ async def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
     )
     job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
     if job_registry is None:
-        raise HTTPException(503, {"error": "job_registry_unavailable"})
+        raise ServiceUnavailableError(
+            "job registry not initialised", code="job_registry_unavailable"
+        )
     running = job_registry.list_running(user_id=user.user_id)
     today = job_registry.list_created_today(user_id=user.user_id)
 

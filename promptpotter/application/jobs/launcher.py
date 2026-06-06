@@ -1,7 +1,8 @@
 """Background-task launcher — mints + spawns a campaign run from one command.
 
-The ``mint-campaign`` apply path mirrors CLI ``new <dataset>``: build
-session → load campaign config → prepare cycle → ``auto_mint_session``
+The ``mint-campaign`` apply path runs the one shared mint prologue
+(``jobs/mint.py::prepare_fresh_cycle`` — the same seam CLI ``new``
+runs inline): build session → load campaign config → ``prepare_fresh_cycle``
 → build observers → ``asyncio.create_task`` for ``run_optimization``.
 The 202 returns the moment the campaign exists on disk; the run
 proceeds in background tracked by :class:`JobRegistry`.
@@ -22,7 +23,7 @@ from typing import Any
 
 from promptpotter import connectors
 from promptpotter.application.bootstrap import init_services
-from promptpotter.application.bootstrap.session import Session, auto_mint_session
+from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
 from promptpotter.application.config import (
     CampaignConfig,
@@ -39,6 +40,7 @@ from promptpotter.application.datasets.draft_campaign import (
     dataset_source_of,
 )
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
+from promptpotter.application.jobs.mint import prepare_fresh_cycle
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
     check_launch_quotas,
@@ -46,14 +48,13 @@ from promptpotter.application.jobs.quota import (
 )
 from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus
 from promptpotter.application.optimization.task_context import load_or_build_task_context
-from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.runner import build_origin_cycle_id
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, TaskDecomposition
 from promptpotter.infrastructure.store import Stores
+from promptpotter.shared.errors import PayloadInvalidError
 
 logger = logging.getLogger(__name__)
 
@@ -66,22 +67,32 @@ _JOB_STATUS_BY_OUTCOME: dict[StopOutcome, JobStatus] = {
 }
 
 
-class LaunchError(RuntimeError):
-    """Raised on mint-time failures (missing dataset, malformed config, …)."""
+class LaunchError(PayloadInvalidError):
+    """Raised on mint-time failures (missing dataset, malformed config, …) — 422.
 
-
-class OriginIncompleteError(RuntimeError):
-    """Raised when the origin-readiness checklist still has gaps at mint time.
-
-    Carries the blocking :class:`FieldGap`s so the API can surface every
-    unresolved field (422 ``origin_incomplete``). The draft is left intact —
-    the operator resolves the gaps and retries.
+    A :class:`~promptpotter.shared.errors.PayloadInvalidError`, so it maps to one
+    HTTP response via the central seam; routes that add context (a suggested free
+    slug) still catch it explicitly.
     """
+
+
+class OriginIncompleteError(PayloadInvalidError):
+    """Raised when the origin-readiness checklist still has gaps at mint time (422).
+
+    Carries the blocking :class:`FieldGap`s on ``details.gaps`` so the API can
+    surface every unresolved field (``origin_incomplete``). The draft is left
+    intact — the operator resolves the gaps and retries.
+    """
+
+    code = "origin_incomplete"
 
     def __init__(self, gaps: tuple[FieldGap, ...]) -> None:
         self.gaps = gaps
         fields = ", ".join(gap.field for gap in gaps) or "<none>"
-        super().__init__(f"origin incomplete — unresolved fields: {fields}")
+        super().__init__(
+            f"origin incomplete — unresolved fields: {fields}",
+            details={"gaps": [gap.to_wire() for gap in gaps]},
+        )
 
 
 async def _run_preflight(backend_type: str, backend_url: str) -> None:
@@ -149,27 +160,10 @@ async def mint_campaign_command(
     campaign_config = load_campaign_config({**profile, **file_config})
 
     train_data = session.samples or []
-    pipeline_params = configure_and_apply_pipeline(
-        session, campaign_config, log=lambda *_a, **_k: None
-    )
-    schema = session.pipeline_schema
-    origin = resolve_origin_opt_search_point(
-        session.experiment_extract,
-        prompt_node_names=schema.prompt_node_names() if schema else [],
-        dataset_dir=session.dataset_config_dir,
-    )
-    cycle_id = build_origin_cycle_id(origin, schema, train_data)
-
-    _session_id, campaign_id, cycle_id = auto_mint_session(
-        session,
-        campaign_config,
-        cycle_id=cycle_id,
-        origin_prompt_fields=origin.prompt_field_dict(),
-        dataset_size=len(train_data),
-        experiment_id=session.experiment_id,
-        pipeline_params=pipeline_params,
-        active_steps=list(pipeline_params.get("steps", [])),
-    )
+    # The one shared mint prologue — same seam CLI ``new`` runs (inline). See
+    # ``application/jobs/mint.py``; the web path keeps only the gates + detached task.
+    minted = prepare_fresh_cycle(session, campaign_config, train_data)
+    campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
 
     # Run-start framing: read the committed ``task_context.json`` (written at
     # commit from the check-in's decomposition) — or decompose a benchmark's

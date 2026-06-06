@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.runtime_flags import is_paused, read_spend_cap
@@ -25,6 +25,7 @@ from promptpotter.infrastructure.store import (
     read_active_pointer,
 )
 from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.shared.errors import NotFoundError
 
 active_router = APIRouter()
 
@@ -52,7 +53,7 @@ async def get_active_session(store: StoreDep) -> ActiveSessionResponse:
         store.tenant_id, projects_root=store.projects_root
     )
     if not session_id:
-        raise HTTPException(404, "No active session")
+        raise NotFoundError("No active session")
     return ActiveSessionResponse(
         tenant_id=store.tenant_id,
         session_id=session_id,
@@ -90,7 +91,7 @@ async def get_live_state(store: StoreDep) -> dict[str, Any]:
         store.tenant_id, projects_root=store.projects_root
     )
     if not session_id:
-        raise HTTPException(404, "No active session")
+        raise NotFoundError("No active session")
     # Both the dashboard.json and the runtime flags live on the active cycle
     # dir (which may be a fork): each cycle owns its own live file, and the
     # runner writes + polls its flags there. Shared readers in

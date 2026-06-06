@@ -22,17 +22,21 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.jobs.spend import start_of_utc_day, sum_user_spend
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.user_store import User
+from promptpotter.shared.errors import PotterError
 
 logger = logging.getLogger(__name__)
 
 
-class QuotaExceededError(RuntimeError):
-    """Raised when a user-scoped abuse limit blocks a launch.
+class QuotaExceededError(PotterError):
+    """Raised when a user-scoped abuse limit blocks a launch (429).
 
-    ``code`` rides the HTTP layer (429 ``quota_exceeded``) — distinct from
-    :class:`~promptpotter.application.jobs.LaunchError` which is a 422
-    (malformed request / dataset not found / not owned).
+    ``code`` rides the HTTP layer (the abuse-limit kind, e.g. ``quota_exceeded``)
+    — distinct from :class:`~promptpotter.application.jobs.LaunchError` which is a
+    422 (malformed request / dataset not found / not owned). Maps to one HTTP
+    response via the :class:`~promptpotter.shared.errors.PotterError` seam.
     """
+
+    http_status = 429
 
     def __init__(self, *, code: str, message: str) -> None:
         super().__init__(message)

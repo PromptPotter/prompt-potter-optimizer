@@ -38,12 +38,10 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
-from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from promptpotter import connectors
 from promptpotter.config.settings import settings
-from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.run_records import CommandRecord, OperatorForkOverride
@@ -62,6 +60,13 @@ from promptpotter.infrastructure.store import (
 from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.paths import root_cycle_id
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import (
+    ConflictError,
+    NotFoundError,
+    PayloadInvalidError,
+    PotterError,
+    ServiceUnavailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,12 +136,9 @@ class CommandDispatcher:
         campaign = self._load_owned_campaign(campaign_id)
         root_dir = self._store.campaigns.cycle_dir(campaign_id, campaign.root_cycle_id)
         if not (root_dir / "index.json").is_file():
-            raise HTTPException(
-                404,
-                {
-                    "error": "command_target_not_found",
-                    "message": f"Root cycle dir missing for campaign {campaign_id}",
-                },
+            raise NotFoundError(
+                f"Root cycle dir missing for campaign {campaign_id}",
+                code="command_target_not_found",
             )
 
         ledger = CycleEventLog.open(CycleDir(root_dir))
@@ -168,28 +170,18 @@ class CommandDispatcher:
         campaign = self._load_owned_campaign(campaign_id)
         cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
         if not (cycle_dir / "index.json").is_file():
-            raise HTTPException(
-                404,
-                {
-                    "error": "command_target_not_found",
-                    "message": f"cycle not found: {campaign_id}/{cycle_id}",
-                },
+            raise NotFoundError(
+                f"cycle not found: {campaign_id}/{cycle_id}", code="command_target_not_found"
             )
 
         ledger = CycleEventLog.open(CycleDir(cycle_dir))
         if expected_version is not None and ledger.next_offset != expected_version:
-            raise HTTPException(
-                409,
-                {
-                    "error": "version_conflict",
-                    "message": (
-                        f"cycle {cycle_id} is at offset {ledger.next_offset}, "
-                        f"client expected {expected_version}"
-                    ),
-                    "details": {
-                        "expected_version": expected_version,
-                        "actual_version": ledger.next_offset,
-                    },
+            raise ConflictError(
+                f"cycle {cycle_id} is at offset {ledger.next_offset}, "
+                f"client expected {expected_version}",
+                details={
+                    "expected_version": expected_version,
+                    "actual_version": ledger.next_offset,
                 },
             )
 
@@ -230,13 +222,7 @@ class CommandDispatcher:
             self._store.tenant_id, projects_root=self._store.projects_root
         )
         if active_campaign == campaign_id and active_cycle == cycle_id:
-            raise HTTPException(
-                409,
-                {
-                    "error": "version_conflict",
-                    "message": f"refusing to delete {cycle_id}: active cycle — switch first",
-                },
-            )
+            raise ConflictError(f"refusing to delete {cycle_id}: active cycle — switch first")
 
         root_dir = self._store.campaigns.cycle_dir(campaign_id, campaign.root_cycle_id)
         root_ledger = CycleEventLog.open(CycleDir(root_dir))
@@ -334,28 +320,15 @@ class CommandDispatcher:
             except _DeleteCycleRejectedError as exc:
                 ack_status = "rejected"
                 ack_detail = exc.reason
-            except BackendUnreachableError as exc:
-                # Central 503 mapping for any applier whose preflight reported
-                # the backend down. Per CLAUDE.md root-fix: one site, not one
-                # per applier. The ``ErrorEnvelope`` shape is declared in
-                # ``docs/specs/m12-api-openapi.yaml::components.responses.BackendUnreachable``.
+            except PotterError as exc:
+                # ONE central mapping seam for any applier error that carries an
+                # HTTP status — backend-unreachable (503), quota (429), launch
+                # (422), conflicts, not-founds. Emit a rejected ack so the audit
+                # trail stays on the ledger, then re-raise: main.py's PotterError
+                # handler serializes the flat ``ErrorEnvelope``
+                # (``docs/specs/m12-api-openapi.yaml``). Per CLAUDE.md root-fix:
+                # one site, not one arm per applier; no ``HTTPException`` here.
                 emit_command_ack(command_id=command_id, status="rejected", detail=str(exc))
-                raise HTTPException(
-                    503,
-                    {
-                        "error": "backend_unreachable",
-                        "message": str(exc),
-                        "details": {
-                            "backend_type": exc.backend_type,
-                            "backend_url": exc.backend_url,
-                        },
-                    },
-                ) from exc
-            except HTTPException:
-                # Apply-time guards that should bubble (e.g. fork dir conflict,
-                # backend-already-exists, backend-not-found, upstream 502)
-                # re-raise to the router; emit ack as rejected first.
-                emit_command_ack(command_id=command_id, status="rejected", detail="")
                 raise
             except Exception as exc:
                 logger.exception("apply failed for %s", kind)
@@ -369,13 +342,9 @@ class CommandDispatcher:
             # Apply rejected by a domain guard (e.g. stub-delete refused);
             # surface to the caller as 409 with the guard's reason while the
             # audit trail (CommandRecord + rejected ack) stays on the ledger.
-            raise HTTPException(
-                409,
-                {
-                    "error": "version_conflict",
-                    "message": f"command {kind} rejected: {ack_detail}",
-                    "details": {"command_id": command_id, "reason": ack_detail},
-                },
+            raise ConflictError(
+                f"command {kind} rejected: {ack_detail}",
+                details={"command_id": command_id, "reason": ack_detail},
             )
 
         return CommandAcceptedBody(
@@ -445,14 +414,8 @@ class CommandDispatcher:
                 else None
             )
             if (usd_val is None or usd_val < 0) and (tok_val is None or tok_val < 0):
-                raise HTTPException(
-                    422,
-                    {
-                        "error": "payload_invalid",
-                        "message": (
-                            "change-spend-budget requires a non-negative max_usd and/or max_tokens."
-                        ),
-                    },
+                raise PayloadInvalidError(
+                    "change-spend-budget requires a non-negative max_usd and/or max_tokens."
                 )
             return lambda: self._apply_change_spend_budget(
                 campaign_id, cycle_id, max_usd=usd_val, max_tokens=tok_val
@@ -472,12 +435,8 @@ class CommandDispatcher:
                 )
 
             return _apply
-        raise HTTPException(  # pragma: no cover — caller validates kind
-            422,
-            {
-                "error": "payload_invalid",
-                "message": f"no applier wired for cycle-scoped kind {kind!r}",
-            },
+        raise PayloadInvalidError(  # pragma: no cover — caller validates kind
+            f"no applier wired for cycle-scoped kind {kind!r}"
         )
 
     def _apply_lifecycle(self, kind: LifecycleKind, campaign_id: str, reason: str) -> None:
@@ -501,13 +460,8 @@ class CommandDispatcher:
             else _slugify_backend_id(name)
         )
         if self._store.backends.get(backend_id) is not None:
-            raise HTTPException(
-                409,
-                {
-                    "error": "version_conflict",
-                    "message": f"Backend '{backend_id}' already exists",
-                    "details": {"backend_id": backend_id},
-                },
+            raise ConflictError(
+                f"Backend '{backend_id}' already exists", details={"backend_id": backend_id}
             )
         self._store.backends.register(
             BackendConnection(
@@ -521,16 +475,12 @@ class CommandDispatcher:
     async def _apply_sync_backend_experiments(self, payload: dict[str, Any]) -> None:
         """Pull experiments from the backend's API into the local store; bump
         ``last_synced_at`` on success. Unknown backend ⇒ 404; upstream
-        failures ⇒ 502 (both ride the ``HTTPException`` rejection path)."""
+        failures ⇒ 503 (both ride the central ``PotterError`` rejection path)."""
         backend_id = str(payload["backend_id"])
         backend = self._store.backends.get(backend_id)
         if backend is None:
-            raise HTTPException(
-                404,
-                {
-                    "error": "command_target_not_found",
-                    "message": f"Backend '{backend_id}' not registered",
-                },
+            raise NotFoundError(
+                f"Backend '{backend_id}' not registered", code="command_target_not_found"
             )
         connector = connectors.get(backend.backend_type)
         client = BackendClient(
@@ -543,12 +493,8 @@ class CommandDispatcher:
         try:
             await client.sync_experiments(self._store, backend_id)
         except Exception as exc:
-            raise HTTPException(
-                502,
-                {
-                    "error": "payload_invalid",
-                    "message": f"Failed to sync from {backend.base_url}: {exc}",
-                },
+            raise ServiceUnavailableError(
+                f"Failed to sync from {backend.base_url}: {exc}", code="backend_sync_failed"
             ) from exc
         backend.last_synced_at = utcnow_iso()
         self._store.backends.update(backend)
@@ -620,27 +566,22 @@ class CommandDispatcher:
         ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
         for the central 503 mapping (R2).
         """
-        from promptpotter.application.jobs import (
-            LaunchError,
-            QuotaExceededError,
-            mint_campaign_command,
-        )
+        from promptpotter.application.jobs import mint_campaign_command
 
         if self._job_registry is None:
-            raise HTTPException(503, {"error": "job_registry_unavailable"})
-        dataset_name = str(payload.get("dataset_name", ""))
-        try:
-            await mint_campaign_command(
-                stores=self._store,
-                dataset_name=dataset_name,
-                job_registry=self._job_registry,
-                halt_at_accuracy=_optional_float(payload.get("halt_at_accuracy")),
-                spend_budget_usd=_optional_float(payload.get("spend_budget_usd")),
+            raise ServiceUnavailableError(
+                "job registry not initialised", code="job_registry_unavailable"
             )
-        except QuotaExceededError as exc:
-            raise HTTPException(429, {"error": exc.code, "message": str(exc)}) from exc
-        except LaunchError as exc:
-            raise HTTPException(422, {"error": "payload_invalid", "message": str(exc)}) from exc
+        dataset_name = str(payload.get("dataset_name", ""))
+        # Quota (429) / Launch (422) / BackendUnreachable (503) are PotterErrors —
+        # the central catch in _record_and_apply maps them. No per-applier arm.
+        await mint_campaign_command(
+            stores=self._store,
+            dataset_name=dataset_name,
+            job_registry=self._job_registry,
+            halt_at_accuracy=_optional_float(payload.get("halt_at_accuracy")),
+            spend_budget_usd=_optional_float(payload.get("spend_budget_usd")),
+        )
 
     async def _apply_start_run(
         self,
@@ -656,28 +597,23 @@ class CommandDispatcher:
         ``BackendUnreachableError`` bubbles uncaught to ``_record_and_apply``
         for the central 503 mapping (R2).
         """
-        from promptpotter.application.jobs import (
-            LaunchError,
-            QuotaExceededError,
-            start_run_command,
-        )
+        from promptpotter.application.jobs import start_run_command
 
         if self._job_registry is None:
-            raise HTTPException(503, {"error": "job_registry_unavailable"})
-        try:
-            await start_run_command(
-                stores=self._store,
-                job_registry=self._job_registry,
-                campaign_id=campaign_id,
-                cycle_id=cycle_id,
-                kind=kind,
-                halt_at_accuracy=halt_at_accuracy,
-                spend_budget_usd=spend_budget_usd,
+            raise ServiceUnavailableError(
+                "job registry not initialised", code="job_registry_unavailable"
             )
-        except QuotaExceededError as exc:
-            raise HTTPException(429, {"error": exc.code, "message": str(exc)}) from exc
-        except LaunchError as exc:
-            raise HTTPException(422, {"error": "payload_invalid", "message": str(exc)}) from exc
+        # Quota / Launch / BackendUnreachable are PotterErrors mapped centrally
+        # by _record_and_apply — no per-applier arm here.
+        await start_run_command(
+            stores=self._store,
+            job_registry=self._job_registry,
+            campaign_id=campaign_id,
+            cycle_id=cycle_id,
+            kind=kind,
+            halt_at_accuracy=halt_at_accuracy,
+            spend_budget_usd=spend_budget_usd,
+        )
 
     def _apply_cleanup_empty(self, campaign_id: str, cycle_id: str) -> None:
         """Batch-delete every empty-stub sibling under ``root_cycle_id(cycle_id)``;
@@ -716,12 +652,8 @@ class CommandDispatcher:
     def _load_owned_campaign(self, campaign_id: str) -> Any:
         campaign = self._store.campaigns.load_campaign(campaign_id)
         if campaign is None or campaign.owner_user_id != str(self._store.identity.user_id):
-            raise HTTPException(
-                404,
-                {
-                    "error": "command_target_not_found",
-                    "message": f"Campaign not found: {campaign_id}",
-                },
+            raise NotFoundError(
+                f"Campaign not found: {campaign_id}", code="command_target_not_found"
             )
         return campaign
 
@@ -759,15 +691,11 @@ def _parse_fork_seed(raw: object) -> OperatorForkOverride:
     typed schema is the contract; `LimitOverrides` bounds ride
     `m12-api-openapi.yaml`)."""
     if not isinstance(raw, dict):
-        raise HTTPException(
-            422, {"error": "payload_invalid", "message": "payload.seed (object) is required."}
-        )
+        raise PayloadInvalidError("payload.seed (object) is required.")
     try:
         return OperatorForkOverride.model_validate(raw)
     except ValidationError as exc:
-        raise HTTPException(
-            422, {"error": "payload_invalid", "message": f"payload.seed invalid: {exc}"}
-        ) from exc
+        raise PayloadInvalidError(f"payload.seed invalid: {exc}") from exc
 
 
 def _slugify_backend_id(name: str) -> str:

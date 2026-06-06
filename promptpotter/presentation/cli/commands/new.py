@@ -11,11 +11,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
+from promptpotter.application.jobs.mint import prepare_fresh_cycle
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
-    _mint_session_and_cycle,
-    _prepare_cycle,
     campaign_result_human,
     get_verbose,
     identity_from_args,
@@ -309,31 +308,22 @@ async def _mint_fresh_session(
     else:
         train_data = session.samples or []
 
-    pipeline_params, origin, cycle_id = _prepare_cycle(session, campaign_config, train_data)
-
-    init_params = {
-        "backend_url": args.backend_url,
-        "backend_id": backend_id,
-        "experiment_id": args.experiment_id,
-        "dataset_name": dataset_name,
-    }
-    session_id, campaign_id, cycle_id = _mint_session_and_cycle(
+    # The one shared mint prologue — same application seam the web mint runs
+    # (detached). The CLI keeps only the inline check-in lines + task-context step.
+    minted = prepare_fresh_cycle(
         session,
         campaign_config,
-        cycle_id=cycle_id,
-        init_params=init_params,
-        pipeline_params=pipeline_params,
-        origin=origin,
-        dataset_count=len(train_data),
+        train_data,
+        log=logger.info if get_verbose() else None,
     )
 
-    sess_n = session_index(cycle_id)
+    sess_n = session_index(minted.cycle_id)
     if sess_n == 1:
-        checkin_line("campaign", f"minted {campaign_id} — session #1")
+        checkin_line("campaign", f"minted {minted.campaign_id} — session #1")
     else:
-        checkin_line("campaign", f"joined {campaign_id} — session #{sess_n}")
+        checkin_line("campaign", f"joined {minted.campaign_id} — session #{sess_n}")
 
-    return session, campaign_config, dataset_name, session_id
+    return session, campaign_config, dataset_name, minted.session_id
 
 
 def _build_live_display(

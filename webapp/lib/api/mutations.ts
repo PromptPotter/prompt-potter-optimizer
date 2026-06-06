@@ -375,17 +375,22 @@ async function _throwApiError(r: Response): Promise<never> {
   let errorCode: string | undefined;
   let detail: IngestErrorDetail | undefined;
   try {
+    // The API serializes every error to the flat ErrorEnvelope declared in
+    // docs/specs/m12-api-openapi.yaml — `{error, message, details?}` at the top
+    // level (no `detail` wrapper). The `detail` fallback only catches Starlette's
+    // built-in 404/422 for genuinely unmatched routes, which we never call.
     const body = (await r.json()) as {
-      detail?:
-        | string
-        | { error?: string; message?: string; details?: IngestErrorDetail };
+      error?: string;
+      message?: string;
+      details?: IngestErrorDetail;
+      detail?: string;
     };
-    if (typeof body?.detail === "string") {
+    if (body?.message) {
+      message = body.message;
+      errorCode = body.error;
+      detail = body.details;
+    } else if (typeof body?.detail === "string") {
       message = body.detail;
-    } else if (body?.detail?.message) {
-      message = body.detail.message;
-      errorCode = body.detail.error;
-      detail = body.detail.details;
     }
   } catch {
     /* status-only message */

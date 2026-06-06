@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from promptpotter.application.config import load_campaign_config
@@ -40,6 +40,13 @@ from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
 from promptpotter.presentation.api.deps import StoreDep, get_draft_registry
+from promptpotter.shared.errors import (
+    BadRequestError,
+    ConflictError,
+    ContentTooLargeError,
+    NotFoundError,
+    PayloadInvalidError,
+)
 
 datasets_router = APIRouter(prefix="/datasets", tags=["Datasets"])
 
@@ -94,15 +101,9 @@ async def list_datasets(store: StoreDep) -> DatasetIndexResponse:
     )
 
 
-def _too_large(observed: int | str) -> HTTPException:
-    return HTTPException(
-        status_code=413,
-        detail={
-            "error": "payload_invalid",
-            "message": (
-                f"Upload {observed} bytes exceeds the per-file cap of {MAX_UPLOAD_BYTES} bytes."
-            ),
-        },
+def _too_large(observed: int | str) -> ContentTooLargeError:
+    return ContentTooLargeError(
+        f"Upload {observed} bytes exceeds the per-file cap of {MAX_UPLOAD_BYTES} bytes."
     )
 
 
@@ -160,34 +161,21 @@ async def ingest_dataset(
             slug=slug,
         )
     except IngestError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "ingest_failed",
-                "message": exc.message,
-                "details": {"reason": exc.reason, "max_samples": MAX_SAMPLES},
-            },
+        raise PayloadInvalidError(
+            exc.message,
+            code="ingest_failed",
+            details={"reason": exc.reason, "max_samples": MAX_SAMPLES},
         ) from None
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "payload_invalid",
-                "message": str(exc),
-                "details": {"reason": "bad_slug"},
-            },
-        ) from None
+        raise PayloadInvalidError(str(exc), details={"reason": "bad_slug"}) from None
     except SlugTakenError as exc:
         # The chat turns this into an in-flow choice (use existing / save as new),
         # so it needs BOTH names: the colliding one (to offer "use existing") and
         # the free suggestion (to offer "save as new").
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "slug_collision",
-                "message": f"A dataset named '{exc.slug}' already exists.",
-                "details": {"slug": exc.slug, "suggested_slug": exc.suggested},
-            },
+        raise ConflictError(
+            f"A dataset named '{exc.slug}' already exists.",
+            code="slug_collision",
+            details={"slug": exc.slug, "suggested_slug": exc.suggested},
         ) from None
     return draft_wire_with_locks(draft)
 
@@ -212,13 +200,8 @@ async def draft_from_existing_dataset(
             stores=store, registry=registry, dataset_dir=dataset_dir, dataset_name=name
         )
     except IngestError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "ingest_failed",
-                "message": exc.message,
-                "details": {"reason": exc.reason},
-            },
+        raise PayloadInvalidError(
+            exc.message, code="ingest_failed", details={"reason": exc.reason}
         ) from None
     return draft_wire_with_locks(draft)
 
@@ -233,7 +216,7 @@ def _resolve_or_404(store: Any, name: str) -> Path:
     try:
         return readable_dataset_dir(store, name)
     except DatasetAccessError as exc:
-        raise HTTPException(404, f"Dataset '{name}' not found") from exc
+        raise NotFoundError(f"Dataset '{name}' not found") from exc
 
 
 def _load_dataset_cache(dataset_dir: Path) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
@@ -245,7 +228,7 @@ def _load_dataset_cache(dataset_dir: Path) -> tuple[dict[str, Any], dict[int, di
     """
     cache_path = dataset_dir / "cache.json"
     if not cache_path.is_file():
-        raise HTTPException(404, f"Dataset '{dataset_dir.name}' not found")
+        raise NotFoundError(f"Dataset '{dataset_dir.name}' not found")
     raw = json.loads(cache_path.read_text(encoding="utf-8"))
     sample_lookup: dict[int, dict[str, Any]] = {}
     for item in raw["items"]:
@@ -272,10 +255,10 @@ def _resolve_scope_artifact(
 
     if scope == "cycle":
         if not campaign_id or not cycle_id:
-            raise HTTPException(400, "scope=cycle requires campaign_id and cycle_id")
+            raise BadRequestError("scope=cycle requires campaign_id and cycle_id")
         cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
         if not cycle_dir.exists():
-            raise HTTPException(404, f"Cycle '{campaign_id}/{cycle_id}' not found")
+            raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
         path = cycle_dir / "hard_samples.json"
         if not path.is_file():
             return {}
@@ -283,10 +266,10 @@ def _resolve_scope_artifact(
         return cycle_artifact
     if scope == "campaign":
         if not campaign_id:
-            raise HTTPException(400, "scope=campaign requires campaign_id")
+            raise BadRequestError("scope=campaign requires campaign_id")
         campaign_dir = campaign_root_dir_for(store.base_dir, campaign_id)
         if not campaign_dir.exists():
-            raise HTTPException(404, f"Campaign '{campaign_id}' not found")
+            raise NotFoundError(f"Campaign '{campaign_id}' not found")
         path = campaign_dir / "hard_samples.json"
         if not path.is_file():
             return {}
@@ -620,7 +603,7 @@ async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineRes
     dataset_dir = _resolve_or_404(store, name)
     pipeline_path = dataset_dir / "pipeline.json"
     if not pipeline_path.is_file():
-        raise HTTPException(404, f"Dataset '{name}' has no pipeline.json")
+        raise NotFoundError(f"Dataset '{name}' has no pipeline.json")
     raw = json.loads(pipeline_path.read_text(encoding="utf-8"))
     # `parse_pipeline_response` strips lone surrogates at parse time so the
     # rendered model is already wire-safe (some overlays carry escape

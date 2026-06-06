@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import HTTPException, Query
+from fastapi import Query
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import session_index
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
+from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
 
 class CampaignSummary(BaseModel):
@@ -125,9 +126,8 @@ async def list_campaigns(
     the ``owner_user_id`` gate filters on ``store.identity.user_id``.
     """
     if lifecycle not in _LIFECYCLE_FILTERS:
-        raise HTTPException(
-            422,
-            f"Invalid lifecycle filter: {lifecycle!r}. Expected one of {_LIFECYCLE_FILTERS}.",
+        raise PayloadInvalidError(
+            f"Invalid lifecycle filter: {lifecycle!r}. Expected one of {_LIFECYCLE_FILTERS}."
         )
     campaigns = store.campaigns.list_campaigns(
         dataset,
@@ -151,7 +151,7 @@ async def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailRespo
     # Cross-user reads return 404 (not 403) — existence leakage is itself a
     # violation.
     if campaign is None or campaign.owner_user_id != str(store.identity.user_id):
-        raise HTTPException(404, f"Campaign not found: {campaign_id}")
+        raise NotFoundError(f"Campaign not found: {campaign_id}")
     sessions = _session_summaries(store, campaign_id)
     return CampaignDetailResponse(
         campaign_id=campaign.campaign_id,

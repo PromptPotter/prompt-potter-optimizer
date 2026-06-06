@@ -35,7 +35,7 @@ import logging
 import re
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, HTTPException, Path, Request
+from fastapi import APIRouter, Header, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.datasets.csv_ingest import IngestError
@@ -59,6 +59,13 @@ from promptpotter.presentation.api.middleware.command_dispatcher import (
     CycleScopedKind,
     LifecycleKind,
     WorkspaceBackendKind,
+)
+from promptpotter.shared.errors import (
+    BadRequestError,
+    ConflictError,
+    NotFoundError,
+    PayloadInvalidError,
+    ServiceUnavailableError,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,12 +106,9 @@ class CommandEnvelope(BaseModel):
 def _ensure_idempotency_key(header_value: str | None) -> str:
     """Trust-boundary check — 400 ``idempotency_key_missing`` when absent or empty."""
     if not header_value or not header_value.strip():
-        raise HTTPException(
-            400,
-            {
-                "error": "idempotency_key_missing",
-                "message": "Idempotency-Key header is required on every command.",
-            },
+        raise BadRequestError(
+            "Idempotency-Key header is required on every command.",
+            code="idempotency_key_missing",
         )
     return header_value.strip()
 
@@ -112,33 +116,18 @@ def _ensure_idempotency_key(header_value: str | None) -> str:
 def _require_string(payload: dict[str, Any], key: str, *, max_len: int) -> str:
     raw = payload.get(key, "")
     if not isinstance(raw, str) or not raw:
-        raise HTTPException(
-            422,
-            {
-                "error": "payload_invalid",
-                "message": f"payload.{key} is required and must be a non-empty string.",
-            },
-        )
+        raise PayloadInvalidError(f"payload.{key} is required and must be a non-empty string.")
     if len(raw) > max_len:
-        raise HTTPException(
-            422,
-            {"error": "payload_invalid", "message": f"payload.{key} exceeds {max_len} chars."},
-        )
+        raise PayloadInvalidError(f"payload.{key} exceeds {max_len} chars.")
     return raw
 
 
 def _optional_string(payload: dict[str, Any], key: str, *, max_len: int) -> str:
     raw = payload.get(key, "")
     if not isinstance(raw, str):
-        raise HTTPException(
-            422,
-            {"error": "payload_invalid", "message": f"payload.{key} must be a string."},
-        )
+        raise PayloadInvalidError(f"payload.{key} must be a string.")
     if len(raw) > max_len:
-        raise HTTPException(
-            422,
-            {"error": "payload_invalid", "message": f"payload.{key} exceeds {max_len} chars."},
-        )
+        raise PayloadInvalidError(f"payload.{key} exceeds {max_len} chars.")
     return raw
 
 
@@ -149,13 +138,7 @@ def _require_slug(payload: dict[str, Any], key: str, *, max_len: int) -> str:
     """Slug-validated required field per the OpenAPI pattern ``^[a-z][a-z0-9-]*$``."""
     raw = _require_string(payload, key, max_len=max_len)
     if not _SLUG_PATTERN.fullmatch(raw):
-        raise HTTPException(
-            422,
-            {
-                "error": "payload_invalid",
-                "message": f"payload.{key} must match ^[a-z][a-z0-9-]*$",
-            },
-        )
+        raise PayloadInvalidError(f"payload.{key} must match ^[a-z][a-z0-9-]*$")
     return raw
 
 
@@ -165,13 +148,7 @@ _DATASET_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 def _require_dataset_name(payload: dict[str, Any]) -> str:
     raw = _require_string(payload, "dataset_name", max_len=64)
     if not _DATASET_NAME_PATTERN.fullmatch(raw):
-        raise HTTPException(
-            422,
-            {
-                "error": "payload_invalid",
-                "message": "payload.dataset_name must match ^[a-z][a-z0-9_-]*$",
-            },
-        )
+        raise PayloadInvalidError("payload.dataset_name must match ^[a-z][a-z0-9_-]*$")
     return raw
 
 
@@ -266,13 +243,7 @@ class _ReplaceDatasetEnvelope(BaseModel):
 def _require_draft_id(payload: dict[str, Any]) -> str:
     raw = payload.get("draft_id")
     if not isinstance(raw, str) or not raw or len(raw) > 64 or len(raw) < 8:
-        raise HTTPException(
-            422,
-            {
-                "error": "payload_invalid",
-                "message": "payload.draft_id is required (8-64 chars).",
-            },
-        )
+        raise PayloadInvalidError("payload.draft_id is required (8-64 chars).")
     return raw
 
 
@@ -296,31 +267,22 @@ async def edit_draft_campaign(
     draft_id = _require_draft_id(raw_payload)
     patch_raw = raw_payload.get("patch", {})
     if not isinstance(patch_raw, dict):
-        raise HTTPException(
-            422,
-            {"error": "payload_invalid", "message": "payload.patch must be an object."},
-        )
+        raise PayloadInvalidError("payload.patch must be an object.")
     patch = _EditDraftPatch.model_validate(patch_raw)
 
     draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
     if draft is None:
-        raise HTTPException(
-            404,
-            {"error": "command_target_not_found", "message": f"draft {draft_id!r} not found."},
-        )
+        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
 
     changes: dict[str, Any] = {}
     provenance: dict[str, Provenance] = {}
     if patch.slug is not None and patch.slug != draft.slug:
         if store.tenant_datasets.slug_exists(patch.slug):
             suggested = store.tenant_datasets.suggest_free_slug(patch.slug)
-            raise HTTPException(
-                409,
-                {
-                    "error": "payload_invalid",
-                    "message": f"Slug '{patch.slug}' already exists in your collection.",
-                    "details": {"suggested_slug": suggested},
-                },
+            raise ConflictError(
+                f"Slug '{patch.slug}' already exists in your collection.",
+                code="slug_collision",
+                details={"suggested_slug": suggested},
             )
         changes["slug"] = patch.slug
     # Config + the authored prompt are not gated — just set the value.
@@ -352,15 +314,8 @@ async def edit_draft_campaign(
         ("column_ground_truth", patch.column_ground_truth),
     ):
         if col is not None and col not in draft.headers:
-            raise HTTPException(
-                422,
-                {
-                    "error": "payload_invalid",
-                    "message": (
-                        f"patch.{label} {col!r} is not one of the uploaded headers "
-                        f"{list(draft.headers)}."
-                    ),
-                },
+            raise PayloadInvalidError(
+                f"patch.{label} {col!r} is not one of the uploaded headers {list(draft.headers)}."
             )
 
     updated = draft.apply_resolution(values=changes, provenance=provenance)
@@ -391,10 +346,7 @@ async def resolve_origin(
     draft_id = _require_draft_id(envelope.payload)
     draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
     if draft is None:
-        raise HTTPException(
-            404,
-            {"error": "command_target_not_found", "message": f"draft {draft_id!r} not found."},
-        )
+        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
 
     from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
 
@@ -402,9 +354,8 @@ async def resolve_origin(
         result = await resolve_origin_turn(stores=store, draft=draft, draft_registry=registry)
     except Exception as exc:  # external LLM boundary; surface a clean 502
         logger.exception("resolve-origin turn failed for draft %s", draft_id)
-        raise HTTPException(
-            502,
-            {"error": "resolver_failed", "message": f"origin resolver turn failed: {exc}"},
+        raise ServiceUnavailableError(
+            f"origin resolver turn failed: {exc}", code="resolver_failed"
         ) from exc
 
     return {"resolution": result.resolution, "draft": draft_wire_with_locks(result.draft)}
@@ -426,14 +377,13 @@ async def mint_campaign_from_draft(
     draft_id = _require_draft_id(envelope.payload)
     draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
     if draft is None:
-        raise HTTPException(
-            404,
-            {"error": "command_target_not_found", "message": f"draft {draft_id!r} not found."},
-        )
+        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
 
     job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
     if job_registry is None:
-        raise HTTPException(500, "job registry not initialised")
+        raise ServiceUnavailableError(
+            "job registry not initialised", code="job_registry_unavailable"
+        )
 
     try:
         campaign_id, cycle_id, job = await mint_campaign_from_draft_command(
@@ -442,54 +392,30 @@ async def mint_campaign_from_draft(
             draft_registry=registry,
             job_registry=job_registry,
         )
-    except OriginIncompleteError as exc:
+    except OriginIncompleteError:
         # The deterministic origin-readiness checklist still has gaps — the
         # draft is preserved; the operator resolves them (edit-draft-campaign)
-        # and retries. Surface every blocking field so the panel can render it.
+        # and retries. The exception already carries code=origin_incomplete +
+        # details.gaps (it's a PotterError); persist the resolution then re-raise.
         store.tenant_datasets.write_draft_resolution(draft.draft_id, resolution_block(draft))
-        raise HTTPException(
-            422,
-            {
-                "error": "origin_incomplete",
-                "message": str(exc),
-                "details": {"gaps": [gap.to_wire() for gap in exc.gaps]},
-            },
-        ) from exc
+        raise
     except IngestError as exc:
         # A confirmed column mapping still hit a per-row data failure at
         # materialization (e.g. a blank input/target cell). Clean 422.
-        raise HTTPException(
-            422,
-            {
-                "error": "ingest_failed",
-                "message": exc.message,
-                "details": {"reason": exc.reason},
-            },
+        raise PayloadInvalidError(
+            exc.message, code="ingest_failed", details={"reason": exc.reason}
         ) from exc
     except BackendUnreachableError as exc:
         # Preflight ran before commit_draft → draft is preserved; the operator
-        # can fix the backend and retry without re-uploading.
-        raise HTTPException(
-            503,
-            {
-                "error": "backend_unreachable",
-                "message": str(exc),
-                "details": {
-                    "backend_type": exc.backend_type,
-                    "backend_url": exc.backend_url,
-                    "draft_id": draft.draft_id,
-                },
-            },
-        ) from exc
+        # can fix the backend and retry without re-uploading. Augment the
+        # exception's own backend_type/url details with the draft id, then re-raise.
+        exc.details["draft_id"] = draft.draft_id
+        raise
     except LaunchError as exc:
+        # Slug collision at commit — surface a free suggestion as a 409.
         suggested = store.tenant_datasets.suggest_free_slug(draft.slug)
-        raise HTTPException(
-            409,
-            {
-                "error": "payload_invalid",
-                "message": str(exc),
-                "details": {"suggested_slug": suggested},
-            },
+        raise ConflictError(
+            str(exc), code="slug_collision", details={"suggested_slug": suggested}
         ) from exc
     return {"campaign_id": campaign_id, "cycle_id": cycle_id, "job_id": job.job_id}
 
@@ -511,23 +437,12 @@ async def replace_dataset(
     _ensure_idempotency_key(idempotency_key)
     raw_slug = _require_string(envelope.payload, "slug", max_len=64)
     if not _DATASET_NAME_PATTERN.fullmatch(raw_slug):
-        raise HTTPException(
-            422,
-            {
-                "error": "payload_invalid",
-                "message": "payload.slug must match ^[a-z][a-z0-9_-]*$",
-            },
-        )
+        raise PayloadInvalidError("payload.slug must match ^[a-z][a-z0-9_-]*$")
     try:
         result = version_and_repoint(stores=store, slug=raw_slug)
     except NothingToReplaceError as exc:
-        raise HTTPException(
-            409,
-            {
-                "error": "nothing_to_replace",
-                "message": str(exc),
-                "details": {"slug": exc.slug},
-            },
+        raise ConflictError(
+            str(exc), code="nothing_to_replace", details={"slug": exc.slug}
         ) from exc
     return {
         "slug": result.slug,
@@ -551,23 +466,14 @@ async def post_command(
     ``CommandDispatcher``."""
     idemp = _ensure_idempotency_key(idempotency_key)
     if kind != envelope.kind:
-        raise HTTPException(
-            422,
-            {
-                "error": "payload_invalid",
-                "message": f"path kind {kind!r} does not match envelope.kind {envelope.kind!r}",
-            },
+        raise PayloadInvalidError(
+            f"path kind {kind!r} does not match envelope.kind {envelope.kind!r}"
         )
     if kind not in _WIRED_KINDS:
-        raise HTTPException(
-            404,
-            {
-                "error": "command_kind_unknown",
-                "message": (
-                    f"Command kind {kind!r} not wired. See "
-                    f"docs/specs/m12-api-openapi.yaml for the declared set."
-                ),
-            },
+        raise NotFoundError(
+            f"Command kind {kind!r} not wired. See "
+            f"docs/specs/m12-api-openapi.yaml for the declared set.",
+            code="command_kind_unknown",
         )
 
     payload = envelope.payload
@@ -605,13 +511,7 @@ async def post_command(
     if kind == "fork-cycle":
         round_raw = payload.get("round", 0)
         if not isinstance(round_raw, int) or round_raw < 0:
-            raise HTTPException(
-                422,
-                {
-                    "error": "payload_invalid",
-                    "message": "payload.round must be a non-negative integer.",
-                },
-            )
+            raise PayloadInvalidError("payload.round must be a non-negative integer.")
         extras["round"] = round_raw
         extras["candidate_id"] = _optional_string(payload, "candidate_id", max_len=128)
         # Operator-steered seed (edited searchpoint + reconciled limit overrides)
@@ -625,13 +525,7 @@ async def post_command(
         max_tokens_raw = payload.get("max_tokens")
         if max_usd_raw is not None:
             if not isinstance(max_usd_raw, int | float) or max_usd_raw < 0:
-                raise HTTPException(
-                    422,
-                    {
-                        "error": "payload_invalid",
-                        "message": "payload.max_usd must be a non-negative number.",
-                    },
-                )
+                raise PayloadInvalidError("payload.max_usd must be a non-negative number.")
             extras["max_usd"] = float(max_usd_raw)
         if max_tokens_raw is not None:
             if (
@@ -639,32 +533,16 @@ async def post_command(
                 or isinstance(max_tokens_raw, bool)
                 or max_tokens_raw < 0
             ):
-                raise HTTPException(
-                    422,
-                    {
-                        "error": "payload_invalid",
-                        "message": "payload.max_tokens must be a non-negative integer.",
-                    },
-                )
+                raise PayloadInvalidError("payload.max_tokens must be a non-negative integer.")
             extras["max_tokens"] = int(max_tokens_raw)
         if "max_usd" not in extras and "max_tokens" not in extras:
-            raise HTTPException(
-                422,
-                {
-                    "error": "payload_invalid",
-                    "message": "change-spend-budget requires at least one of max_usd / max_tokens.",
-                },
+            raise PayloadInvalidError(
+                "change-spend-budget requires at least one of max_usd / max_tokens."
             )
     elif kind == "start-run":
         kind_raw = payload.get("kind")
         if kind_raw not in ("new", "resume"):
-            raise HTTPException(
-                422,
-                {
-                    "error": "payload_invalid",
-                    "message": "payload.kind must be 'new' or 'resume'.",
-                },
-            )
+            raise PayloadInvalidError("payload.kind must be 'new' or 'resume'.")
         extras["kind"] = kind_raw
         halt = payload.get("halt_at_accuracy")
         if isinstance(halt, int | float) and 0.0 <= halt <= 1.0:

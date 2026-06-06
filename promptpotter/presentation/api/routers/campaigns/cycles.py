@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 from typing import Any, Literal
 
-from fastapi import HTTPException, Request, Response
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -20,6 +20,7 @@ from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
+from promptpotter.shared.errors import NotFoundError
 
 
 class CycleSummary(BaseModel):
@@ -58,7 +59,7 @@ class CycleDetailResponse(CycleSummary):
 async def list_campaign_cycles(store: StoreDep, campaign_id: str) -> CampaignCyclesResponse:
     """Every cycle in one campaign's lineage tree."""
     if store.campaigns.load_campaign(campaign_id) is None:
-        raise HTTPException(404, f"Campaign not found: {campaign_id}")
+        raise NotFoundError(f"Campaign not found: {campaign_id}")
     cycles = [
         CycleSummary(
             campaign_id=e["campaign_id"],
@@ -109,7 +110,7 @@ async def get_cycle(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleDe
     """One cycle's ``index.json`` detail with round summaries."""
     index = store.campaigns.load(campaign_id, cycle_id)
     if index is None:
-        raise HTTPException(404, f"Cycle not found: {campaign_id}/{cycle_id}")
+        raise NotFoundError(f"Cycle not found: {campaign_id}/{cycle_id}")
     kind = sibling_kind(cycle_id)
     return CycleDetailResponse(
         campaign_id=campaign_id,
@@ -147,7 +148,7 @@ async def get_round(
     """Full round detail for one round of one cycle."""
     round_data = store.campaigns.load_round_file(campaign_id, cycle_id, round_num)
     if round_data is None:
-        raise HTTPException(404, f"Round {round_num} not found")
+        raise NotFoundError(f"Round {round_num} not found")
     return round_data
 
 

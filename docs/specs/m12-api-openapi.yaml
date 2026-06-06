@@ -1360,12 +1360,16 @@ components:
         error:
           type: string
           description: |
-            Stable error code. Closed set includes `version_conflict` (409),
-            `idempotency_key_missing` (400), `expected_version_missing` (400),
-            `capability_denied` (403), `command_kind_unknown` (404),
-            `payload_invalid` (422), `slug_collision` (409),
-            `backend_unreachable` (503), `ingest_failed` (422),
-            `origin_incomplete` (422). New codes require a YAML update first.
+            Stable error code. The whole API serializes errors to this one flat
+            envelope (no `detail` wrapper) — every code below maps from a
+            `PotterError` subclass at the single `main.py` handler. Control-plane
+            specifics: `version_conflict` (409), `idempotency_key_missing` (400),
+            `command_kind_unknown` (404), `slug_collision` (409),
+            `backend_unreachable` (503), `ingest_failed` / `origin_incomplete`
+            (422). Generic families: `bad_request` (400), `unauthenticated`
+            (401), `capability_denied` (403), `not_found` (404), `too_large`
+            (413), `request_invalid` (422), `service_unavailable` (503),
+            `internal_error` (500). New codes require a YAML update first.
           enum:
             - version_conflict
             - idempotency_key_missing
@@ -1379,6 +1383,20 @@ components:
             - backend_unreachable
             - ingest_failed
             - origin_incomplete
+            - nothing_to_replace
+            - resolver_failed
+            - backend_sync_failed
+            - job_registry_unavailable
+            - identity_not_initialised
+            - provider_not_configured
+            - provider_unknown
+            - bad_request
+            - unauthenticated
+            - not_found
+            - too_large
+            - request_invalid
+            - service_unavailable
+            - internal_error
         message:
           type: string
           description: Human-readable explanation; never load-bearing for clients.

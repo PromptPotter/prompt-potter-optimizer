@@ -15,6 +15,12 @@ from promptpotter.application.jobs.launcher import (
     mint_campaign_command,
     start_run_command,
 )
+from promptpotter.application.jobs.mint import (
+    CyclePlan,
+    MintedCycle,
+    prepare_fresh_cycle,
+    resolve_cycle_plan,
+)
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
     check_launch_quotas,
@@ -28,14 +34,18 @@ from promptpotter.application.jobs.registry import (
 )
 
 __all__ = [
+    "CyclePlan",
     "Job",
     "JobRegistry",
     "JobStatus",
     "LaunchError",
+    "MintedCycle",
     "QuotaExceededError",
     "check_launch_quotas",
     "default_jobs_dir",
     "effective_spend_cap_usd",
     "mint_campaign_command",
+    "prepare_fresh_cycle",
+    "resolve_cycle_plan",
     "start_run_command",
 ]

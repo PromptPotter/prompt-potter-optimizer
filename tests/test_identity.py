@@ -27,6 +27,7 @@ from promptpotter.infrastructure.identity import (
 )
 from promptpotter.infrastructure.store import Stores, build_stores
 from promptpotter.presentation.api.deps import resolve_identity
+from promptpotter.shared.errors import PotterError
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -155,12 +156,14 @@ def test_stage1_identity_gates(monkeypatch, tmp_path: Path) -> None:
     )
 
     # When the env var is unset and no session is bound, resolve_identity
-    # raises a 401 — that's the unauthenticated path.
+    # raises a 401 — that's the unauthenticated path. PotterError carries the
+    # status on ``http_status`` (the one taxonomy → one mapping seam).
     monkeypatch.delenv("PROMPTPOTTER_AUTH", raising=False)
     try:
         resolve_identity(request)
-    except Exception as exc:  # FastAPI HTTPException
-        assert getattr(exc, "status_code", None) == 401
+    except PotterError as exc:
+        assert exc.http_status == 401
+        assert exc.code == "unauthenticated"
     else:
         raise AssertionError("resolve_identity must raise 401 when no session bound")
 

@@ -379,33 +379,58 @@ def test_legacy_session_suffix_still_parses() -> None:
     assert _unit_kind("root", None) == "session"
 
 
-def test_observers_built_via_shared_helper() -> None:
-    """Entry points construct projections via ``build_run_observers`` — no direct RunCallbacks/projection ctors."""
-    BANNED = {
-        "RunCallbacks",
-        "AuditTrailView",
-        "LiveDashboardView",
-        "PoBBStreamView",
-    }
+def test_entry_points_route_through_application_seams() -> None:
+    """Entry points call shared seams + emit ONE error envelope — never hand-rolled.
+
+    Three invariants, one guard:
+    * observers go through ``build_run_observers`` (no direct ``RunCallbacks`` /
+      projection ctors in the CLI / notebook entry points);
+    * the fresh-mint prologue goes through ``jobs/mint.py::prepare_fresh_cycle``
+      (no direct ``auto_mint_session`` in CLI ``new`` / the web launcher);
+    * the whole API layer raises NO ``HTTPException`` — every error is a typed
+      ``PotterError`` mapped to the flat ``ErrorEnvelope`` at the single
+      ``main.py`` seam. A raw ``HTTPException`` would wrap the body under
+      ``detail`` and bypass the taxonomy, re-forking the contract.
+    """
     repo_root = Path(__file__).resolve().parents[1]
-    guarded_paths = [
-        repo_root / "promptpotter" / "presentation" / "cli" / "campaign_runner.py",
-        repo_root / "promptpotter" / "presentation" / "views" / "notebook_run.py",
-    ]
+    pres = repo_root / "promptpotter" / "presentation"
+    jobs = repo_root / "promptpotter" / "application" / "jobs"
+    _OBSERVERS = {"RunCallbacks", "AuditTrailView", "LiveDashboardView", "PoBBStreamView"}
+    # path → direct-construction symbols banned in that entry point
+    guarded: dict[Path, set[str]] = {
+        pres / "cli" / "campaign_runner.py": _OBSERVERS,
+        pres / "views" / "notebook_run.py": _OBSERVERS,
+        pres / "cli" / "commands" / "new.py": {"auto_mint_session"},
+        jobs / "launcher.py": {"auto_mint_session"},
+    }
     offenders: list[str] = []
-    for src_path in guarded_paths:
+    for src_path, banned in guarded.items():
         tree = ast.parse(src_path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             fn = node.func
             name = fn.id if isinstance(fn, ast.Name) else None
-            if name in BANNED:
-                rel = src_path.relative_to(repo_root)
-                offenders.append(f"{rel}:{node.lineno}:{name}")
+            if name in banned:
+                offenders.append(f"{src_path.relative_to(repo_root)}:{node.lineno}:{name}")
+    # No raw HTTPException anywhere in the API layer — the one-envelope lock.
+    for src_path in (pres / "api").rglob("*.py"):
+        tree = ast.parse(src_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Raise)
+                and isinstance(node.exc, ast.Call)
+                and isinstance(node.exc.func, ast.Name)
+                and node.exc.func.id == "HTTPException"
+            ):
+                offenders.append(
+                    f"{src_path.relative_to(repo_root)}:{node.lineno}:raise HTTPException"
+                )
     assert not offenders, (
-        "Direct observer construction in presentation/ — route through "
-        "application/optimization/observers.py::build_run_observers:\n" + "\n".join(offenders)
+        "Entry point reconstructs a seam by hand — route observers through "
+        "build_run_observers, the fresh mint through prepare_fresh_cycle, and "
+        "every API error through a PotterError subclass (no raw HTTPException):\n"
+        + "\n".join(offenders)
     )
 
 

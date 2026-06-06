@@ -5,10 +5,12 @@
   flipped once from :func:`main` before dispatch.
 * ``init_services_cli`` — CLI-style service init (logging style).
 * ``log_startup_summary`` — one-line pipeline/backend/dataset summary.
-* ``_prepare_cycle`` / ``_mint_session_and_cycle`` — pipeline+origin
-  application; used by both fresh-init and divergence-detect paths.
 * ``_DIVERGENCE_HINT`` — operator hint derived from the
   ``ResumeCheckpointKind`` gating table.
+
+The mint prologue (pipeline → origin → cycle_id → mint) lives in the
+application layer at ``application/jobs/mint.py`` — both CLI ``new`` and the
+web mint call it; the CLI commands no longer assemble it here.
 """
 
 from __future__ import annotations
@@ -28,9 +30,6 @@ from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
-    from promptpotter.application.config import CampaignConfig
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -145,56 +144,6 @@ def identity_from_args(args: Any) -> IdentityContext:
     from promptpotter.infrastructure.identity import registered_or_default_identity
 
     return registered_or_default_identity(getattr(args, "tenant", None))
-
-
-def _prepare_cycle(
-    session: Session, campaign_config: CampaignConfig, dataset: list[Sample]
-) -> tuple[dict[Any, Any], OptSearchPoint, str]:
-    """Apply pipeline → load origin → compute cycle_id. Returns (pipeline_params, origin, cycle_id)."""
-    from promptpotter.application.config import configure_and_apply_pipeline
-    from promptpotter.application.origin import resolve_origin_opt_search_point
-    from promptpotter.application.runner import build_origin_cycle_id
-
-    schema = session.pipeline_schema
-    pipeline_params = configure_and_apply_pipeline(
-        session, campaign_config, log=logger.info if _VERBOSE else (lambda *_a, **_k: None)
-    )
-    origin = resolve_origin_opt_search_point(
-        session.experiment_extract,
-        prompt_node_names=schema.prompt_node_names() if schema else [],
-        dataset_dir=session.dataset_config_dir,
-    )
-    return pipeline_params, origin, build_origin_cycle_id(origin, schema, dataset)
-
-
-def _mint_session_and_cycle(
-    session: Session,
-    campaign_config: CampaignConfig,
-    *,
-    cycle_id: str,
-    init_params: dict[str, Any],
-    pipeline_params: dict[str, Any],
-    origin: OptSearchPoint,
-    dataset_count: int,
-) -> tuple[str, str, str]:
-    """Mint session + campaign + root cycle with the CLI's pipeline-snapshot extras.
-
-    Returns ``(session_id, campaign_id, cycle_id)``. ``auto_mint_session``
-    writes ``campaign.json``, the root cycle index, and the 4-key active
-    pointer; it also threads ``campaign_id`` onto *session*.
-    """
-    from promptpotter.application.bootstrap.session import auto_mint_session
-
-    return auto_mint_session(
-        session,
-        campaign_config,
-        cycle_id=cycle_id,
-        origin_prompt_fields=origin.prompt_field_dict(),
-        dataset_size=dataset_count,
-        experiment_id=init_params.get("experiment_id"),
-        pipeline_params=pipeline_params,
-        active_steps=list(pipeline_params.get("steps", [])),
-    )
 
 
 def _build_divergence_hint() -> str:

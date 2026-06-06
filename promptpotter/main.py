@@ -15,12 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
 from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
-from promptpotter.application.jobs import (
-    JobRegistry,
-    LaunchError,
-    QuotaExceededError,
-    default_jobs_dir,
-)
+from promptpotter.application.jobs import JobRegistry, default_jobs_dir
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
 from promptpotter.config.settings import APP_VERSION, settings
 from promptpotter.infrastructure.identity import (
@@ -30,6 +25,7 @@ from promptpotter.infrastructure.identity import (
 from promptpotter.presentation import api
 from promptpotter.presentation.api.middleware import install_oidc_middleware
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import PotterError
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -71,29 +67,48 @@ async def scalar_docs() -> Response:
     return doc
 
 
+# Every API error serializes to the ONE flat envelope declared in
+# docs/specs/m12-api-openapi.yaml#/components/schemas/ErrorEnvelope —
+# `{"error", "message", "details"?}` at the top level (no `detail` wrapper).
+# Three handlers feed it: typed PotterError (the application taxonomy), FastAPI's
+# request-validation 422, and the catch-all 500. No route raises HTTPException.
+def _envelope(
+    code: str, message: str, details: dict[str, object] | None = None
+) -> dict[str, object]:
+    body: dict[str, object] = {"error": code, "message": message}
+    if details:
+        body["details"] = details
+    return body
+
+
+@app.exception_handler(PotterError)
+async def potter_error_handler(request: Request, exc: PotterError) -> JSONResponse:
+    # The one mapping seam for the application error taxonomy: each subclass
+    # carries its own status + code + optional structured details. Routes that
+    # need extra context still catch the specific subclass and add it first.
+    return JSONResponse(
+        status_code=exc.http_status, content=_envelope(exc.code, exc.message, exc.details)
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
-
-
-@app.exception_handler(QuotaExceededError)
-async def quota_exceeded_handler(request: Request, exc: QuotaExceededError) -> JSONResponse:
-    # User-scoped abuse limit (rate / concurrent / daily-campaigns). Maps to 429
-    # for EVERY route — the dispatcher path converts early for its ack flow, this
-    # catches the routes that call the launcher directly (mint-campaign-from-draft).
-    return JSONResponse(status_code=429, content={"error": exc.code, "message": str(exc)})
-
-
-@app.exception_handler(LaunchError)
-async def launch_error_handler(request: Request, exc: LaunchError) -> JSONResponse:
-    # Malformed launch (bad payload / dataset not found / not owned) → 422.
-    return JSONResponse(status_code=422, content={"error": "payload_invalid", "message": str(exc)})
+    # FastAPI's request-shape validation (bad body/query/header) → the same
+    # envelope; the per-field error list rides `details.errors`.
+    return JSONResponse(
+        status_code=422,
+        content=_envelope(
+            "request_invalid", "Request failed validation.", {"errors": exc.errors()}
+        ),
+    )
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    return JSONResponse(
+        status_code=500, content=_envelope("internal_error", "Internal server error")
+    )
 
 
 # CORS middleware
