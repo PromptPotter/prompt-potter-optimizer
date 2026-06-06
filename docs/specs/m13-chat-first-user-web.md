@@ -27,7 +27,7 @@ The drop-three-things upload (dataset + framing + pipeline) is the user's entry 
 
 ### The committed artifact is a Dataset
 
-On commit the ingest produces a **Dataset** in the tenant's collection. The Dataset is more than its rows: per [`architecture.md §0`](../architecture.md), `cycle_{target_hash[:12]}` is content-addressed from `JobSearchPoint.content_hash(dataset)`, which is the rendered target prompt + dataset + target `pipeline_params`. The four committed files at `projects/{tenant}/datasets/{slug}/` compose into exactly that hash (the campaign's **origin** `OptSearchPoint` is then derived from this Dataset — "origin" is reserved for that starting point, never the artifact; see [`m13-dataset-bridge.md` §3.1](m13-dataset-bridge.md)):
+On commit the ingest produces a **Dataset** in the tenant's collection. The Dataset is more than its rows: per [`architecture.md §0`](../architecture.md), `cycle_{target_hash[:12]}` is content-addressed from `JobSearchPoint.content_hash(dataset)`, which is the rendered target prompt + dataset + target `pipeline_params`. The four committed files at `projects/{tenant}/datasets/{slug}/` compose into exactly that hash (the campaign's **origin** `OptSearchPoint` is then derived from this Dataset — "origin" is reserved for that starting point, never the artifact):
 
 | File | Dataset component |
 |---|---|
@@ -99,7 +99,7 @@ Slice 1's one new endpoint. Workspace-scoped mutation (creates a draft, not yet 
 - **Request:** `multipart/form-data` with `file` (CSV blob) + optional `slug` (defaults to `SafeName(filename_without_ext)`).
 - **200:** `DraftCampaign` JSON (shape above) + `sample_preview` (first 10 rows).
 - **401:** unauthenticated (no `IdentityContext`).
-- **409:** slug collision (`error: "slug_collision"`) — `details.slug` (the colliding name) + `details.suggested_slug` (smallest free `{slug}-{n}`). The chat turns this into an in-flow choice (use existing / save as new / replace); dataset-identity + the version-and-repoint Replace contract live in [`m13-dataset-bridge.md`](m13-dataset-bridge.md).
+- **409:** slug collision (`error: "slug_collision"`) — `details.slug` (the colliding name) + `details.suggested_slug` (smallest free `{slug}-{n}`). The chat turns this into an in-flow choice (use existing / save as new / replace); the version-and-repoint Replace never overwrites — the old data is preserved under `{slug}-vN` (`application/datasets/dataset_replace.py`).
 - **422:** parse failure (CSV malformed, missing required columns `query` / `ground_truth`, zero rows, …) — `details.reason` carries the specific failure.
 
 Slug derivation: `SafeName` on the filename's basename minus extension; collisions resolved by operator picking the suggested `{slug}-{n}` or editing.

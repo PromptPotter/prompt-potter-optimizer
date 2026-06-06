@@ -1022,8 +1022,8 @@ paths:
       summary: Version-and-repoint an existing dataset so its name frees for new data.
       description: |
         The data-safe answer to a name collision when the operator means
-        "supersede the data under this name" (`docs/specs/m13-dataset-bridge.md`
-        § 2.1). NEVER overwrites: the old data + its results are preserved,
+        "supersede the data under this name". NEVER overwrites: the old data
+        + its results are preserved,
         renamed out of the way. Server, in crash-safe order:
         1. Renames `projects/{tenant}/datasets/{slug}/` to the smallest free
            `{slug}-v{n}/` (byte-identical data; self-reference fixed).

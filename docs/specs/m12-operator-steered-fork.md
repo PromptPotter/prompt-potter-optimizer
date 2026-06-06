@@ -11,7 +11,7 @@ The loop, in existing primitives:
 ```
 stop-cycle (exists)
   → operator selects a searchpoint   (SelectionContext candidate selection — exists)
-  → edits its prompt/config          (PipelineConfigEditor + PromptFieldsEditor, flipped mode="edit")
+  → edits its prompt/config          (NodeConfigEditor + PromptFieldsEditor, flipped mode="edit")
   → fork-continue                    (a fork seeded from the EDITED searchpoint, resumes optimizing from there)
 ```
 
@@ -31,7 +31,7 @@ The only existing "edit config+prompt then run" path is **draft → mint** — b
 1. **`fork-cycle` carries edits + limit overrides + provenance.** Extend `ForkCyclePayload` (schema-first in [`m12-api-openapi.yaml`](m12-api-openapi.yaml) per the pre-flight gate, *before* the applier) to accept `{from_searchpoint, pipeline_overlay, origin_prompt_fields, limit_overrides}` plus a `steered_by` / human-provenance marker. The applier seeds the fork's origin from these rather than inheriting verbatim. **Human steering is recorded, not forbidden** — the fork is stamped as operator-steered in the ledger (provenance, queryable in lineage), so the campaign tree shows where a human intervened. This is policy-compliant: operators may act; we just record it.
 2. **Cycle-scoped config/prompt override store.** A fork with steered settings needs a per-cycle seed — the fork's origin = the chosen searchpoint **+** the operator's edits. Today there is no place for that to live below the dataset. Smallest shape: write the override into the fork's own cycle dir as its declared origin overlay, read at session bootstrap; don't bolt a sidecar onto the dataset layer.
 3. **Optimizer resume-from-seed.** Bootstrap the forked cycle's origin `OptSearchPoint` from the edited point and **continue** (not replay). Reuses `resume_and_fork/` + `for_session(seed_from_cycle_id=…)`, extended to seed from an *edited* point rather than inherit the parent point unchanged.
-4. **Webapp affordance — unify the existing fork trigger, don't duplicate it.** The dashboard *already* has a "create fork" action on a selected searchpoint (`postCreateFork`) — it's under-engineered (bare `{round, candidate_id}`, no edit/limit step). **Extend that one**, don't add a parallel button. It grows into "Edit & fork from here": flips `PipelineConfigEditor`/`PromptFieldsEditor` from `mode="readonly"` → `mode="edit"`, adds the limit-reconciliation step, and routes `onApply` into the richer `fork-cycle` payload instead of `edit-draft-campaign`. Gated on `!isLive` (stop first). Reuses `SpendBudgetControl`'s `_postCommand` write pattern.
+4. **Webapp affordance — unify the existing fork trigger, don't duplicate it.** The dashboard *already* has a "create fork" action on a selected searchpoint (`postCreateFork`) — it's under-engineered (bare `{round, candidate_id}`, no edit/limit step). **Extend that one**, don't add a parallel button. It grows into "Edit & fork from here": flips `NodeConfigEditor`/`PromptFieldsEditor` from `mode="readonly"` → `mode="edit"`, adds the limit-reconciliation step, and routes `onApply` into the richer `fork-cycle` payload instead of `edit-draft-campaign`. Gated on `!isLive` (stop first). Reuses `SpendBudgetControl`'s `_postCommand` write pattern.
 
 ## Limit reconciliation at fork time
 

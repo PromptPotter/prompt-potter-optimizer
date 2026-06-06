@@ -71,20 +71,21 @@ The persisted world is a four-entity containment hierarchy
   sibling default `campaign.json`. Lives at `datasets/{name}/` (repo
   benchmark) or `projects/{tenant}/datasets/{name}/` (tenant upload).
   Data a campaign has touched is **never mutated in place** — see
-  **Dataset name** + [`specs/m13-dataset-bridge.md`](specs/m13-dataset-bridge.md).
+  **Dataset name**.
 - **Dataset name** (a.k.a. **slug**) — the human-friendly handle for a
   dataset (`email-tagging-eval`), validated `^[a-z][a-z0-9_-]*$` and used
   as the directory segment. A *mutable alias*: it points at data, it is
   **not** the data's identity. A campaign resolves its dataset live by
   this name (`campaign.json::dataset_name`), so moving/replacing it is the
-  version-and-repoint contract, not an in-place overwrite
-  ([`specs/m13-dataset-bridge.md`](specs/m13-dataset-bridge.md)).
+  version-and-repoint contract, not an in-place overwrite (the old data
+  is preserved under `{slug}-vN`; orchestration in
+  `application/datasets/dataset_replace.py`).
 - **Origin** — the optimizer's **starting point**: the origin
   `OptSearchPoint` (`resolve_origin_opt_search_point`) the loop evolves
   from, and the round-0 "origin accuracy" before any mutation. Reserve
   this word for that meaning. The data a campaign starts from is a
   **Dataset**, not an "origin" — historical UI/spec copy that called the
-  dataset an "Origin" is being renamed (m13-dataset-bridge § 3).
+  dataset an "Origin" was renamed to **Dataset**.
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, and the optimizer meta-prompts it runs
   under. A first-class entity holding one session root + its fork/diag/

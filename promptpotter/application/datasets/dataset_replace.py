@@ -3,8 +3,8 @@
 Replacing the data under an existing dataset name must never overwrite it: a
 campaign reads its dataset **live** by name at every run, and measurements are
 stamped by that name, so an in-place overwrite would falsify every prior
-result. Instead we *version-and-repoint* (``docs/specs/m13-dataset-bridge.md``
-§ 2.1): move the old data to an archival ``{slug}-vN`` name, move every
+result. Instead we *version-and-repoint*: move the old data to an archival
+``{slug}-vN`` name, move every
 dependent campaign's pin + measurement stamp with it, then free the canonical
 name for the freshly-dropped data.
 

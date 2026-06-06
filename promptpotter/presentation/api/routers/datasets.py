@@ -180,8 +180,7 @@ async def ingest_dataset(
     except SlugTakenError as exc:
         # The chat turns this into an in-flow choice (use existing / save as new),
         # so it needs BOTH names: the colliding one (to offer "use existing") and
-        # the free suggestion (to offer "save as new"). See
-        # docs/specs/m13-dataset-bridge.md § 2.
+        # the free suggestion (to offer "save as new").
         raise HTTPException(
             status_code=409,
             detail={

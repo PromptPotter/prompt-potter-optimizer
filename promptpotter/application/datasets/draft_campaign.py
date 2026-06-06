@@ -62,7 +62,6 @@ tier (8k TPM) on round 1 — the same reason every wired benchmark (justlogic,
 DEFAULT_OPTIMIZER_MODEL = "openai/gpt-oss-120b"
 """Pinned (not env-default) so the committed campaign.json is reproducible and
 valid on the OpenRouter default above — matches justlogic's optimizer LLM."""
-"""Empty = fall back to ``settings.LLM_MODEL`` (currently ``openai/gpt-oss-120b``)."""
 
 PREVIEW_ROWS = 10
 """Sample-preview head size returned alongside every mutation response."""
@@ -84,8 +83,7 @@ class DraftCampaign:
     writes ``datasets/{slug}/``, the slug becomes the dataset's filesystem
     identity *and* the pin every campaign resolves through. The only sanctioned
     post-commit identity change is the ``-vN`` suffix a *Replace* applies
-    (``application/datasets/dataset_replace.py``) — see
-    ``docs/specs/m13-dataset-bridge.md`` § 1.
+    (``application/datasets/dataset_replace.py``).
     """
 
     draft_id: str
@@ -205,7 +203,7 @@ class DraftCampaign:
     def committed_prompt_fields(self) -> dict[str, Any]:
         """The prompt fields this draft commits at mint — the one encoding of
         "the prompt this draft commits," shared by the prompt writer
-        (``launcher._build_default_prompt``) and the answer-space gate
+        (``launcher.commit_draft_to_dataset``) and the answer-space gate
         (``origin_readiness._check_answer_space``) so they can't drift.
 
         The authored Layer-1 fields (``origin_prompt_fields``) win once present;

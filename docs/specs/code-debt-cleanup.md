@@ -42,9 +42,44 @@ The ingest/origin unify + name-alignment arc (commit `fdb5d95f`) landed the `fie
 
 Shipped this session (git log is the history): item 1 (`committed_prompt_fields()` collapse), item 2 (the `origin_search_point` in-memory slot rename), item 3 (the optimizer/origin symbol-rename cluster → `resolved_origin` / `OperatorForkOverride` / `ScoredCandidate` / `effective_pipeline_params` + `ORIGIN_RESOLUTION_PRIORITY`), item 4 (dropped — the `HardSamplesScope` "origin" homonym does not exist; scopes are already `cycle`/`campaign`/`dataset`), item 6 (OpenAPI `DraftCampaign` reconciled to the shipped `to_wire()`). The two below stay — both gated on a live L1 round.
 
-5. **L1 delta keys `*_override` → `*_updates` (on-disk contract — do last, live-verify)** — `prompt_fields_override` / `task_context_override` / `pp_override`(+`pipeline_params_override`) are merges, not replacements, but the name says "override." Rename the schema (`dispatch/schemas.py`) + parser (`l1/generate.py`) + the `l1_generate` meta-prompt text + the dashboard candidate writers AND the webapp readers (`poll.tsx` `LiveInputCandidate`, `candidateSearchPoint.ts`, `searchPoint.ts`) together — the webapp readers were intentionally left on the old keys pending this. **Load-bearing check:** changes the optimizer LLM's structured-output contract + invalidates on-disk cycles — verify a live L1 round still parses before landing. **Blocker:** one live round (operator-gated).
+5. **L1 delta keys `*_override` → `*_updates` (on-disk contract — do last, live-verify)** — `prompt_fields_override` / `task_context_override` / `pp_override`(+`pipeline_params_override`) are merges, not replacements, but the name says "override." Land together with item 7. **Blocker:** one live L1 round (operator-gated). Full execute-ready map below.
 
-7. **Webapp duplicate searchpoint projection** (do alongside item 5) — `searchPoint.ts::liveInFlightSearchPoint` and `candidateSearchPoint.ts` both map wire `prompt_fields`/`pp_override` → `{origin_prompt_fields, pipeline_overlay}`. **Action:** one `wireToCandidateSearchPoint(wire)` helper both call — also collapses item 5's reader change to a single site.
+7. **Webapp duplicate searchpoint projection** (do *with* item 5, same commit) — `searchPoint.ts::liveInFlightSearchPoint` and `candidateSearchPoint.ts` both map wire `prompt_fields`/`pp_override` → `{origin_prompt_fields, pipeline_overlay}`. **Action:** one `wireToCandidateSearchPoint(wire)` helper both call — collapses item 5's reader change to a single site. **Blocker:** none on its own, but bundle with 5 so the reader key rename lands once.
+
+#### Execution scope for 5 + 7 (next session — rip-to-green in one pass)
+
+These are one arc: item 5's wire-key rename is exactly what item 7's helper consolidates, so do them in **one commit**. Verified site map (greps traced 2026-06-06).
+
+**Rename table** — `*_override → *_updates`, only the three L1-delta keys (NOT `LimitOverrides`, fork/campaign/`resume_from_round_override`, or `forbidden_axes` — those are genuine replacements, leave them):
+
+| Old | New | Surfaces |
+|---|---|---|
+| `prompt_fields_override` | `prompt_fields_updates` | L1Variant schema field + parser + meta-prompt prose |
+| `task_context_override` | `task_context_updates` | L1Variant schema field + parser + meta-prompt prose |
+| `pipeline_params_override` | `pipeline_params_updates` | L1Variant schema field + `round_NNNN.json::candidate_scores[]` key + validators + CLI display + verify |
+| `pp_override` | `pp_updates` | the SHORT dashboard/wire alias: `dashboard.json` candidate entry + CLI display + **webapp readers** |
+
+**Decision to settle first (one axis):** `pp_override` (dashboard wire) and `pipeline_params_override` (round-file + schema) are two names for one delta. Either (a) rename both to the `*_updates` pair above (keeps the short/long split), or (b) **unify to one** `pp_updates` everywhere (kills the two-name tax — preferred, matches the arc's "one shape per concept"). Pick before starting; the table assumes (a), option (b) drops `pipeline_params_updates` in favor of `pp_updates` at every site.
+
+**Python sites (writer + reader together — no shims):**
+- Schema (source of truth): `dispatch/schemas.py::L1Variant` (3 fields + their docstrings) → JSON schema the LLM sees is built from these field names by `validators/l1_strict.py::build_l1_output_schema` (reads `variant_props["pipeline_params_override"]`), so the rename auto-propagates to the LLM contract.
+- Parser: `l1/generate.py` (reads the variant dict keys).
+- Population/score: `l1/population.py`, `l1/score/{loop,candidate,winner}.py`, `l1/stats.py`, `domain/results.py` (`ScoredCandidate` field), `validators/l1_behavior.py` (`_touches_param_scope`/`_touched_forbidden_keys`).
+- Writers (dashboard/round file): `run_observers.py::seed_candidate` (param `pp_override` + `"pp_override"` key), `infrastructure/projections/live_dashboard/view.py` (`"pp_override"` at the candidate entry, l. ~207/599/929).
+- CLI display: `presentation/views/live/{display,candidate,__init__}.py` (`fmt_pp_override` + param + `scores.get("pipeline_params_override")`).
+- Verify path: `presentation/cli/commands/verify.py` (`proposal.get("pipeline_params_override")`), `cli/commands/sweep/_common.py`, `application/review.py`.
+- Meta-prompt prose: `datasets/_optimizer/variants/l1_current.json` (active `l1_generate` text names the keys) + `dispatch/hub/injections/catalogues.py:24` (docstring). **Decision:** also rename the historical snapshots (`l1_v2..v6.json`, `l1_60pct_winner.json`) for grep-cleanliness, or leave them as archival meta-campaign history — they're inactive; recommend renaming so a future grep for `*_override` is clean.
+- Docs: `docs/developer/self-healing-internals.md`, `l1-candidate-analysis-checklist.md` reference the keys.
+
+**Webapp sites (item 7 — the readers intentionally left on old keys):**
+- `lib/poll.tsx::LiveInputCandidate` (the `pp_override?` field), `lib/derivations/searchPoint.ts::liveInFlightSearchPoint` (`latest.pp_override`), `lib/derivations/candidateSearchPoint.ts` (`entry.pp_override`, reads `round_NNNN.json::candidate_scores[]`) + their `__tests__/`.
+- **Item 7 collapse:** extract one `wireToCandidateSearchPoint(wire)` in `lib/derivations/` that both `searchPoint.ts` and `candidateSearchPoint.ts` call — maps `{prompt_fields, pp_updates}` → `{origin_prompt_fields, pipeline_overlay}`. The reader key rename then lands at exactly one site. `prompt_fields` (the candidate's full evolved prompt) is NOT renamed — only the delta key is.
+
+**Order:** (1) settle the two decisions above; (2) Python rename writer→reader (schema first, then parser/validators/writers/display/verify/meta-prompt) + run the Python gate; (3) webapp: build the `wireToCandidateSearchPoint` helper, rename the reader key, point both projections at it + run the webapp gate; (4) **live-verify** (below); (5) one commit (`refactor(l1): override→updates delta keys + collapse webapp searchpoint projection`).
+
+**Live-verify protocol (the actual blocker):** this changes the optimizer LLM's structured-output contract and the `round_NNNN.json` key, so it invalidates on-disk cycles — old round files won't read in the webapp. Verify against a FRESH cycle, not a resumed one: `python -m promptpotter new <small dataset>`, let **round 1 (one L1 round) complete**, then confirm (a) the round parsed — no `l1_zero_candidates` `RoundWarningRecord`, variants populated in `round_0001.json::candidate_scores[]` under the new keys; (b) the dashboard candidate cards render the pipeline delta (webapp reads `pp_updates`); (c) the steer panel seeds from a candidate (exercises `candidateSearchPoint`). Then land.
+
+**Gates:** Python — `ruff check`/`ruff format --check`/`mypy`/`pytest` (`test_optimizer.py`, `test_presentation.py`, `test_pipeline_config.py`, `test_invariants.py` touch these keys). Webapp — `npm run lint`/`tsc --noEmit`/`npm run test` (`searchPoint.test.ts`, `candidateSearchPoint.test.ts`)/`npm run build`.
 
 ### Operator-steered-fork drift (v0.8.1 — found 2026-06-03)
 
@@ -85,6 +120,24 @@ The three below are architectural collapses, not sittings. Each is multi-file, h
   **Pattern:** parallel reconstruction paths for the same shape — collapses once the writer reads the canonical source instead of its on-disk projection.
 
 ### Standing entries
+
+- **HITL notebook (`notebooks/optimization_campaign.ipynb`) has rotted against
+  the orchestration API** — not CI-gated, so it drifted unnoticed across the
+  ingest/origin unify arc. Three confirmed breaks: (1) the `data-setup` cell
+  unpacks **four** values from `prepare_origin_notebook`, which now returns a
+  **3-tuple** (`RunObservers, list[Sample], CampaignOrigin`); (2) it imports
+  `decompose_task_context` from `promptpotter.application.optimization.pipeline`
+  — that module **no longer exists** (the seam is now
+  `task_context.py::load_or_build_task_context` /
+  `decompose_prompt_fields`); (3) downstream cells treat `campaign_rounds` as a
+  list of round dicts, but the runner seam now hands back a `CampaignOrigin`.
+  **Action:** rewrite the three cells against the current `notebook_run.py`
+  contract (`prepare_origin_notebook` → `(observers, dataset, origin)`;
+  `run_optimization_notebook(observers, dataset, origin, …)`) — or retire the
+  notebook if the CLI/web paths have fully superseded the HITL flow (operator's
+  call). **Blocker:** can't be verified without a live TermNorm backend at
+  `:8000`; treat as a dedicated notebook session, not a blind edit. **Pattern:**
+  un-gated surface drifting behind a renamed orchestration seam.
 
 - **`RunPhase.STOPPING` has a thin window for non-paused stops** —
   the runner declares `stopping` (`application/run_phase_control.py`)

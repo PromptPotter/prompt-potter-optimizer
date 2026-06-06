@@ -503,8 +503,7 @@ async def replace_dataset(
 ) -> dict[str, Any]:
     """Version-and-repoint a colliding dataset so its name frees for new data.
 
-    Per ``docs/specs/m12-api-openapi.yaml::replaceDataset`` +
-    ``docs/specs/m13-dataset-bridge.md § 2.1``. Data-safe: never overwrites — the
+    Per ``docs/specs/m12-api-openapi.yaml::replaceDataset``. Data-safe: never overwrites — the
     old data + every prior campaign's results are preserved under ``{slug}-vN``.
     Synchronous (the migration is a bounded set of renames + JSON rewrites); the
     freed name is re-ingested in a separate ``/datasets/ingest`` call.

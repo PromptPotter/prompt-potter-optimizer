@@ -38,7 +38,7 @@ export type IngestPhase =
   | { stage: "checkin"; model: string }
   // A dropped file's name matches a dataset already in the collection. The chat
   // offers the safe choices (use existing / save as new / replace) rather than
-  // a dead-end 409 — see docs/specs/m13-dataset-bridge.md § 2.
+  // a dead-end 409.
   | {
       stage: "collision";
       file: File;
@@ -256,7 +256,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
 
   // Collision: version-and-repoint the existing dataset so its name frees, then
   // re-ingest the dropped file under it. Data-safe — old data + every prior
-  // campaign's results are preserved under `{slug}-vN` (m13-dataset-bridge § 2.1).
+  // campaign's results are preserved under `{slug}-vN`.
   const replaceExisting = async () => {
     if (phase.stage !== "collision") return;
     const { file, existingSlug, chipId } = phase;
