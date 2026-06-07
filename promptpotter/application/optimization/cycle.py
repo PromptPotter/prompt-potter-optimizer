@@ -11,7 +11,6 @@ from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.optimization.pobb.elimination import extract_warning_types
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     RoundOrigin,
@@ -344,12 +343,12 @@ class Cycle:
             _rf_dedup_key(rf.model_dump()) for rf in self.opt_sp.memory.wounds.runtime_failures
         }
         for cs in rr.candidate_scores:
-            for rf_dict in cs.runtime_failures:
-                k = _rf_dedup_key(rf_dict)
+            for rf in cs.runtime_failures:
+                k = _rf_dedup_key(rf.model_dump())
                 if k in existing_keys:
                     continue
                 existing_keys.add(k)
-                self.opt_sp.memory.wounds.runtime_failures.append(RuntimeFailure(**rf_dict))
+                self.opt_sp.memory.wounds.runtime_failures.append(rf)
 
         self.rounds.append(rr)
         for f in PROMPT_STRING_FIELDS:

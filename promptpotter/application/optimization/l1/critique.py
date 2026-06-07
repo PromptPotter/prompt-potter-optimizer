@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.optimization.dispatch.hub import (
     DispatchHub,
@@ -15,6 +15,7 @@ from promptpotter.application.optimization.dispatch.llm_call import (
 )
 from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.results import CritiqueReadout
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -35,7 +36,7 @@ async def run_l1_critique(
     *,
     round_num: int,
     ledger: CycleEventLog | None = None,
-) -> dict[str, Any]:
+) -> CritiqueReadout:
     """Build critique from pipeline stats + LLM analysis; returns dict for storage.
 
     Template embeds ``{{plan|task_context|diagnostics|validation_failures|runtime_failures}}``
@@ -66,4 +67,4 @@ async def run_l1_critique(
         round_num,
         round_result.accuracy,
     )
-    return result.model_dump()
+    return cast(CritiqueReadout, result.model_dump())

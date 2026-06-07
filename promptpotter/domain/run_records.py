@@ -8,7 +8,7 @@ resume-checkpoint policy (gating, helpers, exhaustiveness check) lives in
 from __future__ import annotations
 
 import enum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,6 +18,7 @@ __all__ = [
     "CommandAckRecord",
     "CommandRecord",
     "CycleRecord",
+    "DecisionRecord",
     "ErrorRecord",
     "ForkSpec",
     "ForkTrigger",
@@ -48,6 +49,21 @@ class ResumeCheckpointKind(enum.StrEnum):
     FORK_CUT = "fork_cut"
 
 
+class DecisionRecord(TypedDict):
+    """Wire shape of one recorded decision as it rides ``RoundPayload.decisions``.
+
+    The serialized projection of :meth:`ResumeCheckpointRecord.to_dict` — read by
+    the divergence-replay walker (``resume_and_fork/replayers.py``). ``kind`` is the
+    enum *value* string (not the enum), so a round file round-trips without the
+    optimization layer in scope.
+    """
+
+    kind: str
+    inputs_ref: dict[str, Any]
+    outcome: Any
+    data: dict[str, Any]
+
+
 class ResumeCheckpointRecord(BaseModel):
     """One recorded decision: ``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival."""
 
@@ -61,7 +77,7 @@ class ResumeCheckpointRecord(BaseModel):
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> DecisionRecord:
         """Wire shape for round_data-JSON ``decisions`` payload."""
         return {
             "kind": self.kind.value,

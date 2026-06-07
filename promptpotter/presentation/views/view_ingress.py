@@ -274,7 +274,7 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         p_value=p_value,
         improved_reason=d.get("improved_reason"),
         next_action=str(d.get("next_action", "?") or "?"),
-        l1_critique_text=format_l1_critique_for_prompt(d.get("critique") or {}),
+        l1_critique_text=format_l1_critique_for_prompt(d.get("critique")),
         composite_fitness_formula=ctx.composite_fitness_formula,
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
         origin_composite_fitness=ctx.origin_composite_fitness,

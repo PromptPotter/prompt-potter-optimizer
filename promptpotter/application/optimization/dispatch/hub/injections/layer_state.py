@@ -20,6 +20,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     InjectionKind,
     signal,
 )
+from promptpotter.domain.results import CritiqueReadout
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,9 @@ def _valid_axis_set(schema: Any) -> set[str]:
     return out
 
 
-def format_l1_critique_for_prompt(critique: dict[str, Any], pipeline_schema: Any = None) -> str:
+def format_l1_critique_for_prompt(
+    critique: CritiqueReadout | None, pipeline_schema: Any = None
+) -> str:
     """L1 critique → compact text for L1_GENERATE + L2_CONTEXT. Three load-bearing fields:
     `priority_fix`, schema-filtered `suggested_axes`, `failure_highlights`.
     """
@@ -157,7 +160,7 @@ def format_l1_critique_for_prompt(critique: dict[str, Any], pipeline_schema: Any
 )
 def _r_critique(b: InjectionBundle) -> str:
     """Compact view of the most recent L1_CRITIQUE output dict."""
-    return format_l1_critique_for_prompt(b.digest.critique or {}, b.pipeline_schema)
+    return format_l1_critique_for_prompt(b.digest.critique, b.pipeline_schema)
 
 
 _REBASE_CAPABILITY_TEXT = (
@@ -201,7 +204,8 @@ def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
         triggers.append("peaked_axis")
     if b.opt_sp.memory.wounds.runtime_failures:
         triggers.append("runtime_failure")
-    sa = (b.digest.critique or {}).get("suggested_axes") or []
+    crit = b.digest.critique
+    sa = (crit.get("suggested_axes") if crit else None) or []
     if any(a in PARAM_SCOPE_KEYS for a in sa):
         triggers.append("continuous_envelope")
     key_challenges = b.opt_sp.memory.task_context.key_challenges or ""

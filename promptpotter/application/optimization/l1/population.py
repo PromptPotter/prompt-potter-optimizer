@@ -18,6 +18,8 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import (
     CandidateProposal,
+    DegradationContext,
+    EliminationContext,
     ScoredCandidate,
 )
 
@@ -115,8 +117,8 @@ def build_score_report(
     label: str,
     aborted: bool = False,
     elimination_stopped: bool = False,
-    elimination_context: dict[str, Any] | None = None,
-    degradation_context: dict[str, Any] | None = None,
+    elimination_context: EliminationContext | None = None,
+    degradation_context: DegradationContext | None = None,
     resumed_from_cache: bool = False,
     invalid: bool = False,
     new_runtime_failure: RuntimeFailure | None = None,
@@ -146,10 +148,10 @@ def build_score_report(
         expected_samples=len(dataset),
         invalid=invalid,
         resumed_from_cache=resumed_from_cache,
-        validation_failures=[vf.model_dump() for vf in osp.memory.wounds.validation_failures],
-        runtime_failures=[new_runtime_failure.model_dump()] if new_runtime_failure else [],
-        elimination_context=dict(elimination_context) if elimination_context else {},
-        degradation_context=dict(degradation_context) if degradation_context else {},
+        validation_failures=list(osp.memory.wounds.validation_failures),
+        runtime_failures=[new_runtime_failure] if new_runtime_failure else [],
+        elimination_context=elimination_context or {},
+        degradation_context=degradation_context or {},
     )
 
 

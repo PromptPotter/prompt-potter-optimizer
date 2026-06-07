@@ -16,6 +16,7 @@ from promptpotter.application.optimization.l1.population import pobb_decision_da
 from promptpotter.application.optimization.pobb.elimination import PoBBCheck
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, RuntimeFailure
+from promptpotter.domain.results import DegradationContext, EliminationContext
 
 
 class CandidateOutcome(StrEnum):
@@ -54,8 +55,8 @@ class SignalEffect:
     leader_locked_loose: bool
     leader_id: str
     runtime_failure: RuntimeFailure | None
-    elim_context: dict[str, Any] | None
-    degradation_context: dict[str, Any] | None
+    elim_context: EliminationContext | None
+    degradation_context: DegradationContext | None
     elimination_decision: tuple[dict[str, Any], dict[str, Any]] | None
     leader_lock_decision: tuple[dict[str, Any], dict[str, Any]] | None
 
@@ -112,7 +113,7 @@ def decode_signal_effect(
             candidate_label=candidate_label,
         )
 
-    elim_ctx: dict[str, Any] | None = None
+    elim_ctx: EliminationContext | None = None
     leader_id = ""
     if (elimination_stopped or leader_locked_loose) and signal.check_name == "elimination":
         leader_id = str(cr.get("leader_id", ""))
@@ -129,7 +130,7 @@ def decode_signal_effect(
     # Degradation context — populated when DegradationCheck (or scoring-
     # error abort) fires. Disjoint from elim_ctx: the renderer reads one
     # or the other based on which check name attached to the signal.
-    degrad_ctx: dict[str, Any] | None = None
+    degrad_ctx: DegradationContext | None = None
     if elimination_stopped and signal.check_name in ("degradation", "scoring_error_abort"):
         degrad_ctx = {
             "degraded_rate": float(cr.get("degraded_rate", 0.0)),

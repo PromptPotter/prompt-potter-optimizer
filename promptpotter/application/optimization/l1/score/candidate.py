@@ -168,10 +168,8 @@ async def score_one_candidate(
         label=label,
         aborted=effect.aborted,
         elimination_stopped=effect.elimination_stopped,
-        elimination_context=dict(effect.elim_context) if effect.elim_context else None,
-        degradation_context=(
-            dict(effect.degradation_context) if effect.degradation_context else None
-        ),
+        elimination_context=effect.elim_context,
+        degradation_context=effect.degradation_context,
         new_runtime_failure=effect.runtime_failure,
         l1_diversity=l1_diversity,
     )

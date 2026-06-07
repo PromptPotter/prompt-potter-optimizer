@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.results import CritiqueReadout
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
 if TYPE_CHECKING:
@@ -101,7 +102,7 @@ class RoundDigest:
     Failure renderers (validation/runtime/l2/l3 breaches) read ``bundle.opt_sp`` instead — failures accumulate across rounds."""
 
     diagnostics: RoundDiagnostics | None
-    critique: dict[str, Any] | None
+    critique: CritiqueReadout | None
 
 
 @dataclass(frozen=True)

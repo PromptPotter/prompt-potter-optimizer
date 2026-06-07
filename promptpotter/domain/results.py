@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from promptpotter.domain.escalation_signals import EscalationSignal
+from promptpotter.domain.escalation_signals import (
+    EscalationSignal,
+    RuntimeFailure,
+    ValidationFailure,
+)
 from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
+from promptpotter.domain.run_records import DecisionRecord
 
 __all__ = [
     "CandidateProposal",
+    "CritiqueReadout",
     "CycleResult",
+    "DegradationContext",
     "DiagnosticRunRecord",
+    "EliminationContext",
     "OriginSummary",
     "PayloadOutcome",
     "RoundMetadata",
@@ -27,6 +35,47 @@ __all__ = [
     "candidate_label",
     "is_round_winner",
 ]
+
+
+class EliminationContext(TypedDict, total=False):
+    """PoBB exit context on a ``ScoredCandidate`` — written by ``decode_signal_effect``
+    when the elimination check fires. Empty ``{}`` when the candidate wasn't cut.
+    ``leader_label`` is decorated post-construction (needs prior-rank lookup), so the
+    whole shape is ``total=False``. Disjoint from :class:`DegradationContext`."""
+
+    p_best: float
+    epsilon: float
+    leader_id: str
+    queries_scored: int
+    total_queries: int
+    n_priors: int
+    leader_locked: bool
+    leader_label: str
+
+
+class DegradationContext(TypedDict, total=False):
+    """DegradationCheck / scoring-error-abort exit context on a ``ScoredCandidate``.
+    Empty ``{}`` when the candidate wasn't degradation-cut. Disjoint from
+    :class:`EliminationContext` — the renderer branches on which is non-empty."""
+
+    degraded_rate: float
+    degraded_count: int
+    total_scored: int
+    dominant_warning: str
+    fatal: bool
+    warning_types: dict[str, int]
+    source: str
+
+
+class CritiqueReadout(TypedDict, total=False):
+    """Serialized ``L1CritiqueOutput`` as it rides ``RoundResult.critique`` and the
+    dispatch ``RoundDigest``. Domain-local mirror of the three load-bearing fields so
+    a round file round-trips without the optimization layer's schema in scope; the
+    optimizer node's full Pydantic shape stays in ``dispatch/schemas.py``."""
+
+    priority_fix: str
+    suggested_axes: list[str]
+    failure_highlights: list[str]
 
 
 def candidate_label(round_num: int, idx: int) -> str:
@@ -75,10 +124,10 @@ class ScoredCandidate(BaseModel):
     expected_samples: int = 0
     invalid: bool = False
     resumed_from_cache: bool = False
-    validation_failures: list[dict[str, Any]] = Field(default_factory=list)
-    runtime_failures: list[dict[str, Any]] = Field(default_factory=list)
-    elimination_context: dict[str, Any] = Field(default_factory=dict)
-    degradation_context: dict[str, Any] = Field(default_factory=dict)
+    validation_failures: list[ValidationFailure] = Field(default_factory=list)
+    runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
+    elimination_context: EliminationContext = Field(default_factory=EliminationContext)
+    degradation_context: DegradationContext = Field(default_factory=DegradationContext)
     # Origin restricted to this candidate's measured samples — apples-to-apples
     # when PoBB locks mid-budget; equals full-set origin when fully scored.
     matched_origin_accuracy: float = 0.0
@@ -121,6 +170,9 @@ class RoundOrigin(BaseModel):
     accuracy: float
     composite_fitness: float
     osp: OptSearchPoint
+    # Per-sample ``QueryMeasurement`` rows plus open-ended stale-data protocol
+    # markers (``retry_of_degraded`` etc.) — kept ``dict`` so the markers survive
+    # serialization (a closed model would strip them); readers cast at hot sites.
     results: list[dict[str, Any]] = Field(default_factory=list)
     label: str
     evaluators: dict[str, float] = Field(default_factory=dict)
@@ -165,13 +217,14 @@ class RoundPayload(BaseModel):
     pipeline_params: dict[str, Any] | None = None
     # Prior round's accuracy (or campaign origin for round 0).
     origin_accuracy: float = 0.0
+    # Per-sample rows — ``QueryMeasurement`` + stale-data markers (see ``RoundOrigin.results``).
     results: list[dict[str, Any]] = Field(default_factory=list)
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     candidates_scored: int
     candidate_scores: list[ScoredCandidate] = Field(default_factory=list)
     # ResumeCheckpoint records consumed by the divergence-replay walker.
-    decisions: list[dict[str, Any]] = Field(default_factory=list)
+    decisions: list[DecisionRecord] = Field(default_factory=list)
     evaluators: dict[str, float] = Field(default_factory=dict)
     # L1 yield + failure counts; defaults assume "all valid" for replay paths bypassing the detector.
     l1_yield: float = 1.0
@@ -188,7 +241,7 @@ class RoundResult(RoundMetadata, RoundPayload):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     diagnostics: RoundDiagnostics | None = None
-    critique: dict[str, Any] | None = None
+    critique: CritiqueReadout | None = None
 
 
 class CycleError(BaseModel):

@@ -18,6 +18,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     fence_untrusted,
     signal,
 )
+from promptpotter.domain.results import CritiqueReadout
 
 
 @signal(
@@ -157,13 +158,13 @@ _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
 )
 
 
-def _critique_is_all_prompt_field(critique: dict[str, Any] | None) -> bool:
+def _critique_is_all_prompt_field(critique: CritiqueReadout | None) -> bool:
     """All `critique.suggested_axes` are prompt-field axes? Drives axis-memory filter — when L1_CRITIQUE
     flagged only semantic failures, param-axis rankings are noise the critique already vetoed.
     """
     from promptpotter.config.settings import PROMPT_STRING_FIELDS
 
-    sa = (critique or {}).get("suggested_axes") or []
+    sa = (critique.get("suggested_axes") if critique else None) or []
     if not sa:
         return False
     prompt_axes = set(PROMPT_STRING_FIELDS)

@@ -327,7 +327,7 @@ def _render_critique(round_data: dict[str, Any]) -> list[str]:
         format_l1_critique_for_prompt,
     )
 
-    critique = format_l1_critique_for_prompt(round_data.get("critique") or {}).strip()
+    critique = format_l1_critique_for_prompt(round_data.get("critique")).strip()
     if not critique:
         return []
     quoted = critique.replace("\n", "\n> ")
