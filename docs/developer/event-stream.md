@@ -34,7 +34,7 @@ data: {"kind": "phase", "version": 1, "cycle_id": "cycle_abc123",
 | `payload` | object | Per-kind body. For record-derived kinds, the record's `model_dump` content; for `stream_snapshot`, `dashboard.json` + `snapshot_at_offset`. |
 | `emitted_at` | string | Server wall-clock at envelope mint. Debugging only — never load-bearing for ordering. |
 
-Adding a new kind requires updating [`m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml) **first** (closed-set policy — security box 1), then `ProjectionKind` in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or the projection-only allowlist in `tests/test_control_plane_drift.py`). Drift between the YAML enum and the Python Literal is a hard test failure.
+Adding a new kind requires updating [`m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml) **first** (closed-set policy — security box 1), then `ProjectionKind` in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or the projection-only allowlist in `tests/test_contracts.py`). Drift between the YAML enum and the Python Literal is a hard test failure.
 
 ## Subscription contract — snapshot-then-tail
 
@@ -82,9 +82,9 @@ The registry holds a process-global lock. Cycles can register and deregister con
 
 ## Testing
 
-One bundled invariant test: [`tests/test_event_stream.py::test_event_stream_view_contract`](../../tests/test_event_stream.py). Exercises subscribe → publish → multi-subscriber fan-out → heartbeat → drain on a real `EventStreamView` (no HTTP).
+One bundled invariant test: [`tests/test_invariants.py::test_event_stream_view_contract`](../../tests/test_invariants.py). Exercises subscribe → publish → multi-subscriber fan-out → heartbeat → drain on a real `EventStreamView` (no HTTP).
 
-Drift teeth in [`tests/test_control_plane_drift.py`](../../tests/test_control_plane_drift.py) assert:
+Drift teeth in [`tests/test_contracts.py`](../../tests/test_contracts.py) assert:
 - `ProjectionKind` Literal matches the AsyncAPI `kind` enum exactly.
 - Every YAML-required envelope field exists in the Python model.
 - A FastAPI route is registered at the AsyncAPI-declared channel address.

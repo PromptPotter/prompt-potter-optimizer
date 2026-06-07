@@ -62,9 +62,9 @@ breadcrumb comments — zero backward compatibility, ever) and **root-fix** (fix
 upstream structural cause, not the symptom site; name the cause before touching the surface).
 
 **Layers** (load only the layer you touch: `promptpotter/*/CLAUDE.md`). Forbidden
-runtime imports, locked by `tests/structure.py`: domain→anything, intelligence→
+runtime imports, locked by `tests/test_structure.py`: domain→anything, intelligence→
 optimization, infrastructure→application/intelligence/optimization. A new seam or
-invariant → add a **row** to `tests/structure.py` (`REGEX_BANS`/`CALL_BANS`), never a
+invariant → add a **row** to `tests/test_structure.py` (`REGEX_BANS`/`CALL_BANS`), never a
 hand-rolled `rglob`/`ast.walk`.
 
 **Step 3 — where things live (fact map; skip the re-exploration).**

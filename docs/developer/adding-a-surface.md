@@ -109,7 +109,7 @@ reconstructor to keep in sync** — that synchronized third edit is gone.
    `round_NNNN.json` for **cross-cycle** rendering and is a genuinely separate
    source, not a roundtrip shim.
 
-**CI guard:** `test_round_complete_view_roundtrip` (`tests/test_presentation.py`)
+**CI guard:** `test_round_complete_view_roundtrip` (`tests/test_invariants.py`)
 proves the live builder and the disk builder produce an equal
 `RoundCompleteView` — the two-factories-onto-one-View correctness invariant.
 

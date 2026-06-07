@@ -49,6 +49,34 @@ Deleted on sight, no replacement:
 - **Volume or O(n) scaling tests.** No "runs 100 candidates", no "all 50
   datasets". One canonical case per contract.
 
+## File layout — one file per charter category
+
+A test lives where its *kind of guarantee* lives, not next to the module it
+pokes. Six test files, full stop; adding coverage means adding a row or a
+fixture, not a new file.
+
+| File | Category | Guards |
+|------|----------|--------|
+| `test_structure.py` | lint | Declarative source-scan tables (banned calls / forbidden regex / layer-import edges) + the bespoke AST locks, run by the `_scan.py` engine. Adding a lint = adding a row. |
+| `test_invariants.py` | C1 | Named invariants: artifact-band parity, cycle-identity-is-dir-name, typed-ledger roundtrips, escalation engine, dispatch-hub wiring + untrusted fencing, secret redaction, archive retrieval + dataset scoping, identity foundation, lifecycle, quota, event stream, run-phase, presentation view round-trip + projection routing. |
+| `test_numerics.py` | C2 | Statistical / numerical correctness: PoBB, Rasch, composite scoring, scorer formulas, L1/L2/L3 validators. |
+| `test_contracts.py` | C3 | Wire / schema: API envelopes, LLM retry, Pydantic `extra=forbid`, pipeline parse, control-plane drift, origin-gate, authored-dataset reader. |
+| `test_resume.py` | C4 | Resume / mutation safety: rescore / replay / fork / rewind / merge / zero-signal filter / `DiffScope`. |
+| `test_shapes.py` | C5 | Frozen model shape: `JobSearchPoint`, `OptSearchPoint`, `PipelineSchema`. |
+
+Each category file carries the standard `test_` prefix, so pytest's default glob
+collects all six with no `python_files` override. Support modules carry no tests
+and are excluded by their underscore/`conftest` names: `conftest.py` (fixtures),
+`_factories.py` (pure data builders + on-disk seeding), `_scan.py` (the
+source-scan engine), `_helpers.py` (LLM-client mocks). The locked six-file shape
+is enforced by `test_structure.py::test_category_files_are_collectible` — a stray
+`test_*.py` or a missing category file fails loud.
+
+Wiring-completeness guarantees (every-kind-gated, every-connector-whole,
+every-renderer-wired, every-leaf-classified, every-record-dispatched) are NOT
+tests — they are import-time assertions in the module that owns each registry,
+so a malformed registry fails at startup everywhere, not just in CI.
+
 ## The delete-don't-update rule
 
 When a contract is renamed, restructured, or replaced:
@@ -62,14 +90,27 @@ When a contract is renamed, restructured, or replaced:
 
 ## Ceiling
 
-Target **≤ 18 test files, ≤ 240 collected tests**. Above that, prune before
-adding. Canary (the non-`-q` collect prints the grand total; `-q` only prints
-per-file counts): `python -m pytest tests/ --collect-only 2>&1 | grep "tests collected"`.
-Currently at 240 — AT the ceiling. Prune before adding any further test.
+Target **6 test files, ≤ 240 collected tests**. The six-file shape is the
+contract — new coverage rides an existing category file, never a new one.
+Canary (the non-`-q` collect prints the grand total; `-q` only prints per-file
+counts): `python -m pytest tests/ --collect-only 2>&1 | grep "tests collected"`.
+Currently **230** — headroom to 240. Prune (parametrize-merge) before adding past it.
 
 ## Fixtures (`conftest.py`)
 
-None currently. Add via `conftest.py` if a cross-cutting setup/teardown is genuinely needed.
+| Fixture | Purpose |
+|---------|---------|
+| `built_stores` | A real `Stores` rooted in `tmp_path` under the default identity. |
+| `seeded_campaign_cycle` | `(stores, CycleHandle)` — one canonical campaign + cycle on disk (with ledger). |
+| `patch_pointer_root` | `(stores, active-pointer path)` — redirects the module-level pointer root into the temp tree so bare fork-machinery `save_active_pointer` calls land in `tmp_path`. |
+
+## Factories (`_factories.py`)
+
+Pure data builders + on-disk seeding — every test rides these instead of inline
+JSON or a `build_stores` + mkdir dance: `make_campaign_dict` / `make_index_dict`
+/ `make_dashboard_dict` / `make_round` (dicts, override any field via kwargs)
+and `seed_campaign_cycle(tenant_root, ...) -> CycleHandle` (lays a canonical
+tree through the real store path helpers).
 
 ## Helpers (`_helpers.py`)
 

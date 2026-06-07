@@ -75,7 +75,7 @@ These are one arc: item 5's wire-key rename is exactly what item 7's helper cons
 
 **Live-verify protocol (the actual blocker):** this changes the optimizer LLM's structured-output contract and the `round_NNNN.json` key, so it invalidates on-disk cycles — old round files won't read in the webapp. Verify against a FRESH cycle, not a resumed one: `python -m promptpotter new <small dataset>`, let **round 1 (one L1 round) complete**, then confirm (a) the round parsed — no `l1_zero_candidates` `RoundWarningRecord`, variants populated in `round_0001.json::candidate_scores[]` under the new keys; (b) the dashboard candidate cards render the pipeline delta (webapp reads `pp_updates`); (c) the steer panel seeds from a candidate (exercises `candidateSearchPoint`). Then land.
 
-**Gates:** Python — `ruff check`/`ruff format --check`/`mypy`/`pytest` (`test_optimizer.py`, `test_presentation.py`, `test_pipeline_config.py`, `test_invariants.py` touch these keys). Webapp — `npm run lint`/`tsc --noEmit`/`npm run test` (`searchPoint.test.ts`, `candidateSearchPoint.test.ts`)/`npm run build`.
+**Gates:** Python — `ruff check`/`ruff format --check`/`mypy`/`pytest` (`invariants.py`, `numerics.py`, `contracts.py` touch these keys). Webapp — `npm run lint`/`tsc --noEmit`/`npm run test` (`searchPoint.test.ts`, `candidateSearchPoint.test.ts`)/`npm run build`.
 
 ### Operator-steered-fork drift (v0.8.1 — found 2026-06-03)
 

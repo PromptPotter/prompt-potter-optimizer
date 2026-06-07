@@ -22,7 +22,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-12](#r-12) — `score_search_point()` is the single scoring gateway
 - [R-13](#r-13) — never edit backend static config; use the per-dataset overlay
 - [R-14](#r-14) — respect the hexagonal layer-import rules
-- [R-15](#r-15) — a new seam/invariant is a `tests/structure.py` row
+- [R-15](#r-15) — a new seam/invariant is a `tests/test_structure.py` row
 
 **Workflow / git**
 - [R-16](#r-16) — one commit per arc
@@ -109,7 +109,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 
 ### R-10 — `llm_call()`, never `chat()`
 - **Trigger:** making an optimizer LLM call (L1/L2/L3/critique).
-- **Rule:** route through `llm_call()` (`application/optimization/dispatch/llm_call/call.py`). Direct `.chat()` outside that file is locked out by `tests/structure.py`.
+- **Rule:** route through `llm_call()` (`application/optimization/dispatch/llm_call/call.py`). Direct `.chat()` outside that file is locked out by `tests/test_structure.py`.
 - **Why:** one funnel for retry/deadline/telemetry. [[R-11]]
 - **Origin:** 2026-06-07 — seeded from conventions / pre-flight gate Q8.
 
@@ -121,7 +121,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 
 ### R-12 — `score_search_point()` is the single scoring gateway
 - **Trigger:** scoring a candidate/searchpoint.
-- **Rule:** go through `score_search_point()`; pass `on_sample_scored=` explicitly (a callback, or `None` for intentional silence). Locked by `tests/structure.py`.
+- **Rule:** go through `score_search_point()`; pass `on_sample_scored=` explicitly (a callback, or `None` for intentional silence). Locked by `tests/test_structure.py`.
 - **Why:** one scoring path keeps measurement + visibility consistent.
 - **Origin:** 2026-06-07 — seeded from architecture §0.5.
 
@@ -133,15 +133,15 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 
 ### R-14 — hexagonal layer-import rules
 - **Trigger:** adding an import across `promptpotter/` packages.
-- **Rule:** forbidden runtime edges (locked by `tests/structure.py`): domain→anything, intelligence→optimization, infrastructure→application/intelligence/optimization.
+- **Rule:** forbidden runtime edges (locked by `tests/test_structure.py`): domain→anything, intelligence→optimization, infrastructure→application/intelligence/optimization.
 - **Why:** the layering is the architecture; the test makes the wrong import fail loudly.
-- **Origin:** 2026-06-07 — seeded from `tests/structure.py`.
+- **Origin:** 2026-06-07 — seeded from `tests/test_structure.py`.
 
 ### R-15 — a new seam/invariant is a `structure.py` row
 - **Trigger:** you just introduced a seam ("X must only happen in file Y") or want to lock a pattern.
-- **Rule:** add a `RegexBan`/`CallBan` row to `tests/structure.py` — never hand-roll an `rglob`/`ast.walk` lint. The engine is `tests/_scan.py`.
+- **Rule:** add a `RegexBan`/`CallBan` row to `tests/test_structure.py` — never hand-roll an `rglob`/`ast.walk` lint. The engine is `tests/_scan.py`.
 - **Why:** one scan engine, declarative bans; adding a lock = adding a row.
-- **Origin:** 2026-06-07 — seeded from `tests/structure.py` design.
+- **Origin:** 2026-06-07 — seeded from `tests/test_structure.py` design.
 
 ## Workflow / git
 

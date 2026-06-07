@@ -268,14 +268,21 @@ REPLAYERS: dict[ResumeCheckpointKind, Replayer] = {
     ResumeCheckpointKind.L3_ESCALATION_TRIGGER: _replay_l3_trigger,
 }
 
-_missing_replayers = {
-    k
-    for k, mode in RESUME_CHECKPOINT_GATING.items()
-    if mode is GatingMode.REPLAYED and k not in REPLAYERS
-}
+# REPLAYERS must register a replayer for exactly the REPLAYED kinds — both
+# directions fail import: a REPLAYED kind with no replayer (silent non-replay on
+# resume) and an ARCHIVAL kind with one (replaying a kind that must never be
+# re-derived). The registry's key set must equal the REPLAYED kind set.
+_replayed_kinds = {k for k, mode in RESUME_CHECKPOINT_GATING.items() if mode is GatingMode.REPLAYED}
+_missing_replayers = _replayed_kinds - set(REPLAYERS)
 if _missing_replayers:
     raise RuntimeError(
         f"RESUME_CHECKPOINT_GATING declares {sorted(_missing_replayers)} as REPLAYED, "
         "but no replayer is registered in resume_and_fork/replayers.py::REPLAYERS."
     )
-del _missing_replayers
+_archival_with_replayer = set(REPLAYERS) - _replayed_kinds
+if _archival_with_replayer:
+    raise RuntimeError(
+        f"REPLAYERS registers {sorted(_archival_with_replayer)}, but those kinds are "
+        "ARCHIVAL in RESUME_CHECKPOINT_GATING — an archival kind must never be replayed."
+    )
+del _replayed_kinds, _missing_replayers, _archival_with_replayer

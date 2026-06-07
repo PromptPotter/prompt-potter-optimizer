@@ -297,7 +297,7 @@ reachable from the lowest-trust zone. Permanent contract:
 amending §0 first; the pre-flight gate (CLAUDE.md Q4 sub-rule)
 blocks code that introduces one without §0 backing. Hexagonal layer
 separation is enforced by
-`tests/test_invariants.py::test_no_unexpected_runtime_layer_violations`
+`tests/test_structure.py::test_runtime_layer_imports`
 (plus `test_cycle_does_not_import_prompt_surface`) so data types
 stay free of I/O and the orchestrator can be reused without dragging
 a backend client along. SearchPoint types are
@@ -310,7 +310,7 @@ ingress; resume + fork ride dedicated checkpoint records on the
 ledger. Display and observability subscribe to the ledger as
 read-only views — never write campaign artifacts of their own.
 **Single-writer invariant on the ledger** (pinned by
-`tests/test_invariants.py::test_no_direct_artifact_writes_outside_stores`
+`tests/test_structure.py::test_forbidden_calls`
 + `test_artifact_sets_are_disjoint_and_well_formed`): any module
 besides the ledger writing to `events.jsonl`, or any projection
 writing outside its declared allowlist, fails the tests. **The MeasurementArchive (the
@@ -374,7 +374,7 @@ cross-campaign by design (see "Measurement archive" below).
 (`notebooks/optimization_campaign.ipynb`) is a thin UI shell — every
 non-display code cell calls into `application/` (no orchestration
 logic, no scoring, no LLM calls authored in the notebook).
-Verifiable via `tests/test_invariants.py` extension: notebook
+Verifiable via `tests/test_structure.py` extension: notebook
 cells whitelist-imports from `application/` + `presentation/views/`
 only. Additional notebooks
 (currently `notebooks/bbeh_potter.ipynb`) are **work-in-progress** —
@@ -471,7 +471,7 @@ the PR description.
   backend's API surface to PromptPotter. Don't simplify "because
   TermNorm is the only consumer today."
 - **Hexagonal layer separation test**
-  (`tests/test_invariants.py::test_no_unexpected_runtime_layer_violations` + `test_cycle_does_not_import_prompt_surface`) — without it, the three entry points drift.
+  (`tests/test_structure.py::test_runtime_layer_imports` + `test_cycle_does_not_import_prompt_surface`) — without it, the three entry points drift.
 - **Resume + fork-on-divergence mechanism** — load-bearing for
   `--from N` and `--fork-on-divergence`. Today's symbols
   (`Decision`/`ResumeCheckpointKind`) and the post-cleanup symbols

@@ -60,7 +60,7 @@ The halt probe at `application/runner/entry.py` reads `observers.dashboard.spend
 
 Three layers of confirmation:
 
-1. **Existing tests green.** `tests/test_identity.py::test_identity_seam_no_drift` covers gates #3 / #4 / #6 from [`0002-identity-foundation.md`](0002-identity-foundation.md); the `IdentityContext` seam this ADR reifies is the same seam those gates protect.
+1. **Existing tests green.** `tests/test_invariants.py::test_identity_seam_no_drift` covers gates #3 / #4 / #6 from [`0002-identity-foundation.md`](0002-identity-foundation.md); the `IdentityContext` seam this ADR reifies is the same seam those gates protect.
 2. **Halt probe round-trip.** `application/runner/entry.py` reads `observers.dashboard.spend_total_used_usd`; live campaigns demonstrate halt-at-budget with no `state["spend"]` peek anywhere in the codebase.
 3. **Audit trail integrity on disk.** `round_NNNN.json` continues to carry `TokenUsageRecord` entries; `dashboard.json::spend` continues to render bar + publication + `log.md` values from one rollup. No divergence between display and audit.
 
@@ -105,7 +105,7 @@ Three layers of confirmation:
 - **`build_stores(identity, *, projects_root=…, datasets_root=…)` shipped** — `infrastructure/store/stores.py`. `Stores.identity` is the sole tenant-scope source; `Stores.tenant_id` is a derived `@property` returning the `TenantId` newtype. `DEFAULT_TENANT_ID` removed.
 - **FastAPI seam shipped** — `presentation/api/deps.py::resolve_identity` returns the Stage-0 default; `IdentityDep` / `build_stores_from_identity` / `StoreDep` chain it. Stage 1 (M12 OIDC client) replaces only `resolve_identity`.
 - **CLI seam shipped** — `presentation/cli/commands/_shared.py::identity_from_args` reads `args.tenant`; `init_services_cli(identity=…)` + `init_services(identity=…)` accept the `IdentityContext`. All 8 `build_stores` call sites migrated.
-- **Invariant test shipped** — `tests/test_identity.py::test_identity_seam_no_drift` bundles no-drift gates #3 (`build_stores` signature), #4 (`Stores.identity` sole tenant source), #6 (SCIM-named field set).
+- **Invariant test shipped** — `tests/test_invariants.py::test_identity_seam_no_drift` bundles no-drift gates #3 (`build_stores` signature), #4 (`Stores.identity` sole tenant source), #6 (SCIM-named field set).
 - `shared/spend.py` shipped — three-layer rate resolution (wire passthrough → `~/.promptpotter/rates.json` 24 h TTL → bundled `shared/data/rates.json`), stdlib-only fetcher, 8 MB cap.
 - `TokenUsageRecord` is the sole cross-ledger shape for per-call cost telemetry (`domain/run_records.py::TokenUsageRecord`). `TokenUsage` dataclass deleted. OpenRouter wire cost extracted in `application/optimization/dispatch/llm_call/call.py` and passed as `cost_usd=` kwarg.
 - `--spend-budget` plumbed CLI → loop, `StopReason.SPEND_BUDGET` exists (`domain/phases.py`), halt probe at `application/runner/entry.py` reads `observers.dashboard.spend_total_used_usd` (clean accessor on the dashboard projection; no `state["spend"]` peek).
@@ -144,7 +144,7 @@ Reifies the Stage-0 deliverables of [`0002-identity-foundation.md`](0002-identit
 
 #### 3. Single seam per entry point
 
-The seam is where `IdentityContext` enters the process. Three entry points, two construction functions (`default_identity()` in `shared/identity.py` for the auth-off default; `identity_from_args(args)` in `presentation/cli/commands/_shared.py` for the CLI seam) so the rule "tenant prefix is derived from identity, never from a request field" is enforceable by `tests/test_identity.py` (no-drift gates #3 + #4 from identity-foundation):
+The seam is where `IdentityContext` enters the process. Three entry points, two construction functions (`default_identity()` in `shared/identity.py` for the auth-off default; `identity_from_args(args)` in `presentation/cli/commands/_shared.py` for the CLI seam) so the rule "tenant prefix is derived from identity, never from a request field" is enforceable by `tests/test_invariants.py` (no-drift gates #3 + #4 from identity-foundation):
 
 | Entry point | Seam | Single-operator default (Stage 0) |
 |---|---|---|
@@ -176,7 +176,7 @@ On first upgrade: the on-disk layout is already `projects/{tenant}/` with `tenan
 
 ### Anchors
 
-Every claim names a file. Path existence asserted by `tests/test_control_plane_drift.py::test_adr_anchor_files_exist`.
+Every claim names a file. Path existence asserted by `tests/test_contracts.py::test_adr_anchor_files_exist`.
 
 | Concern | File |
 |---|---|

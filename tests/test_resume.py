@@ -1,19 +1,36 @@
-"""Rescore-on-load + decision replay + ``_mint_fork`` dispatch + rewind."""
+"""C4 — Resume / mutation safety.
+
+The guarantees that make a killed-and-restarted run, a rewind, or an operator
+fork safe: rescore-on-load accumulates without corrupting prior fitness,
+decision-replay flags divergence when a rescore flips a recorded outcome,
+``_mint_fork`` dispatches each trigger to the right lineage shape, the
+unprocessed-prior merge never shrinks an already-fuller archive, and
+``rewind_to_round`` archives-not-deletes the truncated tail. ``DiffScope``
+closes the loop: a config change either resumes in place (policy-only) or forks
+(data-affecting), and an unclassified knob must default to forking.
+
+Sections:
+  1. Rescore-on-load + decision replay.
+  2. ``_mint_fork`` — one lineage shape per trigger.
+  3. Origin inheritance + limit-override reconciliation + lineage walk.
+  4. Unprocessed-prior merge — partial-run archive preservation.
+  5. ``rewind_to_round`` — archive-not-delete the truncated tail.
+  6. ``DiffScope`` — fork-vs-resume classifier.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from promptpotter.application.optimization.resume_and_fork import (
-    _mint_fork,
-    replay_decisions,
-)
+import pytest
+from _factories import make_round, seed_campaign_cycle
+
+from promptpotter.application.config import CampaignConfig, DiffScope
+from promptpotter.application.optimization.resume_and_fork import _mint_fork, replay_decisions
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.scoring.formula import compile_scorer, rescore_results
-from promptpotter.application.scoring.search_point_scorer import (
-    merge_with_unprocessed_priors,
-)
+from promptpotter.application.scoring.search_point_scorer import merge_with_unprocessed_priors
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import (
     ForkSpec,
@@ -24,11 +41,15 @@ from promptpotter.domain.run_records import (
     ResumeCheckpointRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.store import build_stores, walk_cycle_lineage
-from promptpotter.shared.identity import default_identity
+from promptpotter.infrastructure.store import Stores, walk_cycle_lineage
 
-# Every cycle lives inside a campaign; the tests pin one.
+# Every cycle lives inside a campaign; the foundation factory's default id.
 _CAMPAIGN = "testds__20260101-000000"
+
+
+# ===========================================================================
+# 1. Rescore-on-load + decision replay
+# ===========================================================================
 
 
 def test_rescore_results_accumulates_and_projects_active() -> None:
@@ -108,45 +129,9 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
     assert div.recorded_outcome is True and div.current_outcome is False
 
 
-def _seed_cycle(projects_root: Path, tenant: str, cycle_id: str, n_rounds: int) -> list[dict]:
-    """Lay down a minimal cycle dir on disk; return the round_data-index list."""
-    base = projects_root / tenant / "campaigns" / _CAMPAIGN / "cycles" / cycle_id
-    (base / "rounds").mkdir(parents=True)
-    (base / ".runtime" / "cache" / "candidates").mkdir(parents=True)
-    rounds_index = []
-    for r in range(n_rounds):
-        t = {"round_id": f"round_{r}", "round": r, "accuracy": 0.5 + 0.1 * r, "label": f"r{r}"}
-        (base / "rounds" / f"round_{r:04d}.json").write_text(json.dumps(t), encoding="utf-8")
-        (base / ".runtime" / "cache" / "candidates" / f"round_{r:04d}.json").write_text(
-            "[]", encoding="utf-8"
-        )
-        rounds_index.append(t)
-    (base / "index.json").write_text(
-        json.dumps(
-            {
-                "rounds": rounds_index,
-                "n_rounds": n_rounds,
-                "best_round_id": f"round_{n_rounds - 1}",
-                "sibling_kind": "root",
-                "status": "in_progress",
-            }
-        ),
-        encoding="utf-8",
-    )
-    return rounds_index
-
-
-def _patch_pointer(monkeypatch, tmp_path: Path) -> Path:
-    """Redirect the per-tenant pointer root into tmp_path.
-
-    The pointer lives at ``{projects_root}/{tenant}/.workspace/active_session.json``;
-    tests use tenant ``default`` and pass ``projects_root=tmp_path`` to
-    ``build_stores`` already. Monkey-patching the module-level default keeps
-    bare ``save_active_pointer`` calls (deep inside fork machinery) inside the
-    temp tree too.
-    """
-    monkeypatch.setattr("promptpotter.infrastructure.store.DEFAULT_PROJECTS_ROOT", tmp_path)
-    return tmp_path / "default" / ".workspace" / "active_session.json"
+# ===========================================================================
+# 2. ``_mint_fork`` — one lineage shape per trigger
+# ===========================================================================
 
 
 def _div_payload() -> ForkSpec:
@@ -169,15 +154,19 @@ def _sweep_payload() -> ForkSpec:
 
 
 def test_mint_fork_scoring_divergence_inherits_and_appends_fork_cut(
-    tmp_path: Path, monkeypatch
+    patch_pointer_root: tuple[Stores, object],
 ) -> None:
     """SCORING_DIVERGENCE: inherit rounds < R, retarget pointer, FORK_CUT carries typed payload."""
-    tenant = "default"
+    stores, ptr = patch_pointer_root
+    tenant = stores.tenant_id
     parent = "cycle_div_parent"
-    rounds = _seed_cycle(tmp_path, tenant, parent, n_rounds=4)
-    ptr = _patch_pointer(monkeypatch, tmp_path)
-
-    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
+    seed_campaign_cycle(
+        stores.base_dir,
+        cycle_id=parent,
+        n_rounds=4,
+        with_candidates=True,
+        index={"best_round_id": "round_3", "status": "in_progress"},
+    )
     parent_dir = stores.campaigns.cycle_dir(_CAMPAIGN, parent)
     new_cycle = _mint_fork(
         stores.campaigns,
@@ -187,7 +176,7 @@ def test_mint_fork_scoring_divergence_inherits_and_appends_fork_cut(
         parent,
         2,
         _div_payload(),
-        surviving_rounds=rounds[:2],
+        surviving_rounds=[make_round(0), make_round(1)],
     )
 
     new_dir = stores.campaigns.cycle_dir(_CAMPAIGN, new_cycle)
@@ -228,13 +217,14 @@ def test_mint_fork_scoring_divergence_inherits_and_appends_fork_cut(
     }
 
 
-def test_mint_fork_operator_diag_counted_id_clean_slate(tmp_path: Path, monkeypatch) -> None:
+def test_mint_fork_operator_diag_counted_id_clean_slate(
+    patch_pointer_root: tuple[Stores, object],
+) -> None:
     """OPERATOR_DIAG: counted ``_diag_NNN`` id, no inheritance, typed FORK_CUT."""
-    tenant = "default"
+    stores, _ = patch_pointer_root
+    tenant = stores.tenant_id
     parent = "cyclediagparent"
-    _seed_cycle(tmp_path, tenant, parent, n_rounds=2)
-    _patch_pointer(monkeypatch, tmp_path)
-    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
+    seed_campaign_cycle(stores.base_dir, cycle_id=parent, n_rounds=2, with_candidates=True)
 
     sib1 = _mint_fork(stores.campaigns, _CAMPAIGN, tenant, "s_test", parent, 0, _diag_payload())
     sib2 = _mint_fork(stores.campaigns, _CAMPAIGN, tenant, "s_test", parent, 0, _diag_payload())
@@ -257,13 +247,14 @@ def test_mint_fork_operator_diag_counted_id_clean_slate(tmp_path: Path, monkeypa
     }
 
 
-def test_mint_fork_operator_sweep_no_inherit_and_dedup_fields(tmp_path: Path, monkeypatch) -> None:
+def test_mint_fork_operator_sweep_no_inherit_and_dedup_fields(
+    patch_pointer_root: tuple[Stores, object],
+) -> None:
     """OPERATOR_SWEEP: clean-slate, dedup fields at FORK_CUT data top level, typed payload."""
-    tenant = "default"
+    stores, _ = patch_pointer_root
+    tenant = stores.tenant_id
     parent = "cyclesweepparent"
-    _seed_cycle(tmp_path, tenant, parent, n_rounds=1)
-    _patch_pointer(monkeypatch, tmp_path)
-    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
+    seed_campaign_cycle(stores.base_dir, cycle_id=parent, n_rounds=1, with_candidates=True)
     parent_dir = stores.campaigns.cycle_dir(_CAMPAIGN, parent)
 
     new_cycle = _mint_fork(
@@ -305,15 +296,14 @@ def test_mint_fork_operator_sweep_no_inherit_and_dedup_fields(tmp_path: Path, mo
 
 
 def test_mint_fork_operator_steered_writes_seed_and_typed_fork_block(
-    tmp_path: Path, monkeypatch
+    patch_pointer_root: tuple[Stores, object],
 ) -> None:
     """OPERATOR_STEERED: clean ``_fork_`` offshoot, edited seed → ``.overrides/seed.json``,
     typed fork block carries from_candidate_id but NOT the heavy seed."""
-    tenant = "default"
+    stores, _ = patch_pointer_root
+    tenant = stores.tenant_id
     parent = "cyclesteerparent"
-    _seed_cycle(tmp_path, tenant, parent, n_rounds=3)
-    _patch_pointer(monkeypatch, tmp_path)
-    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
+    seed_campaign_cycle(stores.base_dir, cycle_id=parent, n_rounds=3, with_candidates=True)
 
     spec = ForkSpec(
         trigger=ForkTrigger.OPERATOR_STEERED,
@@ -349,6 +339,11 @@ def test_mint_fork_operator_steered_writes_seed_and_typed_fork_block(
     assert read_back.limit_overrides.max_rounds == 2
 
 
+# ===========================================================================
+# 3. Origin inheritance + limit reconciliation + lineage walk
+# ===========================================================================
+
+
 def test_resolve_origin_fork_seed_wins_over_experiment_prompt() -> None:
     """A fork seed's ``origin_prompt_fields`` becomes the origin OSP — beating the
     experiment/dataset sources — and stamps ``source='fork_seed'`` lineage.
@@ -370,7 +365,7 @@ def test_resolve_origin_fork_seed_wins_over_experiment_prompt() -> None:
     assert plain.lineage.source == "origin"
 
 
-def test_inherit_fork_origin_unmodified_inherits_else_rescores(tmp_path: Path) -> None:
+def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Stores) -> None:
     """A no-modification operator fork inherits its branch-point candidate's RECORDED
     accuracy as C0 (no re-score under a nondeterministic backend); an edited prompt
     renders differently and falls back to ``None`` → the caller re-scores."""
@@ -382,8 +377,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(tmp_path: Path) -
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
 
-    tenant = "default"
-    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
+    stores = built_stores
     parent = "cycle_inherit_parent"
     fork = "cycle_inherit_parent_fork_abc123"
     prompt = {"instruction": "do the thing", "persona": "you are precise"}
@@ -452,7 +446,6 @@ def test_apply_limit_overrides_snapshots_fork_limits_leaving_parent_intact() -> 
     """A fork's reconciled ``LimitOverrides`` land on a fresh config snapshot —
     absolute values, an absent knob inherits the parent — and the seed's
     ``spend_budget_usd`` becomes the effective cap. The parent config is untouched."""
-    from promptpotter.application.config import CampaignConfig
     from promptpotter.application.runner.entry import _apply_limit_overrides
 
     parent = CampaignConfig(
@@ -479,13 +472,12 @@ def test_apply_limit_overrides_snapshots_fork_limits_leaving_parent_intact() -> 
     assert spend2 == 7.0
 
 
-def test_walk_cycle_lineage_walks_parent_chain(tmp_path: Path, monkeypatch) -> None:
+def test_walk_cycle_lineage_walks_parent_chain(patch_pointer_root: tuple[Stores, object]) -> None:
     """Lineage walker returns ``[root, ..., leaf]`` via parent_cycle_id chain."""
-    tenant = "default"
+    stores, _ = patch_pointer_root
+    tenant = stores.tenant_id
     parent = "cycle_lineage_root"
-    _seed_cycle(tmp_path, tenant, parent, n_rounds=2)
-    _patch_pointer(monkeypatch, tmp_path)
-    stores = build_stores(default_identity(tenant_id=tenant), projects_root=tmp_path)
+    seed_campaign_cycle(stores.base_dir, cycle_id=parent, n_rounds=2, with_candidates=True)
 
     fork = _mint_fork(
         stores.campaigns,
@@ -495,7 +487,7 @@ def test_walk_cycle_lineage_walks_parent_chain(tmp_path: Path, monkeypatch) -> N
         parent,
         1,
         _div_payload(),
-        surviving_rounds=[{"round_id": "round_0", "round": 0, "accuracy": 0.5, "label": "r0"}],
+        surviving_rounds=[make_round(0)],
     )
     sweep = _mint_fork(
         stores.campaigns,
@@ -509,10 +501,15 @@ def test_walk_cycle_lineage_walks_parent_chain(tmp_path: Path, monkeypatch) -> N
         sweep_source_file="x.json",
     )
 
-    tenant_root = tmp_path / tenant
+    tenant_root = stores.base_dir
     assert walk_cycle_lineage(tenant_root, _CAMPAIGN, parent) == [parent]
     assert walk_cycle_lineage(tenant_root, _CAMPAIGN, fork) == [parent, fork]
     assert walk_cycle_lineage(tenant_root, _CAMPAIGN, sweep) == [parent, fork, sweep]
+
+
+# ===========================================================================
+# 4. Unprocessed-prior merge — partial-run archive preservation
+# ===========================================================================
 
 
 def _prior(query: str, predicted: str = "p", gt: str = "g") -> dict:
@@ -530,8 +527,7 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
     yields back every dataset query the archive already covered.
 
     Aborted runs must not shrink an already-fuller archive — without this the
-    overwrite-on-save ``_persist_fresh`` would grind down the cache file each
-    Ctrl+C.
+    overwrite-on-save ``_persist_fresh`` would grind down the cache file each Ctrl+C.
     """
     queries = [f"q{i}" for i in range(20)]
     dataset_queries = set(queries)
@@ -576,7 +572,7 @@ def test_merge_with_unprocessed_priors_filters_off_dataset_and_evicted() -> None
 
 
 # ===========================================================================
-# CampaignStore.rewind_to_round — mid-cycle rewind primitive behind --from
+# 5. ``rewind_to_round`` — archive-not-delete the truncated tail
 # ===========================================================================
 
 
@@ -594,17 +590,15 @@ def _make_round_data(round_num: int, accuracy: float) -> dict:
 
 
 def _seed_rewind_cycle(store, campaign_id: str, cycle_id: str, rounds: int) -> None:
+    """Seed via the store API + a minimal ledger whose phase records mark each
+    round completed (the rewind admissibility pre-check reads the ledger)."""
     store.create(campaign_id, cycle_id, {"type": "optimization_loop", "origin_accuracy": 0.0})
     for r in range(rounds):
         store.save_round_file(campaign_id, cycle_id, _make_round_data(r, 0.1 * (r + 1)))
-        # Simulate round-level candidate checkpoints for the same round.
         store.save_round_candidates(campaign_id, cycle_id, r, [{"round": r, "id": f"cand_{r}"}])
-    # Mint a minimal ledger so the ledger-aware ``rewind_to_round`` admissibility
-    # check sees each seeded round as completed.
     cycle_dir = store.cycle_dir(campaign_id, cycle_id)
     runtime_dir = cycle_dir / ".runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    ledger_path = runtime_dir / "ledger.jsonl"
     lines: list[str] = []
     for r in range(rounds):
         if r == 0:
@@ -617,7 +611,9 @@ def _seed_rewind_cycle(store, campaign_id: str, cycle_id: str, rounds: int) -> N
                     {"record_type": "phase", "phase": "round", "event": "complete", "round": r}
                 )
             )
-    ledger_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    (runtime_dir / "ledger.jsonl").write_text(
+        "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
+    )
 
 
 class TestRewindToRound:
@@ -649,8 +645,6 @@ class TestRewindToRound:
         assert (archived / "candidates" / "round_0004.json").exists()
 
     def test_rebuilds_round_index_from_survivors(self, tmp_path):
-        import pytest as _pytest
-
         from promptpotter.infrastructure.store import CampaignStore
 
         store = CampaignStore(tmp_path)
@@ -660,7 +654,7 @@ class TestRewindToRound:
         # rebuild has to recompute it.
         store.save_round_file(_CAMPAIGN, "cycle_a", _make_round_data(4, 0.99))
         before = json.loads(store._index_path(_CAMPAIGN, "cycle_a").read_text(encoding="utf-8"))
-        assert before["best_accuracy"] == _pytest.approx(0.99)
+        assert before["best_accuracy"] == pytest.approx(0.99)
 
         store.rewind_to_round(_CAMPAIGN, "cycle_a", after_round=2)
 
@@ -670,27 +664,179 @@ class TestRewindToRound:
         assert rounds_in_index == [0, 1, 2]
         # Best round_data is round 2 (accuracy 0.3 per seed formula).
         assert after["best_round_id"] == "round_2"
-        assert after["best_accuracy"] == _pytest.approx(0.3)
+        assert after["best_accuracy"] == pytest.approx(0.3)
 
     def test_resume_from_missing_round_raises(self, tmp_path):
-        import pytest as _pytest
-
         from promptpotter.infrastructure.store import CampaignStore
 
         store = CampaignStore(tmp_path)
         _seed_rewind_cycle(store, _CAMPAIGN, "cycle_a", rounds=3)
 
         # ``rewind_to_round`` consults the ledger first for admissibility.
-        with _pytest.raises(LookupError, match=r"ledger only has completed rounds 0\.\.2"):
+        with pytest.raises(LookupError, match=r"ledger only has completed rounds 0\.\.2"):
             store.rewind_to_round(_CAMPAIGN, "cycle_a", after_round=99)
 
     def test_resume_from_missing_cycle_raises(self, tmp_path):
-        import pytest as _pytest
-
         from promptpotter.infrastructure.store import CampaignStore
 
         store = CampaignStore(tmp_path)
         # A nonexistent cycle has no ledger on disk — the ledger pre-check
         # raises before the public ``rounds/`` tree is consulted.
-        with _pytest.raises(LookupError, match="no ledger on disk"):
+        with pytest.raises(LookupError, match="no ledger on disk"):
             store.rewind_to_round(_CAMPAIGN, "cycle_nonexistent", after_round=0)
+
+
+# ===========================================================================
+# 6. ``DiffScope`` — fork-vs-resume classifier
+# ===========================================================================
+
+
+def _cfg(**opt_overrides: object) -> CampaignConfig:
+    opt = {"improvement_threshold": 0.01, "degradation_threshold": 0.4, **opt_overrides}
+    return CampaignConfig.model_validate({"optimization": opt})
+
+
+def test_classify_diff_scopes() -> None:
+    """Per-scenario classifier contract: policy-only changes don't fork."""
+    base = _cfg().model_dump(mode="json")
+
+    assert _cfg().classify_diff_against(base) == (DiffScope.NONE, [])
+
+    # Policy-only: PoBB epsilon change (the operator's exact scenario).
+    scope, diffed = _cfg(pobb_epsilon=0.10).classify_diff_against(base)
+    assert scope is DiffScope.POLICY_ONLY
+    assert diffed == ["optimization.pobb_epsilon"]
+
+    # Data-affecting: scoring formula change rescores past fitness.
+    scope, _ = CampaignConfig.model_validate(
+        {
+            "optimization": {"improvement_threshold": 0.01, "degradation_threshold": 0.4},
+            "scoring": "score(top1_hit)",
+        }
+    ).classify_diff_against(base)
+    assert scope is DiffScope.DATA_AFFECTING
+
+    # Mixed: data wins (forks even if a policy field also moved).
+    mixed_base = CampaignConfig.model_validate(
+        {
+            "optimization": {"improvement_threshold": 0.01, "degradation_threshold": 0.4},
+            "scoring": "old",
+        }
+    ).model_dump(mode="json")
+    mixed = CampaignConfig.model_validate(
+        {
+            "optimization": {
+                "improvement_threshold": 0.01,
+                "degradation_threshold": 0.4,
+                "pobb_epsilon": 0.10,
+            },
+            "scoring": "new",
+        }
+    )
+    scope, _ = mixed.classify_diff_against(mixed_base)
+    assert scope is DiffScope.DATA_AFFECTING
+
+
+def test_classify_unknown_path_defaults_to_data_affecting(caplog) -> None:
+    """A path missing from ``_FIELD_SCOPES`` classifies as DATA_AFFECTING with a
+    warning — adding a knob without an entry can't silently downgrade resume safety."""
+    base = _cfg().model_dump(mode="json")
+    base.setdefault("optimization", {})["unknown_new_knob"] = "old"
+    with caplog.at_level("WARNING"):
+        scope, _ = _cfg().classify_diff_against(base)
+    assert scope is DiffScope.DATA_AFFECTING
+    assert "unclassified config path" in caplog.text
+
+
+# ===========================================================================
+# 7. Cumulative pool merge + zero-signal sample filter
+# ===========================================================================
+
+
+def test_merge_into_cumulative_preserves_prior_on_untouched_samples() -> None:
+    """Subset-measured winner must not shrink the cumulative pool — prior samples are preserved."""
+    from promptpotter.application.optimization.cycle import _merge_into_cumulative
+
+    prior = [{"sample_id": i, "fitness": 1.0 if i < 10 else 0.0, "hit": i < 10} for i in range(20)]
+    winner_hits = {10, 12, 15}
+    winner = [
+        {"sample_id": sid, "fitness": 1.0 if sid in winner_hits else 0.0, "hit": sid in winner_hits}
+        for sid in range(10, 18)
+    ]
+    merged = _merge_into_cumulative(prior, winner)
+    by_sid = {r["sample_id"]: r for r in merged}
+
+    assert set(by_sid.keys()) == set(range(20))
+    assert by_sid[10]["hit"] is True
+    assert by_sid[11]["hit"] is False
+    assert by_sid[19]["hit"] is False
+    assert all(by_sid[i]["hit"] is True for i in range(10))
+    assert _merge_into_cumulative(prior, []) == prior
+
+
+def test_dead_queries_respects_min_observations() -> None:
+    """``SampleIndex.dead`` physically prunes always-hit/always-miss queries once
+    enough observations accumulate; ``include_always_hit=False`` keeps the hits."""
+    from promptpotter.application.intelligence.indexes import AxisIndex, SampleIndex
+    from promptpotter.domain.sample import Sample
+
+    def _seed_axes(hits: dict[str, list[bool]]) -> AxisIndex:
+        idx = SampleIndex()
+        for i, (query, seq) in enumerate(hits.items()):
+            sample = Sample(id=i, query=query, ground_truth=f"gt_{i}")
+            idx.register(sample)
+            idx._hits[i] = list(seq)
+        return AxisIndex(sample_index=idx)
+
+    axes = _seed_axes(
+        {
+            "fresh_miss": [False] * 3,
+            "proven_miss": [False] * 6,
+            "proven_hit": [True] * 6,
+            "variable": [True, False, True, False, True, True],
+        }
+    )
+
+    dead = axes.sample_index.dead(min_observations=5)
+    dead_qs = {r.query for r in dead}
+    assert dead_qs == {"proven_miss", "proven_hit"}
+
+    miss_only = axes.sample_index.dead(min_observations=5, include_always_hit=False)
+    assert {r.query for r in miss_only} == {"proven_miss"}
+
+
+def test_live_dashboard_for_session_recovers_round_after_interrupt(tmp_path: Path) -> None:
+    """Resume invariant: when ``rounds/round_NNNN.json`` checkpoints exist on
+    disk but the prior ``dashboard.json::round`` is stale (e.g. zeroed by an
+    earlier re-init), ``for_session`` must restore ``round`` to the highest
+    checkpoint — otherwise the webapp polls ``rounds/round_0000.json`` forever
+    on a cycle that has rounds 1–3 completed.
+    """
+    from promptpotter.infrastructure.projections import LiveDashboardView
+
+    project_root = tmp_path / "default"
+    campaign_id = "ds__abc123abc123"
+    cycle_id = "cycle_abc123abc123"
+    cycle_dir = project_root / "campaigns" / campaign_id / "cycles" / cycle_id
+    rounds_dir = cycle_dir / "rounds"
+    rounds_dir.mkdir(parents=True)
+    for n in (1, 2, 3):
+        (rounds_dir / f"round_{n:04d}.json").write_text("{}", encoding="utf-8")
+    # dashboard.json is per-session — in the session's root cycle dir.
+    (cycle_dir / "dashboard.json").write_text(
+        json.dumps({"state": "init", "round": 0, "best": 0.5}),
+        encoding="utf-8",
+    )
+
+    proj = LiveDashboardView.for_session(
+        origin_accuracy=0.1,
+        cycle_id=cycle_id,
+        project_root=str(project_root),
+        session_id="s_test",
+        campaign_id=campaign_id,
+        l1_patience=3,
+        n_variants=5,
+        sp_budget_ttest=20,
+    )
+    assert proj is not None
+    assert proj.state.round == 3

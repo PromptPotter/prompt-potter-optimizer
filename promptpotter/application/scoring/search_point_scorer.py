@@ -137,8 +137,8 @@ async def score_search_point(
     intent). The class of bug being guarded: a backend running
     ``measure_sample`` for tens of seconds while the CLI stays silent,
     burning LLM credits with the operator unable to tell the front-end
-    apart from a frozen process. ``tests/test_invariants.py::
-    test_score_search_point_callers_explicit_per_sample_visibility``
+    apart from a frozen process. ``tests/test_structure.py::
+    test_score_search_point_callers_pass_on_sample_scored``
     statically enforces the same invariant.
     """
     store = session.store

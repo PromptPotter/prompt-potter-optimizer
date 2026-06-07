@@ -7,8 +7,14 @@ an import + dict entry below. No import-side-effects.
 
 from __future__ import annotations
 
+import typing
+
 from promptpotter.connectors.promptpotter import CONNECTOR as _PROMPTPOTTER
-from promptpotter.connectors.protocol import BackendUnreachableError, Connector
+from promptpotter.connectors.protocol import (
+    BackendUnreachableError,
+    Connector,
+    ConnectorExecution,
+)
 from promptpotter.connectors.termnorm import CONNECTOR as _TERMNORM
 
 __all__ = ["CONNECTORS", "BackendUnreachableError", "Connector", "get"]
@@ -17,6 +23,25 @@ CONNECTORS: dict[str, Connector] = {
     "termnorm": _TERMNORM,
     "promptpotter": _PROMPTPOTTER,
 }
+
+
+# Fail import if any row is half-wired: registry key must match ``name``, the
+# three hooks must be callable, and ``execution`` must be a declared mode
+# ``BackendClient.run_query`` can dispatch on. (The session contract —
+# ``session_factory()`` building a SessionProtocol — stays a behavior test;
+# constructing a session is a side effect we don't want at import.)
+_valid_execution = set(typing.get_args(ConnectorExecution))
+for _key, _c in CONNECTORS.items():
+    if _c.name != _key:
+        raise RuntimeError(f"CONNECTORS[{_key!r}] registry key != connector.name ({_c.name!r}).")
+    for _hook in ("wire_adapter", "extract_experiment", "session_factory"):
+        if not callable(getattr(_c, _hook, None)):
+            raise RuntimeError(f"CONNECTORS[{_key!r}]: {_hook} is not callable.")
+    if _c.execution not in _valid_execution:
+        raise RuntimeError(
+            f"CONNECTORS[{_key!r}]: execution {_c.execution!r} not in {_valid_execution}."
+        )
+del _valid_execution, _key, _c, _hook
 
 
 def get(name: str) -> Connector:

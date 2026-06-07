@@ -281,6 +281,35 @@ class CampaignConfig(BaseModel):
         return DiffScope.POLICY_ONLY, diff_strs
 
 
+def _config_leaves(
+    model_cls: type[BaseModel], prefix: tuple[str, ...] = ()
+) -> list[tuple[str, ...]]:
+    """Leaf field paths of *model_cls*; a path in ``_FIELD_SCOPES`` is a leaf (subtree-as-unit)."""
+    out: list[tuple[str, ...]] = []
+    for name, fld in model_cls.model_fields.items():
+        path = (*prefix, name)
+        ann = fld.annotation
+        if path in _FIELD_SCOPES:
+            out.append(path)
+        elif isinstance(ann, type) and issubclass(ann, BaseModel):
+            out.extend(_config_leaves(ann, path))
+        else:
+            out.append(path)
+    return out
+
+
+# Fail import if a new CampaignConfig knob has no scope: the unclassified
+# fallback silently treats it as DATA_AFFECTING, breaking the operator's
+# "don't fork for policy changes" contract. Every leaf must be in _FIELD_SCOPES.
+_unclassified = [".".join(p) for p in _config_leaves(CampaignConfig) if p not in _FIELD_SCOPES]
+if _unclassified:
+    raise RuntimeError(
+        f"CampaignConfig leaves missing from _FIELD_SCOPES: {_unclassified}. "
+        "Classify each as 'policy' or 'data' in promptpotter/application/config.py."
+    )
+del _unclassified
+
+
 def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig:
     """Normalize raw dict / Pydantic input into a validated ``CampaignConfig``."""
     if isinstance(raw, CampaignConfig):

@@ -73,7 +73,7 @@ If a piece of state must survive across `new` / `resume` invocations, it goes
 through the ledger (or its projections), not `Session`. If it's
 per-process per-cycle, it lives on `Session.state` or `Cycle`. The
 separation is enforced by
-`tests/test_invariants.py::test_no_direct_artifact_writes_outside_stores`.
+`tests/test_structure.py::test_forbidden_calls`.
 
 ## When the chain breaks
 

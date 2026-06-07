@@ -14,7 +14,7 @@ lives at each call site is only as strong as the least careful handler. Routing
 every dataset-directory access through here makes the check structural — a route
 that does not go through the gateway cannot resolve a dataset at all.
 Presentation code MUST NOT read :attr:`Stores.benchmarks_root` directly
-(guarded by ``tests/test_invariants.py``).
+(guarded by ``tests/test_structure.py``).
 """
 
 from __future__ import annotations

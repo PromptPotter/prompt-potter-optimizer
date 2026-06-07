@@ -67,7 +67,7 @@ A **Session** is one `new` invocation; a campaign holds one. `resume` extends it
 | `.runtime/streams/…_p_best.jsonl` | per cycle | Per-sample PoBB snapshots. |
 | `.runtime/cache/rounds\|candidates/` | per cycle | Per-node I/O (l1_generate/critique/score, l2/l3) + pre-scoring candidate checkpoint. |
 
-Material facts land on disk in human-readable form; reads happen by opening files (no read CLI). Entry points never write campaign artifacts directly — every write rides the per-cycle ledger through two projections (live telemetry + audit), allowlist-enforced in `tests/test_invariants.py`.
+Material facts land on disk in human-readable form; reads happen by opening files (no read CLI). Entry points never write campaign artifacts directly — every write rides the per-cycle ledger through two projections (live telemetry + audit), allowlist-enforced in `tests/test_structure.py`.
 
 **Editing optimizer state by hand.** Open `cycles/{cycle_id}/rounds/round_{N:04d}.json` before `resume --from N` and edit; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. On resume the cycle replays every prior `round_NNNN.json` in order to rebuild its state — there is no separate write-ahead log.
 

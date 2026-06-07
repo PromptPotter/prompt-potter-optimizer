@@ -128,7 +128,7 @@ ADR-0002 gate #5.
 
 ### Confirmation
 
-`tests/test_control_plane_drift.py::test_adr_anchor_files_exist` includes this ADR in
+`tests/test_contracts.py::test_adr_anchor_files_exist` includes this ADR in
 its set — every file named in the Anchors table below must exist on disk. The §0
 amendment naming the operator-admin channel landed before the bot code, per the
 sequencing rule.
@@ -165,7 +165,7 @@ in `.env`, run `deploy-linux/install-allowlist-bot.sh`, then message the bot
 ### Anchors
 
 Every claim names a file. Path existence asserted by
-`tests/test_control_plane_drift.py::test_adr_anchor_files_exist`.
+`tests/test_contracts.py::test_adr_anchor_files_exist`.
 
 | Concern | File |
 |---|---|

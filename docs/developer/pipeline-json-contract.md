@@ -10,7 +10,7 @@ optimizer manifest, this is the contract you implement against.
 Concept-level intro for the node model lives in
 [`node-standard.md`](node-standard.md); this doc is the strict
 field-level shape, pinned by
-[`tests/test_pipeline_config.py`](../../tests/test_pipeline_config.py).
+[`tests/test_contracts.py`](../../tests/test_contracts.py).
 
 ## Top-level shape
 
@@ -135,7 +135,7 @@ M12 L4 self-optimization closure (see
 + [`docs/specs/roadmap.md`](../specs/roadmap.md)).
 
 The parity is enforced by
-[`tests/test_pipeline_config.py`](../../tests/test_pipeline_config.py)
+[`tests/test_contracts.py`](../../tests/test_contracts.py)
 — if `optimizer_pipeline.json` ever drifts from a backend
 pipeline's shape (parallel registries, ad-hoc keys, special-case
 fields), the test fails.

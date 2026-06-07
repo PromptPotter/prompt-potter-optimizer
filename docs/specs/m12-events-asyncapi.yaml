@@ -6,7 +6,7 @@
 # `promptpotter/domain/run_records.py::CycleRecord` or before a projection
 # emits it as an SSE frame from `EventStreamView`.
 #
-# Drift detection: `tests/test_control_plane_drift.py` + AsyncAPI Studio CLI lint.
+# Drift detection: `tests/test_contracts.py` + AsyncAPI Studio CLI lint.
 #
 # Permanent contract: docs/adr/0001-m12-control-plane.md
 # §0 definition: docs/architecture.md (§0 "State + persistence" — Five I/O kinds)

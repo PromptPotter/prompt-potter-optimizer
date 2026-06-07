@@ -1,15 +1,48 @@
-"""Structural invariants — artifact parity + hexagonal layer-import rules."""
+"""C1 — Named invariants, persistence parity, escalation engine, security fences.
+
+The behaviour-heavy category: the guarantees the rest of the codebase leans on.
+Artifact-band parity (campaign/cycle/session trees), cycle-identity-is-dir-name,
+the typed-ledger roundtrips that make resume/fork/escalation replayable, the
+escalation rules engine, the dispatch hub's typed-INJECTIONS wiring + untrusted-
+content fencing, secret redaction, path-traversal rejection, cross-cutting
+persistence (archive retrieval + dataset scoping), identity foundation, campaign
+lifecycle, quota gates, the event stream, run-phase derivation, and the
+presentation view round-trip + projection routing.
+
+Source-scan locks (banned calls, layer-import edges, the bespoke AST guards)
+live in ``structure.py``; the six wiring bijections are import-time asserts in
+production. This file tests *behaviour*.
+
+Sections:
+  1.  Artifact parity + emitter.
+  2.  Cycle identity + legacy-suffix parse + path-traversal rejection.
+  3.  Typed ledger roundtrips + divergence hint + escalation-FSM replay + audit trail.
+  4.  Tracing wire-format parity (Langfuse shadow).
+  5.  Connector session protocol.
+  6.  Security — secret redaction + untrusted-signal fencing.
+  7.  Escalation engine — parse/apply L2/L3, fork-payload, dispatch wiring, rules engine.
+  8.  Archive retrieval — measurement queries + axis index.
+  9.  Dataset-scoped archive + version-and-repoint.
+  10. Identity foundation gates.
+  11. Campaign lifecycle primitive.
+  12. Per-user quota gates.
+  13. Event stream (Profile A).
+  14. Run-phase derivation + StopReason classification.
+  15. Presentation view round-trip + projection routing.
+"""
 
 from __future__ import annotations
 
-import ast
 import json
 import pathlib
-import re
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+
+# ===========================================================================
+# 1. Artifact parity + emitter
+# ===========================================================================
 
 CAMPAIGN_DIR_ARTIFACTS = {"campaign.json"}
 SESSION_TELEMETRY_ARTIFACTS = {"dashboard.json"}
@@ -62,21 +95,16 @@ def session_campaign_cycle_dirs(tmp_path: Path) -> tuple[Path, Path, Path]:
     return sdir, campaign_dir, cycle_dir
 
 
-def test_artifact_sets_are_disjoint_and_well_formed() -> None:
-    """The artifact bands must never overlap; each fixed key lands in the expected set."""
-    bands = CAMPAIGN_DIR_ARTIFACTS | SESSION_TELEMETRY_ARTIFACTS | CYCLE_OPERATOR_ARTIFACTS
-    assert bands.isdisjoint(SESSION_ARTIFACTS)
-    assert PER_CYCLE_INTERNAL_UMBRELLA not in bands
-    assert {"session.json"} <= SESSION_ARTIFACTS
-    assert {"campaign.json"} <= CAMPAIGN_DIR_ARTIFACTS
-    assert {"dashboard.json"} <= SESSION_TELEMETRY_ARTIFACTS
-    assert {"index.json", "log.md", "review.md"} <= CYCLE_OPERATOR_ARTIFACTS
-
-
 def test_emitter_produces_all_artifacts(
     session_campaign_cycle_dirs: tuple[Path, Path, Path],
 ) -> None:
-    """Emitter produces per-cycle telemetry in the cycle's own dir; runner mirror produces operator artifacts."""
+    """Emitter produces per-cycle telemetry in the cycle's own dir; runner mirror produces operator artifacts.
+
+    Folds in the artifact-band disjointness invariant (the bands never overlap)
+    and the parent-session-recorded invariant (index.json carries
+    parent_session_id) — both one-line subsets guarded here, not as standalone
+    tests.
+    """
     from types import SimpleNamespace
 
     from promptpotter.application.config import CampaignConfig
@@ -89,7 +117,18 @@ def test_emitter_produces_all_artifacts(
     from promptpotter.presentation.views.view_ingress import from_phase_event
     from promptpotter.presentation.views.view_models import ViewContext
 
+    # Artifact bands never overlap; each fixed key lands in the expected set.
+    bands = CAMPAIGN_DIR_ARTIFACTS | SESSION_TELEMETRY_ARTIFACTS | CYCLE_OPERATOR_ARTIFACTS
+    assert bands.isdisjoint(SESSION_ARTIFACTS)
+    assert PER_CYCLE_INTERNAL_UMBRELLA not in bands
+
     session_dir, campaign_dir, cycle_dir = session_campaign_cycle_dirs
+
+    # index.json carries the parent session (state-sync lineage read).
+    assert json.loads((cycle_dir / "index.json").read_text(encoding="utf-8"))[
+        "parent_session_id"
+    ], "index.json must carry parent_session_id"
+
     config = CampaignConfig(
         optimization={
             "max_rounds": 5,
@@ -295,12 +334,9 @@ def test_emitter_produces_all_artifacts(
     assert not (cycle_dir / "streams").exists()
 
 
-def test_campaign_records_parent_session(
-    session_campaign_cycle_dirs: tuple[Path, Path, Path],
-) -> None:
-    _session_dir, _campaign_dir, cycle_dir = session_campaign_cycle_dirs
-    data = json.loads((cycle_dir / "index.json").read_text(encoding="utf-8"))
-    assert data["parent_session_id"], "index.json must carry parent_session_id"
+# ===========================================================================
+# 2. Cycle identity + legacy-suffix parse + path-traversal rejection
+# ===========================================================================
 
 
 def test_cycle_identity_is_dir_name_not_stored(tmp_path: Path) -> None:
@@ -379,575 +415,34 @@ def test_legacy_session_suffix_still_parses() -> None:
     assert _unit_kind("root", None) == "session"
 
 
-def test_entry_points_route_through_application_seams() -> None:
-    """Entry points call shared seams + emit ONE error envelope — never hand-rolled.
+def test_path_builders_reject_traversal(tmp_path: Path) -> None:
+    from promptpotter.infrastructure.store.paths import (
+        campaign_root_dir_for,
+        cycle_dir_for,
+        sweep_batch_dir_for,
+    )
 
-    Three invariants, one guard:
-    * observers go through ``build_run_observers`` (no direct ``RunCallbacks`` /
-      projection ctors in the CLI / notebook entry points);
-    * the fresh-mint prologue goes through ``jobs/mint.py::prepare_fresh_cycle``
-      (no direct ``auto_mint_session`` in CLI ``new`` / the web launcher);
-    * the whole API layer raises NO ``HTTPException`` — every error is a typed
-      ``PotterError`` mapped to the flat ``ErrorEnvelope`` at the single
-      ``main.py`` seam. A raw ``HTTPException`` would wrap the body under
-      ``detail`` and bypass the taxonomy, re-forking the contract.
-    """
-    repo_root = Path(__file__).resolve().parents[1]
-    pres = repo_root / "promptpotter" / "presentation"
-    jobs = repo_root / "promptpotter" / "application" / "jobs"
-    _OBSERVERS = {"RunCallbacks", "AuditTrailView", "LiveDashboardView", "PoBBStreamView"}
-    # path → direct-construction symbols banned in that entry point
-    guarded: dict[Path, set[str]] = {
-        pres / "cli" / "campaign_runner.py": _OBSERVERS,
-        pres / "views" / "notebook_run.py": _OBSERVERS,
-        pres / "cli" / "commands" / "new.py": {"auto_mint_session"},
-        jobs / "launcher.py": {"auto_mint_session"},
-    }
-    offenders: list[str] = []
-    for src_path, banned in guarded.items():
-        tree = ast.parse(src_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            fn = node.func
-            name = fn.id if isinstance(fn, ast.Name) else None
-            if name in banned:
-                offenders.append(f"{src_path.relative_to(repo_root)}:{node.lineno}:{name}")
-    # No raw HTTPException anywhere in the API layer — the one-envelope lock.
-    for src_path in (pres / "api").rglob("*.py"):
-        tree = ast.parse(src_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Raise)
-                and isinstance(node.exc, ast.Call)
-                and isinstance(node.exc.func, ast.Name)
-                and node.exc.func.id == "HTTPException"
-            ):
-                offenders.append(
-                    f"{src_path.relative_to(repo_root)}:{node.lineno}:raise HTTPException"
-                )
-    assert not offenders, (
-        "Entry point reconstructs a seam by hand — route observers through "
-        "build_run_observers, the fresh mint through prepare_fresh_cycle, and "
-        "every API error through a PotterError subclass (no raw HTTPException):\n"
-        + "\n".join(offenders)
+    with pytest.raises(ValueError):
+        campaign_root_dir_for(tmp_path, "../escape")
+
+    with pytest.raises(ValueError):
+        cycle_dir_for(tmp_path, "ok_campaign", "../escape")
+
+    with pytest.raises(ValueError):
+        sweep_batch_dir_for(tmp_path, "ok_campaign", "../escape")
+
+    out = cycle_dir_for(tmp_path, "ds__20260101-000000", "cycle_abc_fork_def_xyz")
+    assert out == (
+        tmp_path / "campaigns" / "ds__20260101-000000" / "cycles" / "cycle_abc_fork_def_xyz"
     )
 
 
-def test_run_callbacks_requires_ledger() -> None:
-    """RunCallbacks must be constructed with a ledger — no two-phase init."""
-    from promptpotter.application.run_observers import RunCallbacks
-
-    with pytest.raises(TypeError):
-        RunCallbacks()  # type: ignore[call-arg]
-
-
-def test_no_direct_artifact_writes_outside_stores() -> None:
-    """Entry points + orchestrators must not write campaign artifacts directly — route through Stores."""
-    BANNED_FUNCS = {"write_json", "write_text", "write_bytes", "copyfile", "copy", "copy2"}
-    repo_root = Path(__file__).resolve().parents[1]
-    guarded_paths = [
-        repo_root / "promptpotter" / "application" / "optimization" / "cycle.py",
-        repo_root / "promptpotter" / "presentation" / "cli" / "campaign_runner.py",
-        repo_root / "promptpotter" / "application" / "sweep" / "sweep_runner.py",
-    ]
-    offenders: list[str] = []
-    for src_path in guarded_paths:
-        tree = ast.parse(src_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            fn = node.func
-            name: str | None
-            if isinstance(fn, ast.Attribute):
-                name = fn.attr
-            elif isinstance(fn, ast.Name):
-                name = fn.id
-            else:
-                name = None
-            if name in BANNED_FUNCS:
-                rel = src_path.relative_to(repo_root)
-                offenders.append(f"{rel}:{node.lineno}:{name}")
-    assert not offenders, (
-        "Direct artifact writes detected — route through CampaignStore/SweepStore:\n"
-        + "\n".join(offenders)
-    )
-
-
-def test_score_search_point_callers_explicit_per_sample_visibility() -> None:
-    """Every ``score_search_point()`` call must explicitly pass ``on_sample_scored``."""
-    repo_root = Path(__file__).resolve().parents[1]
-    offenders: list[str] = []
-    for src_path in (repo_root / "promptpotter").rglob("*.py"):
-        try:
-            tree = ast.parse(src_path.read_text(encoding="utf-8"))
-        except SyntaxError:  # pragma: no cover
-            continue
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            fn = node.func
-            if isinstance(fn, ast.Attribute):
-                name = fn.attr
-            elif isinstance(fn, ast.Name):
-                name = fn.id
-            else:
-                continue
-            if name != "score_search_point":
-                continue
-            kwargs = {kw.arg for kw in node.keywords if kw.arg is not None}
-            if "on_sample_scored" not in kwargs:
-                rel = src_path.relative_to(repo_root)
-                offenders.append(
-                    f"{rel}:{node.lineno}: score_search_point() must pass "
-                    "on_sample_scored=... explicitly (wire a callback, or "
-                    "pass None with a reasoning comment for intentional silence)"
-                )
-    assert not offenders, "Silent measure_sample regressions detected:\n" + "\n".join(offenders)
-
-
-def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
-    """FileSink's Langfuse shadow must be wire-format compatible (camelCase fields, parentObservationId)."""
-    from promptpotter.infrastructure.tracing import (
-        CampaignEnd,
-        CampaignStart,
-        FileSink,
-        NodeEnd,
-        NodeStart,
-        RoundEnd,
-        RoundStart,
-    )
-
-    tenant_root = tmp_path / "default"
-    tenant_root.mkdir()
-    entity_campaign = "ds__20260101-000000"
-    sink = FileSink(str(tenant_root), campaign_id=entity_campaign)
-
-    cycle_id = "cycle_wire_parity"
-    campaign_id = "cmp_wire_parity"
-
-    sink.on_campaign_start(
-        CampaignStart(
-            campaign_id=campaign_id,
-            config={"max_rounds": 1},
-            origin_accuracy=0.5,
-            session_id=cycle_id,
-        )
-    )
-    sink.on_round_start(RoundStart(campaign_id=campaign_id, round_num=0))
-    sink.on_node_start(
-        NodeStart(
-            campaign_id=campaign_id,
-            round_num=0,
-            node_id="l1_generate",
-            node_type="llm",
-            as_type="generation",
-            input_data={"prompt": "hello"},
-        )
-    )
-    sink.on_node_end(
-        NodeEnd(
-            campaign_id=campaign_id,
-            round_num=0,
-            node_id="l1_generate",
-            output_data={"text": "world"},
-        )
-    )
-    sink.on_round_end(
-        RoundEnd(
-            campaign_id=campaign_id,
-            round_num=0,
-            accuracy=0.7,
-            hits=7,
-            total=10,
-            improved=True,
-            winner_prompt_fields_id="abc",
-            candidate_scores=[{"candidate": "c0", "accuracy": 0.7}],
-            next_action="continue",
-        )
-    )
-    sink.on_campaign_end(
-        CampaignEnd(
-            campaign_id=campaign_id,
-            best_accuracy=0.7,
-            n_rounds=1,
-            stop_reason="max_rounds",
-            best_round=0,
-        )
-    )
-
-    cycle_root = tenant_root / "campaigns" / entity_campaign / "cycles" / cycle_id
-
-    trace_files = list((cycle_root / "langfuse" / "traces").glob("*.json"))
-    assert len(trace_files) == 1
-    trace_id = json.loads(trace_files[0].read_text())["id"]
-
-    obs_dir = cycle_root / "langfuse" / "observations" / trace_id
-    observations = [json.loads(p.read_text()) for p in obs_dir.glob("*.json")]
-    assert len(observations) == 2, "round + node observation expected (single obs per round)"
-
-    for obs in observations:
-        assert "traceId" in obs and obs["traceId"] == trace_id
-        assert "startTime" in obs
-        assert "endTime" in obs
-        for snake in ("trace_id", "start_time", "end_time"):
-            assert snake not in obs
-
-    round_obs = next(o for o in observations if o["name"].startswith("round_"))
-    node_obs = next(o for o in observations if o["name"] == "l1_generate")
-    assert "parentObservationId" not in round_obs
-    assert node_obs["parentObservationId"] == round_obs["id"]
-
-    score_files = list((cycle_root / "langfuse" / "scores").glob("*.jsonl"))
-    assert score_files
-    scores = [json.loads(line) for p in score_files for line in p.read_text().splitlines() if line]
-    assert scores
-    for score in scores:
-        assert "traceId" in score and score["traceId"] == trace_id
-        assert "dataType" in score
-        for snake in ("trace_id", "data_type"):
-            assert snake not in score
-
-
-ROOT = pathlib.Path(__file__).parent.parent / "promptpotter"
-
-
-# Allowlist for intentional runtime cross-layer imports; stale entries fail the test.
-KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset()
-
-
-def _layer(rel_posix: str) -> str | None:
-    if "/domain/" in rel_posix:
-        return "domain"
-    if "/application/intelligence/" in rel_posix:
-        return "intelligence"
-    if "/application/optimization/" in rel_posix:
-        return "optimization"
-    if "/application/" in rel_posix:
-        return "application"
-    if "/infrastructure/" in rel_posix:
-        return "infrastructure"
-    if "/presentation/" in rel_posix:
-        return "presentation"
-    return None
-
-
-def _target_layer(module: str) -> str | None:
-    if module.startswith("promptpotter.domain"):
-        return "domain"
-    if module.startswith("promptpotter.application.intelligence"):
-        return "intelligence"
-    if module.startswith("promptpotter.application.optimization"):
-        return "optimization"
-    if module.startswith("promptpotter.application"):
-        return "application"
-    if module.startswith("promptpotter.infrastructure"):
-        return "infrastructure"
-    if module.startswith("promptpotter.presentation"):
-        return "presentation"
-    return None
-
-
-def _is_violation(src: str, tgt: str) -> bool:
-    if src == "domain" and tgt != "domain":
-        return True
-    if src == "intelligence" and tgt == "optimization":
-        return True
-    return src == "infrastructure" and tgt in {"application", "intelligence", "optimization"}
-
-
-class _RuntimeImports(ast.NodeVisitor):
-    """Collect runtime imports; skips ``if TYPE_CHECKING:`` blocks."""
-
-    def __init__(self) -> None:
-        self.modules: list[str] = []
-
-    def visit_If(self, node: ast.If) -> None:
-        if "TYPE_CHECKING" in ast.unparse(node.test):
-            for n in node.orelse:
-                self.visit(n)
-            return
-        self.generic_visit(node)
-
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if node.module:
-            self.modules.append(node.module)
-
-    def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            self.modules.append(alias.name)
-
-
-def _scan_violations() -> set[tuple[str, str]]:
-    found: set[tuple[str, str]] = set()
-    for path in ROOT.rglob("*.py"):
-        rel = path.relative_to(ROOT.parent).as_posix()
-        src_layer = _layer(rel)
-        if src_layer is None:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        visitor = _RuntimeImports()
-        visitor.visit(tree)
-        for module in visitor.modules:
-            tgt_layer = _target_layer(module)
-            if tgt_layer is None:
-                continue
-            if _is_violation(src_layer, tgt_layer):
-                found.add((rel, module))
-    return found
-
-
-_CYCLE_FORBIDDEN_PROMPT_SURFACE = frozenset(
-    {
-        "promptpotter.application.optimization.dispatch.hub",
-        "promptpotter.application.optimization.l1.critique",
-        "promptpotter.application.optimization.transitions",
-        "promptpotter.application.optimization.escalation",
-    }
-)
-
-
-def test_cycle_does_not_import_prompt_surface() -> None:
-    """``cycle.py`` must not import prompt-surface or escalation modules — escalation imports cycle."""
-    cycle_path = ROOT / "application" / "optimization" / "cycle.py"
-    tree = ast.parse(cycle_path.read_text(encoding="utf-8"))
-    visitor = _RuntimeImports()
-    visitor.visit(tree)
-    forbidden = sorted(set(visitor.modules) & _CYCLE_FORBIDDEN_PROMPT_SURFACE)
-    assert not forbidden, "cycle.py back-edge to prompt-surface modules:\n  " + "\n  ".join(
-        forbidden
-    )
-
-
-def test_no_unexpected_runtime_layer_violations() -> None:
-    found = _scan_violations()
-    new = found - KNOWN_VIOLATIONS
-    stale = KNOWN_VIOLATIONS - found
-    assert not new, "New runtime layer-import violations:\n  " + "\n  ".join(
-        f"{src}: {tgt}" for src, tgt in sorted(new)
-    )
-    assert not stale, "Stale KNOWN_VIOLATIONS:\n  " + "\n  ".join(
-        f"{src}: {tgt}" for src, tgt in sorted(stale)
-    )
-
-
-_ARCHIVE_FACADE_MODULE = "infrastructure/store/archive_views.py"
-_ARCHIVE_INTERNAL_MODULES = frozenset(
-    {
-        "infrastructure/store/measurement_archive.py",
-        "infrastructure/store/stores.py",
-        "infrastructure/store/__init__.py",
-    }
-)
-# Catches ``store.archive.method(`` / ``self.archive.method(`` / ``cls.archive.method(``
-# + alias ``= session.store.archive``.
-_ARCHIVE_DIRECT_PATTERNS = (
-    re.compile(r"\b(?:store|self|cls)\.archive\.[a-zA-Z_]"),
-    re.compile(r"=\s*\S+\.store\.archive\b"),
-)
-
-
-def test_no_direct_archive_access_outside_facade() -> None:
-    """Every MeasurementArchive read/write routes through ``archive_views``."""
-    offenders: list[str] = []
-    for path in ROOT.rglob("*.py"):
-        rel = path.relative_to(ROOT).as_posix()
-        if rel == _ARCHIVE_FACADE_MODULE.removeprefix("infrastructure/").replace(
-            "store/archive_views.py", ""
-        ):
-            pass  # narrowing handled below
-        if rel in _ARCHIVE_INTERNAL_MODULES:
-            continue
-        if rel == "infrastructure/store/archive_views.py":
-            continue
-        text = path.read_text(encoding="utf-8")
-        for pattern in _ARCHIVE_DIRECT_PATTERNS:
-            for match in pattern.finditer(text):
-                # Skip comment/docstring lines.
-                line_start = text.rfind("\n", 0, match.start()) + 1
-                line_end = text.find("\n", match.start())
-                line = text[line_start : line_end if line_end != -1 else None]
-                stripped = line.lstrip()
-                if stripped.startswith(("#", '"', "'", "*")):
-                    continue
-                offenders.append(
-                    f"{rel}:{text[: match.start()].count(chr(10)) + 1}: {line.strip()}"
-                )
-    assert not offenders, (
-        "Direct MeasurementArchive access outside facade — route through archive_views:\n  "
-        + "\n  ".join(offenders)
-    )
-
-
-# The two canonical I/O seams and their sanctioned exceptions.
-_IO_SEAM = (
-    ROOT / "infrastructure" / "store" / "base.py"
-)  # write_json/read_json/append_jsonl/_atomic_*
-_CLOCK_SEAM = ROOT / "shared" / "clock.py"  # utcnow_iso — sole UTC-timestamp minter
-# spend.py's rate cache (~/.promptpotter/rates.json) is a global, self-healing,
-# deliberately-compact (indent=0) blob — not a campaign artifact, so it stays out
-# of the pretty/atomic write_json seam by design.
-_COMPACT_CACHE = ROOT / "shared" / "spend.py"
-
-
-def _is_json_call(node: ast.AST, attr: str) -> bool:
-    """True if *node* is ``json.<attr>(...)``."""
-    return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == attr
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "json"
-    )
-
-
-def test_no_hand_rolled_io_seam_bypass() -> None:
-    """No site re-implements a canonical I/O seam — the seam-enforcement lock.
-
-    Each pattern below is a hand-roll that bypasses (and drifts from / is
-    inferior to) the blessed helper:
-
-    * ``os.replace`` — an atomic rename missing the seam's WinError-5 retry +
-      long-path-prefix hardening (the real Windows torn-write/rename bug).
-    * ``<expr>.now(...).isoformat(...)`` — an inline UTC timestamp whose format
-      drifts from ``shared.clock.utcnow_iso``'s canonical ``...Z``.
-    * ``json.dump``/``json.load`` on a file handle — raw artifact JSON with no
-      long-path / atomic swap.
-    * ``.write_text(json.dumps(...))`` — a non-atomic JSON clobber (the torn
-      session/marker write this arc fixed).
-
-    Route writes through ``write_json``/``write_text``/``append_jsonl``, reads
-    through ``read_json``, and timestamps through ``utcnow_iso``.
-    """
-    offenders: list[str] = []
-    for path in ROOT.rglob("*.py"):
-        if path in (_IO_SEAM, _CLOCK_SEAM):
-            continue
-        rel = path.relative_to(ROOT.parent).as_posix()
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if not isinstance(node, ast.Call):
-                continue
-            fn = node.func
-            if (
-                isinstance(fn, ast.Attribute)
-                and fn.attr == "replace"
-                and isinstance(fn.value, ast.Name)
-                and fn.value.id == "os"
-            ):
-                offenders.append(f"{rel}:{node.lineno}: os.replace — use write_json/write_text")
-            if (
-                isinstance(fn, ast.Attribute)
-                and fn.attr == "isoformat"
-                and isinstance(fn.value, ast.Call)
-                and isinstance(fn.value.func, ast.Attribute)
-                and fn.value.func.attr == "now"
-            ):
-                offenders.append(
-                    f"{rel}:{node.lineno}: inline now().isoformat() — use utcnow_iso()"
-                )
-            if _is_json_call(node, "dump") or _is_json_call(node, "load"):
-                offenders.append(
-                    f"{rel}:{node.lineno}: json.dump/load on a handle — use write_json/read_json"
-                )
-            if (
-                path != _COMPACT_CACHE
-                and isinstance(fn, ast.Attribute)
-                and fn.attr == "write_text"
-                and node.args
-                and _is_json_call(node.args[0], "dumps")
-            ):
-                offenders.append(
-                    f"{rel}:{node.lineno}: write_text(json.dumps(...)) — use write_json"
-                )
-    assert not offenders, (
-        "Hand-rolled bypass of a canonical I/O seam — route through "
-        "infrastructure/store/base.py (write_json/read_json/write_text/append_jsonl) "
-        "or shared/clock.py (utcnow_iso):\n  " + "\n  ".join(offenders)
-    )
-
-
-# Control-plane records ride the ledger but are applied by CommandDispatcher /
-# RunnerCommandSubscriber, never projected by DerivedView — so they have no
-# on_record dispatch arm by design.
-_CONTROL_PLANE_RECORDS = {"CommandRecord", "CommandAckRecord"}
-
-
-def test_every_cycle_record_is_dispatched_or_control_plane() -> None:
-    """Every ``CycleRecord`` union member is routed by ``DerivedView.on_record``
-    (or is an allowlisted control-plane record).
-
-    The emit_* expansion template's most error-prone step: add a ``*Record`` to
-    the union, forget the ``isinstance`` arm, and it silently drops from EVERY
-    projection (dashboard, audit, SSE). This locks that — a new record must wire
-    a dispatch arm + ``_handle_*``, or be declared control-plane.
-    """
-    import typing
-
-    from promptpotter.domain.run_records import CycleRecord
-
-    union = typing.get_args(CycleRecord)[0]  # strip the Annotated[..., Field] wrapper
-    members = {m.__name__ for m in typing.get_args(union)}
-
-    on_record = next(
-        n
-        for n in ast.walk(
-            ast.parse((ROOT / "infrastructure" / "projections" / "base.py").read_text())
-        )
-        if isinstance(n, ast.FunctionDef) and n.name == "on_record"
-    )
-    dispatched: set[str] = set()
-    for node in ast.walk(on_record):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "isinstance"
-            and len(node.args) == 2
-        ):
-            targets = node.args[1].elts if isinstance(node.args[1], ast.Tuple) else [node.args[1]]
-            dispatched |= {t.id for t in targets if isinstance(t, ast.Name)}
-
-    unrouted = members - dispatched - _CONTROL_PLANE_RECORDS
-    assert not unrouted, (
-        "CycleRecord members with no DerivedView.on_record arm (silent-drop from "
-        "every projection) — add an isinstance branch + _handle_*, or add to "
-        f"_CONTROL_PLANE_RECORDS if applied by the dispatcher: {sorted(unrouted)}"
-    )
-    stale = _CONTROL_PLANE_RECORDS - members
-    assert not stale, f"_CONTROL_PLANE_RECORDS names non-union records: {sorted(stale)}"
-
-
-def test_every_connector_implements_protocol() -> None:
-    """Every ``CONNECTORS`` row implements the full ``Connector`` protocol.
-
-    Adding a connector is one file + one ``CONNECTORS`` entry; this locks that
-    the entry is whole — registry key matches ``name``, the three required hooks
-    (``wire_adapter`` / ``extract_experiment`` / ``session_factory``) are callable,
-    the session factory builds a ``SessionProtocol``, and ``execution`` is a
-    declared mode ``BackendClient.run_query`` can dispatch on. A half-wired
-    connector would otherwise fail deep in ``BackendClient`` at run time, not here.
-    """
-    import typing
-
-    from promptpotter.connectors import CONNECTORS
-    from promptpotter.connectors.protocol import Connector, ConnectorExecution
-
-    valid_exec = set(typing.get_args(ConnectorExecution))
-    for key, c in CONNECTORS.items():
-        assert isinstance(c, Connector), f"{key}: not a Connector"
-        assert c.name == key, f"{key}: registry key != connector.name ({c.name!r})"
-        assert callable(c.wire_adapter), f"{key}: wire_adapter not callable"
-        assert callable(c.extract_experiment), f"{key}: extract_experiment not callable"
-        assert callable(c.session_factory), f"{key}: session_factory not callable"
-        session = c.session_factory()
-        assert callable(getattr(session, "set_terms", None)), f"{key}: session has no set_terms"
-        assert callable(getattr(session, "recover", None)), f"{key}: session has no recover"
-        assert c.execution in valid_exec, f"{key}: execution {c.execution!r} not in {valid_exec}"
-
+# ===========================================================================
+# 3. Typed ledger roundtrips + divergence hint + escalation-FSM replay + audit trail
+# ===========================================================================
 
 from promptpotter.application.optimization.resume_and_fork import (  # noqa: E402
-    REPLAYERS,
     RESUME_CHECKPOINT_GATING,
-    GatingMode,
     ResumeCheckpointKind,
     ResumeCheckpointRecord,
 )
@@ -958,129 +453,6 @@ from promptpotter.domain.run_records import (  # noqa: E402
     SnapshotRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog  # noqa: E402
-
-_SRC_ROOT = Path(__file__).resolve().parent.parent / "promptpotter"
-
-
-def test_every_decision_kind_has_a_gating_entry() -> None:
-    missing = [k for k in ResumeCheckpointKind if k not in RESUME_CHECKPOINT_GATING]
-    extra = [k for k in RESUME_CHECKPOINT_GATING if k not in set(ResumeCheckpointKind)]
-    assert not missing, (
-        f"ResumeCheckpointKind members missing from RESUME_CHECKPOINT_GATING: {missing}"
-    )
-    assert not extra, f"RESUME_CHECKPOINT_GATING contains unknown kinds: {extra}"
-
-
-def test_replayed_kinds_have_a_replayer() -> None:
-    expected = {k for k, mode in RESUME_CHECKPOINT_GATING.items() if mode is GatingMode.REPLAYED}
-    missing = expected - set(REPLAYERS)
-    assert not missing, (
-        f"REPLAYED kinds without a registered replayer: {sorted(k.value for k in missing)}"
-    )
-
-
-def test_archival_kinds_have_no_replayer() -> None:
-    archival = {k for k, mode in RESUME_CHECKPOINT_GATING.items() if mode is GatingMode.ARCHIVAL}
-    leaked = archival & set(REPLAYERS)
-    assert not leaked, (
-        f"ARCHIVAL kinds must not register a replayer: {sorted(k.value for k in leaked)}"
-    )
-
-
-# Match calls only — `(?<!def )` skips the helper definition; second arg must start with `ResumeCheckpointKind.`.
-_RECORD_DECISION = re.compile(
-    r"""(?<!def\ )record_decision\s*\(
-        \s*[^,()\[\]]+,
-        \s*(?P<kind>[^,)]+)
-    """,
-    re.VERBOSE | re.DOTALL,
-)
-
-
-def test_no_bare_string_decision_kinds() -> None:
-    """``record_decision`` calls pass a ``ResumeCheckpointKind``, not a bare string."""
-    offenders: list[str] = []
-    for py in _SRC_ROOT.rglob("*.py"):
-        text = py.read_text(encoding="utf-8")
-        if "record_decision(" not in text:
-            continue
-        for match in _RECORD_DECISION.finditer(text):
-            kind_expr = match.group("kind").strip()
-            if not kind_expr.startswith("ResumeCheckpointKind."):
-                offenders.append(f"{py.relative_to(_SRC_ROOT.parent)}: {kind_expr!r}")
-    assert not offenders, "bare-string decision kinds found:\n  " + "\n  ".join(offenders)
-
-
-# Control-local hooks (pause/stop) must bind centrally in the runner seam
-# (run_optimization), never per-entry-point — else a launch path (the API
-# launcher did exactly this) silently ships a run that ignores pause.flag /
-# stop.flag. ``=(?!=)`` skips ``is``/``==`` comparisons.
-_CONTROL_HOOK_ASSIGN = re.compile(r"\.(?:pause_check|stop_check)\s*=(?!=)")
-_CONTROL_HOOK_SEAM = "application/runner/entry.py"
-
-
-def test_control_hooks_wired_only_at_runner_seam() -> None:
-    """``session.pause_check``/``stop_check`` are assigned only in the runner seam."""
-    offenders: list[str] = []
-    for py in _SRC_ROOT.rglob("*.py"):
-        rel = py.relative_to(_SRC_ROOT.parent).as_posix()
-        if rel.endswith(_CONTROL_HOOK_SEAM):
-            continue
-        if _CONTROL_HOOK_ASSIGN.search(py.read_text(encoding="utf-8")):
-            offenders.append(rel)
-    assert not offenders, (
-        "pause_check/stop_check assigned outside application/runner/entry.py — "
-        "Control-local wiring must stay central so every launch path polls the "
-        "flags:\n  " + "\n  ".join(offenders)
-    )
-
-
-# CLI identity must resolve through registered_or_default_identity (marker-aware:
-# explicit --tenant > registered developer > anonymous default), never
-# default_identity straight off args — else a command reads one tenant's active
-# pointer but looks for the session/campaign in another tenant's tree (the
-# resume / sweep tenant-split bug). registered_or_default_identity's own
-# internal default_identity(tenant_id=explicit) is fine — it doesn't read args.
-_ARGS_IDENTITY = re.compile(r"default_identity\(\s*tenant_id\s*=\s*getattr\(\s*args")
-
-
-def test_cli_identity_resolves_through_registered_resolver() -> None:
-    """No CLI site resolves identity via ``default_identity(... getattr(args,'tenant'))``."""
-    offenders: list[str] = []
-    for py in _SRC_ROOT.rglob("*.py"):
-        if _ARGS_IDENTITY.search(py.read_text(encoding="utf-8")):
-            offenders.append(py.relative_to(_SRC_ROOT.parent).as_posix())
-    assert not offenders, (
-        "CLI identity resolved off args via default_identity() — use "
-        "registered_or_default_identity so resume/sweep honour the registered "
-        "developer's one workspace:\n  " + "\n  ".join(offenders)
-    )
-
-
-def test_api_does_not_read_benchmarks_root_directly() -> None:
-    """Dataset-dir access in `presentation/api/` (the web trust boundary) must route
-    through the capability-aware gateway (`store/dataset_access.py`), never a raw
-    `DEFAULT_DATASETS_ROOT` / `.benchmarks_root` read.
-
-    Inline per-handler reads are how the benchmark capability check got skipped on
-    the preview/pipeline endpoints (a non-admin could pull install-benchmark content
-    the picker hid). Forcing every API read through `readable_dataset_dir` makes the
-    check structural — a handler that bypasses the gateway can't reach the data. The
-    on-box CLI (`presentation/cli/`) is the trusted zone and is intentionally out of
-    scope: shell access already moots a capability gate there.
-    """
-    forbidden = re.compile(r"DEFAULT_DATASETS_ROOT|\.benchmarks_root\b")
-    offenders = [
-        py.relative_to(_SRC_ROOT.parent).as_posix()
-        for py in (_SRC_ROOT / "presentation" / "api").rglob("*.py")
-        if forbidden.search(py.read_text(encoding="utf-8"))
-    ]
-    assert not offenders, (
-        "presentation/api/ reads the benchmarks root directly — route dataset access "
-        "through store/dataset_access.py (readable_dataset_dir / "
-        "list_readable_datasets) so the capability gate can't be skipped:\n  "
-        + "\n  ".join(offenders)
-    )
 
 
 def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
@@ -1297,6 +669,140 @@ def test_audit_trail_round_trips_llm_call_records(tmp_path: Path) -> None:
     assert fresh_payload == live_payload
 
 
+# ===========================================================================
+# 4. Tracing wire-format parity (Langfuse shadow)
+# ===========================================================================
+
+
+def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
+    """FileSink's Langfuse shadow must be wire-format compatible (camelCase fields, parentObservationId)."""
+    from promptpotter.infrastructure.tracing import (
+        CampaignEnd,
+        CampaignStart,
+        FileSink,
+        NodeEnd,
+        NodeStart,
+        RoundEnd,
+        RoundStart,
+    )
+
+    tenant_root = tmp_path / "default"
+    tenant_root.mkdir()
+    entity_campaign = "ds__20260101-000000"
+    sink = FileSink(str(tenant_root), campaign_id=entity_campaign)
+
+    cycle_id = "cycle_wire_parity"
+    campaign_id = "cmp_wire_parity"
+
+    sink.on_campaign_start(
+        CampaignStart(
+            campaign_id=campaign_id,
+            config={"max_rounds": 1},
+            origin_accuracy=0.5,
+            session_id=cycle_id,
+        )
+    )
+    sink.on_round_start(RoundStart(campaign_id=campaign_id, round_num=0))
+    sink.on_node_start(
+        NodeStart(
+            campaign_id=campaign_id,
+            round_num=0,
+            node_id="l1_generate",
+            node_type="llm",
+            as_type="generation",
+            input_data={"prompt": "hello"},
+        )
+    )
+    sink.on_node_end(
+        NodeEnd(
+            campaign_id=campaign_id,
+            round_num=0,
+            node_id="l1_generate",
+            output_data={"text": "world"},
+        )
+    )
+    sink.on_round_end(
+        RoundEnd(
+            campaign_id=campaign_id,
+            round_num=0,
+            accuracy=0.7,
+            hits=7,
+            total=10,
+            improved=True,
+            winner_prompt_fields_id="abc",
+            candidate_scores=[{"candidate": "c0", "accuracy": 0.7}],
+            next_action="continue",
+        )
+    )
+    sink.on_campaign_end(
+        CampaignEnd(
+            campaign_id=campaign_id,
+            best_accuracy=0.7,
+            n_rounds=1,
+            stop_reason="max_rounds",
+            best_round=0,
+        )
+    )
+
+    cycle_root = tenant_root / "campaigns" / entity_campaign / "cycles" / cycle_id
+
+    trace_files = list((cycle_root / "langfuse" / "traces").glob("*.json"))
+    assert len(trace_files) == 1
+    trace_id = json.loads(trace_files[0].read_text())["id"]
+
+    obs_dir = cycle_root / "langfuse" / "observations" / trace_id
+    observations = [json.loads(p.read_text()) for p in obs_dir.glob("*.json")]
+    assert len(observations) == 2, "round + node observation expected (single obs per round)"
+
+    for obs in observations:
+        assert "traceId" in obs and obs["traceId"] == trace_id
+        assert "startTime" in obs
+        assert "endTime" in obs
+        for snake in ("trace_id", "start_time", "end_time"):
+            assert snake not in obs
+
+    round_obs = next(o for o in observations if o["name"].startswith("round_"))
+    node_obs = next(o for o in observations if o["name"] == "l1_generate")
+    assert "parentObservationId" not in round_obs
+    assert node_obs["parentObservationId"] == round_obs["id"]
+
+    score_files = list((cycle_root / "langfuse" / "scores").glob("*.jsonl"))
+    assert score_files
+    scores = [json.loads(line) for p in score_files for line in p.read_text().splitlines() if line]
+    assert scores
+    for score in scores:
+        assert "traceId" in score and score["traceId"] == trace_id
+        assert "dataType" in score
+        for snake in ("trace_id", "data_type"):
+            assert snake not in score
+
+
+# ===========================================================================
+# 5. Connector session protocol
+# ===========================================================================
+
+ROOT = pathlib.Path(__file__).parent.parent / "promptpotter"
+
+
+def test_connector_session_factory_builds_session_protocol() -> None:
+    """Each connector's ``session_factory()`` builds a ``SessionProtocol`` (``set_terms`` +
+    ``recover``). The registry-shape half — key==name, callable hooks, valid ``execution`` —
+    is an import-time guard in ``connectors/__init__.py``; only the session contract, which
+    constructs a session (a side effect we keep out of import), is exercised here.
+    """
+    from promptpotter.connectors import CONNECTORS
+
+    for key, c in CONNECTORS.items():
+        session = c.session_factory()
+        assert callable(getattr(session, "set_terms", None)), f"{key}: session has no set_terms"
+        assert callable(getattr(session, "recover", None)), f"{key}: session has no recover"
+
+
+# ===========================================================================
+# 6. Security — secret redaction + untrusted-signal fencing
+# ===========================================================================
+
+
 def test_secret_redaction_filter_scrubs_settings_values_and_prefixes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1327,28 +833,6 @@ def test_secret_redaction_filter_scrubs_settings_values_and_prefixes(
     assert "gsk_redact_me" not in rendered
     assert "sk-leaked" not in rendered
     assert log_redaction.REDACTED in rendered
-
-
-def test_path_builders_reject_traversal(tmp_path: Path) -> None:
-    from promptpotter.infrastructure.store.paths import (
-        campaign_root_dir_for,
-        cycle_dir_for,
-        sweep_batch_dir_for,
-    )
-
-    with pytest.raises(ValueError):
-        campaign_root_dir_for(tmp_path, "../escape")
-
-    with pytest.raises(ValueError):
-        cycle_dir_for(tmp_path, "ok_campaign", "../escape")
-
-    with pytest.raises(ValueError):
-        sweep_batch_dir_for(tmp_path, "ok_campaign", "../escape")
-
-    out = cycle_dir_for(tmp_path, "ds__20260101-000000", "cycle_abc_fork_def_xyz")
-    assert out == (
-        tmp_path / "campaigns" / "ds__20260101-000000" / "cycles" / "cycle_abc_fork_def_xyz"
-    )
 
 
 def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
@@ -1480,111 +964,1911 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     assert "UNTRUSTED" not in tc_text
 
 
-def test_run_round_loop_continue_paths_route_through_close_round() -> None:
-    """Every ``continue`` inside the round-loop ``while`` calls ``close_round`` (or ``post_round``)."""
-    runner_src = (ROOT / "application" / "runner" / "loop.py").read_text(encoding="utf-8")
-    tree = ast.parse(runner_src)
+# ===========================================================================
+# 7. Escalation engine — parse/apply L2/L3, fork-payload, dispatch wiring, rules
+# ===========================================================================
 
-    fn = next(
-        n
-        for n in ast.walk(tree)
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "run_round_loop"
+import types  # noqa: E402
+
+from promptpotter.application.optimization.dispatch.schemas import (  # noqa: E402
+    L2ContextOutput,
+    L3PlanOutput,
+)
+from promptpotter.application.optimization.escalation import (  # noqa: E402
+    apply_fork_payload_to_osp,
+)
+from promptpotter.application.optimization.escalation.firing import (  # noqa: E402
+    _apply_l2,
+    _apply_l3,
+    _parse_l2,
+    _parse_l3,
+)
+from promptpotter.domain.l1_layout import default_l1_layout  # noqa: E402
+from promptpotter.domain.opt_search_point import OptSearchPoint, WoundChannels  # noqa: E402
+from promptpotter.domain.run_records import ForkSpec, ForkTrigger  # noqa: E402
+
+
+def _osp(**kwargs) -> OptSearchPoint:
+    from promptpotter.domain.opt_search_point import L2L3Memory
+
+    memory_fields = {
+        "wounds",
+        "l1_layout",
+        "l1_overrides",
+        "l1_supplemental_rules",
+        "l1_situational_examples",
+        "task_context",
+    }
+    if "memory" not in kwargs and (
+        mem_kwargs := {k: kwargs.pop(k) for k in list(kwargs) if k in memory_fields}
+    ):
+        kwargs["memory"] = L2L3Memory(**mem_kwargs)
+    return OptSearchPoint(persona="Expert", instruction="Rank items.", **kwargs)
+
+
+def _full_layout_dict() -> dict[str, list[str]]:
+    return default_l1_layout().model_dump()
+
+
+def _operator_sweep_payload(**kwargs: object) -> ForkSpec:
+    return ForkSpec(
+        trigger=ForkTrigger.OPERATOR_SWEEP,
+        reason=str(kwargs.pop("reason", "canonical case")),
+        issued_by=str(kwargs.pop("issued_by", "test-operator")),
+        **kwargs,  # type: ignore[arg-type]
     )
 
-    # The outermost while is the round-iteration loop. A nested while may
-    # exist for pause cooperation (`session.pause_check` wait-loop) — that
-    # one has no ``continue`` of its own, so the round-iteration invariant
-    # below still only applies to the outer loop's direct branches.
-    while_nodes = [n for n in ast.walk(fn) if isinstance(n, ast.While)]
-    assert while_nodes, "expected a round-iteration while in run_round_loop"
-    round_loop = while_nodes[0]
 
-    sanctioned = {"close_round", "post_round"}
+def test_fork_payload_roundtrips_through_opt_search_point() -> None:
+    layout_dict = _full_layout_dict()
+    payload = _operator_sweep_payload(l1_layout=layout_dict)
 
-    def _calls_sanctioned(stmt: ast.AST) -> bool:
-        for node in ast.walk(stmt):
-            if isinstance(node, ast.Call):
-                func = node.func
-                if isinstance(func, ast.Name) and func.id in sanctioned:
-                    return True
-        return False
+    osp = OptSearchPoint.from_prompt_fields({"persona": "p", "task_intent": "t"})
+    apply_fork_payload_to_osp(osp, payload)
 
-    # Each top-level ``if`` whose body ``continue``s is a round-loop branch that must close the round.
-    offenders: list[str] = []
-    for stmt in round_loop.body:
-        if not isinstance(stmt, ast.If):
+    assert osp.memory.l1_layout.model_dump() == layout_dict
+
+    dump = osp.model_dump()
+    reloaded = OptSearchPoint(**dump)
+
+    assert reloaded.memory.l1_layout.model_dump() == layout_dict
+
+
+def test_fork_payload_rejects_layout_missing_mandatory_placeholder() -> None:
+    """Every L1_MANDATORY placeholder must appear somewhere."""
+    bad_layout = {
+        "task_intent": ["task_context"],
+        "problem_description": ["rendered_prompt"],
+    }
+    payload = _operator_sweep_payload(l1_layout=bad_layout)
+    osp = OptSearchPoint.from_prompt_fields({"persona": "p"})
+    with pytest.raises(ValueError, match="hard validators"):
+        apply_fork_payload_to_osp(osp, payload)
+
+
+def _l2_cycle_stub() -> types.SimpleNamespace:
+    from promptpotter.application.optimization.escalation.state import EscalationFSM
+
+    return types.SimpleNamespace(
+        opt_sp=_osp(),
+        escalation=EscalationFSM(),
+        pending_decisions=[],
+        probe_next_round=False,
+        last_l2_axis="",
+        tracking=types.SimpleNamespace(best_accuracy=0.0, best_composite_fitness=0.0),
+    )
+
+
+def test_parse_l2_round_trips_probe_action_and_axis():
+    raw = L2ContextOutput(action="probe_round", axis_targeted="persona", rationale="test")
+    result = _parse_l2(raw, _osp(), prompt="<prompt>")
+    assert result.action == "probe_round"
+    assert result.axis_targeted == "persona"
+
+
+def test_apply_l2_probe_action_sets_cycle_state_and_records_commitment():
+    cycle = _l2_cycle_stub()
+    raw = L2ContextOutput(action="probe_round", axis_targeted="persona", rationale="test")
+    result = _parse_l2(raw, cycle.opt_sp, prompt="<prompt>")
+    _apply_l2(cycle, result, round_num=3)
+
+    assert cycle.probe_next_round is True
+    assert cycle.last_l2_axis == "persona"
+    last = cycle.pending_decisions[-1]
+    assert last.kind == ResumeCheckpointKind.PROBE_ROUND_COMMITMENT
+    assert last.outcome is True
+    assert last.data["action"] == "probe_round"
+    assert last.data["axis_targeted"] == "persona"
+
+
+def test_apply_l2_normal_action_records_commitment_without_probe_state():
+    cycle = _l2_cycle_stub()
+    raw = L2ContextOutput(action="normal_round", rationale="test")
+    result = _parse_l2(raw, cycle.opt_sp, prompt="<prompt>")
+    _apply_l2(cycle, result, round_num=3)
+
+    assert cycle.probe_next_round is False
+    last = cycle.pending_decisions[-1]
+    assert last.kind == ResumeCheckpointKind.PROBE_ROUND_COMMITMENT
+    assert last.outcome is False
+    assert last.data["action"] == "normal_round"
+    assert last.data["task_context_changed"] is False
+
+
+def test_l3_to_l2_note_is_in_signals_but_not_l1_possible():
+    """The L3→L2 note channel is L2-only; must not appear in ``L1_POSSIBLE``."""
+    from promptpotter.application.optimization.dispatch.hub import INJECTIONS
+    from promptpotter.domain.l1_layout import L1_POSSIBLE
+
+    assert "l3_to_l2_note" in INJECTIONS
+    assert "l3_to_l2_note" not in L1_POSSIBLE
+
+
+def test_l3_note_rides_memory_and_forwarded_via_copy_memory_to():
+    """``l3_note`` lives on ``OptSearchPoint.memory.wounds`` so it survives the L2-fire OSP swap."""
+    from promptpotter.domain.opt_search_point import L2L3Memory
+
+    assert "wounds" in L2L3Memory.model_fields
+
+    osp = _osp(
+        memory=L2L3Memory(
+            wounds=WoundChannels(l3_note="constraint X discovered, steer L2 around it")
+        )
+    )
+    target = _osp()
+    osp.copy_memory_to(target)
+    assert target.memory.wounds.l3_note == osp.memory.wounds.l3_note
+
+
+def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
+    """L3 fire wholesale-replaces ``cycle.opt_sp.l3_note`` — even with an
+    empty/missing ``note``, prior content is wiped. That's the contract:
+    each L3 fire produces a complete (or null) note."""
+    from promptpotter.application.optimization.escalation.state import EscalationFSM
+
+    osp = _osp(plan="prior plan", wounds=WoundChannels(l3_note="prior note"))
+    raw = L3PlanOutput(plan="x" * 200, note="new sticky pointer", rationale="test")
+    result = _parse_l3(raw, osp, prompt="<prompt>")
+    assert result.l3_note == "new sticky pointer"
+
+    # Mirror the order ``_run_transition`` applies: copy memory onto a
+    # fresh OSP (carries the prior note), then apply L3 (overwrites).
+    cycle = types.SimpleNamespace(
+        opt_sp=result.opt_search_point,
+        escalation=EscalationFSM(),
+        tracking=types.SimpleNamespace(best_accuracy=0.0, best_composite_fitness=0.0),
+    )
+    osp.copy_memory_to(cycle.opt_sp)
+    assert cycle.opt_sp.memory.wounds.l3_note == "prior note"  # copy_memory_to forwarded
+    _apply_l3(cycle, result, round_num=5)
+    assert cycle.opt_sp.memory.wounds.l3_note == "new sticky pointer"  # _apply_l3 replaced
+
+    # And: missing note → wipe.
+    raw_no_note = L3PlanOutput(plan="y" * 200, rationale="test")
+    result2 = _parse_l3(
+        raw_no_note,
+        _osp(plan="p", wounds=WoundChannels(l3_note="something")),
+        prompt="<prompt>",
+    )
+    assert result2.l3_note == ""
+
+
+def test_optimizer_prompts_load_with_no_unresolvable_slots():
+    from promptpotter.application.optimization.dispatch.llm_call import (
+        list_optimizer_prompts,
+        load_optimizer_prompt,
+    )
+
+    names = list_optimizer_prompts()
+    assert names, "expected at least one optimizer prompt registered"
+    for name in names:
+        load_optimizer_prompt(name)  # raises KeyError on unknown slot
+
+
+def test_validate_template_raises_on_unknown_slot():
+    from promptpotter.application.optimization.dispatch.hub import validate_template
+    from promptpotter.domain.opt_search_point import PromptTemplate
+
+    bad = PromptTemplate(task_intent="see {{not_a_signal}}")
+    with pytest.raises(KeyError, match="not_a_signal"):
+        validate_template("l1_critique", bad)
+
+
+def _empty_cycle_slice():
+    from promptpotter.application.optimization.dispatch.hub import CycleSlice
+
+    return CycleSlice(
+        round_num=0,
+        current_accuracy=0.0,
+        best_accuracy=0.0,
+        best_round=0,
+        l1_stall_count=0,
+        l2_round=0,
+        l2_stall_count=0,
+        l3_round=0,
+        l3_stall_count=0,
+    )
+
+
+def test_axis_memory_renders_when_axes_digest_yields_content():
+    from promptpotter.application.optimization.dispatch.hub import (
+        DispatchHub,
+        InjectionBundle,
+        RoundDigest,
+    )
+
+    fake_axes = types.SimpleNamespace(
+        digest=lambda: {
+            "axis_rankings": "persona (effect=0.234, strong)",
+            "persistent_failures": "3 chronic failures",
+        }
+    )
+    bundle = InjectionBundle(
+        opt_sp=OptSearchPoint(),
+        pipeline_schema=None,
+        cycle_slice=_empty_cycle_slice(),
+        digest=RoundDigest(diagnostics=None, critique=None),
+        axes=fake_axes,
+    )
+    out = DispatchHub.render("axis_memory", bundle)
+    assert out.startswith("AXIS MEMORY")
+    assert "axis rankings: persona (effect=0.234, strong)" in out
+    assert "persistent failures: 3 chronic failures" in out
+
+
+def test_axis_memory_empty_when_axes_or_digest_absent():
+    from promptpotter.application.optimization.dispatch.hub import (
+        DispatchHub,
+        InjectionBundle,
+        RoundDigest,
+    )
+
+    base_kwargs = {
+        "opt_sp": OptSearchPoint(),
+        "pipeline_schema": None,
+        "cycle_slice": _empty_cycle_slice(),
+        "digest": RoundDigest(diagnostics=None, critique=None),
+    }
+
+    no_axes = InjectionBundle(**base_kwargs, axes=None)
+    assert DispatchHub.render("axis_memory", no_axes) == ""
+
+    empty_digest = InjectionBundle(
+        **base_kwargs,
+        axes=types.SimpleNamespace(digest=lambda: None),
+    )
+    assert DispatchHub.render("axis_memory", empty_digest) == ""
+
+
+def test_axis_memory_listed_in_l1_possible_and_default_layout():
+    from promptpotter.domain.l1_layout import L1_POSSIBLE, default_l1_layout
+
+    assert "axis_memory" in L1_POSSIBLE
+    assert "axis_memory" in default_l1_layout().problem_description
+
+
+def test_dispatch_caps_and_surfaces_renderer_errors(monkeypatch):
+    """char_cap truncates LLM-authored text + appends `…`; renderer exceptions wrap as InjectionRenderError."""
+    import pytest
+
+    from promptpotter.application.optimization.dispatch.hub import (
+        DispatchHub,
+        InjectionBundle,
+        InjectionRenderError,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.dispatch.hub.bundle import (
+        InjectionKind,
+        _Injection,
+    )
+    from promptpotter.application.optimization.dispatch.hub.injections.registry import INJECTIONS
+
+    def _bundle(**kw):
+        return InjectionBundle(
+            opt_sp=kw.pop("opt_sp", OptSearchPoint()),
+            pipeline_schema=None,
+            cycle_slice=_empty_cycle_slice(),
+            digest=RoundDigest(diagnostics=None, critique=None),
+            axes=None,
+            **kw,
+        )
+
+    plan_cap = INJECTIONS["plan"].char_cap
+    assert plan_cap is not None
+    capped = DispatchHub.render("plan", _bundle(opt_sp=OptSearchPoint(plan="x" * 5000)))
+    assert len(capped) <= plan_cap + 1
+    assert capped.endswith("…")
+
+    def _boom(_b):
+        raise AttributeError("renamed data-model field")
+
+    monkeypatch.setitem(
+        INJECTIONS,
+        "plan",
+        _Injection("plan", InjectionKind.TRACE, _boom, "", char_cap=1200),
+    )
+    with pytest.raises(InjectionRenderError):
+        DispatchHub.render("plan", _bundle())
+
+
+async def test_optimizer_call_deadline_retries_once_then_raises(monkeypatch):
+    """``_chat_under_deadline`` retries one transient timeout, raises TimeoutError on the second."""
+    import asyncio
+
+    import pytest
+
+    from promptpotter.application.optimization.dispatch.llm_call import call as llm_call_mod
+
+    monkeypatch.setattr(llm_call_mod, "OPTIMIZER_CALL_DEADLINE_S", 0.05)
+
+    class _Client:
+        def __init__(self, hang_calls: int) -> None:
+            self.hang_calls = hang_calls
+            self.calls = 0
+
+        async def chat(self, **_kw):
+            self.calls += 1
+            if self.calls <= self.hang_calls:
+                await asyncio.sleep(10)
+            return "ok"
+
+    recovers = _Client(hang_calls=1)
+    result = await llm_call_mod._chat_under_deadline(recovers, node_label="l1_generate")
+    assert result == "ok" and recovers.calls == 2
+
+    never = _Client(hang_calls=2)
+    with pytest.raises(TimeoutError):
+        await llm_call_mod._chat_under_deadline(never, node_label="l1_generate")
+    assert never.calls == 2
+
+
+def test_default_round_rules_reproduce_observe_round_fsm():
+    """DEFAULT_ROUND_RULES matches observe_round's branches."""
+    from promptpotter.application.optimization.escalation import (
+        EscalationInputs,
+        decide_escalation,
+    )
+    from promptpotter.application.optimization.escalation.state import NextAction
+
+    perfect = EscalationInputs(
+        improved=True,
+        current_accuracy=1.0,
+        l1_stall_count=0,
+        l1_patience=3,
+    )
+    assert decide_escalation(perfect).next_action == NextAction.STOP_PERFECT
+
+    continuing = EscalationInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+    )
+    assert decide_escalation(continuing).next_action == NextAction.CONTINUE
+
+    fire = EscalationInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=3,
+        l1_patience=3,
+    )
+    assert decide_escalation(fire).next_action == NextAction.FIRE_L2
+
+
+def test_l2_axis_yield_drought_rule_fires_when_signal_supports_it():
+    """Yield-drought preempts l1_continue when AxisIndex shows zero productive axes."""
+    from promptpotter.application.optimization.escalation import (
+        EscalationInputs,
+        decide_escalation,
+    )
+    from promptpotter.application.optimization.escalation.state import NextAction
+
+    drought = EscalationInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        axes_with_positive_yield=0,
+    )
+    assert decide_escalation(drought).next_action == NextAction.FIRE_L2
+
+    productive = EscalationInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        axes_with_positive_yield=2,
+    )
+    assert decide_escalation(productive).next_action == NextAction.CONTINUE
+
+    no_evidence = EscalationInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        axes_with_positive_yield=None,
+    )
+    assert decide_escalation(no_evidence).next_action == NextAction.CONTINUE
+
+
+def test_l1_patience_zero_fires_l2_every_round():
+    """l1_patience=0 fires L2 every round; perfect_accuracy still preempts."""
+    from promptpotter.application.optimization.escalation import (
+        EscalationInputs,
+        decide_escalation,
+    )
+    from promptpotter.application.optimization.escalation.state import NextAction
+
+    improving = EscalationInputs(
+        improved=True,
+        current_accuracy=0.5,
+        l1_stall_count=0,
+        l1_patience=0,
+    )
+    assert decide_escalation(improving).next_action == NextAction.FIRE_L2
+
+    stalling = EscalationInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=0,
+    )
+    assert decide_escalation(stalling).next_action == NextAction.FIRE_L2
+
+    perfect = EscalationInputs(
+        improved=True,
+        current_accuracy=1.0,
+        l1_stall_count=0,
+        l1_patience=0,
+    )
+    assert decide_escalation(perfect).next_action == NextAction.STOP_PERFECT
+
+
+# ===========================================================================
+# 8. Archive retrieval — measurement queries + axis index
+# ===========================================================================
+
+from types import SimpleNamespace  # noqa: E402
+
+from _factories import make_archive_item, make_archive_run  # noqa: E402
+
+from promptpotter.application.intelligence.hard_sample_archive import (  # noqa: E402
+    build_archive_observations,
+)
+from promptpotter.application.intelligence.indexes import AxisIndex  # noqa: E402
+from promptpotter.infrastructure.store import build_stores  # noqa: E402
+from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive  # noqa: E402
+from promptpotter.shared.errors import ErrorCategory  # noqa: E402
+from promptpotter.shared.identity import default_identity  # noqa: E402
+
+
+@pytest.fixture
+def archive(tmp_path: Path) -> MeasurementArchive:
+    a = MeasurementArchive(tmp_path)
+    a.save(
+        "any-backend",
+        "run_a",
+        make_archive_run(
+            "run_a",
+            node_configs=[("llm_only", {"model": "X", "temperature": 0.0})],
+            items=[make_archive_item(0, hit=True), make_archive_item(1, hit=False)],
+        ),
+    )
+    a.save(
+        "any-backend",
+        "run_b",
+        make_archive_run(
+            "run_b",
+            node_configs=[("llm_only", {"model": "Y", "temperature": 0.0})],
+            items=[make_archive_item(0, hit=False), make_archive_item(1, hit=True)],
+        ),
+    )
+    a.save(
+        "any-backend",
+        "run_c",
+        make_archive_run(
+            "run_c",
+            node_configs=[("web_search", {"max_sites": 5}), ("llm_only", {"model": "X"})],
+            items=[make_archive_item(0, hit=True)],
+        ),
+    )
+    return a
+
+
+def test_measurements_for_sample_returns_only_matching_rows(
+    archive: MeasurementArchive,
+) -> None:
+    rows = archive.measurements_for_sample("any-backend", 0)
+    assert len(rows) == 3  # sample 0 in all three runs
+    assert {r.run_id for r in rows} == {"run_a", "run_b", "run_c"}
+    assert all(r.sample_id == 0 for r in rows)
+    a_row = next(r for r in rows if r.run_id == "run_a")
+    assert a_row.hit is True
+    assert a_row.node_configs == [("llm_only", {"model": "X", "temperature": 0.0})]
+    assert a_row.fitness == 1.0
+
+
+def test_measurements_for_config_subset_predicate(archive: MeasurementArchive) -> None:
+    presence = archive.measurements_for_config("any-backend", {"llm_only": {}})
+    assert {r.run_id for r in presence} == {"run_a", "run_b", "run_c"}
+
+    by_model_x = archive.measurements_for_config("any-backend", {"llm_only": {"model": "X"}})
+    assert {r.run_id for r in by_model_x} == {"run_a", "run_c"}
+
+    multi = archive.measurements_for_config("any-backend", {"web_search": {}, "llm_only": {}})
+    assert {r.run_id for r in multi} == {"run_c"}
+
+    none_match = archive.measurements_for_config("any-backend", {"llm_only": {"model": "Z"}})
+    assert none_match == []
+
+
+def test_measurements_for_config_empty_predicate_returns_empty(
+    archive: MeasurementArchive,
+) -> None:
+    assert archive.measurements_for_config("any-backend", {}) == []
+
+
+def test_find_by_node_configs_prefix_exact(archive: MeasurementArchive) -> None:
+    matches = archive.find_by_node_configs(
+        "any-backend",
+        [("llm_only", {"model": "X", "temperature": 0.0})],
+    )
+    assert len(matches) == 1
+    entry, match_len = matches[0]
+    assert entry["run_id"] == "run_a"
+    assert match_len == 1
+
+    matches2 = archive.find_by_node_configs(
+        "any-backend",
+        [("web_search", {"max_sites": 5}), ("llm_only", {"model": "X"})],
+    )
+    assert len(matches2) == 1
+    assert matches2[0][0]["run_id"] == "run_c"
+    assert matches2[0][1] == 2
+
+    assert archive.find_by_node_configs("any-backend", []) == []
+
+
+def _seed_indexed_run(
+    archive: MeasurementArchive,
+    run_id: str,
+    *,
+    pipeline_params: dict[str, dict[str, Any]],
+    accuracy: float,
+) -> None:
+    archive.save(
+        "any-backend",
+        run_id,
+        make_archive_run(
+            run_id,
+            pipeline_params=pipeline_params,
+            scores={"accuracy": accuracy, "total": 1},
+            items=[make_archive_item(0, hit=accuracy >= 0.5, fitness=accuracy, query="q")],
+        ),
+    )
+
+
+@pytest.fixture
+def indexed_stores(tmp_path: Path):
+    s = build_stores(
+        default_identity(), projects_root=tmp_path / "projects", datasets_root=tmp_path / "datasets"
+    )
+    _seed_indexed_run(
+        s.archive,
+        "run_a",
+        pipeline_params={"llm_only": {"model": "X", "temperature": 0.0}},
+        accuracy=0.8,
+    )
+    _seed_indexed_run(
+        s.archive,
+        "run_b",
+        pipeline_params={"llm_only": {"model": "Y", "temperature": 0.0}},
+        accuracy=0.4,
+    )
+    return s
+
+
+def test_axis_index_refresh_rebuilds_axis_values(indexed_stores: Any) -> None:
+    idx = AxisIndex()
+    idx.refresh(indexed_stores, "any-backend", dataset_name=None)
+
+    assert set(idx._axis_values["llm_only.model"].keys()) == {"X", "Y"}
+    assert idx._axis_values["llm_only.model"]["X"] == [0.8]
+    assert idx._axis_values["llm_only.model"]["Y"] == [0.4]
+    assert set(idx._axis_values["llm_only.temperature"].keys()) == {"0.0"}
+    assert sorted(idx._axis_values["llm_only.temperature"]["0.0"]) == [0.4, 0.8]
+
+    snapshot = {
+        a: {v: list(accs) for v, accs in vals.items()} for a, vals in idx._axis_values.items()
+    }
+    idx.refresh(indexed_stores, "any-backend", dataset_name=None)
+    rebuilt = {
+        a: {v: list(accs) for v, accs in vals.items()} for a, vals in idx._axis_values.items()
+    }
+    assert rebuilt == snapshot
+
+
+def test_axis_index_no_persistence(indexed_stores: Any, tmp_path: Path) -> None:
+    idx = AxisIndex()
+    idx.refresh(indexed_stores, "any-backend", dataset_name=None)
+    library = indexed_stores.base_dir / "archive"
+    assert not (library / "axes.json").exists()
+    assert not (library / "search_memory.json").exists()
+    assert not (library / "samples.json").exists()
+
+
+def _seed_cross_cycle(
+    archive: MeasurementArchive,
+    *,
+    run_id: str,
+    content_hash: str,
+    items: list[dict[str, Any]],
+) -> None:
+    archive.save(
+        "bk",
+        run_id,
+        make_archive_run(
+            run_id,
+            content_hash=content_hash,
+            pipeline_params={"llm_only": {"model": "stub"}},
+            scores={"accuracy": 0.5},
+            created_at="2026-04-30T00:00:00Z",
+            items=items,
+        ),
+    )
+
+
+def _cross_cycle_item(
+    sid: int, *, hit: bool, fitness: float = 1.0, error: bool = False
+) -> dict[str, Any]:
+    err = (
+        {
+            "predicted": "ERROR",
+            "error": "stub backend error",
+            "error_category": ErrorCategory.PIPELINE,
+        }
+        if error
+        else {}
+    )
+    return make_archive_item(sid, hit=hit, fitness=fitness, **err)
+
+
+@pytest.fixture
+def aggregator_archive(tmp_path: Path) -> MeasurementArchive:
+    return MeasurementArchive(tmp_path)
+
+
+def test_archive_observations_use_content_hash_prefix(
+    aggregator_archive: MeasurementArchive,
+) -> None:
+    """Candidate IDs = ``content_hash[:12]``; error / missing-id rows dropped."""
+    long_hash = "abcdef0123456789aaaa"
+    _seed_cross_cycle(
+        aggregator_archive,
+        run_id="run_1",
+        content_hash=long_hash,
+        items=[
+            _cross_cycle_item(1, hit=True),
+            _cross_cycle_item(2, hit=False),
+            _cross_cycle_item(3, hit=False, error=True),
+            {"hit": True},
+        ],
+    )
+    stores = SimpleNamespace(archive=aggregator_archive)
+    obs = build_archive_observations(stores, "bk", dataset_name=None)
+    assert len(obs) == 2
+    assert all(o.candidate_id == long_hash[:12] for o in obs)
+    assert {o.sample_id for o in obs} == {1, 2}
+
+
+# ===========================================================================
+# 9. Dataset-scoped archive + version-and-repoint
+# ===========================================================================
+
+from datetime import UTC, datetime  # noqa: E402
+
+from promptpotter.application.datasets.dataset_replace import (  # noqa: E402
+    recover_pending_replacements,
+    version_and_repoint,
+)
+from promptpotter.domain.campaign import Campaign  # noqa: E402
+from promptpotter.domain.identity import TenantId, UserId  # noqa: E402
+from promptpotter.shared.identity import IdentityContext  # noqa: E402
+
+
+def _seed(
+    archive: MeasurementArchive,
+    *,
+    run_id: str,
+    dataset_name: str | None,
+    sample_id: int = 0,
+    hit: bool = True,
+    content_hash: str | None = None,
+) -> None:
+    extra = {"dataset_name": dataset_name} if dataset_name is not None else {}
+    archive.save(
+        "bk",
+        run_id,
+        make_archive_run(
+            run_id,
+            content_hash=content_hash,
+            pipeline_params={"llm_only": {"model": "X"}},
+            scores={"accuracy": 1.0 if hit else 0.0, "total": 1},
+            created_at="2026-05-19T00:00:00Z",
+            items=[
+                make_archive_item(
+                    sample_id,
+                    hit=hit,
+                    fitness=1.0 if hit else 0.0,
+                    query=f"q_{dataset_name or 'unknown'}_{sample_id}",
+                )
+            ],
+            **extra,
+        ),
+    )
+
+
+def test_save_writes_dataset_name(tmp_path: Path) -> None:
+    """Phase 1 contract: the field lands in both the index summary and the per-run detail."""
+    archive = MeasurementArchive(tmp_path)
+    _seed(archive, run_id="r1", dataset_name="aime")
+
+    index = json.loads((tmp_path / "archive" / "measurements_index.json").read_text())
+    assert index["measurements"][0]["dataset_name"] == "aime"
+    detail = json.loads((tmp_path / "archive" / "measurements" / "r1.json").read_text())
+    assert detail["dataset_name"] == "aime"
+
+
+def test_list_all_filters_by_dataset(tmp_path: Path) -> None:
+    """Phase 2 contract: explicit dataset_name returns only matching entries."""
+    archive = MeasurementArchive(tmp_path)
+    _seed(archive, run_id="aime_1", dataset_name="aime")
+    _seed(archive, run_id="just_1", dataset_name="justlogic")
+
+    aime_only = archive.list_all("bk", dataset_name="aime")
+    assert [e["run_id"] for e in aime_only] == ["aime_1"]
+    just_only = archive.list_all("bk", dataset_name="justlogic")
+    assert [e["run_id"] for e in just_only] == ["just_1"]
+    no_filter = archive.list_all("bk")
+    assert {e["run_id"] for e in no_filter} == {"aime_1", "just_1"}
+
+
+def test_unknown_entries_excluded_by_default(tmp_path: Path) -> None:
+    """Pre-schema entries (v1, no dataset_name) drop out of cross-cycle views by default."""
+    archive = MeasurementArchive(tmp_path)
+    _seed(archive, run_id="old", dataset_name=None)  # v1-shape
+    _seed(archive, run_id="new", dataset_name="aime")
+
+    only_aime = archive.list_all("bk", dataset_name="aime")
+    assert [e["run_id"] for e in only_aime] == ["new"]
+    with_unknown = archive.list_all("bk", dataset_name="aime", include_unknown=True)
+    assert {e["run_id"] for e in with_unknown} == {"new", "old"}
+
+
+def test_archive_observations_dataset_scoped(tmp_path: Path) -> None:
+    """build_archive_observations filters by dataset — colliding sample_ids stay isolated."""
+    archive = MeasurementArchive(tmp_path)
+    _seed(archive, run_id="aime_5", dataset_name="aime", sample_id=14, hit=False)
+    _seed(archive, run_id="just_5", dataset_name="justlogic", sample_id=14, hit=True)
+    stores = SimpleNamespace(archive=archive)
+
+    aime_obs = build_archive_observations(stores, "bk", dataset_name="aime")
+    assert {(o.sample_id, o.hit) for o in aime_obs} == {(14, False)}
+    just_obs = build_archive_observations(stores, "bk", dataset_name="justlogic")
+    assert {(o.sample_id, o.hit) for o in just_obs} == {(14, True)}
+
+
+def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
+    """load_reusable_results scopes by dataset — identical node-configs don't bleed across datasets."""
+    archive = MeasurementArchive(tmp_path)
+    _seed(archive, run_id="aime_cached", dataset_name="aime", sample_id=14, hit=True)
+    _seed(archive, run_id="just_fresh", dataset_name="justlogic", sample_id=14, hit=False)
+
+    node_configs = [("llm_only", {"model": "X"})]
+    aime_cache = archive.load_reusable_results("bk", node_configs, dataset_name="aime")
+    just_cache = archive.load_reusable_results("bk", node_configs, dataset_name="justlogic")
+
+    # Same sample_id, different dataset → different query texts → cached
+    # results for one dataset are unreachable under the other's dataset_name.
+    aime_queries = set(aime_cache.keys())
+    just_queries = set(just_cache.keys())
+    assert aime_queries.isdisjoint(just_queries)
+    assert any("aime" in q for q in aime_queries)
+    assert any("justlogic" in q for q in just_queries)
+
+
+def _commit_fake_dataset(stores: Any, slug: str) -> Path:
+    """Hand-write a minimal committed dataset (cache + self-referential campaign.json)."""
+    ds_dir = stores.tenant_datasets.dataset_dir(slug)
+    ds_dir.mkdir(parents=True)
+    (ds_dir / "cache.json").write_text(
+        json.dumps({"name": slug, "items": [{"id": 0, "query": "q", "ground_truth": "g"}]}),
+        encoding="utf-8",
+    )
+    (ds_dir / "campaign.json").write_text(
+        json.dumps({"campaign_config": {"dataset_name": slug}}), encoding="utf-8"
+    )
+    return ds_dir
+
+
+def _mint_campaign(stores: Any, *, campaign_id: str, dataset_name: str, cycle_id: str) -> Path:
+    """Mint a campaign pinned to *dataset_name* + a cycle index stamping it in the header."""
+    now = datetime.now(UTC).isoformat()
+    stores.campaigns.create_campaign(
+        Campaign(
+            campaign_id=campaign_id,
+            dataset_name=dataset_name,
+            created_at=now,
+            root_cycle_id=cycle_id,
+            owner_user_id="nieena",
+            lifecycle_status="active",
+            lifecycle_changed_at=now,
+        )
+    )
+    idx_path = stores.campaigns.cycle_dir(campaign_id, cycle_id) / "index.json"
+    idx_path.parent.mkdir(parents=True, exist_ok=True)
+    idx_path.write_text(
+        json.dumps({"header": {"dataset_name": dataset_name, "backend_id": "bk"}}),
+        encoding="utf-8",
+    )
+    return idx_path
+
+
+def test_version_and_repoint_preserves_results(tmp_path: Path) -> None:
+    """Replace = version-and-repoint: the old data + every dependent campaign's
+    results survive under ``{slug}-v1``, never overwritten. The pin (manifest +
+    cycle header + self-ref) and measurement stamps follow the data, and a
+    half-done migration is recoverable from its marker."""
+    ident = IdentityContext(user_id=UserId("nieena"), tenant_id=TenantId("nieena"))
+    stores = build_stores(ident, projects_root=tmp_path)
+
+    _commit_fake_dataset(stores, "emails")
+    idx_path = _mint_campaign(
+        stores, campaign_id="emails__c1", dataset_name="emails", cycle_id="cycle_aaaa0001"
+    )
+    _seed(stores.archive, run_id="r1", dataset_name="emails")
+
+    result = version_and_repoint(stores=stores, slug="emails")
+
+    # Data moved out of the way; the canonical name is free.
+    assert not stores.tenant_datasets.dataset_dir("emails").exists()
+    assert stores.tenant_datasets.dataset_dir("emails-v1").is_dir()
+    # The pin followed the data — manifest, cycle header, and the dataset's own
+    # self-reference all now resolve the bytes the campaign always ran on.
+    assert stores.campaigns.load_campaign("emails__c1").dataset_name == "emails-v1"  # type: ignore[union-attr]
+    assert json.loads(idx_path.read_text())["header"]["dataset_name"] == "emails-v1"
+    moved_cc = json.loads(
+        (stores.tenant_datasets.dataset_dir("emails-v1") / "campaign.json").read_text()
+    )
+    assert moved_cc["campaign_config"]["dataset_name"] == "emails-v1"
+    # Measurements re-stamped — reachable under the new name, gone under the old.
+    assert [e["run_id"] for e in stores.archive.list_all("bk", dataset_name="emails-v1")] == ["r1"]
+    assert stores.archive.list_all("bk", dataset_name="emails") == []
+    assert result.repointed_campaigns == 1
+    assert result.restamped_measurements == 1
+
+    # Crash recovery — simulate a replace that versioned the data + wrote a
+    # marker but died before repointing. The next access heals it idempotently.
+    _commit_fake_dataset(stores, "notes")
+    _mint_campaign(stores, campaign_id="notes__c1", dataset_name="notes", cycle_id="cycle_bbbb0001")
+    stores.tenant_datasets.version_dataset("notes", "notes-v1")  # data moved…
+    mig_dir = stores.tenant_datasets.migrations_dir()
+    mig_dir.mkdir(parents=True, exist_ok=True)
+    (mig_dir / "crash.json").write_text(
+        json.dumps({"id": "crash", "from": "notes", "to": "notes-v1", "status": "pending"}),
+        encoding="utf-8",
+    )  # …but the campaign still points at the now-missing 'notes'.
+
+    recover_pending_replacements(stores=stores)
+
+    assert stores.campaigns.load_campaign("notes__c1").dataset_name == "notes-v1"  # type: ignore[union-attr]
+    assert json.loads((mig_dir / "crash.json").read_text())["status"] == "completed"
+
+
+# ===========================================================================
+# 10. Identity foundation gates (ADR-0002 Stage-0 + Stage-1)
+# ===========================================================================
+
+import inspect  # noqa: E402
+import os  # noqa: E402
+from typing import get_type_hints  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
+
+from promptpotter.domain.identity import SafeName, safe_name  # noqa: E402
+from promptpotter.infrastructure.identity import (  # noqa: E402
+    GitHubProviderClient,
+    GoogleProviderClient,
+    add_email,
+    derive_user_id,
+    list_emails,
+    remove_email,
+)
+from promptpotter.infrastructure.store import Stores  # noqa: E402
+from promptpotter.presentation.api.deps import resolve_identity  # noqa: E402
+from promptpotter.shared.errors import PotterError  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# SCIM 2.0 Core (RFC 7643) User-resource field subset we promise to mirror at
+# Stage 0 — `id` and `externalId` map to `user_id`; the IdentityContext layer
+# carries the OIDC-claim envelope (`claims`) and the auth-time capability set
+# (`capabilities`) alongside the tenant slice (`tenant_id`). Stage 1+ extends
+# this via the SCIM extension namespace, never by re-shaping these five.
+_SCIM_STAGE0_FIELDS = frozenset({"user_id", "tenant_id", "issuer", "claims", "capabilities"})
+
+
+def test_identity_seam_no_drift() -> None:
+    """Bundled assertion of identity-foundation no-drift gates #3, #4, #6."""
+    # Gate #3 — build_stores takes IdentityContext as first positional param.
+    sig = inspect.signature(build_stores)
+    params = list(sig.parameters.values())
+    assert params, "build_stores must take at least one parameter"
+    first = params[0]
+    assert first.name == "identity", f"first parameter must be 'identity', got {first.name!r}"
+    # ``from __future__ import annotations`` stringifies signatures — resolve via get_type_hints.
+    hints = get_type_hints(build_stores)
+    assert hints.get("identity") is IdentityContext, (
+        f"first parameter must be IdentityContext, got {hints.get('identity')!r}"
+    )
+
+    # Gate #4 — Stores.identity is the sole source of tenant scope. The
+    # convenience accessor Stores.tenant_id is a @property that delegates;
+    # there must be no independent ``tenant_id`` field on the dataclass.
+    field_names = {f.name for f in Stores.__dataclass_fields__.values()}
+    assert "identity" in field_names, "Stores must carry an IdentityContext field"
+    assert "tenant_id" not in field_names, (
+        "Stores.tenant_id must be derived from .identity (no independent field)"
+    )
+    assert isinstance(getattr(Stores, "tenant_id", None), property), (
+        "Stores.tenant_id must be a @property reading from .identity"
+    )
+
+    # Gate #6 — IdentityContext field names mirror the SCIM-mapped Stage-0
+    # surface verbatim. Placeholder until `vendor/schemas/scim/` lands; once
+    # the submodule is vendored, replace this set with a load of the SCIM Core
+    # JSON Schema field list.
+    ctx_fields = {f.name for f in IdentityContext.__dataclass_fields__.values()}
+    assert ctx_fields == _SCIM_STAGE0_FIELDS, (
+        f"IdentityContext field set drifted from SCIM Stage-0 map: "
+        f"got {sorted(ctx_fields)}, expected {sorted(_SCIM_STAGE0_FIELDS)}"
+    )
+
+    # And the Stage-0 default constructs cleanly + threads through build_stores.
+    default = default_identity()
+    assert isinstance(default.tenant_id, str)  # TenantId is NewType(str)
+    assert default.tenant_id == TenantId("default")
+    assert default.user_id == UserId("default")
+    assert default.issuer is None
+    assert default.capabilities == frozenset()
+
+    # safe_name guards path-segment use of identity slugs.
+    assert safe_name("default") == SafeName("default")
+    try:
+        safe_name("../etc/passwd")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("safe_name must reject path-traversal slugs")
+
+
+def test_stage1_identity_gates(monkeypatch, tmp_path: Path) -> None:
+    """Bundled assertion of Stage-1 no-drift gates #1, #2, #5."""
+    # Gate #5 — §0 names the Identity I/O kind. The architecture spec lists the
+    # five I/O kinds at the top of §0; the count + the literal "Identity" entry
+    # must both be present before any Stage-1 code lands.
+    arch = (REPO_ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
+    assert "Five I/O kinds" in arch, "§0 must declare five I/O kinds"
+    assert "Identity" in arch, "§0 must name the Identity I/O kind"
+
+    # Gate #1 — the closed provider set is declared as Google + GitHub. Adding
+    # a provider means writing a new module under `infrastructure/identity/`
+    # AND wiring it into `bundle.build_identity_bundle` + the auth router;
+    # this assertion fails until then.
+    assert GoogleProviderClient.__module__.endswith("identity.google")
+    assert GitHubProviderClient.__module__.endswith("identity.github")
+
+    # Gate #2 — no JWT type appears past the identity-infrastructure
+    # boundary. The verifier (`infrastructure/identity/verifier.py`) is the
+    # ONLY module permitted to import a JWS library. Downstream code sees
+    # `IdentityContext` exclusively.
+    code_root = REPO_ROOT / "promptpotter"
+    allowed = {
+        code_root / "infrastructure" / "identity" / "verifier.py",
+        code_root / "infrastructure" / "identity" / "jwks.py",
+    }
+    forbidden_imports = ("import jwt", "from jwt", "import jose", "from jose")
+    for path in code_root.rglob("*.py"):
+        if path in allowed:
             continue
-        if not any(isinstance(s, ast.Continue) for s in stmt.body):
-            continue
-        if not _calls_sanctioned(stmt):
-            offenders.append(
-                f"line {stmt.lineno}: ``continue`` without close_round/post_round call"
+        text = path.read_text(encoding="utf-8")
+        for needle in forbidden_imports:
+            assert needle not in text, (
+                f"JWT import past middleware boundary in {path.relative_to(REPO_ROOT)} "
+                f"(found {needle!r}); only verifier.py / jwks.py may touch JWS"
             )
 
-    assert not offenders, "round-loop branches must route through close_round:\n  " + "\n  ".join(
-        offenders
+    # derive_user_id is deterministic per (iss, sub) and produces a
+    # safe_name-shaped slug.
+    uid1 = derive_user_id("https://accounts.google.com", "1234567890")
+    uid2 = derive_user_id("https://accounts.google.com", "1234567890")
+    uid3 = derive_user_id("https://github.com", "1234567890")
+    assert uid1 == uid2, "derive_user_id must be deterministic"
+    assert uid1 != uid3, "same sub across different iss must yield different UserIds"
+    assert safe_name(str(uid1)) == SafeName(str(uid1))
+
+    # PROMPTPOTTER_AUTH=off escape hatch — resolve_identity resolves the SAME
+    # way the CLI does (registered developer via default-claim marker, else
+    # anonymous default), so the auth-off web surface and terminal runs share
+    # one workspace. Parity is the contract, not a fixed value: both calls read
+    # the same marker, so this holds regardless of local registration state.
+    from promptpotter.infrastructure.identity.migration import registered_or_default_identity
+
+    monkeypatch.setenv("PROMPTPOTTER_AUTH", "off")
+    request = MagicMock()
+    request.state.identity_ctx = None
+    ctx = resolve_identity(request)
+    assert ctx == registered_or_default_identity(), (
+        "PROMPTPOTTER_AUTH=off must resolve identically to the CLI "
+        "(registered_or_default_identity), not anonymous default"
+    )
+
+    # When the env var is unset and no session is bound, resolve_identity
+    # raises a 401 — that's the unauthenticated path. PotterError carries the
+    # status on ``http_status`` (the one taxonomy → one mapping seam).
+    monkeypatch.delenv("PROMPTPOTTER_AUTH", raising=False)
+    try:
+        resolve_identity(request)
+    except PotterError as exc:
+        assert exc.http_status == 401
+        assert exc.code == "unauthenticated"
+    else:
+        raise AssertionError("resolve_identity must raise 401 when no session bound")
+
+    # Sanity — gate #2 file allowlist references files that actually exist.
+    for path in allowed:
+        assert path.is_file(), f"gate #2 allowlist references missing file: {path}"
+    _ = os  # used implicitly by monkeypatch
+
+    # Allowlist admin-write facet (ADR-0004) — add/remove/list round-trip,
+    # normalization, idempotency, atomic create, and one audit line per change.
+    al = tmp_path / "identity" / "allowlist.json"
+    audit = tmp_path / "identity" / "allowlist_audit.jsonl"
+    assert list_emails(al) == []  # absent file → empty
+    assert add_email(al, "  Alice@Example.com ", actor="t", audit_path=audit) == [
+        "alice@example.com"
+    ]
+    assert al.is_file()  # parent dir + file created atomically
+    add_email(al, "bob@example.com", actor="t", audit_path=audit)
+    assert list_emails(al) == ["alice@example.com", "bob@example.com"]
+    add_email(al, "alice@example.com", actor="t", audit_path=audit)  # idempotent
+    assert list_emails(al) == ["alice@example.com", "bob@example.com"]
+    assert remove_email(al, "ALICE@example.com", actor="t", audit_path=audit) == ["bob@example.com"]
+    remove_email(al, "nobody@example.com", actor="t", audit_path=audit)  # no-op
+    assert list_emails(al) == ["bob@example.com"]
+    # 5 mutating calls above → 5 audit lines (no-ops still record the attempt).
+    assert len(audit.read_text(encoding="utf-8").strip().splitlines()) == 5
+
+
+def test_registered_developer_resolution(tmp_path: Path) -> None:
+    """CLI identity: explicit --tenant > registered developer (claim marker) > default.
+
+    Guards the one-workspace invariant — once a developer has signed in (the
+    default-claim marker records their user_id), terminal runs resolve to that
+    tenant instead of recreating an orphaned anonymous ``projects/default/``.
+    """
+    from promptpotter.infrastructure.identity import (
+        registered_or_default_identity,
+        registered_user_id,
+    )
+    from promptpotter.shared.identity import identity_for_user
+
+    marker = tmp_path / "default_claimed.json"
+    assert registered_user_id(marker) is None  # never registered
+    marker.write_text(json.dumps({"user_id": "default"}), encoding="utf-8")
+    assert registered_user_id(marker) is None  # literal "default" is not a registration
+    marker.write_text(json.dumps({"user_id": "197ee2cf2aea7b14"}), encoding="utf-8")
+    assert registered_user_id(marker) == "197ee2cf2aea7b14"
+
+    # Explicit --tenant always wins, no marker read.
+    assert registered_or_default_identity("acme").tenant_id == TenantId(safe_name("acme"))
+
+    # A registered operator's identity is tenant == user (one workspace).
+    ident = identity_for_user("197ee2cf2aea7b14")
+    assert ident.tenant_id == TenantId("197ee2cf2aea7b14")
+    assert ident.user_id == UserId("197ee2cf2aea7b14")
+
+    # Web capability pinning (oidc.py) rides the SAME marker: BENCHMARKS_READ_CAP
+    # is granted to the registered developer's session and to NO other identity.
+    # A first-time signup never sees the install benchmarks — the bleed-through
+    # the M13 ingest arc closed must not reopen via a process-wide admin switch
+    # (ADR-0004 pinned-operator model, not a blanket grant).
+    from promptpotter.presentation.api.middleware.oidc import _session_capabilities
+    from promptpotter.shared.identity import BENCHMARKS_READ_CAP
+
+    bundle = MagicMock()
+    bundle.paths.default_claim_marker = marker  # marker == registered 197ee2cf…
+    assert _session_capabilities("197ee2cf2aea7b14", bundle) == frozenset({BENCHMARKS_READ_CAP})
+    assert _session_capabilities("a_brand_new_signup", bundle) == frozenset()
+
+
+# ===========================================================================
+# 11. Campaign lifecycle primitive
+# ===========================================================================
+
+
+def _mint_lifecycle(
+    store_campaigns: object, *, campaign_id: str, owner: str, lifecycle: str = "active"
+) -> None:
+    now = datetime.now(UTC).isoformat()
+    store_campaigns.create_campaign(  # type: ignore[attr-defined]
+        Campaign(
+            campaign_id=campaign_id,
+            dataset_name="aime",
+            created_at=now,
+            root_cycle_id="cycle_deadbeef0001",
+            owner_user_id=owner,
+            lifecycle_status=lifecycle,  # type: ignore[arg-type]
+            lifecycle_changed_at=now,
+        )
     )
 
 
-def test_every_injection_renderer_is_wired() -> None:
-    """Every INJECTIONS slot resolves to a renderer; every ``_r_*`` renderer is wired."""
-    import importlib
-    import inspect
-    import pkgutil
+def test_campaign_lifecycle_contract(tmp_path: Path) -> None:
+    """Owner-binding + lifecycle filter + soft-mark + cross-user invisibility."""
+    alice = IdentityContext(user_id=UserId("alice"), tenant_id=TenantId("alice"))
+    bob = IdentityContext(user_id=UserId("bob"), tenant_id=TenantId("bob"))
 
-    from promptpotter.application.optimization.dispatch.hub import injections as injpkg
-    from promptpotter.application.optimization.dispatch.hub.injections.registry import (
-        INJECTIONS,
+    alice_store = build_stores(alice, projects_root=tmp_path)
+    bob_store = build_stores(bob, projects_root=tmp_path)
+
+    # Mint two for alice (one active, one archived) + one for bob.
+    _mint_lifecycle(alice_store.campaigns, campaign_id="aime__alice1", owner="alice")
+    _mint_lifecycle(
+        alice_store.campaigns, campaign_id="aime__alice2", owner="alice", lifecycle="archived"
+    )
+    _mint_lifecycle(bob_store.campaigns, campaign_id="aime__bob1", owner="bob")
+
+    # Default filter (lifecycle="active", owner-scoped) — alice sees only her active one.
+    alice_active = alice_store.campaigns.list_campaigns(lifecycle="active", owner_user_id="alice")
+    assert {c.campaign_id for c in alice_active} == {"aime__alice1"}
+
+    # lifecycle="archived" surfaces the hidden one.
+    alice_archived = alice_store.campaigns.list_campaigns(
+        lifecycle="archived", owner_user_id="alice"
+    )
+    assert {c.campaign_id for c in alice_archived} == {"aime__alice2"}
+
+    # lifecycle="all" surfaces both — soft-mark, not delete.
+    alice_all = alice_store.campaigns.list_campaigns(lifecycle="all", owner_user_id="alice")
+    assert {c.campaign_id for c in alice_all} == {"aime__alice1", "aime__alice2"}
+
+    # Cross-user invisibility — alice's owner filter never returns bob's campaign,
+    # even though bob's lives under his own tenant_id partition.
+    leaked = [c for c in alice_all if c.owner_user_id != "alice"]
+    assert not leaked, f"cross-user leak: {leaked}"
+
+    # Soft-mark transition — archive flips lifecycle_status + bumps changed_at.
+    before_at = alice_store.campaigns.load_campaign("aime__alice1").lifecycle_changed_at  # type: ignore[union-attr]
+    alice_store.campaigns.mark_campaign_lifecycle(
+        "aime__alice1",
+        lifecycle_status="archived",
+        lifecycle_changed_at=datetime.now(UTC).isoformat(),
+        lifecycle_reason="cluttering sidebar",
+    )
+    after = alice_store.campaigns.load_campaign("aime__alice1")
+    assert after is not None
+    assert after.lifecycle_status == "archived"
+    assert after.lifecycle_reason == "cluttering sidebar"
+    assert after.lifecycle_changed_at != before_at
+
+    # Unarchive — same writer, status flips back to "active".
+    alice_store.campaigns.mark_campaign_lifecycle(
+        "aime__alice1",
+        lifecycle_status="active",
+        lifecycle_changed_at=datetime.now(UTC).isoformat(),
+    )
+    restored = alice_store.campaigns.load_campaign("aime__alice1")
+    assert restored is not None
+    assert restored.lifecycle_status == "active"
+
+    # Physical artifacts survive — campaign.json + cycle dir are still on disk
+    # after any number of soft-marks. (Soft-mark ≠ delete; measurements survive.)
+    alice_store.campaigns.mark_campaign_lifecycle(
+        "aime__alice1",
+        lifecycle_status="deleted",
+        lifecycle_changed_at=datetime.now(UTC).isoformat(),
+    )
+    manifest = tmp_path / "alice" / "campaigns" / "aime__alice1" / "campaign.json"
+    assert manifest.exists(), "soft-deletion must not remove campaign.json"
+
+
+# ===========================================================================
+# 12. Per-user quota gates
+# ===========================================================================
+
+from promptpotter.application.jobs import (  # noqa: E402
+    JobRegistry,
+    QuotaExceededError,
+    check_launch_quotas,
+    effective_spend_cap_usd,
+)
+from promptpotter.application.jobs.quota import reset_rate_buckets  # noqa: E402
+from promptpotter.domain.run_records import TokenUsageRecord  # noqa: E402
+from promptpotter.infrastructure.store.user_store import User  # noqa: E402
+
+
+def _mk_user(**overrides: object) -> User:
+    base: dict[str, object] = {
+        "user_id": "u_alice",
+        "tenant_id": "u_alice",
+        "email": None,
+        "spend_budget_usd_daily": None,
+        "max_concurrent_cycles": 2,
+        "max_campaigns_per_day": 10,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    base.update(overrides)
+    return User.model_validate(base)
+
+
+def test_quota_contract(tmp_path: Path) -> None:
+    """All four Phase-5 gates fire on a single user; spend caps compose."""
+    reset_rate_buckets()
+    jobs_dir = tmp_path / "jobs"
+    registry = JobRegistry(jobs_dir)
+
+    # --- Gate 1: concurrent-cycles ceiling ------------------------------
+    user_concurrent = _mk_user(max_concurrent_cycles=2)
+    for i in range(2):
+        job = registry.create(
+            user_id=user_concurrent.user_id,
+            campaign_id=f"camp-{i}",
+            cycle_id=f"cycle_{i:012x}",
+            dataset_name="aime",
+        )
+        registry.mark_started(job.job_id)
+    with pytest.raises(QuotaExceededError) as exc:
+        # ``rate_limited=False`` isolates concurrent ceiling from the rate bucket.
+        check_launch_quotas(user=user_concurrent, job_registry=registry, rate_limited=False)
+    assert exc.value.code == "quota_exceeded"
+    assert "Concurrent-cycles" in str(exc.value)
+
+    # --- Gate 2: campaigns-per-day ceiling -------------------------------
+    daily_dir = tmp_path / "jobs_daily"
+    daily_registry = JobRegistry(daily_dir)
+    user_daily = _mk_user(user_id="u_daily", tenant_id="u_daily", max_campaigns_per_day=3)
+    for i in range(3):
+        job = daily_registry.create(
+            user_id=user_daily.user_id,
+            campaign_id=f"d-{i}",
+            cycle_id=f"cycle_d{i:011x}",
+            dataset_name="aime",
+        )
+        # Finish each so concurrent-cycles ceiling stays clear.
+        daily_registry.mark_finished(job.job_id, status="completed")
+    with pytest.raises(QuotaExceededError) as exc:
+        check_launch_quotas(user=user_daily, job_registry=daily_registry, rate_limited=True)
+    assert exc.value.code == "quota_exceeded"
+    assert "Daily campaigns" in str(exc.value)
+
+    # --- Gate 3: rate-limit bucket --------------------------------------
+    reset_rate_buckets()
+    fresh_dir = tmp_path / "jobs_rate"
+    fresh_registry = JobRegistry(fresh_dir)
+    user_rate = _mk_user(user_id="u_rate", tenant_id="u_rate", max_campaigns_per_day=100)
+    # First 5 admits drain the burst capacity; 6th raises ``rate_limited``.
+    for _ in range(5):
+        check_launch_quotas(user=user_rate, job_registry=fresh_registry, rate_limited=True)
+    with pytest.raises(QuotaExceededError) as exc:
+        check_launch_quotas(user=user_rate, job_registry=fresh_registry, rate_limited=True)
+    assert exc.value.code == "rate_limited"
+
+    # --- Gate 4: spend-cap composition -----------------------------------
+    # User's daily cap is $1.00; today's per-cycle ledger carries $0.40 of token
+    # spend. Per-cycle request of $0.80 collapses to remaining $0.60. Spend is
+    # read from the canonical ledger (TokenUsageRecord), not dashboard.json.
+    user_spend = _mk_user(
+        user_id="u_spend",
+        tenant_id="u_spend",
+        spend_budget_usd_daily=1.0,
+    )
+    spend_registry = JobRegistry(tmp_path / "jobs_spend")
+    identity = IdentityContext(user_id=UserId("u_spend"), tenant_id=TenantId("u_spend"))
+    stores = build_stores(identity, projects_root=tmp_path / "projects_spend")
+    # Plant a job + a token-usage record on its per-cycle ledger.
+    job = spend_registry.create(
+        user_id=user_spend.user_id,
+        campaign_id="cmp",
+        cycle_id="cycle_abcdef012345",
+        dataset_name="aime",
+    )
+    runtime_dir = stores.campaigns.cycle_dir(job.campaign_id, job.cycle_id) / ".runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    usage = TokenUsageRecord(
+        kind="backend", node="x", input_tokens=0, output_tokens=0, cost_usd=0.40
+    )
+    (runtime_dir / "ledger.jsonl").write_text(usage.model_dump_json() + "\n", encoding="utf-8")
+    cap = effective_spend_cap_usd(
+        requested_cap_usd=0.80,
+        user=user_spend,
+        job_registry=spend_registry,
+        stores=stores,
+    )
+    assert cap is not None
+    assert cap == pytest.approx(0.60)
+    # No request → daily-remaining alone.
+    cap_unset = effective_spend_cap_usd(
+        requested_cap_usd=None,
+        user=user_spend,
+        job_registry=spend_registry,
+        stores=stores,
+    )
+    assert cap_unset == pytest.approx(0.60)
+    # No daily cap configured → request passes through.
+    assert (
+        effective_spend_cap_usd(
+            requested_cap_usd=2.50,
+            user=_mk_user(),
+            job_registry=spend_registry,
+            stores=stores,
+        )
+        == 2.50
     )
 
-    for key, inj in INJECTIONS.items():
-        assert inj.name == key, f"INJECTIONS['{key}'] has mismatched name {inj.name!r}"
-        assert callable(inj.render), f"INJECTIONS['{key}'].render is not callable"
 
-    wired = {inj.render for inj in INJECTIONS.values()}
-    orphans: list[str] = []
-    for mod_info in pkgutil.iter_modules(injpkg.__path__):
-        mod = importlib.import_module(f"{injpkg.__name__}.{mod_info.name}")
-        for name, fn in inspect.getmembers(mod, inspect.isfunction):
-            if name.startswith("_r_") and fn.__module__ == mod.__name__ and fn not in wired:
-                orphans.append(f"{mod.__name__}.{name}")
-    assert not orphans, (
-        "Orphaned injection renderers — defined but never wired into INJECTIONS:\n  "
-        + "\n  ".join(sorted(orphans))
+# ===========================================================================
+# 13. Event stream (Profile A)
+# ===========================================================================
+
+import asyncio  # noqa: E402
+import tempfile  # noqa: E402
+
+from promptpotter.domain.projection_envelope import ProjectionEnvelope  # noqa: E402
+from promptpotter.infrastructure.projections import EventStreamView  # noqa: E402
+
+
+def test_event_stream_view_contract() -> None:
+    """Bundled assertion: snapshot offset capture, sequence monotonicity,
+    fan-out to multiple subscribers, drain closes everyone, heartbeat ticks."""
+
+    async def _body() -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cycle_root = Path(tmp) / "cycle_abc123"
+            cycle_root.mkdir()
+            # Pre-seed dashboard.json so the snapshot frame has real content;
+            # the view reads its own cycle dir's dashboard.json (per-cycle).
+            (cycle_root / "dashboard.json").write_text(
+                json.dumps({"campaign_id": "x", "rounds": []}),
+                encoding="utf-8",
+            )
+            view = EventStreamView(
+                CycleDir(cycle_root),
+                cycle_id="cycle_abc123",
+                initial_offset=42,
+            )
+
+            # --- Subscribe captures the initial offset (resume semantics) ---
+            sub_a = view.subscribe()
+            assert sub_a.start_offset == 42, (
+                f"snapshot offset must mirror ledger.next_offset at subscribe, "
+                f"got {sub_a.start_offset}"
+            )
+            assert len(view._subscribers) == 1
+
+            # --- Snapshot payload reflects dashboard.json + snapshot_at_offset ---
+            snapshot_payload = view.snapshot_payload()
+            assert snapshot_payload["snapshot_at_offset"] == 42
+            assert snapshot_payload["campaign_id"] == "x"
+
+            # --- Multi-subscriber fan-out ---
+            sub_b = view.subscribe()
+            assert sub_b.start_offset == 42
+            assert len(view._subscribers) == 2
+
+            # --- Live tail: feed two records, both subscribers get both ---
+            sub_a.attach_loop(asyncio.get_running_loop())
+            sub_b.attach_loop(asyncio.get_running_loop())
+            view.on_record(
+                PhaseRecord(phase="round", event="start", round=1),
+                offset=42,
+            )
+            view.on_record(
+                TokenUsageRecord(
+                    kind="optimizer",
+                    node="l1_generate",
+                    input_tokens=100,
+                    output_tokens=50,
+                ),
+                offset=43,
+            )
+
+            # next_offset must advance past the last broadcast record
+            assert view.next_offset == 44
+
+            # Drain each subscriber's queue — strict order + sequence + kind
+            received_a: list[ProjectionEnvelope] = []
+            received_b: list[ProjectionEnvelope] = []
+            for _ in range(2):
+                received_a.append(await asyncio.wait_for(sub_a._queue.get(), timeout=1.0))
+                received_b.append(await asyncio.wait_for(sub_b._queue.get(), timeout=1.0))
+
+            for envs in (received_a, received_b):
+                assert [e.kind for e in envs] == ["phase", "token_usage"]
+                assert [e.sequence for e in envs] == [42, 43]
+                assert all(e.cycle_id == "cycle_abc123" for e in envs)
+
+            # --- Heartbeat: when idle, stream yields None per cadence ---
+            heartbeat_seen = False
+
+            async def _watch_heartbeat() -> None:
+                nonlocal heartbeat_seen
+                async for frame in sub_a.stream(heartbeat_interval_s=0.05):
+                    if frame is None:
+                        heartbeat_seen = True
+                        return
+
+            await asyncio.wait_for(_watch_heartbeat(), timeout=1.0)
+            assert heartbeat_seen, "idle subscriber must yield None for heartbeat"
+
+            # --- Drain closes every subscriber + clears registry-side fan-out ---
+            view.drain()
+            assert sub_a.closed and sub_b.closed
+            assert len(view._subscribers) == 0
+
+            # Post-drain publishes are no-ops (no exception)
+            view.on_record(
+                PhaseRecord(phase="round", event="complete", round=1),
+                offset=44,
+            )
+
+    asyncio.run(_body())
+
+
+# ===========================================================================
+# 14. Run-phase derivation + StopReason classification
+# ===========================================================================
+
+import time  # noqa: E402
+
+from promptpotter.domain.phases import (  # noqa: E402
+    STOP_REASON_INFO,
+    RunPhase,
+    StopOutcome,
+    StopReason,
+    stop_reason_outcome,
+)
+from promptpotter.infrastructure.runtime_flags import derive_run_phase  # noqa: E402
+
+# Mirror of the sole outcome→JobStatus bridge (application/jobs/launcher.py); if
+# that map drifts from this, the cross-surface guarantee is broken.
+_JOB_STATUS_BY_OUTCOME = {
+    StopOutcome.SUCCESS: "completed",
+    StopOutcome.HALTED: "stopped",
+    StopOutcome.FAILED: "failed",
+}
+
+
+def _fresh_dashboard(cycle_dir: Path, *, stale: bool) -> None:
+    dash = cycle_dir / "dashboard.json"
+    dash.write_text("{}", encoding="utf-8")
+    if stale:
+        old = time.time() - 10_000
+        os.utime(dash, (old, old))
+
+
+def test_derive_run_phase_priority(tmp_path: Path) -> None:
+    """terminal > stopping > paused > running > detached, and freshness is
+    consulted ONLY to split running from detached — never to decide paused."""
+    runtime = tmp_path / ".runtime"
+    runtime.mkdir()
+
+    # Terminal wins over every live signal, even with a fresh file + flags set.
+    _fresh_dashboard(tmp_path, stale=False)
+    (runtime / "pause.flag").write_text("x", encoding="utf-8")
+    (runtime / "stop.flag").write_text("x", encoding="utf-8")
+    assert derive_run_phase(tmp_path, is_terminal=True) is RunPhase.TERMINAL
+
+    # Stop-intent beats pause (terminal-intent wins during a pause).
+    assert derive_run_phase(tmp_path, is_terminal=False) is RunPhase.STOPPING
+
+    # Pause with no stop — the reported bug: a paused run (fresh file) must read
+    # paused, not running.
+    (runtime / "stop.flag").unlink()
+    assert derive_run_phase(tmp_path, is_terminal=False) is RunPhase.PAUSED
+
+    # No flags, fresh producer → running.
+    (runtime / "pause.flag").unlink()
+    assert derive_run_phase(tmp_path, is_terminal=False) is RunPhase.RUNNING
+
+    # No flags, stale producer (died without a terminal record) → detached.
+    _fresh_dashboard(tmp_path, stale=True)
+    assert derive_run_phase(tmp_path, is_terminal=False) is RunPhase.DETACHED
+
+
+def test_stop_reason_outcome_is_total_and_consistent() -> None:
+    """Every StopReason classifies, and the one outcome table drives JobStatus —
+    so optimizer_timeout can't be "failed" on one surface and "completed" on
+    another (the pre-unification split)."""
+    assert set(STOP_REASON_INFO) == set(StopReason)
+    for reason in StopReason:
+        outcome = stop_reason_outcome(reason)
+        assert outcome in _JOB_STATUS_BY_OUTCOME  # total mapping, no fallthrough
+
+    assert stop_reason_outcome(StopReason.OPTIMIZER_TIMEOUT) is StopOutcome.FAILED
+    assert stop_reason_outcome(StopReason.INTERRUPTED) is StopOutcome.HALTED
+    assert stop_reason_outcome(StopReason.PERFECT) is StopOutcome.SUCCESS
+
+
+# ===========================================================================
+# 15. Presentation view round-trip + projection routing
+# ===========================================================================
+
+from dataclasses import replace  # noqa: E402
+
+from promptpotter.domain.phases import PhaseEvent  # noqa: E402
+from promptpotter.infrastructure.projections import LiveDashboardView  # noqa: E402
+from promptpotter.presentation.views.view_ingress import from_phase_event  # noqa: E402
+from promptpotter.presentation.views.view_models import RoundCompleteView, ViewContext  # noqa: E402
+from promptpotter.presentation.writers import from_disk_round  # noqa: E402
+from promptpotter.shared.statistics import wilson_ci  # noqa: E402
+
+
+def _candidate_score_dict(
+    *,
+    candidate_id: str,
+    label: str,
+    accuracy: float,
+    composite_fitness: float,
+    hits: int,
+    total: int,
+    aborted: bool = False,
+) -> dict:
+    """Mirror what ``ScoredCandidate.model_dump`` writes into ``round_data.candidate_scores``."""
+    ci_lo, ci_hi = wilson_ci(hits, total)
+    return {
+        "candidate_id": candidate_id,
+        "label": label,
+        "changes_description": "",
+        "pipeline_params_override": None,
+        "accuracy": accuracy,
+        "composite_fitness": composite_fitness,
+        "hits": hits,
+        "total": total,
+        "ci_lo": ci_lo,
+        "ci_hi": ci_hi,
+        "evaluators": {"accuracy": accuracy},
+        "escalation_aborted": aborted,
+        "elimination_stopped": False,
+        "scored_samples": total,
+        "expected_samples": total,
+        "invalid": False,
+        "resumed_from_cache": False,
+        "validation_failures": [],
+        "runtime_failures": [],
+        "elimination_context": {},
+    }
+
+
+def test_round_complete_view_roundtrip() -> None:
+    """``from_phase_event(e) == from_disk(write_then_load(e))`` on
+    ``RoundCompleteView`` — the named correctness invariant of the unification."""
+    origin_acc = 0.30
+    winner_acc = 0.55
+    winner_hits = 11
+    winner_total = 20
+    winner_composite_fitness = 0.60
+
+    # Three candidates in round 1; the second one wins.
+    # Labels follow the canonical CN.M scheme (round=1, idx=0/1/2 → C1.1/C1.2/C1.3).
+    candidate_scores = [
+        {
+            "candidate_id": "cand_0",
+            "label": "C1.1",
+            "accuracy": 0.40,
+            "composite_fitness": 0.45,
+            "hits": 8,
+            "total": 20,
+            "escalation_aborted": False,
+        },
+        {
+            "candidate_id": "cand_1",
+            "label": "C1.2",
+            "accuracy": winner_acc,
+            "composite_fitness": winner_composite_fitness,
+            "hits": winner_hits,
+            "total": winner_total,
+            "escalation_aborted": False,
+        },
+        {
+            "candidate_id": "cand_2",
+            "label": "C1.3",
+            "accuracy": 0.20,
+            "composite_fitness": 0.25,
+            "hits": 4,
+            "total": 20,
+            "escalation_aborted": False,
+        },
+    ]
+
+    # Live path: build a phase event identical to what l1.py emits at
+    # L1_SCORE:exit, run from_phase_event with a fresh ctx.
+    ctx = ViewContext(
+        round_num=1,
+        origin_accuracy=origin_acc,
+        origin_composite_fitness=0.40,
+        composite_fitness_formula="0.7*acc + 0.3*recall",
+        composite_fitness_formula_short="0.7*A + 0.3*R",
+    )
+    event = PhaseEvent(
+        phase="l1_score",
+        event="exit",
+        round=1,
+        data={
+            "winner_label": "C1.2",
+            "winner_accuracy": winner_acc,
+            "winner_composite_fitness": winner_composite_fitness,
+            "winner_evaluators": {"accuracy": winner_acc},
+            "improved": True,
+            "candidate_scores": candidate_scores,
+        },
+    )
+    live_view = from_phase_event(event, ctx)
+    assert isinstance(live_view, RoundCompleteView)
+
+    # Disk path: build a round_data dict shaped like ``RoundResult.model_dump()``
+    # for the same round, then run from_disk_round.
+    round_data = {
+        "round_id": "round_1",
+        "round": 1,
+        "label": "round_1",
+        "accuracy": winner_acc,
+        "composite_fitness": winner_composite_fitness,
+        "hits": winner_hits,
+        "total": winner_total,
+        "improved": True,
+        "p_value": live_view.p_value,
+        "origin_accuracy": origin_acc,
+        "evaluators": {"accuracy": winner_acc},
+        "candidate_scores": [
+            _candidate_score_dict(
+                candidate_id=f"cand_{i}",
+                label=cs["label"],
+                accuracy=cs["accuracy"],
+                composite_fitness=cs["composite_fitness"],
+                hits=cs["hits"],
+                total=cs["total"],
+            )
+            for i, cs in enumerate(candidate_scores)
+        ],
+        "critique": {},
+    }
+    disk_view = from_disk_round(
+        round_data,
+        composite_fitness_formula=ctx.composite_fitness_formula,
+        composite_fitness_formula_short=ctx.composite_fitness_formula_short,
+        origin_composite_fitness=ctx.origin_composite_fitness,
     )
 
+    # The live view carries an in-memory ``next_action`` flag that the
+    # runner uses for control flow but never persists. Strip it from
+    # the live view so the comparison covers only the persisted contract.
+    live_view = replace(live_view, next_action="")
 
-def test_llm_calls_funnel_through_dispatch() -> None:
-    """Raw ``.chat()`` calls live only in ``dispatch/llm_call/call.py`` (pre-flight gate Q8)."""
-    allowed = "application/optimization/dispatch/llm_call/call.py"
-    offenders: list[str] = []
-    for src_path in ROOT.rglob("*.py"):
-        rel = src_path.relative_to(ROOT).as_posix()
-        if rel == allowed:
-            continue
-        tree = ast.parse(src_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "chat"
-            ):
-                offenders.append(f"{rel}:{node.lineno}")
-    assert not offenders, "Direct ``.chat()`` outside dispatch/llm_call/call.py:\n  " + "\n  ".join(
-        offenders
+    assert live_view == disk_view
+
+
+def test_round_complete_view_no_improvement() -> None:
+    """Round trip stays consistent when no candidate beats origin."""
+    origin_acc = 0.50
+    candidate_scores = [
+        {
+            "candidate_id": "cand_0",
+            "label": "C1.1",
+            "accuracy": 0.40,
+            "composite_fitness": 0.42,
+            "hits": 8,
+            "total": 20,
+            "escalation_aborted": False,
+        },
+    ]
+    ctx = ViewContext(round_num=1, origin_accuracy=origin_acc)
+    event = PhaseEvent(
+        phase="l1_score",
+        event="exit",
+        round=1,
+        data={
+            "winner_label": "C1.1",
+            "winner_accuracy": 0.40,
+            "winner_composite_fitness": 0.42,
+            "winner_evaluators": {},
+            "improved": False,
+            "candidate_scores": candidate_scores,
+        },
     )
+    live_view = from_phase_event(event, ctx)
+    assert isinstance(live_view, RoundCompleteView)
+
+    round_data = {
+        "round": 1,
+        "accuracy": 0.40,
+        "composite_fitness": 0.42,
+        "hits": 8,
+        "total": 20,
+        "improved": False,
+        "p_value": None,
+        "origin_accuracy": origin_acc,
+        "evaluators": {},
+        "candidate_scores": [
+            _candidate_score_dict(
+                candidate_id="cand_0",
+                label="C1.1",
+                accuracy=0.40,
+                composite_fitness=0.42,
+                hits=8,
+                total=20,
+            )
+        ],
+        "critique": {},
+    }
+    disk_view = from_disk_round(round_data)
+
+    live_view = replace(live_view, next_action="")
+
+    # Delta now reflects the true gap vs origin even when ``improved=False``
+    # — the renderer surfaces it on the ``✗ NOT PROMOTED`` path so the
+    # operator sees the actual difference. Round-trip parity holds: both
+    # live and disk views compute the gap the same way.
+    assert live_view.improved is False
+    assert live_view.delta == pytest.approx(-0.10)
+    assert live_view.improved_reason is None
+    assert live_view == disk_view
 
 
-def test_pipeline_params_rejects_flat_param_map() -> None:
-    """``JobSearchPoint.pipeline_params`` is nested-by-node ⇒ flat ``{param: value}`` rejected."""
-    from pydantic import ValidationError
+def test_live_dashboard_binds_to_cycle_dir(tmp_path: Path) -> None:
+    """The live dashboard binds to the cycle's own dir — one
+    ``dashboard.json`` per cycle (root, fork, sweep, diag)."""
+    cycle_dir = tmp_path / "campaigns" / "ds__abc123abc123" / "cycles" / "cycle_abc123abc123"
+    cycle_dir.mkdir(parents=True)
+    session_dir = tmp_path / "sessions" / "s_test"
 
-    from promptpotter.domain.search_point import JobSearchPoint
+    proj = LiveDashboardView(
+        CycleDir(cycle_dir),
+        session_dir,
+        campaign_id="ds__abc123abc123",
+        cycle_id="cycle_abc123abc123",
+        session_id="s_test",
+        l1_patience=3,
+        n_variants=5,
+        sp_budget_ttest=20,
+    )
+    assert proj.state_path == cycle_dir / "dashboard.json"
 
-    JobSearchPoint(pipeline_params={"llm_only": {"model": "x", "temperature": 0.1}})
-    JobSearchPoint(pipeline_params={"steps": ["llm_ranking"], "llm_ranking": {"prompt": "x"}})
-    JobSearchPoint(pipeline_params={})
-    JobSearchPoint(pipeline_params=None)
 
-    with pytest.raises(ValidationError):
-        JobSearchPoint(pipeline_params={"model": "x", "temperature": 0.1})
+def test_audit_trail_rejects_non_rounds_path(tmp_path: Path) -> None:
+    """A rounds_dir must terminate in ``.runtime/cache/rounds`` — anything else is ad-hoc routing."""
+    bad = tmp_path / "campaigns" / "cyc1"
+    bad.mkdir(parents=True)
+    with pytest.raises(ValueError, match=r"\.runtime/cache/rounds"):
+        AuditTrailView(bad)
+
+
+def test_audit_trail_from_cycle_dir_derives_subpath(tmp_path: Path) -> None:
+    """The standard factory derives ``.runtime/cache/rounds`` from a cycle dir."""
+    cycle_dir = tmp_path / "campaigns" / "cyc1"
+    cycle_dir.mkdir(parents=True)
+    proj = AuditTrailView.from_cycle_dir(CycleDir(cycle_dir))
+    assert proj.rounds_dir == cycle_dir / ".runtime" / "cache" / "rounds"
+
+
+def test_audit_trail_fork_dir_lands_under_fork(tmp_path: Path) -> None:
+    """A fork's audit projection writes under its own cycle dir.
+
+    Forks live flat under ``campaigns/{campaign_id}/cycles/`` — the
+    fork's audit cache must land in the fork's own dir, never a sibling's.
+    """
+    cycles_dir = tmp_path / "campaigns" / "ds__20260101-000000" / "cycles"
+    root_dir = cycles_dir / "cycle_root_xyz"
+    fork_dir = cycles_dir / "cycle_root_xyz_fork_abc"
+    fork_dir.mkdir(parents=True)
+    root_dir.mkdir(parents=True)
+    proj = AuditTrailView.from_cycle_dir(CycleDir(fork_dir))
+    assert proj.rounds_dir == fork_dir / ".runtime" / "cache" / "rounds"
+    assert root_dir not in proj.rounds_dir.parents
+
+
+def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
+    """PhaseRecord('round', 'enter')/'complete' from a ledger drives the recorder lifecycle.
+
+    PhaseRecord 3 contract: an AuditTrailView bound to the ledger MUST
+    react to round-boundary phase records — ``enter`` opens a fresh
+    round, ``complete`` flushes ``round_NNNN.json`` to disk. Other
+    record types are ignored at this projection's scope.
+    """
+    cycle_dir = tmp_path / "campaigns" / "cyc1"
+    cycle_dir.mkdir(parents=True)
+    proj = AuditTrailView.from_cycle_dir(CycleDir(cycle_dir))
+
+    # Record an LLMCallRecord so flush has state to write.
+    proj.on_record(PhaseRecord(phase="round", event="enter", round=4), 0)
+    proj.on_record(
+        LLMCallRecord(
+            node="l1_generate", round=4, payload={"type": "l1_generate", "response": "ok"}
+        ),
+        1,
+    )
+    # An unrelated ResumeCheckpointRecord must not crash or trigger a flush.
+    proj.on_record(
+        ResumeCheckpointRecord(kind=ResumeCheckpointKind.ROUND_WINNER, outcome="c1", round=4), 2
+    )
+    # Round-complete triggers the disk write.
+    proj.on_record(PhaseRecord(phase="round", event="complete", round=4), 3)
+
+    written = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0004.json"
+    assert written.exists(), "PhaseRecord('round', 'complete') must flush round_NNNN.json"
+
+
+def test_audit_trail_drain_flushes_partial_round(tmp_path: Path) -> None:
+    """`drain()` flushes a buffered round even when `round:complete` never arrives.
+
+    Doctrine: ledger is the truth; projection files are caches. An operator
+    Ctrl+C mid-candidate produces a ledger with the round's `enter` event
+    and LLMCallRecord(s), but no `complete`. Without `drain()`, the audit
+    projection's `_nodes` buffer is silently discarded on teardown. With
+    `drain()`, the partial round lands on disk tagged `"interrupted": true`
+    so future tooling can read it.
+    """
+    cycle_dir = tmp_path / "campaigns" / "cyc_drain"
+    cycle_dir.mkdir(parents=True)
+    proj = AuditTrailView.from_cycle_dir(CycleDir(cycle_dir))
+
+    # Round 1 begins, an L1 call is recorded, then the run is interrupted —
+    # no `complete` event arrives. Simulate the runner's teardown by setting
+    # the interrupted flag and calling drain().
+    proj.on_record(PhaseRecord(phase="round", event="enter", round=1), 0)
+    proj.on_record(
+        LLMCallRecord(
+            node="l1_generate", round=1, payload={"type": "l1_generate", "response": "partial"}
+        ),
+        1,
+    )
+    proj._halted_mid_round = True
+    proj.drain()
+
+    path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0001.json"
+    assert path.exists(), "drain() must flush the partial round to disk"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload.get("interrupted") is True, "interrupted flag must surface on the partial round"
+    assert "l1_generate" in payload["nodes"], "the buffered LLM call must be in the flushed nodes"
+
+
+def test_audit_trail_persists_origin_as_round_0000(tmp_path: Path) -> None:
+    """Origin IS round 0 on disk: ``PhaseRecord('origin','enter'|'exit',round=0)``
+    flushes to ``round_0000.json``; the first L1 round (round=1) flushes to
+    ``round_0001.json``. No ``round_origin.json``, no collision.
+    """
+    cycle_dir = tmp_path / "campaigns" / "cyc_origin"
+    cycle_dir.mkdir(parents=True)
+    proj = AuditTrailView.from_cycle_dir(CycleDir(cycle_dir))
+
+    proj.on_record(PhaseRecord(phase="origin", event="enter", round=0), 0)
+    proj.on_record(
+        LLMCallRecord(node="llm_only", payload={"type": "llm_only", "response": "answer"}),
+        1,
+    )
+    proj.on_record(PhaseRecord(phase="origin", event="exit", round=0), 2)
+    # First L1 round = round 1 (origin = round 0 is already on disk).
+    proj.on_record(PhaseRecord(phase="round", event="enter", round=1), 3)
+    proj.on_record(
+        LLMCallRecord(
+            node="l1_generate", round=1, payload={"type": "l1_generate", "response": "ok"}
+        ),
+        4,
+    )
+    proj.on_record(PhaseRecord(phase="round", event="complete", round=1), 5)
+
+    origin_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0000.json"
+    round_1_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0001.json"
+    legacy_origin_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_origin.json"
+    assert origin_path.exists(), "origin phase must flush to round_0000.json"
+    assert round_1_path.exists(), "first L1 round must flush to round_0001.json"
+    assert not legacy_origin_path.exists(), "round_origin.json must not be written"

@@ -77,7 +77,7 @@ dev = [
     "pyyaml>=6.0",            # why kept: parse the Control-remote wire-contract YAMLs
                               # (docs/specs/m12-api-openapi.yaml,
                               # docs/specs/m12-events-asyncapi.yaml) for the
-                              # tests/test_control_plane_drift.py invariant.
+                              # tests/test_contracts.py invariant.
     "types-PyYAML>=6.0",      # why kept: mypy --strict stubs for the yaml import above.
 ]
 
@@ -97,6 +97,10 @@ promptpotter = ["py.typed", "shared/data/rates.json"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["tests"]
+# Charter files carry their reason-to-exist in the name (test_contracts, test_invariants,
+# …) under the standard `test_` prefix, so default discovery picks them up; the support
+# modules (conftest/_scan/_factories — fixtures + the scan engine, never test fns) are
+# excluded by the underscore prefix.
 addopts = "-q --tb=short --no-header"
 filterwarnings = ["ignore::RuntimeWarning"]
 markers = ["slow: orchestrator integration tests (>1s each)"]
@@ -206,7 +210,7 @@ DEP002 = [
     "mypy",
     "deptry",
     # test-only imports — pyyaml parses the M12 wire-contract YAMLs in
-    # tests/test_control_plane_drift.py; types-PyYAML is the matching
+    # tests/test_contracts.py; types-PyYAML is the matching
     # mypy-strict stub. Neither is imported by promptpotter/ itself.
     "pyyaml",
     "types-PyYAML",

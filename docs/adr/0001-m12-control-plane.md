@@ -56,7 +56,7 @@ The §0 amendment defining the Control-remote I/O kind is the precondition. Sche
 
 ### Confirmation
 
-`tests/test_control_plane_drift.py` is a bundled invariant that asserts:
+`tests/test_contracts.py` is a bundled invariant that asserts:
 
 1. OpenAPI 3.1 + AsyncAPI 3.0 versions are declared.
 2. Reusable trust-boundary parameters (`IdempotencyKey`, `ExpectedVersion`) are required headers.
@@ -64,7 +64,7 @@ The §0 amendment defining the Control-remote I/O kind is the precondition. Sche
 4. AsyncAPI `cycleEvents` channel + `ProjectionEnvelope` schema with the required envelope fields exist.
 5. Heartbeat shape is declared (security box 15).
 6. **Closed outbound set parity** — every `record_type: Literal[...]` in `domain/run_records.py::CycleRecord` is present in the AsyncAPI `kind` enum; extra enum entries must be on the `_PROJECTION_ONLY_KINDS` allowlist.
-7. **Anchors table integrity** — every file path in the ## Anchors section of this ADR exists on disk.
+7. **Anchors table integrity** — every file path in the ## Anchors section of this ADR exists on disk, and no anchor cites a test file (anchors name stable contracts; tests move freely).
 
 CI runs the test on every PR. Spectral lint on the OpenAPI YAML and AsyncAPI Studio CLI on the AsyncAPI YAML wire in as the ADR's schemas accumulate operations / messages.
 
@@ -210,7 +210,11 @@ The eight questions from root `CLAUDE.md`, answered:
 
 ### Anchors
 
-Every claim in this ADR names a file. The drift detector test reads this table and asserts each path exists.
+Every claim in this ADR names a file. The drift detector reads this table and
+asserts each path exists. Anchors cite **stable contract artifacts** — specs and
+the code/domain modules the ADR depends on — never test files: tests are
+enforcement detail that must move freely, so they are named in prose (see
+*Confirmation* above), never anchored here.
 
 | Concern | File |
 |---|---|
@@ -218,7 +222,6 @@ Every claim in this ADR names a file. The drift detector test reads this table a
 | §0.5 Control-remote load-bearing-surface entry | `docs/architecture.md` (§0.5 load-bearing surface) |
 | Closed inbound command set | `docs/specs/m12-api-openapi.yaml` |
 | Closed outbound event set | `docs/specs/m12-events-asyncapi.yaml` |
-| Drift invariant test | `tests/test_control_plane_drift.py` |
 | Identity seam consumed | `promptpotter/presentation/api/deps.py::resolve_identity` |
 | `emit_token_usage` template (mirrored by `emit_command`) | `promptpotter/infrastructure/llm/models.py::emit_token_usage` |
 | Sole-writer template (mirrored by `EventStreamView`) | `promptpotter/infrastructure/projections/live_dashboard/view.py::LiveDashboardView._handle_token_usage` |
@@ -228,7 +231,6 @@ Every claim in this ADR names a file. The drift detector test reads this table a
 | SSE endpoint handler (Profile A) | `promptpotter/presentation/api/routers/campaigns/events.py::stream_cycle_events` |
 | EventStream registry (cycle → view lookup) | `promptpotter/infrastructure/projections/event_stream/registry.py` |
 | Certified Profile A contract | `docs/developer/event-stream.md` |
-| Profile A invariant test | `tests/test_event_stream.py::test_event_stream_view_contract` |
 
 ### Promotion log
 
