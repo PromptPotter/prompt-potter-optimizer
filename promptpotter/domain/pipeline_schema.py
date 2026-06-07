@@ -272,8 +272,26 @@ class PipelineSchema(BaseModel):
         configs = self.node_configs(pipeline_params)
         return stable_hash(configs) if configs else ""
 
-    def node_param_keys(self) -> dict[str, set[str]]:
-        return {step.name: step.param_keys for step in self.nodes if step.param_keys}
+    def node_param_keys(self, forbidden_strict: bool = True) -> dict[str, set[str]]:
+        """Optimizer-tunable param keys per node — the SINGLE surface the param
+        catalogue, the L1 output schema, and `validate_overrides` all derive from.
+
+        Model/provider optimizability is POLICY, not a per-dataset declaration: a
+        file's stale `param_keys` listing of them is inert. When `forbidden_strict`
+        (default) the model axis is ABSENT — the optimizer never sees it. When the
+        campaign explicitly unlocks AND the dataset advertises `available_models`,
+        the `model` axis is synthesized onto each LLM node (value space =
+        `available_models`); that is the sole ablation lever. `provider` is never
+        an optimizer axis.
+        """
+        out: dict[str, set[str]] = {}
+        for step in self.nodes:
+            keys = set(step.param_keys) - PARAM_FORBIDDEN_KEYS
+            if not forbidden_strict and self.available_models and step.is_llm:
+                keys = keys | {"model"}
+            if keys:
+                out[step.name] = keys
+        return out
 
     def prompt_node_names(self) -> list[str]:
         """Node names whose output is affected by the prompt — ``prompt_info`` set."""

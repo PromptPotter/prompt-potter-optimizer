@@ -6,6 +6,11 @@ dependency — the network fetch lives at the call site
 (`pipelines.default` for step order, per-node ``optimizer`` sub-objects,
 top-level ``resolved_schemas`` / ``resolved_prompts`` registries keyed by
 ``"{family}/{version}"``); zero hardcoded defaults.
+
+The task model is read ONLY from each node's ``config`` (``current_config``);
+the top-level ``llm_defaults`` block is **not authoritative** — it is a display
+snapshot of the backend's ``GET /pipeline`` and is intentionally never parsed
+here. The dataset owns its model in ``nodes.{node}.config.model``.
 """
 
 from __future__ import annotations

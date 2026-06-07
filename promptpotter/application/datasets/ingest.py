@@ -13,7 +13,6 @@ Spec: ``docs/specs/roadmap.md`` +
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +32,7 @@ from promptpotter.application.datasets.draft_campaign import (
     DraftCampaignRegistry,
     default_slug_from_filename,
 )
+from promptpotter.application.datasets.loaders import resolve_dataset_items
 from promptpotter.application.datasets.origin_readiness import resolution_block
 from promptpotter.application.datasets.prompts import (
     list_dataset_prompts,
@@ -122,15 +122,6 @@ def ingest_draft(
     return draft
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    """Read a JSON object from *path*; ``{}`` when absent. Lets an authored
-    dataset omit a sidecar (e.g. campaign.json) and still draft from defaults."""
-    if not path.is_file():
-        return {}
-    parsed: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    return parsed
-
-
 def draft_from_dataset(
     *,
     stores: Stores,
@@ -150,10 +141,10 @@ def draft_from_dataset(
     fall back to connector defaults). The same ``ingest_draft`` → context check-in
     → commit sequence runs from here on, so both surfaces share one commit path.
     """
-    cache = _read_json(dataset_dir / "cache.json")
+    items = resolve_dataset_items(stores, dataset_name)
     rows: list[dict[str, str]] = [
         {"query": str(it["query"]), "ground_truth": str(it["ground_truth"])}
-        for it in cache.get("items", [])
+        for it in items
         if it.get("query") and it.get("ground_truth")
     ]
     if not rows:

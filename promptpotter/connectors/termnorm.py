@@ -294,15 +294,23 @@ CONNECTOR = Connector(
         ("improvement_threshold", 0.01),
         ("degradation_threshold", 0.4),
     ),
-    # Conservative reasoning rail seeded into a fresh dataset's pipeline.json:
-    # origin floor ``low`` + an allowed set with ``medium``/``high`` crossed out,
-    # so the optimizer can never escalate ``reasoning_effort`` campaign-wide on a
-    # tenant's untuned first run. Operator widens it via the check-in's
-    # ``backend.node_config`` if their task genuinely needs deeper reasoning.
-    # (Model/provider are already pinned by ``forbidden_axes_strict``.)
+    # A fresh drop's committed pipeline.json must OWN its task model — the dataset
+    # is the authority for what the backend runs, never the backend's own hidden
+    # GET /pipeline default (which would silently pick the heavy groq/120b). This
+    # seed is copied verbatim into the new dataset's file by ``merge_pipeline_overlay``,
+    # so the dataset owns ``openrouter/gpt-oss-20b`` explicitly, visible on disk.
+    # Conservative reasoning rail rides alongside: origin floor ``low`` + an allowed
+    # set with ``medium``/``high`` crossed out, so the optimizer can never escalate
+    # ``reasoning_effort`` campaign-wide on a tenant's untuned first run. Operator
+    # widens model or reasoning via the check-in's ``backend.node_config``.
     default_node_config={
         "llm_only": {
-            "config": {"reasoning_effort": "low", "temperature": 0.0},
+            "config": {
+                "provider": "openrouter",
+                "model": "openai/gpt-oss-20b",
+                "reasoning_effort": "low",
+                "temperature": 0.0,
+            },
             "optimizer": {"param_allowed_values": {"reasoning_effort": ["none", "default", "low"]}},
         },
     },

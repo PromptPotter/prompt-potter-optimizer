@@ -47,7 +47,6 @@ def render_review_md(
         origin_composite_fitness=origin_composite_fitness,
         behavior_results=behavior_per_round,
         l2_behavior_results=l2_behavior_per_round,
-        audits=audits,
     )
 
     repairs_per_round = [_schema_repair_count(a) for a in audits]
@@ -55,7 +54,7 @@ def render_review_md(
     parts: list[str] = []
     parts += _render_header(index, final, stats)
     parts += _render_stats_block(stats, repairs_per_round, calls_per_round)
-    parts += _render_behavior_summary(behavior_per_round, stats)
+    parts += _render_behavior_summary(behavior_per_round)
     parts += ["## Rounds", ""]
 
     sweep_mode = (final.get("mode") or "").strip() == "sweep"
@@ -178,9 +177,6 @@ def _render_stats_block(
         f"- stagnation_max: {stats.stagnation_max}",
         f"- l2_fires: {stats.l2_fires}",
     ]
-    if stats.forbidden_axis_attempts > 0:
-        healed = "healed" if stats.forbidden_axis_healed else "NOT healed"
-        lines.append(f"- forbidden_axis_attempts: {stats.forbidden_axis_attempts} ({healed})")
     repairs_total = sum(repairs_per_round)
     calls_total = sum(calls_per_round)
     if calls_total:
@@ -194,7 +190,7 @@ def _render_stats_block(
 
 
 def _render_behavior_summary(
-    behavior_per_round: list[list[CheckResult]], stats: L1Stats
+    behavior_per_round: list[list[CheckResult]],
 ) -> list[str]:
     if not behavior_per_round or not any(behavior_per_round):
         return []
@@ -211,9 +207,6 @@ def _render_behavior_summary(
         )
         marker = "✗" if fails else "✓"
         parts.append(f"- {marker} `{check_id}` — {runs - fails}/{runs} rounds passed")
-        if check_id == "forbidden_axes_honored" and stats.forbidden_axis_attempts > 0:
-            verb = "healed by validator + L2" if stats.forbidden_axis_healed else "NOT healed"
-            parts.append(f"  → {verb} ({stats.forbidden_axis_attempts} attempts across cycle)")
     parts.append("")
     return parts
 

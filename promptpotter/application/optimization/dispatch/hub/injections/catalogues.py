@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from promptpotter.application.optimization.dispatch.hub.bundle import (
     AXES_ENUM_PREVIEW,
-    PIPELINE_PARAM_CATALOGUE_MODEL_CAP,
     InjectionBundle,
     InjectionKind,
     signal,
@@ -27,9 +26,12 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
     schema = b.pipeline_schema
     if schema is None:
         return ""
-    npk = schema.node_param_keys()
+    # ONE surface, gated by the lock: when strict the `model` axis is absent, when
+    # unlocked it's synthesized with `available_models` as its value space.
+    npk = schema.node_param_keys(forbidden_strict=b.forbidden_axes_strict)
     if not npk:
         return ""
+    available_models = list(schema.available_models)
     lines = ["PIPELINE PARAM CATALOGUE (use only these — do not invent):"]
     for node_name, params in npk.items():
         node = schema.get_node(node_name)
@@ -39,7 +41,7 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
         enums = node.param_allowed_values or {}
         bits: list[str] = []
         for p in sorted(params):
-            allowed = enums.get(p)
+            allowed = enums.get(p) or (available_models if p == "model" else None)
             if allowed:
                 shown = list(allowed)[:AXES_ENUM_PREVIEW]
                 preview = ", ".join(str(x) for x in shown)
@@ -51,13 +53,6 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
             else:
                 bits.append(p)
         lines.append(f"  {node_name}: {', '.join(bits)}")
-    # Suppress MODELS when operator-locked — advertising a list the validator will reject just
-    # costs L1 a candidate slot per round to Wound 1.
-    if schema.available_models and not b.forbidden_axes_strict:
-        lines.append("MODELS:")
-        lines.append(
-            "  " + ", ".join(list(schema.available_models)[:PIPELINE_PARAM_CATALOGUE_MODEL_CAP])
-        )
     return "\n".join(lines)
 
 

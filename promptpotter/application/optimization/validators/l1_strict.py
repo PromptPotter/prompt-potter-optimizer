@@ -65,7 +65,9 @@ def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
     return node
 
 
-def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict[str, Any]:
+def build_l1_output_schema(
+    pipeline_schema: PipelineSchema, *, forbidden_axes_strict: bool = True
+) -> dict[str, Any]:
     """l1_generate response_schema — three constrained slots per variant.
 
     The base shape comes from :class:`L1GenerateOutput` (the Pydantic SoT
@@ -109,17 +111,21 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict[str, Any]:
     pp_override["additionalProperties"] = False
     pp_properties = pp_override["properties"]
 
-    for node in pipeline_schema.nodes:
-        if not node.param_keys:
+    # The emittable per-node param surface is `node_param_keys(forbidden_strict)` —
+    # the ONE source the catalogue + validator share. When locked it omits the
+    # model axis entirely (the LLM cannot emit a key the schema doesn't declare,
+    # so the lock needs no per-round rejection); when unlocked it synthesizes a
+    # `model` axis whose value space is `available_models`.
+    npk = pipeline_schema.node_param_keys(forbidden_strict=forbidden_axes_strict)
+    available_models = list(pipeline_schema.available_models)
+    for node_name, keys in npk.items():
+        node = pipeline_schema.get_node(node_name)
+        if node is None:
             continue
         param_props: dict[str, dict[str, Any]] = {}
-        for param in sorted(node.param_keys):
-            # Operator-locked axes (model, provider) live in the dataset
-            # overlay and are off L1's surface. Keeping them out of the
-            # output schema closes the loop the validator otherwise has
-            # to reject every round — the LLM cannot emit a key the
-            # structured-output schema does not declare.
-            if param in PARAM_FORBIDDEN_KEYS:
+        for param in sorted(keys):
+            if param == "model" and available_models:
+                param_props[param] = {"type": "string", "enum": available_models}
                 continue
             allowed = node.param_allowed_values.get(param)
             declared_type = node.param_types.get(param)
@@ -131,7 +137,7 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict[str, Any]:
                 param_props[param] = {}
         if not param_props:
             continue
-        pp_properties[node.name] = {
+        pp_properties[node_name] = {
             "type": "object",
             "properties": param_props,
             "additionalProperties": False,

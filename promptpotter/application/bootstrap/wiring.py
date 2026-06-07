@@ -17,7 +17,7 @@ from typing import Any
 from promptpotter import connectors
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.datasets import (
-    DATASET_LOADERS,
+    resolve_dataset_items,
     samples_from_dicts,
 )
 from promptpotter.config.settings import (
@@ -180,25 +180,14 @@ def _load_dataset_into_session(
     one-shot download into the benchmark tree. Tenant uploads never
     cross-contaminate the install-global benchmark slot.
     """
-    from promptpotter.domain.sample import Sample
-
-    ds: dict[str, Any] | None = session.store.tenant_datasets.load_dataset(dataset_name)
-    if not (ds and ds.get("items")):
-        ds = session.store.backends.load_dataset(dataset_name)
-    if not (ds and ds.get("items")) and dataset_name in DATASET_LOADERS:
-        status(f"Loading dataset '{dataset_name}' from registry ...")
-        loader_items = DATASET_LOADERS[dataset_name]()
-        session.store.backends.save_dataset(dataset_name, loader_items)
-        ds = {"items": [s.model_dump() for s in loader_items]}
-
-    if not (ds and ds.get("items")):
+    items = resolve_dataset_items(session.store, dataset_name, status=status)
+    if not items:
         status(f"Dataset '{dataset_name}' not available")
         raise ValueError(
             f"Dataset {dataset_name!r} not found in tenant uploads, repo benchmarks, "
             f"or DATASET_LOADERS. Add a loader to DATASET_LOADERS in dataset_builder.py."
         )
 
-    items = [it.model_dump() if isinstance(it, Sample) else it for it in ds["items"]]
     valid = [item for item in items if item.get("query") and item.get("ground_truth")]
     session.samples = samples_from_dicts(valid)
     session.index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})

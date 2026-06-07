@@ -19,6 +19,7 @@ from promptpotter.shared.hashing import HASH_TRUNCATE
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -357,6 +358,35 @@ def load_dataset(name: str, **kwargs: Any) -> list[Sample]:
     if loader is None:
         raise KeyError(f"Unknown dataset {name!r}. Available: {sorted(DATASET_LOADERS)}")
     return loader(**kwargs)
+
+
+def resolve_dataset_items(
+    stores: Stores,
+    dataset_name: str,
+    *,
+    status: Callable[[str], None] | None = None,
+) -> list[dict[str, Any]]:
+    """Tenant cache → backend cache → ``DATASET_LOADERS`` fallback (fetch + persist).
+
+    Returns normalized item dicts (``Sample.model_dump()`` shape); ``[]`` only when
+    no cached source exists AND no loader is registered. The single materialization
+    seam shared by the run-time bootstrap (``_load_dataset_into_session``) and the
+    webapp ingest-from-dataset path (``draft_from_dataset``), so both reach the same
+    samples — a benchmark whose ``cache.json`` is gitignored/absent on the server is
+    fetched + re-persisted here, exactly as a fresh run would.
+    """
+    ds: dict[str, Any] | None = stores.tenant_datasets.load_dataset(dataset_name)
+    if not (ds and ds.get("items")):
+        ds = stores.backends.load_dataset(dataset_name)
+    if not (ds and ds.get("items")) and dataset_name in DATASET_LOADERS:
+        if status:
+            status(f"Loading dataset '{dataset_name}' from registry ...")
+        loader_items = DATASET_LOADERS[dataset_name]()
+        stores.backends.save_dataset(dataset_name, loader_items)
+        ds = {"items": [s.model_dump() for s in loader_items]}
+    if not (ds and ds.get("items")):
+        return []
+    return [it.model_dump() if isinstance(it, Sample) else it for it in ds["items"]]
 
 
 def build_dataset_run_data(

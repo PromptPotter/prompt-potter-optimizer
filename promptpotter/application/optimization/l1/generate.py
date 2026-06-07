@@ -100,7 +100,14 @@ async def l1_generate(
         "l1_situational_examples": DispatchHub.render("l1_situational_examples", bundle),
     }
 
-    output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
+    output_schema = (
+        build_l1_output_schema(
+            pipeline_schema,
+            forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
+        )
+        if pipeline_schema
+        else None
+    )
     try:
         generated, meta_prompt = await run_optimizer_node(
             template_name="l1_generate",

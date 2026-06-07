@@ -20,7 +20,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-10](#r-10) — optimizer LLM calls go through `llm_call()`, never `chat()`
 - [R-11](#r-11) — wrap LLM calls / backend matches with `observed_node()`
 - [R-12](#r-12) — `score_search_point()` is the single scoring gateway
-- [R-13](#r-13) — never edit backend static config; use the per-dataset overlay
+- [R-13](#r-13) — per-dataset tunable → overlay; TermNorm structural root-cause → fix in TermNorm
 - [R-14](#r-14) — respect the hexagonal layer-import rules
 - [R-15](#r-15) — a new seam/invariant is a `tests/test_structure.py` row
 
@@ -125,11 +125,11 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Why:** one scoring path keeps measurement + visibility consistent.
 - **Origin:** 2026-06-07 — seeded from architecture §0.5.
 
-### R-13 — never edit backend static config
-- **Trigger:** operator wants to change a backend node's model/provider/param.
-- **Rule:** edit `datasets/{name}/pipeline.json::nodes.{name}.config` (sparse overlay), NEVER the backend's own `config/pipeline.json`. The dataset's `llm_defaults` is a snapshot of the backend's `GET /pipeline` — leave it; the overlay routes per-call. PromptPotter's own meta-prompt LLM is separate (`datasets/_optimizer/pipeline.json`). Treat any urge to `cd` into a backend repo as a flag.
-- **Why:** architecture §0 commitment — pipeline-agnostic, backends read-only; operator usually has no backend write access (TermNorm is the exception, not the model).
-- **Origin:** 2026-06-07 — seeded from `feedback_no_backend_edits`.
+### R-13 — per-dataset tunable → overlay; TermNorm root-cause → fix in TermNorm
+- **Trigger:** changing what a backend runs — a model/provider/param switch, OR a structural backend behaviour/bug.
+- **Rule:** split on *which kind*. (a) A **per-dataset tunable switch** (this dataset should run model X / temp Y) → edit `datasets/{name}/pipeline.json::nodes.{name}.config` (the dataset OWNS its config), NEVER a backend repo. (b) A **genuine structural root cause that lives in TermNorm's code** → fix it IN TermNorm (`TermNorm-excel/backend-api`), coordinate explicitly, keep both sides simple — TermNorm is co-owned/same-project, NOT a read-only third party. Do NOT patch PromptPotter to paper over a TermNorm-root bug (that's the R-08 anti-pattern). The `llm_defaults` block is a non-authoritative display snapshot — never read for resolution, never a control. The optimizer's own meta-prompt LLM is separate + install-global (`datasets/_optimizer/pipeline.json`). The model is dataset-owned and a missing one is a loud error (see config.py), not a silent backend-default fall-through.
+- **Why:** pipeline-agnostic is a §0 commitment for *config*, but root-fix (R-08) wins for *code* — and TermNorm is in-house, so its root is reachable. The earlier "never `cd` into a backend repo" framing over-applied the read-only rule to the one backend that isn't third-party.
+- **Origin:** 2026-06-07 — seeded from `feedback_no_backend_edits`; sharpened 2026-06-07 after the operator corrected the absolute "never edit even co-owned TermNorm" framing during the model-knot gut.
 
 ### R-14 — hexagonal layer-import rules
 - **Trigger:** adding an import across `promptpotter/` packages.

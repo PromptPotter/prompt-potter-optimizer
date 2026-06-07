@@ -6,9 +6,11 @@
   ``detect_invariants`` over yield stats. Failures route through L2 as
   ``ValidationFailure``.
 * ``l1_behavior`` — SOFT behavior checks (load-bearing per
-  ``promptpotter/CLAUDE.md``: ``forbidden_axes_honored``,
-  ``evidence_grounding_present``, etc.). Counts attempts for the audit
-  trail; surfaces in ``review.md`` and ``round_NNNN.json``.
+  ``promptpotter/CLAUDE.md``: ``evidence_grounding_present``,
+  ``context_object_honored``, etc.). Surfaces in ``review.md`` and
+  ``round_NNNN.json``. (Model/provider locking is NOT a behavior check —
+  it's the single ``forbidden_axes_strict`` bit enforced at the schema
+  surface + the ``l1_strict.validate_overrides`` backstop.)
 * ``l2_output`` / ``l3_output`` — Output validators for ``l2_context`` /
   ``l3_plan`` parsed outputs (verbatim-repeat detection, plan-length
   floor, rule/example authoring guards). Failures route to the next

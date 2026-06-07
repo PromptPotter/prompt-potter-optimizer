@@ -188,18 +188,20 @@ class OptimizationConfig(BaseModel):
     forbidden_axes_strict: bool = Field(
         True,
         description=(
-            "Strict mode: any L1 candidate that proposes a change to "
-            "``PARAM_FORBIDDEN_KEYS`` (``model``, ``provider`` — operator-fixed "
-            "at the dataset overlay) is rejected at parse time with a "
-            "``ValidationFailure(reason='forbidden_axis')``. The candidate "
-            "deterministically skips ``score_search_point()`` (no /matches "
-            "spend) and lands as ``SKIPPED_VALIDATION`` with synthetic-0 "
-            "fitness — same machinery as a malformed L1 output, just gated "
-            "by policy rather than schema-shape. Default on while the "
-            "operator-fixed axes are still operator-fixed; flip to ``false`` "
-            "for ablation experiments that intentionally vary the model. "
-            "Soft detection (the ``forbidden_axes_honored`` behavior check) "
-            "stays on regardless — strict mode is the spend-saver."
+            "The single model-optimizability bit. When on (default), the "
+            "``model`` axis is ABSENT from the optimizer surface — "
+            "``PipelineSchema.node_param_keys`` drops ``PARAM_FORBIDDEN_KEYS`` "
+            "(``model``, ``provider``), so the param catalogue never advertises "
+            "them and ``build_l1_output_schema`` never declares them; the LLM "
+            "cannot emit a key the schema omits. ``validate_overrides`` is the "
+            "lone deterministic backstop for a provider that leaks the key past "
+            "its own schema — it rejects the candidate with "
+            "``ValidationFailure(reason='forbidden_axis')`` (synthetic-0, no "
+            "/matches spend). The dataset still OWNS the model value via "
+            "``nodes.{node}.config.model``; this flag governs only whether the "
+            "OPTIMIZER may search it. Flip to ``false`` for ablation runs that "
+            "sweep model identity — the ``model`` axis is then synthesized onto "
+            "each LLM node with ``available_models`` as its value space."
         ),
     )
 
@@ -493,6 +495,23 @@ def configure_and_apply_pipeline(
     # Overrides + starting prompt land on the sparse wire payload, never on `current_config`.
     for node, cfg in valid_overrides.items():
         pipeline_params.setdefault(node, {}).update(cfg)
+
+    # The dataset OWNS its task model — every LLM node's resolved config must carry
+    # an explicit `model`, sourced from the dataset's own `nodes.{node}.config`
+    # overlay. A missing model is a setup bug, surfaced loudly here: the prior
+    # silent fall-through let the backend's hidden GET /pipeline default decide
+    # (TermNorm ships groq/120b), so a fresh drop ran the wrong model unnoticed.
+    # In-process meta-prompt nodes (L4) are not `is_llm` and are exempt — their
+    # model is the install-global optimizer config.
+    if filtered is not None:
+        for name in active:
+            node = filtered.get_node(name)
+            if node and node.is_llm and not pipeline_params.get(name, {}).get("model"):
+                raise ValueError(
+                    f"dataset {dataset_name!r}: LLM node {name!r} has no owned model. "
+                    f"Declare it in the dataset's pipeline.json::nodes.{name}.config.model "
+                    f"— the dataset owns its task model, never the backend default."
+                )
 
     if filtered is not None:
         session.pipeline_schema = filtered

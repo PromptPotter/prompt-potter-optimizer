@@ -29,7 +29,6 @@ AXES_ENUM_PREVIEW = 4
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
 FAILURE_WARNING_PREVIEW = 1
-PIPELINE_PARAM_CATALOGUE_MODEL_CAP = 6
 # Two pointers suffice to signal a cluster (~110 chars each); larger campaigns can't bloat L1.
 INTRACTABLE_SAMPLES_RENDER_CAP = 2
 # L2-authored framing strings; overrun is healed (truncated + warned), not raised.
@@ -168,7 +167,6 @@ __all__ = [
     "FAILURE_WARNING_PREVIEW",
     "INTRACTABLE_SAMPLES_RENDER_CAP",
     "NEAR_MISS_RENDER_CAP",
-    "PIPELINE_PARAM_CATALOGUE_MODEL_CAP",
     "RUNTIME_FAILURE_RECENCY_WINDOW",
     "SAMPLE_RENDER_CAP",
     "TASK_CONTEXT_VALUE_CAP",

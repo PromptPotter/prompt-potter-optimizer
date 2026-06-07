@@ -176,9 +176,10 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       {!ready ? (
         <div className="ingest-gaps">
           <OriginCheckinPanel draft={draft} lastResolution={resolution} onApply={flow.applyPatch} />
-          <ColumnMappingPicker draft={draft} onApply={flow.applyPatch} />
         </div>
       ) : null}
+
+      <ColumnMappingPicker draft={draft} onApply={flow.applyPatch} />
 
       <section className="setup-preview ingest-origin-confirm">
         <PromptFieldsEditor value={draft.origin_prompt_fields} onApply={flow.applyPatch} flat />

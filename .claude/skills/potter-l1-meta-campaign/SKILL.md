@@ -70,9 +70,9 @@ The conformant check set depends on `prompt_id`:
 
 | Verdict | Rule |
 |---|---|
-| `healthy` | zero ✗ conformance checks (a healed `forbidden_axes_honored` ✗ doesn't count) |
+| `healthy` | zero ✗ conformance checks |
 | `degraded` | exactly one ✗ conformance check |
-| `broken` | ≥ 2 ✗ conformance checks OR a persistent `forbidden_axes_honored` violation (l1 only) |
+| `broken` | ≥ 2 ✗ conformance checks |
 
 Append one `review` entry per cycle to `log.jsonl` (schema below). Then act on the verdict:
 
@@ -83,12 +83,7 @@ Append one `review` entry per cycle to `log.jsonl` (schema below). Then act on t
 | `degraded` AND cycle in `pending_full` (promotion) | **Halt.** Rank top issue → write proposed edit → set `paused = true`, `pause_reason = "degraded full cycle {cycle_id}"`. Exit. |
 | `broken` (either kind) | **Halt** regardless of cycle kind. Same proposed-edit + pause behavior. |
 
-**`forbidden_axes_honored` is two-state** — the validator (`forbidden_axes_strict`, default on) rejects model/provider mutations pre-population, no spend wasted; L2 absorbs the `ValidationFailure` via Wound 1 (`dispatch_hub._r_validation_failures` renders it into L2's input). L1's meta-prompt does NOT enumerate the lock — the validator + heal chain is the contract.
-
-The skill reads `forbidden_axis_attempts` + `forbidden_axis_healed` from the L1Stats header in `review.md`. Two outcomes:
-
-- **Healed** (`forbidden_axis_attempts > 0 AND forbidden_axis_healed == true`): not an issue. The chain worked as designed. Cycle flows through Screen/Promote normally. Record on the `review` event but do NOT halt. The behavior-check row shows ✗ with the trailer `→ healed by validator + L2 (N attempts across cycle)`.
-- **Persistent** (`forbidden_axis_attempts > 0 AND forbidden_axis_healed == false`): the heal chain didn't converge — top-issue, halt, propose. The fix is **never** "re-add an enumerated clause to L1's prompt." That option is closed by design (`docs/developer/self-healing-internals.md` Wound 1).
+**Model/provider locking is no longer a behavior check.** It's the single `forbidden_axes_strict` bit enforced at the schema surface (`PipelineSchema.node_param_keys` drops the axes when locked, so L1's output schema never declares them) plus the `validate_overrides` backstop for a rare provider leak. There is no `forbidden_axes_honored` check, and no `forbidden_axis_attempts`/`_healed` on L1Stats. A leak that slips past the schema lands as an ordinary `validation_failures` entry (synthetic-0, healed via Wound 1) — read it there if it ever appears; it is not a verdict input.
 
 **Top-issue rank** (first match wins). The verdict is conformance-pure, so a
 non-healthy cycle always carries ≥ 1 conformance ✗ — the top issue is always
@@ -96,9 +91,8 @@ a failed conformance check.
 
 *`l1_generate` campaign:*
 
-1. **Persistent** `forbidden_axes_honored` — heal chain failed.
-2. Failed seeded behavior check (`context_object_honored`, `param_scope_discipline`, `not_only_param_variants`, `parse_success`)
-3. Failed scaffolding check (any other ✗ in the behavior table, excluding healed `forbidden_axes_honored`)
+1. Failed seeded behavior check (`context_object_honored`, `param_scope_discipline`, `not_only_param_variants`, `parse_success`)
+2. Failed scaffolding check (any other ✗ in the behavior table)
 
 *`l2_context` campaign:* the failed L2 check, in registry order —
 `l2_rationale_substantive`, `l2_evidence_anchored`,
@@ -113,7 +107,6 @@ iteration is deferred (M10 spec) — this campaign edits `l1_generate` or
 
 | Top issue | Target | Edit shape |
 |---|---|---|
-| Persistent `forbidden_axes_honored` | `l1_critique/1` (default) or `_r_validation_failures` render in `dispatch_hub.py` | Sharpen the failure-signal carrier so L2 absorbs it within one round. Examples: stronger critique framing of the rejected variant; richer `validation_failures` rendering (axis label, attempt count, "the validator rejected this"). NEVER re-enumerate the forbidden axes in `l1_generate/1` — that path is closed. |
 | Failed `context_object_honored` | `l1_generate/1` | Strengthen the context-object honoring clause. |
 | Failed `param_scope_discipline` | `l1_generate/1` | Bound param mutations until `param_unlock_round`. |
 | Failed `not_only_param_variants` | `l1_generate/1` | Require ≥1 prompt-field mutation per round. |
@@ -122,8 +115,6 @@ iteration is deferred (M10 spec) — this campaign edits `l1_generate` or
 | Failed `l2_evidence_anchored` | `l2_context/1` | Require the refinement to name a targeted axis or cite a specific sample / number. |
 | Failed `l2_task_context_not_verbatim` | `l2_context/1` | Forbid no-op `task_context` merges — require a real field delta per fire. |
 | Failed `l2_targets_l1_surface` | `l2_context/1` | Require each fire to change something L1 reads (`task_context`, `l1_layout`, `l1_overrides`, a supplemental rule). |
-
-A **persistent** `forbidden_axes_honored` is a hard halt for both sweep and full cycles — the heal chain failing means L2 isn't absorbing the validator signal, and the cycle's variants are wasting slots that the validator catches but L1 keeps re-proposing. A **healed** `forbidden_axes_honored` is a normal observation, not a halt; the chain did its job.
 
 Skill writes the proposed diff to `.promptpotter/meta_campaigns/{prompt_id}/proposed_edits/{cycle_id}_{ts}.diff` as unified-diff against the file's current content. **Skill never applies the diff** — operator applies (or asks Claude to), then clears `paused`. If multiple ✗ behavior checks exist, propose the highest-ranked only; document the others in the diff's leading comment so the operator can bundle if they choose (M10's one-change-at-a-time default is a tiebreaker, not a mandate).
 
@@ -246,8 +237,8 @@ Accept ⇒ append `promote_accept`; set `state.json::parent_hash = active_hash`,
 `log.jsonl` (append-only, one event per line, never mutate past lines):
 
 ```jsonl
-{"ts":"…","kind":"review","cycle_id":"…","dataset":"termnorm","cycle_kind":"sweep","round_1_verdict":"healthy","behavior_pass_rate":1.0,"yield_rate":0.33,"top_lift_mean":0.05,"stagnation_max":0,"l2_fires":0,"origin_regression":false,"forbidden_axis_attempts":0,"forbidden_axis_healed":true,"top_issue":null,"proposed_edit_path":null}
-{"ts":"…","kind":"review","cycle_id":"…","dataset":"termnorm","cycle_kind":"full","round_1_verdict":"degraded","behavior_pass_rate":0.75,"yield_rate":0.10,"top_lift_mean":0.02,"stagnation_max":1,"l2_fires":0,"origin_regression":false,"forbidden_axis_attempts":2,"forbidden_axis_healed":true,"top_issue":"low_yield","proposed_edit_path":".promptpotter/meta_campaigns/l1_generate/proposed_edits/cycle_abc_2026-05-11T19-12.diff"}
+{"ts":"…","kind":"review","cycle_id":"…","dataset":"termnorm","cycle_kind":"sweep","round_1_verdict":"healthy","behavior_pass_rate":1.0,"yield_rate":0.33,"top_lift_mean":0.05,"stagnation_max":0,"l2_fires":0,"origin_regression":false,"top_issue":null,"proposed_edit_path":null}
+{"ts":"…","kind":"review","cycle_id":"…","dataset":"termnorm","cycle_kind":"full","round_1_verdict":"degraded","behavior_pass_rate":0.75,"yield_rate":0.10,"top_lift_mean":0.02,"stagnation_max":1,"l2_fires":0,"origin_regression":false,"top_issue":"low_yield","proposed_edit_path":".promptpotter/meta_campaigns/l1_generate/proposed_edits/cycle_abc_2026-05-11T19-12.diff"}
 {"ts":"…","kind":"screen","candidate":"01_…","prompt_hash":"…","cycle_id":"…","dataset":"termnorm","verdict":"winner","top_lift_r1":0.12,"parent_top_lift_r1":0.05,"behavior_pass":true}
 {"ts":"…","kind":"promote_accept","candidate":"…","prompt_hash":"…","cycle_id":"…","dataset":"…","rounds_to_95":4,"parent_rounds_to_95":5,"final_accuracy":0.97,"parent_final_accuracy":0.94,"secondary_dataset":null}
 {"ts":"…","kind":"promote_reject","candidate":"…","prompt_hash":"…","cycle_id":"…","dataset":"…","reason":"final_accuracy regressed by 0.03"}
@@ -281,7 +272,7 @@ ls    .promptpotter/meta_campaigns/l1_generate/proposed_edits/
 |---|---|
 | Cycle root (both flavors) | `projects/{tenant}/campaigns/{cycle_id}/` **and** `projects/{tenant}/campaigns/{parent}/forks/{cycle_id}/` (also `diag/`, `sweeps/`) — both are first-class cycles |
 | Per-cycle review (header: behavior table, `round_1_verdict`, L1Stats block) | `{cycle_dir}/review.md` (may be missing — backfill with `python scripts/render_review.py`) |
-| L1Stats fields (`rounds_to_95`, `round_1_verdict`, `yield_rate`, `top_lift_mean`, `behavior_pass_rate`, `stagnation_max`, `l2_fires`, `forbidden_axis_attempts`, `forbidden_axis_healed`) | `{cycle_dir}/review.md` header |
+| L1Stats fields (`rounds_to_95`, `round_1_verdict`, `yield_rate`, `top_lift_mean`, `behavior_pass_rate`, `stagnation_max`, `l2_fires`) | `{cycle_dir}/review.md` header |
 | Round trace (`accuracy`, `candidate_scores`, `origin`, `critique`, `lineage.source`) | `{cycle_dir}/rounds/round_NNNN.json` |
 | Cycle completeness (authoritative) | `{cycle_dir}/index.json::final.stop_reason ∈ {"max_rounds", "goal_reached", "infinite_stall"}` — **not** the outer `status` field |
 | Cycle L1 hash (family key) | `{cycle_dir}/index.json::final.prompt_hashes.l1_generate` |

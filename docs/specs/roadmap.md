@@ -82,7 +82,7 @@ Four nouns map to OIDC: Install=`iss`, User=`sub` (`user_id=f"{iss}:{sub}"`, SCI
 ### Prompt-iteration framework + exit gate — partially shipped (gate not yet met)
 - **Exit gate:** `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules).
 - `_mint_fork(parent, fork_from_round, payload)` is the single entry for all 6 `ForkTrigger` variants (one `ForkPayload`); L2/L3 auto-rebase capped at `MAX_AUTO_REBASES = 10`/invocation, gated by `OptimizationConfig.rebase_capability`.
-- **Round-1 verdict (conformance-anchored):** 0 ✗ → healthy · 1 ✗ → degraded · ≥2 ✗ (or persistent `forbidden_axes_honored`) → broken; behavior checks are pure `(round_dict, ctx) → CheckResult`. The Track-7 L2 self-diagnosis rule turns a missing `evidence_grounding` citation into an L2 `task_context` nudge.
+- **Round-1 verdict (conformance-anchored):** 0 ✗ → healthy · 1 ✗ → degraded · ≥2 ✗ → broken; behavior checks are pure `(round_dict, ctx) → CheckResult`. (Model/provider locking is not a behavior check — it's the single `forbidden_axes_strict` bit at the schema surface + the `validate_overrides` backstop.) The Track-7 L2 self-diagnosis rule turns a missing `evidence_grounding` citation into an L2 `task_context` nudge.
 - Sweep results: `archive/sweeps/{l1_meta_prompt_hash}/{dataset}/{verb}_{ts}.json`; `sweep rank` keys `(l1_generate_hash, rounds_to_95 asc, behavior_pass_rate desc)`. Live mechanism = `/potter-l1-meta-campaign`.
 
 ### BYO per-user API keys — spec-only (Lane A2)
