@@ -223,7 +223,7 @@ def _load_dataset_cache(dataset_dir: Path) -> tuple[dict[str, Any], dict[int, di
     """Load ``cache.json`` from a resolved dataset dir; normalise sample-id keys to int.
 
     Sample-id key varies on disk (``id`` canonical, BBEH HF emits ``sample_id``) —
-    normalise at the read boundary. Raises ``HTTPException(404)`` when the resolved
+    normalise at the read boundary. Raises ``NotFoundError`` when the resolved
     dir carries no cache. The dir is already access-checked by :func:`_resolve_or_404`.
     """
     cache_path = dataset_dir / "cache.json"

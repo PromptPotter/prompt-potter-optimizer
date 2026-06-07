@@ -1,26 +1,24 @@
 """``LiveDashboardView`` — session-family ``dashboard.json`` writer.
 
-Three cohesive concerns share this class — read it in three slices:
+This class is the **scalar-state mutation dispatcher**: phase / snapshot /
+LLM-call / token-usage records mutate ``self.state`` (the on-disk scalar
+shape) and the sticky LLM-call mirror, and the debounced ``_persist`` plumbing
+flushes them to disk. The two other concerns it orchestrates live in sibling
+modules:
 
-1. **Scalar mutations** (``_apply_phase`` + the ``_handle_*`` dispatch
-   methods). Phase / snapshot / LLM-call / token-usage records mutate
-   ``self.state`` (the on-disk scalar shape) and the sticky LLM-call
-   mirror. The ``# -- Scalar mutations ----`` divider marks the section.
-2. **Round buffer** (``_RoundBuffer`` inner dataclass + its mutators).
-   Owns the per-round candidate buffer feeding
-   ``dashboard.json::current_round.nodes.l1_score``. Snapshot
-   handlers delegate the per-candidate / per-sample writes here.
-3. **Block builders** (``_build_l1_score_block``, ``_build_pobb_block``,
-   ``_fmt_sample_line``). Pure projections from scalar state + round
-   buffer to the dashboard.json output shape. Called by ``_persist`` and
-   by the round-complete flush in ``_handle_phase``.
+- **Round buffer** — :class:`.round_buffer.RoundBuffer` owns the per-round
+  candidate buffer feeding ``dashboard.json::current_round.nodes.l1_score``;
+  ``_handle_snapshot`` routes per-candidate / per-sample writes to it.
+- **Block builders** — :mod:`.render` (``build_l1_score_block`` /
+  ``build_pobb_block`` / ``fmt_sample_line``) projects scalar state + round
+  buffer to the dashboard.json output shape; called by ``_persist`` and the
+  round-complete flush in ``_handle_phase``.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +43,11 @@ from promptpotter.infrastructure.projections.audit_trail import (
 )
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_dashboard.factory import resolve_resume_state
+from promptpotter.infrastructure.projections.live_dashboard.render import (
+    build_l1_score_block,
+    build_pobb_block,
+)
+from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
 from promptpotter.infrastructure.projections.live_dashboard.round_summary import build_round_summary
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
@@ -62,7 +65,6 @@ from promptpotter.infrastructure.projections.live_state import (
     apply_phase,
     backfill_spend_rates,
     empty_spend,
-    top_n_p_best,
 )
 from promptpotter.infrastructure.store import (
     cycle_dir_for,
@@ -70,7 +72,6 @@ from promptpotter.infrastructure.store import (
     write_json,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import has_pipeline_warnings
 from promptpotter.shared.spend import compute_usd
 
@@ -97,188 +98,6 @@ _PHASE_TO_STATE: dict[str, str] = {
     CampaignPhase.MODIFY_PLAN: "l3_replanning",
     CampaignPhase.ESCALATION: "escalation",
 }
-
-# Per-sample terminator badge for the compact in-flight rendering;
-# unmapped nodes render as the first two characters of the node name.
-_NODE_BADGES: dict[str, str] = {
-    "llm_only": "ai",
-    "llm_ranking": "ai",
-    "entity_profiling": "ai",
-    "cache_lookup": "cache",
-    "fuzzy_matching": "fz",
-    "token_matching": "tk",
-    "web_search": "ws",
-}
-
-
-def _trim(text: str, n: int) -> str:
-    t = str(text or "").replace("\n", " ").strip()
-    return t if len(t) <= n else t[: n - 1] + "…"
-
-
-def _fmt_sample_line(s: dict[str, Any]) -> str:
-    """One compact line per query for the in-flight ``l1_score`` samples list.
-    Keeps the live dashboard scannable instead of bloating with full ~2 kB
-    query strings; round-complete flush emits the full dicts.
-    """
-    qi = int(s.get("qi", 0))
-    sid = s.get("sample_id")
-    sid_seg = f" sid:{int(sid):03d}" if sid is not None else ""
-    hit = bool(s.get("hit"))
-    cached = bool(s.get("cached"))
-    time_s = float(s.get("time_s") or 0.0)
-    badge = _NODE_BADGES.get(s.get("terminated_at") or "", (s.get("terminated_at") or "?")[:2])
-    cache_icon = "📖" if cached else " "
-    mark = "HIT " if hit else "MISS"
-    query = _trim(s.get("query") or "", 42)
-    pred = _trim(s.get("prediction") or "", 28)
-    gt = _trim(s.get("ground_truth") or "", 20)
-    in_tok = s.get("input_tokens")
-    out_tok = s.get("output_tokens")
-    tok_seg = ""
-    if in_tok is not None or out_tok is not None:
-        tok_seg = (
-            f" io={in_tok if in_tok is not None else '-'}/{out_tok if out_tok is not None else '-'}"
-        )
-    return (
-        f"  {time_s:4.1f}s #{qi:03d}{sid_seg} {mark} [{badge}]{cache_icon}"
-        f"{tok_seg} -> '{pred}' gt:'{gt}' q:'{query}'"
-    )
-
-
-@dataclass
-class _RoundBuffer:
-    """Round-local candidate buffer + per-sample tally.
-
-    Owns the data structure that
-    ``dashboard.json::current_round.nodes.l1_score`` projects from.
-    Snapshot-record fan-out (``candidate_started`` / ``sample_scored`` /
-    ``candidate_scored`` / ``p_best_update``) lands here; the block
-    builders read these fields verbatim.
-    """
-
-    round_num: int = 0
-    candidates: dict[int, dict[str, Any]] = field(default_factory=dict)
-    p_best_top: list[dict[str, Any]] = field(default_factory=list)
-
-    def reset(self, round_num: int) -> None:
-        """L1_GENERATE:enter clears the candidate buffer; historical rounds[] is untouched."""
-        self.round_num = round_num
-        self.candidates = {}
-        self.p_best_top = []
-
-    def slot(self, idx: int, total: int = 0) -> dict[str, Any]:
-        """Lazy-init a candidate slot. Sample / score / p_best callbacks may fire
-        before ``candidate_started`` seeds the slot, so all mutators funnel here.
-
-        ``changes_description`` holds the human-readable mutation text; the
-        canonical display ``label`` is composed in ``_build_l1_score_block``
-        from the slot's round + idx via :func:`candidate_label`.
-        """
-        return self.candidates.setdefault(
-            idx,
-            {
-                "idx": idx,
-                "total": total,
-                "changes_description": "",
-                "samples": [],
-                "scores": None,
-            },
-        )
-
-    def seed_candidate(
-        self,
-        idx: int,
-        total: int,
-        changes_description: str,
-        pp_override: dict[str, Any] | None,
-        prompt_fields: dict[str, Any] | None,
-    ) -> None:
-        """Seed a slot so CURRENT shows labelled pending rows before scoring lands.
-
-        ``prompt_fields`` + ``pp_override`` are the candidate's evolved
-        searchpoint (``OptSearchPoint.prompt_field_dict()`` + pipeline delta) —
-        the seed-able half the steer panel forks from. Surfacing them live makes
-        an in-flight candidate steerable without its (not-yet-written) round file.
-        """
-        entry = self.slot(idx, total)
-        entry["total"] = total
-        entry["changes_description"] = changes_description or ""
-        entry["pp_override"] = pp_override
-        entry["prompt_fields"] = prompt_fields
-
-    def append_sample(
-        self,
-        ci: int,
-        ct: int,
-        qi: int,
-        qt: int,
-        result: dict[str, Any],
-    ) -> None:
-        """Append one scored sample to its candidate slot."""
-        pd = result.get("pipeline_data") or {}
-        query_time = float(pd.get("total_time", 0.0) or 0.0)
-        # Tokens may live on result or pd; prefer result, preserve 0 vs None.
-        in_tok = result.get("input_tokens")
-        out_tok = result.get("output_tokens")
-        self.slot(ci, ct)["samples"].append(
-            {
-                "qi": qi,
-                "qt": qt,
-                "sample_id": result.get("sample_id"),
-                "hit": bool(result.get("hit")),
-                "cached": bool(result.get("cached", False)),
-                "query": result.get("query") or "",
-                # Scored result dicts carry the field as ``predicted`` (past
-                # tense, matching round_NNNN.json::results[]). Reading
-                # ``prediction`` here returned None on every sample → the live
-                # tape rendered every row as an empty prediction. The compact
-                # ``_fmt_sample_line`` reader below stays on ``prediction``
-                # because that is the live-sample dict's outbound key — the
-                # mismatch was only on the inbound source name.
-                "prediction": result.get("predicted") or "",
-                "ground_truth": result.get("ground_truth") or "",
-                "time_s": round(query_time, 2),
-                "terminated_at": pd.get("terminated_at") or "",
-                "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
-                "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,
-            }
-        )
-
-    def set_candidate_scores(self, idx: int, total: int, scores: dict[str, Any]) -> None:
-        """Store the score report verbatim — single source of truth shared with
-        ``round_result.candidate_scores`` (same dict instance)."""
-        self.slot(idx, total)["scores"] = scores
-
-    def update_p_best(
-        self,
-        idx: int,
-        total: int,
-        current_id: str,
-        n_samples: int,
-        p_best: dict[str, float],
-    ) -> None:
-        """Merge per-sample P(best) into the candidate slot + top-5 leaderboard.
-
-        Stores each candidate's ``p_best``, signed delta vs prior query, and a
-        capped trajectory list; refreshes the round-wide top-5 view consumed
-        by ``_build_pobb_block``.
-        """
-        cand = self.slot(idx, total)
-        current = float(p_best.get(current_id, 0.0))
-        prev = float(cand.get("p_best", current))
-        history: list[float] = list(cand.get("p_best_history") or [])
-        history.append(current)
-        # Cap history at 64 entries — round size rarely exceeds 40.
-        if len(history) > 64:
-            history = history[-64:]
-        cand["p_best"] = current
-        cand["p_best_delta"] = current - prev
-        cand["p_best_history"] = history
-        cand["p_best_n_samples"] = n_samples
-
-        # Round-wide leaderboard (top-5 by P(best)).
-        self.p_best_top = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(p_best)]
 
 
 class LiveDashboardView(DerivedView):
@@ -339,7 +158,7 @@ class LiveDashboardView(DerivedView):
             spend=SpendRollup.model_validate(backfill_spend_rates(r.get("spend") or empty_spend())),
         )
         self.short_formula_template: str | None = None
-        self._buffer = _RoundBuffer()
+        self._buffer = RoundBuffer()
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
         # audit-trail. Each ``LLMCallRecord`` mutates the matching phase-keyed slot;
         # the audit-trail records the same event independently into its round flush.
@@ -535,7 +354,7 @@ class LiveDashboardView(DerivedView):
             if round_result is not None:
                 self._absorb_round_complete(round_result.accuracy, l1_stall)
                 if self._recorder is not None:
-                    self._recorder.set_l1_score(self._build_l1_score_block(round_result))
+                    self._recorder.set_l1_score(self._l1_score_block(round_result))
                 # Append round summary; re-firing the same round (replay / sweep) replaces in place.
                 summary = build_round_summary(round_result)
                 rounds_list = [r for r in self.state.rounds if r.round != round_result.round]
@@ -553,7 +372,7 @@ class LiveDashboardView(DerivedView):
             and self._recorder is not None
             and self._buffer.candidates
         ):
-            self._recorder.set_l1_score(self._build_l1_score_block())
+            self._recorder.set_l1_score(self._l1_score_block())
 
         payload = record.payload or {}
         view = payload.get("view")
@@ -858,9 +677,9 @@ class LiveDashboardView(DerivedView):
         s.patience = f"{l1_stall_count}/{self.patience_max}"
 
     # -- Round-state mutations (snapshot-record fan-out) ----------------------
-    # The per-candidate / per-sample / P(best) writes live on the ``_RoundBuffer``
-    # inner dataclass; ``_handle_snapshot`` above routes each snapshot kind to
-    # the matching ``self._buffer.*`` method. ``_append_backfill`` stays here
+    # The per-candidate / per-sample / P(best) writes live on the ``RoundBuffer``
+    # (``round_buffer.py``); ``_handle_snapshot`` above routes each snapshot kind
+    # to the matching ``self._buffer.*`` method. ``_append_backfill`` stays here
     # because it writes to ``state["backfill_log"]`` (scalar state), not the
     # round buffer.
 
@@ -894,101 +713,18 @@ class LiveDashboardView(DerivedView):
         )
         self.state.backfill_log = log[-256:]
 
-    # -- Block builders (consumed by _persist) --------------------------------
+    # -- Block builders (delegated to render.py) ------------------------------
 
-    def _build_l1_score_block(self, round_result: RoundResult | None = None) -> dict[str, Any]:
-        """Project current candidates to dashboard's l1_score shape.
-
-        ``label`` is canonical ``CN.M`` (``C0`` for origin), composed from
-        the slot's round + idx via :func:`candidate_label`. Display sites
-        read this field verbatim — no ``idx + 1`` arithmetic anywhere.
-
-        ``live`` (``round_result is None``) renders samples as compact
-        one-liners; ``not live`` emits the full sample dicts (round-complete
-        flush). Each candidate's composite_fitness number is paired with
-        the active formula and the value-inlined short formula derived from
-        ``self.short_formula_template``.
-        """
-        live = round_result is None
-        active_formula = self.state.composite_fitness_formula
-        candidates = self._buffer.candidates
-        round_num = self._buffer.round_num
-        input_candidates: list[dict[str, Any]] = []
-        output_candidates: list[dict[str, Any]] = []
-        for idx in sorted(candidates.keys()):
-            cand = candidates[idx]
-            scores = cand.get("scores") or {}
-            label = candidate_label(round_num, idx)
-            input_candidates.append(
-                {
-                    "idx": idx,
-                    "label": label,
-                    "changes_description": (
-                        cand.get("changes_description") or scores.get("changes_description") or ""
-                    ),
-                    "pp_override": cand.get("pp_override"),
-                    # The evolved prompt (OptSearchPoint.prompt_field_dict() shape).
-                    # Live peer of round_NNNN.json::candidate_scores[].prompt_fields
-                    # — `liveCandidateSearchPoint` reads it for steer-fork seeding.
-                    "prompt_fields": cand.get("prompt_fields"),
-                }
-            )
-            cand_evaluators = dict(scores.get("evaluators") or {})
-            stats: dict[str, Any] = {
-                "accuracy": scores.get("accuracy"),
-                "composite_fitness": scores.get("composite_fitness"),
-                "composite_fitness_formula": active_formula,
-                # Per-candidate value-inlined short formula. The legend for short
-                # codes (``acc``, ``H``, ``lat``, ``R``, ``pc``) lives in
-                # ``docs/operations/improvement-tracking.md``.
-                "composite_fitness_formula_short": inline_short_formula_values(
-                    self.short_formula_template, cand_evaluators
-                ),
-                "hits": scores.get("hits"),
-                "total": scores.get("total"),
-                "invalid": scores.get("invalid", False),
-                "validation_failures": scores.get("validation_failures") or [],
-            }
-            samples = cand.get("samples") or []
-            output_candidates.append(
-                {
-                    "idx": idx,
-                    "label": label,
-                    "stats": stats,
-                    "samples": [_fmt_sample_line(s) for s in samples] if live else list(samples),
-                }
-            )
-        return {
-            "input": {"candidates": input_candidates},
-            "output": {"candidates": output_candidates},
-        }
-
-    def _build_pobb_block(self) -> dict[str, Any]:
-        """Round-wide PoBB telemetry: leader probability, posterior-width, top-5.
-
-        ``posterior_width = 1 - max(p_best)`` — distance the leader has
-        from certainty. Width near 0 = leader confirmed; width near 1 =
-        flat posterior, more samples needed before elimination is safe.
-        Operators read this to judge whether ``elimination_n_min`` is set
-        appropriately for the dataset's per-sample variance.
-        """
-        p_best = self._core.current_p_best
-        if not p_best:
-            return {
-                "current_id": "",
-                "n_samples": 0,
-                "leader_prob": 0.0,
-                "posterior_width": 1.0,
-                "top": [],
-            }
-        leader_prob = max(p_best.values())
-        return {
-            "current_id": self._core.current_p_best_id,
-            "n_samples": self._core.current_p_best_n,
-            "leader_prob": float(leader_prob),
-            "posterior_width": float(1.0 - leader_prob),
-            "top": list(self._buffer.p_best_top),
-        }
+    def _l1_score_block(self, round_result: RoundResult | None = None) -> dict[str, Any]:
+        """Thread the view's live state into the pure
+        :func:`~promptpotter.infrastructure.projections.live_dashboard.render.build_l1_score_block`
+        projection — the only state coupling the builder needs."""
+        return build_l1_score_block(
+            self._buffer,
+            self.state.composite_fitness_formula,
+            self.short_formula_template,
+            round_result,
+        )
 
     # -- Internal --------------------------------------------------------------
 
@@ -999,7 +735,7 @@ class LiveDashboardView(DerivedView):
         # audit-trail records the same events independently into round_NNNN.json.
         nodes: dict[str, Any] = dict(self._sticky_llm_calls)
         if self._buffer.candidates:
-            nodes["l1_score"] = self._build_l1_score_block()
+            nodes["l1_score"] = self._l1_score_block()
         ordered = {
             k: nodes.pop(k) for k in ("l1_generate", "l1_critique", "l1_score") if k in nodes
         }
@@ -1008,7 +744,7 @@ class LiveDashboardView(DerivedView):
         s.current_round = {
             "round": self._buffer.round_num,
             "nodes": ordered,
-            "pobb": self._build_pobb_block(),
+            "pobb": build_pobb_block(self._core, self._buffer.p_best_top),
         }
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape: every scalar field's presence +

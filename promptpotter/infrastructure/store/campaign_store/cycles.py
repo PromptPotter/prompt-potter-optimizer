@@ -23,6 +23,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.paths import root_cycle_id, sibling_kind
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -141,22 +142,22 @@ class CycleIndexMixin(CampaignStoreKernel):
 
         ledger_path = cycle_dir / ".runtime" / "ledger.jsonl"
         if not ledger_path.exists():
-            raise LookupError(f"cycle {cycle_id!r} has no ledger on disk")
+            raise NotFoundError(f"cycle {cycle_id!r} has no ledger on disk")
         max_complete = scan_ledger_max_round_complete(ledger_path)
         if after_round > max_complete:
-            raise LookupError(
+            raise BadRequestError(
                 f"--from {after_round}: ledger only has completed rounds 0..{max_complete}"
             )
 
         if after_round >= 1:
             if not rounds_dir.exists():
-                raise LookupError(
+                raise NotFoundError(
                     f"cycle {cycle_id!r}: ledger has rounds 0..{max_complete} but "
                     f"{rounds_dir} is missing — projection cache out of sync with ledger"
                 )
             target = rounds_dir / f"round_{after_round:04d}.json"
             if not target.exists():
-                raise LookupError(
+                raise NotFoundError(
                     f"--from {after_round}: round_{after_round:04d}.json not found in "
                     f"{rounds_dir} (ledger has completed rounds 0..{max_complete} — "
                     "projection cache out of sync)"

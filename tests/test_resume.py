@@ -42,6 +42,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import Stores, walk_cycle_lineage
+from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 # Every cycle lives inside a campaign; the foundation factory's default id.
 _CAMPAIGN = "testds__20260101-000000"
@@ -673,7 +674,7 @@ class TestRewindToRound:
         _seed_rewind_cycle(store, _CAMPAIGN, "cycle_a", rounds=3)
 
         # ``rewind_to_round`` consults the ledger first for admissibility.
-        with pytest.raises(LookupError, match=r"ledger only has completed rounds 0\.\.2"):
+        with pytest.raises(BadRequestError, match=r"ledger only has completed rounds 0\.\.2"):
             store.rewind_to_round(_CAMPAIGN, "cycle_a", after_round=99)
 
     def test_resume_from_missing_cycle_raises(self, tmp_path):
@@ -682,7 +683,7 @@ class TestRewindToRound:
         store = CampaignStore(tmp_path)
         # A nonexistent cycle has no ledger on disk — the ledger pre-check
         # raises before the public ``rounds/`` tree is consulted.
-        with pytest.raises(LookupError, match="no ledger on disk"):
+        with pytest.raises(NotFoundError, match="no ledger on disk"):
             store.rewind_to_round(_CAMPAIGN, "cycle_nonexistent", after_round=0)
 
 

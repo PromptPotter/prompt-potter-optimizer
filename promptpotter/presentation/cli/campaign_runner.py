@@ -50,7 +50,7 @@ COMMANDS = {
 
 
 def main() -> None:
-    from promptpotter.shared.errors import RequestTooLargeError
+    from promptpotter.shared.errors import PotterError, RequestTooLargeError
 
     parser = build_parser()
     args = parser.parse_args()
@@ -87,7 +87,10 @@ def main() -> None:
 
     try:
         result = asyncio.run(COMMANDS[args.command](args))
-    except RequestTooLargeError as exc:
+    except (RequestTooLargeError, PotterError) as exc:
+        # Operator-facing input errors (e.g. `resume --from N` past the last
+        # completed round → BadRequestError) surface as a clean message, not a
+        # traceback. PotterError is the one typed-error family the seams raise.
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
     if result is None:
