@@ -108,7 +108,7 @@ async def score_one_candidate(
         if fresh:
             callbacks.on_pobb_backfill(round_num, idx, n_total, sample.id, fresh)
 
-    results, scores, was_cached, signal = await score_search_point(
+    results, scores, from_cache, signal = await score_search_point(
         candidate_sp,
         dataset,
         cycle.session,
@@ -125,7 +125,7 @@ async def score_one_candidate(
     )
 
     # Path 2 — full-run cache replay.
-    if was_cached:
+    if from_cache:
         elim_check.register_completed(results, candidate_id=osp_c.lineage.id, sp=candidate_sp)
         return CandidateRunResult(
             outcome=CandidateOutcome.REPLAYED_FROM_CACHE,

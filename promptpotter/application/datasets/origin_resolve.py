@@ -48,7 +48,6 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm import get_llm_client
 from promptpotter.infrastructure.llm.models import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.tracing import observed_node
@@ -139,9 +138,6 @@ async def resolve_origin_turn(
     resolution + post-apply draft."""
     user_content, consultation_instruction = build_origin_consultation(draft)
 
-    client = get_llm_client(draft.optimizer_provider)
-    model = draft.optimizer_model or None
-
     # Token/cost ride the tenant workspace ledger (no cycle exists pre-mint).
     ledger = CycleEventLog.open_workspace(WorkspaceDir(stores.base_dir))
     token = set_cycle_ledger(ledger)
@@ -156,8 +152,6 @@ async def resolve_origin_turn(
             raw, _prompt = await run_optimizer_node(
                 template_name="checkin",
                 prompt_vars={"consultation_instruction": consultation_instruction},
-                llm_client=client,
-                model=model,
                 user_content=user_content,
                 context=LLMCallContext(ledger=ledger, round_num=0),
             )

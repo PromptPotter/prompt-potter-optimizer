@@ -18,8 +18,6 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     max_rounds: 5,
     raw_task_description: "",
     pipeline_overlay: {},
-    optimizer_provider: "groq",
-    optimizer_model: "",
     headers: ["input", "gt"],
     column_query: "",
     column_ground_truth: "",

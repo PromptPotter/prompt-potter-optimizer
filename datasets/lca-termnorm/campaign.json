@@ -24,10 +24,6 @@
       "degradation_threshold": 0.4,
       "l2_patience": 2,
       "l3_patience": 1
-    },
-    "optimizer_llm": {
-      "model": "openai/gpt-oss-120b",
-      "provider": "groq"
     }
   }
 }

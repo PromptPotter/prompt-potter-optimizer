@@ -516,13 +516,13 @@ def _finalize_run(
                 finished_at=cycle_result.finished_at,
             )
     # Drain AFTER mark_stopped so dashboard.json's stopped state is in place before audit settles.
-    # `_cycle_was_interrupted` threads `"interrupted": true` into partial round_NNNN.json — true
+    # `_halted_mid_round` threads `"interrupted": true` into partial round_NNNN.json — true
     # for both Ctrl+C and uncaught-exception teardowns. The operator-facing
     # ``dashboard.json::error`` block is owned by ``_handle_error_record`` (sole
     # writer) and was already populated at the ``emit_error_record`` site.
     if emitter is not None:
         emitter.mark_stopped(str(stop_reason or ""))
-    observers.audit._cycle_was_interrupted = halted_mid_round
+    observers.audit._halted_mid_round = halted_mid_round
     observers.drain_all()
 
     obs = session.state.obs

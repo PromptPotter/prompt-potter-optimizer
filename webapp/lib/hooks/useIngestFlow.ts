@@ -107,7 +107,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   // operator's context. The check-in failing is non-fatal: the draft still
   // exists, so we land in `ready` and the view surfaces the gaps.
   const runCheckin = async (draft: DraftCampaignWire) => {
-    setPhase({ stage: "checkin", model: draft.optimizer_model || "the check-in model" });
+    setPhase({ stage: "checkin", model: "the check-in model" });
     let resolved = draft;
     let resolution: OriginLastResolution | null = null;
     let recap = "";

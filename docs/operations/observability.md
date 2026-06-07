@@ -49,7 +49,7 @@ Optimizer findings (validation failures, anomaly flags, elimination, degradation
 Line 1 names the observation, line 2 the repair or consequence. A finding without a `↳` is a bug.
 
 ```
-⚠ llm_only.model = 'gpt-4o' ∉ [openai/gpt-oss-120b]
+⚠ llm_only.model = 'gpt-4o' ∉ [openai/gpt-oss-20b]
   ↳ scored 0; L2 brief will name this value
 ```
 

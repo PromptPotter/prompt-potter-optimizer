@@ -195,8 +195,6 @@ class _EditDraftPatch(BaseModel):
     max_rounds: int | None = Field(default=None, ge=1, le=100)
     raw_task_description: str | None = Field(default=None, max_length=16384)
     pipeline_overlay: dict[str, Any] | None = None
-    optimizer_provider: str | None = Field(default=None, min_length=1, max_length=32)
-    optimizer_model: str | None = Field(default=None, max_length=128)
     column_query: str | None = Field(default=None, max_length=256)
     column_ground_truth: str | None = Field(default=None, max_length=256)
     # Operator edits to the campaign's origin prompt (PromptTemplate field
@@ -291,8 +289,6 @@ async def edit_draft_campaign(
         (patch.scoring_composite, "scoring_composite"),
         (patch.max_rounds, "max_rounds"),
         (patch.pipeline_overlay, "pipeline_overlay"),
-        (patch.optimizer_provider, "optimizer_provider"),
-        (patch.optimizer_model, "optimizer_model"),
         (patch.origin_prompt_fields, "origin_prompt_fields"),
         (patch.lock_model, "lock_model"),
     ):

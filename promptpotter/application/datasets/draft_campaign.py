@@ -51,18 +51,6 @@ DEFAULT_SCORING_COMPOSITE = "exact_match"
 DEFAULT_MAX_ROUNDS = 5
 """Matches the M10 prompt-iteration framework default."""
 
-DEFAULT_OPTIMIZER_PROVIDER = "openrouter"
-"""Ingest default for the L1/L2/L3 optimizer LLM. OpenRouter, not Groq: the
-optimizer meta-prompt is ~20k+ tokens, which blows Groq's free ``on_demand``
-tier (8k TPM) on round 1 — the same reason every wired benchmark (justlogic,
-…) runs the optimizer on OpenRouter. Operator-overridable via the check-in's
-``optimizer.provider`` field. Distinct from the *backend* model, which
-``forbidden_axes_strict`` already pins."""
-
-DEFAULT_OPTIMIZER_MODEL = "openai/gpt-oss-120b"
-"""Pinned (not env-default) so the committed campaign.json is reproducible and
-valid on the OpenRouter default above — matches justlogic's optimizer LLM."""
-
 PREVIEW_ROWS = 10
 """Sample-preview head size returned alongside every mutation response."""
 
@@ -121,11 +109,6 @@ class DraftCampaign:
     # is not gated.
     field_provenance: dict[str, Provenance] = field(default_factory=dict)
     source_file: str = ""
-    # Per-draft optimizer LLM config — what model runs the L1/L2/L3
-    # meta-prompts. Distinct from the backend pipeline node's own LLM
-    # (lives in ``pipeline_overlay::nodes.{name}.config``).
-    optimizer_provider: str = DEFAULT_OPTIMIZER_PROVIDER
-    optimizer_model: str = DEFAULT_OPTIMIZER_MODEL
     # The campaign's origin prompt — a ``PromptTemplate.prompt_field_dict()``
     # shape (the six string fields + optional ``few_shot_examples``). This is the
     # origin OSP's prompt fields: seeded by the check-in node's decomposition half
@@ -173,8 +156,6 @@ class DraftCampaign:
             "max_rounds": self.max_rounds,
             "raw_task_description": self.raw_task_description,
             "pipeline_overlay": dict(self.pipeline_overlay),
-            "optimizer_provider": self.optimizer_provider,
-            "optimizer_model": self.optimizer_model,
             "headers": list(self.headers),
             "column_query": self.column_query,
             "column_ground_truth": self.column_ground_truth,
@@ -322,8 +303,6 @@ class DraftCampaignRegistry:
             column_ground_truth=column_ground_truth,
             column_label_sets=dict(column_label_sets or {}),
             field_provenance=provenance,
-            optimizer_provider=DEFAULT_OPTIMIZER_PROVIDER,
-            optimizer_model=DEFAULT_OPTIMIZER_MODEL,
             created_at=now,
             updated_at=now,
             source_file=source_file,
@@ -439,8 +418,6 @@ def default_slug_from_filename(filename: str) -> str:
 __all__ = [
     "DEFAULT_CONNECTOR",
     "DEFAULT_MAX_ROUNDS",
-    "DEFAULT_OPTIMIZER_MODEL",
-    "DEFAULT_OPTIMIZER_PROVIDER",
     "DEFAULT_SCORING_COMPOSITE",
     "PREVIEW_ROWS",
     "DraftCampaign",

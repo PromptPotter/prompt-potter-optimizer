@@ -90,7 +90,7 @@ Use when the active cycle went somewhere you don't want (a bad L3 replan, or you
 
 ### Fork — `resume --fork-on-divergence`
 
-Use when a **data-affecting** edit (scoring formula, `optimizer_llm.provider`/`model`, `pipeline_overrides`, `exclude_nodes`, `dataset_name`) makes resume's replayer find recorded decisions no longer hold. The optimizer halts rather than drift; either revert, or commit with `--fork-on-divergence`. It mints a new `cycle_id` **in the same session**, rooted at the divergence point, copies pre-divergence trials, records `parent_cycle_id`, and re-runs the divergent round under the current scorer. The shared archive is not duplicated — both cycles read the same measurements through their own scoring ledger.
+Use when a **data-affecting** edit (scoring formula, `pipeline_overrides`, `exclude_nodes`, `dataset_name`) makes resume's replayer find recorded decisions no longer hold. The optimizer halts rather than drift; either revert, or commit with `--fork-on-divergence`. It mints a new `cycle_id` **in the same session**, rooted at the divergence point, copies pre-divergence trials, records `parent_cycle_id`, and re-runs the divergent round under the current scorer. The shared archive is not duplicated — both cycles read the same measurements through their own scoring ledger.
 
 **Policy-only edits** (PoBB knobs, patience, thresholds, `n_variants`, `exploration.*`) can't have changed the data trace, so resume continues in-place on the same cycle and `--fork-on-divergence` is a no-op. Past decisions stay as the audit record of the policy that made them; the new policy governs unevaluated rounds.
 

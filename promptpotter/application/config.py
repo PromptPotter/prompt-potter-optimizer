@@ -8,6 +8,7 @@ and reads ``connector.extract_experiment(extract)``.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -20,7 +21,6 @@ from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.llm import LLMClientBase
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +29,8 @@ __all__ = [
     "DiffScope",
     "ExplorationConfig",
     "OptimizationConfig",
-    "OptimizerLLMConfig",
     "PreflightWarning",
     "configure_and_apply_pipeline",
-    "create_llm_client",
     "load_campaign_config",
     "run_preflight_checks",
 ]
@@ -79,13 +77,6 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "forbidden_axes_strict"): "policy",
     ("optimization", "rebase_capability"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
-    # OptimizerLLMConfig — provider/model swap + per-layer temperature change the
-    # L1/L2/L3 candidate distribution → data.
-    ("optimizer_llm", "provider"): "data",
-    ("optimizer_llm", "model"): "data",
-    ("optimizer_llm", "l1_temperature"): "data",
-    ("optimizer_llm", "l2_temperature"): "data",
-    ("optimizer_llm", "l3_temperature"): "data",
 }
 
 
@@ -231,28 +222,6 @@ class OptimizationConfig(BaseModel):
     exploration: ExplorationConfig = Field(default_factory=ExplorationConfig)
 
 
-class OptimizerLLMConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    provider: str = Field("groq")
-    model: str | None = Field(None)
-    # Per-layer sampling temperature for the meta-prompt LLM. L1 generates a
-    # candidate spread (higher); L2 refines task_context, L3 replans (lower, more
-    # deterministic). Sourced by l1.generate + escalation.executor — no hardcoded
-    # constant. Like provider/model, a change shifts the candidate distribution.
-    l1_temperature: float = Field(0.7)
-    l2_temperature: float = Field(0.3)
-    l3_temperature: float = Field(0.5)
-
-    def temperature_for(self, layer_id: str) -> float:
-        """Meta-prompt temperature for ``layer_id`` ∈ {L1, L2, L3}."""
-        return {
-            "L1": self.l1_temperature,
-            "L2": self.l2_temperature,
-            "L3": self.l3_temperature,
-        }[layer_id]
-
-
 class DatasetSplit(BaseModel):
     """Train/test fold sizes — display metadata. `train` is the bank; `test` stays off-bank, on-demand."""
 
@@ -285,7 +254,6 @@ class CampaignConfig(BaseModel):
     )
 
     optimization: OptimizationConfig
-    optimizer_llm: OptimizerLLMConfig = Field(default_factory=OptimizerLLMConfig)
 
     def classify_diff_against(self, frozen: dict[str, Any]) -> tuple[DiffScope, list[str]]:
         """Classify diff vs *frozen*; returns `(scope, dotted_paths)`. Unknown paths warn + classify DATA."""
@@ -347,10 +315,64 @@ def _check_sp_budget_vs_dataset(
     return None
 
 
-def run_preflight_checks(config: CampaignConfig, dataset: list[Sample]) -> list[PreflightWarning]:
-    """Run all preflight checks. Pure — no mutation, no I/O."""
+_PARAMS_B_RE = re.compile(r"(\d+(?:\.\d+)?)\s*b\b", re.IGNORECASE)
+
+
+def _model_params_b(model_id: str) -> float | None:
+    """Best-effort parameter count (billions) parsed from a model id's last path
+    segment — ``openai/gpt-oss-120b`` → 120.0, ``mistral-small-3.2-24b`` → 24.0.
+    ``None`` when no ``<N>b`` token is present (e.g. ``gpt-4o``), so the inversion
+    check below stays silent rather than guessing."""
+    segment = model_id.rsplit("/", 1)[-1]
+    match = _PARAMS_B_RE.search(segment)
+    return float(match.group(1)) if match else None
+
+
+def _check_optimizer_below_target(target_models: tuple[str, ...]) -> PreflightWarning | None:
+    """Warn when the optimizer LLM is *smaller* than a target it optimizes.
+
+    The optimizer is meant to be the strong model that improves the pipeline;
+    running it on a model smaller than the target it optimizes is almost always an
+    accidental inversion — the bug class behind the email-tagging 20b optimizer
+    pin. Both sides must parse a ``<N>b`` size or the check is skipped (no guess).
+    The optimizer model is read from the install-global optimizer node config
+    (``datasets/_optimizer/pipeline.json``), not a per-campaign copy."""
+    from promptpotter.application.optimization.dispatch.llm_call import optimizer_model
+
+    opt_model = optimizer_model()
+    opt_b = _model_params_b(opt_model)
+    if opt_b is None:
+        return None
+    bigger = sorted(
+        {m for m in target_models if (b := _model_params_b(m)) is not None and b > opt_b}
+    )
+    if not bigger:
+        return None
+    return PreflightWarning(
+        code="optimizer_below_target",
+        title=f"optimizer LLM ({opt_model}) is smaller than the target ({', '.join(bigger)})",
+        detail=(
+            "The optimizer is the strong model that improves the pipeline; running "
+            "it on a model smaller than the target it optimizes is usually an "
+            "accidental inversion. Raise the optimizer node `model` in "
+            "`datasets/_optimizer/pipeline.json` to a larger tier."
+        ),
+    )
+
+
+def run_preflight_checks(
+    config: CampaignConfig,
+    dataset: list[Sample],
+    target_models: tuple[str, ...] = (),
+) -> list[PreflightWarning]:
+    """Run all preflight checks. Pure — no mutation, no I/O.
+
+    ``target_models`` are the resolved per-node target/scoring model ids (from
+    ``session.pipeline_params``); empty when the backend owns the model."""
     warnings: list[PreflightWarning] = []
     if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
+        warnings.append(w)
+    if (w := _check_optimizer_below_target(target_models)) is not None:
         warnings.append(w)
     return warnings
 
@@ -453,13 +475,3 @@ def configure_and_apply_pipeline(
     log(f"Active nodes: {nodes_str}{excl_str}")
 
     return pipeline_params
-
-
-def create_llm_client(
-    campaign_config: CampaignConfig,
-) -> tuple[LLMClientBase, str]:
-    """Create LLM client + model from ``campaign_config.optimizer_llm``."""
-    from promptpotter.infrastructure.llm import get_llm_client
-
-    llm = campaign_config.optimizer_llm
-    return get_llm_client(llm.provider), llm.model or ""

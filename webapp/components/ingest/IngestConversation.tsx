@@ -15,7 +15,6 @@ import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsE
 import { CheckinLoadingWindow } from "./CheckinLoadingWindow";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
 import { OriginCheckinPanel } from "./OriginCheckinPanel";
-import { OptimizerLLMField } from "./OptimizerLLMField";
 import { DatasetPickList } from "./DatasetPickList";
 
 // The single ingest conversation, driven by `useIngestFlow`. Rendered by BOTH
@@ -195,13 +194,6 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       <details className="new-campaign-optional ingest-advanced">
         <summary>Optimizer (optional)</summary>
         <div className="new-campaign-optional-body">
-          <OptimizerLLMField
-            provider={draft.optimizer_provider}
-            model={draft.optimizer_model}
-            onApply={(optimizer_provider, optimizer_model) =>
-              flow.applyPatch({ optimizer_provider, optimizer_model })
-            }
-          />
           <NumberField
             label="Max rounds"
             value={draft.max_rounds}

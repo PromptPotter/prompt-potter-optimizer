@@ -29,7 +29,6 @@ def test_read_authored_dataset_preserves_full_node_blocks_and_validates(tmp_path
                         "improvement_threshold": 0.01,
                         "degradation_threshold": 0.05,
                     },
-                    "optimizer_llm": {"provider": "openrouter", "model": "openai/gpt-oss-120b"},
                 }
             }
         ),

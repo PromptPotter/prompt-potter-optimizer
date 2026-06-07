@@ -27,9 +27,9 @@ Lower-priority subtask cuts (revisit only if PlanBench + NaturalPlan don't pan o
 
 Rejected from this round: **AR-LSAT** (72% ceiling — solved at low) and **MuSiQue macro** (60% ceiling — 2hop coasts at 89%).
 
-## Groq daily-volume model swap
+## Model default + the Groq daily-volume swap
 
-`openai/gpt-oss-120b` is the canonical default for all reasoning datasets. During development, when the operator's Groq daily volume on 120b is exhausted, swap the `model` field in the relevant `pipeline.json` to `openai/gpt-oss-20b` to keep iterating. Flip back to 120b for benchmarking / publication runs.
+There is no single canonical model — each dataset pins its own (table above). The floor default for a **new** dataset is `openai/gpt-oss-20b:nitro @ low` via OpenRouter (cheapest, fastest, leaves L1 headroom); scale up to `120b` only where the dataset's reasoning genuinely needs it (e.g. `gsm8k`, `hotpotqa`). When a Groq-routed run exhausts its daily 120b volume, drop to `20b` to keep iterating; flip back to `120b` for benchmarking / publication runs.
 
 The current value committed in `datasets/bbeh/pipeline.json` may be either — treat the field as a **live operator knob**, not a fixed default.
 

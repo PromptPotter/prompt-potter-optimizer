@@ -13,7 +13,7 @@ Three named invariants:
      campaign.json overrides.
   3. ``CampaignConfig`` parses every persisted ``datasets/*/campaign.json``
      verbatim and rejects unknown keys at every nesting level (top-level,
-     ``optimization``, ``optimizer_llm``, runtime ``pipeline_params``).
+     ``optimization``, runtime ``pipeline_params``).
      Per-dataset knobs (``improvement_threshold``, ``degradation_threshold``)
      have no defaults and must be explicit.
 """
@@ -205,11 +205,6 @@ def test_unknown_optimization_key_rejected() -> None:
         CampaignConfig.model_validate(
             {"optimization": {"zero_signal_filtre_enabled": True}}  # typo: filtre
         )
-
-
-def test_unknown_optimizer_llm_key_rejected() -> None:
-    with pytest.raises(ValidationError):
-        CampaignConfig.model_validate({"optimizer_llm": {"modle": "x"}})  # typo: modle
 
 
 def test_runtime_pipeline_params_is_rejected() -> None:

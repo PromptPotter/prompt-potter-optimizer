@@ -159,25 +159,6 @@ export function fetchPipeline(signal?: AbortSignal): Promise<unknown> {
   return jget(`${API}/optimizer-pipeline`, signal);
 }
 
-/** One curated entry from ``GET /api/v1/llm-providers``. ``available`` is
- * gated on the env-var being non-empty server-side — the picker dims
- * providers whose API key isn't configured rather than letting the operator
- * pick a provider that would fail at first call. */
-export interface LLMProvider {
-  name: string;
-  display_name: string;
-  available: boolean;
-  env_var: string;
-  models: string[];
-  note: string;
-}
-export interface LLMProvidersResponse {
-  providers: LLMProvider[];
-}
-export function fetchLLMProviders(signal?: AbortSignal): Promise<LLMProvidersResponse> {
-  return jget<LLMProvidersResponse>(`${API}/llm-providers`, signal);
-}
-
 // Target connector pipeline for a dataset. One-shot — topology is bound at
 // cycle-identity hash time and doesn't mutate during the loop. The server
 // reads `datasets/{name}/pipeline.json` (dataset overlay = source of truth)

@@ -50,7 +50,7 @@ async def escalate_or_stop(
 def persist_round(
     cycle: Cycle,
     round_result: RoundResult,
-    trial_dict: dict[str, Any],
+    round_payload: dict[str, Any],
     round_num: int,
     session: Session,
     *,
@@ -64,12 +64,12 @@ def persist_round(
         flushed = list(cycle.pending_decisions)
         cycle.pending_decisions.clear()
         round_result.decisions.extend(d.to_dict() for d in flushed)
-        trial_dict["decisions"] = list(round_result.decisions)
+        round_payload["decisions"] = list(round_result.decisions)
 
     # Persist axis-memory peaked set on the round dict — review.py's
     # ``evidence_grounding_present`` check needs it (AxisIndex isn't reconstructable from round_NNNN.json alone).
     if cycle.axes is not None:
-        trial_dict["axis_memory_peaked"] = sorted(cycle.axes.peaked_axes())
+        round_payload["axis_memory_peaked"] = sorted(cycle.axes.peaked_axes())
 
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
@@ -94,7 +94,7 @@ def persist_round(
             session.store.campaigns.save_round_file(
                 session.campaign_id,
                 session.state.cycle_id,
-                trial_dict,
+                round_payload,
             )
         hard_samples_artifact = write_hard_samples_artifacts(session, cycle)
         write_log_md(session, hard_samples_artifact=hard_samples_artifact)
@@ -116,7 +116,7 @@ def count_positive_yield_axes(cycle: Cycle) -> int | None:
 async def close_round(
     cycle: Cycle,
     round_result: RoundResult,
-    trial_dict: dict[str, Any],
+    round_payload: dict[str, Any],
     round_num: int,
     session: Session,
     cb: RunCallbacks,
@@ -127,7 +127,7 @@ async def close_round(
     Emits ``round:display`` (via ``cb.on_round_complete``) + ``round:complete`` (via ``persist_round``),
     writes ``round_NNNN.json``, refreshes axis memory. Independent of whether the round feeds escalation."""
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
-    persist_round(cycle, round_result, trial_dict, round_num, session, is_probe=is_probe)
+    persist_round(cycle, round_result, round_payload, round_num, session, is_probe=is_probe)
     if cycle.axes and session.store and session.backend_id:
         cycle.axes.refresh(
             session.store,
@@ -142,7 +142,7 @@ async def close_round(
 async def post_round(
     cycle: Cycle,
     round_result: RoundResult,
-    trial_dict: dict[str, Any],
+    round_payload: dict[str, Any],
     round_num: int,
     config: CampaignConfig,
     session: Session,
@@ -159,7 +159,7 @@ async def post_round(
         axes_with_positive_yield=axes_with_positive_yield,
     )
 
-    await close_round(cycle, round_result, trial_dict, round_num, session, cb)
+    await close_round(cycle, round_result, round_payload, round_num, session, cb)
 
     if event.stop_reason is not None:
         raise StopLoop(event.stop_reason)

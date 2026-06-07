@@ -115,9 +115,10 @@ class Settings(BaseSettings):
         """Parse ALLOWED_ORIGINS as a comma-separated list, dropping blanks."""
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
 
-    # LLM provider keys. Provider selection is per-campaign on
-    # ``CampaignConfig.optimizer_llm.provider`` — there is no env-var default.
-    LLM_MODEL: str = "openai/gpt-oss-120b"
+    # LLM provider keys. The optimizer's provider + model are install-global,
+    # configured per node in ``datasets/_optimizer/pipeline.json`` and read at
+    # ``llm_call`` — there is no env-var provider/model default. (Target/scoring
+    # model is per-dataset, in the pipeline overlay.)
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GROQ_API_KEY: str = ""

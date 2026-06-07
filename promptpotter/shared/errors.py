@@ -141,9 +141,10 @@ class RequestTooLargeError(RuntimeError):
             f"This is one optimizer (L1) call; n_variants is the per-round candidate "
             f"count (parallel calls), NOT a single-request lever — lowering it does "
             f"not shrink this request. Biggest lever first:\n"
-            f"  - point CampaignConfig.optimizer_llm.provider at a tier whose "
-            f"per-minute cap exceeds {requested} tokens (e.g. OpenRouter, or a paid "
-            f"Groq tier) — the free Groq on_demand tier caps at {limit}\n"
+            f"  - point the optimizer node `provider` in "
+            f"`datasets/_optimizer/pipeline.json` at a tier whose per-minute cap "
+            f"exceeds {requested} tokens (e.g. OpenRouter, or a paid Groq tier) — "
+            f"the free Groq on_demand tier caps at {limit}\n"
             f"  - or shorten the optimizer meta-prompt (task_description.md)."
         )
 

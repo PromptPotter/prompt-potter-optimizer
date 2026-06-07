@@ -1,10 +1,12 @@
 """Provider registry — name → factory.
 
-Provider must be supplied explicitly (typically ``CampaignConfig.optimizer_llm.provider``);
-no auto-detection or env-var fallback."""
+Provider must be supplied explicitly (the optimizer node's ``config.provider`` in
+``datasets/_optimizer/pipeline.json``, read by ``llm_call``); no auto-detection
+or env-var fallback."""
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -95,8 +97,13 @@ _PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
 }
 
 
+@functools.cache
 def get_llm_client(provider: str) -> LLMClientBase:
-    """Construct the LLM client for ``provider``."""
+    """The LLM client for ``provider`` — one instance per provider per process.
+
+    Resolved on every optimizer call now (``llm_call`` reads the per-node
+    ``provider``), so it's cached: the rate-limiter state is per-provider-account
+    and rightly shared across cycles, and the lazy SDK/httpx pool is built once."""
     factory = _PROVIDER_FACTORIES.get(provider)
     if factory is None:
         valid = ", ".join(sorted(_PROVIDER_FACTORIES))

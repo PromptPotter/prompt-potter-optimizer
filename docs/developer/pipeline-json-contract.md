@@ -87,7 +87,7 @@ A minimal one — the GSM8K single-LLM-node pipeline — at
   "description": "...",
   "backend_name": "TermNorm",
   "backend_type": "termnorm",
-  "available_models": ["openai/gpt-oss-120b"],
+  "available_models": ["openai/gpt-oss-20b", "openai/gpt-oss-120b"],
   "nodes": {
     "llm_only": {
       "type": "generation",
@@ -107,7 +107,7 @@ A minimal one — the GSM8K single-LLM-node pipeline — at
     }
   },
   "pipelines": {"default": ["llm_only"]},
-  "llm_defaults": {"provider": "groq", "model": "openai/gpt-oss-120b"}
+  "llm_defaults": {"provider": "openrouter", "model": "openai/gpt-oss-20b"}
 }
 ```
 

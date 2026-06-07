@@ -2,8 +2,9 @@
 
 ``TransitionResult`` = one L2/L3 fire's output; ``LayerStrategy`` = static
 per-layer spec (template, phase, the four parse/apply/enter/exit callables)
-that ``escalation.firing.executor`` reads. Temperature is sourced per-layer
-from ``OptimizerLLMConfig.temperature_for`` at the call site, not held here.
+that ``escalation.firing.executor`` reads. Provider/model/temperature are
+sourced from the layer's optimizer node config
+(``datasets/_optimizer/pipeline.json``) inside ``llm_call``, not held here.
 """
 
 from __future__ import annotations

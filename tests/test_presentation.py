@@ -407,7 +407,7 @@ def test_audit_trail_drain_flushes_partial_round(tmp_path: Path) -> None:
         ),
         1,
     )
-    proj._cycle_was_interrupted = True
+    proj._halted_mid_round = True
     proj.drain()
 
     path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0001.json"

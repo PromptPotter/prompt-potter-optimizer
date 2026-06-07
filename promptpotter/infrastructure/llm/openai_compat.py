@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
 
-from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import (
     MetaPromptParseError,
@@ -39,7 +38,6 @@ class OpenAICompatibleClient(LLMClientBase):
         base_url: str | None = None,
         max_retries: int = 5,
         timeout: float | None = None,
-        default_model: str | None = None,
         provider_name: str = "openai",
         rate_limiter: RateLimiter | None = None,
     ):
@@ -47,7 +45,6 @@ class OpenAICompatibleClient(LLMClientBase):
         self._base_url = base_url
         self._max_retries = max_retries
         self._timeout = timeout
-        self._default_model = default_model or settings.LLM_MODEL
         self._provider_name = provider_name
         self._rate_limiter = rate_limiter
         self._client: AsyncOpenAI | None = None
@@ -74,7 +71,7 @@ class OpenAICompatibleClient(LLMClientBase):
     async def chat(
         self,
         messages: list[dict[str, str]],
-        model: str | None = None,
+        model: str,
         temperature: float = 0.0,
         max_tokens: int | None = None,
         response_model: type[BaseModel] | None = None,
@@ -84,7 +81,7 @@ class OpenAICompatibleClient(LLMClientBase):
         client = self._ensure_client()
 
         request_params: dict[str, Any] = {
-            "model": model or self._default_model,
+            "model": model,
             "messages": messages,
             "temperature": temperature,
         }
@@ -254,8 +251,9 @@ class OpenAICompatibleClient(LLMClientBase):
             model_name = request_params.get("model", "unknown")
             raise ValueError(
                 f"Model '{model_name}' not found on {self._provider_name}. "
-                f"Update campaign_config['optimizer_llm']['model'] or "
-                f"set EXPERIMENT_ID = None to use current config."
+                f"Update the optimizer node `model` in "
+                f"datasets/_optimizer/pipeline.json (or the dataset's pipeline "
+                f"overlay for a backend node)."
             ) from exc
         return try_groq_json_validate_repair(
             exc, request_params, self._provider_name, response_model

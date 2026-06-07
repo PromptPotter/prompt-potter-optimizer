@@ -93,6 +93,25 @@ def get_optimizer_schema() -> PipelineSchema:
     )
 
 
+def optimizer_node_config(node: str) -> dict[str, Any]:
+    """The resolved config dict for an optimizer node (``datasets/_optimizer/pipeline.json``).
+
+    The single read accessor for optimizer-node tunables — provider, model,
+    temperature, reasoning_effort — now that they live only in the optimizer
+    pipeline file. Display/default sites (the RoundEnd model line, the preflight
+    optimizer-vs-target check, the l1 creativity default) read through here
+    instead of a per-campaign config copy."""
+    schema_node = get_optimizer_schema().get_node(node)
+    if schema_node is None:
+        raise KeyError(f"Unknown optimizer node: {node!r}")
+    return schema_node.current_config
+
+
+def optimizer_model(node: str = "l1_generate") -> str:
+    """The concrete optimizer model configured for ``node`` (default: the L1 generator)."""
+    return str(optimizer_node_config(node)["model"])
+
+
 _LANGFUSE_PREFIX = "optimizer_"
 _LANGFUSE_CACHE_TTL = 300  # seconds
 

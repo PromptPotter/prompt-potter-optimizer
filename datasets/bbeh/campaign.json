@@ -15,10 +15,6 @@
       "l3_patience": 1,
       "elimination_n_min": 4,
       "pobb_epsilon": 0.05
-    },
-    "optimizer_llm": {
-      "model": "mistralai/mistral-small-3.2-24b-instruct",
-      "provider": "openrouter"
     }
   }
 }

@@ -38,7 +38,6 @@ def llm_client():
     client = OpenAICompatibleClient(
         api_key="test-key",
         base_url="http://localhost:1234",
-        default_model="test-model",
         provider_name="test",
     )
     mock_async_client = AsyncMock()
@@ -53,7 +52,7 @@ async def test_404_translates_to_model_not_found(llm_client):
         side_effect=make_http_error(404, "model not found")
     )
     with pytest.raises(ValueError, match="not found on test"):
-        await client.chat(messages=[{"role": "user", "content": "x"}])
+        await client.chat(messages=[{"role": "user", "content": "x"}], model="test-model")
 
 
 @pytest.mark.asyncio
@@ -65,7 +64,7 @@ async def test_request_too_large_terminal(llm_client, status):
         side_effect=make_http_error(status, body)
     )
     with pytest.raises(RequestTooLargeError) as excinfo:
-        await client.chat(messages=[{"role": "user", "content": "x"}])
+        await client.chat(messages=[{"role": "user", "content": "x"}], model="test-model")
     assert excinfo.value.limit == 8000
     assert excinfo.value.requested == 9660
 
@@ -80,7 +79,7 @@ async def test_json_validate_failed_salvage(llm_client):
     mock_async.chat.completions.with_raw_response.create = AsyncMock(
         side_effect=make_http_error(400, body)
     )
-    resp = await client.chat(messages=[{"role": "user", "content": "x"}])
+    resp = await client.chat(messages=[{"role": "user", "content": "x"}], model="test-model")
     assert resp.parsed == {"ok": 1}
 
 
@@ -95,7 +94,7 @@ async def test_unknown_error_reraised_no_app_retry(llm_client):
 
     mock_async.chat.completions.with_raw_response.create = mock_create
     with pytest.raises(MockHTTPError, match="server error"):
-        await client.chat(messages=[{"role": "user", "content": "x"}])
+        await client.chat(messages=[{"role": "user", "content": "x"}], model="test-model")
     assert call_count[0] == 1, "app layer must not retry — SDK handles 5xx internally"
 
 
@@ -105,7 +104,7 @@ async def test_happy_path_calls_sdk_once(llm_client):
     mock_async.chat.completions.with_raw_response.create = AsyncMock(
         return_value=_RawResponse(MockCompletion())
     )
-    resp = await client.chat(messages=[{"role": "user", "content": "x"}])
+    resp = await client.chat(messages=[{"role": "user", "content": "x"}], model="test-model")
     assert resp.content == '{"result": "ok"}'
 
 
@@ -147,6 +146,7 @@ async def test_pydantic_validation_failure_retries_once_then_raises(llm_client):
     with pytest.raises(MetaPromptParseError) as excinfo:
         await client.chat(
             messages=[{"role": "user", "content": "x"}],
+            model="test-model",
             response_model=_Strict,
         )
     assert excinfo.value.attempts == 2

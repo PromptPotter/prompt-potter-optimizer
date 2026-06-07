@@ -27,8 +27,6 @@ from promptpotter.application.datasets.csv_ingest import (
 from promptpotter.application.datasets.draft_campaign import (
     DEFAULT_CONNECTOR,
     DEFAULT_MAX_ROUNDS,
-    DEFAULT_OPTIMIZER_MODEL,
-    DEFAULT_OPTIMIZER_PROVIDER,
     DEFAULT_SCORING_COMPOSITE,
     PREVIEW_ROWS,
     DraftCampaign,
@@ -164,17 +162,15 @@ def draft_from_dataset(
             message=f"Dataset {dataset_name!r} has no usable (query, ground_truth) rows.",
         )
 
-    # One validated parse of the dataset's config files. The DEFAULT_* ladders
-    # below fire only where the authored file omits a field — and they
-    # deliberately differ from CampaignConfig's schema defaults (ingest wants
-    # openrouter / 120b / 5 rounds; see the constant docstrings).
+    # One validated parse of the dataset's config files. The `or` ladders below
+    # fire only where the authored file leaves a field empty. (The optimizer LLM
+    # is install-global — datasets/_optimizer/pipeline.json — so the draft no
+    # longer carries provider/model.)
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config
     task = authored.task_description
     scoring = str(cc.scoring or "").split("(", 1)[0].strip() or DEFAULT_SCORING_COMPOSITE
     max_rounds = cc.optimization.max_rounds or DEFAULT_MAX_ROUNDS
-    optimizer_provider = cc.optimizer_llm.provider or DEFAULT_OPTIMIZER_PROVIDER
-    optimizer_model = cc.optimizer_llm.model or DEFAULT_OPTIMIZER_MODEL
     connector = authored.backend_type or DEFAULT_CONNECTOR
     pipeline_overlay = authored.pipeline_nodes
 
@@ -215,8 +211,6 @@ def draft_from_dataset(
             "connector": connector,
             "scoring_composite": scoring,
             "max_rounds": max_rounds,
-            "optimizer_provider": optimizer_provider,
-            "optimizer_model": optimizer_model,
             "pipeline_overlay": pipeline_overlay,
             "origin_prompt_fields": origin_prompt_fields,
         },

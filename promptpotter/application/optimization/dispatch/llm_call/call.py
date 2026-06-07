@@ -42,6 +42,7 @@ from promptpotter.infrastructure.llm import (
     decide_429_wait,
     emit_token_usage,
     extract_parsed_json,
+    get_llm_client,
     wait_with_countdown,
 )
 from promptpotter.infrastructure.store.stores import OptimizerCallCache, hash_call
@@ -169,7 +170,6 @@ def _ledger_response_payload(response: LLMResponse) -> Any:
 
 
 async def llm_call(
-    llm_client: LLMClientBase,
     messages: list[dict[str, str]],
     *,
     node: str | None = None,
@@ -181,6 +181,10 @@ async def llm_call(
     **overrides: Any,
 ) -> LLMResponse:
     """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides.
+
+    ``provider`` and ``model`` resolve from the optimizer node's config (sourced
+    from ``datasets/_optimizer/pipeline.json`` via ``node``) like every other
+    tunable — the client is built here from ``merged["provider"]``, not passed in.
 
     *response_model* defaults to ``OPTIMIZER_RESPONSE_MODELS[node]`` when a
     *node* is supplied — every optimizer node has a Pydantic model, so
@@ -215,6 +219,7 @@ async def llm_call(
         else:
             config = {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
+    llm_client = get_llm_client(merged["provider"])
 
     cache_key: str | None = None
     cached_payload: dict[str, Any] | None = None
@@ -222,7 +227,7 @@ async def llm_call(
         cache_key = hash_call(
             messages=messages,
             model=merged.get("model"),
-            provider=type(llm_client).__name__,
+            provider=merged["provider"],
             temperature=merged["temperature"],
             json_schema=response_schema,
             response_model=response_model.__name__ if response_model else None,
@@ -272,7 +277,7 @@ async def llm_call(
         log(
             "→ optimizer call: %s · %s · %d-char prompt%s",
             node or "llm_call",
-            merged.get("model") or "(default)",
+            merged["model"],
             prompt_chars,
             f" (over the {OPTIMIZER_PROMPT_WARN_CHARS}-char warn line)" if oversize else "",
         )
@@ -409,15 +414,18 @@ async def run_optimizer_node(
     *,
     template_name: str,
     prompt_vars: dict[str, Any],
-    llm_client: LLMClientBase,
-    model: str | None,
-    temperature: float = 0.0,
+    temperature: float | None = None,
     response_schema: dict[str, Any] | None = None,
     user_content: str | None = None,
     context: LLMCallContext | None = None,
     template: PromptTemplate | None = None,
 ) -> tuple[Any, str]:
     """Load prompt template, compile, call LLM → (parsed_result, prompt_text).
+
+    Provider, model, and the default temperature come from the node's config in
+    ``datasets/_optimizer/pipeline.json`` (resolved inside :func:`llm_call`).
+    Pass *temperature* only to override that default — the L1 generator does, with
+    its escalation-driven creativity; every other node defers to the file.
 
     The response model is looked up by ``template_name`` in
     :data:`OPTIMIZER_RESPONSE_MODELS`; the typed Pydantic instance lands on
@@ -447,12 +455,12 @@ async def run_optimizer_node(
         ]
     else:
         messages = [{"role": "user", "content": prompt}]
+    overrides: dict[str, Any] = {}
+    if temperature is not None:
+        overrides["temperature"] = temperature
     response = await llm_call(
-        llm_client,
         messages=messages,
         node=template_name,
-        model=model,
-        temperature=temperature,
         response_schema=response_schema,
         context=context,
         trace_meta={
@@ -460,5 +468,6 @@ async def run_optimizer_node(
             "template_fields": template.prompt_field_dict(),
             "variables": prompt_vars,
         },
+        **overrides,
     )
     return extract_parsed_json(response), prompt

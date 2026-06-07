@@ -24,8 +24,6 @@ export const ORIGIN_KEY = {
   connector: "connector",
   scoringComposite: "scoring_composite",
   maxRounds: "max_rounds",
-  optimizerProvider: "optimizer.provider",
-  optimizerModel: "optimizer.model",
   backendNodeConfig: "backend.node_config",
 } as const;
 
@@ -124,10 +122,6 @@ export function questionPatch(field: string, answer: string): DraftPatch | null 
       return { connector: value };
     case ORIGIN_KEY.scoringComposite:
       return { scoring_composite: value };
-    case ORIGIN_KEY.optimizerProvider:
-      return { optimizer_provider: value };
-    case ORIGIN_KEY.optimizerModel:
-      return { optimizer_model: value };
     case ORIGIN_KEY.maxRounds: {
       const n = Number(value);
       return Number.isInteger(n) && n >= 1 && n <= 100 ? { max_rounds: n } : null;

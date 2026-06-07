@@ -37,7 +37,6 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopLoop, StopReason, emit_phase
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, RebaseRequest
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.llm.models import emit_round_warning
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
 from promptpotter.shared import truncate
@@ -332,7 +331,6 @@ async def _run_transition(
     Layer-agnostic — everything layer-specific reads off the `LayerStrategy` spec.
     """
     assert cycle.tracking.current_sp is not None
-    client = _llm_client.get_llm_client(config.optimizer_llm.provider)
     current_pp = cycle.tracking.current_sp.pipeline_params
 
     emit_phase(
@@ -350,9 +348,6 @@ async def _run_transition(
         raw, prompt = await run_optimizer_node(
             template_name=transition.template_name,
             prompt_vars=prompt_vars,
-            llm_client=client,
-            model=config.optimizer_llm.model,
-            temperature=config.optimizer_llm.temperature_for(transition.layer_id),
             context=LLMCallContext(
                 ledger=cycle.session.state.ledger,
                 round_num=round_num,

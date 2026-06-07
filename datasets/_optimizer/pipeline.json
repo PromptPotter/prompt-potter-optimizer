@@ -17,7 +17,9 @@
         "schema_family": "l1_generate",
         "schema_version": 1,
         "reasoning_effort": "high",
-        "max_tokens": 20000
+        "max_tokens": 20000,
+        "provider": "openrouter",
+        "model": "openai/gpt-oss-120b"
       }
     },
     "l1_score": {
@@ -29,7 +31,7 @@
     "l1_critique": {
       "type": "agent",
       "config": {
-        "temperature": 0.3,
+        "temperature": 0.0,
         "output_format": "json",
         "positive_threshold": 0.7,
         "schema_family": "l1_critique",
@@ -37,7 +39,9 @@
         "prompt_family": "l1_critique",
         "prompt_version": 1,
         "reasoning_effort": "high",
-        "max_tokens": 10000
+        "max_tokens": 10000,
+        "provider": "openrouter",
+        "model": "openai/gpt-oss-120b"
       }
     },
     "l2_context": {
@@ -53,7 +57,9 @@
         "response_parser": "transition_result",
         "prompt_version": 1,
         "reasoning_effort": "high",
-        "max_tokens": 10000
+        "max_tokens": 10000,
+        "provider": "openrouter",
+        "model": "openai/gpt-oss-120b"
       }
     },
     "l3_plan": {
@@ -70,18 +76,22 @@
         "response_parser": "transition_result",
         "prompt_version": 1,
         "reasoning_effort": "high",
-        "max_tokens": 10000
+        "max_tokens": 10000,
+        "provider": "openrouter",
+        "model": "openai/gpt-oss-120b"
       }
     },
     "checkin": {
       "type": "llm/meta",
       "config": {
-        "temperature": 0.3,
+        "temperature": 0.0,
         "output_format": "json",
         "prompt_family": "checkin",
         "prompt_version": 2,
         "reasoning_effort": "high",
-        "max_tokens": 10000
+        "max_tokens": 10000,
+        "provider": "openrouter",
+        "model": "openai/gpt-oss-120b"
       }
     }
   },

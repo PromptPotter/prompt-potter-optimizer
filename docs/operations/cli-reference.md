@@ -57,7 +57,7 @@ If a gap survives the resolver (e.g. an ambiguous column or unstated framing), `
 | `--config` | Campaign config JSON file — overrides the dataset's default `campaign.json` (name form) |
 | `--dataset-name` | Alternative to the positional name |
 | `--slug` | *(file form)* Dataset slug under `projects/{tenant}/datasets/` (default: derived from the filename) |
-| `--set FIELD=VALUE` | *(file form)* Confirm an origin field directly (operator-stated), repeatable. Fields: `task_description`, `column.query`, `column.ground_truth`, `connector`, `scoring_composite`, `max_rounds`, `optimizer.provider`, `optimizer.model`. Applied before the resolver, so it seeds the rest |
+| `--set FIELD=VALUE` | *(file form)* Confirm an origin field directly (operator-stated), repeatable. Fields: `task_description`, `column.query`, `column.ground_truth`, `connector`, `scoring_composite`, `max_rounds`. Applied before the resolver, so it seeds the rest |
 | `--backend-url` | Backend service URL |
 | `--backend-id` | Override backend id (auto-derived from `dataset_name` otherwise) |
 | `--task-file` | *(name form)* Override `<dataset>/task_description.md` |
@@ -81,7 +81,7 @@ While `resume` runs, the live in-flight round mirrors into the active cycle's ow
 |---|---|
 | `--from <round>` | Rewind the active cycle to after round N before resuming |
 | `--no-check` | On resume, rescore but skip the decision-replay halt |
-| `--fork-on-divergence` | On *data-affecting* config divergence (scoring, optimizer_llm, pipeline_overrides, exclude_nodes, dataset_name), mint a sibling cycle (with `parent_cycle_id`) and re-run the divergent round under the current scorer. Policy-only edits (PoBB knobs, patience, thresholds, n_variants, exploration) continue in-place — no fork, the flag is a no-op. See `CampaignConfig.classify_diff_against` for the field-by-field split. |
+| `--fork-on-divergence` | On *data-affecting* config divergence (scoring, pipeline_overrides, exclude_nodes, dataset_name), mint a sibling cycle (with `parent_cycle_id`) and re-run the divergent round under the current scorer. Policy-only edits (PoBB knobs, patience, thresholds, n_variants, exploration) continue in-place — no fork, the flag is a no-op. See `CampaignConfig.classify_diff_against` for the field-by-field split. |
 
 ---
 
@@ -145,7 +145,7 @@ Restoration is manual — move entries from `excluded` back into `items`.
 
 ## Environment
 
-`.env` file (see `.env.example`) carries API keys. Provider selection lives on `CampaignConfig.optimizer_llm.provider` per dataset's `campaign.json` — no env-var default.
+`.env` file (see `.env.example`) carries API keys. The optimizer's provider + model are install-global in `datasets/_optimizer/pipeline.json` (per optimizer node) — no per-campaign or env-var default. (Target/scoring model is per-dataset in the pipeline overlay.)
 
 | Variable | When required | Purpose |
 |----------|---------------|---------|
@@ -153,7 +153,6 @@ Restoration is manual — move entries from `excluded` back into `items`.
 | `OPENAI_API_KEY` | using OpenAI | OpenAI API key |
 | `ANTHROPIC_API_KEY` | using Anthropic | Anthropic API key |
 | `OPENROUTER_API_KEY` | using OpenRouter | OpenRouter (`sk-or-…`) |
-| `LLM_MODEL` | always | Default model when `optimizer_llm.model` is null (e.g. `openai/gpt-oss-120b`) |
 | `LANGFUSE_PUBLIC_KEY` | optional | Langfuse cloud tracing |
 | `LANGFUSE_SECRET_KEY` | optional | Langfuse cloud tracing |
 | `LANGFUSE_HOST` | optional | Langfuse host URL |

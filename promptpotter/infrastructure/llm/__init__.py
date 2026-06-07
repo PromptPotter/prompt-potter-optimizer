@@ -7,9 +7,9 @@ mode, token tracking. Retry and ``Retry-After`` honoring are delegated to
 the provider SDKs (``max_retries`` kwarg on ``AsyncOpenAI`` / ``AsyncAnthropic``).
 
 Provider selection is always explicit — caller passes
-:func:`get_llm_client` ``(provider)``, typically sourced from
-``CampaignConfig.optimizer_llm.provider``. There is no auto-detection or
-env-var fallback.
+:func:`get_llm_client` ``(provider)``, sourced from the optimizer node's
+``config.provider`` (``datasets/_optimizer/pipeline.json``) inside ``llm_call``.
+There is no auto-detection or env-var fallback.
 
 Client-side tier throttling (RPM + TPM) is opt-in via ``*_RPM`` / ``*_TPM``
 settings — see :mod:`.rate_limit`.

@@ -6,6 +6,10 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from promptpotter.application.optimization.dispatch.llm_call import (
+    optimizer_model,
+    optimizer_node_config,
+)
 from promptpotter.application.optimization.l1.generate import (
     candidate_summaries,
     l1_generate,
@@ -18,7 +22,6 @@ from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.domain.results import CandidateProposal
 
 # Module-level alias for test monkeypatching.
-from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.tracing import observed_node
 
 if TYPE_CHECKING:
@@ -41,10 +44,11 @@ async def generate_or_load_candidates(
     config = cycle.config
     # Cap n_variants at 3× config so L2 can't blow up the round budget.
     opt = config.optimization
-    model = config.optimizer_llm.model
     opt_params = cycle.opt_sp.memory.l1_overrides
     _n_variants = min(opt_params.get("n_variants", opt.n_variants), opt.n_variants * 3)
-    _creativity = opt_params.get("creativity", config.optimizer_llm.l1_temperature)
+    _creativity = opt_params.get(
+        "creativity", float(optimizer_node_config("l1_generate")["temperature"])
+    )
     prompt_preview = cycle.opt_sp.render()[:120]
 
     assert cycle.tracking.current_sp is not None
@@ -57,7 +61,7 @@ async def generate_or_load_candidates(
         prompt_preview=prompt_preview,
         n_variants=_n_variants,
         creativity=_creativity,
-        model=model or "(default)",
+        model=optimizer_model(),
         has_l1_critique=bool(cycle.rounds[-1].critique) if cycle.rounds else False,
         pipeline_params=cycle.tracking.current_sp.pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
@@ -112,7 +116,6 @@ async def generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
-    client = _llm_client.get_llm_client(config.optimizer_llm.provider)
     async with observed_node(
         f"l1_generate_r{round_num}",
         "llm/meta",
@@ -124,8 +127,6 @@ async def generate_or_load_candidates(
             cycle,
             n_variants=_n_variants,
             creativity=_creativity,
-            llm_client=client,
-            model=model,
             obs=obs,
             round_num=round_num,
         )

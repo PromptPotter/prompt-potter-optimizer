@@ -18,6 +18,7 @@ from typing import Any
 from promptpotter.application.optimization.dispatch.hub import (
     format_l1_critique_for_prompt,
 )
+from promptpotter.application.optimization.dispatch.llm_call import optimizer_model
 from promptpotter.application.optimization.l1.score import round_winner_key
 from promptpotter.domain.opt_search_point import (
     build_candidate_flat,
@@ -115,7 +116,7 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
         sp_budget_ttest=sample,
         dataset_size=len(dataset),
         mde=min_detectable_effect(sample),
-        model=config.optimizer_llm.model or "(default)",
+        model=optimizer_model(),
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
     )

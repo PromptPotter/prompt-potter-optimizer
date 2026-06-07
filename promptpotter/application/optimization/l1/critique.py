@@ -15,7 +15,6 @@ from promptpotter.application.optimization.dispatch.llm_call import (
 )
 from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.infrastructure.llm import LLMClientBase
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -33,10 +32,8 @@ async def run_l1_critique(
     cycle: Cycle,
     round_result: RoundResult,
     schema: PipelineSchema | None,
-    llm_client: LLMClientBase,
     *,
     round_num: int,
-    model: str | None = None,
     ledger: CycleEventLog | None = None,
 ) -> dict[str, Any]:
     """Build critique from pipeline stats + LLM analysis; returns dict for storage.
@@ -54,8 +51,6 @@ async def run_l1_critique(
     result, prompt = await run_optimizer_node(
         template_name="l1_critique",
         prompt_vars=prompt_vars,
-        llm_client=llm_client,
-        model=model,
         context=LLMCallContext(
             ledger=ledger,
             round_num=round_num,

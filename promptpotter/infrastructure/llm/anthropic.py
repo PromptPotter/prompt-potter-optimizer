@@ -49,7 +49,7 @@ class AnthropicClient(LLMClientBase):
     async def chat(
         self,
         messages: list[dict[str, str]],
-        model: str | None = None,
+        model: str,
         temperature: float = 0.0,
         max_tokens: int | None = None,
         response_model: type[BaseModel] | None = None,
@@ -69,13 +69,11 @@ class AnthropicClient(LLMClientBase):
             else:
                 anthropic_messages.append({"role": msg["role"], "content": msg["content"]})
 
-        model_name = model or settings.LLM_MODEL
-
         # Anthropic requires max_tokens; 8192 is the per-request ceiling on most Claude models (boundary-local fallback, not a project default).
         anthropic_max_tokens = max_tokens if max_tokens is not None else 8192
 
         request_params: dict[str, Any] = {
-            "model": model_name,
+            "model": model,
             "messages": anthropic_messages,
             "max_tokens": anthropic_max_tokens,
             "temperature": temperature,

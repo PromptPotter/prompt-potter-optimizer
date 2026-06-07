@@ -16,7 +16,6 @@ from typing import Any
 from promptpotter.application.optimization.dispatch.llm_call import run_optimizer_node
 from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.llm import LLMClientBase
 from promptpotter.infrastructure.store.base import (
     read_json_optional,
     read_text_optional,
@@ -29,12 +28,11 @@ __all__ = [
 ]
 
 
-async def decompose_prompt_fields(
-    context_input: Any,
-    llm_client: LLMClientBase,
-    model: str | None = None,
-) -> dict[str, Any]:
-    """LLM check-in: raw context → Layer 1 prompt fields + task_context sub-dict."""
+async def decompose_prompt_fields(context_input: Any) -> dict[str, Any]:
+    """LLM check-in: raw context → Layer 1 prompt fields + task_context sub-dict.
+
+    Provider + model come from the ``checkin`` optimizer node config
+    (``datasets/_optimizer/pipeline.json``), resolved inside :func:`llm_call`."""
     if isinstance(context_input, dict):
         user_content = (
             "The user has provided partial Layer 1 fields for a prompt. "
@@ -56,8 +54,6 @@ async def decompose_prompt_fields(
     result, _ = await run_optimizer_node(
         template_name="checkin",
         prompt_vars={"consultation_instruction": consultation_instruction},
-        llm_client=llm_client,
-        model=model,
         user_content=user_content,
     )
     assert isinstance(result, CheckinOutput), (
@@ -71,8 +67,6 @@ async def decompose_prompt_fields(
 
 async def load_or_build_task_context(
     dataset_config_dir: Path | None,
-    llm_client: LLMClientBase,
-    model: str | None,
 ) -> TaskDecomposition:
     """Run-start task framing — read the committed ``{dir}/task_context.json``, or
     decompose ``task_description.md`` once on first sight and persist it.
@@ -92,7 +86,7 @@ async def load_or_build_task_context(
     task_description = read_text_optional(dataset_config_dir / "task_description.md")
     if not task_description:
         return TaskDecomposition()
-    result = await decompose_prompt_fields(task_description, llm_client, model=model)
+    result = await decompose_prompt_fields(task_description)
     tc_dict = dict(result.get("task_context") or {})
     tc_dict["raw_description"] = task_description
     task_context = TaskDecomposition.from_dict(tc_dict)

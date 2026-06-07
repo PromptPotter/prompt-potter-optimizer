@@ -54,7 +54,7 @@ Read these. Don't recommend parameter tweaks unless the user asks. Don't classif
 
 Trigger if any of: `.env` missing, backend `/status` unreachable, or requested dataset has no loader. Run sub-flows in order; each one's success unblocks the next phase.
 
-**Missing `.env`.** Ask the operator for `GROQ_API_KEY` (free tier at [console.groq.com](https://console.groq.com) is the default optimizer LLM). Add OpenAI/Anthropic/OpenRouter only if explicitly named. Write `.env` with `GROQ_API_KEY=…` + `LLM_MODEL=openai/gpt-oss-120b`; `.env.example` is the full template.
+**Missing `.env`.** Ask the operator for `GROQ_API_KEY` (free tier at [console.groq.com](https://console.groq.com) is the default optimizer LLM). Add OpenAI/Anthropic/OpenRouter only if explicitly named. Write `.env` with `GROQ_API_KEY=…` (the optimizer model defaults to `openai/gpt-oss-120b`; no env override); `.env.example` is the full template.
 
 **Backend `/status` unreachable.** TermNorm is the canonical test backend. If it isn't local yet, `git clone https://github.com/runfish5/TermNorm-excel` to `../TermNorm-excel` (sibling of PromptPotter; operator can override the path). Once present, tell the operator to run `start-server-py-LLMs.bat` in their own terminal — same hand-off model as Phase 4 (`new` / `resume`). Wait for `/status` 200 before continuing. *Future improvement: spawn a dedicated terminal automatically once that capability lands.*
 

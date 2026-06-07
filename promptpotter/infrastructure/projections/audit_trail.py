@@ -167,7 +167,7 @@ class AuditTrailView(DerivedView):
         self._finished_at: str = ""
         # Set by the runner pre-`drain()` on teardown; threads `"interrupted": True` onto rounds
         # that never received a `round:complete`.
-        self._cycle_was_interrupted: bool = False
+        self._halted_mid_round: bool = False
 
     @classmethod
     def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailView:
@@ -269,7 +269,7 @@ class AuditTrailView(DerivedView):
         merged_warnings = existing_warnings + self._warnings
         if merged_warnings:
             payload["warnings"] = merged_warnings
-        if self._cycle_was_interrupted:
+        if self._halted_mid_round:
             payload["interrupted"] = True
 
         write_json(path, payload, default=str)
@@ -287,7 +287,7 @@ class AuditTrailView(DerivedView):
 
     def drain(self) -> None:
         """Runner's teardown seam — flush buffered state since a mid-candidate interrupt never
-        emits `round:complete`. `_cycle_was_interrupted` threads `"interrupted": true` on the partial.
+        emits `round:complete`. `_halted_mid_round` threads `"interrupted": true` on the partial.
         """
         if self._nodes or self._l1_score is not None or self._warnings:
             self.flush()

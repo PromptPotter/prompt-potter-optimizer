@@ -9,10 +9,6 @@
       "n_variants": 3,
       "improvement_threshold": 0.01,
       "degradation_threshold": 0.4
-    },
-    "optimizer_llm": {
-      "provider": "openrouter",
-      "model": "openai/gpt-oss-20b"
     }
   }
 }

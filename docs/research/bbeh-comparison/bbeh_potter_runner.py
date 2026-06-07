@@ -51,13 +51,13 @@ def build_campaign_config(
     max_rounds: int | None = None,
     n_variants: int | None = None,
     sp_budget_ttest: int | None = None,
-    optimizer_model: str | None = None,
-    optimizer_provider: str | None = None,
 ) -> CampaignConfig:
     """Load campaign.json and patch any non-None overrides on top.
 
     Overrides are intended as ad-hoc notebook conveniences; campaign.json
-    stays the project default and the SoT for CLI runs.
+    stays the project default and the SoT for CLI runs. The optimizer LLM is
+    install-global (``datasets/_optimizer/pipeline.json``) — edit that file to
+    change the optimizer model/provider, not the campaign config.
     """
     raw = json.loads(_BBEH_CAMPAIGN_JSON.read_text(encoding="utf-8"))
     cfg = raw.get("campaign_config", raw)
@@ -82,14 +82,6 @@ def build_campaign_config(
     if opt_overrides:
         cfg["optimization"] = {**cfg.get("optimization", {}), **opt_overrides}
 
-    llm_overrides = {
-        k: v
-        for k, v in {"model": optimizer_model, "provider": optimizer_provider}.items()
-        if v is not None
-    }
-    if llm_overrides:
-        cfg["optimizer_llm"] = {**cfg.get("optimizer_llm", {}), **llm_overrides}
-
     return load_campaign_config(cfg)
 
 
@@ -102,8 +94,6 @@ async def run_bbeh_campaign(
     max_rounds: int | None = None,
     n_variants: int | None = None,
     sp_budget_ttest: int | None = None,
-    optimizer_model: str | None = None,
-    optimizer_provider: str | None = None,
 ) -> dict[str, Any] | None:
     """End-to-end BBEH run: origin -> optimize -> per-task test eval -> export.
 
@@ -126,8 +116,6 @@ async def run_bbeh_campaign(
             max_rounds=max_rounds,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
-            optimizer_model=optimizer_model,
-            optimizer_provider=optimizer_provider,
         )
         pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
         set_display_tags(session.pipeline_schema)

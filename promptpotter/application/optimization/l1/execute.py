@@ -10,6 +10,7 @@ from promptpotter.application.intelligence.exploration import (
     select_round_subset,
 )
 from promptpotter.application.optimization.dispatch.hub import format_l1_critique_for_prompt
+from promptpotter.application.optimization.dispatch.llm_call import optimizer_model
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.l1.resume import generate_or_load_candidates
 from promptpotter.application.optimization.l1.score import l1_score
@@ -21,7 +22,6 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.validators import StopRule
 
 # Module-level alias for test monkeypatching.
-from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.tracing import (
     L1CritiqueWritten,
     PromptVersion,
@@ -175,7 +175,6 @@ async def execute_round(
 
     critique_text = ""
     if round_result.results and not skip_critique:
-        crit_llm = _llm_client.get_llm_client(config.optimizer_llm.provider)
         # Critique is round-over-round feedback — survive a malformed response.
         with graceful("L1 critique failed; continuing without round-over-round feedback"):
             async with observed_node(
@@ -189,9 +188,7 @@ async def execute_round(
                     cycle,
                     round_result,
                     session.pipeline_schema,
-                    crit_llm,
                     round_num=round_num,
-                    model=config.optimizer_llm.model,
                     ledger=session.state.ledger,
                 )
             round_result.critique = critique_result
@@ -217,7 +214,7 @@ async def execute_round(
                     improved=round_result.improved,
                     winner_prompt_fields_id=round_result.prompt_fields.get("id", ""),
                     candidate_scores=[c.model_dump() for c in round_result.candidate_scores],
-                    model=config.optimizer_llm.model or "",
+                    model=optimizer_model(),
                     n_variants=config.optimization.n_variants,
                     optimizer_templates=["l1_generate", "l1_critique"],
                     evaluators=dict(round_result.evaluators),

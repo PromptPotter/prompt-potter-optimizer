@@ -28,7 +28,6 @@ from promptpotter.application.bootstrap.wiring import resolve_dataset_config_dir
 from promptpotter.application.config import (
     CampaignConfig,
     configure_and_apply_pipeline,
-    create_llm_client,
     load_campaign_config,
 )
 from promptpotter.application.datasets import read_campaign_config_file
@@ -169,8 +168,7 @@ async def mint_campaign_command(
     # commit from the check-in's decomposition) — or decompose a benchmark's
     # ``task_description.md`` once on first sight. No second LLM call once the
     # file exists; the web mint path previously ran with EMPTY framing.
-    llm_client, model = create_llm_client(campaign_config)
-    task_context = await load_or_build_task_context(session.dataset_config_dir, llm_client, model)
+    task_context = await load_or_build_task_context(session.dataset_config_dir)
 
     job = job_registry.create(
         user_id=str(stores.identity.user_id),
@@ -446,9 +444,6 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     hard-codes ``["llm_ranking"]`` or ``n_variants=3``. Connectors that
     leave the fields empty get the schema defaults.
     """
-    optimizer_llm: dict[str, Any] = {"provider": draft.optimizer_provider}
-    if draft.optimizer_model:
-        optimizer_llm["model"] = draft.optimizer_model
     connector = connectors.get(draft.connector)
     optimization: dict[str, Any] = {"max_rounds": draft.max_rounds}
     optimization.update(dict(connector.default_optimization))
@@ -461,7 +456,6 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
             "scoring": f"{draft.scoring_composite}(predicted, ground_truth)",
             "exclude_nodes": list(connector.default_exclude_nodes),
             "optimization": optimization,
-            "optimizer_llm": optimizer_llm,
         },
     }
 
@@ -536,8 +530,7 @@ async def start_run_command(
 
     train_data = session.samples or []
     configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
-    llm_client, model = create_llm_client(campaign_config)
-    task_context = await load_or_build_task_context(session.dataset_config_dir, llm_client, model)
+    task_context = await load_or_build_task_context(session.dataset_config_dir)
     # Bind the session to the EXISTING campaign/cycle before launch. Without this
     # `_ensure_session_minted` (guards on an empty session_id) would mint a fresh
     # random campaign + root cycle and steal the active pointer — stranding an

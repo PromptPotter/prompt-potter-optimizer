@@ -17,7 +17,7 @@ class LLMClientBase(ABC):
     async def chat(
         self,
         messages: list[dict[str, str]],
-        model: str | None = None,
+        model: str,
         temperature: float = 0.0,
         max_tokens: int | None = None,
         response_model: type[BaseModel] | None = None,
@@ -26,6 +26,9 @@ class LLMClientBase(ABC):
     ) -> LLMResponse:
         """Send a chat completion request.
 
+        - ``model``: mandatory + concrete. ``llm_call`` reads it from the
+          optimizer node config (``datasets/_optimizer/pipeline.json``) before
+          the call; no model fallback lives below this seam.
         - ``max_tokens``: ``None`` = no cap (provider default).
         - ``response_model``: typed JSON output via provider ``response_format`` +
           client-side ``model_validate``. Anthropic validates client-side only

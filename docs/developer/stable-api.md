@@ -72,7 +72,7 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 
 Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
 
-**Top-level keys.** `dataset_name`, `scoring`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`, `optimizer_llm`.
+**Top-level keys.** `dataset_name`, `scoring`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `datasets/_optimizer/pipeline.json` — not a campaign key.)
 
 **`optimization` knobs:**
 
@@ -93,9 +93,9 @@ Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::C
 | `exploration.seed_heatmap_from_archive` | False | Round-end hard-sample Rasch fit folds in prior archive observations (cross-cycle δ_s ordering). |
 | `exploration.heatmap_show_archive_candidates` | False | When seeding from archive: also show archive candidate IDs on the heatmap Y-axis (else hidden from display). |
 
-**`optimizer_llm` knobs:** `provider` (`groq`/`openai`/`anthropic`/`openrouter`), `model` (provider-specific). Per-node temperature + max_tokens come from `datasets/_optimizer/pipeline.json`, not the campaign config.
+**Optimizer LLM:** install-global, **not** in `campaign.json`. Provider, model, temperature, `reasoning_effort`, and `max_tokens` are per-node config in `datasets/_optimizer/pipeline.json` (`nodes.{l1_generate|l1_critique|l2_context|l3_plan|checkin}.config`), resolved inside `llm_call` like any other node tunable. One file configures the optimizer for every campaign.
 
-Constants moved out of `campaign.json` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`), L2/L3 transition temperatures (`optimizer_llm.temperature_for(layer_id)`), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
+Constants moved out of `campaign.json` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
 
 The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. L2 and L3 are always-on architecture.
 

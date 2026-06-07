@@ -8,6 +8,7 @@ from promptpotter.application.optimization.dispatch.hub import DispatchHub, buil
 from promptpotter.application.optimization.dispatch.llm_call import (
     LLMCallContext,
     load_optimizer_prompt,
+    optimizer_model,
     run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import (
@@ -21,7 +22,6 @@ from promptpotter.application.optimization.validators.l1_strict import (
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import EvidenceGrounding
 from promptpotter.domain.results import CandidateProposal, candidate_label
-from promptpotter.infrastructure.llm import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
 from promptpotter.infrastructure.llm.models import emit_round_warning
 from promptpotter.infrastructure.tracing import CandidateCreated
@@ -76,8 +76,6 @@ async def l1_generate(
     *,
     n_variants: int,
     creativity: float,
-    llm_client: LLMClientBase,
-    model: str | None = None,
     obs: ObservabilityBridge | None = None,
     round_num: int = 0,
 ) -> list[CandidateProposal]:
@@ -85,6 +83,7 @@ async def l1_generate(
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
+    model = optimizer_model("l1_generate")  # for warning/diagnostic surfaces only
     opt_sp = cycle.opt_sp
     pipeline_schema = cycle.session.pipeline_schema
     tracing_campaign_id = cycle.session.state.tracing_campaign_id
@@ -106,8 +105,6 @@ async def l1_generate(
         generated, meta_prompt = await run_optimizer_node(
             template_name="l1_generate",
             prompt_vars=prompt_vars,
-            llm_client=llm_client,
-            model=model,
             temperature=creativity,
             response_schema=output_schema,
             context=LLMCallContext(

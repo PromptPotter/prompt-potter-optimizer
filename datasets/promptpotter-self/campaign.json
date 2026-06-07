@@ -14,10 +14,6 @@
       "l2_patience": 2,
       "l3_patience": 1,
       "elimination_n_min": 6
-    },
-    "optimizer_llm": {
-      "model": "openai/gpt-oss-120b",
-      "provider": "groq"
     }
   }
 }

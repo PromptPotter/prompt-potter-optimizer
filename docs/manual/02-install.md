@@ -2,11 +2,11 @@
 
 Five steps. Takes a couple of minutes.
 
-## 1. Get a Groq API key
+## 1. Get an OpenRouter API key
 
-Sign up at [console.groq.com](https://console.groq.com) and create an API key. The free tier works.
+Sign up at [openrouter.ai/keys](https://openrouter.ai/keys) and create an API key.
 
-Groq is the default optimizer LLM provider. If you prefer OpenAI, see [`operations/cli-reference.md § Environment`](../operations/cli-reference.md#environment) for the alternative variables.
+OpenRouter is the default optimizer LLM provider — the optimizer meta-prompt is too large for Groq's free tier. If you prefer Groq, OpenAI, or Anthropic, see [`operations/cli-reference.md § Environment`](../operations/cli-reference.md#environment) for the alternative variables.
 
 ## 2. Clone the repo
 
@@ -22,13 +22,10 @@ Requires **Python 3.13+**.
 Create a file called `.env` in the repo root, containing exactly:
 
 ```
-GROQ_API_KEY=your_key_here
-LLM_MODEL=openai/gpt-oss-120b
+OPENROUTER_API_KEY=your_key_here
 ```
 
-Any Groq-hosted model ID works; `openai/gpt-oss-120b` is the recommended default for optimizer calls. If you hit free-tier rate limits, try `meta-llama/llama-4-scout-17b-16e-instruct`.
-
-To use Anthropic, OpenAI, or OpenRouter instead of (or alongside) Groq, set the corresponding `*_API_KEY` and switch `optimizer_llm.provider` in your dataset's `campaign.json` to `"anthropic"`, `"openai"`, or `"openrouter"`. Provider selection is per-campaign — there is no env-var default.
+The optimizer model defaults to `openai/gpt-oss-120b` on OpenRouter. It's install-global, configured once in `datasets/_optimizer/pipeline.json` (per optimizer node's `config.model` / `config.provider`) — the same optimizer runs every campaign. To use a different model or provider, edit that file; set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no per-campaign or env-var override.
 
 Connecting to a remote / auth-gated backend? See [`operations/backend-integration.md § Connection security`](../operations/backend-integration.md#connection-security).
 

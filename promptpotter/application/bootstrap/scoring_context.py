@@ -104,7 +104,12 @@ async def _emit_preflight_and_init_session(
     from promptpotter.application.config import run_preflight_checks
     from promptpotter.domain.phases import CampaignPhase, emit_phase
 
-    preflight_warnings = run_preflight_checks(config, dataset)
+    target_models = tuple(
+        str(v["model"])
+        for v in session.pipeline_params.values()
+        if isinstance(v, dict) and v.get("model")
+    )
+    preflight_warnings = run_preflight_checks(config, dataset, target_models)
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
     emit_phase(

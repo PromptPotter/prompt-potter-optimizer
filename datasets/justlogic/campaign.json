@@ -19,10 +19,6 @@
       "l3_patience": 1,
       "elimination_n_min": 6,
       "pobb_epsilon": 0.05
-    },
-    "optimizer_llm": {
-      "model": "openai/gpt-oss-120b",
-      "provider": "openrouter"
     }
   }
 }

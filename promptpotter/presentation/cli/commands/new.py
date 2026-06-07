@@ -50,8 +50,6 @@ _SET_ATTR: dict[str, str] = {
     "task_description": "raw_task_description",
     "connector": "connector",
     "scoring_composite": "scoring_composite",
-    "optimizer.provider": "optimizer_provider",
-    "optimizer.model": "optimizer_model",
     "max_rounds": "max_rounds",
 }
 
@@ -221,28 +219,23 @@ async def _checkin_task(
     override instead. Either way the result rides session state so ``resume`` /
     ``sweep`` read it back; no second check-in call recomputes what ingest already
     decomposed."""
-    from promptpotter.application.config import create_llm_client
     from promptpotter.application.optimization.task_context import (
         decompose_prompt_fields,
         load_or_build_task_context,
     )
     from promptpotter.domain.search_point import TaskDecomposition
 
-    llm_client, model = create_llm_client(campaign_config)
-
     if task_file:
         override: str | None = Path(task_file).read_text(encoding="utf-8")
     else:
         override = task_text
     if override:
-        result = await decompose_prompt_fields(override, llm_client, model=model)
+        result = await decompose_prompt_fields(override)
         tc_dict = dict(result.get("task_context") or {})
         tc_dict["raw_description"] = override
         task_context = TaskDecomposition.from_dict(tc_dict)
     else:
-        task_context = await load_or_build_task_context(
-            session.dataset_config_dir, llm_client, model
-        )
+        task_context = await load_or_build_task_context(session.dataset_config_dir)
 
     if not task_context:
         checkin_line("task check-in", "no task description — skipped")

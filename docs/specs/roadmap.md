@@ -123,6 +123,6 @@ Verified against code 2026-05-30+:
 | Single evaluation (500 items) | < 10 min |
 | Full run (5 iters × 500 items) | < 60 min |
 | Project store per campaign | < 10 MB |
-| LLM providers | OpenAI-compatible (Groq default) |
+| LLM providers | OpenAI-compatible (OpenRouter default) |
 | Python | 3.13 |
 | Crash recovery | incremental `.partial.jsonl`; resume cache-hits prior |

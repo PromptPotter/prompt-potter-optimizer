@@ -263,8 +263,6 @@ export interface DraftCampaignWire {
   max_rounds: number;
   raw_task_description: string;
   pipeline_overlay: Record<string, unknown>;
-  optimizer_provider: string;
-  optimizer_model: string;
   // Header-agnostic ingest (A3 origin-resolution gate). `headers` are the
   // uploaded file's columns in order; `column_query` / `column_ground_truth`
   // are the operator-resolved input/target mapping (empty until picked);
@@ -462,8 +460,6 @@ export interface DraftPatch {
   max_rounds?: number;
   raw_task_description?: string;
   pipeline_overlay?: Record<string, unknown>;
-  optimizer_provider?: string;
-  optimizer_model?: string;
   // Confirm the input/target column mapping. Each must be a member of the
   // draft's `headers` (server rejects with 422 otherwise); setting one flips
   // `field_provenance["column.query|ground_truth"]` to `confirmed`.

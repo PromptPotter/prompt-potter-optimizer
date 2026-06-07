@@ -13,8 +13,8 @@ Six router objects mounted at ``/api/v1`` from ``main.py``:
 
 3. **Active-session + global reads** (``active_router``) — active session
    (``/sessions/active`` + ``/sessions/active/live-state``), global cycle
-   list (``/cycles``), and the optimizer-pipeline / evaluators / llm-providers
-   registry reads. Per-route tags since it spans several resources.
+   list (``/cycles``), and the optimizer-pipeline / evaluators registry
+   reads. Per-route tags since it spans several resources.
 
 4. **Datasets** (``datasets_router``) — campaign-sourced dataset preview
    for the New Job view.
