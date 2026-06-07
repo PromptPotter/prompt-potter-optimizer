@@ -86,6 +86,8 @@ data/
 .claude/skills/*
 !.claude/skills/potter-run/
 !.claude/skills/potter-l1-meta-campaign/
+!.claude/skills/potter-dev/
+!.claude/hooks/
 tools
 .playwright-cli/
 
