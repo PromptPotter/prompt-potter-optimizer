@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { liveL1Candidates, type DashboardSnapshot } from "../poll";
 
-// Regression guard for React #185 (post-login render loop): the no-candidate
-// path must return a STABLE reference. A fresh `[]` per call churned the
-// FitnessPanel Set chain into an unbounded setState loop.
+// Regression guard for the post-login render loop: the no-candidate path must
+// return a STABLE reference. A fresh `[]` per call churned the FitnessPanel
+// Set chain into an unbounded setState loop.
 describe("liveL1Candidates", () => {
   it("returns the same reference on the no-candidate path", () => {
     expect(liveL1Candidates(null)).toBe(liveL1Candidates(null));

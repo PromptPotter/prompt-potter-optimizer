@@ -230,9 +230,6 @@ fixture into `tests/fixtures/`, or pin the cross-repo dependency — so
 the bug becomes reproducible from a clean `git clone` by any
 collaborator. Then ship the fix on top.
 **Precedents (this arc, 2026-05-28):**
-- React #185 → local Dex OIDC harness (`dev/oidc-local/`) + production
-  source maps (`webapp/next.config.ts`); the fix at
-  `FitnessPanel.tsx::seededHere` then landed against the harness.
 - L2/L3-terminal hang → checked-in `tests/fixtures/cycles/l2_terminal/`
   + Vitest harness at `webapp/lib/derivations/__tests__/`; the
   empty-historical fix landed against the fixture, not against the

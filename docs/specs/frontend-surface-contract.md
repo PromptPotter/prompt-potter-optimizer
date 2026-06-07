@@ -233,13 +233,14 @@ rests at a terminal `unreachable` when the backend is down; frozen units show
 Two states remain **un-exercised** (not contract gaps — just unreached here):
 - `warming` (origin running, `dashboard.json` not yet written) — needs a live
   starting campaign; verify on the next real run.
-- The real Google OIDC **login round-trip** + the known React #185 post-login
-  crash — `AUTH=off` bypasses the redirect, and #185 did NOT reproduce on authed
-  dashboard-mount, so it's redirect-path-specific. Verify on the live deploy.
+- The real Google OIDC **login round-trip** — `AUTH=off` bypasses the redirect,
+  so the post-login mount path is reachable only via the Dex harness
+  (`dev/oidc-local/`), where it was driven end-to-end and the dashboard mounts
+  clean.
 
 The B0–B7 hardening campaign that drove the surface to this contract (anon
 fires only the `auth/me` probe; full keyboard/a11y; one I5 leak in `FitnessPanel`
 fixed) is shipped. Post-alpha parallel work surfaces in real use against these
 same invariants: deep live-data edge cases, multi-campaign + Archived,
 offline/stale, the L2/L3-terminal loading bug, whitelabel theme variants, and the
-OIDC/#185 round-trip above.
+OIDC round-trip above.

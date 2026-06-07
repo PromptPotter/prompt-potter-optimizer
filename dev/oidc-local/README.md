@@ -53,7 +53,7 @@ overwriting `allowlist.json` still rejects every real user.
 
 ## When to use it
 
-- **Any post-auth bug** — React #185 was the trigger; future
+- **Any post-auth bug** — the post-login render loop was the trigger;
   authenticated render paths, multi-tenant boundary tests, OIDC claim
   edge cases, session-cookie behaviour all qualify.
 - **Whitelabel adopter onboarding** — copy this directory as the

@@ -182,7 +182,7 @@ export interface L1ScoreInput {
 // gets a stable reference. A fresh `[]` per call gave each poll a new array
 // identity, churning the FitnessPanel Set chain
 // (realApplicable→viewApplicable→inActive) into an unbounded setState loop
-// once a real cycleId resolved post-login (React #185).
+// once a real cycleId resolved post-login.
 const NO_CANDIDATES: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
 
 export function liveL1Candidates(dash: DashboardSnapshot | null): LiveCandidate[] {

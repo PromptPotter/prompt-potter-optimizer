@@ -9,8 +9,8 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   // Emit .map files alongside minified .js in the static export so a live
   // DevTools session on a deployed dashboard resolves React errors to
-  // component + line. Without this, production stacks read like
-  // "Minified React error #185" with no actionable frame.
+  // component + line. Without this, production stacks read like a bare
+  // "Minified React error" code with no actionable frame.
   productionBrowserSourceMaps: true,
   // Served at the domain root by FastAPI's StaticFiles mount in production —
   // the app owns `/`, the API is the carved-out `/api/v1` namespace. No

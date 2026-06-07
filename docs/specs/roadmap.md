@@ -24,7 +24,6 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 
 | # | Item | Status |
 |---|---|---|
-| A1 | React #185 post-login crash fix | **blocker — verify still reproducing** (known-issues memory) |
 | A2 | BYO per-user API keys | pending — **overdue** (see § BYO keys); token HQ at `/auth/{quota-status,activity}` already shipped |
 
 ### Lane B — foundations (closed)

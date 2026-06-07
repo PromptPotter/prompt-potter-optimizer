@@ -27,8 +27,8 @@ Full walkthrough + troubleshooting + alternate IdP recipes:
 
 Any bug that only reproduces under an authenticated session. Examples:
 
-- A React component that crashes only post-login (React #185 was the
-  trigger that motivated the harness).
+- A React component that crashes only post-login (the post-login render
+  loop that motivated the harness).
 - A renderer that mishandles a missing `email` claim.
 - A multi-tenant store path that scopes incorrectly when
   `IdentityContext.tenant_id` is real.

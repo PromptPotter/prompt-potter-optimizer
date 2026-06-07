@@ -55,7 +55,7 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   // so identity is stable across polls (and across no-op 304 ticks): the
   // downstream Set chain (realApplicable→viewApplicable→inActive) only
   // rebuilds when `dash` actually changes, so the seed + prune guards below
-  // converge instead of looping setState every render (React #185).
+  // converge instead of looping setState every render.
   const inflightCandidates: LiveCandidate[] = useMemo(
     () => liveL1Candidates(dash),
     [dash],
@@ -171,7 +171,7 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   // default. Local `seededHere` is the canonical render-phase reset guard
   // (see `webapp/CLAUDE.md::State reset on prop change` and the precedent
   // at `AccountModal.tsx:56-62`): it fires the seed once per cycle. The
-  // #185 loop is held off upstream — `inflightCandidates` is now a stable
+  // render loop is held off upstream — `inflightCandidates` is a stable
   // ref, so the Set chain feeding this condition doesn't churn every render.
   // Bail when `cycleId == null` (no active campaign yet).
   const [seededHere, setSeededHere] = useState<string | null>(null);
