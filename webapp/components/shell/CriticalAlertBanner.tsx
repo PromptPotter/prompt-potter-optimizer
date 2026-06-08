@@ -3,6 +3,7 @@ import { cx } from "@/lib/cx";
 import { connectorReachability } from "@/lib/derivations/connector-state";
 import { criticalAlert } from "@/lib/derivations/critical-alert";
 import { useConnector } from "@/lib/hooks/useConnector";
+import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
 
 // The loud, can't-miss failure surface — a full-width sticky bar pinned under
@@ -33,6 +34,9 @@ export function CriticalAlertBanner({
   // `useConnector()` probe, one shared `down` verdict (connector-state.ts).
   const { health, connector } = useConnector();
   const { down: connectorDown } = connectorReachability(health);
+  // Cross-user busy state — its own 5 s poll (useMachineStatus), surfaced in the
+  // same bar so "someone else is running" reaches an alt-tabbed operator.
+  const machine = useMachineStatus();
   const alert = criticalAlert({
     bannerStatus,
     bannerText,
@@ -42,6 +46,9 @@ export function CriticalAlertBanner({
     connectorDown,
     connectorName: connector,
     connectorDetail: health?.detail ?? null,
+    machineBusy: machine.busy,
+    machineBusyHolder: machine.holder?.user ?? null,
+    machineBusySince: machine.holder?.started_at ?? null,
   });
   if (!alert) return null;
 

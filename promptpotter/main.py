@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # that fires when a browser tab drops a kept-alive socket.
     silence_proactor_disconnect_noise()
     app.state.identity_bundle = build_identity_bundle(default_identity_paths())
-    app.state.job_registry = JobRegistry(default_jobs_dir())
+    app.state.job_registry = JobRegistry(default_jobs_dir(), capacity=settings.MACHINE_RUN_CAPACITY)
     app.state.draft_campaigns = DraftCampaignRegistry()
     logger.info("Webapp available at: /")
     logger.info("API docs available at: /docs")

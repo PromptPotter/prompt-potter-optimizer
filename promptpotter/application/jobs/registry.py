@@ -48,18 +48,40 @@ class Job:
     stop_reason: str | None
 
 
+@dataclass(frozen=True)
+class ReserveResult:
+    """Outcome of an admission attempt (:meth:`JobRegistry.reserve`).
+
+    Exactly one side is set: ``job`` is the reservation when a slot was free;
+    ``holder`` is the run that owns the slot when the machine is at capacity.
+    The launcher maps a ``holder`` to a 409 ``MachineBusyError``.
+    """
+
+    job: Job | None
+    holder: Job | None
+
+
 def default_jobs_dir() -> Path:
     """Jobs dir sibling of the default `projects/` root."""
     return DEFAULT_PROJECTS_ROOT.parent / "jobs"
 
 
 class JobRegistry:
-    """Process-wide job tracker. Thread-safe; persists per-job state on every status change."""
+    """Process-wide job tracker + run-admission gate.
 
-    def __init__(self, jobs_dir: Path) -> None:
+    Thread-safe; persists per-job state on every status change. ``capacity`` is
+    the number of runs admitted concurrently — the single sequential slot is
+    ``capacity = 1`` (the default). Admission rides :meth:`reserve`, an atomic
+    count-then-claim that closes the launch race; raising ``capacity`` is the
+    concurrent-serving lever (gated on per-user keys + per-tenant rate limits —
+    see ``docs/specs/roadmap.md § Run admission + concurrent serving``).
+    """
+
+    def __init__(self, jobs_dir: Path, *, capacity: int = 1) -> None:
         self._dir = jobs_dir
         self._dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        self._capacity = capacity
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._mark_stale_on_startup()
 
@@ -87,6 +109,47 @@ class JobRegistry:
         )
         self._persist(job)
         return job
+
+    def reserve(
+        self,
+        *,
+        user_id: str,
+        dataset_name: str,
+        campaign_id: str = "",
+        cycle_id: str = "",
+    ) -> ReserveResult:
+        """Atomically admit a run against ``capacity``, or report the holder.
+
+        The slot count read and the reservation write happen under one lock with
+        **no ``await`` between them** — that atomicity is what closes the launch
+        race (two near-simultaneous launches can no longer both pass the gate
+        before either's record lands). At ``capacity = 1`` any in-flight run
+        blocks a new admit (strictly sequential). The reservation is a ``pending``
+        :class:`Job`; the mint path fills real ids later via :meth:`update_target`,
+        and the launcher releases it (``mark_finished``) if the launch fails
+        before the task starts — so a slot is never wedged.
+        """
+        with self._lock:
+            running = self.list_running()
+            if len(running) >= self._capacity:
+                holder = min(running, key=lambda j: j.created_at)
+                return ReserveResult(job=None, holder=holder)
+            job = self.create(
+                user_id=user_id,
+                campaign_id=campaign_id,
+                cycle_id=cycle_id,
+                dataset_name=dataset_name,
+            )
+            return ReserveResult(job=job, holder=None)
+
+    def update_target(self, job_id: str, *, campaign_id: str, cycle_id: str) -> None:
+        """Fill the campaign/cycle ids on a reservation once the mint resolves them."""
+        job = self.get(job_id)
+        if job is None:
+            return
+        job.campaign_id = campaign_id
+        job.cycle_id = cycle_id
+        self._persist(job)
 
     def attach_task(self, job_id: str, task: asyncio.Task[None]) -> None:
         with self._lock:
@@ -140,6 +203,22 @@ class JobRegistry:
 
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
         return [j for j in self.list_all(user_id=user_id) if j.status in ("pending", "running")]
+
+    def machine_holder(self, *, exclude_user_id: str) -> Job | None:
+        """The oldest still-running job owned by a user other than *exclude_user_id*.
+
+        The single global "is the machine busy for this user, and by whom"
+        query. Both the launch gate (``check_launch_quotas``) and the
+        ``/machine-status`` read call it, so the 409 a blocked user gets and
+        the banner everyone sees can never disagree. Oldest-first so the holder
+        is the run that actually owns the slot, not a later contender. ``None``
+        when the machine is free for this user. Process-wide + ``--workers 1``
+        makes this authoritative across every tenant.
+        """
+        others = [j for j in self.list_running() if j.user_id != exclude_user_id]
+        if not others:
+            return None
+        return min(others, key=lambda j: j.created_at)
 
     def list_created_today(self, *, user_id: str | None = None) -> list[Job]:
         """Daily-campaigns quota probe — jobs created since UTC midnight."""
@@ -204,4 +283,4 @@ def _optional_str(raw: object) -> str | None:
     return str(raw)
 
 
-__all__ = ["Job", "JobRegistry", "JobStatus", "default_jobs_dir"]
+__all__ = ["Job", "JobRegistry", "JobStatus", "ReserveResult", "default_jobs_dir"]

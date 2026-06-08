@@ -202,6 +202,27 @@ export function fetchBackendHealth(
   return jget<BackendHealth>(`${API}/backends/${encodeURIComponent(backendId)}/health`, signal);
 }
 
+// Whether *another* user is currently running a campaign on this single-process
+// server (it runs campaigns in sequence, one at a time). `busy` is true only
+// when the holder is a DIFFERENT user than the caller; `holder` is then their
+// presence record. Polled on a slow cadence to raise the machine-busy banner
+// before a launch is attempted — the always-on twin of the 409 `machine_busy`
+// a launch returns. Mirrors MachineStatusResponse
+// (promptpotter/presentation/api/routers/active.py).
+export interface MachineHolder {
+  user: string;
+  campaign_id: string;
+  cycle_id: string;
+  started_at: string | null;
+}
+export interface MachineStatus {
+  busy: boolean;
+  holder: MachineHolder | null;
+}
+export function fetchMachineStatus(signal?: AbortSignal): Promise<MachineStatus> {
+  return jget<MachineStatus>(`${API}/machine-status`, signal);
+}
+
 // Per-cycle file content. Files live either under the cycle dir
 // (`scope=cycle`) or at the campaign dir (`scope=campaign` — campaign.json,
 // log.md, hard_samples.json). `dashboard.json` is NOT a campaign artifact —

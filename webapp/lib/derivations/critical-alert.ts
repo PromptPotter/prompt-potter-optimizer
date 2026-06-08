@@ -35,6 +35,13 @@ interface Args {
   connectorDown?: boolean;
   connectorName?: string | null;
   connectorDetail?: string | null;
+  // Another user holds the single sequential run slot (the server runs one
+  // campaign at a time). `machineBusyHolder` is their label for the detail
+  // line; both come straight from the `/machine-status` poll
+  // (`useMachineStatus`). The always-on twin of the 409 a launch returns.
+  machineBusy?: boolean;
+  machineBusyHolder?: string | null;
+  machineBusySince?: string | null;
 }
 
 export function criticalAlert({
@@ -46,6 +53,9 @@ export function criticalAlert({
   connectorDown,
   connectorName,
   connectorDetail,
+  machineBusy,
+  machineBusyHolder,
+  machineBusySince,
 }: Args): CriticalAlert | null {
   // Crash/abort wins — a terminal run with a projected ErrorRecord is the most
   // actionable failure. The full multi-line message + remediation stays in the
@@ -73,6 +83,20 @@ export function criticalAlert({
       severity: "critical",
       title: `Backend unreachable — ${connectorName ?? "connector"}`,
       detail: connectorDetail ?? undefined,
+    };
+  }
+  // Another user holds the single sequential run slot. Not a failure of this
+  // operator's run — but it blocks them from launching (the server runs one
+  // campaign at a time), so it's a can't-miss "wait your turn" headline, the
+  // always-on twin of the 409 a launch attempt returns. After connectorDown so
+  // a genuine dependency failure still wins.
+  if (machineBusy) {
+    return {
+      severity: "critical",
+      title: `Machine busy — ${machineBusyHolder ?? "another user"} is running a campaign`,
+      detail: machineBusySince
+        ? `the machine processes one at a time · since ${machineBusySince}`
+        : "the machine processes one campaign at a time",
     };
   }
   // Producer went quiet: declared `running` but the poll has gone stale, so the

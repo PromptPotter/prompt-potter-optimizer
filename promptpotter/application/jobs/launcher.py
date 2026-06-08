@@ -45,7 +45,7 @@ from promptpotter.application.jobs.quota import (
     check_launch_quotas,
     effective_spend_cap_usd,
 )
-from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus
+from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus, ReserveResult
 from promptpotter.application.optimization.task_context import load_or_build_task_context
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
@@ -53,7 +53,7 @@ from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, TaskDecomposition
 from promptpotter.infrastructure.store import Stores
-from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,25 @@ async def _run_preflight(backend_type: str, backend_url: str) -> None:
     await connector.preflight(backend_url)
 
 
+def _admit(reservation: ReserveResult) -> Job:
+    """Unwrap an admission, or raise 409 ``machine_busy`` from the slot holder.
+
+    The single map from :class:`ReserveResult` to the launch surface — both
+    launchers gate through it, so the busy 409 reads identically whichever
+    command was attempted.
+    """
+    if reservation.job is not None:
+        return reservation.job
+    holder = reservation.holder
+    assert holder is not None  # reserve() sets exactly one side
+    raise MachineBusyError(
+        holder_user=holder.user_id,
+        campaign_id=holder.campaign_id,
+        cycle_id=holder.cycle_id,
+        started_at=holder.started_at,
+    )
+
+
 async def mint_campaign_command(
     *,
     stores: Stores,
@@ -133,49 +152,57 @@ async def mint_campaign_command(
         raise LaunchError(f"dataset not found: {dataset_name!r} (no {dataset_root}/)")
 
     backend_type = _read_backend_type_from_dataset(dataset_root, dataset_name)
-    await _run_preflight(backend_type, backend_url)
 
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
         tenant_id=str(stores.identity.tenant_id),
         email=_claim_email(stores),
     )
+    # Per-user gates first (count the caller's PRIOR runs), then the atomic
+    # global slot. Reserve writes a pending reservation before any ``await``, so
+    # a second near-simultaneous launch sees it and is rejected — the launch
+    # race is closed. The reservation's real ids land once the mint resolves.
     check_launch_quotas(user=user, job_registry=job_registry, rate_limited=True)
-    spend_budget_usd = effective_spend_cap_usd(
-        requested_cap_usd=spend_budget_usd,
-        user=user,
-        job_registry=job_registry,
-        stores=stores,
+    job = _admit(
+        job_registry.reserve(user_id=str(stores.identity.user_id), dataset_name=dataset_name)
     )
 
-    session = await init_services(
-        backend_url=backend_url,
-        dataset_name=dataset_name,
-        identity=stores.identity,
-    )
+    # Everything below holds a slot — release it on any pre-launch failure so a
+    # crashed preflight/init never wedges the machine at capacity.
+    try:
+        await _run_preflight(backend_type, backend_url)
+        spend_budget_usd = effective_spend_cap_usd(
+            requested_cap_usd=spend_budget_usd,
+            user=user,
+            job_registry=job_registry,
+            stores=stores,
+        )
 
-    file_config = read_campaign_config_file(dataset_root / "campaign.json")
-    profile = session.store.backends.load_connector_profile(session.backend_id) or {}
-    campaign_config = load_campaign_config({**profile, **file_config})
+        session = await init_services(
+            backend_url=backend_url,
+            dataset_name=dataset_name,
+            identity=stores.identity,
+        )
 
-    train_data = session.samples or []
-    # The one shared mint prologue — same seam CLI ``new`` runs (inline). See
-    # ``application/jobs/mint.py``; the web path keeps only the gates + detached task.
-    minted = prepare_fresh_cycle(session, campaign_config, train_data)
-    campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
+        file_config = read_campaign_config_file(dataset_root / "campaign.json")
+        profile = session.store.backends.load_connector_profile(session.backend_id) or {}
+        campaign_config = load_campaign_config({**profile, **file_config})
 
-    # Run-start framing: read the committed ``task_context.json`` (written at
-    # commit from the check-in's decomposition) — or decompose a benchmark's
-    # ``task_description.md`` once on first sight. No second LLM call once the
-    # file exists; the web mint path previously ran with EMPTY framing.
-    task_context = await load_or_build_task_context(session.dataset_config_dir)
+        train_data = session.samples or []
+        # The one shared mint prologue — same seam CLI ``new`` runs (inline). See
+        # ``application/jobs/mint.py``; the web path keeps only the gates + detached task.
+        minted = prepare_fresh_cycle(session, campaign_config, train_data)
+        campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
+        job_registry.update_target(job.job_id, campaign_id=campaign_id, cycle_id=cycle_id)
 
-    job = job_registry.create(
-        user_id=str(stores.identity.user_id),
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
-        dataset_name=dataset_name,
-    )
+        # Run-start framing: read the committed ``task_context.json`` (written at
+        # commit from the check-in's decomposition) — or decompose a benchmark's
+        # ``task_description.md`` once on first sight. No second LLM call once the
+        # file exists; the web mint path previously ran with EMPTY framing.
+        task_context = await load_or_build_task_context(session.dataset_config_dir)
+    except BaseException:
+        job_registry.mark_finished(job.job_id, status="failed", stop_reason="launch_aborted")
+        raise
 
     task = asyncio.create_task(
         _run_in_background(
@@ -500,56 +527,65 @@ async def start_run_command(
 
     dataset_root = resolve_dataset_config_dir(stores, _repo_root(), campaign.dataset_name)
     backend_type = _read_backend_type_from_dataset(dataset_root, campaign.dataset_name)
-    await _run_preflight(backend_type, backend_url)
+    dataset_name = campaign.dataset_name
 
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
         tenant_id=str(stores.identity.tenant_id),
         email=_claim_email(stores),
     )
+    # Per-user gates first, then the atomic global slot (ids are known up front,
+    # so the reservation carries them directly). See ``mint_campaign_command``.
     check_launch_quotas(user=user, job_registry=job_registry, rate_limited=False)
-    spend_budget_usd = effective_spend_cap_usd(
-        requested_cap_usd=spend_budget_usd,
-        user=user,
-        job_registry=job_registry,
-        stores=stores,
+    job = _admit(
+        job_registry.reserve(
+            user_id=str(stores.identity.user_id),
+            dataset_name=dataset_name,
+            campaign_id=campaign_id,
+            cycle_id=cycle_id,
+        )
     )
 
-    dataset_name = campaign.dataset_name
-    session = await init_services(
-        backend_url=backend_url,
-        dataset_name=dataset_name,
-        identity=stores.identity,
-    )
+    try:
+        await _run_preflight(backend_type, backend_url)
+        spend_budget_usd = effective_spend_cap_usd(
+            requested_cap_usd=spend_budget_usd,
+            user=user,
+            job_registry=job_registry,
+            stores=stores,
+        )
 
-    file_config = read_campaign_config_file(
-        resolve_dataset_config_dir(stores, _repo_root(), dataset_name) / "campaign.json"
-    )
-    profile = session.store.backends.load_connector_profile(session.backend_id) or {}
-    campaign_config = load_campaign_config({**profile, **file_config})
+        session = await init_services(
+            backend_url=backend_url,
+            dataset_name=dataset_name,
+            identity=stores.identity,
+        )
 
-    train_data = session.samples or []
-    configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
-    task_context = await load_or_build_task_context(session.dataset_config_dir)
-    # Bind the session to the EXISTING campaign/cycle before launch. Without this
-    # `_ensure_session_minted` (guards on an empty session_id) would mint a fresh
-    # random campaign + root cycle and steal the active pointer — stranding an
-    # operator-steered fork in its real campaign. The campaign was already loaded
-    # above, so auto-mint must never fire from this path. Mirrors CLI `cmd_resume`.
-    session.campaign_id = campaign_id
-    session.state.cycle_id = cycle_id
-    index = stores.campaigns.load(campaign_id, cycle_id) or {}
-    session_id = str(index.get("parent_session_id") or "")
-    if not session_id:
-        raise LaunchError(f"cycle {cycle_id} in {campaign_id} has no parent_session_id")
-    session.session_id = session_id
+        file_config = read_campaign_config_file(
+            resolve_dataset_config_dir(stores, _repo_root(), dataset_name) / "campaign.json"
+        )
+        profile = session.store.backends.load_connector_profile(session.backend_id) or {}
+        campaign_config = load_campaign_config({**profile, **file_config})
 
-    job = job_registry.create(
-        user_id=str(stores.identity.user_id),
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
-        dataset_name=dataset_name,
-    )
+        train_data = session.samples or []
+        configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
+        task_context = await load_or_build_task_context(session.dataset_config_dir)
+        # Bind the session to the EXISTING campaign/cycle before launch. Without
+        # this `_ensure_session_minted` (guards on an empty session_id) would mint
+        # a fresh random campaign + root cycle and steal the active pointer —
+        # stranding an operator-steered fork in its real campaign. The campaign was
+        # already loaded above, so auto-mint must never fire from this path.
+        # Mirrors CLI `cmd_resume`.
+        session.campaign_id = campaign_id
+        session.state.cycle_id = cycle_id
+        index = stores.campaigns.load(campaign_id, cycle_id) or {}
+        session_id = str(index.get("parent_session_id") or "")
+        if not session_id:
+            raise LaunchError(f"cycle {cycle_id} in {campaign_id} has no parent_session_id")
+        session.session_id = session_id
+    except BaseException:
+        job_registry.mark_finished(job.job_id, status="failed", stop_reason="launch_aborted")
+        raise
 
     task = asyncio.create_task(
         _run_in_background(

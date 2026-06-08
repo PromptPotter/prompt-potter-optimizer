@@ -24,7 +24,7 @@ from promptpotter.infrastructure.store import (
     cycle_dir_for,
     read_active_pointer,
 )
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import IdentityDep, JobRegistryDep, StoreDep
 from promptpotter.shared.errors import NotFoundError
 
 active_router = APIRouter()
@@ -172,6 +172,50 @@ async def get_cycles(store: StoreDep) -> CyclesResponse:
     )
 
 
+class MachineHolder(BaseModel):
+    user: str = Field(description="user_id of the operator whose run owns the slot")
+    campaign_id: str
+    cycle_id: str
+    started_at: str | None = Field(
+        default=None, description="ISO start time of the holding run; null if still pending"
+    )
+
+
+class MachineStatusResponse(BaseModel):
+    busy: bool = Field(
+        description="True iff a *different* user holds a running job (the server runs one campaign at a time)."
+    )
+    holder: MachineHolder | None = Field(
+        default=None, description="Who holds the slot; null when free for this caller."
+    )
+
+
+@active_router.get("/machine-status", response_model=MachineStatusResponse, tags=["Sessions"])
+async def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> MachineStatusResponse:
+    """Whether another user is currently running a campaign on this machine.
+
+    The server is single-process and runs campaigns in sequence, so a launch
+    is rejected (409 ``machine_busy``) while anyone else's run is live. This
+    read is the poll that lets the webapp surface that state as a critical-alert
+    banner *before* the operator tries — the always-on twin of the 409. Reads
+    the same :meth:`JobRegistry.machine_holder` the launch gate uses, so banner
+    and gate never disagree. Cross-user holder info is intentionally exposed
+    (the seed of an admin presence view).
+    """
+    holder = jobs.machine_holder(exclude_user_id=str(identity.user_id))
+    if holder is None:
+        return MachineStatusResponse(busy=False)
+    return MachineStatusResponse(
+        busy=True,
+        holder=MachineHolder(
+            user=holder.user_id,
+            campaign_id=holder.campaign_id,
+            cycle_id=holder.cycle_id,
+            started_at=holder.started_at,
+        ),
+    )
+
+
 @active_router.get("/optimizer-pipeline", tags=["Optimizer"])
 async def get_optimizer_pipeline() -> dict[str, Any]:
     """Bundled ``optimizer_pipeline.json`` — nodes + pipelines + ``view`` topology for the webapp workflow."""
@@ -191,4 +235,6 @@ __all__ = [
     "ActiveSessionResponse",
     "CycleListEntry",
     "CyclesResponse",
+    "MachineHolder",
+    "MachineStatusResponse",
 ]

@@ -2212,10 +2212,36 @@ def _mk_user(**overrides: object) -> User:
 
 
 def test_quota_contract(tmp_path: Path) -> None:
-    """All four Phase-5 gates fire on a single user; spend caps compose."""
+    """The launch gates fire: cross-user machine-busy first, then the four
+    per-user Phase-5 gates; spend caps compose."""
     reset_rate_buckets()
     jobs_dir = tmp_path / "jobs"
     registry = JobRegistry(jobs_dir)
+
+    # --- Gate 0: run admission (the single sequential slot) -------------
+    # reserve() is the atomic count-then-claim. At capacity 1 any in-flight run
+    # fills the slot: a second reserve returns no job + the holder (which the
+    # launcher maps to 409 machine_busy). The reservation counts IMMEDIATELY —
+    # this is the launch-race closure.
+    busy_registry = JobRegistry(tmp_path / "jobs_busy", capacity=1)
+    first = busy_registry.reserve(
+        user_id="u_bob", dataset_name="aime", campaign_id="bob-camp", cycle_id="cycle_b0b000000000"
+    )
+    assert first.job is not None and first.holder is None
+    busy_registry.mark_started(first.job.job_id)
+    blocked = busy_registry.reserve(user_id="u_alice", dataset_name="aime")
+    assert blocked.job is None
+    assert blocked.holder is not None and blocked.holder.user_id == "u_bob"
+    assert blocked.holder.campaign_id == "bob-camp"
+    # Race closure: a pending reservation (not yet started) already fills the
+    # slot, so back-to-back reserves at capacity 1 admit only the first.
+    race = JobRegistry(tmp_path / "jobs_race", capacity=1)
+    r1 = race.reserve(user_id="u_a", dataset_name="aime")
+    r2 = race.reserve(user_id="u_a", dataset_name="aime")
+    assert r1.job is not None and r2.job is None
+    # machine_holder excludes self (drives the cross-user /machine-status banner).
+    assert busy_registry.machine_holder(exclude_user_id="u_bob") is None
+    assert busy_registry.machine_holder(exclude_user_id="u_alice") is not None
 
     # --- Gate 1: concurrent-cycles ceiling ------------------------------
     user_concurrent = _mk_user(max_concurrent_cycles=2)

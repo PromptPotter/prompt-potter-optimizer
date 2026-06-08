@@ -107,4 +107,30 @@ describe("criticalAlert", () => {
     });
     expect(out?.title).toBe("Server unreachable — retrying");
   });
+
+  it("flags machine-busy (another user running) as critical", () => {
+    expect(
+      criticalAlert({
+        ...base,
+        machineBusy: true,
+        machineBusyHolder: "u_bob",
+        machineBusySince: "2026-06-08T10:00:00+00:00",
+      }),
+    ).toEqual({
+      severity: "critical",
+      title: "Machine busy — u_bob is running a campaign",
+      detail: "the machine processes one at a time · since 2026-06-08T10:00:00+00:00",
+    });
+  });
+
+  it("a down backend takes precedence over machine-busy", () => {
+    const out = criticalAlert({
+      ...base,
+      connectorDown: true,
+      connectorName: "termnorm",
+      machineBusy: true,
+      machineBusyHolder: "u_bob",
+    });
+    expect(out?.title).toBe("Backend unreachable — termnorm");
+  });
 });

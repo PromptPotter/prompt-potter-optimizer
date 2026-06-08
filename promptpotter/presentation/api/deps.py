@@ -9,6 +9,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
+from promptpotter.application.jobs import JobRegistry
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store import Stores, build_stores
@@ -77,12 +78,30 @@ def get_draft_registry(request: Request) -> DraftCampaignRegistry:
     return registry
 
 
+def get_job_registry(request: Request) -> JobRegistry:
+    """Pull the process-wide :class:`JobRegistry` off ``app.state``.
+
+    The same instance the launcher writes to — so a read route sees every
+    in-flight run across all tenants. Missing is a programmer error (lifespan
+    sets it), surfaced as 503 like the draft registry.
+    """
+    registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
+    if registry is None:
+        raise ServiceUnavailableError("job registry not initialised")
+    return registry
+
+
+JobRegistryDep = Annotated[JobRegistry, Depends(get_job_registry)]
+
+
 __all__ = [
     "IdentityDep",
+    "JobRegistryDep",
     "StoreDep",
     "build_stores_from_identity",
     "get_backend_or_404",
     "get_draft_registry",
+    "get_job_registry",
     "read_text_or_404",
     "resolve_identity",
 ]

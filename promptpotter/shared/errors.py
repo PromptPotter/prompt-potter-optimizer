@@ -96,6 +96,41 @@ class ConflictError(PotterError):
     code = "version_conflict"
 
 
+class MachineBusyError(PotterError):
+    """The single sequential run slot is taken — 409.
+
+    The server admits ``MACHINE_RUN_CAPACITY`` campaigns at once (1 today —
+    ``uvicorn --workers 1``, runs in sequence). A launch while the slot is full
+    is rejected with the holder's presence record on ``details`` — the reusable
+    "who's on the machine" ledger an admin presence view consumes later. At
+    capacity 1 the holder may be the caller's *own* in-flight run, so the
+    message stays neutral; the cross-user banner (``/machine-status``, which
+    excludes self) is what names the other operator.
+    """
+
+    http_status = 409
+    code = "machine_busy"
+
+    def __init__(
+        self,
+        *,
+        holder_user: str,
+        campaign_id: str,
+        cycle_id: str,
+        started_at: str | None,
+    ) -> None:
+        super().__init__(
+            "A campaign is already running — the machine processes one at a "
+            "time. Try again once it finishes.",
+            details={
+                "holder_user": holder_user,
+                "campaign_id": campaign_id,
+                "cycle_id": cycle_id,
+                "started_at": started_at,
+            },
+        )
+
+
 class ContentTooLargeError(PotterError):
     """Request/target exceeds a hard size cap (too many file entries) — 413."""
 
@@ -252,6 +287,7 @@ __all__ = [
     "ContentTooLargeError",
     "ErrorCategory",
     "ForbiddenError",
+    "MachineBusyError",
     "NotFoundError",
     "PayloadInvalidError",
     "PotterError",

@@ -1328,7 +1328,8 @@ components:
             `PotterError` subclass at the single `main.py` handler. Control-plane
             specifics: `version_conflict` (409), `idempotency_key_missing` (400),
             `command_kind_unknown` (404), `slug_collision` (409),
-            `backend_unreachable` (503), `ingest_failed` / `origin_incomplete`
+            `machine_busy` (409), `backend_unreachable` (503),
+            `ingest_failed` / `origin_incomplete`
             (422). Generic families: `bad_request` (400), `unauthenticated`
             (401), `capability_denied` (403), `not_found` (404), `too_large`
             (413), `request_invalid` (422), `service_unavailable` (503),
@@ -1343,6 +1344,7 @@ components:
             - payload_invalid
             - tenant_mismatch
             - slug_collision
+            - machine_busy
             - backend_unreachable
             - ingest_failed
             - origin_incomplete
@@ -1375,6 +1377,15 @@ components:
               `/commands/mint-campaign-from-draft`) — `suggested_slug`
               carrying the smallest free `{slug}-{n}`, and `draft_id`
               when collision detection runs against an existing draft.
+            * `machine_busy` (409 on any launch command — `mint-campaign`,
+              `mint-campaign-from-draft`, `start-run`, `fork-cycle`) — the
+              single sequential run slot is taken (the server admits
+              `MACHINE_RUN_CAPACITY` campaigns at once, 1 today). Carries the
+              holder presence record: `holder_user`, `campaign_id`, `cycle_id`,
+              `started_at`. The webapp also polls this state proactively via
+              the read `GET /machine-status` (which excludes the caller's own
+              run) to raise the cross-user busy banner before a launch is
+              attempted.
             * `backend_unreachable` (503 on any command that needs the
               backend reachable) — `backend_type` (connector name) and
               `backend_url` (configured URL). Used by the frontend to

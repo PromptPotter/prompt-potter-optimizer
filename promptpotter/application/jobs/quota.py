@@ -79,12 +79,17 @@ def check_launch_quotas(
 ) -> None:
     """Enforce per-user abuse limits before a launch.
 
-    Raises :class:`QuotaExceededError` on:
+    The *global* run-admission gate (one campaign at a time across all users —
+    409 ``machine_busy``) rides :meth:`JobRegistry.reserve` at the launcher, not
+    here; this function owns only the per-user limits:
 
     - rate-limit miss (``mint-campaign`` only; ``rate_limited=False`` skips it
       for ``start-run`` against an existing cycle, which is a retry path)
-    - concurrent-cycles ceiling
+    - concurrent-cycles ceiling (the caller's *own* second launch)
     - campaigns-per-day ceiling
+
+    Runs *before* ``reserve`` so it counts the caller's prior runs, not the
+    reservation it is about to make.
     """
     if rate_limited and not _consume_rate_token(user.user_id):
         raise QuotaExceededError(

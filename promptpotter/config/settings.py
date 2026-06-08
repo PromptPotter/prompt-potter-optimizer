@@ -93,8 +93,11 @@ OPTIMIZER_PROMPT_WARN_CHARS: int = 8_000
 # candidate stops when its P(best) drops below ε. The runtime value is
 # ``CampaignConfig.pobb_epsilon``; this is the single default every entry
 # point (the config Field, PoBBConfig, elevate_to_decisive, the CLI)
-# references so the number can't drift.
-POBB_DEFAULT_EPSILON: float = 0.05
+# references so the number can't drift. 0.15 = abort a candidate once its
+# P(reaching par with the current best) falls below 15% — empirically the
+# most aggressive threshold before false-cuts of true winners climb (≈2% at
+# 0.15 vs ≈9% at 0.20, measured on the archived round corpus).
+POBB_DEFAULT_EPSILON: float = 0.15
 
 
 class Settings(BaseSettings):
@@ -159,6 +162,15 @@ class Settings(BaseSettings):
     # hook for future upload-surface hardening, matching the zero-trust posture in
     # docs/operations/secure-hosting.md.
     HARDENED_MODE: bool = False
+
+    # Run-admission capacity — how many campaigns the server admits at once
+    # (JobRegistry.reserve). 1 = strictly sequential (today's single-process
+    # `--workers 1` reality); a new launch while a run is in flight gets 409
+    # `machine_busy`. This is the concurrent-serving lever, but DO NOT raise it
+    # above 1 until BYO per-user keys (Lane A2) + a per-tenant RateLimiter land —
+    # N parallel runs on the shared key/rate-bucket would cross-bill and throttle.
+    # See docs/specs/roadmap.md § Run admission + concurrent serving.
+    MACHINE_RUN_CAPACITY: int = 1
 
     # File-based observability (traces, events.jsonl)
     OBS_ENABLED: bool = True
