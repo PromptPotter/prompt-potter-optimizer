@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:deploy": "DEPLOY_BUILD=1 next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run"

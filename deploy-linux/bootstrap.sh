@@ -130,7 +130,7 @@ fi
 say "building webapp (static export → $WEBAPP_DIR/out/)"
 cd "$WEBAPP_DIR"
 npm install
-npm run build
+npm run build:deploy   # full shipped artifact: React Compiler + source maps
 cd ..
 
 # --- 7. smoke ------------------------------------------------------------

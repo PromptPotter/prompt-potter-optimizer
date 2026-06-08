@@ -3,15 +3,42 @@ import "./styles/index.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 
+// Link-unfurl (share-card) copy — what WhatsApp/Slack/iMessage/X show when the
+// URL is pasted. Mirrors promptpotter-web's split: a descriptive card title +
+// punchy, jargon-free blurb (distinct from the terse browser-tab title above).
+const CARD_TITLE = "PromptPotter — automatic prompt optimizer for better AI answers";
+const CARD_DESC =
+  "Give PromptPotter the prompt you used on your AI provider. It critiques and " +
+  "improves it on its own, then shows a significant, measured gain — in about five minutes.";
+
 export const metadata: Metadata = {
   metadataBase: new URL(BRAND.url),
-  title: `${BRAND.shortName} — Live Unit`,
+  title: "optimize, potter, learn",
+  // Emoji favicon as an inline SVG data-URI — no image asset to ship. Single
+  // quotes inside so the generated href="" stays valid.
+  icons: {
+    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏺</text></svg>",
+  },
   description: BRAND.description,
   applicationName: BRAND.shortName,
   // publisher = the distributing brand; provider authored the software.
   publisher: BRAND.publisher.name,
   authors: [{ name: BRAND.provider.name, url: BRAND.provider.url }],
   creator: BRAND.provider.name,
+  // No og:image — link unfurls show the title + blurb only (no thumbnail). A
+  // social card image must be a real fetched raster; we're not committing a
+  // brand asset pre-launch, so the card stays text-only for now.
+  openGraph: {
+    type: "website",
+    url: BRAND.url,
+    title: CARD_TITLE,
+    description: CARD_DESC,
+  },
+  twitter: {
+    card: "summary",
+    title: CARD_TITLE,
+    description: CARD_DESC,
+  },
 };
 
 export const viewport: Viewport = {

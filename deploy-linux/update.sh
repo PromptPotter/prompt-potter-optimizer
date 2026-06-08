@@ -39,7 +39,7 @@ fi
 say "app: $INSTALL_DIR"
 sync "$INSTALL_DIR"
 "$INSTALL_DIR/.venv/bin/pip" install -q -e "$INSTALL_DIR[all]"
-[[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build )
+[[ -d "$INSTALL_DIR/$WEBAPP_DIR" ]] && ( cd "$INSTALL_DIR/$WEBAPP_DIR" && npm install --silent && npm run build:deploy )
 sudo systemctl restart "$SERVICE_NAME"
 
 # --- backend (optional): sync → deps → restart ------------------------------

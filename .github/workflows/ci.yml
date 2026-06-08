@@ -93,4 +93,7 @@ jobs:
           fi
 
       - name: Build
-        run: npm run build
+        # Validate the exact shipped artifact: React Compiler pass + source
+        # maps on (DEPLOY_BUILD=1). Bare `npm run build` is the fast local
+        # preview path and would skip both.
+        run: npm run build:deploy

@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { fetchCycleFile, fetchPipeline, type HardSamplesScope } from "@/lib/api";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
@@ -13,20 +14,37 @@ import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { StatusAssistant } from "@/components/status/StatusAssistant";
 import { TopStrip } from "@/components/dashboard/layout/TopStrip";
-import { ChatPane } from "@/components/chat/ChatPane";
 import { Lane } from "@/components/dashboard/layout/Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
 import { RoundTabsStrip } from "@/components/dashboard/samples/RoundTabsStrip";
 import { CyclePicker } from "@/components/shell/CyclePicker";
 import { SelectionProvider } from "@/lib/SelectionContext";
-import { IngestPane } from "@/components/ingest/IngestPane";
 import { NowTriad } from "@/components/dashboard/layout/NowTriad";
 import { RunErrorBanner } from "@/components/dashboard/layout/RunErrorBanner";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
-import { FilesPane } from "@/components/tree/FilesPane";
-import { VerifyPane } from "@/components/verify/VerifyPane";
 
 import type { PipelineDoc } from "@/components/workflow/types";
+
+// The non-landing surfaces load on demand, not on first paint. The operator
+// lands on the dashboard tab; Chat / Files / Verify (and the markdown renderer
+// `marked` that rides inside Files) and the Ingest modal each ship as their own
+// chunk fetched only when the tab is opened — `ssr: false` since they're
+// client-only and there's no SSR under `output: export` anyway.
+const ChatPane = dynamic(() => import("@/components/chat/ChatPane").then((m) => m.ChatPane), {
+  ssr: false,
+  loading: () => <div className="content" aria-busy="true" />,
+});
+const FilesPane = dynamic(() => import("@/components/tree/FilesPane").then((m) => m.FilesPane), {
+  ssr: false,
+  loading: () => <div className="content" aria-busy="true" />,
+});
+const VerifyPane = dynamic(() => import("@/components/verify/VerifyPane").then((m) => m.VerifyPane), {
+  ssr: false,
+  loading: () => <div className="content" aria-busy="true" />,
+});
+const IngestPane = dynamic(() => import("@/components/ingest/IngestPane").then((m) => m.IngestPane), {
+  ssr: false,
+});
 
 export function AppShell() {
   // `campaignId` + `cycleId` are owned by WorkspaceProvider (the single
@@ -302,15 +320,20 @@ function AppShellInner() {
           <VerifyPane />
         )}
       </main>
-      <IngestPane
-        open={newCampaignOpen}
-        onClose={() => setNewCampaignOpen(false)}
-        onMinted={(sel) => {
-          // The from-draft mint returns the new (campaign, cycle) — select it
-          // now rather than waiting on the 2 s workspace poll.
-          selectCycle(sel.campaignId, sel.cycleId);
-        }}
-      />
+      {/* Mounted only while open so its chunk (+ ingest wizard deps) stays off
+          first paint — IngestPane already hard-returns null when closed, so
+          gating the mount is behaviour-identical. */}
+      {newCampaignOpen && (
+        <IngestPane
+          open
+          onClose={() => setNewCampaignOpen(false)}
+          onMinted={(sel) => {
+            // The from-draft mint returns the new (campaign, cycle) — select it
+            // now rather than waiting on the 2 s workspace poll.
+            selectCycle(sel.campaignId, sel.cycleId);
+          }}
+        />
+      )}
     </div>
     </ConnectorProvider>
     </SelectionProvider>

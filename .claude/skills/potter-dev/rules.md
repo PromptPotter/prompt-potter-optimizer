@@ -46,6 +46,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-32](#r-32) — canonical test set first
 - [R-33](#r-33) — `dashboard.json` and on-disk surfaces stay live-written
 - [R-34](#r-34) — drain the debt backlog before feature work
+- [R-35](#r-35) — reuse the session-chosen asset; don't hardlock pre-launch brand assets
 
 ---
 
@@ -260,3 +261,9 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Rule:** check `docs/specs/code-debt-cleanup.md` (and state-sync items); drain cheap, verified items first. Only file new debt at high confidence after verification, with file+line, why, action, blockers.
 - **Why:** keeps debt from accreting; cheap wins compound.
 - **Origin:** 2026-06-07 — seeded from `feedback_backlog_hygiene_daily`.
+
+### R-35 — reuse the session-chosen asset; don't hardlock pre-launch brand assets
+- **Trigger:** a surface needs a brand asset (share-card/OG image, icon, favicon, splash) and you're about to pull in a separate file (e.g. copy `wizard.jpg` from the marketing repo).
+- **Rule:** reuse the symbol/asset already chosen this session for a sibling surface (e.g. the tab emoji 🏺 → render it to the share-card PNG) instead of importing a distinct asset. Prefer the minimal, already-decided, trivially-regenerable option. Pre-launch brand art is not settled — don't commit the app to it.
+- **Why:** the operator is pre-publishing and may move away from current brand art; hardlocking onto `wizard.jpg` (or any one asset) across surfaces creates churn when it changes. One source symbol per session = one place to swap later. [[R-09]]
+- **Origin:** 2026-06-08 — operator: "render the emoji used in the tab, don't add wizard.jpg, we might move away from that, don't wanna hardlock."

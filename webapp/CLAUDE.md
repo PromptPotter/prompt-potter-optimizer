@@ -120,9 +120,11 @@ When to reach for a component-render test (`@testing-library/react`): pick a reg
 ```bash
 cd webapp
 npm install                          # one-time
-npm run build                        # static export → webapp/out/, served at the root by FastAPI
+npm run build                        # FAST local-preview export → webapp/out/, served at the root by FastAPI
 npm run lint
 npx tsc --noEmit
 ```
+
+**Two build modes — `next build` has two audiences (`next.config.ts`).** `npm run build` is the operator's fast rebuild→reload preview loop: it compiles only. The React Compiler pass and full-bundle source maps are deploy-artifact concerns gated behind `DEPLOY_BUILD=1`, exposed as **`npm run build:deploy`** — the artifact CI validates and the deploy box (`deploy-linux/{bootstrap,update}.sh`) ships. Type-check and lint never run inside *either* build: they're owned by the dedicated CI gates above (`npx tsc --noEmit`, `npm run lint`), so re-running them in `next build` is duplication. The `build:deploy` script uses bash inline-env, so it runs in CI and on the deploy box; to preview compiler-on behaviour from Windows, set the var in-shell instead: `$env:DEPLOY_BUILD=1; npm run build`.
 
 `out/` is the route mounted by FastAPI (`StaticFiles(html=True)` at `/`). After any source change, rebuild and hard-reload the browser. Dev mode (`npm run dev`) proxies `/api/*` to `http://127.0.0.1:8001` via `next.config.ts::rewrites` — production has no proxy (same FastAPI origin).
