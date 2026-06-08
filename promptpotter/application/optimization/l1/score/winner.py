@@ -85,7 +85,12 @@ async def l1_score(
         forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
     )
     decisions: list[ResumeCheckpointRecord] = []
-    all_candidate_results, candidate_scores, escalation_signal = await score_population(
+    (
+        all_candidate_results,
+        candidate_scores,
+        escalation_signal,
+        sample_order_timeline,
+    ) = await score_population(
         cycle,
         osp_population,
         effective_pipeline_params,
@@ -228,6 +233,7 @@ async def l1_score(
         else pipeline_params,
         results=best_results,
         all_candidate_results=dict(all_candidate_results),
+        sample_order_timeline=sample_order_timeline,
         candidates_scored=len(scored),
         candidate_scores=candidate_scores,
         decisions=[d.to_dict() for d in decisions],

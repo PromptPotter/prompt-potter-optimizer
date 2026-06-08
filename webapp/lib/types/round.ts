@@ -24,6 +24,22 @@ export interface ScoreboardEntry {
   [k: string]: unknown;
 }
 
+// One measurement step in a round's adaptive sample-selection timeline,
+// from `round_NNNN.json::sample_order_timeline[]` (closed rounds) or
+// reconstructed live from `dashboard.json` for the in-flight round.
+// `computed` = samples already measured (measurement order); `planned` =
+// the picker's intended order for the remaining tail at that step;
+// `current_sample_id` = the one being measured (planned[0], or null at the
+// terminal step). Mirrors the backend `SampleOrderStep`
+// (`promptpotter/domain/results.py`). Each row is a frozen snapshot — the
+// trajectory hover reads one row per step.
+export interface SampleOrderStep {
+  step: number;
+  current_sample_id: number | null;
+  computed: number[];
+  planned: number[];
+}
+
 // `round_NNNN.json::results[]` entry. The pre-bucketing per-sample
 // row consumed by FreqChart (in the round-mode path) and the
 // historical samples view.

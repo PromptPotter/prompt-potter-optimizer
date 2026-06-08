@@ -401,6 +401,7 @@ class Cycle:
             "prompt_fields": rr.prompt_fields,
             "results": rr.results,
             "all_candidate_results": dict(rr.all_candidate_results),
+            "sample_order_timeline": [s.model_dump() for s in rr.sample_order_timeline],
             "candidates_scored": rr.candidates_scored,
             "candidate_scores": [c.model_dump() for c in rr.candidate_scores],
             "decisions": list(rr.decisions),

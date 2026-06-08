@@ -196,7 +196,13 @@ export function HardSamplesHeatmap({
       </div>
       {(bankExpanded || heatExpanded) && (
         <RotatePrompt surfaceName="The sample heat-map" skipRender>
-          {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
+          {bankExpanded && (
+            <SampleTrajectory
+              rounds={dash?.rounds ?? []}
+              campaignId={campaignId}
+              cycleId={cycleId}
+            />
+          )}
           {heatExpanded && (
             <div className="hs-expand-wrap">
               <HardSamplesTable

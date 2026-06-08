@@ -26,7 +26,7 @@ from promptpotter.application.optimization.resume_and_fork import ResumeCheckpoi
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import CandidateProposal, ScoredCandidate
+from promptpotter.domain.results import CandidateProposal, SampleOrderStep, ScoredCandidate
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.tracing import CandidateScored
@@ -52,8 +52,18 @@ async def score_population(
     round_num: int = 0,
     decisions: list[ResumeCheckpointRecord] | None = None,
     l1_diversity: float = 1.0,
-) -> tuple[dict[str, list[QueryMeasurement]], list[ScoredCandidate], EscalationSignal | None]:
-    """Score each individual; per-candidate body in `score_one_candidate`. Owns the ESCALATED break."""
+) -> tuple[
+    dict[str, list[QueryMeasurement]],
+    list[ScoredCandidate],
+    EscalationSignal | None,
+    list[SampleOrderStep],
+]:
+    """Score each individual; per-candidate body in `score_one_candidate`. Owns the ESCALATED break.
+
+    The 4th return is the round's adaptive sample-selection timeline (the
+    representative/longest candidate's per-step (computed, planned) split),
+    captured from the online picker for the trajectory hover.
+    """
     session = cycle.session
     obs = session.state.obs
     n = len(population)
@@ -61,6 +71,9 @@ async def score_population(
     all_candidate_results: dict[str, list[QueryMeasurement]] = {}
     candidate_scores: list[ScoredCandidate] = []
     escalation_signal: EscalationSignal | None = None
+    # Per-candidate adaptive-picker timelines, keyed by candidate id; the
+    # representative (longest, matching `selection`) is returned after the loop.
+    sample_order_timelines: dict[str, list[SampleOrderStep]] = {}
 
     async def _pobb_backfill(sp: JobSearchPoint, samples: list[Sample]) -> list[QueryMeasurement]:
         """Score *sp* on *samples* for PoBB paired-comparison fill-in. `candidate_idx=-1` is the
@@ -196,6 +209,10 @@ async def score_population(
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
 
+        # Per-candidate timeline accumulator — one frozen (computed, planned)
+        # step per measurement, captured below as the picker re-ranks.
+        order_steps: list[SampleOrderStep] = []
+
         # Online 1PL Rasch adaptive queue mechanism — re-fits δ on every measurement, folds
         # outcomes into a running θ̂_c, picks argmax of decision-IG. Fold is from-scratch each step
         # (no (μ_c, var_c) persistence). Re-emits `hard_sample_order` so the webapp reorders on
@@ -204,6 +221,7 @@ async def score_population(
             scored_outcomes: dict[int, bool],
             _cid: str = osp_c.lineage.id,
             _idx: int = idx,
+            _steps: list[SampleOrderStep] = order_steps,
         ) -> int | None:
             extra = [
                 Observation(candidate_id=_cid, sample_id=sid, hit=hit)
@@ -239,6 +257,18 @@ async def score_population(
                 n_priors=len(elim_check.priors_by_sample),
                 sample_order=order,
             )
+            # Freeze this step: computed = measured-so-far (insertion = measurement
+            # order), planned = the picker's intended order for the untouched tail.
+            computed_ids = list(scored_outcomes.keys())
+            planned_ids = [sid for sid in order if sid not in scored_outcomes]
+            _steps.append(
+                SampleOrderStep(
+                    step=len(computed_ids),
+                    current_sample_id=planned_ids[0] if planned_ids else None,
+                    computed=computed_ids,
+                    planned=planned_ids,
+                )
+            )
             remaining = set(dataset_sample_ids) - scored_outcomes.keys()
             return next_sample(mu_c, var_c, s_mu, s_var, d_map, d_se_map, remaining)
 
@@ -264,6 +294,8 @@ async def score_population(
             next_sample=_next_sample,
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
+        if order_steps:
+            sample_order_timelines[osp_c.lineage.id] = order_steps
         # Fold outcomes into live obs so next candidate's queue mechanism + leaderboard see them.
         round_live_obs.extend(_filtered_obs({osp_c.lineage.id: cr_result.results}))
         if cr_result.runtime_failure is not None:
@@ -287,7 +319,18 @@ async def score_population(
             escalation_signal = cr_result.escalation_signal
             break  # true degradation — abort remaining candidates
 
-    return all_candidate_results, candidate_scores, escalation_signal
+    # Representative timeline = the longest-surviving candidate's, matching the
+    # `selection` rule in round_summary._measurement_order (longest list, tie-break
+    # on candidate id) so the executed prefix lines up with the displayed order.
+    representative_timeline: list[SampleOrderStep] = []
+    if sample_order_timelines:
+        rep_cid = max(
+            sample_order_timelines,
+            key=lambda cid: (len(all_candidate_results.get(cid, [])), cid),
+        )
+        representative_timeline = sample_order_timelines[rep_cid]
+
+    return all_candidate_results, candidate_scores, escalation_signal, representative_timeline
 
 
 __all__ = ["score_population"]

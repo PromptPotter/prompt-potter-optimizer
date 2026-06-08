@@ -8,6 +8,10 @@ import type { SelectedCandidate } from "@/lib/types/selection";
 //   - round     — which L1-round are the lineage / fitness / samples
 //                 surfaces scoped to (null = follow live in-flight)
 //   - node      — which optimizer node is open for drill (workflow detail)
+//   - sampleSet — a fixed set of sample ids to recompute the per-candidate
+//                 fitness bars over (null = each bar over its own samples).
+//                 Populated by the Sample-trajectory "Steps" view; consumed
+//                 by FitnessPanel's "fixed sample set" mode. Independent axis.
 //
 // The candidate and round axes are coupled: a candidate selection
 // implies a round (the candidate's). Writes go through the helpers
@@ -21,6 +25,7 @@ interface Ctx {
   candidate: SelectedCandidate | null;
   round: number | null;
   node: string | null;
+  sampleSet: number[] | null;
   // Atomic candidate+round write. Passing null clears both axes.
   setSelectionForCandidate: (c: SelectedCandidate | null) => void;
   // Round-axis write. Clears any candidate selection whose round
@@ -29,6 +34,9 @@ interface Ctx {
   setSelectionForRound: (r: number | null) => void;
   // Workflow-node write. Independent of the candidate/round pair.
   setSelectionForNode: (n: string | null) => void;
+  // Fixed-sample-set write. Passing null returns the fitness bars to
+  // per-candidate-own-samples mode. Independent of the other axes.
+  setSelectionForSampleSet: (ids: number[] | null) => void;
 }
 
 const SelectionCtx = createContext<Ctx | null>(null);
@@ -49,12 +57,14 @@ export function SelectionProvider({
   const [candidate, setCandidate] = useState<SelectedCandidate | null>(null);
   const [round, setRound] = useState<number | null>(null);
   const [node, setNode] = useState<string | null>(null);
+  const [sampleSet, setSampleSet] = useState<number[] | null>(null);
   const [prevCycle, setPrevCycle] = useState(cycleId);
   if (cycleId !== prevCycle) {
     setPrevCycle(cycleId);
     setCandidate(null);
     setRound(null);
     setNode(null);
+    setSampleSet(null);
   }
 
   const setSelectionForCandidate = useCallback(
@@ -79,15 +89,25 @@ export function SelectionProvider({
     setNode(n);
   }, []);
 
+  const setSelectionForSampleSet = useCallback((ids: number[] | null) => {
+    // `null` = mode off (per-candidate-own-samples). An empty array is a
+    // DISTINCT state: mode on, nothing selected — the chart blanks and the
+    // operator builds the set up sample-by-sample. Only the panel's own
+    // "Sample set" chip flips back to null.
+    setSampleSet(ids);
+  }, []);
+
   return (
     <SelectionCtx.Provider
       value={{
         candidate,
         round,
         node,
+        sampleSet,
         setSelectionForCandidate,
         setSelectionForRound,
         setSelectionForNode,
+        setSelectionForSampleSet,
       }}
     >
       {children}

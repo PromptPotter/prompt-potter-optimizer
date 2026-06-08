@@ -18,6 +18,7 @@ import { useAuthGate } from "./auth-context";
 import { resolveRunPhase } from "./run-phase";
 import { ageTextSeconds } from "./format";
 import type { RoundSummary } from "./api/types";
+import type { SampleOrderStep } from "./types/round";
 import { usePoll } from "./hooks/usePoll";
 
 export type StatusKind = "live" | "stale" | "offline";
@@ -243,6 +244,7 @@ export interface RoundFileDoc {
   results?: unknown[];
   candidate_scores?: unknown[];
   all_candidate_results?: Record<string, unknown>;
+  sample_order_timeline?: SampleOrderStep[];
   [k: string]: unknown;
 }
 

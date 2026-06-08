@@ -15,8 +15,11 @@ import { WhatIfGrid } from "./WhatIfGrid";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
+import { useChartedRoundDocs } from "@/lib/hooks/useChartedRoundDocs";
 import { useWorkspace } from "@/lib/workspace";
 import { useFitnessBars } from "./useFitnessBars";
+import { SampleSetControl } from "./SampleSetControl";
+import { measuredUniverse } from "@/lib/sample-set";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -30,7 +33,12 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   // FitnessChart resolves selectedKey → bar index by matching `bar.key`
   // against the SelectedCandidate's {round, candidate_id}. Aliased away
   // from the evaluator-set `selected` already in this component.
-  const { candidate: selectedCandidate, setSelectionForCandidate } = useSelection();
+  const {
+    candidate: selectedCandidate,
+    setSelectionForCandidate,
+    sampleSet,
+    setSelectionForSampleSet,
+  } = useSelection();
   // Default view: chart-only (one bar per candidate = accuracy). The
   // composite chip pairs the formula-weighted score; the what-if chip
   // opens the ablation widget below the chart. State lives in a module
@@ -214,7 +222,34 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   // labels) comes from `useRoundCandidates` — the same source
   // LineageTree reads. With one derivation the two surfaces cannot
   // disagree on count, labels, or selection target.
-  const bars = useFitnessBars(selected, inActive, rows, diagByLabel);
+  // Fixed-sample-set mode (driven by the Sample-trajectory "Steps" view) needs
+  // the per-(candidate, sample) hit matrix from each charted round's file —
+  // fetched only while a set is active, so the default chart stays dash-only.
+  const chartedRounds = useMemo(
+    () => history.filter((h) => h.candidates.length > 0).map((h) => h.round),
+    [history],
+  );
+  const chartedDocs = useChartedRoundDocs(
+    campaignId,
+    cycleId,
+    chartedRounds,
+    sampleSet != null,
+  );
+
+  // The measured-sample universe the bars can be sliced over — used to seed the
+  // set when the operator first turns the mode on. The chip strip + per-round
+  // picks + trajectory drill all live in `SampleSetControl`.
+  const sampleUniverse = useMemo(() => measuredUniverse(history), [history]);
+
+  const bars = useFitnessBars(
+    selected,
+    inActive,
+    rows,
+    diagByLabel,
+    sampleSet,
+    chartedDocs,
+    dash,
+  );
 
   return (
     <CardFrame
@@ -245,10 +280,25 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
           >
             What-If
           </button>
+          <button
+            type="button"
+            className={`fitness-chip${sampleSet ? " on" : ""}`}
+            aria-pressed={sampleSet != null}
+            onClick={() =>
+              setSelectionForSampleSet(sampleSet ? null : sampleUniverse)
+            }
+            disabled={sampleUniverse.length === 0}
+            title="Recompute every bar over one fixed set of samples so candidates compare on the same basis. Toggle samples below, or seed a set by clicking a square in the Sample-trajectory Series view."
+          >
+            Sample set{sampleSet ? ` · ${sampleSet.length}` : ""}
+          </button>
         </div>
       }
     >
       <div className="fitness-body">
+        {sampleSet && (
+          <SampleSetControl rounds={history} campaignId={campaignId} cycleId={cycleId} />
+        )}
         {/* Legend + chart wrapped so the legend sits over the chart's
             width specifically — when What-If opens and the card stretches,
             the legend stays anchored above the bars instead of drifting
