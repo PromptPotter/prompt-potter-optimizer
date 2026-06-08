@@ -12,6 +12,9 @@ export interface SessionGroup {
   branches: CycleListEntry[];
   // Most-recent updated_at across the session's units.
   updatedAt: string;
+  // Best fitness across the session's whole fork-tree (root + branches) — the
+  // winner often lives in a fork, so this is NOT just the root's number.
+  bestAccuracy: number | null;
 }
 
 // One campaign's row in the tree: the manifest + its N sessions.
@@ -21,6 +24,31 @@ export interface CampaignGroup {
   // Most-recent updated_at across every session — sorts campaigns so the
   // one being actively worked on stays at the top.
   updatedAt: string;
+  // Best fitness across every cycle in the campaign forest.
+  bestAccuracy: number | null;
+}
+
+// Best fitness across a set of cycles — max of the non-null best_accuracy
+// values, or null when none has scored a round yet (renders as "—"). A fresh
+// sibling carries 0.0 (a real value); a no-rounds-yet cycle carries null, so
+// the `!= null` guard keeps "—" distinct from a genuine 0%.
+function bestAccuracyOf(entries: CycleListEntry[]): number | null {
+  let best: number | null = null;
+  for (const e of entries) {
+    if (e.best_accuracy != null && (best == null || e.best_accuracy > best)) {
+      best = e.best_accuracy;
+    }
+  }
+  return best;
+}
+
+// Same null-aware max, over already-derived session bests.
+function maxNullable(values: (number | null)[]): number | null {
+  let best: number | null = null;
+  for (const v of values) {
+    if (v != null && (best == null || v > best)) best = v;
+  }
+  return best;
 }
 
 // One node in a session's fork-tree: a unit plus the units forked off it.
@@ -106,7 +134,12 @@ export function groupCampaigns(
         (m, c) => (c.updated_at > m ? c.updated_at : m),
         s.root.updated_at,
       );
-      sessions.push({ root: s.root, branches: s.branches, updatedAt });
+      sessions.push({
+        root: s.root,
+        branches: s.branches,
+        updatedAt,
+        bestAccuracy: bestAccuracyOf([s.root, ...s.branches]),
+      });
     }
     sessions.sort(
       (a, b) => sessionIndexOf(a.root.cycle_id) - sessionIndexOf(b.root.cycle_id),
@@ -115,7 +148,12 @@ export function groupCampaigns(
       (m, s) => (s.updatedAt > m ? s.updatedAt : m),
       campaign.created_at,
     );
-    groups.push({ campaign, sessions, updatedAt });
+    groups.push({
+      campaign,
+      sessions,
+      updatedAt,
+      bestAccuracy: maxNullable(sessions.map((s) => s.bestAccuracy)),
+    });
   }
   groups.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   return groups;

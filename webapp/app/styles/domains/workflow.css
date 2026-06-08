@@ -85,6 +85,11 @@
 
 .opt-detail-pre{margin:0;font-family:var(--font-mono);font-size:12px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-sm);padding:8px 11px;white-space:pre-wrap;word-break:break-word;max-height:44vh;overflow:auto;line-height:1.5;color:var(--color-text-primary)}
 
+/* Round samples embedded in the l1_score node panel — the scoring node owns
+   the per-round HIT/MISS view now that it's no longer a standalone card. */
+.opt-detail-samples{padding:8px 16px;border-top:0.5px solid var(--color-border-tertiary)}
+.opt-detail-samples .round-samples-view{margin-bottom:0}
+
 /* Footer — secondary content as inline disclosures. The raw payloads and
    config dump are escape hatches, not primary; default-collapsed so the
    strip stays one line tall. */

@@ -124,14 +124,21 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     setPhase({ stage: "ready", draft: resolved, resolution });
   };
 
-  // After any draft-producing action (drop / pick), always surface the context
-  // box — prefilled with whatever task the dataset already carries — so the
-  // operator confirms or refines it before the single check-in call. No LLM
-  // here; `submitContext` runs the one call once they send.
+  // After any draft-producing action (drop / pick). If the dataset already
+  // carries its task — a registered dataset, or a dropped file whose dataloader
+  // the backend recognized — there's nothing to ask: run the one check-in
+  // straight through to the Start button. Only a context-less drop stops to ask,
+  // prefilling the box and waiting for the operator's one message.
   const advance = (draft: DraftCampaignWire) => {
-    setInputText(draft.raw_task_description ?? "");
+    if ((draft.raw_task_description ?? "").trim()) {
+      setInputText("");
+      pushAi(`Parsed ${draft.n_samples} rows — task already on file. Checking the setup…`);
+      void runCheckin(draft);
+      return;
+    }
+    setInputText("");
     pushAi(
-      `Parsed ${draft.n_samples} rows. Describe the task — what should the model do with each row? The more you give me, the better I set up the prompt and pipeline. Edit the text below and send.`,
+      `Parsed ${draft.n_samples} rows. Describe the task — what should the model do with each row? The more you give me, the better I set up the prompt and pipeline. Send when ready.`,
     );
     setPhase({ stage: "awaiting-context", draft });
   };

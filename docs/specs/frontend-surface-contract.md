@@ -162,7 +162,7 @@ controls:
     do: Fork+candidate cladogram from rounds[]; empty note before round 1.
     status: ok
   - id: samples
-    do: Per-sample table once scoring starts; empty note otherwise.
+    do: Per-sample table — rendered inside the l1_score node inspector (click l1_score), not a standalone card. Empty note before scoring.
     status: ok
   - id: optimizer.node_strip
     do: checkin/l3_plan/l2_context/l1_generate/l1_score/l1_critique nodes; click opens inspector

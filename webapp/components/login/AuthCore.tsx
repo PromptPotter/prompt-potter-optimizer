@@ -74,7 +74,8 @@ export function AuthCore({ errorCode, errorEmail }: Props) {
       </div>
 
       <p className="auth-fineprint">
-        No Google account?{" "}
+        Google is the only sign-in. We federate identity and never store passwords, so there&rsquo;s no
+        email-and-password option. No Google account?{" "}
         <a className="auth-link" href={ISSUE_URL} target="_blank" rel="noopener noreferrer">
           Open a GitHub issue
         </a>{" "}

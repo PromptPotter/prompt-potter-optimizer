@@ -144,46 +144,40 @@
    it instead of as a separated row below. Cards are equal-height and
    align-items:start so a tall one (lineage with many forks) never
    forces the others taller. */
-/* One shared card height drives the whole row — lineage height == fitness
-   height by construction (the operator's "Lineage same size as Fitness").
-   Shrinks together on mobile via the --triad-card-h override below. */
-.dash-row-triad{--triad-card-h:240px;width:100%;display:grid;grid-template-columns:minmax(460px,auto) minmax(0,1fr);grid-template-areas:"fitness lineage";gap:18px;align-items:start}
-.dash-row-triad > *{min-width:0}
-.dash-row-triad > .fitness-card{grid-area:fitness;justify-self:start;min-height:var(--triad-card-h);margin-left:0;margin-right:0}
-.dash-row-triad > .lineage-card{grid-area:lineage;justify-self:stretch;height:var(--triad-card-h)}
-.dash-row-triad > .inspector-panel{grid-area:inspector;min-height:var(--triad-card-h);height:auto;max-height:520px;overflow:auto}
+/* Size-to-content row. Fitness (left) keeps a fixed basis; Lineage (right) is
+   sized to its tree's natural width (flex-grow:0 — it never balloons to fill the
+   leftover band, so a short tree leaves no empty right gutter). --lineage-natural-w
+   is fed in by FamilyTree since the viewport's overflow hides that width from CSS.
+   When the tree and Fitness can't share the band, Lineage wraps to its OWN
+   full-width row below Fitness; min(…,100%) caps the demand at the band so a giant
+   tree scrolls inside the viewport instead of overflowing the page. The viewport's
+   own height is fixed + operator-resizable (family-tree.css), not coupled here. */
+.dash-row-triad{--triad-card-h:240px;width:100%;display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start}
+.dash-row-triad > .fitness-card{flex:0 1 460px;min-width:0;min-height:var(--triad-card-h);margin-left:0;margin-right:0}
+.dash-row-triad > .lineage-card{flex:0 1 auto;min-width:min(var(--lineage-natural-w,480px),100%);max-width:100%}
 .dash-row-triad > .fitness-card,
-.dash-row-triad > .lineage-card,
-.dash-row-triad > .inspector-panel{display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
-.dash-row-triad > .fitness-card.whatif-open{height:auto;justify-self:stretch}
-.dash-row-triad .lineage-scroll{flex:1;min-height:0;overflow:auto}
-.dash-row-triad .family-cladogram-scroll{max-height:none}
+.dash-row-triad > .lineage-card{display:flex;flex-direction:column;margin-bottom:0;padding:10px 14px}
+.dash-row-triad > .fitness-card.whatif-open{flex-basis:100%}
 .dash-row-triad .fitness-chart-frame{flex:1;height:160px;min-height:0}
 .dash-row-triad .fitness-body{flex:1;display:flex;flex-direction:column;min-height:0}
-.dash-row-triad > .inspector-panel .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
 
-/* Inspector present — slot it as the 3rd column right next to lineage.
-   Adjacency is the whole point: the fitness/lineage clicks reveal the
-   drill inline rather than scrolling a separated panel into view. */
-.dash-row-triad:has(> .inspector-panel){grid-template-columns:minmax(0,1.1fr) minmax(0,0.9fr) minmax(0,1fr);grid-template-areas:"fitness lineage inspector"}
+/* Scoring inspector — its own full-width row below the fitness/lineage row,
+   never beside lineage. Rendered as a sibling of .dash-row-triad so it spans
+   the whole spine; the border reset matches the old in-triad card framing. */
+.inspector-row{max-height:520px;overflow:auto;margin-bottom:14px}
+.inspector-row .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
 
-/* What-If open — fitness card promotes to a full-width top row; the
-   remaining columns (lineage, plus inspector if present) drop to row 2.
-   The chart frame stays at its closed-mode 432px × 160px so the
-   bars don't jump when the operator opens the ablation grid. */
-.dash-row-triad:has(> .fitness-card.whatif-open){grid-template-columns:minmax(0,2fr) minmax(0,1fr);grid-template-areas:"fitness fitness" "lineage inspector"}
-.dash-row-triad:has(> .fitness-card.whatif-open):not(:has(> .inspector-panel)){grid-template-columns:1fr;grid-template-areas:"fitness" "lineage"}
+/* What-If open — fitness card takes the full first line (flex-basis:100%, set
+   above), so lineage wraps to its own row beneath it. The chart frame stays at
+   its closed-mode size so the bars don't jump when the ablation grid opens.
+   Narrow screens need no special rule: the flex row wraps on its own once
+   Fitness + Lineage can't share the width. */
 
-@media (max-width:960px){
-  .dash-row-triad{grid-template-columns:1fr;grid-template-areas:"fitness" "lineage" "inspector";max-width:none}
-  .dash-row-triad > .fitness-card{justify-self:stretch}
-  .dash-row-triad:has(> .fitness-card.whatif-open){grid-template-columns:1fr;grid-template-areas:"fitness" "lineage" "inspector"}
-}
-/* Phone (≤640px): the triad cards shrink together so the whole dashboard
-   reads in portrait without the rotate prompt. The chart frame drops in
-   step with the shared card height so the bars stay proportional. */
+/* Phone (≤640px): the cards shrink together so the dashboard reads in portrait
+   without the rotate prompt; the chart frame drops in step. */
 @media (max-width:640px){
   .dash-row-triad{--triad-card-h:200px}
+  .dash-row-triad > .fitness-card{flex-basis:100%}
   .dash-row-triad .fitness-chart-frame{height:140px}
 }
 

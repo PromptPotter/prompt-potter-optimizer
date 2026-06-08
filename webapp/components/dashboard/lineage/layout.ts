@@ -6,15 +6,13 @@
 //   collapsed — one summary node per round (the round winner), the compact
 //               campaign/fork view. laneSpan = 1 row.
 //   expanded  — the full intra-cycle candidate cladogram for that cycle:
-//               one node per candidate per round, winner→children branches,
-//               an optional origin (C0) trunk. laneSpan = the widest round's
-//               candidate count, so an expanded lane pushes the lanes below it
-//               down by that many rows.
+//               one node per candidate per round, winner→children branches.
+//               laneSpan = the widest round's candidate count, so an expanded
+//               lane pushes the lanes below it down by that many rows.
 // Forks anchor to the parent's WINNER node (the "spine") at the fork round, so
 // a fork stem stays attached even when the parent lane fans out.
 
 import { type CampaignLineageCycle, type SiblingKind } from "@/lib/api";
-import { ORIGIN_CANDIDATE_ID } from "@/lib/derivations/round-candidates";
 import { rootCycleId } from "@/lib/ids";
 
 // Cladogram dimensions. Each round across a session's family is one
@@ -25,12 +23,7 @@ export const COL_W = 110;          // width per round-column
 export const LANE_H = 26;          // height per lane-row
 export const STUB = 14;            // horizontal stub before a collapsed round node
 export const CAND_STUB = 22;       // horizontal stub before an expanded candidate node
-// Gap from the origin (C0) trunk node to its first round. A short fixed gap —
-// not a full column — so C0 sits just left of round 1 instead of floating out
-// at the far-left edge.
-export const ORIGIN_GAP = 58;
-// Left margin before column 0. Wide enough that the origin (C0) trunk node's
-// left-anchored label clears the SVG edge instead of clipping.
+// Left margin before column 0 — room for round 1's left-anchored stub + label.
 export const LEFT_PAD = 48;
 export const HEADER_H = 18;        // column-header row at the top
 export const TOP_PAD = HEADER_H + 8; // first lane sits below the header row
@@ -67,11 +60,10 @@ export interface LaneRound {
 }
 export interface CycleDetail {
   rounds: LaneRound[];
-  originAccuracy: number | null;
 }
 export type DetailByCycle = Map<string, CycleDetail>;
 
-const EMPTY_DETAIL: CycleDetail = { rounds: [], originAccuracy: null };
+const EMPTY_DETAIL: CycleDetail = { rounds: [] };
 
 // The round's elected winner (or first candidate as a fallback) — the node a
 // fork anchors to and the parent of the next round's fan.
@@ -203,17 +195,17 @@ export function layout(
 }
 
 // Compute SVG (x, y) for every node (collapsed = one summary node per round;
-// expanded = one node per candidate per round, plus an optional origin) and the
-// branch segments between them.
+// expanded = one node per candidate per round) and the branch segments between
+// them.
 export interface RoundNodePos {
   cycleId: string;
-  round: number;            // 0 = origin trunk node
+  round: number;
   col: number;
   x: number;
   y: number;
   accuracy: number | null;
-  // Short candidate label ("C1.2", "C0") for expanded nodes; "" for collapsed
-  // summary nodes (Forest draws "R{n}" for those).
+  // Short candidate label ("C1.2") for expanded nodes; "" for collapsed summary
+  // nodes (Forest draws "R{n}" for those).
   candidateLabel: string;
   // Stable id for selection routing. Origin uses ORIGIN_CANDIDATE_ID.
   candidateId: string;
@@ -237,6 +229,11 @@ export interface BranchSeg {
 // origin / fork stems anchor to).
 function bandCenterY(l: LaneLayout): number {
   return TOP_PAD + (l.laneOffset + (l.laneSpan - 1) / 2) * LANE_H;
+}
+
+// Left x of a lane's column band — what the band-left fork fallbacks anchor to.
+function bandLeftX(l: LaneLayout): number {
+  return LEFT_PAD + l.cycle.round_column_offset * COL_W;
 }
 
 export function placeNodes(layouts: Map<string, LaneLayout>): {
@@ -292,32 +289,10 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       continue;
     }
 
-    // Expanded: the full intra-cycle candidate cladogram. The origin trunk
-    // sits a short fixed gap left of the first round (not a full column out).
-    const firstRound = rounds.length > 0 ? rounds[0].round : null;
-    const originX = firstRound != null ? colX(firstRound) - ORIGIN_GAP : colX(0);
-    let originNode: RoundNodePos | null = null;
-    if (l.detail.originAccuracy != null) {
-      originNode = {
-        cycleId: l.cycle.cycle_id,
-        round: 0,
-        col: offset,
-        x: originX,
-        y: bandCenterY(l),
-        accuracy: l.detail.originAccuracy,
-        candidateLabel: "C0",
-        candidateId: ORIGIN_CANDIDATE_ID,
-        isWinner: false,
-        isExpanded: true,
-        isLastInLane: false,
-        sibling_kind: l.cycle.sibling_kind,
-        trigger: l.cycle.trigger,
-      };
-      nodes.push(originNode);
-    }
-
-    // Parent point for round 1 — origin if present, else the trunk gap point.
-    let parent: { x: number; y: number } = { x: originX, y: bandCenterY(l) };
+    // Expanded: the full intra-cycle candidate cladogram. Round 1 has no
+    // parent node (the origin trunk was removed) — its candidates draw only
+    // their own stub; each later round chains from the prior round's winner.
+    let parent: { x: number; y: number } | null = null;
 
     for (const r of rounds) {
       const n = r.candidates.length;
@@ -349,8 +324,10 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
         }
         // Parent winner → this child's stub start. The stub itself (and the
         // label) is drawn by the node group in lineage style, so emit only the
-        // slant here.
-        segs.push({ x1: parent.x, y1: parent.y, x2: x - CAND_STUB, y2: y, variant: "chain" });
+        // slant here. Round 1 has no parent (no origin) — it draws just its stub.
+        if (parent) {
+          segs.push({ x1: parent.x, y1: parent.y, x2: x - CAND_STUB, y2: y, variant: "chain" });
+        }
       });
       const winner = pickWinner(r.candidates);
       const winnerNode =
@@ -384,7 +361,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
       anchorX = fromCand.x;
       anchorY = fromCand.y;
     } else if (fr === 0) {
-      anchorX = LEFT_PAD + parentLayout.cycle.round_column_offset * COL_W;
+      anchorX = bandLeftX(parentLayout);
       anchorY = parentBandY;
     } else {
       const exact = fr != null ? spineByCycleRound.get(`${l.parentCycleId}::r${fr}`) : undefined;

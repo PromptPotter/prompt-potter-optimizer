@@ -56,10 +56,6 @@ export function CampaignNode({
   // Multi-session campaign — a grouping row that expands to session rows.
   const containsViewed = cid === campaignId;
   const containsActive = cid === activeCampaignId;
-  const best = group.sessions.reduce<number | null>((m, s) => {
-    const a = s.root.best_accuracy;
-    return a != null && (m == null || a > m) ? a : m;
-  }, null);
   return (
     <>
       <div className={`unit-library-family${containsViewed ? " selected" : ""}`}>
@@ -90,7 +86,7 @@ export function CampaignNode({
               )}
             </span>
             <span className="unit-library-meta">
-              {group.sessions.length} sessions · {fmtPct0(best)}
+              {group.sessions.length} sessions · {fmtPct0(group.bestAccuracy)}
             </span>
           </span>
         </button>

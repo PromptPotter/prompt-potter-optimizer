@@ -89,7 +89,7 @@ export function SessionSubtree({
                 </span>
               )}
             </span>
-            <span className="unit-library-meta">{fmtPct0(root.best_accuracy)}</span>
+            <span className="unit-library-meta">{fmtPct0(session.bestAccuracy)}</span>
           </span>
         </button>
         {chips.length > 0 && (

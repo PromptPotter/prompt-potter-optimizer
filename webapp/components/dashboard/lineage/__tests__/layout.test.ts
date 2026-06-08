@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { CampaignLineageCycle } from "@/lib/api";
-import { ORIGIN_CANDIDATE_ID } from "@/lib/derivations/round-candidates";
 import {
   COL_W,
   LANE_H,
   LEFT_PAD,
-  ORIGIN_GAP,
   TOP_PAD,
   buildTree,
   expandedLaneSpan,
@@ -41,9 +39,8 @@ function cycle(
 
 // `counts` is one entry per round (round number is the index + 1); each value
 // is the candidate count for that round. The last candidate is the winner.
-function detail(counts: number[], originAccuracy: number | null = null): CycleDetail {
+function detail(counts: number[]): CycleDetail {
   return {
-    originAccuracy,
     rounds: counts.map((n, ri) => ({
       round: ri + 1,
       candidates: Array.from({ length: n }, (_, i) => ({
@@ -62,7 +59,7 @@ describe("expandedLaneSpan", () => {
   it("is the widest round's candidate count, floored at 1", () => {
     expect(expandedLaneSpan(detail([3, 2, 4]))).toBe(4);
     expect(expandedLaneSpan(detail([1, 1]))).toBe(1);
-    expect(expandedLaneSpan({ rounds: [], originAccuracy: null })).toBe(1);
+    expect(expandedLaneSpan({ rounds: [] })).toBe(1);
   });
 });
 
@@ -146,31 +143,6 @@ describe("placeNodes", () => {
     }
   });
 
-  it("emits an origin (C0) trunk node only when originAccuracy is set", () => {
-    const cycles = [cycle("cycle_a")];
-    const tree = buildTree("cycle_a", cycles)!;
-    const withOrigin: DetailByCycle = new Map([["cycle_a", detail([2], 0.4)]]);
-    const noOrigin: DetailByCycle = new Map([["cycle_a", detail([2], null)]]);
-
-    const a = placeNodes(layout(tree, withOrigin, new Set(["cycle_a"])).laneByCycle);
-    const origin = a.nodes.find((n) => n.round === 0);
-    expect(origin?.candidateId).toBe(ORIGIN_CANDIDATE_ID);
-    // Origin sits a short fixed gap left of round 1, not a full column out.
-    expect(origin?.x).toBe(LEFT_PAD + COL_W - ORIGIN_GAP);
-    // Round-1 children chain from the origin.
-    const r1 = a.nodes.filter((n) => n.round === 1);
-    for (const child of r1) {
-      expect(
-        a.segs.some(
-          (s) => s.x1 === origin!.x && s.y1 === origin!.y && s.y2 === child.y,
-        ),
-      ).toBe(true);
-    }
-
-    const b = placeNodes(layout(tree, noOrigin, new Set(["cycle_a"])).laneByCycle);
-    expect(b.nodes.some((n) => n.round === 0)).toBe(false);
-  });
-
   it("fork stem anchors to the parent's winner spine under expansion", () => {
     const cycles = [
       cycle("cycle_a"),
@@ -197,12 +169,11 @@ describe("placeNodes", () => {
   it("single expanded cycle reproduces the intraloop spine (the 'cool one')", () => {
     const cycles = [cycle("cycle_a")];
     const tree = buildTree("cycle_a", cycles)!;
-    const detailByCycle: DetailByCycle = new Map([["cycle_a", detail([2, 2, 1], 0.3)]]);
+    const detailByCycle: DetailByCycle = new Map([["cycle_a", detail([2, 2, 1])]]);
     const { laneByCycle, maxCol } = layout(tree, detailByCycle, new Set(["cycle_a"]));
     const { nodes, spineByCycleRound } = placeNodes(laneByCycle);
-    // origin + 2 + 2 + 1 candidate nodes
-    expect(nodes).toHaveLength(6);
-    expect(nodes.find((n) => n.round === 0)).toBeTruthy();
+    // 2 + 2 + 1 candidate nodes (no origin trunk)
+    expect(nodes).toHaveLength(5);
     // A winner spine entry per round, columns ascending.
     expect(spineByCycleRound.get("cycle_a::r1")!.x).toBe(LEFT_PAD + 1 * COL_W);
     expect(spineByCycleRound.get("cycle_a::r3")!.x).toBe(LEFT_PAD + 3 * COL_W);

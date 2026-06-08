@@ -35,14 +35,13 @@ const CandidateNode = memo(function CandidateNode({
   selected: boolean;
   onPick: (n: RoundNodePos) => void;
 }) {
-  const isOrigin = n.round === 0;
   return (
     <g
       className={cx("lineage-node", selected && "selected")}
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`${isOrigin ? "Origin" : `Round ${n.round}`} candidate ${n.candidateLabel}, accuracy ${fmtPct0(n.accuracy)}${n.isWinner ? ", round winner" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, accuracy ${fmtPct0(n.accuracy)}${n.isWinner ? ", round winner" : ""}`}
       onClick={() => onPick(n)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -52,37 +51,21 @@ const CandidateNode = memo(function CandidateNode({
       }}
       style={{ cursor: "pointer" }}
     >
-      {isOrigin ? (
-        <>
-          <text
-            x={n.x - 4}
-            y={n.y + 3}
-            className={cx("lineage-label", selected && "selected")}
-            textAnchor="end"
-          >
-            {n.candidateLabel} {fmtPct0(n.accuracy)}
-          </text>
-          <rect x={n.x - 64} y={n.y - 10} width={64} height={20} fill="transparent" />
-        </>
-      ) : (
-        <>
-          <line
-            x1={n.x - CAND_STUB}
-            y1={n.y}
-            x2={n.x}
-            y2={n.y}
-            className={cx("lineage-stub", n.isWinner && "winner")}
-          />
-          <text
-            x={n.x + 4}
-            y={n.y + 3}
-            className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
-          >
-            {n.candidateLabel} {fmtPct0(n.accuracy)}
-          </text>
-          <rect x={n.x - CAND_STUB} y={n.y - 10} width={CAND_STUB + 110} height={20} fill="transparent" />
-        </>
-      )}
+      <line
+        x1={n.x - CAND_STUB}
+        y1={n.y}
+        x2={n.x}
+        y2={n.y}
+        className={cx("lineage-stub", n.isWinner && "winner")}
+      />
+      <text
+        x={n.x + 4}
+        y={n.y + 3}
+        className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
+      >
+        {n.candidateLabel} {fmtPct0(n.accuracy)}
+      </text>
+      <rect x={n.x - CAND_STUB} y={n.y - 10} width={CAND_STUB + 110} height={20} fill="transparent" />
     </g>
   );
 });
@@ -166,7 +149,6 @@ export function Forest({
       {sessionLabel && (
         <div className="family-cladogram-session-head">{sessionLabel}</div>
       )}
-      <div className="family-cladogram-scroll">
         <svg
           width={width}
           height={height}
@@ -365,7 +347,6 @@ export function Forest({
             })}
 
         </svg>
-      </div>
     </div>
   );
 }

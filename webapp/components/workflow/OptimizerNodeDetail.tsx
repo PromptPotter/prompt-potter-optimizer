@@ -1,7 +1,8 @@
 "use client";
 import { useMemo } from "react";
 import type { PipelineDoc } from "./types";
-import { type DashboardSnapshot, roundOf } from "@/lib/poll";
+import { type DashboardSnapshot, type StatusKind, roundOf } from "@/lib/poll";
+import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
 import { availableRounds } from "@/lib/derivations/round-axis";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useSelection } from "@/lib/SelectionContext";
@@ -16,6 +17,9 @@ interface Props {
   // Freshness gate — a frozen cycle keeps `dash.state` at its last phase;
   // without this the detail panel would claim the node is "live" forever.
   isLive: boolean;
+  // Forwarded to the round-samples view, which renders inside this panel for
+  // the l1_score node (its live/historical body keys off the cycle status).
+  status: StatusKind;
   // Needed for the lazy per-round fetch when the operator picks a
   // historical round from the dropdown.
   campaignId: string | null;
@@ -65,6 +69,7 @@ export function OptimizerNodeDetail({
   pipeline,
   dash,
   isLive,
+  status,
   campaignId,
   cycleId,
   onClose,
@@ -243,6 +248,17 @@ export function OptimizerNodeDetail({
             </div>
           </section>
         </div>
+      )}
+
+      {id === "l1_score" && (
+        <section className="opt-detail-samples" aria-label="Round samples">
+          <RoundSamplesView
+            dash={dash}
+            status={status}
+            campaignId={campaignId}
+            cycleId={cycleId}
+          />
+        </section>
       )}
 
       <footer className="opt-detail-footer">
