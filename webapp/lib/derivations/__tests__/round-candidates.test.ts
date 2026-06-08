@@ -4,10 +4,12 @@ import { roundCandidates } from "@/lib/derivations/round-candidates";
 
 describe("roundCandidates — l2_terminal fixture", () => {
   // Reproduces the operator's justlogic__ca6d4d/cycle_2451d3cf6ebc exit
-  // shape: 4 fully-scored rounds + a round-5 stub with empty candidates
-  // (closed mid-L2 without l1_score firing). Per the derivation contract:
+  // shape: origin (round 0) + 4 fully-scored rounds + a round-5 stub with
+  // empty candidates (closed mid-L2 without l1_score firing). Per the
+  // derivation contract:
   //
-  //   - Origin renders as C0 (rounds.length > 0 → hasAnything).
+  //   - Origin is round 0 in `dash.rounds[]` — a single candidate labelled
+  //     "C0" that flows through the same history loop as every round.
   //   - Historical rounds 1–4 each contribute their two candidates.
   //   - Round 5 is in `dash.rounds[]` but has `candidates: []` and must
   //     be skipped (no rows added AND no suppression of the in-flight
@@ -17,15 +19,16 @@ describe("roundCandidates — l2_terminal fixture", () => {
   const dash = loadCycleFixture("l2_terminal");
   const rows = roundCandidates(dash);
 
-  it("emits origin C0", () => {
-    const origin = rows.find((r) => r.is_origin);
+  it("emits origin as round 0 (C0)", () => {
+    const origin = rows.find((r) => r.round === 0);
     expect(origin).toBeDefined();
-    expect(origin?.key).toBe("C0");
+    expect(origin?.label).toBe("C0");
+    expect(origin?.key).toBe("R0.0");
   });
 
-  it("emits every non-empty historical round's candidates", () => {
-    const historical = rows.filter((r) => !r.is_origin);
-    // 4 closed rounds × 2 candidates each = 8 historical rows. Round 5's
+  it("emits every non-empty post-origin round's candidates", () => {
+    const historical = rows.filter((r) => r.round > 0);
+    // 4 closed rounds × 2 candidates each = 8 rows. Round 5's
     // empty stub contributes nothing.
     expect(historical).toHaveLength(8);
     expect(new Set(historical.map((r) => r.round))).toEqual(
@@ -38,10 +41,10 @@ describe("roundCandidates — l2_terminal fixture", () => {
     expect(inflight).toHaveLength(0);
   });
 
-  it("preserves selection order — origin then ascending rounds", () => {
+  it("preserves selection order — origin (round 0) then ascending rounds", () => {
     const ordered = rows.map((r) => r.key);
-    expect(ordered[0]).toBe("C0");
-    expect(ordered.slice(1)).toEqual([
+    expect(ordered).toEqual([
+      "R0.0",
       "R1.0",
       "R1.1",
       "R2.0",

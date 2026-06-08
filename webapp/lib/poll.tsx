@@ -17,10 +17,7 @@ import { fetchDashboardConditional } from "./api";
 import { useAuthGate } from "./auth-context";
 import { resolveRunPhase } from "./run-phase";
 import { ageTextSeconds } from "./format";
-import type {
-  OriginSummary,
-  RoundSummary,
-} from "./api/types";
+import type { RoundSummary } from "./api/types";
 import { usePoll } from "./hooks/usePoll";
 
 export type StatusKind = "live" | "stale" | "offline";
@@ -63,9 +60,6 @@ export interface DashboardSnapshot {
       top?: { id: string; p_best: number }[];
     };
   };
-  // Origin row — accuracy + sample count behind C0. Replaces the prior
-  // pair of top-level `origin_accuracy` / `origin_samples` scalars.
-  origin?: OriginSummary;
   // Completed-round display summaries; sole source of truth for the
   // FitnessChart, TrendChart, TopStrip sparkline, and LineageTree.
   // Sorted ascending by `round`; empty until the first round closes.

@@ -18,7 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.domain.results import OriginSummary, RoundSummary
+from promptpotter.domain.results import RoundSummary
 
 __all__ = [
     "BackendWarning",
@@ -220,7 +220,8 @@ class LiveDashboardState(BaseModel):
     query: str = ""
     patience: str = ""
 
-    origin: OriginSummary = Field(default_factory=lambda: OriginSummary(accuracy=0.0, samples=0))
+    # Origin is round 0 — it lives in ``rounds[]`` as a normal one-candidate
+    # RoundSummary, not a separate block. Same shape every L1 round has.
     rounds: list[RoundSummary] = Field(default_factory=list)
 
     best: float = 0.0

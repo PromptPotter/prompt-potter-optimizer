@@ -62,7 +62,7 @@ If a future change wants to defer or skip a write, the question to answer first 
 
 Two on-disk surfaces back the dashboard. Read from the right one:
 
-- **`dashboard.json`** (polled every 2 s by `lib/poll.tsx` → `useCycleStream()`) — origin, in-flight `current_round`, and the `rounds[]` array of completed-round summaries. **Sole source** for the FitnessChart, TrendChart, TopStrip sparkline, LineageTree. Don't stitch in `round_NNNN.json` for chart data.
+- **`dashboard.json`** (polled every 2 s by `lib/poll.tsx` → `useCycleStream()`) — in-flight `current_round` and the `rounds[]` array of completed-round summaries (**round 0 = origin**, a one-candidate round labelled "C0"; there is no separate origin block). **Sole source** for the FitnessChart, TrendChart, TopStrip sparkline, LineageTree. Don't stitch in `round_NNNN.json` for chart data.
 - **`round_NNNN.json`** (lazy, fetched via `lib/hooks/useRoundFile.ts`) — deep audit per round: full LLM I/O, per-sample results, scoreboard with `per_sample`. Reach for it only when the operator drills into a specific round (FreqChart distribution, ScoringInspector composite/hits, OptimizerNodeDetail node-by-node inspection).
 
 If you find yourself adding a "merge in-flight with historical" or "fall back to round-file when dashboard hasn't written X yet" branch, you're re-introducing the stitch pattern the unification spec (`docs/specs/webapp-display-source-unification.md`) collapsed. Pick one source per data class.

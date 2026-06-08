@@ -8,23 +8,21 @@
 // themselves. That divergence is what produced the lineage-vs-fitness
 // off-by-one and asymmetric origin handling.
 //
-// `round = 0` and `idx = 0` reserved for origin (the C0 row). Any
-// other `(round, idx)` is a real L1 candidate.
+// `round = 0` is the origin round (a single candidate, labelled "C0") —
+// not a special row, just the first round. Any `(round, idx)` is a candidate.
 
-export type CandidateSource = "origin" | "history" | "inflight";
+export type CandidateSource = "history" | "inflight";
 
 export interface CandidateRow {
   // React + dedup key — stable across renders of the same candidate.
   // Shape: "C0" for origin, `R${round}.${idx}` for candidates.
   key: string;
-  // Round number. 0 for origin.
+  // Round number. 0 is the origin round.
   round: number;
-  // Position within the round. 0 for origin and for the first L1 candidate.
+  // Position within the round. 0 for the origin and for the first L1 candidate.
   idx: number;
-  // True only for the origin row (round 0, idx 0).
-  is_origin: boolean;
   // Stable id used for selection routing. Falls back to `r${round}_${idx}`
-  // when the backend round summary hasn't stamped one. Origin uses "origin".
+  // when the backend round summary hasn't stamped one.
   candidate_id: string;
   // Display label via `candidateLabel(round, idx)` — uniform across surfaces.
   label: string;

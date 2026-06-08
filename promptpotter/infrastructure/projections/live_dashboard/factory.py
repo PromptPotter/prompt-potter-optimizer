@@ -31,7 +31,6 @@ def _max_round_on_disk(rounds_dir: Path) -> int:
 def resolve_resume_state(
     seed_dir: Path,
     active_cycle_dir: Path,
-    origin_accuracy: float,
     resumed_from_round: int | None,
 ) -> dict[str, Any] | None:
     """Read the prior ``dashboard.json`` and self-heal its round/best pointers.
@@ -43,7 +42,8 @@ def resolve_resume_state(
     cycle's own dir on a root/resume, or the parent cycle's dir on a fork (the
     fork inherits the parent's trajectory up to the cut). ``active_cycle_dir``
     is always the cycle's own dir; its ``rounds/`` checkpoints drive the
-    round-pointer self-heal.
+    round-pointer self-heal. Origin rides ``rounds[0]`` like any round, so the
+    seeded ``rounds`` already carries it — no separate origin reconciliation.
 
     ``best`` is the rolling-max composite for the active cycle. The prior
     ``dashboard.json`` may hold a number from an earlier run. That number is
@@ -60,11 +60,6 @@ def resolve_resume_state(
     except (json.JSONDecodeError, OSError):
         return None
 
-    origin_block = dict(resume_from.get("origin") or {})
-    origin_block["accuracy"] = origin_accuracy
-    # samples stays whatever the prior dashboard recorded; INIT:exit will
-    # refresh both fields once the new run hits origin scoring.
-    resume_from["origin"] = origin_block
     disk_round = _max_round_on_disk(active_cycle_dir / "rounds")
     if disk_round > int(resume_from.get("round") or 0):
         resume_from["round"] = disk_round

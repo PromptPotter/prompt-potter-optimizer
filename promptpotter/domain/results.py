@@ -22,7 +22,6 @@ __all__ = [
     "DegradationContext",
     "DiagnosticRunRecord",
     "EliminationContext",
-    "OriginSummary",
     "PayloadOutcome",
     "RoundMetadata",
     "RoundOrigin",
@@ -344,15 +343,6 @@ class RoundSummary(BaseModel):
     # in measurement order (longest candidate sequence carries the full
     # series since PoBB truncates losers, not the queue mechanism itself).
     selection: list[int] = Field(default_factory=list)
-
-
-class OriginSummary(BaseModel):
-    """Origin row for `dashboard.json::origin` — separate from `rounds[]` since origin has no candidates/fitness."""
-
-    model_config = ConfigDict(frozen=True)
-
-    accuracy: float
-    samples: int
 
 
 class PayloadOutcome(BaseModel):

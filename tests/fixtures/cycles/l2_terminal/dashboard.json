@@ -17,11 +17,18 @@
     "nodes": {
       "l1_generate": {
         "status": "complete",
-        "output": {"variants": ["candidate description 1", "candidate description 2"]}
+        "output": {
+          "variants": [
+            "candidate description 1",
+            "candidate description 2"
+          ]
+        }
       },
       "l1_critique": {
         "status": "complete",
-        "output": {"summary": "two candidates, neither dominates"}
+        "output": {
+          "summary": "two candidates, neither dominates"
+        }
       },
       "l2_context": {
         "status": "running",
@@ -30,8 +37,26 @@
     },
     "pobb": null
   },
-  "origin": {"accuracy": 0.22, "samples": 200},
   "rounds": [
+    {
+      "round": 0,
+      "accuracy": 0.22,
+      "composite_fitness": 0.22,
+      "candidates": [
+        {
+          "candidate_id": "origin_c0",
+          "label": "C0",
+          "accuracy": 0.22,
+          "composite_fitness": 0.22,
+          "scored_samples": 200,
+          "expected_samples": 200,
+          "is_winner": true,
+          "evaluators": {},
+          "changes_description": "C0"
+        }
+      ],
+      "selection": []
+    },
     {
       "round": 1,
       "accuracy": 0.34,
@@ -40,12 +65,14 @@
         {
           "candidate_id": "r1_0",
           "label": "C1.1",
-          "accuracy": 0.30,
-          "composite_fitness": 0.30,
+          "accuracy": 0.3,
+          "composite_fitness": 0.3,
           "scored_samples": 200,
           "expected_samples": 200,
           "is_winner": false,
-          "evaluators": {"exact_match": 0.30},
+          "evaluators": {
+            "exact_match": 0.3
+          },
           "changes_description": "shorten preamble"
         },
         {
@@ -56,11 +83,15 @@
           "scored_samples": 200,
           "expected_samples": 200,
           "is_winner": true,
-          "evaluators": {"exact_match": 0.34},
+          "evaluators": {
+            "exact_match": 0.34
+          },
           "changes_description": "add worked example"
         }
       ],
-      "selection": [1]
+      "selection": [
+        1
+      ]
     },
     {
       "round": 2,
@@ -75,7 +106,9 @@
           "scored_samples": 200,
           "expected_samples": 200,
           "is_winner": false,
-          "evaluators": {"exact_match": 0.42},
+          "evaluators": {
+            "exact_match": 0.42
+          },
           "changes_description": "tighten constraint phrasing"
         },
         {
@@ -86,11 +119,15 @@
           "scored_samples": 200,
           "expected_samples": 200,
           "is_winner": true,
-          "evaluators": {"exact_match": 0.48},
+          "evaluators": {
+            "exact_match": 0.48
+          },
           "changes_description": "re-order steps"
         }
       ],
-      "selection": [1]
+      "selection": [
+        1
+      ]
     },
     {
       "round": 3,
@@ -105,7 +142,9 @@
           "scored_samples": 200,
           "expected_samples": 200,
           "is_winner": false,
-          "evaluators": {"exact_match": 0.51},
+          "evaluators": {
+            "exact_match": 0.51
+          },
           "changes_description": "swap example"
         },
         {
@@ -116,11 +155,15 @@
           "scored_samples": 200,
           "expected_samples": 200,
           "is_winner": true,
-          "evaluators": {"exact_match": 0.55},
+          "evaluators": {
+            "exact_match": 0.55
+          },
           "changes_description": "rewrite intro"
         }
       ],
-      "selection": [1]
+      "selection": [
+        1
+      ]
     },
     {
       "round": 4,
@@ -135,7 +178,9 @@
           "scored_samples": 200,
           "expected_samples": 200,
           "is_winner": false,
-          "evaluators": {"exact_match": 0.58},
+          "evaluators": {
+            "exact_match": 0.58
+          },
           "changes_description": "trim worked example"
         },
         {
@@ -146,11 +191,15 @@
           "scored_samples": 200,
           "expected_samples": 200,
           "is_winner": true,
-          "evaluators": {"exact_match": 0.62},
+          "evaluators": {
+            "exact_match": 0.62
+          },
           "changes_description": "add explicit count step"
         }
       ],
-      "selection": [1]
+      "selection": [
+        1
+      ]
     },
     {
       "round": 5,

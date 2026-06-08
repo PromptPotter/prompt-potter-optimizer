@@ -24,13 +24,16 @@ export function useFitnessBars(
     return candidates.map<BarSlot>((row) => {
       const diag = diagByLabel.get(row.label);
       const composite = row.composite;
-      // Origin (no evaluators) — the what-if column has no meaningful
-      // value, leave it null so the chart skips painting a stub bar.
-      const whatif = row.is_origin
-        ? null
-        : useComposite && composite != null
-          ? composite
-          : correctedFromEvaluators(row.evaluators, selected, rows);
+      // Origin (round 0) has no per-evaluator breakdown — the what-if column
+      // has no meaningful value, so leave it null when evaluators are empty
+      // and the chart skips painting a stub bar.
+      const hasEvaluators = Object.keys(row.evaluators).length > 0;
+      const whatif =
+        !hasEvaluators && composite == null
+          ? null
+          : useComposite && composite != null
+            ? composite
+            : correctedFromEvaluators(row.evaluators, selected, rows);
       // "Started" mirrors the prior chart logic: any sign of activity —
       // accuracy, composite, evaluators populated, or any sample scored.
       const started =

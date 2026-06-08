@@ -27,7 +27,7 @@ follow the same pattern.
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardView` | per cycle | `dashboard.json`, `output.log` | **Display surface** — origin + completed-round summaries (`dash.rounds[]`) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
+| `LiveDashboardView` | per cycle | `dashboard.json`, `output.log` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = origin**, a one-candidate round emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
 | `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
 | `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 | `EventStreamView` | per cycle | SSE frames over `GET /campaigns/{c}/cycles/{cy}/events:subscribe` | **Profile A outbound highway** — sole writer of `ProjectionEnvelope` frames (security box 4). Per-cycle ledger subscriber; broadcasts to N HTTP subscribers via per-subscriber asyncio queues bridged from the ledger thread via `loop.call_soon_threadsafe`. Snapshot-then-tail + 15 s heartbeat + sequence-gap detection. Certified contract: [`docs/developer/event-stream.md`](../../docs/developer/event-stream.md). Lookup via process-wide registry (`event_stream/registry.py`); `register_event_stream` at `build_run_observers`, `deregister_event_stream` at `drain_all`. |
@@ -64,7 +64,9 @@ post-mortem readers can see what the ledger has.
 `CampaignStore.rewind_to_round` consults the ledger (not the public
 `rounds/` tree) for admissibility: `--from N` is valid iff the ledger
 contains a closing PhaseRecord for round N (`(phase="round", event="complete")`
-or, for round 0, `(phase="origin", event="exit")`). The pure ledger scan
+— round 0 now closes through the same path as any round via `emit_origin_round`,
+so it carries `(phase="round", event="complete", round=0)`; the legacy
+`(phase="origin", event="exit")` close is still accepted by the scan). The pure ledger scan
 lives in `scan_ledger_max_round_complete` (`store/campaign_store/ledger_scan.py`)
 and never instantiates `CycleEventLog`, so no subscribers fire during
 admissibility checks.

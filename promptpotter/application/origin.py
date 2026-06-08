@@ -426,6 +426,11 @@ async def prepare_scoring_context(
                 partial(listener.on_sample_scored, 0, 1) if listener is not None else None
             ),
         )
+        # Origin is candidate 0 of round 0 — deposit its aggregate score so the live
+        # round buffer (→ round_0000.json node block) carries the same stats every
+        # round's candidates do.
+        if listener is not None:
+            listener.on_candidate_scored(0, 1, scores)
     finally:
         if listener is not None:
             emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "exit", round=0)

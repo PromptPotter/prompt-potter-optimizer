@@ -75,10 +75,8 @@ class CampaignLineageCycle(BaseModel):
     status: str
     dataset_name: str
     best_accuracy: float | None
-    # Origin (C0) accuracy for this cycle, read from index.json::origin_accuracy.
-    # Lets the cladogram draw the origin trunk node for completed cycles — the
-    # active cycle gets its live origin from dashboard.json instead.
-    origin_accuracy: float | None
+    # Origin is round 0 — it rides ``rounds[]`` like any round (no separate
+    # trunk anchor). The cladogram renders it through the same round path.
     rounds: list[CampaignLineageRound]
 
 
@@ -204,7 +202,6 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
                     status="missing",
                     dataset_name=entry["dataset_name"],
                     best_accuracy=None,
-                    origin_accuracy=None,
                     rounds=[],
                 )
             )
@@ -295,11 +292,6 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
                 best_accuracy=(
                     float(index["best_accuracy"])
                     if isinstance(index.get("best_accuracy"), int | float)
-                    else None
-                ),
-                origin_accuracy=(
-                    float(index["origin_accuracy"])
-                    if isinstance(index.get("origin_accuracy"), int | float)
                     else None
                 ),
                 rounds=rounds_out,

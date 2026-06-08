@@ -505,8 +505,8 @@ def configure_and_apply_pipeline(
     # model is the install-global optimizer config.
     if filtered is not None:
         for name in active:
-            node = filtered.get_node(name)
-            if node and node.is_llm and not pipeline_params.get(name, {}).get("model"):
+            node_obj = filtered.get_node(name)
+            if node_obj and node_obj.is_llm and not pipeline_params.get(name, {}).get("model"):
                 raise ValueError(
                     f"dataset {dataset_name!r}: LLM node {name!r} has no owned model. "
                     f"Declare it in the dataset's pipeline.json::nodes.{name}.config.model "

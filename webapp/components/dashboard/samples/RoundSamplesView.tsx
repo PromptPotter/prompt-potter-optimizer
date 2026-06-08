@@ -56,13 +56,12 @@ export function RoundSamplesView({ dash, status, campaignId, cycleId }: Props) {
   const [candFilter, setCandFilter] = useState<string>("all");
 
   // Candidate list for this round — single source of truth shared with
-  // LineageTree and FitnessPanel. Excludes origin since C0 has no
-  // per-sample stream of its own (origin's samples come from the
-  // dataset's archive, not from a round file).
+  // LineageTree and FitnessPanel. Round 0 is the origin (one candidate, "C0")
+  // and shows its per-sample stream from round_0000.json like any round.
   const byRound = useMemo(() => roundCandidatesByRound(dash), [dash]);
   const candidates: CandidateRow[] = useMemo(() => {
     if (effectiveRound == null) return [];
-    return (byRound.get(effectiveRound) ?? []).filter((c) => !c.is_origin);
+    return byRound.get(effectiveRound) ?? [];
   }, [byRound, effectiveRound]);
 
   // Build per-candidate samples lists. Live mode pulls directly from

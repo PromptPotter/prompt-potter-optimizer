@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.results import OriginSummary, RoundSummary, candidate_label
+from promptpotter.domain.results import RoundSummary, candidate_label
 from promptpotter.domain.run_records import (
     CycleRecord,
     ErrorRecord,
@@ -143,11 +143,6 @@ class LiveDashboardView(DerivedView):
             # Inherit round so re-instantiation doesn't zero the operator-visible pointer.
             round=int(r.get("round") or 0),
             patience=f"0/{l1_patience}",
-            # Merge onto defaults: a resumed snapshot may carry a partial origin
-            # (older data wrote accuracy without samples); fill the required field.
-            origin=OriginSummary.model_validate(
-                {"accuracy": 0.0, "samples": 0, **(r.get("origin") or {})}
-            ),
             rounds=[RoundSummary.model_validate(x) for x in (r.get("rounds") or [])],
             best=float(r.get("best") or 0.0),
             composite_fitness_formula=r.get("composite_fitness_formula"),
@@ -165,7 +160,9 @@ class LiveDashboardView(DerivedView):
         self._sticky_llm_calls: dict[str, dict[str, Any]] = dict(initial_llm_nodes or {})
         self._core = LiveStateCore(
             round_num=self.state.round,
-            origin_acc=self.state.origin.accuracy,
+            # Origin anchor seeds from round 0 if it's already on disk (resume);
+            # otherwise apply_phase sets it at INIT:exit. Origin is just round 0.
+            origin_acc=next((r.accuracy for r in self.state.rounds if r.round == 0), 0.0),
             best_acc=self.state.best,
         )
         # Debounce coalesces snapshot/token/LLM-call writes onto one disk
@@ -219,7 +216,6 @@ class LiveDashboardView(DerivedView):
         resume_from = resolve_resume_state(
             seed_dir,
             Path(cycle_dir),
-            origin_accuracy,
             resumed_from_round,
         )
         # Resume seed for the sticky LLM-call mirror — surfaces prior rounds' L1/L2/L3
@@ -364,16 +360,6 @@ class LiveDashboardView(DerivedView):
                 self._flush_pending_persist()
             return
 
-        # Origin exit: push the live l1_score block to the recorder so `round_0000.json`
-        # carries the origin candidate snapshot when audit_trail flushes (dashboard → audit order).
-        if (
-            record.phase == "origin"
-            and record.event == "exit"
-            and self._recorder is not None
-            and self._buffer.candidates
-        ):
-            self._recorder.set_l1_score(self._l1_score_block())
-
         payload = record.payload or {}
         view = payload.get("view")
         data = payload.get("data") or {}
@@ -483,10 +469,9 @@ class LiveDashboardView(DerivedView):
             # serializer can't walk). Origin accuracy + sample count ride the
             # typed view instead (read by attribute — see ``apply_phase``).
             if view is not None:
-                s.origin = OriginSummary(
-                    accuracy=float(getattr(view, "origin_acc", 0.0) or 0.0),
-                    samples=int(getattr(view, "origin_samples", 0) or 0),
-                )
+                # Origin accuracy now rides round 0 in ``rounds[]`` (emitted via the
+                # standard ``close_round`` path) — no separate origin block. Only the
+                # scoring-formula stamp is read off the INIT:exit view here.
                 s.composite_fitness_formula = getattr(view, "composite_fitness_formula", None)
                 self.short_formula_template = getattr(view, "composite_fitness_formula_short", None)
             opt = config.optimization

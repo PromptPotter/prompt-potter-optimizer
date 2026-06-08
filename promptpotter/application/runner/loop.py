@@ -25,6 +25,7 @@ from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import pause_gate
 from promptpotter.application.runner.round import (
     close_round,
+    emit_origin_round,
     escalate_or_stop,
     post_round,
 )
@@ -85,6 +86,20 @@ async def run_round_loop(
     round_num = session.state.resumed_from_round
     clean_rounds = max(session.state.resumed_from_round - 1, 0)
     max_rounds = opt.max_rounds or 999
+
+    # Origin is round 0 — emit it through the standard completion path before the
+    # L1 loop on a fresh start (clean_rounds == 0) when it isn't already on disk.
+    # Resume (round 0 present) and divergence/sweep forks (clean_rounds > 0, round 0
+    # inherited from the parent lane) skip it.
+    if not sweep and not diag and clean_rounds == 0:
+        round0_present = bool(
+            session.state.cycle_id
+            and session.store.campaigns.load_round_file(
+                session.campaign_id, session.state.cycle_id, 0
+            )
+        )
+        if not round0_present:
+            await emit_origin_round(cycle, session, cb)
 
     try:
         while clean_rounds < max_rounds and round_num < HARD_CAP:

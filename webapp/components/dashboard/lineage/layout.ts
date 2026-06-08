@@ -207,7 +207,7 @@ export interface RoundNodePos {
   // Short candidate label ("C1.2") for expanded nodes; "" for collapsed summary
   // nodes (Forest draws "R{n}" for those).
   candidateLabel: string;
-  // Stable id for selection routing. Origin uses ORIGIN_CANDIDATE_ID.
+  // Stable id for selection routing (round 0 = origin's candidate id).
   candidateId: string;
   isWinner: boolean;
   isExpanded: boolean;

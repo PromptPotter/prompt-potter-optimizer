@@ -32,7 +32,6 @@ export type {
   MeasurementSeriesResponse,
   NodeConfigParam,
   NodeOutputSchema,
-  OriginSummary,
   RoundSummary,
   RoundSummaryCandidate,
   SampleSeries,

@@ -2,12 +2,6 @@
 // Run `python scripts/build_ts_types.py` to regenerate from the Pydantic
 // models in `promptpotter/` and commit the diff alongside any schema change.
 
-/** Origin row for `dashboard.json::origin` — separate from `rounds[]` since origin has no candidates/fitness. */
-export interface OriginSummary {
-  accuracy: number;
-  samples: number;
-}
-
 /** Display-summary row for `dashboard.json::rounds[].candidates` — chart/lineage/sparkline subset of `ScoredCandidate`. */
 export interface RoundSummaryCandidate {
   candidate_id: string;
@@ -139,7 +133,6 @@ export interface LiveDashboardState {
   candidate: string;
   query: string;
   patience: string;
-  origin: OriginSummary;
   rounds: RoundSummary[];
   best: number;
   current_acc: number;
@@ -417,7 +410,6 @@ export interface CampaignLineageCycle {
   status: string;
   dataset_name: string;
   best_accuracy: number | null;
-  origin_accuracy: number | null;
   rounds: CampaignLineageRound[];
 }
 

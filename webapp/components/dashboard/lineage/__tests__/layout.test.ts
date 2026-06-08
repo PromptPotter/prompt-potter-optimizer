@@ -31,7 +31,6 @@ function cycle(
     status: "",
     dataset_name: "ds",
     best_accuracy: null,
-    origin_accuracy: null,
     rounds: [],
     ...opts,
   };

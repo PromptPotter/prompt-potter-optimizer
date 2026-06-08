@@ -17,7 +17,6 @@ export type {
 } from "@/lib/poll";
 
 export type {
-  OriginSummary,
   RoundSummary,
   RoundSummaryCandidate,
 } from "@/lib/api/types";

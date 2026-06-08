@@ -1,9 +1,13 @@
 // Single source of truth for "which candidates exist per round, in
 // display order". Sole consumer of `liveL1Candidates` / `roundOf` /
-// `dash.rounds[]` / `dash.origin` for candidate-list purposes — every
-// surface that lists, plots, or selects candidates (FitnessPanel,
-// LineageTree, RoundSamplesView, RoundTabsStrip's per-tab counts)
-// reads through this helper.
+// `dash.rounds[]` for candidate-list purposes — every surface that
+// lists, plots, or selects candidates (FitnessPanel, LineageTree,
+// RoundSamplesView, RoundTabsStrip's per-tab counts) reads through this
+// helper.
+//
+// Origin is not special: it's round 0 in `dash.rounds[]`, a one-candidate
+// round labelled "C0", and flows through the same history loop as every
+// other round.
 //
 // Why centralized: before this module, FitnessPanel and LineageTree
 // each ran their own history-vs-inflight switch with subtly different
@@ -23,61 +27,18 @@ import { computeAccuracyFromSamples } from "@/lib/sample-line";
 import type { CandidateRow } from "@/lib/types/candidate";
 import type { RoundCandidates } from "@/lib/types/round";
 
-// Origin id used everywhere that needs a stable selection target for C0.
-// Distinct from any `r{round}_{idx}` so a click on the origin stub never
-// collides with a candidate id.
-export const ORIGIN_CANDIDATE_ID = "origin";
-
-// Reserved key + label for the origin row. Other rows derive theirs
-// from `candidateLabel(round, idx)`; origin's stays "C0" to match the
-// label `candidateLabel(0, 0)` already returns.
-function originRow(dash: DashboardSnapshot | null): CandidateRow | null {
-  const origin = dash?.origin;
-  // The `> 0` accuracy guard distinguishes "not yet scored" from
-  // "scored at 0% accuracy" — without it, the origin bar would
-  // render before the scoring run actually finished.
-  const accuracy = origin && origin.accuracy > 0 ? origin.accuracy : null;
-  const nSamples = origin && origin.samples > 0 ? origin.samples : null;
-  // Render the origin row as soon as we know there is anything else
-  // to compare it against; otherwise the origin-only landing page
-  // would be visually empty.
-  const hasAnything =
-    accuracy != null ||
-    (dash?.rounds?.length ?? 0) > 0 ||
-    liveL1Candidates(dash).length > 0;
-  if (!hasAnything) return null;
-  return {
-    key: "C0",
-    round: 0,
-    idx: 0,
-    is_origin: true,
-    candidate_id: ORIGIN_CANDIDATE_ID,
-    label: candidateLabel(0, 0),
-    accuracy,
-    composite: null,
-    evaluators: {},
-    is_winner: false,
-    n_samples: nSamples,
-    n_expected: null,
-    source: "origin",
-  };
-}
-
 // All candidate rows for the dashboard, in display order:
-//   1. Origin (C0)
-//   2. Historical rounds from `dash.rounds[]`, ascending by round,
-//      then by their authored index within the round.
-//   3. In-flight current-round candidates, only if the current round
+//   1. Completed rounds from `dash.rounds[]`, ascending by round (round 0
+//      = origin, labelled "C0"), then by their authored index within the round.
+//   2. In-flight current-round candidates, only if the current round
 //      isn't already represented in `dash.rounds[]`.
 //
-// Step 3's guard prevents double-counting: once `round:display` closes
+// Step 2's guard prevents double-counting: once `round:display` closes
 // the round into the summary, the in-flight projection drops out of
 // this list at the same tick. Both surfaces apply this rule the same
 // way because they both ride this list.
 export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] {
   const out: CandidateRow[] = [];
-  const origin = originRow(dash);
-  if (origin) out.push(origin);
 
   const historicalRounds = new Set<number>();
   const history = (dash?.rounds ?? []).slice().sort((a, b) => a.round - b.round);
@@ -94,7 +55,6 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         key: `R${r.round}.${i}`,
         round: r.round,
         idx: i,
-        is_origin: false,
         // Fallback mirrors LineageTree's prior local id rule so any
         // selection persisted across the d183dcdb cutover still resolves.
         candidate_id: c.candidate_id || liveCandidateId(r.round, i),
@@ -128,7 +88,6 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         key: `R${liveRound}.${i}`,
         round: liveRound,
         idx: i,
-        is_origin: false,
         candidate_id: liveCandidateId(liveRound, i),
         label: candidateLabel(liveRound, i),
         accuracy,

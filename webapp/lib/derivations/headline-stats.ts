@@ -5,10 +5,9 @@
 // headline in the chat job-bar than elsewhere. One derivation, they cannot
 // disagree.
 //
-// Note the `origin` here is the headline "is-a-number" reading. The candidate
-// list (round-candidates.ts) keeps its own `accuracy > 0` guard — there
-// "origin" means "scored, render the C0 bar", a different question — so the
-// two intentionally do not share this helper.
+// Origin is round 0 in `dash.rounds[]` (a one-candidate round labelled "C0");
+// its accuracy is the round-0 entry's accuracy. The candidate list
+// (round-candidates.ts) reads the same round-0 entry through the generic loop.
 
 import type { DashboardSnapshot } from "@/lib/poll";
 
@@ -27,7 +26,8 @@ function finite(v: unknown): number | null {
 
 export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
   const best = finite(dash?.best);
-  const origin = finite(dash?.origin?.accuracy);
+  const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
+  const origin = finite(round0?.accuracy);
   const delta = best != null && origin != null ? best - origin : null;
   return { best, origin, delta };
 }

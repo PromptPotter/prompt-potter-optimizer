@@ -19,11 +19,9 @@ const SHOWN_ELSEWHERE = new Set([
   "current_query_payload",
   "state", "round", "candidate", "query",
   "patience",
-  // ``origin`` rides as a nested object; surfaced as a derived KV row
-  // below rather than dumped as a JSON blob through the generic loop.
-  "origin",
   // ``rounds[]`` is the per-round summary array used by the chart /
-  // lineage tree — not a scalar field for this KV dump.
+  // lineage tree — not a scalar field for this KV dump. Origin rides it
+  // as round 0; origin_acc is surfaced as a derived KV row below.
   "rounds",
 ]);
 
@@ -56,18 +54,19 @@ const FORMATTERS: Record<string, (v: unknown) => string> = {
 export function LiveStateCard({ dash }: Props) {
   const formula = (dash as { composite_fitness_formula?: string } | null)?.composite_fitness_formula || "—";
 
-  // Build the KV grid: derived origin row first (flattened from the
-  // nested ``origin`` block), then known-order fields, then any remaining
-  // scalar fields in the dashboard.json snapshot.
+  // Build the KV grid: derived origin row first (origin is round 0 in
+  // ``rounds[]``), then known-order fields, then any remaining scalar
+  // fields in the dashboard.json snapshot.
   const items: [string, unknown][] = [];
   const seen = new Set(SHOWN_ELSEWHERE);
   if (dash) {
-    const originAcc = dash.origin?.accuracy;
+    const round0 = dash.rounds?.find((r) => r.round === 0);
+    const originAcc = round0?.accuracy;
     if (typeof originAcc === "number") {
       items.push(["origin_acc", originAcc]);
       seen.add("origin_acc");
     }
-    const originSamples = dash.origin?.samples;
+    const originSamples = round0?.candidates?.[0]?.scored_samples;
     if (typeof originSamples === "number") {
       items.push(["origin_samples", originSamples]);
       seen.add("origin_samples");

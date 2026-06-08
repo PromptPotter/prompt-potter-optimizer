@@ -6,15 +6,16 @@ The ledger is the sole persistence ingress; display projections subscribe to it
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation import NextAction, escalate_l2
 from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.domain.phases import StopLoop
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results import RoundResult, ScoredCandidate, candidate_label
 from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
 from promptpotter.presentation.writers import (
     write_hard_samples_artifacts,
@@ -23,7 +24,122 @@ from promptpotter.presentation.writers import (
 )
 from promptpotter.shared.errors import graceful
 
+if TYPE_CHECKING:
+    from promptpotter.domain.scoring import QueryMeasurement
+
 logger = logging.getLogger(__name__)
+
+
+async def emit_origin_round(
+    cycle: Cycle,
+    session: Session,
+    cb: RunCallbacks,
+) -> None:
+    """Emit the scored origin as **round 0** through the standard completion path.
+
+    Origin is not a lesser, separate entity — it's the first round. This builds a
+    one-candidate ``RoundResult`` from the cycle's frozen origin state
+    (``cycle.tracking.origin_*`` + ``cycle.opt_sp``) and closes it via the same
+    ``close_round`` seam every L1 round uses, so the public round file
+    (``rounds/round_0000.json``), the ``index.json::rounds[]`` entry, and the live
+    ``dashboard.json::rounds[]`` summary all carry round 0 in the identical shape.
+
+    It deliberately does **not** call ``cycle.absorb_round`` — ``cycle.rounds``
+    stays the 1-indexed L1 trajectory (origin is the floor it improves on, not a
+    member of it) — and does **not** feed escalation (``close_round`` never does;
+    only ``post_round`` observes). Idempotent at the call site: the loop guards on
+    the round-0 file already existing.
+    """
+    tr = cycle.tracking
+    osp = cycle.opt_sp
+    results = list(tr.origin_per_sample_results)
+    base = _compute_accuracy(cast("list[QueryMeasurement]", results))
+    prompt_fields = {**osp.prompt_field_dict(), "lineage": osp.lineage.model_dump()}
+    label = candidate_label(0, 0)  # "C0"
+    sc = ScoredCandidate(
+        candidate_id=osp.lineage.id,
+        label=label,
+        # changes_description == round label ⇒ ``is_round_winner`` marks the sole
+        # origin candidate the winner, same rule every round's winner uses.
+        changes_description=label,
+        accuracy=tr.origin_accuracy,
+        composite_fitness=tr.origin_composite_fitness,
+        hits=base["hits"],
+        total=base["total"],
+        prompt_fields=prompt_fields,
+        scored_samples=base["total"],
+        expected_samples=base["total"],
+        matched_origin_accuracy=tr.origin_accuracy,
+        matched_origin_hits=base["hits"],
+        matched_origin_composite=tr.origin_composite_fitness,
+    )
+    round_result = RoundResult(
+        round=0,
+        label=label,
+        accuracy=tr.origin_accuracy,
+        composite_fitness=tr.origin_composite_fitness,
+        hits=base["hits"],
+        total=base["total"],
+        improved=False,
+        origin_accuracy=tr.origin_accuracy,
+        matched_origin_accuracy=tr.origin_accuracy,
+        matched_origin_hits=base["hits"],
+        matched_origin_composite=tr.origin_composite_fitness,
+        prompt_fields=prompt_fields,
+        pipeline_params=(tr.current_sp.pipeline_params if tr.current_sp else None),
+        results=results,
+        all_candidate_results={osp.lineage.id: results},
+        candidates_scored=1,
+        candidate_scores=[sc],
+        deprecated=base["deprecated"],
+        cumulative_total=base["total"],
+        cumulative_accuracy=tr.origin_accuracy,
+    )
+    round_payload: dict[str, Any] = {
+        "round_id": "round_0",
+        "round": 0,
+        "label": label,
+        "accuracy": round_result.accuracy,
+        "composite_fitness": round_result.composite_fitness,
+        "hits": round_result.hits,
+        "total": round_result.total,
+        "improved": False,
+        "p_value": None,
+        "origin_accuracy": round_result.origin_accuracy,
+        "matched_origin_accuracy": round_result.matched_origin_accuracy,
+        "matched_origin_hits": round_result.matched_origin_hits,
+        "matched_origin_composite": round_result.matched_origin_composite,
+        "cumulative_total": round_result.cumulative_total,
+        "cumulative_accuracy": round_result.cumulative_accuracy,
+        "scoreboard": [
+            {
+                "rank": 1,
+                "candidate_id": sc.candidate_id,
+                "label": sc.changes_description,
+                "accuracy": sc.accuracy,
+                "composite_fitness": sc.composite_fitness,
+                "hits": sc.hits,
+                "total": sc.total,
+                "ci_lo": sc.ci_lo,
+                "ci_hi": sc.ci_hi,
+                "is_winner": True,
+                "escalation_aborted": False,
+                "matched_origin_accuracy": sc.matched_origin_accuracy,
+                "matched_origin_hits": sc.matched_origin_hits,
+                "matched_origin_composite": sc.matched_origin_composite,
+            }
+        ],
+        "prompt_fields": prompt_fields,
+        "results": results,
+        "all_candidate_results": {osp.lineage.id: results},
+        "candidates_scored": 1,
+        "candidate_scores": [sc.model_dump()],
+        "decisions": [],
+        "evaluators": {},
+        "critique": None,
+        "opt_search_point": osp.model_dump(),
+    }
+    await close_round(cycle, round_result, round_payload, 0, session, cb)
 
 
 async def escalate_or_stop(
@@ -170,6 +286,7 @@ async def post_round(
 __all__ = [
     "close_round",
     "count_positive_yield_axes",
+    "emit_origin_round",
     "escalate_or_stop",
     "persist_round",
     "post_round",
