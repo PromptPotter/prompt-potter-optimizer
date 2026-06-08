@@ -250,8 +250,10 @@
 .ingest-picklist{display:flex;flex-direction:column;gap:12px}
 .ingest-picklist-group{display:flex;flex-direction:column;gap:6px}
 .ingest-picklist-head{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600}
-.ingest-picklist-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
-.ingest-pick-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:8px;padding:10px 12px;font-size:14px;color:var(--color-text-primary);cursor:pointer;text-align:left;transition:background .15s,border-color .15s}
+.ingest-picklist-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+/* Cap each menu to 8 rows (row ≈ 33px + 3px gap); scroll beyond. */
+.ingest-picklist-scroll{max-height:284px;overflow-y:auto;padding-right:4px}
+.ingest-pick-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--color-background-secondary);border:1px solid var(--color-border-tertiary);border-radius:6px;padding:7px 12px;font-size:14px;color:var(--color-text-primary);cursor:pointer;text-align:left;transition:background .15s,border-color .15s}
 .ingest-pick-btn:hover:not(:disabled){background:var(--color-background-hover);border-color:var(--color-accent)}
 .ingest-pick-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .ingest-pick-btn:disabled{opacity:.55;cursor:not-allowed}

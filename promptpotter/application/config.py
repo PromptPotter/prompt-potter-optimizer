@@ -70,6 +70,8 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "degradation_threshold"): "policy",
     ("optimization", "elimination_n_min"): "policy",
     ("optimization", "pobb_epsilon"): "policy",
+    ("optimization", "pobb_lock_in"): "policy",
+    ("optimization", "pobb_lock_in_n_min"): "policy",
     ("optimization", "improvement_significance"): "policy",
     ("optimization", "zero_signal_filter_enabled"): "policy",
     ("optimization", "spend_budget_usd"): "policy",
@@ -147,6 +149,19 @@ class OptimizationConfig(BaseModel):
         POBB_DEFAULT_EPSILON,
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Default 5%; smaller → fewer stops.",
+    )
+    pobb_lock_in: float = Field(
+        1.0,
+        description="Leader lock-in: stop measuring a candidate once its P(best) "
+        "against every prior reaches this threshold. 1.0 (default) disables lock-in "
+        "— a leading candidate measures its full sample budget; only losers are "
+        "eliminated early. Set below 1.0 (e.g. 0.95) to crown decisive leaders early "
+        "and save spend, at the cost of committing rounds on partial evidence.",
+    )
+    pobb_lock_in_n_min: int = Field(
+        8,
+        description="Samples-floor for lock-in — a leader can only lock in after at "
+        "least this many measurements. Ignored when `pobb_lock_in` is 1.0.",
     )
 
     improvement_significance: float = Field(

@@ -131,7 +131,9 @@ class PoBBConfig:
 
     n_min: int = 6
     epsilon: float = POBB_DEFAULT_EPSILON
-    lock_in: float = 0.95
+    lock_in: float = (
+        1.0  # 1.0 disables leader lock-in; OptimizationConfig.pobb_lock_in is the runtime value
+    )
     lock_in_n_min: int = 8
 
 

@@ -60,9 +60,13 @@ export interface IngestFlow {
   awaitingContext: boolean;
   // Drop or attach a tabular file → upload → readiness branch.
   onDatasetFile: (file: File) => void;
-  // Pick a registered dataset (owned / benchmark / demo) → same context ask
-  // as a fresh drop, prefilled with the dataset's known task.
+  // Make a NEW origin for a dataset via the check-in LLM (for when the operator
+  // has no origin in mind yet) → editable ready panel → Start.
   pickDataset: (entry: DatasetIndexEntry) => void;
+  // Reuse a dataset's committed origin: open it in the editable ready panel with
+  // NO check-in (the optimizer graph enters at l1_generate, skipping checkin) —
+  // modify if wanted, then Start.
+  openOrigin: (entry: DatasetIndexEntry) => void;
   // The operator's one-message task description (awaiting-context → check-in).
   submitContext: () => void;
   // Inline patch in the ready state (column mapping / question answers).
@@ -204,6 +208,29 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const pickDataset = (entry: DatasetIndexEntry) =>
     void draftFrom(entry.name, `Use dataset “${entry.title || entry.name}”`);
 
+  // Reuse a dataset's committed origin: open the draft (which carries the
+  // committed origin fields + pipeline config) straight into the editable ready
+  // panel — NO check-in LLM. The operator modifies if wanted and Starts, which
+  // mints from the draft. Skips the checkin node; the graph enters at l1_generate.
+  const openOrigin = async (entry: DatasetIndexEntry) => {
+    if (busy) return;
+    setMessages((m) => [
+      ...m,
+      { id: uid(), kind: "user", text: `Reuse origin “${entry.title || entry.name}”` },
+    ]);
+    setPhase({ stage: "uploading" });
+    let draft: DraftCampaignWire;
+    try {
+      draft = await postDraftFromDataset(entry.name);
+    } catch (e) {
+      setPhase({ stage: "idle" });
+      pushError(e);
+      return;
+    }
+    pushAi("Opened the committed origin — edit anything below, then Start.");
+    setPhase({ stage: "ready", draft, resolution: null });
+  };
+
   const submitContext = async () => {
     if (phase.stage !== "awaiting-context") return;
     const text = inputText.trim();
@@ -295,6 +322,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     awaitingContext,
     onDatasetFile: (file) => void ingestAndResolve(file),
     pickDataset,
+    openOrigin: (entry) => void openOrigin(entry),
     submitContext: () => void submitContext(),
     applyPatch: (patch) => void applyPatch(patch),
     startFromReady: () => void startFromReady(),

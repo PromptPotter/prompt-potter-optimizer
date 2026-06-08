@@ -45,7 +45,12 @@ export function IngestConversation({
       <div className="chat-messages" aria-live="polite">
         {showIllustration ? <FirstRunIllustration /> : null}
         {showEntryList ? (
-          <DatasetPickList datasets={datasets!} onPick={flow.pickDataset} busy={flow.busy} />
+          <DatasetPickList
+            datasets={datasets!}
+            onOpenOrigin={flow.openOrigin}
+            onPick={flow.pickDataset}
+            busy={flow.busy}
+          />
         ) : null}
 
         {messages.map((msg) =>

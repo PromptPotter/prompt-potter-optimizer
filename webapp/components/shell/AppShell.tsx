@@ -89,10 +89,10 @@ function AppShellInner() {
   // scope regardless of this toggle — see l1/execute.py round-subset fit.
   const [hardSamplesScope, setHardSamplesScope] = useState<HardSamplesScope>("campaign");
   // Dataset roster + per-sample measurement history for the unit in view.
-  // One hook owns the fetch chain. Cached per (unit, scope); a campaign or
-  // scope switch shows the prior data marked stale until the new fetch
-  // lands — never blanks. `dataVersion` is a monotonic stamp on each fresh
-  // load; downstream components key per-row memos on it.
+  // One hook owns the fetch chain — it loads BOTH scope slices per unit, so
+  // the scope toggle is a pure in-memory pick (no re-fetch, no cross-scope
+  // borrow). A campaign switch shows the prior data marked stale until the
+  // new fetch lands — never blanks.
   const {
     datasetName,
     items: datasetItems,

@@ -40,12 +40,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-POBB_LOCK_IN: float = 0.95
-"""P(best) threshold for round-winner lock-in; 1.0 disables."""
-POBB_LOCK_IN_N_MIN: int = 8
-"""Samples-floor for lock-in; higher than the elimination floor (lock-in commits the round)."""
-
-
 async def execute_round(
     cycle: Cycle,
     round_num: int,
@@ -123,8 +117,8 @@ async def execute_round(
             pobb_config=PoBBConfig(
                 n_min=opt.elimination_n_min,
                 epsilon=opt.pobb_epsilon,
-                lock_in=POBB_LOCK_IN,
-                lock_in_n_min=POBB_LOCK_IN_N_MIN,
+                lock_in=opt.pobb_lock_in,
+                lock_in_n_min=opt.pobb_lock_in_n_min,
             ),
             round_num=round_num,
             yield_stats=yield_stats,
@@ -235,4 +229,4 @@ async def execute_round(
     return round_result
 
 
-__all__ = ["POBB_LOCK_IN", "POBB_LOCK_IN_N_MIN", "execute_round"]
+__all__ = ["execute_round"]

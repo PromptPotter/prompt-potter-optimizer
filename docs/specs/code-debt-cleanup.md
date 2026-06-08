@@ -32,6 +32,8 @@ patterns.
 
 ### This week (execution slate)
 
+0. **Campaign-from-origin Phase 2 (MOST URGENT — next scope)** — surface the tenant's distinct *used origins* (cross-campaign, dedup by `Campaign.root_content_hash`) in New Campaign; start a fresh campaign from a chosen one. Phase 1 (per-dataset committed-origin reuse) shipped. **The one real refactor:** the origin *seed* (`OperatorForkOverride` → `application/origin.py::establish_campaign_origin(fork_seed=…)`, already wins) reaches only the fork/resume entry (`runner/entry.py::_read_fork_seed`) — thread it through the fresh root mint (`jobs/launcher.py::mint_campaign_command → jobs/mint.py::{prepare_fresh_cycle,resolve_cycle_plan}`), unifying fork + steer + campaign-from-origin into one seam. **Additive:** a `GET /origins` derived read over `list_campaigns()`; an `origin_override` on `datasets/ingest.py::draft_from_dataset`.
+
 1. **TermNorm wire `model`** — cross-repo edit at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`. With the connector revision-pin landed (`promptpotter/connectors/protocol.py::Connector.{expected_revision, version_check}`), the TermNorm-side PR adds `model` to the per-request response + a `/version` endpoint; this repo bumps `termnorm.py::_EXPECTED_REVISION` to the new SHA and deletes the `_synth_legacy_backend_record` back-fill in `presentation/api/routers/auth.py`.
 
 ### Ingest/origin model-alignment slate (2026-06-06)

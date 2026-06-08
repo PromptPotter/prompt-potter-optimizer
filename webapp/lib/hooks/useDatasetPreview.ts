@@ -1,10 +1,13 @@
 "use client";
 // Dataset preview for the unit in view — the sample roster + per-sample
-// measurement history that back the hard-samples table. Module-level LRU
-// keyed on (campaignId, cycleId, scope); on miss, the hook fetches and
-// shows the prior slice in the meantime (isStale: true) so the table never
-// blanks. Each scope is purely itself — no fallback between campaign and
-// dataset slices; the toggle is display-only.
+// measurement history that back the hard-samples table. One fetch chain per
+// (campaignId, cycleId) UNIT loads BOTH scope slices (campaign-pooled +
+// cross-campaign dataset) into one unit-stamped state object; the scope toggle
+// is a pure in-memory pick between the two already-loaded slices — no re-fetch,
+// no cross-scope borrow, so the toggle can never show one scope's data while
+// pointed at the other. A unit switch shows the prior unit's slice marked
+// `isStale` until the new fetch lands (never blanks); a failed dataset fetch
+// surfaces honestly via `error` rather than silently showing stale data.
 
 import { useEffect, useState } from "react";
 import {
@@ -27,13 +30,28 @@ export interface DatasetPreviewState extends ScopeSlice {
   datasetName: string | null;
   splitTest: number | null;
   isStale: boolean;
+  // Honest failure signal — set when the dataset-scope fetch (the spine)
+  // threw for the unit in view. Additive: consumers may ignore it (the table
+  // already renders an empty state for an empty slice).
+  error: string | null;
 }
 
-interface CacheEntry {
-  datasetName: string;
+interface Loaded {
+  // Unit stamp the slices were fetched for; null until the first load lands.
+  key: string | null;
+  datasetName: string | null;
   splitTest: number | null;
-  slice: ScopeSlice;
+  campaign: ScopeSlice;
+  dataset: ScopeSlice;
+  error: string | null;
 }
+
+const EMPTY_SLICE: ScopeSlice = {
+  items: [],
+  measuredCount: 0,
+  unmeasuredCount: 0,
+  archivePerSample: new Map(),
+};
 
 const EMPTY: DatasetPreviewState = {
   datasetName: null,
@@ -43,31 +61,8 @@ const EMPTY: DatasetPreviewState = {
   unmeasuredCount: 0,
   archivePerSample: new Map(),
   isStale: false,
+  error: null,
 };
-
-// Module-level LRU. Map preserves insertion order; we read-touch by
-// delete+set on every hit and evict the oldest on overflow.
-const CACHE_LIMIT = 12;
-const cache = new Map<string, CacheEntry>();
-
-function cacheGet(k: string): CacheEntry | undefined {
-  const v = cache.get(k);
-  if (v !== undefined) {
-    cache.delete(k);
-    cache.set(k, v);
-  }
-  return v;
-}
-
-function cacheSet(k: string, v: CacheEntry): void {
-  if (cache.has(k)) cache.delete(k);
-  cache.set(k, v);
-  while (cache.size > CACHE_LIMIT) {
-    const oldest = cache.keys().next().value;
-    if (oldest === undefined) break;
-    cache.delete(oldest);
-  }
-}
 
 function dotMap(
   items: { sample_id: number; measurements: MeasurementDot[] }[] | undefined,
@@ -102,57 +97,97 @@ export function useDatasetPreview(
   cycleId: string | null,
   scope: HardSamplesScope,
 ): DatasetPreviewState {
-  const wantKey =
-    campaignId && cycleId ? `${campaignId}::${cycleId}::${scope}` : null;
+  // \x1f (unit separator) can't collide with id characters.
+  const unitKey = campaignId && cycleId ? `${campaignId}\x1f${cycleId}` : null;
 
-  // Last successful fetch — kept across key changes so the table shows the
-  // prior slice (marked stale) while a new fetch is in flight. The effect's
-  // cancel-guard ensures only a fetch for the current wantKey writes here.
-  const [last, setLast] = useState<CacheEntry | null>(null);
-
-  // Synchronous cache lookup. On a hit, snap state to it in render — the
-  // render-phase guarded reset pattern documented in webapp/CLAUDE.md.
-  const hit = wantKey ? cacheGet(wantKey) : null;
-  if (hit && last !== hit) setLast(hit);
+  const [loaded, setLoaded] = useState<Loaded>({
+    key: null,
+    datasetName: null,
+    splitTest: null,
+    campaign: EMPTY_SLICE,
+    dataset: EMPTY_SLICE,
+    error: null,
+  });
 
   useEffect(() => {
-    if (!wantKey || !campaignId || !cycleId || cache.has(wantKey)) return;
+    if (!unitKey || !campaignId || !cycleId) return;
     let cancelled = false;
     const ac = new AbortController();
     (async () => {
       try {
         const name = await fetchActiveDatasetName(campaignId, cycleId, ac.signal);
-        if (cancelled || !name) return;
-        const [preview, series] = await Promise.all([
-          fetchDatasetPreview(name, 1000, ac.signal, scope, campaignId, cycleId),
-          fetchMeasurementSeries(name, 1000, ac.signal, scope, campaignId, cycleId).catch(() => null),
+        if (cancelled) return;
+        if (!name) {
+          setLoaded({
+            key: unitKey,
+            datasetName: null,
+            splitTest: null,
+            campaign: EMPTY_SLICE,
+            dataset: EMPTY_SLICE,
+            error: null,
+          });
+          return;
+        }
+        // Both scopes load together. The dataset preview is the spine — a real
+        // failure throws into the catch below (honest `error`). The campaign
+        // slice + both series are floored to null: a fresh campaign legitimately
+        // has no campaign-scope artifact yet (honest empty, never borrowed).
+        const [dsPreview, dsSeries, cmpPreview, cmpSeries] = await Promise.all([
+          fetchDatasetPreview(name, 1000, ac.signal, "dataset", campaignId, cycleId),
+          fetchMeasurementSeries(name, 1000, ac.signal, "dataset", campaignId, cycleId).catch(
+            () => null,
+          ),
+          fetchDatasetPreview(name, 1000, ac.signal, "campaign", campaignId, cycleId).catch(
+            () => null,
+          ),
+          fetchMeasurementSeries(name, 1000, ac.signal, "campaign", campaignId, cycleId).catch(
+            () => null,
+          ),
         ]);
         if (cancelled) return;
-        const entry: CacheEntry = {
+        setLoaded({
+          key: unitKey,
           datasetName: name,
-          splitTest: preview.split_test,
-          slice: sliceFrom(preview.items, series?.items),
-        };
-        cacheSet(wantKey, entry);
-        setLast(entry);
-      } catch {
-        /* transient fetch failure — a cycle change re-runs this */
+          splitTest: dsPreview.split_test,
+          dataset: sliceFrom(dsPreview.items, dsSeries?.items),
+          campaign: cmpPreview
+            ? sliceFrom(cmpPreview.items, cmpSeries?.items)
+            : EMPTY_SLICE,
+          error: null,
+        });
+      } catch (e) {
+        if (cancelled || ac.signal.aborted) return;
+        setLoaded({
+          key: unitKey,
+          datasetName: null,
+          splitTest: null,
+          campaign: EMPTY_SLICE,
+          dataset: EMPTY_SLICE,
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     })();
     return () => {
       cancelled = true;
       ac.abort();
     };
-  }, [wantKey, campaignId, cycleId, scope]);
+  }, [unitKey, campaignId, cycleId]);
 
-  const entry = hit ?? last;
-  const isStale = !!wantKey && !hit;
+  if (!unitKey) return EMPTY;
+  // First load for this session — show a loading affordance, not blank chrome.
+  if (loaded.key === null) return { ...EMPTY, isStale: true };
 
-  if (!entry) return { ...EMPTY, isStale };
+  // Pure pick AFTER the unit check: the returned slice is always the requested
+  // scope's slice for whatever unit `loaded` holds — fresh or stale-pending-new
+  // — so it is structurally impossible to show campaign data while scope is
+  // dataset.
+  const fresh = loaded.key === unitKey;
+  const slice = scope === "campaign" ? loaded.campaign : loaded.dataset;
   return {
-    datasetName: entry.datasetName,
-    splitTest: entry.splitTest,
-    ...entry.slice,
-    isStale,
+    datasetName: loaded.datasetName,
+    splitTest: loaded.splitTest,
+    ...slice,
+    isStale: !fresh,
+    error: fresh ? loaded.error : null,
   };
 }

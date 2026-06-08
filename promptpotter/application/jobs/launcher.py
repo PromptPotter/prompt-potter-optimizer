@@ -347,8 +347,10 @@ async def mint_campaign_from_draft_command(
         if not readiness.complete:
             raise OriginIncompleteError(readiness.gaps)
         await _run_preflight(draft.connector, backend_url)
-        draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)
-        return await mint_campaign_command(
+        # Discard ONLY after a successful mint — a failed mint (e.g. 409
+        # machine_busy) must leave the draft intact so the operator can retry
+        # without re-opening the origin (otherwise the retry 404s on a gone draft).
+        result = await mint_campaign_command(
             stores=stores,
             dataset_name=canonical,
             job_registry=job_registry,
@@ -356,6 +358,8 @@ async def mint_campaign_from_draft_command(
             spend_budget_usd=spend_budget_usd,
             backend_url=backend_url,
         )
+        draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)
+        return result
 
     slug = await commit_draft_to_dataset(
         stores=stores,
