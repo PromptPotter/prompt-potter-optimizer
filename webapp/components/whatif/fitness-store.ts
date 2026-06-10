@@ -18,6 +18,10 @@ interface FitnessState {
   showComposite: boolean;
   showWhatIf: boolean;
   selected: Set<string>;
+  // Per-evaluator what-if weight (the slider value). Seeded from the realized
+  // composite formula's coefficients per cycle; the operator reweights to
+  // explore. Keyed by evaluator display name; missing ⇒ DEFAULT_WHATIF_WEIGHT.
+  weights: Record<string, number>;
   seededForCycle: string | null;
 }
 
@@ -25,6 +29,7 @@ let state: FitnessState = {
   showComposite: false,
   showWhatIf: false,
   selected: new Set<string>(),
+  weights: {},
   seededForCycle: null,
 };
 

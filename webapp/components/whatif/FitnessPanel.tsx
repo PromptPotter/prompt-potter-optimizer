@@ -1,6 +1,12 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { WHATIF_INLINE_META, buildRows, whatifIdentifiersInFormula, type Row } from "./meta";
+import {
+  WHATIF_INLINE_META,
+  buildRows,
+  whatifIdentifiersInFormula,
+  weightsFromFormula,
+  type Row,
+} from "./meta";
 import { FitnessChart } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
 import { CardFrame } from "@/components/ui/Card";
@@ -20,6 +26,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useFitnessBars } from "./useFitnessBars";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
+import { useMaskState, divergenceRoundsFor } from "@/lib/mask-store";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -49,13 +56,15 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   // the current `selected` set was seeded for. When the operator binds a
   // fresh cycle, the panel re-seeds against that cycle's formula rather
   // than inheriting the prior cycle's picks.
-  const { showComposite, showWhatIf, selected, seededForCycle } = useFitnessState();
+  const { showComposite, showWhatIf, selected, weights, seededForCycle } = useFitnessState();
   const seeded = seededForCycle != null && seededForCycle === cycleId;
   const setShowComposite = (v: boolean | ((p: boolean) => boolean)) =>
     setFitnessState({ showComposite: typeof v === "function" ? v(showComposite) : v });
   const setShowWhatIf = (v: boolean | ((p: boolean) => boolean)) =>
     setFitnessState({ showWhatIf: typeof v === "function" ? v(showWhatIf) : v });
   const setSelected = (s: Set<string>) => setFitnessState({ selected: s });
+  const setWeight = (name: string, w: number) =>
+    setFitnessState({ weights: { ...weights, [name]: w } });
 
   const meta = WHATIF_INLINE_META;
 
@@ -131,17 +140,23 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
     return set;
   }, [isPrestaging, realApplicable, meta]);
 
-  const inActive = useMemo(() => {
-    let parsed: Set<string> | null = null;
-    const top = (dash as { composite_fitness_formula?: string | null } | null)?.composite_fitness_formula;
-    if (top) {
-      parsed = whatifIdentifiersInFormula(top);
-    } else {
-      for (const c of inflightCandidates) {
-        const f = c.stats?.composite_fitness_formula;
-        if (f) { parsed = whatifIdentifiersInFormula(f); break; }
-      }
+  // The realized composite formula in effect — top-level when present, else the
+  // first candidate's. Drives both `inActive` (which evaluators it references) and
+  // the what-if weight seed (their coefficients).
+  const compositeFormula = useMemo(() => {
+    const top = (dash as { composite_fitness_formula?: string | null } | null)
+      ?.composite_fitness_formula;
+    if (top) return top;
+    for (const c of inflightCandidates) {
+      if (c.stats?.composite_fitness_formula) return c.stats.composite_fitness_formula;
     }
+    return null;
+  }, [dash, inflightCandidates]);
+
+  const inActive = useMemo(() => {
+    let parsed: Set<string> | null = compositeFormula
+      ? whatifIdentifiersInFormula(compositeFormula)
+      : null;
     if (parsed == null) {
       parsed = new Set<string>();
       for (const c of inflightCandidates) {
@@ -152,7 +167,7 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
     const out = new Set<string>();
     for (const k of parsed) if (viewApplicable.has(k)) out.add(k);
     return out;
-  }, [dash, inflightCandidates, viewApplicable]);
+  }, [compositeFormula, inflightCandidates, viewApplicable]);
 
   const rows = useMemo(() => {
     const built = isPrestaging
@@ -194,7 +209,13 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
     for (const r of rows) {
       if (r.applicable && inActive.has(r.displayName)) seed.add(r.displayName);
     }
-    setFitnessState({ selected: seed, seededForCycle: cycleId });
+    // Seed each evaluator's slider from its realized composite coefficient, so the
+    // What-If opens ≈ the realized criterion and reweighting reveals divergence.
+    setFitnessState({
+      selected: seed,
+      weights: weightsFromFormula(compositeFormula),
+      seededForCycle: cycleId,
+    });
   }
 
   // Prune: when the applicable evaluator set shrinks (e.g. a node was
@@ -243,13 +264,30 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
 
   const bars = useFitnessBars(
     selected,
-    inActive,
     rows,
+    weights,
     diagByLabel,
     sampleSet,
     chartedDocs,
     dash,
   );
+
+  // Mask divergence boundary → the bar index where the active lens first parts
+  // ways with the realized record. The lineage card publishes the served overlay
+  // (R-36, never recomputed here); we map its earliest divergent round for THIS
+  // cycle to the first bar at/after it, and the chart draws a red divider at that
+  // bar's left edge. null whenever no mask is active or nothing diverges.
+  const mask = useMaskState();
+  const divergenceBoundary = useMemo(() => {
+    if (!mask.maskActive) return null;
+    const { points, subtree } = divergenceRoundsFor(mask, cycleId);
+    let firstRound = Infinity;
+    for (const r of points) firstRound = Math.min(firstRound, r);
+    for (const r of subtree) firstRound = Math.min(firstRound, r);
+    if (!Number.isFinite(firstRound)) return null;
+    const idx = bars.findIndex((b) => b.round != null && b.round >= firstRound);
+    return idx >= 0 ? idx : null;
+  }, [mask, cycleId, bars]);
 
   return (
     <CardFrame
@@ -315,6 +353,7 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
             bars={bars}
             showComposite={showComposite}
             showWhatIf={showWhatIf}
+            divergenceBoundary={divergenceBoundary}
             selectedKey={
               selectedCandidate
                 ? bars.find(
@@ -347,8 +386,10 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
             rows={rows}
             selected={selected}
             inActive={inActive}
+            weights={weights}
             bars={bars}
             onToggle={toggle}
+            onWeight={setWeight}
           />
         )}
       </div>

@@ -7,7 +7,7 @@
 
 import { useMemo } from "react";
 import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
-import { setsEqual, type Row } from "./meta";
+import { type Row } from "./meta";
 import { accuracyOverSampleSet, correctedFromEvaluators } from "./fitness-bars";
 import {
   historicalSamplesFor,
@@ -19,8 +19,8 @@ import type { DashboardSnapshot, RoundFileDoc } from "@/lib/poll";
 
 export function useFitnessBars(
   selected: Set<string>,
-  inActive: Set<string>,
   rows: Row[],
+  weights: Readonly<Record<string, number>>,
   diagByLabel: Map<string, DiagnosticRunRecord>,
   // Fixed-sample-set mode: when non-null, every bar's accuracy is recomputed
   // over exactly these sample ids (∩ the samples that candidate ran), so all
@@ -32,7 +32,6 @@ export function useFitnessBars(
 ): BarSlot[] {
   const { all: candidates } = useRoundCandidates();
   return useMemo(() => {
-    const useComposite = setsEqual(selected, inActive);
     // `null` = off (default per-candidate accuracy). A non-null set — INCLUDING
     // an empty one — is slice mode: an empty set blanks every bar (n=0), which
     // is the "Off, select one by one" starting state, not the default.
@@ -42,14 +41,13 @@ export function useFitnessBars(
       const composite = row.composite;
       // Origin (round 0) has no per-evaluator breakdown — the what-if column
       // has no meaningful value, so leave it null when evaluators are empty
-      // and the chart skips painting a stub bar.
+      // and the chart skips painting a stub bar. Otherwise always the weighted
+      // recompute, so a slider nudge moves the bar (no composite short-circuit).
       const hasEvaluators = Object.keys(row.evaluators).length > 0;
       const whatif =
         !hasEvaluators && composite == null
           ? null
-          : useComposite && composite != null
-            ? composite
-            : correctedFromEvaluators(row.evaluators, selected, rows);
+          : correctedFromEvaluators(row.evaluators, selected, rows, weights);
 
       if (sliceIds) {
         // Recompute accuracy over the chosen sample subset from this
@@ -114,5 +112,5 @@ export function useFitnessBars(
           : undefined,
       };
     });
-  }, [candidates, selected, rows, inActive, diagByLabel, sampleSet, chartedDocs, dash]);
+  }, [candidates, selected, rows, weights, diagByLabel, sampleSet, chartedDocs, dash]);
 }

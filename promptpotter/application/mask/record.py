@@ -45,6 +45,11 @@ class MaskCandidate(BaseModel):
     accuracy: float = 0.0
     is_winner: bool = False
     is_eligible: bool = True
+    # Which PoBB abort contributor cut this candidate's measurement early, if any:
+    # ``"epsilon"`` (ε-elimination) | ``"lock_in"`` (leader lock-in) | ``None``
+    # (ran to completion). The abort verdict reads this; the scoring verdict ignores
+    # it. Recorded fact from ``elimination_context.leader_locked``.
+    abort: str | None = None
 
 
 class MaskRound(BaseModel):

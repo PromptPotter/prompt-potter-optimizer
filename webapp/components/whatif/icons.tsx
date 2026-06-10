@@ -95,6 +95,13 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M12 7v13" />
     </svg>
   ),
+  output_compactness: (
+    <svg {...COMMON} aria-hidden="true">
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 7v10" />
+      <path d="M14.6 9.3c-.6-.8-1.6-1.3-2.7-1.3-1.7 0-2.8.9-2.8 2.1 0 2.8 5.8 1.5 5.8 4.2 0 1.3-1.2 2.2-3 2.2-1.2 0-2.4-.5-3-1.3" />
+    </svg>
+  ),
 };
 
 const FALLBACK_ICON: ReactNode = (

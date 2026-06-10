@@ -16,6 +16,7 @@ declare module "chart.js" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface PluginOptionsByType<TType extends ChartType> {
     sampleCount?: { counts: (number | null)[] };
+    divergenceLine?: { index: number | null };
   }
 }
 
@@ -47,8 +48,45 @@ const sampleCountPlugin: Plugin<"bar", { counts: (number | null)[] }> = {
   },
 };
 
+// Red vertical divider at the mask divergence boundary: bars left of it are the
+// invariant prefix (the masked criterion would have elected the SAME winners up
+// to here), bars at/right of it are counterfactual. Drawn at the LEFT edge of the
+// first divergent bar — "before the divergent values, after what is truly the
+// same". Index null ⇒ no mask active / no divergence ⇒ nothing drawn.
+const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
+  id: "divergenceLine",
+  afterDatasetsDraw(chart, _args, opts) {
+    const idx = opts?.index;
+    if (idx == null || idx < 0) return;
+    const xScale = chart.scales.x;
+    if (!xScale) return;
+    const { ctx, chartArea } = chart;
+    // Left edge of category `idx` = midpoint to its left neighbour; for idx 0,
+    // step half a category left of the first centre (clamped to the plot edge).
+    const c = xScale.getPixelForValue(idx);
+    let x: number;
+    if (idx > 0) {
+      x = (xScale.getPixelForValue(idx - 1) + c) / 2;
+    } else {
+      const step = xScale.getPixelForValue(1) - xScale.getPixelForValue(0);
+      x = Math.max(chartArea.left, c - (Number.isFinite(step) ? step : 0) / 2);
+    }
+    const red = getCss("--color-status-error") || "#e5484d";
+    ctx.save();
+    ctx.strokeStyle = red;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = red;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
 // Stable identity — passing a fresh array each render churns the chart.
-const CHART_PLUGINS = [sampleCountPlugin];
+const CHART_PLUGINS = [sampleCountPlugin, divergenceLinePlugin];
 
 // Above this real-bar count, x-axis labels rotate 60° so they stop
 // overlapping their neighbours. Picked empirically against the 240px
@@ -91,6 +129,10 @@ interface Props {
   showWhatIf: boolean;
   selectedKey: string | null;
   onSelect: (bar: BarSlot | null) => void;
+  // Bar index where the active mask first diverges from the realized record —
+  // the red vertical divider is drawn at its left edge. null = no mask / no
+  // divergence (no divider).
+  divergenceBoundary: number | null;
 }
 
 export const FitnessChart = memo(function FitnessChart({
@@ -99,6 +141,7 @@ export const FitnessChart = memo(function FitnessChart({
   showWhatIf,
   selectedKey,
   onSelect,
+  divergenceBoundary,
 }: Props) {
   // Subscribe to theme so a flip re-runs this component and the data/options
   // memos below pick up the new getCss() values.
@@ -290,9 +333,10 @@ export const FitnessChart = memo(function FitnessChart({
         },
       },
       sampleCount: { counts: bars.map((b) => b.nSamples) },
+      divergenceLine: { index: divergenceBoundary },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, accRaw, compRaw, whatifRaw, verifyRaw, rotate, bars, selectedKey, onSelect]);
+  }), [themeVersion, accRaw, compRaw, whatifRaw, verifyRaw, rotate, bars, selectedKey, onSelect, divergenceBoundary]);
 
   return (
     <div className="fitness-chart-frame">

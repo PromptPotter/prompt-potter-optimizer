@@ -32,22 +32,32 @@ const CandidateNode = memo(function CandidateNode({
   onPick,
   dimmed,
   alt,
+  divergence,
 }: {
   n: RoundNodePos;
   selected: boolean;
   onPick: (n: RoundNodePos) => void;
   // Mask overlay (served): `dimmed` = in the counterfactual subtree past a
-  // divergence; `alt` = this candidate is the one the lens would have elected.
+  // divergence; `alt` = this candidate is the one the lens would have elected;
+  // `divergence` = this is the recorded winner AT the divergence round (the last
+  // agreed-upon point — glows red even when the lens names no alternative).
   dimmed: boolean;
   alt: boolean;
+  divergence: boolean;
 }) {
   return (
     <g
-      className={cx("lineage-node", selected && "selected", dimmed && "mask-divergent", alt && "mask-alt")}
+      className={cx(
+        "lineage-node",
+        selected && "selected",
+        dimmed && "mask-divergent",
+        alt && "mask-alt",
+        divergence && "mask-divergence",
+      )}
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, accuracy ${fmtPct0(n.accuracy)}${n.isWinner ? ", round winner" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, accuracy ${fmtPct0(n.accuracy)}${n.isWinner ? ", round winner" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       onClick={() => onPick(n)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -57,11 +67,8 @@ const CandidateNode = memo(function CandidateNode({
       }}
       style={{ cursor: "pointer" }}
     >
-      {alt && (
-        <text x={n.x - CAND_STUB - 7} y={n.y + 3} className="lineage-mask-marker" aria-hidden="true">
-          ◆
-        </text>
-      )}
+      {/* The alternative candidate is marked by its own branch line glowing red
+          (`.mask-alt .lineage-stub`) — no glyph. */}
       <line
         x1={n.x - CAND_STUB}
         y1={n.y}
@@ -334,7 +341,7 @@ export function Forest({
                   <title>
                     {n.cycleId} · R{n.round} · {fmtPct0(n.accuracy)}
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
-                    {isDivergence ? "\n◆ divergence under the scoring lens" : ""}
+                    {isDivergence ? "\ndivergence under the scoring lens" : ""}
                     {isDivergent ? "\ncounterfactual under the scoring lens" : ""}
                   </title>
                 </g>
@@ -359,6 +366,7 @@ export function Forest({
                   onPick={onPickCandidate}
                   dimmed={divergentKeys.has(key)}
                   alt={divergenceByKey.get(key) === n.candidateId && n.candidateId !== ""}
+                  divergence={divergenceByKey.has(key) && n.isWinner}
                 />
               );
             })}

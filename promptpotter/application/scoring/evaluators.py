@@ -21,10 +21,12 @@ DataType = Literal["NUMERIC", "BOOLEAN"]
 
 LATENCY_BUDGET_MS = 10_000.0  # ≥ budget → 0.0, 0 → 1.0
 PROMPT_BUDGET_CHARS = 4_000  # ≈ 1000 tokens; soft linear ceiling
+OUTPUT_TOKEN_BUDGET = 12_000  # generation-cost soft ceiling; ≥ budget → 0.0
 
 
 __all__ = [
     "LATENCY_BUDGET_MS",
+    "OUTPUT_TOKEN_BUDGET",
     "PROMPT_BUDGET_CHARS",
     "SELF_HEALERS",
     "Evaluator",
@@ -252,6 +254,27 @@ def compute_prompt_compactness(*, opt_sp: Any = None, **_: Any) -> float:
     return max(0.0, 1.0 - len(rendered) / PROMPT_BUDGET_CHARS)
 
 
+def compute_output_compactness(*, results: list[QueryMeasurement], **_: Any) -> float:
+    """``1 - mean(output_tokens)/budget`` — the generation-cost twin of
+    ``prompt_compactness`` (output side). Sums each step's completion tokens from
+    ``pipeline_data.step_tokens[*].output``; 1.0 on missing token data (vacuous, no
+    fake penalty). This is the accuracy-vs-cost axis the optimizer can trade
+    against — a terse candidate scores higher here than a verbose one."""
+    totals: list[float] = []
+    for r in results:
+        st = (r.get("pipeline_data") or {}).get("step_tokens") or {}
+        out = 0.0
+        for v in st.values():
+            o = v.get("output") if isinstance(v, dict) else None
+            if isinstance(o, (int, float)):
+                out += float(o)
+        totals.append(out)
+    if not totals or not any(totals):
+        return 1.0
+    mean_out = sum(totals) / len(totals)
+    return max(0.0, 1.0 - mean_out / OUTPUT_TOKEN_BUDGET)
+
+
 @dataclass(frozen=True)
 class Evaluator:
     name: str
@@ -345,6 +368,16 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=compute_pipeline_compactness,
         direction="low",
+    ),
+    Evaluator(
+        name="output_compactness",
+        description=(
+            "1 - mean(output_tokens) / OUTPUT_TOKEN_BUDGET — terser (cheaper) generations "
+            "score higher. The accuracy-vs-cost axis; available to formulas, not in the "
+            "default composite."
+        ),
+        scope="per_round",
+        compute=compute_output_compactness,
     ),
     Evaluator(
         name="prompt_compactness",

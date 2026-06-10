@@ -72,14 +72,57 @@
    pairs with an aria-label + tooltip, never colour alone. */
 .family-cladogram-node.mask-divergent,
 .lineage-node.mask-divergent{opacity:0.38}
-.family-cladogram-divergence-ring{fill:none;stroke:var(--color-accent);stroke-width:1.5;stroke-dasharray:2 2}
-.lineage-node.mask-alt .lineage-label{fill:var(--color-accent);font-weight:600}
-.lineage-node.mask-alt .lineage-stub{stroke:var(--color-accent);stroke-width:3}
-.lineage-mask-marker{fill:var(--color-accent);font-size:11px;font-weight:700}
+/* Divergence = RED throughout. No glyphs — the marking IS the colour: the
+   alternative candidate's own branch line glows red ("this is the configuration
+   the mask would have elected, this is where it forks"), and the collapsed
+   round-level node carries a red ring. The dim is the quiet signal; the red glow
+   is the loud one. Honours prefers-reduced-motion (glow stays, pulse drops). */
+.family-cladogram-divergence-ring{
+  fill:none;
+  stroke:var(--color-status-error,#e5484d);
+  stroke-width:2.25;
+  filter:drop-shadow(0 0 3px var(--color-status-error,#e5484d))
+         drop-shadow(0 0 6px var(--color-status-error,#e5484d));
+  transform-box:fill-box;
+  transform-origin:center;
+  animation:mask-divergence-pulse 1.8s ease-in-out infinite;
+}
+.family-cladogram-node.mask-divergence .family-cladogram-dot{
+  filter:drop-shadow(0 0 4px var(--color-status-error,#e5484d));
+}
+@keyframes mask-divergence-pulse{
+  0%,100%{opacity:0.65;stroke-width:2}
+  50%{opacity:1;stroke-width:2.75}
+}
+/* The divergence config line glows red — both the recorded winner AT the
+   divergence round (the last agreed-upon point, `mask-divergence`) and the
+   candidate the lens would have elected instead (`mask-alt`). The line IS the
+   marker; it breathes. The winner always glows even when the lens names no
+   alternative, so a divergence is never invisible in the expanded tree. */
+.lineage-node.mask-alt .lineage-stub,
+.lineage-node.mask-divergence .lineage-stub{
+  stroke:var(--color-status-error,#e5484d);
+  stroke-width:3.25;
+  filter:drop-shadow(0 0 2px var(--color-status-error,#e5484d))
+         drop-shadow(0 0 5px var(--color-status-error,#e5484d));
+  animation:mask-divergence-pulse 1.8s ease-in-out infinite;
+}
+.lineage-node.mask-alt .lineage-label,
+.lineage-node.mask-divergence .lineage-label{fill:var(--color-status-error,#e5484d);font-weight:600}
+@media (prefers-reduced-motion:reduce){
+  .family-cladogram-divergence-ring,
+  .lineage-node.mask-alt .lineage-stub,
+  .lineage-node.mask-divergence .lineage-stub{animation:none;opacity:1}
+}
 /* Scoring-lens selector in the card header. */
 .lineage-lens{display:inline-flex;align-items:center;gap:4px}
 .lineage-lens-label{font-size:11px;color:var(--color-text-tertiary);text-transform:none;letter-spacing:0}
 .lineage-lens-select{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:1px 4px}
+.lineage-lens-select:disabled{opacity:0.6;cursor:default}
+/* Red "mask active" tag in the card title — signals the lineage is showing a
+   counterfactual projection, not the realized record. */
+.lineage-title{display:inline-flex;align-items:center;gap:8px}
+.lineage-mask-tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#fff;background:var(--color-status-error,#c53030);border-radius:4px;padding:1px 6px;line-height:1.5;font-family:var(--font-mono)}
 /* Header right-side cluster: badge + "Clean up N stubs" button. */
 .family-cladogram-head-meta{display:inline-flex;align-items:center;gap:8px}
 .family-cladogram-cleanup-btn{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:2px 8px;text-transform:none;letter-spacing:0}

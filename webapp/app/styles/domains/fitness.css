@@ -82,12 +82,18 @@
   border:1.5px solid rgba(var(--color-accent-rgb),0.32);
   box-shadow:0 0 6px rgba(var(--color-accent-rgb),0.18);
 }
-/* Exactly two rows of tiles visible: 2 × 108px tile + 1 × 10px gap +
-   2 × 6px wrap padding = 238px. Anything beyond two rows scrolls. */
-.whatif-grid-wrap{overflow-y:auto;max-height:238px;padding:6px 4px 6px 0;margin-bottom:12px}
+/* Two rows of tiles visible: 2 × 126px tile + 1 × 10px gap + 2 × 6px wrap
+   padding = 274px. The tile carries a toggle button + a weight thermometer. */
+.whatif-grid-wrap{overflow-y:auto;max-height:274px;padding:6px 4px 6px 0;margin-bottom:12px}
 .whatif-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:10px}
-.whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border-tertiary);border-radius:9px;padding:13px 7px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:108px;user-select:none;z-index:1;font-family:inherit}
+.whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border-tertiary);border-radius:9px;padding:0;display:flex;flex-direction:column;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:126px;user-select:none;z-index:1;font-family:inherit}
 .whatif-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}
+/* The toggle is the upper area (tick/dir/icon/name); the weight row sits below. */
+.whatif-sq-toggle{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;width:100%;padding:13px 7px 4px;background:transparent;border:0;color:inherit;font:inherit;cursor:pointer}
+.whatif-sq-toggle:disabled{cursor:not-allowed}
+.whatif-weight{display:flex;align-items:center;gap:4px;width:100%;min-height:18px;padding:0 7px 8px}
+.whatif-weight-range{flex:1;min-width:0;height:3px;accent-color:var(--color-accent);cursor:pointer}
+.whatif-weight-val{font-size:9px;font-family:var(--font-mono);color:var(--color-text-tertiary);min-width:22px;text-align:right}
 /* Phone (≤640px): lay every tile in ONE horizontally-scrolling row (the
    .wf-hero-flow pattern) instead of the two-row vertical-scroll grid —
    one swipe sweeps the whole evaluator set. Tiles drop to ~70% in both
@@ -98,7 +104,10 @@
   .whatif-grid-wrap{overflow-x:auto;overflow-y:hidden;max-height:none;padding:6px 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}
   .whatif-grid-wrap::-webkit-scrollbar{display:none}
   .whatif-grid{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:70px;gap:7px}
-  .whatif-sq{width:70px;height:76px;padding:9px 4px 7px;gap:3px}
+  .whatif-sq{width:70px;height:92px;padding:0;gap:0}
+  .whatif-sq-toggle{padding:9px 4px 3px;gap:3px}
+  .whatif-weight{min-height:14px;padding:0 4px 5px}
+  .whatif-weight-val{display:none}
   .whatif-ico{width:19px;height:19px;margin-top:3px}
   .whatif-name{font-size:9px;line-height:1.15}
   .whatif-tick{width:11px;height:11px;top:4px;left:4px}

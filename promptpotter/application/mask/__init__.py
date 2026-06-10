@@ -24,7 +24,7 @@ from promptpotter.application.mask.record import (
     MaskRecord,
     MaskRound,
 )
-from promptpotter.application.mask.verdicts import make_scoring_verdict
+from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
 
 __all__ = [
     "Divergence",
@@ -36,5 +36,6 @@ __all__ = [
     "Verdict",
     "VerdictOutcome",
     "find_divergences",
+    "make_abort_verdict",
     "make_scoring_verdict",
 ]

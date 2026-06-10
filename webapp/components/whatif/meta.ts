@@ -35,12 +35,32 @@ export const WHATIF_INLINE_META: EvaluatorMeta[] = [
     description: "1 − (active_steps − 1)/11 — shorter pipelines score higher." },
   { name: "prompt_compactness",       scope: "per_round", direction: "high", node_type: null,
     description: "1 − len(rendered_prompt)/PROMPT_BUDGET_CHARS — shorter prompts score higher." },
+  { name: "output_compactness",       scope: "per_round", direction: "high", node_type: null,
+    description: "1 − mean(output_tokens)/OUTPUT_TOKEN_BUDGET — terser (cheaper) generations score higher; the accuracy-vs-cost axis." },
 ];
 
 export function whatifIdentifiersInFormula(formula: string | undefined | null): Set<string> {
   if (!formula) return new Set();
   const tokens = formula.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || [];
   return new Set(tokens);
+}
+
+// Per-evaluator weight parsed from a scoring formula — the coefficient on each
+// `<coef> * [(1 - ]name` term (the canonical weighted-sum shape every default /
+// operator formula uses). Seeds the What-If weight sliders so they start at the
+// evaluator's *actual* composite weight; the operator reweights from there. A
+// formula that isn't a weighted sum simply yields no/partial entries → callers
+// fall back to a default weight.
+export function weightsFromFormula(formula: string | undefined | null): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!formula) return out;
+  const re = /([0-9]*\.?[0-9]+)\s*\*\s*\(?\s*(?:1\s*-\s*)?([a-zA-Z_][a-zA-Z0-9_]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(formula)) !== null) {
+    const name = m[2];
+    if (!(name in out)) out[name] = parseFloat(m[1]);
+  }
+  return out;
 }
 
 export function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {

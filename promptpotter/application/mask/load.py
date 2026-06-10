@@ -24,6 +24,7 @@ from promptpotter.application.mask.record import (
     MaskRound,
 )
 from promptpotter.application.optimization.l1.score.winner import is_leader_eligible
+from promptpotter.application.scoring.metrics import accuracy_over_samples
 from promptpotter.domain.results import ScoredCandidate
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.base import read_json_optional
@@ -39,31 +40,67 @@ def _mask_eligible(sc: ScoredCandidate) -> bool:
     return is_leader_eligible(sc) and not sc.invalid and not sc.validation_failures
 
 
-def _candidates(round_file: dict[str, Any]) -> list[MaskCandidate]:
+def _candidates(round_file: dict[str, Any], samples: frozenset[int] | None) -> list[MaskCandidate]:
     winners = {
         c["candidate_id"]
         for c in round_file.get("scoreboard", [])
         if isinstance(c, dict) and c.get("is_winner") and c.get("candidate_id")
     }
+    # Sample-set mask: re-score accuracy over only the selected samples, read from
+    # the per-sample rows already on disk. The full evaluator namespace stays at its
+    # stored (full-set) values — only `accuracy`, the sample-dependent term, moves —
+    # so a What-If formula reweighting accuracy reshapes the election on the subset.
+    per_sample = round_file.get("all_candidate_results") or {} if samples is not None else {}
     out: list[MaskCandidate] = []
     for cs in round_file.get("candidate_scores", []):
         if not isinstance(cs, dict) or not cs.get("candidate_id"):
             continue
         sc = ScoredCandidate.model_validate(cs)
+        evaluators = dict(sc.evaluators)
+        accuracy = sc.accuracy
+        if samples is not None:
+            acc, n_measured = accuracy_over_samples(per_sample.get(sc.candidate_id) or [], samples)
+            if n_measured == 0:
+                # Never ran any selected sample → unscorable on this set. Empty
+                # evaluators make the verdict + winner-threading skip it uniformly,
+                # exactly like a candidate with no stored values.
+                evaluators = {}
+                accuracy = 0.0
+            else:
+                accuracy = acc
+                if evaluators:
+                    evaluators["accuracy"] = acc
         out.append(
             MaskCandidate(
                 candidate_id=sc.candidate_id,
-                evaluators=dict(sc.evaluators),
-                accuracy=sc.accuracy,
+                evaluators=evaluators,
+                accuracy=accuracy,
                 is_winner=sc.candidate_id in winners,
                 is_eligible=_mask_eligible(sc),
+                abort=_abort_contributor(sc),
             )
         )
     return out
 
 
-def load_mask_record(store: Stores, campaign_id: str) -> MaskRecord:
-    """Read every cycle in *campaign_id* into a :class:`MaskRecord` (read-only)."""
+def _abort_contributor(sc: ScoredCandidate) -> str | None:
+    """Which PoBB contributor cut this candidate early — ``leader_locked``
+    discriminates lock-in (B) from ε-elimination (A); ``None`` if it ran to term."""
+    if not sc.elimination_stopped or not sc.elimination_context:
+        return None
+    return "lock_in" if sc.elimination_context.get("leader_locked") else "epsilon"
+
+
+def load_mask_record(
+    store: Stores, campaign_id: str, samples: frozenset[int] | None = None
+) -> MaskRecord:
+    """Read every cycle in *campaign_id* into a :class:`MaskRecord` (read-only).
+
+    *samples* (the **sample-set mask**) re-scores each candidate's accuracy over only
+    those sample ids — the carried-forward winner threads its subset accuracy too, so
+    the election re-runs on the subset and the fold finds where the subset-best
+    diverges from the recorded (full-set) winner. ``None`` ⇒ stored full-set values.
+    """
     entries = [e for e in store.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id]
 
     # Pass 1: read each cycle's round files (keyed by round number) + tree edges.
@@ -122,7 +159,7 @@ def load_mask_record(store: Stores, campaign_id: str) -> MaskRecord:
         )
         rounds: list[MaskRound] = []
         for rn in sorted(files[cid]):
-            candidates = _candidates(files[cid][rn])
+            candidates = _candidates(files[cid][rn], samples)
             rounds.append(
                 MaskRound(
                     cycle_id=cid,

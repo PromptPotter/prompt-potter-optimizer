@@ -27,6 +27,7 @@ export type {
   FileEntry,
   FilesResponse,
   InFlightCall,
+  LineageDivergence,
   LiveDashboardState,
   MeasurementDot,
   MeasurementSeriesResponse,

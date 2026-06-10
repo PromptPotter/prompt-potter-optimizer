@@ -11,7 +11,7 @@ Pure computation — no I/O, no backend dependencies.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.evaluators import (
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Evaluator",
+    "accuracy_over_samples",
     "all_evaluators",
     "compute_composite_fitness",
     "count_degraded_samples",
@@ -340,3 +341,21 @@ def value_with_mask_applied(
     """
     scorer = criterion if callable(criterion) else compile_round_scorer(criterion)
     return float(scorer(dict(evaluators)))
+
+
+def accuracy_over_samples(
+    results: list[QueryMeasurement], sample_ids: Collection[int]
+) -> tuple[float, int]:
+    """Accuracy recomputed over **only** the samples in *sample_ids* — the sample-set
+    mask's per-candidate value.
+
+    Returns ``(accuracy, n_measured)``: ``n_measured`` is how many of the candidate's
+    valid measured rows fell in the subset (``0`` ⇒ the candidate never ran any
+    selected sample → unscorable on this set, the caller drops it). Schema-free —
+    accuracy is the mean over per-sample ``fitness``, so the sample-set mask stays a
+    read-time projection like the rest, no ``PipelineSchema`` (never persisted).
+    """
+    wanted = set(sample_ids)
+    subset = [r for r in results if r.get("sample_id") in wanted]
+    base = _compute_accuracy(subset)
+    return float(base["accuracy"]), int(base["total"])

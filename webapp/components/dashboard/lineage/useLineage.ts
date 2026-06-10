@@ -18,6 +18,19 @@ import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
 import { rootCycleId, sessionIndexOf } from "@/lib/ids";
 import { bumpRevalidation, useRevalidation } from "@/lib/revalidate";
 import { useFetch } from "@/lib/hooks/useFetch";
+import { useFitnessState } from "@/components/whatif/fitness-store";
+import { formulaFromWeights } from "@/components/whatif/fitness-bars";
+import { useDebounced } from "@/lib/hooks/useDebounced";
+import { setMaskState } from "@/lib/mask-store";
+import { useSelection } from "@/lib/SelectionContext";
+
+// Short label per preset lens for the lineage card's mask tag.
+const LENS_LABELS: Record<string, string> = {
+  "score:accuracy": "Accuracy",
+  "abort:epsilon_off": "No ε-elim",
+  "abort:lock_in_off": "No lock-in",
+  "abort:all_off": "No abort",
+};
 import { useExpandedDashboards } from "@/lib/hooks/useExpandedDashboards";
 import { useStableContent } from "@/lib/stable";
 import { roundCandidatesByRound } from "@/lib/derivations/round-candidates";
@@ -101,9 +114,14 @@ export interface Lineage {
   isInheritedSibling: boolean;
   parentId: string | null;
   cleanup: LineageCleanup;
-  // Scoring-mask lens + the served divergence overlay it produced.
-  mask: string | null;
-  setMask: (mask: string | null) => void;
+  // Preset lens (dropdown) + the served divergence overlay any active mask produced.
+  lens: string;
+  setLens: (lens: string) => void;
+  // A mask is driving the lineage (red tag) + its label; whether the What-If card
+  // is the active master (so the preset dropdown is overridden/disabled).
+  maskActive: boolean;
+  maskLabel: string;
+  whatifActive: boolean;
   divergenceByKey: ReadonlyMap<string, string | null>;
   divergentKeys: ReadonlySet<string>;
 }
@@ -118,20 +136,62 @@ export function useLineage({
   cycleId: string | null;
 }): Lineage {
   const [tick, setTick] = useState(0);
-  // The scoring-mask lens (an alternative scoring formula, e.g. "accuracy"); null
-  // = off. When set, the lineage fetch carries it and the response includes the
-  // divergence overlay. Backend-owned projection — the webapp only renders the
-  // served flags, never recomputes scores (R-36).
-  const [mask, setMask] = useState<string | null>(null);
+  // The PRESET lens — a dropdown value: "" (realized, off), "score:<formula>"
+  // (scoring swap), or "abort:<variant>" (PoBB abort switch-off). The What-If mask
+  // is NOT a preset: opening the What-If card (its chip) is the master switch that
+  // drives the lineage from the live evaluator selection + weights. Backend-owned
+  // projection — the webapp renders served flags, never recomputes (R-36).
+  const [lens, setLens] = useState<string>("");
+  // The What-If card is the master: when open, the lineage follows its live
+  // selection + weights (the SAME weighted criterion as the bars), so dragging a
+  // weight reshapes the divergence — debounced so a continuous drag doesn't spam
+  // the fetch (the bars recompute live; the overlay settles ~250 ms after).
+  const {
+    selected: whatifSelected,
+    weights: whatifWeights,
+    showWhatIf,
+  } = useFitnessState();
+  // The fixed sample-set (the fitness "Sample set" chip) is ALSO a mask: it
+  // re-scores accuracy over only those ids backend-side, so the lineage diverges
+  // wherever the subset-best ≠ the recorded winner — the same set the per-candidate
+  // bars recompute over. Serialized to a stable string so a same-content set
+  // doesn't re-fire the fetch.
+  const { sampleSet } = useSelection();
+  const samplesParam = useMemo(
+    () => (sampleSet && sampleSet.length > 0 ? sampleSet : null),
+    [sampleSet],
+  );
+  const samplesKey = samplesParam ? samplesParam.join(",") : "";
+  const liveWhatifFormula = useMemo(
+    () => (showWhatIf ? formulaFromWeights(whatifSelected, whatifWeights) : null),
+    [showWhatIf, whatifSelected, whatifWeights],
+  );
+  const whatifFormula = useDebounced(liveWhatifFormula, 250);
+  const [maskParam, abortParam] = useMemo(() => {
+    if (showWhatIf) return [whatifFormula, null] as const;
+    if (lens.startsWith("score:")) return [lens.slice(6), null] as const;
+    if (lens.startsWith("abort:")) return [null, lens.slice(6)] as const;
+    return [null, null] as const;
+  }, [showWhatIf, whatifFormula, lens]);
+  // Short label for whichever lens is REQUESTED (drives the fetch). The red tag
+  // itself is gated on a divergence actually being FOUND (`maskActive`, derived
+  // from the served overlay below) — not on the chip being toggled.
+  const maskLabel = showWhatIf
+    ? "What-If"
+    : samplesParam
+      ? "Sample set"
+      : LENS_LABELS[lens] ?? "";
   // Refetch the campaign-wide tree the instant any mutation resolves (fork,
   // cleanup, lifecycle) — the same revalidation seam the poll loops ride.
   // `cycleId` is deliberately NOT a fetch dep: /lineage is campaign-scoped, so a
-  // same-campaign cycle switch returns identical data. `mask` IS a dep: it changes
+  // same-campaign cycle switch returns identical data. `lens` IS a dep: it changes
   // the served overlay.
   const reval = useRevalidation();
   const { data } = useFetch(
-    campaignId ? (s) => fetchCampaignLineage(campaignId, mask, s) : null,
-    [campaignId, tick, reval, mask],
+    campaignId
+      ? (s) => fetchCampaignLineage(campaignId, maskParam, abortParam, samplesParam, s)
+      : null,
+    [campaignId, tick, reval, maskParam, abortParam, samplesKey],
   );
 
   // Served divergence overlay → lookup structures keyed by `{cycle_id}::r{round}`.
@@ -143,6 +203,24 @@ export function useLineage({
     return m;
   }, [data]);
   const divergentKeys = useMemo(() => new Set(data?.divergent ?? []), [data]);
+
+  // The mask is "active" (red tag, fitness divider) only when the served overlay
+  // actually carries a divergence — NOT merely because a lens/chip is requested.
+  // Toggling Sample-set / What-If with no resulting divergence shows nothing.
+  const maskActive = divergenceByKey.size > 0 || divergentKeys.size > 0;
+
+  // Publish the served overlay so the per-candidate fitness can draw the same
+  // divergence boundary — the lineage card is the single fetcher; other surfaces
+  // render what it serves (R-36). Content-guarded in the store, so a bare poll is
+  // a no-op when the divergences are unchanged.
+  useEffect(() => {
+    setMaskState({
+      divergences: data?.divergences ?? [],
+      divergent: data?.divergent ?? [],
+      maskActive,
+      maskLabel,
+    });
+  }, [data, maskActive, maskLabel]);
 
   // Independent per-cycle expand state — one unified tree where every cycle
   // opens its intra-cycle candidate cladogram in place, any number at once.
@@ -315,8 +393,11 @@ export function useLineage({
     isInheritedSibling,
     parentId,
     cleanup,
-    mask,
-    setMask,
+    lens,
+    setLens,
+    maskActive,
+    maskLabel,
+    whatifActive: showWhatIf,
     divergenceByKey,
     divergentKeys,
   };

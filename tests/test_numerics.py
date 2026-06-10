@@ -32,6 +32,7 @@ from promptpotter.application.mask import (
     MaskRecord,
     MaskRound,
     find_divergences,
+    make_abort_verdict,
     make_scoring_verdict,
 )
 from promptpotter.application.scoring.evaluators import all_evaluators, materialize_round_values
@@ -359,6 +360,35 @@ def test_mask_scoring_divergence_self_consistency_and_eligibility():
         ("cyc::r1", "B")
     ]
     assert swapped.divergent == ["cyc::r2"]
+
+
+def test_mask_abort_verdict_rides_the_same_fold():
+    """The abort verdict — a different verdict (log-read, no value face) on the SAME
+    fold. r1 fired lock-in, r2 fired ε-elimination. The first round a *suppressed*
+    contributor fired is the divergence; the rest is the dimmed counterfactual
+    subtree. Empty suppress = the realized config = zero divergences."""
+    r0 = MaskRound(cycle_id="cyc", round=0, candidates=[MaskCandidate(candidate_id="C0")])
+    r1 = MaskRound(
+        cycle_id="cyc", round=1, candidates=[MaskCandidate(candidate_id="A", abort="lock_in")]
+    )
+    r2 = MaskRound(
+        cycle_id="cyc", round=2, candidates=[MaskCandidate(candidate_id="B", abort="epsilon")]
+    )
+    record = MaskRecord(cycles=[MaskCycle(cycle_id="cyc", rounds=[r0, r1, r2])])
+
+    realized = find_divergences(record, make_abort_verdict(frozenset()))
+    assert realized.divergences == [] and realized.divergent == []
+
+    no_lockin = find_divergences(record, make_abort_verdict(frozenset({"lock_in"})))
+    assert [d.node_key for d in no_lockin.divergences] == ["cyc::r1"]
+    assert no_lockin.divergent == ["cyc::r2"]
+
+    no_eps = find_divergences(record, make_abort_verdict(frozenset({"epsilon"})))
+    assert [d.node_key for d in no_eps.divergences] == ["cyc::r2"]
+
+    no_abort = find_divergences(record, make_abort_verdict(frozenset({"epsilon", "lock_in"})))
+    assert [d.node_key for d in no_abort.divergences] == ["cyc::r1"]
+    assert no_abort.divergent == ["cyc::r2"]
 
 
 def test_composite_fitness_zeroed_on_validation_failure():

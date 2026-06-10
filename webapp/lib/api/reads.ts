@@ -365,13 +365,21 @@ export function fetchCycles(signal?: AbortSignal): Promise<CyclesResponse> {
 export function fetchCampaignLineage(
   campaignId: string,
   mask: string | null,
+  abort: string | null,
+  samples: number[] | null,
   signal?: AbortSignal,
 ): Promise<CampaignLineageResponse> {
-  // `mask` is an alternative scoring formula; when set the response carries the
-  // divergence overlay (where that criterion would have forked the record).
-  const q = mask ? `?mask=${encodeURIComponent(mask)}` : "";
+  // Lens params driving the divergence overlay: `mask` = an alternative scoring
+  // formula, `abort` = a PoBB abort-contributor switch-off, `samples` = the
+  // sample-set mask (re-score accuracy over only these ids). `samples` composes
+  // with `mask`; `abort` is exclusive of the scoring lenses.
+  const params = new URLSearchParams();
+  if (mask) params.set("mask", mask);
+  if (abort) params.set("abort", abort);
+  if (samples && samples.length > 0) params.set("samples", samples.join(","));
+  const q = params.toString();
   return jget<CampaignLineageResponse>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}/lineage${q}`,
+    `${API}/campaigns/${encodeURIComponent(campaignId)}/lineage${q ? `?${q}` : ""}`,
     signal,
   );
 }

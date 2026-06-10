@@ -235,9 +235,10 @@ nothing.
   API-edge value that selects one:
   - **scoring** (M1) — "re-elected leader under the swapped formula ≠ `is_winner`?"
     Calls `value_with_mask_applied`. The **only** verdict with a value face.
-  - **abort** (first migration — below) — "would variant V's abort decision differ
-    here?" A log-read over `elimination_context`. No value face, no one-step
-    alternative (continuation unmeasured).
+  - **abort** *(built — the first migration, below)* — "did a *switched-off* PoBB
+    abort contributor fire here?" A log-read over `elimination_context` (no value
+    face, no one-step alternative). `make_abort_verdict(suppress)` with
+    `suppress ⊆ {epsilon, lock_in}`; empty = the realized config = no divergence.
   - **constraint** *(hypothesis, not built)* — "does this node's
     `pipeline_params_override` comply with the constraint?" A predicate; the
     operator's "hyperparameters not in line."
@@ -263,22 +264,29 @@ and **B = lock-in** (`_leader_locked` — stop once the leader's `p_best` clears
 `ScoredCandidate.elimination_context` = `{p_best, epsilon, leader_locked, …}` says,
 per round, **which contributor fired** (`leader_locked` discriminates B from A).
 
-**This is a real read-side mask, and the cleanest second consumer.** The abort only
-changes *what gets measured from the point it first fires* — so up to that round, all
-variants V ∈ {none, A, B, combo} took the *identical* measurements (**invariant**,
-zero re-runs). The **abort verdict** for V: per round, recompute "would V's abort
-decision differ from the record?" — `none` diverges at the first round any abort
-fired; `A-only` where B fired; `B-only` where A fired — all from the recorded
-`p_best` vs V's thresholds (`pobb_epsilon` / `pobb_lock_in`, already policy-scope
-config). First differing round = divergence; the rest is **divergent**. Unlike the
-scoring verdict, it names **no** one-step alternative — the continuation is unmeasured.
+**This is a real read-side mask, and the cleanest second consumer (BUILT).** The
+abort only changes *what gets measured from the point it first fires* — so up to that
+round, every variant took the *identical* measurements (**invariant**, zero re-runs).
+The verdict is `make_abort_verdict(suppress)`: per round, did a *suppressed*
+contributor fire (read off `MaskCandidate.abort`, which the loader classifies from
+`elimination_context.leader_locked` — `lock_in` vs `epsilon`)? The first such round is
+the divergence; the rest is **divergent**. It names **no** one-step alternative — the
+suppressed-abort continuation was never measured. Exposed at the API edge as the
+`?abort=` lens (`epsilon_off` / `lock_in_off` / `all_off`).
 
-It rides the *same* `find_divergences` fold (per-round node stream), proving the
-shape with a genuinely different verdict (a log-read, no value face). **Self-consistency
-(abort):** the verdict fed the *realized* abort config reproduces exactly where each
-contributor fired. The actual none/A/B/combo *runs* (to see past divergence) are a
-**separate**, later thing — four sibling cycles via the existing policy-scope config
-+ branch-from-origin path ([R-22]); not part of the read-side mask.
+It rides the *same* `find_divergences` fold (per-round node stream), proving the shape
+with a genuinely different verdict (a log-read, no value face). **Self-consistency
+(abort):** `suppress = ∅` is the realized config ⇒ zero divergences; and the loader's
+`abort` classification reproduces which contributor cut each candidate.
+
+**The computable boundary (honest).** *Suppressing* a contributor that **did** fire is
+fully record-computable (we know each firing's type). *Adding* a contributor the
+realized run **lacked** (e.g. "what if lock-in too" on an ε-only run) is **not** — it
+needs the per-step `p_best` trajectory (`PoBBStreamView`), not the per-candidate
+`elimination_context` snapshot, because lock-in keys off the *leader's* posterior, and
+the leader isn't eliminated. That case is the actual none/A/B/combo *run* — a real,
+measured sibling cycle via the existing policy-scope config + branch-from-origin path
+([R-22]) — **not** part of this read-side mask.
 
 ## Future (beyond this arc — the write-side)
 

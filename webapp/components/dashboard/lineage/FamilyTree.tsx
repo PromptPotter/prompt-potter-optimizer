@@ -47,8 +47,11 @@ export const FamilyTree = memo(function FamilyTree({
     isInheritedSibling,
     parentId,
     cleanup,
-    mask,
-    setMask,
+    lens,
+    setLens,
+    maskActive,
+    maskLabel,
+    whatifActive,
     divergenceByKey,
     divergentKeys,
   } = useLineage({ dash, campaignId, cycleId });
@@ -61,22 +64,49 @@ export const FamilyTree = memo(function FamilyTree({
           ? ({ "--lineage-natural-w": `${naturalWidth}px` } as CSSProperties)
           : undefined
       }
-      title={<span>Lineage</span>}
+      title={
+        <span className="lineage-title">
+          Lineage
+          {maskActive && (
+            <span className="lineage-mask-tag" title={`Showing the ${maskLabel} mask — divergence vs the realized record`}>
+              {maskLabel}
+            </span>
+          )}
+        </span>
+      }
       actions={
         <span className="family-cladogram-head-meta">
-          {/* Scoring-lens (mask): re-score the record under an alternative formula
-              and mark where it would have forked the realized lineage. Backend
-              projection; this only selects which served overlay to render. */}
-          <label className="lineage-lens" title="Re-score the lineage under an alternative scoring formula and mark where it would have diverged">
+          {/* Lens: re-project the record under an alternative criterion and mark
+              where it would have forked the realized lineage. Backend projection;
+              this only selects which served overlay to render. */}
+          <label
+            className="lineage-lens"
+            title={
+              whatifActive
+                ? "What-If is driving the lineage — adjust the evaluator cards/weights, or close What-If to use a preset lens"
+                : "Re-project the lineage under an alternative criterion and mark where it would have diverged"
+            }
+          >
             <span className="lineage-lens-label">Lens</span>
             <select
               className="lineage-lens-select"
-              value={mask ?? ""}
-              onChange={(e) => setMask(e.target.value || null)}
-              aria-label="Scoring lens — mark lineage divergence under an alternative formula"
+              value={whatifActive ? "whatif" : lens}
+              disabled={whatifActive}
+              onChange={(e) => setLens(e.target.value)}
+              aria-label="Lineage lens — mark divergence under an alternative scoring or abort criterion"
             >
+              {/* While What-If is open it is the master lens (chip-driven); the
+                  preset dropdown is disabled and shows the live What-If state. */}
+              {whatifActive && <option value="whatif">What-If (live)</option>}
               <option value="">Realized</option>
-              <option value="accuracy">Accuracy</option>
+              <optgroup label="Scoring">
+                <option value="score:accuracy">Accuracy</option>
+              </optgroup>
+              <optgroup label="Abort off">
+                <option value="abort:epsilon_off">No ε-elimination</option>
+                <option value="abort:lock_in_off">No lock-in</option>
+                <option value="abort:all_off">No early abort</option>
+              </optgroup>
             </select>
           </label>
           <span className="badge">
