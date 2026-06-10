@@ -25,7 +25,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-15](#r-15) — a new seam/invariant is a `tests/test_structure.py` row
 
 **Workflow / git**
-- [R-16](#r-16) — one commit per arc
+- [R-16](#r-16) — a few coherent commits per arc (logical units, not one blob, not one-per-change)
 - [R-17](#r-17) — conventional commits, ≤800 chars, title <70
 - [R-18](#r-18) — ruff format + check before commit
 - [R-19](#r-19) — never commit or push unless told
@@ -149,11 +149,12 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 
 ## Workflow / git
 
-### R-16 — one commit per arc
-- **Trigger:** finishing a feature + its refinements/fixes/docs.
-- **Rule:** a whole arc = ONE commit. Amend follow-ups in, squash, force-push your own branch — never fragment into many small commits.
-- **Why:** the history reads as intent, not keystrokes.
-- **Origin:** 2026-06-07 — seeded from `feedback_one_commit_per_arc`.
+### R-16 — a few coherent commits per arc (not one blob, not one-per-change)
+- **Trigger:** committing finished work — a feature, refactor, fix, or its docs.
+- **Rule:** an arc = **a handful of commits** (~2–4), one per **coherent logical phase**, each compiling + green on its own with a body that explains the *why*. Calibration (operator, 2026-06-10): **bundle, lean coarse.** A multi-phase feature is ~1–2 commits (foundation+serve+overlay together is fine); a cleanup pass is ~1–2 (backend vs frontend split only when typecheck forces it — a renamed API param lands with the backend, the caller next). Do **NOT** split per-`W`/per-file/per-step — that's over-atomizing (8 was too many; ~4 was right for the mask arc: 2 feat + 2 refactor). Do **NOT** squash an entire arc into one blob either — that loses resolution. Fold only WIP/"checkpoint"/"fix typo" into their unit. Conventional prefixes (`feat`/`refactor`/`fix`/`docs`).
+- **Why:** git history is review **and future-training** signal — each commit a clean `(state→diff→why)` triple; one blob loses the reasoning sequence, one-per-change buries signal in noise. The sweet spot is *logical phase*. **Supersedes** the old "one commit per arc" (that fit the pre-foundation phase). **To re-grain LOCAL/unpushed commits without re-staging:** `git commit-tree <existing-commit>^{tree} -p <parent> -F -` to stitch a new history that reuses verified trees, then `git diff <old-HEAD> HEAD` must be **empty** (byte-identical) before trusting it.
+- **Caveat (learned 2026-06-10 the hard way):** `git reset --hard` during a re-grain **wipes uncommitted tracked changes** (it ate this very rule's prior edit). Run `git status` first; stash or commit pending tracked edits before any `reset --hard`. [[R-37]] [[R-19]]
+- **Origin:** 2026-06-10 — operator moved off one-per-arc toward atomic, then calibrated back ("not toooo many… roughly 3-4"); replaces the 2026-06-07 `feedback_one_commit_per_arc` seed.
 
 ### R-17 — conventional commits, ≤800 chars
 - **Trigger:** writing a commit message.

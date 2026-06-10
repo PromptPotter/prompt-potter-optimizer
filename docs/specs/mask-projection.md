@@ -204,13 +204,25 @@ End to end:
   verdict must reproduce `is_winner` across the whole tree (incl. eligibility).
 - **Served as Display** (read-after-run, no ledger write) under a **requested**
   `MaskSpec` — the criterion rides the request, computed-then-discarded, not
-  persisted. **Schema-first**: `docs/specs/m12-api-openapi.yaml` → projection →
-  regenerate `webapp/lib/api/types.generated.ts`.
+  persisted. **One `lens` query param** carries it: `lens=score:<formula>` |
+  `lens=abort:<variant>` (mutually exclusive — one active lens; `samples` is the one
+  orthogonal param that *composes* with a `score:` lens). The pre-resolution
+  two-param `?mask=` + `?abort=` shape (where the edge hard-coded "abort wins") was
+  collapsed into this single discriminated value. **Schema-first**:
+  `docs/specs/m12-api-openapi.yaml` → projection → regenerate
+  `webapp/lib/api/types.generated.ts`.
 - **Frontend — minimal visual clues** at and after the divergence point: a marker
   on that node + the divergent downstream subtree dimmed, rendered from the served
   flags (no TS recompute). Just enough to read "the record forks here under this
   scoring function." Divergent nodes stay clickable; the dimming pairs with a label,
   not colour-only. Not a full feature — the foundation is the point.
+  - *Record-scoped overlay seam.* The served overlay is a property of the **record**,
+    not of the lineage widget — both the lineage card and the per-candidate fitness
+    panel render it. So a single `LineageOverlayProvider` (`webapp/lib/lineage-overlay.tsx`)
+    owns the **one** `/lineage` fetch + the lens selection; both surfaces read it via
+    `useLineageOverlay()`. No widget publishes to a module global from a render effect
+    (the prior `mask-store.ts` singleton is **deleted**) — one fetch, one source,
+    rendered, never recomputed ([R-36]).
 
 **Then — validate the fold with a second real consumer.** The next mask (the
 abort-ablation, below) is a *different verdict* riding the *same* `find_divergences`
@@ -245,14 +257,44 @@ nothing.
   - **order** *(deferred)* — its signal is per-*step* (`SampleOrderStep`), **not** a
     per-round node; whether it can host on this fold's node stream is **unverified**.
     Don't claim it until checked.
-- **`value_with_mask_applied(evaluators, criterion) -> value`** in
+- **`value_with_mask_applied(evaluators, criterion) -> value | None`** in
   `application/scoring/` (next to `compute_composite_fitness`): the per-candidate
   re-evaluation the **scoring** verdict calls — a formula (`compile_round_scorer`)
-  over the entity's **stored, materialized evaluator namespace**. No schema, no
-  measurements, no re-run: the round score always *was* a formula over those
-  evaluators, so this reproduces the realized composite exactly and the read path
-  needs no `PipelineSchema` (never persisted). **Stays out of the fold** — the later
+  over the entity's **materialized evaluator namespace**. No schema, no measurements,
+  no re-run: the round score always *was* a formula over those evaluators, so this
+  reproduces the realized composite exactly and the read path needs no
+  `PipelineSchema` (never persisted). **Stays out of the fold** — the later
   fitness-card value face calls this same helper, but `find_divergences` never does.
+  Returns **`None`** when the criterion names an evaluator absent from the namespace —
+  the *single, one-place* missing-name resolution (a `NameError` from the formula eval
+  becomes `None` = "unscorable under this mask", **not** a fabricated score). The live
+  round scorer stays fail-loud (broken formula = real bug); only this read-side seam
+  treats a missing name as honest absence.
+
+### The evaluator namespace — row-derivable vs. snapshot (resolved 2026-06-10)
+
+The namespace a mask scores over is **not** simply the stored `evaluators` snapshot.
+`Evaluator.from_rows` partitions the registry:
+
+- **row-derivable** (`accuracy`, `output_compactness`, `latency_norm`, `error_rate`,
+  `degraded_rate`) — pure functions of the persisted per-sample rows
+  (`all_candidate_results`). The loader (`mask/load._candidates`) **recomputes** these
+  from the rows at read time (`materialize_row_derivable`) and merges them over the
+  snapshot, so they are present on **every** record regardless of when it was written.
+  A sample-set mask filters the rows to the subset first, so the same evaluators
+  (accuracy especially) re-score on the subset — this is how the sample-set mask
+  composes with a `score:` formula. (This *subsumes* the old `accuracy_over_samples`
+  helper — it was the `accuracy` member of this subset; deleted.)
+- **snapshot-only** (recall / cache / `*_shortfall` / `pipeline_compactness` /
+  self-heal / `prompt_compactness`) — need the unpersisted `PipelineSchema` / `opt_sp`,
+  so they come from the stored snapshot. A formula naming one that's genuinely absent
+  (a `*_recall` on a pipeline with no such node, on an older record) resolves to
+  honest-absence via the `value_with_mask_applied` `None` path above.
+
+This is the **structural** reason there is no backfill: a newer row-derivable
+evaluator is never "missing" from an old record — it's recomputed from rows that were
+always on disk. (The one-off `backfill_output_compactness.py` that rewrote stored
+round files / `dashboard.json` is **deleted** — it violated *Record unchanged* below.)
 
 ## First migration — the abort mask (a second verdict, same fold)
 
@@ -271,8 +313,8 @@ The verdict is `make_abort_verdict(suppress)`: per round, did a *suppressed*
 contributor fire (read off `MaskCandidate.abort`, which the loader classifies from
 `elimination_context.leader_locked` — `lock_in` vs `epsilon`)? The first such round is
 the divergence; the rest is **divergent**. It names **no** one-step alternative — the
-suppressed-abort continuation was never measured. Exposed at the API edge as the
-`?abort=` lens (`epsilon_off` / `lock_in_off` / `all_off`).
+suppressed-abort continuation was never measured. Exposed at the API edge as
+`?lens=abort:<variant>` (`epsilon_off` / `lock_in_off` / `all_off`).
 
 It rides the *same* `find_divergences` fold (per-round node stream), proving the shape
 with a genuinely different verdict (a log-read, no value face). **Self-consistency

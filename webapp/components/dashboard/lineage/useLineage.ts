@@ -1,36 +1,25 @@
 "use client";
-// Data + state for the campaign lineage card. Everything that is NOT geometry
-// (layout.ts) and NOT markup (FamilyTree/Forest) lives here: the one campaign
-// fetch, the per-cycle expand set, the live-dashboard overlay, the derived
-// forests + natural width, and the empty-stub cleanup mutation. FamilyTree
-// consumes this and renders — it owns no fetch and no derived state of its own.
+// Tree + state for the campaign lineage card. Everything that is NOT geometry
+// (layout.ts), NOT markup (FamilyTree/Forest), and NOT the shared fetch/overlay
+// (lib/lineage-overlay) lives here: the per-cycle expand set, the live-dashboard
+// overlay, the derived forests + natural width, and the empty-stub cleanup
+// mutation. The campaign fetch and the mask/lens divergence overlay are owned by
+// `LineageOverlayProvider` and read via `useLineageOverlay()` — the same source the
+// per-candidate fitness panel reads, so both surfaces render one served overlay.
 //
 // The mental model is three files, one per concern:
 //   layout.ts    pure geometry   (tree → SVG coordinates)
-//   useLineage   data + state    (fetch, expand set, overlay, cleanup)  ← here
+//   useLineage   tree + state    (expand set, live overlay, cleanup)  ← here
 //   FamilyTree   view            (card + viewport + Forest, presentational)
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchCampaignLineage, postCleanupEmpty } from "@/lib/api";
+import { useCallback, useMemo, useState } from "react";
+import { postCleanupEmpty } from "@/lib/api";
 import type { CampaignLineageCycle } from "@/lib/api";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
 import { rootCycleId, sessionIndexOf } from "@/lib/ids";
-import { bumpRevalidation, useRevalidation } from "@/lib/revalidate";
-import { useFetch } from "@/lib/hooks/useFetch";
-import { useFitnessState } from "@/components/whatif/fitness-store";
-import { formulaFromWeights } from "@/components/whatif/fitness-bars";
-import { useDebounced } from "@/lib/hooks/useDebounced";
-import { setMaskState } from "@/lib/mask-store";
-import { useSelection } from "@/lib/SelectionContext";
-
-// Short label per preset lens for the lineage card's mask tag.
-const LENS_LABELS: Record<string, string> = {
-  "score:accuracy": "Accuracy",
-  "abort:epsilon_off": "No ε-elim",
-  "abort:lock_in_off": "No lock-in",
-  "abort:all_off": "No abort",
-};
+import { bumpRevalidation } from "@/lib/revalidate";
+import { useLineageOverlay } from "@/lib/lineage-overlay";
 import { useExpandedDashboards } from "@/lib/hooks/useExpandedDashboards";
 import { useStableContent } from "@/lib/stable";
 import { roundCandidatesByRound } from "@/lib/derivations/round-candidates";
@@ -135,92 +124,11 @@ export function useLineage({
   campaignId: string | null;
   cycleId: string | null;
 }): Lineage {
-  const [tick, setTick] = useState(0);
-  // The PRESET lens — a dropdown value: "" (realized, off), "score:<formula>"
-  // (scoring swap), or "abort:<variant>" (PoBB abort switch-off). The What-If mask
-  // is NOT a preset: opening the What-If card (its chip) is the master switch that
-  // drives the lineage from the live evaluator selection + weights. Backend-owned
-  // projection — the webapp renders served flags, never recomputes (R-36).
-  const [lens, setLens] = useState<string>("");
-  // The What-If card is the master: when open, the lineage follows its live
-  // selection + weights (the SAME weighted criterion as the bars), so dragging a
-  // weight reshapes the divergence — debounced so a continuous drag doesn't spam
-  // the fetch (the bars recompute live; the overlay settles ~250 ms after).
-  const {
-    selected: whatifSelected,
-    weights: whatifWeights,
-    showWhatIf,
-  } = useFitnessState();
-  // The fixed sample-set (the fitness "Sample set" chip) is ALSO a mask: it
-  // re-scores accuracy over only those ids backend-side, so the lineage diverges
-  // wherever the subset-best ≠ the recorded winner — the same set the per-candidate
-  // bars recompute over. Serialized to a stable string so a same-content set
-  // doesn't re-fire the fetch.
-  const { sampleSet } = useSelection();
-  const samplesParam = useMemo(
-    () => (sampleSet && sampleSet.length > 0 ? sampleSet : null),
-    [sampleSet],
-  );
-  const samplesKey = samplesParam ? samplesParam.join(",") : "";
-  const liveWhatifFormula = useMemo(
-    () => (showWhatIf ? formulaFromWeights(whatifSelected, whatifWeights) : null),
-    [showWhatIf, whatifSelected, whatifWeights],
-  );
-  const whatifFormula = useDebounced(liveWhatifFormula, 250);
-  const [maskParam, abortParam] = useMemo(() => {
-    if (showWhatIf) return [whatifFormula, null] as const;
-    if (lens.startsWith("score:")) return [lens.slice(6), null] as const;
-    if (lens.startsWith("abort:")) return [null, lens.slice(6)] as const;
-    return [null, null] as const;
-  }, [showWhatIf, whatifFormula, lens]);
-  // Short label for whichever lens is REQUESTED (drives the fetch). The red tag
-  // itself is gated on a divergence actually being FOUND (`maskActive`, derived
-  // from the served overlay below) — not on the chip being toggled.
-  const maskLabel = showWhatIf
-    ? "What-If"
-    : samplesParam
-      ? "Sample set"
-      : LENS_LABELS[lens] ?? "";
-  // Refetch the campaign-wide tree the instant any mutation resolves (fork,
-  // cleanup, lifecycle) — the same revalidation seam the poll loops ride.
-  // `cycleId` is deliberately NOT a fetch dep: /lineage is campaign-scoped, so a
-  // same-campaign cycle switch returns identical data. `lens` IS a dep: it changes
-  // the served overlay.
-  const reval = useRevalidation();
-  const { data } = useFetch(
-    campaignId
-      ? (s) => fetchCampaignLineage(campaignId, maskParam, abortParam, samplesParam, s)
-      : null,
-    [campaignId, tick, reval, maskParam, abortParam, samplesKey],
-  );
-
-  // Served divergence overlay → lookup structures keyed by `{cycle_id}::r{round}`.
-  // divergenceByKey: marker nodes → the one-step alternative candidate (or null).
-  // divergentKeys: the counterfactual descendant subtree to render dimmed.
-  const divergenceByKey = useMemo(() => {
-    const m = new Map<string, string | null>();
-    for (const d of data?.divergences ?? []) m.set(d.node_key, d.alternative_candidate_id);
-    return m;
-  }, [data]);
-  const divergentKeys = useMemo(() => new Set(data?.divergent ?? []), [data]);
-
-  // The mask is "active" (red tag, fitness divider) only when the served overlay
-  // actually carries a divergence — NOT merely because a lens/chip is requested.
-  // Toggling Sample-set / What-If with no resulting divergence shows nothing.
-  const maskActive = divergenceByKey.size > 0 || divergentKeys.size > 0;
-
-  // Publish the served overlay so the per-candidate fitness can draw the same
-  // divergence boundary — the lineage card is the single fetcher; other surfaces
-  // render what it serves (R-36). Content-guarded in the store, so a bare poll is
-  // a no-op when the divergences are unchanged.
-  useEffect(() => {
-    setMaskState({
-      divergences: data?.divergences ?? [],
-      divergent: data?.divergent ?? [],
-      maskActive,
-      maskLabel,
-    });
-  }, [data, maskActive, maskLabel]);
+  // Shared campaign fetch + mask/lens overlay — the single source both this card
+  // and the fitness panel render (R-36). Backend-owned projection; the webapp
+  // renders served flags, never recomputes.
+  const { data, lens, setLens, maskActive, maskLabel, whatifActive, divergenceByKey, divergentKeys } =
+    useLineageOverlay();
 
   // Independent per-cycle expand state — one unified tree where every cycle
   // opens its intra-cycle candidate cladogram in place, any number at once.
@@ -289,10 +197,7 @@ export function useLineage({
       return [...map.entries()];
     }, [data, cycleId, dash, liveDashboards]),
   );
-  const detailByCycle: DetailByCycle = useMemo(
-    () => new Map(detailEntries),
-    [detailEntries],
-  );
+  const detailByCycle: DetailByCycle = useMemo(() => new Map(detailEntries), [detailEntries]);
 
   // One cladogram per session — every session root renders, including a lone
   // root with no forks (its single lane carries the intra-cycle view).
@@ -325,19 +230,10 @@ export function useLineage({
   const parentId = cycleId ? rootCycleId(cycleId) : null;
   const isInheritedSibling = parentId != null && parentId !== cycleId;
 
-  // Window refocus ⇒ re-fetch, so forks/cleanups made from another tab or the
-  // CLI surface without a manual reload.
-  useEffect(() => {
-    const onFocus = () => setTick((t) => t + 1);
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
-
   const stubCount = useMemo(
     () =>
-      (data?.cycles ?? []).filter(
-        (c) => c.rounds.length === 0 && c.sibling_kind !== "root",
-      ).length,
+      (data?.cycles ?? []).filter((c) => c.rounds.length === 0 && c.sibling_kind !== "root")
+        .length,
     [data],
   );
 
@@ -355,7 +251,6 @@ export function useLineage({
       await postCleanupEmpty(campaignId, rootCycleIds[0]);
       setCleanupAcked(true);
       setCleanupOpen(false);
-      setTick((t) => t + 1);
       bumpRevalidation();
     } catch (err) {
       setCleanupError((err as Error).message);
@@ -397,7 +292,7 @@ export function useLineage({
     setLens,
     maskActive,
     maskLabel,
-    whatifActive: showWhatIf,
+    whatifActive,
     divergenceByKey,
     divergentKeys,
   };

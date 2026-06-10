@@ -7,6 +7,7 @@ import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { FamilyTree } from "@/components/dashboard/lineage/FamilyTree";
 import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
 import { useSelection } from "@/lib/SelectionContext";
+import { LineageOverlayProvider } from "@/lib/lineage-overlay";
 import type { PipelineDoc } from "@/components/workflow/types";
 
 // The Now lane's main row + drill-down. Renders the Fitness + Lineage row,
@@ -45,15 +46,20 @@ export function NowTriad({
     useSelection();
   return (
     <>
-      <div className="dash-row-triad">
-        <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} />
-        <FamilyTree
-          dash={dash}
-          campaignId={campaignId}
-          cycleId={cycleId}
-          onSelectCycle={onSelectCycle}
-        />
-      </div>
+      {/* The lineage fetch + its mask/lens divergence overlay are owned here, once,
+          and read by BOTH the fitness panel and the lineage card — one served
+          overlay, no cross-widget module global (R-36). */}
+      <LineageOverlayProvider campaignId={campaignId}>
+        <div className="dash-row-triad">
+          <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} />
+          <FamilyTree
+            dash={dash}
+            campaignId={campaignId}
+            cycleId={cycleId}
+            onSelectCycle={onSelectCycle}
+          />
+        </div>
+      </LineageOverlayProvider>
       {candidate && (
         <div className="card inspector-row">
           <ScoringInspector

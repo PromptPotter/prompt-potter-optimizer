@@ -83,7 +83,9 @@ const CandidateNode = memo(function CandidateNode({
       >
         {n.candidateLabel} {fmtPct0(n.accuracy)}
       </text>
-      <rect x={n.x - CAND_STUB} y={n.y - 10} width={CAND_STUB + 110} height={20} fill="transparent" />
+      {/* Invisible click target: the candidate's own slot — its stub plus the one
+          column-width its label occupies before the next round's node. */}
+      <rect x={n.x - CAND_STUB} y={n.y - 10} width={CAND_STUB + COL_W} height={20} fill="transparent" />
     </g>
   );
 });

@@ -26,7 +26,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useFitnessBars } from "./useFitnessBars";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
-import { useMaskState, divergenceRoundsFor } from "@/lib/mask-store";
+import { useLineageOverlay, divergenceRoundsFor } from "@/lib/lineage-overlay";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -273,21 +273,21 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   );
 
   // Mask divergence boundary → the bar index where the active lens first parts
-  // ways with the realized record. The lineage card publishes the served overlay
-  // (R-36, never recomputed here); we map its earliest divergent round for THIS
-  // cycle to the first bar at/after it, and the chart draws a red divider at that
-  // bar's left edge. null whenever no mask is active or nothing diverges.
-  const mask = useMaskState();
+  // ways with the realized record. We read the shared served overlay (R-36, never
+  // recomputed here); we map its earliest divergent round for THIS cycle to the
+  // first bar at/after it, and the chart draws a red divider at that bar's left
+  // edge. null whenever no mask is active or nothing diverges.
+  const overlay = useLineageOverlay();
   const divergenceBoundary = useMemo(() => {
-    if (!mask.maskActive) return null;
-    const { points, subtree } = divergenceRoundsFor(mask, cycleId);
+    if (!overlay.maskActive) return null;
+    const { points, subtree } = divergenceRoundsFor(overlay, cycleId);
     let firstRound = Infinity;
     for (const r of points) firstRound = Math.min(firstRound, r);
     for (const r of subtree) firstRound = Math.min(firstRound, r);
     if (!Number.isFinite(firstRound)) return null;
     const idx = bars.findIndex((b) => b.round != null && b.round >= firstRound);
     return idx >= 0 ? idx : null;
-  }, [mask, cycleId, bars]);
+  }, [overlay, cycleId, bars]);
 
   return (
     <CardFrame
