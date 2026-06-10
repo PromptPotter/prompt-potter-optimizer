@@ -207,18 +207,26 @@ _ABORT_SUPPRESS: dict[str, frozenset[str]] = {
 }
 
 
-def _resolve_verdict(mask: str | None, abort: str | None) -> Verdict:
-    """The thin API-edge selector: a chosen lens → its verdict strategy. ``abort``
-    wins when both are sent (one active lens). A bad value is a clean 400."""
-    if abort is not None:
-        suppress = _ABORT_SUPPRESS.get(abort)
+def _resolve_verdict(lens: str | None) -> Verdict:
+    """The thin API-edge selector: one ``lens`` value → its verdict strategy.
+    ``abort:<variant>`` → the abort verdict; ``score:<formula>`` (or empty ⇒ the
+    accuracy default, used by a samples-only mask) → the scoring verdict. A bad value
+    is a clean 400."""
+    if lens and lens.startswith("abort:"):
+        variant = lens.removeprefix("abort:")
+        suppress = _ABORT_SUPPRESS.get(variant)
         if suppress is None:
             raise BadRequestError(
-                f"Unknown abort lens: {abort!r} (expected one of {sorted(_ABORT_SUPPRESS)})"
+                f"Unknown abort lens: {variant!r} (expected one of {sorted(_ABORT_SUPPRESS)})"
             )
         return make_abort_verdict(suppress)
+    if lens and not lens.startswith("score:"):
+        raise BadRequestError(
+            f"Unknown lens: {lens!r} (expected 'score:<formula>' or 'abort:<variant>')"
+        )
+    formula = lens.removeprefix("score:") if lens else None
     try:
-        return make_scoring_verdict(compile_round_scorer(mask))
+        return make_scoring_verdict(compile_round_scorer(formula))
     except (ValueError, SyntaxError) as exc:
         raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
 
@@ -238,27 +246,23 @@ def _parse_samples(samples: str | None) -> frozenset[int] | None:
 def _mask_overlay(
     store: StoreDep,
     campaign_id: str,
-    mask: str | None,
-    abort: str | None,
+    lens: str | None,
     samples: frozenset[int] | None,
 ) -> tuple[list[LineageDivergence], list[str]]:
     """Run the chosen lens over the realized record → served divergence overlay.
 
     Read-only: loads the record, folds the selected verdict, returns the markers +
     the dimmed subtree. *samples* (the sample-set mask) re-scores accuracy over the
-    subset at load time; it composes with a scoring ``mask`` (a What-If formula
-    reweighting the subset accuracy) and is ignored for the ``abort`` lens (which
-    reads the recorded firing log, not evaluators). A *known* evaluator simply absent
-    from an older round's stored namespace is handled inside the scoring verdict —
-    that candidate is skipped, the tree unaffected. The ``NameError`` catch here is
-    the backstop for any *other* lazy-eval name failure (clean 400, not a 500).
+    subset at load time; it composes with a ``score:`` lens (a What-If formula
+    reweighting the subset accuracy) and is ignored for an ``abort:`` lens (which reads
+    the recorded firing log, not evaluators). An evaluator absent from an older round's
+    stored namespace is resolved once, inside ``value_with_mask_applied`` — that
+    candidate is skipped, the tree unaffected; no second backstop here.
     """
-    verdict = _resolve_verdict(mask, abort)
-    record_samples = samples if abort is None else None
-    try:
-        result = find_divergences(load_mask_record(store, campaign_id, record_samples), verdict)
-    except NameError as exc:
-        raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
+    verdict = _resolve_verdict(lens)
+    is_abort = bool(lens and lens.startswith("abort:"))
+    record_samples = samples if not is_abort else None
+    result = find_divergences(load_mask_record(store, campaign_id, record_samples), verdict)
     divergences = [
         LineageDivergence(
             node_key=d.node_key,
@@ -278,8 +282,7 @@ def _mask_overlay(
 async def get_campaign_lineage(
     store: StoreDep,
     campaign_id: str,
-    mask: str | None = None,
-    abort: str | None = None,
+    lens: str | None = None,
     samples: str | None = None,
 ) -> CampaignLineageResponse:
     """Aggregated lineage for the whole campaign.
@@ -289,14 +292,15 @@ async def get_campaign_lineage(
     a ledger scan for fork-cut rounds when the index doesn't have them.
     The tree is built from each cycle's ``parent_cycle_id``.
 
-    Optional **lenses** select a divergence overlay. ``mask`` = an alternative
-    scoring formula (where that criterion would have forked the record). ``abort`` ∈
-    {``epsilon_off``, ``lock_in_off``, ``all_off``} = switch off a PoBB abort
-    contributor (``abort`` wins over ``mask`` if both sent). ``samples`` = a
+    An optional **lens** selects a divergence overlay. ``lens=score:<formula>`` = an
+    alternative scoring formula (where that criterion would have forked the record);
+    ``lens=abort:<variant>``, variant ∈ {``epsilon_off``, ``lock_in_off``,
+    ``all_off``} = switch off a PoBB abort contributor. ``samples`` = a
     comma-separated sample-id list (the **sample-set mask**): re-score accuracy over
     only those samples and mark where the subset-best diverges from the recorded
-    winner — it composes with ``mask`` (reweight the subset accuracy) and is ignored
-    for ``abort``. No lens ⇒ overlay empty, lineage byte-identical to the raw read.
+    winner — it composes with a ``score:`` lens (reweight the subset accuracy) and is
+    ignored for an ``abort:`` lens. No lens + no samples ⇒ overlay empty, lineage
+    byte-identical to the raw read.
     """
     if store.campaigns.load_campaign(campaign_id) is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
@@ -420,9 +424,7 @@ async def get_campaign_lineage(
 
     sample_ids = _parse_samples(samples)
     divergences, divergent = (
-        _mask_overlay(store, campaign_id, mask, abort, sample_ids)
-        if (mask or abort or sample_ids)
-        else ([], [])
+        _mask_overlay(store, campaign_id, lens, sample_ids) if (lens or sample_ids) else ([], [])
     )
     return CampaignLineageResponse(
         campaign_id=campaign_id,

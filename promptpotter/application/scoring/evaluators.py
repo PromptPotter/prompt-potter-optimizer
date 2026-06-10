@@ -36,6 +36,7 @@ __all__ = [
     "default_per_round_formula_short",
     "evaluators_meta",
     "materialize_round_values",
+    "materialize_row_derivable",
     "materialize_sample_values",
 ]
 
@@ -286,6 +287,15 @@ class Evaluator:
     direction: Literal["high", "low"] = "high"
     node_type: str | None = None
     applies: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
+    # True ⇒ a pure function of the persisted per-sample rows alone (``compute`` needs
+    # only ``results`` — no ``schema`` / ``node`` / ``opt_sp``). The read-side mask
+    # recomputes exactly this subset from ``all_candidate_results`` at read time
+    # (``materialize_row_derivable``), so it is present on every record regardless of
+    # when the record was written — no backfill, no namespace-gap. The complement
+    # (recall / cache / *_shortfall / pipeline_compactness / self-heal /
+    # prompt_compactness) needs the unpersisted schema/opt_sp and is read from the
+    # stored snapshot only.
+    from_rows: bool = False
 
 
 _REGISTRY: list[Evaluator] = [
@@ -294,6 +304,7 @@ _REGISTRY: list[Evaluator] = [
         description="Mean per-sample score across non-deprecated samples.",
         scope="per_round",
         compute=compute_accuracy,
+        from_rows=True,
     ),
     Evaluator(
         name="error_rate",
@@ -301,6 +312,7 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=compute_error_rate,
         direction="low",
+        from_rows=True,
     ),
     Evaluator(
         name="degraded_rate",
@@ -308,6 +320,7 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=compute_degraded_rate,
         direction="low",
+        from_rows=True,
     ),
     # Self-healers — one Evaluator per SELF_HEALERS spec; combined weight ~0.30 in default formula.
     *(_make_self_healer_evaluator(spec) for spec in SELF_HEALERS),
@@ -318,6 +331,7 @@ _REGISTRY: list[Evaluator] = [
         ),
         scope="per_round",
         compute=compute_latency_norm,
+        from_rows=True,
     ),
     Evaluator(
         name="source_recall",
@@ -378,6 +392,7 @@ _REGISTRY: list[Evaluator] = [
         ),
         scope="per_round",
         compute=compute_output_compactness,
+        from_rows=True,
     ),
     Evaluator(
         name="prompt_compactness",
@@ -447,6 +462,20 @@ def materialize_round_values(
             kwargs["node"] = node
         values[display_name] = round(float(ev.compute(**kwargs)), 6)
     return values
+
+
+def materialize_row_derivable(results: list[QueryMeasurement]) -> dict[str, float]:
+    """Materialize the per-round evaluators that are pure functions of the persisted
+    per-sample rows (``Evaluator.from_rows``) — ``accuracy``, ``output_compactness``,
+    ``latency_norm``, ``error_rate``, ``degraded_rate``. No schema, no ``opt_sp``: the
+    read-side mask recomputes exactly these from ``all_candidate_results`` so they are
+    present on every record (and re-scored over a sample subset when masked), while the
+    schema/opt_sp-bound evaluators come from the stored snapshot."""
+    return {
+        ev.name: round(float(ev.compute(results=results)), 6)
+        for ev in _REGISTRY
+        if ev.scope == "per_round" and ev.from_rows
+    }
 
 
 def materialize_sample_values(

@@ -24,7 +24,7 @@ from promptpotter.application.mask.record import (
     MaskRound,
 )
 from promptpotter.application.optimization.l1.score.winner import is_leader_eligible
-from promptpotter.application.scoring.metrics import accuracy_over_samples
+from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.results import ScoredCandidate
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.base import read_json_optional
@@ -46,41 +46,50 @@ def _candidates(round_file: dict[str, Any], samples: frozenset[int] | None) -> l
         for c in round_file.get("scoreboard", [])
         if isinstance(c, dict) and c.get("is_winner") and c.get("candidate_id")
     }
-    # Sample-set mask: re-score accuracy over only the selected samples, read from
-    # the per-sample rows already on disk. The full evaluator namespace stays at its
-    # stored (full-set) values — only `accuracy`, the sample-dependent term, moves —
-    # so a What-If formula reweighting accuracy reshapes the election on the subset.
-    per_sample = round_file.get("all_candidate_results") or {} if samples is not None else {}
+    # The per-sample rows already on disk. The row-derivable evaluator subset
+    # (accuracy, output_compactness, latency_norm, …) is recomputed from these and
+    # merged over the stored snapshot — present on every record regardless of when it
+    # was written. A sample-set mask filters the rows to the selected subset first, so
+    # those same evaluators (accuracy especially) re-score on the subset and a What-If
+    # formula reshapes the election there.
+    all_rows = round_file.get("all_candidate_results") or {}
     out: list[MaskCandidate] = []
     for cs in round_file.get("candidate_scores", []):
         if not isinstance(cs, dict) or not cs.get("candidate_id"):
             continue
         sc = ScoredCandidate.model_validate(cs)
-        evaluators = dict(sc.evaluators)
-        accuracy = sc.accuracy
+        rows = all_rows.get(sc.candidate_id) or []
         if samples is not None:
-            acc, n_measured = accuracy_over_samples(per_sample.get(sc.candidate_id) or [], samples)
-            if n_measured == 0:
+            rows = [r for r in rows if r.get("sample_id") in samples]
+            if not rows:
                 # Never ran any selected sample → unscorable on this set. Empty
                 # evaluators make the verdict + winner-threading skip it uniformly,
                 # exactly like a candidate with no stored values.
-                evaluators = {}
-                accuracy = 0.0
-            else:
-                accuracy = acc
-                if evaluators:
-                    evaluators["accuracy"] = acc
-        out.append(
-            MaskCandidate(
-                candidate_id=sc.candidate_id,
-                evaluators=evaluators,
-                accuracy=accuracy,
-                is_winner=sc.candidate_id in winners,
-                is_eligible=_mask_eligible(sc),
-                abort=_abort_contributor(sc),
-            )
-        )
+                out.append(_mask_candidate(sc, {}, 0.0, winners))
+                continue
+        evaluators = dict(sc.evaluators)
+        accuracy = sc.accuracy
+        # Refresh the row-derivable subset from the rows (full set, or the masked
+        # subset). The snapshot supplies the schema/opt_sp-bound names. An empty
+        # snapshot = invalid/force-zeroed candidate → leave empty so it stays skipped.
+        if evaluators and rows:
+            evaluators.update(materialize_row_derivable(rows))
+            accuracy = evaluators["accuracy"]
+        out.append(_mask_candidate(sc, evaluators, accuracy, winners))
     return out
+
+
+def _mask_candidate(
+    sc: ScoredCandidate, evaluators: dict[str, float], accuracy: float, winners: set[str]
+) -> MaskCandidate:
+    return MaskCandidate(
+        candidate_id=sc.candidate_id,
+        evaluators=evaluators,
+        accuracy=accuracy,
+        is_winner=sc.candidate_id in winners,
+        is_eligible=_mask_eligible(sc),
+        abort=_abort_contributor(sc),
+    )
 
 
 def _abort_contributor(sc: ScoredCandidate) -> str | None:

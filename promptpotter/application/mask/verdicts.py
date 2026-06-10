@@ -35,19 +35,16 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
     """
 
     def _key(evaluators: Mapping[str, float], accuracy: float) -> tuple[float, float] | None:
-        # A candidate/anchor whose stored namespace can't satisfy this mask's
-        # formula — it references an evaluator absent from those values — is
-        # *unscorable under the mask*, not a crash. This is the new-evaluator-on-
-        # old-data case: a round measured before an evaluator existed (backfill is
-        # best-effort) carries an incomplete namespace. Same class of incompleteness
-        # as the `not c.evaluators` skip below: partial data → can't compare, so
-        # return None and let the caller treat it like a missing candidate. The
-        # realized formula only names evaluators that WERE stored, so feeding it
+        # A candidate/anchor whose stored namespace can't satisfy this mask's formula —
+        # it references a schema-bound evaluator absent from those values — is
+        # *unscorable under the mask*, not a crash. ``value_with_mask_applied`` owns
+        # that single resolution (returns None); same class of incompleteness as the
+        # `not c.evaluators` skip below, so we thread None to the caller as a missing
+        # candidate. Row-derivable evaluators are recomputed into every record upstream,
+        # and the realized formula only names evaluators that WERE stored, so feeding it
         # never trips this — self-consistency is untouched.
-        try:
-            return round_winner_key(value_with_mask_applied(evaluators, criterion), accuracy)
-        except NameError:
-            return None
+        value = value_with_mask_applied(evaluators, criterion)
+        return None if value is None else round_winner_key(value, accuracy)
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
         # Origin round 0 holds no election; and without the anchor we cannot
