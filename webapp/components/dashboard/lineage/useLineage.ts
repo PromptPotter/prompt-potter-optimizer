@@ -101,6 +101,11 @@ export interface Lineage {
   isInheritedSibling: boolean;
   parentId: string | null;
   cleanup: LineageCleanup;
+  // Scoring-mask lens + the served divergence overlay it produced.
+  mask: string | null;
+  setMask: (mask: string | null) => void;
+  divergenceByKey: ReadonlyMap<string, string | null>;
+  divergentKeys: ReadonlySet<string>;
 }
 
 export function useLineage({
@@ -113,15 +118,31 @@ export function useLineage({
   cycleId: string | null;
 }): Lineage {
   const [tick, setTick] = useState(0);
+  // The scoring-mask lens (an alternative scoring formula, e.g. "accuracy"); null
+  // = off. When set, the lineage fetch carries it and the response includes the
+  // divergence overlay. Backend-owned projection — the webapp only renders the
+  // served flags, never recomputes scores (R-36).
+  const [mask, setMask] = useState<string | null>(null);
   // Refetch the campaign-wide tree the instant any mutation resolves (fork,
   // cleanup, lifecycle) — the same revalidation seam the poll loops ride.
   // `cycleId` is deliberately NOT a fetch dep: /lineage is campaign-scoped, so a
-  // same-campaign cycle switch returns identical data.
+  // same-campaign cycle switch returns identical data. `mask` IS a dep: it changes
+  // the served overlay.
   const reval = useRevalidation();
   const { data } = useFetch(
-    campaignId ? (s) => fetchCampaignLineage(campaignId, s) : null,
-    [campaignId, tick, reval],
+    campaignId ? (s) => fetchCampaignLineage(campaignId, mask, s) : null,
+    [campaignId, tick, reval, mask],
   );
+
+  // Served divergence overlay → lookup structures keyed by `{cycle_id}::r{round}`.
+  // divergenceByKey: marker nodes → the one-step alternative candidate (or null).
+  // divergentKeys: the counterfactual descendant subtree to render dimmed.
+  const divergenceByKey = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const d of data?.divergences ?? []) m.set(d.node_key, d.alternative_candidate_id);
+    return m;
+  }, [data]);
+  const divergentKeys = useMemo(() => new Set(data?.divergent ?? []), [data]);
 
   // Independent per-cycle expand state — one unified tree where every cycle
   // opens its intra-cycle candidate cladogram in place, any number at once.
@@ -294,5 +315,9 @@ export function useLineage({
     isInheritedSibling,
     parentId,
     cleanup,
+    mask,
+    setMask,
+    divergenceByKey,
+    divergentKeys,
   };
 }

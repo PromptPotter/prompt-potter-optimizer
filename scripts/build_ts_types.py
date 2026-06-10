@@ -51,6 +51,7 @@ from promptpotter.presentation.api.routers.campaigns.lineage import (
     CampaignLineageCycle,
     CampaignLineageResponse,
     CampaignLineageRound,
+    LineageDivergence,
 )
 from promptpotter.presentation.api.routers.campaigns.registry import (
     CampaignListResponse,
@@ -113,6 +114,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     CampaignLineageCandidate,
     CampaignLineageRound,
     CampaignLineageCycle,
+    LineageDivergence,
     CampaignLineageResponse,
     # --- measurements router ---
     PerQueryRow,

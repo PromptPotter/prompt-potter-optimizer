@@ -364,10 +364,14 @@ export function fetchCycles(signal?: AbortSignal): Promise<CyclesResponse> {
 
 export function fetchCampaignLineage(
   campaignId: string,
+  mask: string | null,
   signal?: AbortSignal,
 ): Promise<CampaignLineageResponse> {
+  // `mask` is an alternative scoring formula; when set the response carries the
+  // divergence overlay (where that criterion would have forked the record).
+  const q = mask ? `?mask=${encodeURIComponent(mask)}` : "";
   return jget<CampaignLineageResponse>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}/lineage`,
+    `${API}/campaigns/${encodeURIComponent(campaignId)}/lineage${q}`,
     signal,
   );
 }

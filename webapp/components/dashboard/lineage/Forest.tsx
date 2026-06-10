@@ -30,18 +30,24 @@ const CandidateNode = memo(function CandidateNode({
   n,
   selected,
   onPick,
+  dimmed,
+  alt,
 }: {
   n: RoundNodePos;
   selected: boolean;
   onPick: (n: RoundNodePos) => void;
+  // Mask overlay (served): `dimmed` = in the counterfactual subtree past a
+  // divergence; `alt` = this candidate is the one the lens would have elected.
+  dimmed: boolean;
+  alt: boolean;
 }) {
   return (
     <g
-      className={cx("lineage-node", selected && "selected")}
+      className={cx("lineage-node", selected && "selected", dimmed && "mask-divergent", alt && "mask-alt")}
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, accuracy ${fmtPct0(n.accuracy)}${n.isWinner ? ", round winner" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, accuracy ${fmtPct0(n.accuracy)}${n.isWinner ? ", round winner" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       onClick={() => onPick(n)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -51,6 +57,11 @@ const CandidateNode = memo(function CandidateNode({
       }}
       style={{ cursor: "pointer" }}
     >
+      {alt && (
+        <text x={n.x - CAND_STUB - 7} y={n.y + 3} className="lineage-mask-marker" aria-hidden="true">
+          ◆
+        </text>
+      )}
       <line
         x1={n.x - CAND_STUB}
         y1={n.y}
@@ -81,6 +92,8 @@ export function Forest({
   expanded,
   onLaneActivate,
   onSelectCycle,
+  divergenceByKey,
+  divergentKeys,
   sessionLabel,
 }: {
   tree: CycleNode;
@@ -95,9 +108,16 @@ export function Forest({
   // Navigate the dashboard to a cycle — fired when a candidate in a non-selected
   // lane is clicked (the inspector/samples follow the searchpoint).
   onSelectCycle: (campaignId: string, cycleId: string) => void;
+  // Served scoring-mask overlay, keyed by `{cycle_id}::r{round}`. divergenceByKey:
+  // a divergence node → the one-step alternative candidate id (or null = origin
+  // would hold). divergentKeys: the dimmed counterfactual subtree. Both empty
+  // when no lens is active. Rendered, never recomputed (R-36).
+  divergenceByKey: ReadonlyMap<string, string | null>;
+  divergentKeys: ReadonlySet<string>;
   sessionLabel: string | null;
 }) {
   const { candidate, setSelectionForCandidate } = useSelection();
+  const nodeKey = (cid: string, round: number): string => `${cid}::r${round}`;
   // Layout is pure + the inputs are content-stabilized upstream, so this memo
   // re-runs only on a real shape change (new round / candidate / winner flip /
   // lane toggle), never on a bare 2 s poll.
@@ -265,10 +285,18 @@ export function Forest({
                   ? cyc.dataset_name || cyc.cycle_id
                   : shortFamilyTail(cyc.cycle_id);
               })();
+              const key = nodeKey(n.cycleId, n.round);
+              const isDivergence = divergenceByKey.has(key);
+              const isDivergent = divergentKeys.has(key);
               return (
                 <g
                   key={`n-${n.cycleId}-${n.round}`}
-                  className={cx("family-cladogram-node", cycleSelected && "selected")}
+                  className={cx(
+                    "family-cladogram-node",
+                    cycleSelected && "selected",
+                    isDivergent && "mask-divergent",
+                    isDivergence && "mask-divergence",
+                  )}
                   onClick={() => onLaneActivate(n.cycleId)}
                   style={{ cursor: "pointer" }}
                 >
@@ -278,6 +306,14 @@ export function Forest({
                     r={NODE_R}
                     className={`family-cladogram-dot kind-${n.sibling_kind}`}
                   />
+                  {isDivergence && (
+                    <circle
+                      cx={n.x}
+                      cy={n.y}
+                      r={NODE_R + 3}
+                      className="family-cladogram-divergence-ring"
+                    />
+                  )}
                   <text
                     x={n.x}
                     y={n.y - 6}
@@ -298,6 +334,8 @@ export function Forest({
                   <title>
                     {n.cycleId} · R{n.round} · {fmtPct0(n.accuracy)}
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
+                    {isDivergence ? "\n◆ divergence under the scoring lens" : ""}
+                    {isDivergent ? "\ncounterfactual under the scoring lens" : ""}
                   </title>
                 </g>
               );
@@ -306,19 +344,24 @@ export function Forest({
           {/* Expanded candidate nodes (lineage-style stubs). */}
           {nodes
             .filter((n) => n.isExpanded)
-            .map((n) => (
-              <CandidateNode
-                key={`c-${n.cycleId}-${n.round}-${n.candidateId}`}
-                n={n}
-                selected={
-                  n.cycleId === cycleId &&
-                  candidate != null &&
-                  candidate.round === n.round &&
-                  candidate.candidate_id === n.candidateId
-                }
-                onPick={onPickCandidate}
-              />
-            ))}
+            .map((n) => {
+              const key = nodeKey(n.cycleId, n.round);
+              return (
+                <CandidateNode
+                  key={`c-${n.cycleId}-${n.round}-${n.candidateId}`}
+                  n={n}
+                  selected={
+                    n.cycleId === cycleId &&
+                    candidate != null &&
+                    candidate.round === n.round &&
+                    candidate.candidate_id === n.candidateId
+                  }
+                  onPick={onPickCandidate}
+                  dimmed={divergentKeys.has(key)}
+                  alt={divergenceByKey.get(key) === n.candidateId && n.candidateId !== ""}
+                />
+              );
+            })}
 
           {/* Expanded lanes carry their cycle label beside the last winner. */}
           {nodes

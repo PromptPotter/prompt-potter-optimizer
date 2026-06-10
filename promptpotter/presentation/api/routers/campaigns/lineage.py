@@ -12,6 +12,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from promptpotter.application.mask import find_divergences, make_scoring_verdict
+from promptpotter.application.mask.load import load_mask_record
+from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import (
     UNATTRIBUTED_OPERATOR,
@@ -25,7 +28,7 @@ from promptpotter.infrastructure.store.base import read_json_optional
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 # An operator-steered fork is a clean offshoot: numbering restarts at 1, so all
 # its rounds are post-divergence by definition and the lane sits one column past
@@ -80,11 +83,35 @@ class CampaignLineageCycle(BaseModel):
     rounds: list[CampaignLineageRound]
 
 
+class LineageDivergence(BaseModel):
+    """A mask divergence point — the first node on a branch an alternative scoring
+    criterion would have forked. Rendered as a marker on that node (not dimmed);
+    nodes in ``divergent`` are its counterfactual descendant subtree (dimmed).
+    Empty unless the request carried a ``mask`` criterion."""
+
+    node_key: str = Field(description="Lineage node id, formatted `{cycle_id}::r{round}`")
+    cycle_id: str
+    round: int
+    alternative_candidate_id: str | None = Field(
+        default=None,
+        description="The candidate the masked criterion would have elected instead "
+        "(measured, so nameable); null when the round would simply have held on origin.",
+    )
+
+
 class CampaignLineageResponse(BaseModel):
     campaign_id: str
     cycles: list[CampaignLineageCycle] = Field(
         description="Every cycle in the campaign (root + forks + sweeps + diag). "
         "Sorted by cycle id; lay out via immediate_parent_cycle_id."
+    )
+    # Mask overlay — computed only when the request carries a ``mask`` scoring
+    # criterion; both empty otherwise (the unmasked lineage is byte-identical to
+    # before). Match a divergence / dimmed node to a tree node by `{cycle_id}::r{round}`.
+    divergences: list[LineageDivergence] = Field(default_factory=list)
+    divergent: list[str] = Field(
+        default_factory=list,
+        description="Node keys of the counterfactual subtree to render dimmed.",
     )
 
 
@@ -166,17 +193,53 @@ def _filter_post_divergence_rounds(
     return [r for r in rounds if r.round > fork_from_round]
 
 
+def _mask_overlay(
+    store: StoreDep, campaign_id: str, mask: str
+) -> tuple[list[LineageDivergence], list[str]]:
+    """Run the scoring mask over the realized record → served divergence overlay.
+
+    ``mask`` is the swapped scoring formula (e.g. ``"accuracy"``); a bad formula is a
+    clean 400 — syntax/disallowed at compile, an unknown evaluator name (``eval`` is
+    lazy) when the verdict first scores. Read-only: loads the record, folds the
+    scoring verdict, returns the markers + the dimmed subtree.
+    """
+    try:
+        scorer = compile_round_scorer(mask)
+        result = find_divergences(
+            load_mask_record(store, campaign_id), make_scoring_verdict(scorer)
+        )
+    except (ValueError, SyntaxError, NameError) as exc:
+        raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
+    divergences = [
+        LineageDivergence(
+            node_key=d.node_key,
+            cycle_id=d.cycle_id,
+            round=d.round,
+            alternative_candidate_id=d.alternative_candidate_id,
+        )
+        for d in result.divergences
+    ]
+    return divergences, result.divergent
+
+
 @campaigns_router.get(
     "/campaigns/{campaign_id}/lineage",
     response_model=CampaignLineageResponse,
 )
-async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLineageResponse:
+async def get_campaign_lineage(
+    store: StoreDep, campaign_id: str, mask: str | None = None
+) -> CampaignLineageResponse:
     """Aggregated lineage for the whole campaign.
 
     One pass over every cycle in the campaign — reads each index.json
     (which already carries the per-round scoreboard) and supplements with
     a ledger scan for fork-cut rounds when the index doesn't have them.
     The tree is built from each cycle's ``parent_cycle_id``.
+
+    ``mask`` (optional) is an alternative scoring formula; when present the response
+    carries the **divergence overlay** — where that criterion would have forked the
+    record (markers + the dimmed counterfactual subtree). Absent ⇒ both empty, the
+    lineage byte-identical to the unmasked read.
     """
     if store.campaigns.load_campaign(campaign_id) is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
@@ -298,4 +361,10 @@ async def get_campaign_lineage(store: StoreDep, campaign_id: str) -> CampaignLin
             )
         )
 
-    return CampaignLineageResponse(campaign_id=campaign_id, cycles=out_cycles)
+    divergences, divergent = _mask_overlay(store, campaign_id, mask) if mask else ([], [])
+    return CampaignLineageResponse(
+        campaign_id=campaign_id,
+        cycles=out_cycles,
+        divergences=divergences,
+        divergent=divergent,
+    )

@@ -26,6 +26,14 @@ from promptpotter.application.intelligence.exploration import (
     fit_rasch,
     select_round_subset,
 )
+from promptpotter.application.mask import (
+    MaskCandidate,
+    MaskCycle,
+    MaskRecord,
+    MaskRound,
+    find_divergences,
+    make_scoring_verdict,
+)
 from promptpotter.application.scoring.evaluators import all_evaluators, materialize_round_values
 from promptpotter.application.scoring.formula import compile_scorer, extract_display_answer
 from promptpotter.application.scoring.formula.matchers import (
@@ -300,6 +308,57 @@ def test_matched_origin_stats_restricts_to_candidate_subset():
     assert full["hits"] == 10
     assert full["total"] == 20
     assert full["accuracy"] == pytest.approx(0.5)
+
+
+def _mask_cand(cid: str, acc: float, **kw: object) -> MaskCandidate:
+    return MaskCandidate(candidate_id=cid, evaluators={"accuracy": acc}, accuracy=acc, **kw)  # type: ignore[arg-type]
+
+
+def test_mask_scoring_divergence_self_consistency_and_eligibility():
+    """The scoring mask's correctness backbone, in one record.
+
+    Realized election (``winner.py``): argmax round_winner_key over {origin-anchor}
+    ∪ *eligible* candidates. Round 1: origin C0=0.5, A=0.75 (winner), B=0.25, and an
+    INELIGIBLE C=1.0 (escalation-aborted-style). Round 2: A carries to anchor, D=1.0
+    wins.
+
+    (a) Self-consistency + eligibility: feeding the *realizing* criterion
+    (``accuracy``) reproduces every is_winner → zero divergences. C's 1.0 must NOT
+    fabricate one — the verdict carries the recorded eligibility filter, not just the
+    formula (the reviewer's load-bearing point).
+    (b) Swap: under ``1 - accuracy`` the round-1 leader flips to B → one divergence
+    at r1 naming B, and the descendant subtree (r2) is marked divergent.
+    """
+    r0 = MaskRound(cycle_id="cyc", round=0, candidates=[_mask_cand("C0", 0.5, is_winner=True)])
+    r1 = MaskRound(
+        cycle_id="cyc",
+        round=1,
+        anchor_evaluators={"accuracy": 0.5},
+        anchor_accuracy=0.5,
+        candidates=[
+            _mask_cand("A", 0.75, is_winner=True),
+            _mask_cand("B", 0.25),
+            _mask_cand("C", 1.0, is_eligible=False),  # higher score, but excluded
+        ],
+    )
+    r2 = MaskRound(
+        cycle_id="cyc",
+        round=2,
+        anchor_evaluators={"accuracy": 0.75},  # A carried forward
+        anchor_accuracy=0.75,
+        candidates=[_mask_cand("D", 1.0, is_winner=True)],
+    )
+    record = MaskRecord(cycles=[MaskCycle(cycle_id="cyc", rounds=[r0, r1, r2])])
+
+    realized = find_divergences(record, make_scoring_verdict("accuracy"))
+    assert realized.divergences == []
+    assert realized.divergent == []
+
+    swapped = find_divergences(record, make_scoring_verdict("1 - accuracy"))
+    assert [(d.node_key, d.alternative_candidate_id) for d in swapped.divergences] == [
+        ("cyc::r1", "B")
+    ]
+    assert swapped.divergent == ["cyc::r2"]
 
 
 def test_composite_fitness_zeroed_on_validation_failure():

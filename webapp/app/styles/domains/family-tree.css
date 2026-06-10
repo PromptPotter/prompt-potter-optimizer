@@ -67,6 +67,19 @@
 .family-cladogram-lane-hit:hover{fill:var(--color-background-hover);opacity:0.5}
 .family-cladogram-lane-hit:focus{outline:none}
 .family-cladogram-lane-hit:focus-visible{fill:var(--color-background-hover);opacity:0.5}
+/* Scoring-mask (lens) overlay — divergence marker + dimmed counterfactual
+   subtree, rendered from the served overlay (never recomputed). The dim always
+   pairs with an aria-label + tooltip, never colour alone. */
+.family-cladogram-node.mask-divergent,
+.lineage-node.mask-divergent{opacity:0.38}
+.family-cladogram-divergence-ring{fill:none;stroke:var(--color-accent);stroke-width:1.5;stroke-dasharray:2 2}
+.lineage-node.mask-alt .lineage-label{fill:var(--color-accent);font-weight:600}
+.lineage-node.mask-alt .lineage-stub{stroke:var(--color-accent);stroke-width:3}
+.lineage-mask-marker{fill:var(--color-accent);font-size:11px;font-weight:700}
+/* Scoring-lens selector in the card header. */
+.lineage-lens{display:inline-flex;align-items:center;gap:4px}
+.lineage-lens-label{font-size:11px;color:var(--color-text-tertiary);text-transform:none;letter-spacing:0}
+.lineage-lens-select{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:1px 4px}
 /* Header right-side cluster: badge + "Clean up N stubs" button. */
 .family-cladogram-head-meta{display:inline-flex;align-items:center;gap:8px}
 .family-cladogram-cleanup-btn{background:transparent;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text-secondary);cursor:pointer;font:inherit;font-size:11px;padding:2px 8px;text-transform:none;letter-spacing:0}

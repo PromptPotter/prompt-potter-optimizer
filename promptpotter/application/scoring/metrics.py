@@ -42,6 +42,7 @@ __all__ = [
     "find_rank",
     "has_pipeline_warnings",
     "matched_origin_stats",
+    "value_with_mask_applied",
 ]
 
 
@@ -316,3 +317,26 @@ def matched_origin_stats(
         "total": base["total"],
         "composite_fitness": composite["composite_fitness"],
     }
+
+
+def value_with_mask_applied(
+    evaluators: Mapping[str, float],
+    criterion: RoundScorer | str | None,
+) -> float:
+    """A candidate's round value under an alternative scoring criterion, recomputed
+    from its **stored, already-materialized evaluator namespace** — no schema, no
+    re-run.
+
+    The single re-evaluation seam the scoring **mask** verdict routes through — the
+    mask layer owns no scoring math of its own, it asks here. The round score is a
+    formula over the per-round evaluator values (``accuracy``, ``latency_norm``,
+    ``*_recall``, ``prompt_compactness``, the self-heal rates, …); a *scoring swap* is
+    that same evaluator namespace under a different formula. Because the realized
+    ``composite_fitness`` was itself ``realized_formula(evaluators)``, feeding the
+    realizing criterion here reproduces it **exactly** — the mask's self-consistency
+    gate holds by construction, and the read path needs no ``PipelineSchema`` (which
+    is never persisted). ``criterion`` is a formula string (e.g. ``"accuracy"``), a
+    compiled ``RoundScorer``, or ``None`` (the round-scorer default = accuracy-only).
+    """
+    scorer = criterion if callable(criterion) else compile_round_scorer(criterion)
+    return float(scorer(dict(evaluators)))

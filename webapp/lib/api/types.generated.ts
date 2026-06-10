@@ -413,11 +413,25 @@ export interface CampaignLineageCycle {
   rounds: CampaignLineageRound[];
 }
 
+/** A mask divergence point — the first node on a branch an alternative scoring */
+export interface LineageDivergence {
+  /** Lineage node id, formatted `{cycle_id}::r{round}` */
+  node_key: string;
+  cycle_id: string;
+  round: number;
+  /** The candidate the masked criterion would have elected instead (measured, so
+   * nameable); null when the round would simply have held on origin. */
+  alternative_candidate_id: string | null;
+}
+
 export interface CampaignLineageResponse {
   campaign_id: string;
   /** Every cycle in the campaign (root + forks + sweeps + diag). Sorted by cycle
    * id; lay out via immediate_parent_cycle_id. */
   cycles: CampaignLineageCycle[];
+  divergences: LineageDivergence[];
+  /** Node keys of the counterfactual subtree to render dimmed. */
+  divergent: string[];
 }
 
 export interface PerQueryRow {

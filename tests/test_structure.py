@@ -153,6 +153,20 @@ CALL_BANS: tuple[CallBan, ...] = (
         match="attr",
         allow=frozenset({"application/optimization/dispatch/llm_call/call.py"}),
     ),
+    CallBan(
+        id="mask_read_only",
+        names=frozenset({"write_json", "write_text", "write_bytes"}),
+        message="The mask package persists nothing — it is a read-only projection "
+        "(no mask state on disk; decision #1 in docs/specs/mask-projection.md).",
+        under="application/mask",
+    ),
+    CallBan(
+        id="mask_reeval_seam",
+        names=frozenset({"compute_composite_fitness", "compile_round_scorer"}),
+        message="Mask re-evaluation math must route through value_with_mask_applied — "
+        "no parallel scoring kernel in the mask package.",
+        under="application/mask",
+    ),
 )
 
 
