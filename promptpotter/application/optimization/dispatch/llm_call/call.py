@@ -77,6 +77,15 @@ _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
 
 
 HEARTBEAT_INTERVAL_S = 15.0
+
+# A single logical optimizer call may fire ONE schema-repair retry inside
+# chat() — a full second round-trip the client appends on schema-noncompliant
+# output (openai_compat.py, ~2x latency; capped at one). OPTIMIZER_CALL_DEADLINE_S
+# is the per-round-trip ceiling; the logical-call wall budgets for both so a
+# healthy-but-slow reasoning model that needs a repair doesn't false-halt (the
+# bug: initial ~150s + repair ~150s = ~300s tripped a flat 180s ceiling even
+# though neither round-trip hung).
+_MAX_ROUND_TRIPS_PER_CALL = 2
 """Seconds between in-flight progress ticks.
 
 15s is a compromise: short enough that the operator sees a fresh
@@ -132,23 +141,28 @@ async def _chat_under_deadline(
     is retried once; a second raises :class:`TimeoutError` to the caller.
     :func:`run_round_loop` turns that into ``StopReason.OPTIMIZER_TIMEOUT``
     — a graceful, operator-recoverable halt.
+
+    The wall budget is the per-round-trip ceiling times the worst-case
+    round-trip count, because one ``chat()`` may include a schema-repair
+    retry (a second full call); see ``_MAX_ROUND_TRIPS_PER_CALL``.
     """
+    budget_s = OPTIMIZER_CALL_DEADLINE_S * _MAX_ROUND_TRIPS_PER_CALL
     for attempt in range(2):
         try:
-            async with asyncio.timeout(OPTIMIZER_CALL_DEADLINE_S):
+            async with asyncio.timeout(budget_s):
                 return await llm_client.chat(**chat_kwargs)
         except TimeoutError:
             if attempt == 0:
                 logger.warning(
                     "optimizer call %s exceeded the %.0fs deadline — retrying once",
                     node_label,
-                    OPTIMIZER_CALL_DEADLINE_S,
+                    budget_s,
                 )
                 continue
             logger.error(
                 "optimizer call %s exceeded the %.0fs deadline twice — halting",
                 node_label,
-                OPTIMIZER_CALL_DEADLINE_S,
+                budget_s,
             )
             raise
     raise AssertionError("unreachable — the loop returns or raises on every path")

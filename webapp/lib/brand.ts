@@ -40,7 +40,7 @@ export const BRAND = {
     title: process.env.NEXT_PUBLIC_MARKETING_TITLE || "PromptPotter",
     tagline:
       process.env.NEXT_PUBLIC_MARKETING_TAGLINE ||
-      "LLM-driven program evolution — fix a broken LLM pipeline in half a day, then it just works.",
+      "Give PromptPotter the prompt you're already using; it returns critiqued, improved versions with rich evaluation metadata — a significant, measured gain in about five minutes.",
   },
   // Default to the repo issue tracker — the live beta support channel (the
   // hosted /support page isn't up yet). Whitelabel distributors override via

@@ -92,6 +92,23 @@ Knots 1–4 shipped in the v0.8.1 panel-fix arc (git log). Remaining:
 
 ### Standing entries
 
+- **Optimizer model unreliable on heavy l2/l3 structured output (operator's model call)** —
+  the L3-plan-timeout *false-halt* is fixed (the wall budget now covers the
+  schema-repair round-trip — `OPTIMIZER_CALL_DEADLINE_S` is per-round-trip,
+  `_MAX_ROUND_TRIPS_PER_CALL` budgets initial+repair in
+  `dispatch/llm_call/call.py`). The *deeper* root remains: `openrouter/gpt-oss-120b`
+  (all optimizer nodes) is both slow (~150s on a heavy `l3_plan` prompt) and
+  schema-noncompliant on the large `L3PlanOutput`/`L2*` shapes, so it routinely
+  fires the ~2× repair retry and sometimes fails it (`l1_zero_candidates` /
+  `OPTIMIZER_TIMEOUT`). *Why it's here, not a code fix:* swapping the optimizer
+  model is a cost/quality decision and a per-node overlay edit
+  (`datasets/_optimizer/pipeline.json::nodes.{l2_context,l3_plan}.config.model`),
+  not a service-code change (R-13). **Action (needs operator pick):** evaluate a
+  faster/more-schema-reliable model for `l2_context` + `l3_plan` specifically
+  (they carry the largest schemas), or shrink the `L3PlanOutput` schema surface.
+  **Blocker:** operator chooses the model; needs a live cycle that reaches L3 to
+  measure repair-rate before/after.
+
 - **HITL notebook (`notebooks/optimization_campaign.ipynb`) has rotted against
   the orchestration API** — not CI-gated, so it drifted unnoticed across the
   ingest/origin unify arc. Three confirmed breaks: (1) the `data-setup` cell

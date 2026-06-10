@@ -72,13 +72,17 @@ DEFAULT_CONNECTOR_TYPE = "default"
 
 # Optimizer-call reliability + size visibility.
 #
-# OPTIMIZER_CALL_DEADLINE_S — total wall-clock ceiling on one optimizer LLM
-# call. ``llm_call`` wraps each attempt in ``asyncio.timeout``. The provider
-# SDK's own timeout is a per-read-gap timeout, not a total one: a reasoning
-# model streaming a large output slowly never trips it and the call can hang
-# indefinitely. Healthy optimizer calls run 8-40s; 180s is a generous ceiling
-# that still bounds a runaway. One transient timeout is retried; a second
-# halts the loop with ``StopReason.OPTIMIZER_TIMEOUT``.
+# OPTIMIZER_CALL_DEADLINE_S — wall-clock ceiling on a single optimizer LLM
+# round-trip. ``llm_call`` wraps each logical call in ``asyncio.timeout`` sized
+# for the worst case (initial round-trip + one schema-repair retry — the client
+# fires a full second call on schema-noncompliant output, ~2x latency; see
+# ``_MAX_ROUND_TRIPS_PER_CALL``). The provider SDK's own timeout is a per-read-gap
+# timeout, not a total one: a reasoning model streaming a large output slowly
+# never trips it and the call can hang indefinitely. Healthy round-trips run
+# 8-40s; a slow reasoning model on a heavy l2/l3 prompt runs ~150s, and a repair
+# pushes the logical call to ~300s — so the per-call wall must budget BOTH
+# round-trips or a healthy-but-slow call false-halts. One transient timeout is
+# retried; a second halts the loop with ``StopReason.OPTIMIZER_TIMEOUT``.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 
 # OPTIMIZER_PROMPT_WARN_CHARS — soft size line. A composed optimizer prompt

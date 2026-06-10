@@ -6,8 +6,9 @@
 .login-container h1{font-size:32px;margin:0 0 8px;letter-spacing:-0.02em}
 .login-sub{color:var(--color-text-secondary);margin:0 0 24px}
 .login-buttons{display:flex;flex-direction:column;gap:12px;width:100%}
-.login-button{display:block;width:100%;padding:12px 16px;border:0.5px solid var(--color-border-tertiary);border-radius:6px;background:var(--color-background-primary);color:var(--color-text-primary);text-decoration:none;font-weight:500;font-size:14px;transition:background 120ms}
+.login-button{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:12px 16px;border:0.5px solid var(--color-border-tertiary);border-radius:6px;background:var(--color-background-primary);color:var(--color-text-primary);text-decoration:none;font-weight:500;font-size:14px;transition:background 120ms}
 .login-button:hover{background:var(--color-background-hover)}
+.login-button .google-mark{flex-shrink:0}
 
 /* ============ Brand showcase — self-contained advertising surface ============
    Carries its own brand palette (theme-independent on purpose: it is the

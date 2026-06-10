@@ -22,15 +22,17 @@
    card's corner (not floating above a divider + gap). */
 .family-cladogram{margin-top:8px}
 .family-cladogram-head{display:flex;align-items:center;justify-content:space-between;padding:0 2px 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--color-text-tertiary)}
-/* One viewport for all session forests. FIXED default height — never auto-grown
-   to content — so vertical extent is the operator's call alone: drag the grip
-   (resize:vertical) to change it, and a campaign switch resets it (FamilyTree
-   keys the viewport on campaignId, so the dragged height + scroll don't leak
-   into the next campaign). Each <svg> renders at its intrinsic px size; a tree
-   taller or wider than the box scrolls inside it (overflow:auto). resize:vertical
-   is the native grip (house style — see .hs-block); a no-op on touch Safari,
-   which degrades gracefully to the scroller. */
-.family-cladogram-viewport{height:var(--lineage-h,240px);overflow:auto;resize:vertical}
+/* One viewport for all session forests. Auto-fits its content height so the
+   whole tree shows by default ("all fits") — no fixed crop. Capped at 60vh,
+   beyond which it scrolls (overflow:auto), so a deep forest can't push the rest
+   of the dashboard off-screen. The operator can still drag the native grip
+   (resize:vertical, house style — see .hs-block) to pin a height; a campaign
+   switch remounts the box (FamilyTree keys it on campaignId) so a dragged
+   height + scroll reset instead of leaking into the next campaign. Each <svg>
+   renders at its intrinsic px size; a tree wider than the box scrolls
+   horizontally. resize is a no-op on touch Safari, which degrades to the
+   scroller. */
+.family-cladogram-viewport{max-height:60vh;overflow:auto;resize:vertical}
 /* A campaign is a forest — one cladogram per session. Each forest is its
    own <svg>; the session sub-header appears only for multi-session
    campaigns (a single-session campaign needs no per-session label). */

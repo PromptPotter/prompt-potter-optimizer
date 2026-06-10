@@ -32,6 +32,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-20](#r-20) — solo dev: commit to `main`, no PR ceremony unless asked
 - [R-21](#r-21) — CLI timeouts ≤30s; never background the runner
 - [R-22](#r-22) — `--config` means mint-fresh, not "use this config"
+- [R-37](#r-37) — scope `git add` to changed files; never commit a sibling repo's WIP
 
 **Investigation / interaction**
 - [R-23](#r-23) — say "origin", never "baseline"
@@ -47,6 +48,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-33](#r-33) — `dashboard.json` and on-disk surfaces stay live-written
 - [R-34](#r-34) — drain the debt backlog before feature work
 - [R-35](#r-35) — reuse the session-chosen asset; don't hardlock pre-launch brand assets
+- [R-36](#r-36) — scoring/projection is backend; the webapp renders served scores, never recomputes them
 
 ---
 
@@ -188,6 +190,12 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Why:** the mental model "--config = which config to use" is wrong and the CLI rejects the combination.
 - **Origin:** 2026-06-07 — seeded from `feedback_optimize_config_vs_resume`.
 
+### R-37 — scope `git add` to changed files; never commit a sibling repo's WIP
+- **Trigger:** committing while other uncommitted work (a concurrent agent's, or operator WIP) sits in the tree, OR committing in a sibling/separate repo (`promptpotter-web`, TermNorm).
+- **Rule:** run `git status` FIRST, then `git add` only the exact paths you changed. `git add <path>` on an *untracked* file stages the WHOLE file, not a diff — so a one-line edit to an untracked file commits the entire file. And never commit in a separate repo that holds active operator WIP without explicit per-repo confirmation — the operator owns those commits ("I'll go there later").
+- **Why:** add-by-path on an untracked file swept a 57-line operator page into a commit meant for a one-word headline swap; committing in the marketing repo crossed a boundary the operator manages. [[R-19]] [[R-29]]
+- **Origin:** 2026-06-10 — operator: "don't commit anything over there, I'll go there later" + the untracked-file wholesale-commit slip.
+
 ## Investigation / interaction
 
 ### R-23 — say "origin", never "baseline"
@@ -267,3 +275,9 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Rule:** reuse the symbol/asset already chosen this session for a sibling surface (e.g. the tab emoji 🏺 → render it to the share-card PNG) instead of importing a distinct asset. Prefer the minimal, already-decided, trivially-regenerable option. Pre-launch brand art is not settled — don't commit the app to it.
 - **Why:** the operator is pre-publishing and may move away from current brand art; hardlocking onto `wizard.jpg` (or any one asset) across surfaces creates churn when it changes. One source symbol per session = one place to swap later. [[R-09]]
 - **Origin:** 2026-06-08 — operator: "render the emoji used in the tab, don't add wizard.jpg, we might move away from that, don't wanna hardlock."
+
+### R-36 — scoring/projection is backend; the webapp renders served scores
+- **Trigger:** about to compute an *alternative* score or projection anywhere in `webapp/` TS — a what-if/ablation, a re-weighting, a fixed-sample-set accuracy, an alternative ordering, any "what would the score be if…". Also when the operator frames a feature as a *scoring* or *mask* concept.
+- **Rule:** scoring/projection is a **backend** concept. It lives behind `score_search_point()` / the measurement archive and is **served** to the frontend as a field/endpoint. The webapp is a thin consumer that renders served values — it NEVER re-implements scoring math in TypeScript. A new "scoring view" (mask) = a backend projection over stored measurements + an API field, then a render. Confirm the layer *before* building; if it computes a score, it's backend.
+- **Why:** scoring authority is backend ([[R-12]]). Recomputing client-side forks the truth, drifts from the single gateway, and can't be reused by the CLI / headless / other consumers — the file tree is an equal consumer and gets nothing from TS-only math. [[R-09]]
+- **Origin:** 2026-06-10 — operator stopped a frontend-only "Mask" build (lib/mask/ + a fitness-card menu + a `useFitnessBars` TS recompute): "the mask should be a concept in the backend, not really in the frontend… refactor, standardize, unify the backend."

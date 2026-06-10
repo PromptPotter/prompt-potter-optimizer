@@ -75,7 +75,7 @@ export function BrandShowcase() {
         </div>
 
         <h2 className="ls-headline">
-          Fix a broken LLM pipeline <em>in half a day.</em> Then it just works.
+          Fix a broken LLM pipeline <em>in one hour of waiting.</em> Then it just works.
         </h2>
         <p className="ls-lead">{tagline}</p>
 

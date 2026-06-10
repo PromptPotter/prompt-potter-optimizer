@@ -119,8 +119,13 @@ def render_sp_diff(view: SpDiffView) -> str:
     out.append(_node_line(hdr))
 
     for node_name, rows in rendered_groups:
-        if node_name and len(rendered_groups) > 1:
-            sep = f"{'─── ' + node_name + ' ':─<{max_key + 2}}"
+        # Prompt-field rows carry node_name "" (group_diff_keys' catch-all); label
+        # them "prompt" so a prompt mutation reads as one in the live diff instead
+        # of as unlabeled rows mixed with node.param tweaks. Full new text follows
+        # in the Values: legend.
+        if len(rendered_groups) > 1:
+            sep_name = node_name or "prompt"
+            sep = f"{'─── ' + sep_name + ' ':─<{max_key + 2}}"
             out.append(_node_line(f"{DIM}{sep}{RESET}"))
         for k, cells in rows:
             row = f"{k:>{max_key}}  " + "".join(f"{c:<{col_w[ci]}}" for ci, c in enumerate(cells))

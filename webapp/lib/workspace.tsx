@@ -1,9 +1,11 @@
 "use client";
 // Single source of truth for workspace identity. One provider polls the
-// server's active pointer (`/sessions/active`) and the cycle list (`/cycles`)
-// together; every surface — AppShell, CyclePicker, Sidebar —
-// subscribes here via `useWorkspace()` instead of fetching those
-// endpoints on its own.
+// server's active pointer (`/sessions/active`) on the live 2 s beat and the
+// heavier cycle list (`/cycles`) + campaign registry (`/campaigns`) on a 10 s
+// floor; every surface — AppShell, CyclePicker, Sidebar — subscribes here via
+// `useWorkspace()` instead of fetching those endpoints on its own. The two
+// cadences are deliberate: the active pointer is staleness-critical (a CLI mint
+// must yank the viewed unit over promptly), the registry list is not.
 //
 // Workspace identity is four-level: dataset → campaign → unit, with the
 // operator's active pointer the lens into them. A `cycle_id` is unique
@@ -98,10 +100,16 @@ function urlPin(): UnitPin | null {
 }
 
 export function WorkspaceProvider({
+  // Registry-list cadence (`/cycles` + `/campaigns`) — the passive floor for
+  // rarely-changing data. The active-pointer poll runs faster (below).
   intervalMs = 10000,
+  // Active-pointer cadence (`/sessions/active`) — matches the dashboard's 2 s
+  // live beat so a CLI-minted cycle is followed without the registry's lag.
+  pointerIntervalMs = 2000,
   children,
 }: {
   intervalMs?: number;
+  pointerIntervalMs?: number;
   children: ReactNode;
 }) {
   const [pinned, setPinned] = useState<UnitPin | null>(null);
@@ -152,90 +160,102 @@ export function WorkspaceProvider({
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // One poll — active pointer, cycle list, and campaign registry move
-  // together so the list, the `●` pointer, and the sidebar can never
-  // disagree. The 10 s `intervalMs` is the *passive* floor: this is
-  // registry-level data that changes rarely, so it doesn't need the live
-  // dashboard's 2 s cadence. Operator actions bypass it — `usePoll` owns
-  // the interval, the hidden-tab pause, the focus wake (a `new` run in
-  // another terminal shows within a frame), and per-tick aborts; a mutation
-  // bump (`useRevalidation`) forces an immediate re-tick so a fork / stop
-  // lands without a poll-interval wait.
-  const tick = useCallback(async (signal: AbortSignal) => {
-    const [activeRes, cyclesRes, campaignsRes] = await Promise.allSettled([
-      fetchActive(signal),
-      fetchCycles(signal),
-      fetchCampaigns(undefined, signal, lifecycleFilter),
-    ]);
-    if (signal.aborted) return;
-    // A 401 on any read means the session died — re-probe /auth/me so the
-    // gate flips unauthed and this loop stops instead of storming 401s.
-    for (const r of [activeRes, cyclesRes, campaignsRes]) {
-      if (r.status === "rejected") onAuthError(r.reason);
-    }
-    let nextActiveCycle: string | null = null;
-    let nextActiveCampaign: string | null = null;
-    if (activeRes.status === "fulfilled") {
-      setSessionId(activeRes.value.session_id || null);
-      nextActiveCycle = activeRes.value.cycle_id || null;
-      nextActiveCampaign = activeRes.value.campaign_id || null;
+  // TWO poll cadences. The active pointer (`/sessions/active` — three opaque
+  // ids) is staleness-critical: when the CLI mints a fresh cycle
+  // (`new`/fork/sweep all rewrite active_session.json) the viewed unit must
+  // yank to it promptly, so it rides the live dashboard's 2 s beat. The cycle
+  // list + campaign registry (`/cycles` + `/campaigns`) is heavier and changes
+  // rarely, so it stays on the 10 s floor. Polling them together at 10 s was
+  // the stale-window bug: pointer discovery lagged the 2 s data poll by up to
+  // 10 s, so a CLI-minted run left the dashboard pinned to the dead cycle until
+  // the next registry tick. `usePoll` owns each loop's interval, hidden-tab
+  // pause, focus wake (a `new` run in another terminal shows within a frame),
+  // and per-tick aborts; a `useRevalidation` bump forces an immediate re-tick
+  // on both so an in-app fork / stop lands without a poll-interval wait.
+  const reval = useRevalidation();
+
+  // Fast loop — the active pointer + the follow-snap. Sole owner of the pointer
+  // state; the registry loop no longer second-guesses it from `/cycles`.
+  const pointerTick = useCallback(
+    async (signal: AbortSignal) => {
+      let active;
+      try {
+        active = await fetchActive(signal);
+      } catch (err) {
+        if (signal.aborted) return;
+        // A 401 means the session died — re-probe /auth/me so the gate flips
+        // unauthed and the loop stops instead of storming. Other failures
+        // (incl. the 404 "no active session" steady state) just set the error.
+        onAuthError(err);
+        setActiveError((err as Error)?.message ?? "active session unavailable");
+        return;
+      }
+      if (signal.aborted) return;
+      setSessionId(active.session_id || null);
+      const nextActiveCycle = active.cycle_id || null;
+      const nextActiveCampaign = active.campaign_id || null;
       setActiveCycleId(nextActiveCycle);
       setActiveCampaignId(nextActiveCampaign);
       setActiveError(null);
-    } else {
-      setActiveError(
-        (activeRes.reason as Error)?.message ?? "active session unavailable",
-      );
-    }
-    if (cyclesRes.status === "fulfilled") {
-      setCycles(cyclesRes.value.cycles);
-      // `/cycles` also carries the active pointer — use it as a fallback
-      // only when `/sessions/active` itself failed this tick.
-      if (activeRes.status !== "fulfilled") {
-        if (cyclesRes.value.active_cycle_id) {
-          nextActiveCycle = cyclesRes.value.active_cycle_id;
-          setActiveCycleId(nextActiveCycle);
+      // Auto-snap to the active pointer when it transitions to a fresh cycle.
+      // The first poll's `prev === null` establishes the baseline (no snap);
+      // subsequent transitions are CLI-driven mints. A deliberately-pinned
+      // operator running `new` opted into the new session by issuing the command.
+      if (nextActiveCycle && nextActiveCampaign) {
+        const nextPointer = `${nextActiveCampaign}::${nextActiveCycle}`;
+        const prevPointer = prevActivePointerRef.current;
+        if (prevPointer !== null && prevPointer !== nextPointer) {
+          setFollowing(true);
+          setPinned(null);
         }
-        if (cyclesRes.value.active_campaign_id) {
-          nextActiveCampaign = cyclesRes.value.active_campaign_id;
-          setActiveCampaignId(nextActiveCampaign);
-        }
+        prevActivePointerRef.current = nextPointer;
       }
-      setCyclesError(null);
-    } else {
-      setCyclesError(
-        (cyclesRes.reason as Error)?.message ?? "campaign list unavailable",
-      );
-    }
-    // Auto-snap to the active pointer when it transitions to a fresh
-    // cycle. The first poll's `prev === null` establishes the baseline
-    // (no snap); subsequent transitions are CLI-driven mints. A
-    // deliberately-pinned operator running `new` opted in to the new
-    // session by issuing the command.
-    if (nextActiveCycle && nextActiveCampaign) {
-      const nextPointer = `${nextActiveCampaign}::${nextActiveCycle}`;
-      const prevPointer = prevActivePointerRef.current;
-      if (prevPointer !== null && prevPointer !== nextPointer) {
-        setFollowing(true);
-        setPinned(null);
+    },
+    [onAuthError],
+  );
+
+  // Slow loop — the cycle list + campaign registry that back the picker and
+  // sidebar. Keeps the last good list on a failed tick.
+  const registryTick = useCallback(
+    async (signal: AbortSignal) => {
+      const [cyclesRes, campaignsRes] = await Promise.allSettled([
+        fetchCycles(signal),
+        fetchCampaigns(undefined, signal, lifecycleFilter),
+      ]);
+      if (signal.aborted) return;
+      for (const r of [cyclesRes, campaignsRes]) {
+        if (r.status === "rejected") onAuthError(r.reason);
       }
-      prevActivePointerRef.current = nextPointer;
-    }
-    // Campaign registry — keep the last good list on a failed tick.
-    if (campaignsRes.status === "fulfilled") {
-      setCampaigns(campaignsRes.value.campaigns);
-    }
-    setCyclesLoaded(true);
-  }, [lifecycleFilter, onAuthError]);
-  // Two cadences, mirroring the dashboard poll: when both the active pointer
-  // and the cycle list fail, the API is unreachable — back off to the 5 s
-  // reconnect probe instead of hammering 2 s. Either succeeding = reachable.
+      if (cyclesRes.status === "fulfilled") {
+        setCycles(cyclesRes.value.cycles);
+        setCyclesError(null);
+      } else {
+        setCyclesError(
+          (cyclesRes.reason as Error)?.message ?? "campaign list unavailable",
+        );
+      }
+      if (campaignsRes.status === "fulfilled") {
+        setCampaigns(campaignsRes.value.campaigns);
+      }
+      setCyclesLoaded(true);
+    },
+    [lifecycleFilter, onAuthError],
+  );
+
+  // When BOTH the pointer and the list fail, the API is unreachable — back
+  // both loops off to the 5 s reconnect probe. Either succeeding = reachable.
   const wsOffline = activeError != null && cyclesError != null;
-  usePoll(tick, {
+  usePoll(pointerTick, {
+    intervalMs: wsOffline ? RECONNECT_INTERVAL_MS : pointerIntervalMs,
+    tickOnFocus: true,
+    enabled: authed,
+    revalidateOn: reval,
+  });
+  usePoll(registryTick, {
     intervalMs: wsOffline ? RECONNECT_INTERVAL_MS : intervalMs,
     tickOnFocus: true,
     enabled: authed,
-    revalidateOn: useRevalidation(),
+    revalidateOn: reval,
   });
 
   // The viewed unit: the server pointer while following, else the pin.
