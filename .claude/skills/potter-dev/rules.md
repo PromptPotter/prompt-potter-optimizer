@@ -23,6 +23,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-13](#r-13) — per-dataset tunable → overlay; TermNorm structural root-cause → fix in TermNorm
 - [R-14](#r-14) — respect the hexagonal layer-import rules
 - [R-15](#r-15) — a new seam/invariant is a `tests/test_structure.py` row
+- [R-41](#r-41) — "will changing a connector tunable re-score?" — `node_configs` is the key; campaign config is frozen; cycle id is config-blind
 
 **Workflow / git**
 - [R-16](#r-16) — a few coherent commits per arc (logical units, not one blob, not one-per-change)
@@ -44,6 +45,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-28](#r-28) — AskUserQuestion options vary on one axis only
 - [R-29](#r-29) — no data deletion
 - [R-30](#r-30) — CWD errors → tell the operator to `cd`, don't paper over
+- [R-40](#r-40) — large-scope dataset assembly: audit silent-drop hazards before proposing execution
 - [R-31](#r-31) — root `CLAUDE.md` is a thin entry point
 - [R-32](#r-32) — canonical test set first
 - [R-33](#r-33) — `dashboard.json` and on-disk surfaces stay live-written
@@ -51,6 +53,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-35](#r-35) — reuse the session-chosen asset; don't hardlock pre-launch brand assets
 - [R-36](#r-36) — scoring/projection is backend; the webapp renders served scores, never recomputes them
 - [R-38](#r-38) — overlay markers: one calm indicator where the operator points; line/color over icon/ring/flash
+- [R-42](#r-42) — TermNorm pipeline wrong/empty output: trace the contract seam, not the model
 
 ---
 
@@ -147,6 +150,12 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Rule:** add a `RegexBan`/`CallBan` row to `tests/test_structure.py` — never hand-roll an `rglob`/`ast.walk` lint. The engine is `tests/_scan.py`.
 - **Why:** one scan engine, declarative bans; adding a lock = adding a row.
 - **Origin:** 2026-06-07 — seeded from `tests/test_structure.py` design.
+
+### R-41 — "will changing a connector tunable re-score?" — the identity/caching seam
+- **Trigger:** the operator edits a connector tunable (model/temperature/a node param) and asks whether the next run re-measures, or you need to reason about cycle/campaign/measurement identity.
+- **Rule:** answer from three facts, not eight files. (1) The measurement key is `node_configs` (the effective per-node config, **model included**) over the overlay-merged `session.pipeline_params` (`config.py` merge → `search_point.py::content_hash` → `measurement_archive.py::load_reusable_results`): a change at node N **re-measures** every sample whose pipeline ran past N; only upstream short-circuits (cache/fuzzy, `terminated_at` in the trusted prefix) replay. (2) A running/resumed campaign uses its **frozen `CampaignConfig`** snapshot — editing `datasets/{name}/{campaign,pipeline}.json` only applies on a fresh `new` (random `campaign_id`); that is how you mint a new origin on a changed model. (3) The **cycle id is config-aware** — `build_origin_cycle_id` hashes the SAME overlay-merged params as the measurement key, so `cycle_id`/`root_content_hash` agree with which config was measured: a connector-config edit yields a DISTINCT origin. (Resuming a campaign minted before this landed sees a hash mismatch with identical config — `DiffScope.NONE` — which the drift check treats as benign + re-stamps.) Full writeup: `docs/operations/persistence-and-state.md` § "Will a config change re-score?".
+- **Why:** this took ~8 files / 3 hash schemes to derive once. The cycle-id↔measurement-key asymmetry that made it confusing is now dissolved (config-aware identity); the remaining follow-up is the pure dataset→effective-params resolver (`code-debt-cleanup.md`). [[R-12]] [[R-22]] [[R-29]]
+- **Origin:** 2026-06-11 — operator: the re-score question "took so long… intrinsically messed up… not really a way to get the insight much more direct," asked to capture it in docs + skill + debt.
 
 ## Workflow / git
 
@@ -291,8 +300,20 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Why:** scoring authority is backend ([[R-12]]). Recomputing client-side forks the truth, drifts from the single gateway, and can't be reused by the CLI / headless / other consumers — the file tree is an equal consumer and gets nothing from TS-only math. [[R-09]]
 - **Origin:** 2026-06-10 — operator stopped a frontend-only "Mask" build (lib/mask/ + a fitness-card menu + a `useFitnessBars` TS recompute): "the mask should be a concept in the backend, not really in the frontend… refactor, standardize, unify the backend."
 
+### R-40 — large-scope dataset assembly: audit silent-drop hazards before proposing execution
+- **Trigger:** assembling/curating a benchmark dataset spanning many sources/domains (e.g. lca-termnorm BOM→ecoinvent), especially when the operator signals scope/complexity ("large scope", "various domains", "don't get stuck at the end", "don't forget something").
+- **Rule:** do NOT converge or call the build "mechanical." First ground a **real data audit** (load the actual rows, don't hand-wave) and surface the long tail explicitly: (1) **placeholder/no-match targets** (`--`/empty/`n/a`) that, scored as misses, silently cap accuracy; (2) **gold-string-vs-candidate-pool exactness** — abbreviated/alias golds that fail raw-string scoring even when correct; (3) **multi-target / ambiguous** rows; (4) **per-domain accuracy hiding under an aggregate** (90% mean can mask a science domain at 40% → stratify the eval slice + gate on the worst domain); (5) **short-circuit nodes** (cache/fuzzy) masking the path being tuned. Give every row a *defined fate*; reconcile every gold to its exact pool entry; THEN propose the plan + gates.
+- **Why:** these are the items "pushed aside as harmless" that wreck the end-state — the operator twice pushed back on premature convergence here. Cleverness = nothing silently dropped, nothing forgotten. [[R-32]] [[R-24]] [[R-08]]
+- **Origin:** 2026-06-11 — operator: "really LARGE scope… various science domains… otherwise we get stuck at the end with some item we push aside, wrongfully thinking it harmless. Or we forget something."
+
 ### R-38 — overlay markers: one calm indicator where the operator points; scope edits to the named surface
 - **Trigger:** adding OR removing a visual marker for a divergence / mask / overlay / counterfactual state on any dashboard surface (lineage tree, round axis, fitness chart, samples).
 - **Rule:** use ONE calm indicator placed exactly where the operator asked — a colored line/divider or a line-glow in the operator's stated color — NOT decorative animated glyphs (◆), rings, sparks, or flashing circles around numbers. Don't scatter the same marker across multiple surfaces "for consistency"; put it in the single surface named. **And scope every edit to that one surface:** when the operator says "remove the flash from element Y / put it in Z instead", touch ONLY Y and Z — do NOT also drop the marker the operator liked on a *different* surface (the lineage config click-line glow stayed wanted while the round-tab flash was killed). Confirm which surface each marker lives on before editing; a removal request names a surface, not a feature. When the operator says "make the line glow red" or "a red vertical line before the divergent values", that is literal: line + color, not icon + ring, in that place only.
 - **Why:** the operator reads divergence as a boundary/color on the relevant element, not as ornament; glyphs read "weird symbol", rings/sparks around numbers read as noise, multi-surface duplication reads as clutter — and an over-broad removal nukes a marker they explicitly approved. Color/line over icon/ring, one location, edit-only-what-was-named. [[R-26]]
 - **Origin:** 2026-06-10 — operator corrected the mask visuals three times: killed the ◆ glyph ("rather have it in the color, surrounding the click line — make the line glow RED"), killed the round-tab flashing circle ("don't make that round flash circle red around the ROUND number… instead a red vertical line in the Per-candidate fitness"), then "you should not have dropped the red circle highlight around the click line of the config in lineage, only the one in the [round-tabs] element."
+
+### R-42 — TermNorm pipeline wrong/empty output: trace the contract seam, not the model
+- **Trigger:** a TermNorm / material-matching run returns all-`NO_RESULT`, wrong predictions, a prompt-compile crash, or `json_validate_failed` — and you're tempted to blame model capacity, bump the model, or call the schema "too hard."
+- **Rule:** default to a **contract/config seam**, not the model. Check, in order: (1) **prediction key** — the scorer reads the *terminal ranker's* output; a `token_matching`-terminal pipeline emits `candidate_ranking`, NOT `final_ranking` (`terminal_ranking`, `pobb/elimination/classification.py`). All-`NO_RESULT` while the backend logs show real candidates = this. (2) **placeholder collision** — a node prompt's backend `{{query}}`/`{{combined_text}}` placeholders are *content*, not optimizer slots; `compile_prompt` leaves non-slot `{{…}}` literal, `validate_template` owns authored-slot typos. A "Unsubstituted template variables" crash = this, not a malformed prompt. (3) **reasoning vs native JSON** — Groq gpt-oss does native strict `json_schema` fine at `reasoning_effort ≤ medium`; `high` returns HTTP 400 `json_validate_failed` (empty `failed_generation`, unrecoverable by the repair loop). Cap `reasoning_effort: low`; the model is capable. **Probe the actual provider API** before concluding a capability limit — a ~6-line script against Groq settled all three this arc.
+- **Why:** I blamed the model twice in one arc (gpt-oss-20b "too weak for JSON"; recommended a 120B bump) — both wrong; the real causes were a hardcoded prediction key, a placeholder-syntax collision, and an uncapped `reasoning_effort`. The *facts* live in `docs/operations/dataset-reasoning-matrix.md` + `docs/developer/pipeline-json-contract.md`; this rule is the *investigation order*. [[R-08]] [[R-13]] [[R-24]]
+- **Origin:** 2026-06-11 — the lca-bom-termnorm NO_RESULT→native-JSON arc; operator: "is it not possible that the 20B also can get the structured output right?" + "I WANT to use the in-baked json output feature."

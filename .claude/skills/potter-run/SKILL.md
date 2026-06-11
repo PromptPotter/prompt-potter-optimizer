@@ -4,7 +4,51 @@ You are PromptPotter's data scientist operator. You run optimization campaigns t
 
 ## $ARGUMENTS
 
-Optional dataset name (e.g. `bbeh`, `aime_2025`, `gsm8k`, `lca-termnorm`). If omitted, audit the setup and list available datasets. "new campaign" / "start fresh" forces a new session.
+Optional dataset **name** (a registered benchmark — `bbeh`, `aime_2025`, `gsm8k`, `lca-termnorm`) **or a raw file path** (`./data/bom.csv` — ingest a brand-new tenant dataset). If omitted, audit the setup and list available datasets. "new campaign" / "start fresh" forces a new session.
+
+---
+
+## The ultimate setup — upload → context → origin → select · modify · start
+
+**This is the default onboarding for a new dataset** (a real client/tenant task, not a bundled benchmark): one chat-shaped flow, one origin, no hand-written loader. A registered benchmark skips this and uses `new <name>` (CLI Reference below).
+
+**Fully local — no external network.** A new user clones the repo, starts the two local servers (TermNorm `:8000` + PromptPotter `:8001`), drops their dataset, and runs it end-to-end. Nothing leaves the machine except whatever those two servers do internally (the optimizer/scoring LLM calls the backend itself makes). The operator never wires a third network. This is the recommended setup for running a dataset locally.
+
+**Prereqs (Phase −1):** TermNorm backend up at `http://127.0.0.1:8000` (`start-server-py-LLMs.bat`); webapp up — `python -m uvicorn promptpotter.main:app --port 8001`, open <http://127.0.0.1:8001/>.
+
+**Web flow — the experience a user should get:**
+
+1. **New campaign** — Sidebar → "Start a new campaign" opens the IngestPane.
+2. **Upload file(s)** — CSV / TSV / JSON / JSONL / XLSX, ≤25 MB, ≤500 rows. Parsed into a server-held `DraftCampaign` (nothing on disk yet).
+3. **Fill the raw first context** — type what the prompt is supposed to do, in the chat box. This is the user's framing; submitting marks it CONFIRMED.
+4. **Resolver → origin** — one `checkin` turn proposes the column map (`query` + `ground_truth`), the six decomposed Layer-1 prompt fields, and the 7-field `task_context`; code fills the closed-label answer space deterministically. High-confidence findings auto-confirm; remaining gaps come back as questions. A pure checklist gate (no LLM) blocks mint until query + ground_truth + framing + answer-space are all CONFIRMED.
+5. **See the origin** — it lands as **round 0 / "C0"** in the lineage tree and the fitness seed.
+6. **Select · modify · start** — select the origin in the frontend, modify it (task framing, column map, prompt fields, full node config), then Start. Mint writes the tenant dataset + campaign + cycle and runs the loop from round 0.
+
+**CLI parity (headless, same chain, same seam):**
+
+```bash
+python -m promptpotter new <file.csv> --set task_description='what the prompt does'
+```
+
+Parse → apply `--set` → resolve origin → commit tenant dataset → mint → run — the exact `ingest_draft` → `resolve_origin_turn` → `commit_draft_to_dataset` → `prepare_fresh_cycle` chain the web flow drives. Omit `--set` to let the resolver propose the framing and ask for confirmation.
+
+The seam lives in `promptpotter/application/datasets/` (`ingest.py`, `origin_resolve.py`, `origin_readiness.py`) + `application/jobs/{launcher,mint}.py`; web surfaces in `webapp/components/ingest/` (`IngestPane`, `IngestConversation`, `useIngestFlow`).
+
+### Fast path — loader-backed auto-setup (Claude-simulated check-in)
+
+When the operator says their dataset is ready ("my data's there", "just set it up", names a file or dataset) **and it loads cleanly**, Claude sets the whole origin up itself — **simulating the check-in node** instead of spending the LLM call.
+
+1. **Test the load first.** Registered name → confirm it's in `DATASET_LOADERS` (`application/datasets/loaders.py`). Raw file → ingest-parse it (`POST /datasets/ingest`) or open a registered dataset as a draft (`POST /datasets/{name}/draft`). A clean parse + a sample preview = green. **If the load fails, do NOT simulate** — fall back to the normal flow (operator writes the context, the real `checkin` node resolves).
+2. **Author the origin (this is the simulation).** Read the sample rows + answer space and write what the `checkin` node would: the six Layer-1 prompt fields, the 7-field `task_context`, the `column_query`/`column_ground_truth` map, and a plain `task_description`. Apply them via `POST /commands/edit-draft-campaign` (confirming columns + framing opens the readiness gate). The closed-label answer space stays **code-owned** — never hand-list it.
+3. **Stamp the metadata — MANDATORY.** A simulated origin must never be mistaken for an LLM-resolved one. In the same `edit-draft-campaign` patch set:
+   ```json
+   "simulated_checkin": {"by": "potter-run", "model": "<your model id>", "at": "<YYYY-MM-DD>"}
+   ```
+   It persists to the draft resolution block (`cache.json::simulated_checkin`). **Empty = the real `checkin` node resolved it; populated = Claude authored it.** Skipping this is a hard error — the metadata is what keeps the LLM-call-for-authorship trade honest and reproducible.
+4. **Gate, then mint.** `origin_readiness` must be `complete` (query + ground_truth + framing + answer-space all CONFIRMED). Then `POST /commands/mint-campaign-from-draft` → the origin lands as round 0 (C0) and appears in the frontend for the operator to review, modify, and Start.
+
+Code: the marker is `DraftCampaign.simulated_checkin` (`application/datasets/draft_campaign.py`), threaded through the `edit-draft-campaign` patch (`presentation/api/routers/commands.py`) into `resolution_block` (`application/datasets/origin_readiness.py`).
 
 ---
 
@@ -14,10 +58,11 @@ Two write verbs: `new` and `resume`. Reads happen by opening the campaign dir di
 
 | Verb | Behavior |
 |------|----------|
-| **`new <name>`** | Mint a fresh Campaign + root cycle from `datasets/<name>/`, decompose `task_description.md` on first sight, run from round 0. Every invocation produces a distinct `campaign_id` (`{dataset}__{YYYYMMDD-HHMMSS}` — sortable, collision-free) with its own directory, dashboard, and log. The prior campaign is preserved. |
+| **`new <name>`** | **Registered benchmark.** Mint a fresh Campaign + root cycle from `datasets/<name>/`, decompose `task_description.md` on first sight, run from round 0. Every invocation produces a distinct `campaign_id` (`{dataset}__{YYYYMMDD-HHMMSS}` — sortable, collision-free) with its own directory, dashboard, and log. The prior campaign is preserved. |
+| **`new <file>`** | **Raw ingest (web-onboarding parity).** Parse the file → apply `--set` → resolve the origin (`checkin` turn) → commit a tenant dataset under `projects/{tenant}/datasets/{slug}/` → mint + run. The headless form of the flagship flow above. |
 | **`resume`** | Pick up the active session — reads `{campaign_id, cycle_id}` from the pointer and continues that cycle. Rewind in place with `--from <round>`. |
 
-The fresh-mint prep flags (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--task-file`, `--task-text`) live on `new`.
+The fresh-mint prep flags live on `new`: `--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--task-file`, `--task-text` (benchmark path) and `--set <field>=<value>` (raw-ingest path — e.g. `--set task_description='…'`, the confirmed first context).
 
 ---
 
@@ -58,7 +103,10 @@ Trigger if any of: `.env` missing, backend `/status` unreachable, or requested d
 
 **Backend `/status` unreachable.** TermNorm is the canonical test backend. If it isn't local yet, `git clone https://github.com/runfish5/TermNorm-excel` to `../TermNorm-excel` (sibling of PromptPotter; operator can override the path). Once present, tell the operator to run `start-server-py-LLMs.bat` in their own terminal — same hand-off model as Phase 4 (`new` / `resume`). Wait for `/status` 200 before continuing. *Future improvement: spawn a dedicated terminal automatically once that capability lands.*
 
-**Dataset has no loader.** Anything already in `promptpotter/application/datasets/loaders.py::DATASET_LOADERS` (bundled benchmarks + `lca-termnorm` via `load_excel_ground_truth`) needs nothing — `new` picks them up. **New dataset:** the skill writes a custom loader for the operator. Vocabulary: a function returning `list[Sample]` (`promptpotter/domain/sample.py` — `query` + `ground_truth` + optional `id`/extras). Read the operator's data shape (CSV, Excel, JSON, HuggingFace, …), generate `load_<name>(...)`, and register it in `DATASET_LOADERS`. Then draft `datasets/<name>/{pipeline.json, campaign.json, dataset.md, prompts/<node>.json}` against the patterns in `datasets/bbeh/`. The operator just describes their data and answer keys — Claude does the wiring.
+**Dataset has no loader.** Two paths, split on *bundled benchmark vs. tenant dataset*:
+
+- **Tenant / client dataset (the common case): don't write a loader — ingest it.** A raw file becomes a dataset through the flagship flow above (`new <file>` or the webapp IngestPane): parse → resolve origin → commit tenant dataset. The parser (`application/datasets/csv_ingest.py`) handles CSV/TSV/JSON/JSONL/XLSX; the resolver infers the column map + framing. No `DATASET_LOADERS` entry, no hand-written `load_<name>`.
+- **New bundled benchmark (rare): register a loader.** Only when adding a *repo* benchmark that ships in `datasets/<name>/`. Write a function returning `list[Sample]` (`promptpotter/domain/sample.py` — `query` + `ground_truth` + optional `id`/extras), register it in `promptpotter/application/datasets/loaders.py::DATASET_LOADERS`, and draft `datasets/<name>/{pipeline.json, campaign.json, dataset.md, prompts/<node>.json}` against `datasets/bbeh/`. Follow `docs/operations/adding-a-dataset.md` (canonical split first).
 
 ## Phase 0: Audit (silent)
 
@@ -92,7 +140,10 @@ Surface anomalies as a one-line flag at the top, then the normal outlook. Never 
 
 ## Phase 1+4: Launch (fresh mint + run as one command)
 
-Flags from `datasets/{name}/dataset.md § Init Flags` — verbatim, never guess. The user runs the single command in their own terminal:
+Two launch shapes:
+
+- **New dataset** → the flagship ingest flow (webapp IngestPane, or `new <file> --set task_description='…'`). Origin is resolved, selected, and started from the frontend. No `dataset.md` flags — the resolver owns the framing.
+- **Registered benchmark** → flags from `datasets/{name}/dataset.md § Init Flags`, verbatim, never guess. The user runs the single command in their own terminal:
 
 ```bash
 python -m promptpotter new {name} {flags from dataset.md}

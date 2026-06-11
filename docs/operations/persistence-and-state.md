@@ -123,6 +123,39 @@ python -m promptpotter new --sweep-batch   # dispatches sweep-mode against the f
 
 **Reading results.** Side-by-side: `python -m promptpotter sweep rank` (groups by parent root, sorts by `round_1_top_lift`, reports `proxy_lift_corr` once ≥4 paired sweep/full branches share an `l1_generate_hash`). **Sweep is screening, not validation** — promote winners to a full `new` run. L1-surface only; pipeline/scoring changes are intentionally absent from the operator file shape. Forks run sequentially (the active pointer doesn't tolerate concurrent mints).
 
+## Will a config change re-score? — the measurement cache
+
+The single most-asked operating question: *"I edited a connector tunable (model,
+temperature, a node param) — will the next run actually re-measure, or replay the old
+score?"* Three facts answer it; together they're why editing a file can feel inert.
+
+1. **The measurement key includes the connector config (model included).** Per-sample
+   results pool in `archive/measurements/` keyed by `node_configs` — the effective
+   per-node config derived from the overlay-merged `session.pipeline_params`
+   (`application/scoring/search_point_scorer.py` → `infrastructure/store/measurement_archive.py::load_reusable_results`).
+   On a config change at node *N*, the prefix match breaks at *N*: **every sample whose
+   pipeline ran past *N* is re-measured**; only samples that short-circuited upstream
+   (a cache or high-confidence fuzzy hit before *N*) replay. So changing
+   `entity_profiling.model` from `120b` to `20b` genuinely re-scores the LLM-path samples.
+
+2. **A running/resumed campaign uses its FROZEN `CampaignConfig` snapshot.** The
+   `Campaign` manifest (`campaign.json`) owns the config; editing
+   `datasets/{name}/campaign.json` or `pipeline.json` does **not** change an existing
+   campaign. To apply a connector-config change you mint a **fresh `new`** — it reads the
+   edited dataset configs, gets a fresh random `campaign_id`, and re-scores a new origin
+   on the changed config (the old campaign is untouched — campaigns are never mutated).
+   (For an *in-place* re-explore after a data-affecting edit on the active cycle, that's
+   `--fork-on-divergence`, above; `new` is the clean-slate path.)
+
+3. **The cycle id is config-aware (it agrees with the measurement key).** `cycle_id` /
+   `Campaign.root_content_hash` are built by `build_origin_cycle_id` from the SAME
+   overlay-merged params the measurement key hashes (the connector `model`/config
+   included). So two origins differing only by model get **distinct** `cycle_id`s — a
+   connector-config edit yields a distinct origin, and the id agrees with which config was
+   measured. (Resume of a campaign minted before this landed recomputes a config-aware
+   hash that won't match its stored config-blind one; the drift check treats an identical
+   config — `DiffScope.NONE` — as benign and re-stamps the hash in place.)
+
 ## Steering composite scoring between rounds
 
 Hot-swap the cycle's per-round formula by dropping a file; the next round-end consumes it, the running optimizer never restarts.

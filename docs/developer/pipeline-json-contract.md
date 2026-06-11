@@ -58,6 +58,24 @@ data maps back into pipeline state.
 | `param_descriptions` | optional | `dict[str, str]` | One-line description per param key. Surfaced into L1's prompt as the param catalogue. |
 | `param_allowed_values` | optional | `dict[str, list[str]]` | Enum constraint per param. Drives both L1 prompt guidance and the JSON-schema enum constraint on structured-output generation, plus post-hoc `ValidationFailure` attachment in `validate_overrides`. |
 
+## How the prediction is read
+
+The per-sample `predicted` value is the **head of the terminal ranker's output** — not a fixed
+key. `terminal_ranking(result, schema)`
+(`promptpotter/application/optimization/pobb/elimination/classification.py`) walks the schema
+**in reverse** for the last node with `node_role ∈ {ranker, candidate_source}` that wrote its
+`pipeline_key`, and `sample_measurement.py` takes the head of that list (shape-agnostic via
+`extract_item_label`). So:
+
+- a pipeline ending at `token_matching` (a `candidate_source`) yields its `candidate_ranking`;
+- a pipeline ending at `llm_ranking` / `llm_only` (a `ranker`) yields its `final_ranking`.
+
+`final_ranking` is the *universal* answer key (the typed `PipelineData.final_ranking`), but the
+pipeline **shape** — which ranker terminates it — decides the source, not the key name. A
+pipeline with no terminal ranker emits no prediction (every sample scores `NO_RESULT`);
+bootstrap warns loudly when a resolved schema has no `ranker`/`candidate_source` node with an
+output key.
+
 ## Strict parsing — the contract is the contract
 
 `parse_pipeline_response()` in `promptpotter/domain/pipeline_parsing.py`

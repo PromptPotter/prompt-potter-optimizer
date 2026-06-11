@@ -9,7 +9,8 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 | `hotpotqa` | `openai/gpt-oss-120b` | `medium` | absent | Multi-hop QA. Medium reasoning. |
 | `bbeh` | `openai/gpt-oss-20b` *(prod: 120b — see below)* | `low` | absent | "Big-Bench Extra Hard" puzzles. `low` is intentional — see Groq ceiling note below. |
 | `justlogic` | `openai/gpt-oss-20b:nitro` (OpenRouter) | `low` | absent | JustLogic (Chen 2025), 3-class deductive reasoning, depths 6-7 only. Operator-defined cut: 200/depth train (400) + 500/depth held-out test (1,000). Synthetic generation — no contamination. Recon-measured origin **44%** on depth-6,7 slice 2026-05-19. L1 attack surface: hedge-break (model over-predicts `Uncertain` by ~30pp vs balanced gold). `:nitro` routing for ~0.3s/sample latency. |
-| `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. |
+| `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. Research nodes carry their own per-node `reasoning_effort` + structured-output mode — see "Why TermNorm research nodes cap `reasoning_effort: low`" below. |
+| `lca-bom-termnorm` | `entity_profiling` → `openai/gpt-oss-20b` | `low` (entity_profiling) | absent (`null`) | Tenant material-matching pipeline (`web_search → entity_profiling → token_matching`, no `llm_ranking`). `entity_profiling` emits **native** `json_schema` and pins `reasoning_effort: low` (the cap is load-bearing — see section below). Multi-node, so the single-call columns describe the profiling node only. Tenant config on disk, gitignored. |
 
 `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.json` node config — provider ceiling applies. Enforced by `tests/test_dataset_pipeline_defaults.py`.
 
@@ -44,6 +45,31 @@ If a hard subtask still trips on either model, the operator can:
 2. Or override `pipeline_overrides.llm_only.max_tokens = 8192` (or higher) — but this is model-specific tuning, not a dataset default.
 
 See `datasets/bbeh/task_description.md` for the trap description and `promptpotter/application/optimization/pobb/elimination/classification.py` for the `classify_result()` rule table.
+
+## Why TermNorm research nodes cap `reasoning_effort: low` (native structured output)
+
+A **second, distinct** Groq trap — separate from the output-ceiling one above. TermNorm's
+multi-node pipelines emit **native structured output** by default (`response_format:
+json_schema`, strict; canonical impl + the `prompt_repair` opt-out live in TermNorm
+`core/llm_providers.py`). On Groq `gpt-oss-*` **reasoning** models, native strict `json_schema`
+and `reasoning_effort: high` collide: the reasoning channel runs up against the strict grammar
+and the call returns **HTTP 400 `json_validate_failed` with an empty `failed_generation`** — the
+client-side parse/validate/repair loop cannot salvage it (there is nothing to repair).
+
+Probe-confirmed 2026-06-11 against the real `entity_profile` schema on `gpt-oss-20b`:
+schema-valid JSON at `reasoning_effort` `none` / `low` / `medium`; the 400 appears **only** at
+`high`. It is the *mode*, not the model — 20B does native structured output fine when it isn't
+made to over-reason.
+
+So any node that combines reasoning **and** native structured output (e.g. `entity_profiling`,
+which threads its config `reasoning_effort` through `research_and_rank/web_generate_entity_profile.py`)
+pins `reasoning_effort: low`. Contrast with the BBEH output-ceiling trap above:
+
+- BBEH trap → `finish_reason=length`, empty content; recoverable via a `max_tokens` override.
+- This trap → HTTP 400 `json_validate_failed`, empty `failed_generation`; **unrecoverable** by
+  the repair loop. The only levers are `reasoning_effort ≤ low`, or — for a model without
+  reliable native structured output — the per-node `structured_output_mode: "prompt_repair"`
+  opt-out (sends no `response_format`, leans on prompt-instructed JSON + client repair).
 
 ## AIME 2025 model A/B/C tests (2026-05-11)
 

@@ -39,7 +39,11 @@ implementation site lands, or rename to a term already on the list.
 - **JobSearchPoint (JSP)** — frozen target-layer spec: pipeline_params
   + rendered prompt. Content-hashable. `domain/search_point.py`.
 - **PromptTemplate** — 8-field prompt scheme rendered via
-  `compile_prompt()`. `domain/opt_search_point.py`.
+  `compile_prompt()`. `domain/opt_search_point.py`. `compile_prompt` fills
+  the supplied slots and leaves any other `{{…}}` literal — a node prompt's
+  own backend placeholders (`{{query}}`, `{{combined_text}}`) are content,
+  not optimizer slots; authored-slot typos are caught at load by
+  `dispatch.validate_template`.
 - **OptSearchPoint (OSP)** — optimizer state: lineage + L2 context +
   L3 plan + per-individual memory. Projects to JSP for evaluation.
   `domain/opt_search_point.py`.
@@ -231,6 +235,12 @@ The persisted world is a four-entity containment hierarchy
   posterior, not this snapshot.
 - **llm_ranking** — a backend node that orders ranked_items per
   sample. Distinct from PoBB, Rasch, and the adaptive queue mechanism.
+- **prediction (terminal ranking)** — the per-sample `predicted` is the
+  head of the **terminal ranker's** ranked output (`candidate_ranking`
+  for a `token_matching`-terminal pipeline, `final_ranking` for an
+  `llm_ranking`/`llm_only` one), derived by `terminal_ranking()` — the
+  pipeline shape decides the source key, it is not hardcoded.
+  `application/optimization/pobb/elimination/classification.py`.
 
 ## Escalation + healing
 

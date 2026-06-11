@@ -104,12 +104,78 @@ Five-lens verification audit. Tiers 1–2 dead-code/hidden-default deletes + all
 - `application/optimization/validators/l1_behavior.py:78` `ValidatorContext.param_unlock_round` default 3 never overridden — possibly an intended future tunable. **Confirm before collapsing to a constant.**
 - `application/scoring/evaluators.py:44` `compute_accuracy` ↔ `metrics.py:59` `_compute_accuracy` — the deprecated-filter + mean-fitness accuracy line is byte-identical across the two seams (registry evaluator vs. the `{hits,total,accuracy,…}` bundle). Marginal; have `_compute_accuracy` reuse `compute_accuracy` for the scalar if touched.
 
+### Benchmarks: dev-surface-only, hidden from the distributed end-user app (2026-06-11)
+
+**Product intent (operator):** the distributed webapp must be learnable in ~1h by a non-technical layperson (the Swiss "Ralf"); bundled benchmarks (`bbeh`, `aime_2025`, `gsm8k`, `hotpotqa`, `justlogic`, `lca-termnorm`, `promptpotter*`) confuse that audience and are not for distribution. They must stay fully accessible to **dev surfaces only**: GitHub clone, `SKILL.md` (`/potter-run`), CLI (`new <name>`), folder-UI, and the python entrypoint. The webapp end-user sees only **`yours`** (their own ingested Origins) + optionally **`demo`**.
+
+**The seam already exists — this is a posture/wiring task, not build-from-scratch.** `GET /datasets` (`presentation/api/routers/datasets.py:66-92`) already tiers `yours`/`benchmark`/`demo`, and the `benchmark` tier is gated on the `datasets.benchmarks.read` capability (`infrastructure/store/dataset_access.py`; `demo` rides `User.demo_mode_enabled`, `user_store.py:40`). So benchmarks are already invisible to any identity lacking that capability.
+
+**Action (verify + lock, then confirm with operator):**
+1. Confirm the **distributed-app default identity does NOT hold `datasets.benchmarks.read`** (and `demo_mode_enabled=false`), while the CLI/headless/dev identity DOES. Find where the capability is granted (grep `datasets.benchmarks.read`) and check the default-user/anonymous grant path. This is the load-bearing line.
+2. Audit the webapp for any path that surfaces a benchmark to a non-capable user despite the API gate — esp. the "prefill a draft from a benchmark/Origin" feature (`datasets.py:190`), the IngestPane dataset list, and any hardcoded benchmark name in `webapp/`.
+3. CLI / folder-UI / python entrypoint must NOT route through the capability check (they're the dev surfaces that keep benchmarks) — confirm `new <name>` and direct file-tree access stay unscoped.
+4. Add a `tests/test_structure.py` (or contract test) lock so a benchmark can't leak to a no-capability identity (R-15).
+
+**Blockers:** operator confirmation on (a) whether `demo` tier stays visible to end-users or also hides, and (b) the exact default-identity capability set for the distributed app vs. the dev clone. Ties to identity ADR-0002.
+
+### Backend-registration dedup (2026-06-11)
+
+Both surface from the `wiring.py` root fix that made one `BackendConnection` per
+`(base_url, backend_type)` instead of one per dataset.
+
+- **`webapp/lib/hooks/useConnector.ts` (the `distinct`/`seenEndpoints` loop, ~l.227-238)** —
+  client-side collapse of duplicate `BackendConnection` rows is a **back-compat shim**
+  for per-dataset rows already minted on disk *before* the `wiring.py` fix (the loop's
+  own comment admits it's "a no-op" once data is clean). Violates no-shim / zero-stale-data.
+  **Action (planned 2026-06-12 — NOT just a row delete):** investigation 2026-06-11 found the
+  dedup is a genuine three-step migration, not a cleanup:
+    1. **Rewrite the stored `backend_id` on every existing campaign → one canonical id (`local` =
+       `DEFAULT_BACKEND_ID`).** There are 8 distinct per-dataset ids on disk, all pointing at the
+       SAME endpoint (`termnorm` @ `127.0.0.1:8000`), referenced by **82 campaigns**
+       (`local`×33, `email-tagging`×23, `customer-tickets-eval`×16, `email-tagging-hard-eval`×5,
+       `justlogic`×3, + 1 each for `data_justlogic_deductive_reasoning` / `email-tagging-eval` /
+       `lca-bom-termnorm`). A bare row-delete does NOT stick — the per-dataset id lives in
+       `campaign.json::backend_id`, so any re-wire path that reads it re-references (and the
+       register-if-missing block in `wiring.py` re-mints) the row. Canonicalize the references first.
+    2. **Collapse the duplicate rows** under `.promptpotter/projects/{tenant}/archive/backends/`
+       to one per `(base_url, backend_type)` — needs a new `BackendStore.remove(backend_id)`
+       (the store currently has no delete verb).
+    3. **Make every re-wire path reuse the canonical id** so it never re-diverges: CLI already
+       passes `--backend-id local`; the web/ingest path (empty `backend_id`) hits the
+       endpoint-reuse block — confirm it resolves to the canonical row, not "first alphabetical".
+  Then **delete the loop** — restore `others: active ? backends.filter(b => b !== active) : backends`.
+  Ship as a one-shot idempotent migration script the operator runs on their own data (destructive +
+  hard to fully reverse — do NOT run blind from a clean clone).
+  **Blocker:** the migration above — write + operator-run it before deleting the loop. The loop is
+  **load-bearing until that runs** (the operator currently has 8 stale per-dataset rows + 82
+  campaigns referencing them).
+
+- **`promptpotter/application/bootstrap/wiring.py` (the `not backend_id` reuse block, ~l.312-323)** —
+  when a *second distinct* endpoint is wired with no `--backend-id` and `DEFAULT_BACKEND_ID`
+  already exists for a *different* endpoint, the `if not store.backends.get(backend_id)`
+  guard skips registration and the dataset's backend *record* keeps the old endpoint's
+  `base_url` (calls still go to the right place — `client` uses `backend_url` directly —
+  only the registration metadata lies). **Action:** when falling back to `DEFAULT_BACKEND_ID`,
+  guard the reuse on `existing.base_url == backend_url`; mint a deterministic distinct id on
+  mismatch (so re-wiring the same endpoint stays stable). **Blocker:** none functionally —
+  only bites once a 2nd endpoint/connector exists; defer to the multi-connector lane, but
+  recorded so it isn't rediscovered live.
+
 ### Considered, not debt (don't re-open)
 
 - **`RunCallbacks` ↔ `emit_*`** — two writer APIs, but `RunCallbacks._phase_ctx: ViewContext` is owned write-then-read cross-event state; folding it into an ambient ContextVar is a downgrade. The "which do I use" rule is in [`developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1.
 - **`from_disk_round` / `from_disk_log`** — looks like a roundtrip shim, but it's a genuine separate source: foreign fork-sibling + historical cycles have no live ledger, so on-disk `round_NNNN.json` is the only source. `test_round_complete_view_roundtrip` keeps both factories honest against one View.
 
 ### Standing entries
+
+- ~~**Pure dataset → effective-pipeline-params resolver (follow-up to config-aware identity)**~~
+  **SHIPPED 2026-06-11.** Extracted `resolve_pipeline_config_params(active, pipeline_overrides,
+  dataset_dir) -> dict` (no Session) in `application/config.py`; both
+  `configure_and_apply_pipeline` and `origins.py::_dataset_origin_id` now call it, so the
+  prospective-origin id can never silently diverge from what a real run stamps. (Signature took
+  `active` + overrides rather than the proposed `(dataset_dir, campaign_config, schema)` — the
+  shared core is just the node-config merge; `to_pipeline_params()` is only `{"steps": …}`, so
+  the resolver needs neither the schema nor the full config.)
 
 - **Optimizer model unreliable on heavy l2/l3 structured output (operator's model call)** —
   the L3-plan-timeout *false-halt* is fixed (the wall budget now covers the
