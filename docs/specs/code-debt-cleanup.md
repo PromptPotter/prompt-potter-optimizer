@@ -32,7 +32,7 @@ patterns.
 
 ### This week (execution slate)
 
-0. **Campaign-from-origin Phase 2 (MOST URGENT — next scope)** — surface the tenant's distinct *used origins* (cross-campaign, dedup by `Campaign.root_content_hash`) in New Campaign; start a fresh campaign from a chosen one. Phase 1 (per-dataset committed-origin reuse) shipped. **The one real refactor:** the origin *seed* (`OperatorForkOverride` → `application/origin.py::establish_campaign_origin(fork_seed=…)`, already wins) reaches only the fork/resume entry (`runner/entry.py::_read_fork_seed`) — thread it through the fresh root mint (`jobs/launcher.py::mint_campaign_command → jobs/mint.py::{prepare_fresh_cycle,resolve_cycle_plan}`), unifying fork + steer + campaign-from-origin into one seam. **Additive:** a `GET /origins` derived read over `list_campaigns()`; an `origin_override` on `datasets/ingest.py::draft_from_dataset`.
+0. **Campaign-from-origin Phase 2 — additive consumer layer only (seam refactor SHIPPED).** The seam unification landed: the origin *seed* (`CycleSeed`, formerly `OperatorForkOverride`) now threads through the fresh root mint (`jobs/mint.py::{resolve_cycle_plan,prepare_fresh_cycle}` accept `origin_override` → write `.overrides/seed.json` with `origin_source="campaign_origin"`; `mint_campaign_command` + the `mint-campaign` dispatcher + the `MintCampaignPayload` openapi schema all carry it). C0 lineage is data-driven (`origin.py::_SEED_ORIGIN_LINEAGE`). So `POST /commands/mint-campaign {origin_override}` already starts a fresh campaign from a chosen prior origin. **Remaining (additive, bundle — picker is live-round-gated):** a `GET /origins` derived read over `list_campaigns()` (dedup by `Campaign.root_content_hash`; 3-hop to `session_state.origin_prompt_fields` for the override payload) + the New Campaign / `IngestPane` origin picker that POSTs it. Optional: `origin_override` on `datasets/ingest.py::draft_from_dataset`.
 
 1. **TermNorm wire `model`** — cross-repo edit at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`. With the connector revision-pin landed (`promptpotter/connectors/protocol.py::Connector.{expected_revision, version_check}`), the TermNorm-side PR adds `model` to the per-request response + a `/version` endpoint; this repo bumps `termnorm.py::_EXPECTED_REVISION` to the new SHA and deletes the `_synth_legacy_backend_record` back-fill in `presentation/api/routers/auth.py`.
 
@@ -84,6 +84,52 @@ These are one arc: item 5's wire-key rename is exactly what item 7's helper cons
 Knots 1–4 shipped in the v0.8.1 panel-fix arc (git log). Remaining:
 
 1. **Reconcile defaults snapshot `dash` at mount while the parent keeps polling.** `forkReconcileDefaults`/`LimitReconcile` freeze spend/round "remaining" via `useState(() => …)`; a long edit session shows mount-time remaining, not current. *Why debt:* latent staleness seam — intentional (avoids clobbering the operator's typed values) but undocumented, so a future reader may "fix" it into a clobber. **Action:** one-line comment affirming the snapshot is deliberate, or recompute-on-reopen. **Blocker:** none.
+
+### Untracked-debt sweep (2026-06-11)
+
+Five-lens verification audit (dead-code / fallbacks / structural / webapp / doc-drift). High-confidence after call-site tracing; tiers below by kind. Items NOT already on this backlog.
+
+**Tier 1 — verified dead code (one delete-on-sight commit, R-07).** Each grepped across `promptpotter/`+`tests/`(+`webapp/` for wire keys); zero live readers/callers unless noted.
+- `application/optimization/transitions.py:37` `OptimizerAction` — `Literal["normal_round","probe_round"]` duplicated identically at `dispatch/schemas.py:237`; the transitions.py copy is never imported. **Delete** the alias (+ `__all__` l.32); annotate `TransitionResult.action` by importing from `dispatch.schemas`.
+- `application/origin.py:522` `DatasetRunSummary` + `summarize_archive_runs` — write-once, zero readers repo-wide. **Delete** both (+ `__all__`).
+- `application/origin.py:467` `DatasetSummary.splits` — built only to derive `train_data`; the returned `.splits` is never read (`new.py:300` reads `.train_data`; notebook reads `.index_terms`/`.n_unique_samples` — keep those). **Drop** the field + its return.
+- `connectors/termnorm.py:139,148` `_build_query_item(ground_truth="")` param + `if ground_truth:` branch — sole caller (`_extract_queries:192`) passes no GT and writes the key separately; branch unreachable. **Drop** param + branch.
+- `config/log_redaction.py:54` `SecretRedactionFilter(extra_values=…)` — both ctor sites (`logging.py:90`, `test_invariants.py:820`) pass nothing. **Drop** param + concat.
+- `infrastructure/tracing/events.py:20` `generate_observation_id(length=32)` — sole caller passes nothing. **Drop** param, inline `32`.
+- `infrastructure/identity/session.py:128` `ttl_s=DEFAULT_SESSION_TTL_S` — no caller overrides; constant unimported externally. **Inline** literal, drop export.
+- `presentation/api/routers/auth.py:547` `_refresh_identity` — only the def exists (docstring calls it a "test seam"; no test references it). **Delete**.
+- `domain/opt_search_point.py:28,69-70` `FewShotExample.explanation: str | None` — no write site (Py or JSON) ever sets it; render branch never fires. **Delete** field + branch.
+- `domain/search_point.py:159` `TaskDecomposition.FIELDS` ClassVar — zero reads; iteration uses `dataclasses.fields()`. **Delete**.
+- `domain/sample.py:52-63` `Sample.hits()`/`.failure_modes()`/`.degradation_count()` — zero instance calls; every site goes to `SampleIndex` directly. **Delete** the three proxies.
+- **`__all__`-only dead exports** (trim from `__all__`, internal use stays; ~12 symbols, uniform low-risk): `domain/scoring.py:67` `EMPTY_SCORER_ID`; `shared/hashing.py` `qg_pair`; `shared/composite.py:137` `SHORT_NAMES`+`extract_evaluator_names`; `shared/spend.py:66` `BUNDLED_PATH`; `shared/identity.py:32` `PROMPTPOTTER_ADMIN_ENV`; `domain/validators.py:25` `NurseTarget`; `infrastructure/llm/__init__.py` re-exports `try_parse_json`+`ProviderSpec`; `validators/_text.py` `word_set`; `validators/l2_behavior.py:46` `L2_RATIONALE_FLOOR_CHARS`; `config/logging.py:11-12` `LOG_FORMAT`/`LOG_DATE_FORMAT`; `connectors/protocol.py:46,52` `VersionCheck`/`PreflightFn`; `presentation/api/deps.py:19` `PROMPTPOTTER_AUTH_OFF_ENV`.
+
+**Tier 2 — hidden defaults / dead defensiveness (R-24/R-04/R-07).**
+- `application/origin.py:387` `sp_budget = campaign_config.sp_budget_ttest or 15` — field is `Field(20)`, a guaranteed `int`; the `or 15` fires only on `0` and substitutes a magic value that doesn't even match the model default. Hidden default on an experiment knob. **Action:** direct access `campaign_config.sp_budget_ttest`; reject `0` in a model validator if needed.
+- `application/runner/loop.py:88` `max_rounds = opt.max_rounds or 999` — `max_rounds: int | None` documents `None = unlimited`, but `999` is a magic finite cap standing in for unlimited (and swallows explicit `0`). **Action:** `if opt.max_rounds is not None else math.inf` / guard the loop on `is None`.
+- `application/optimization/escalation/state.py:222,231` `record.payload.get("data") or {}` then immediate `["l2_round"]`/`["l2_stall_count"]` — if `data` were absent the next line KeyErrors anyway, so the `or {}` defends nothing and only obscures the failure. Writer always populates `data`. **Action:** `record.payload["data"]` directly.
+
+**Tier 3 — webapp client-side scoring recompute (R-36).**
+- `webapp/lib/derivations/round-candidates.ts:82` `computeAccuracyFromSamples(c.samples)` fallback — re-derives accuracy in TS by counting HIT/MISS lines when served `stats.accuracy` is absent; the live dashboard already serves it (`poll.tsx:145`). R-36 recompute + the display-source stitch the unification meant to kill. **Action:** delete the fallback, trust served `stats.accuracy` (root-fix upstream if it can go absent mid-round). Clean standalone delete.
+- `webapp/components/whatif/fitness-bars.ts:51-88` (`accuracyOverSampleSet`, `correctedFromEvaluators`) + `whatif/FitnessRankSummary.tsx:5-23` (`ranks()`/`pickWinner()`) — recompute what-if fitness, fixed-sample-set accuracy, and alternative ordering/winner-flip in TS. This is the **deferred mask WRITE-SIDE** (read-side shipped 2026-06-10, Lane C8) — the served overlay already proves the pattern (`lib/lineage-overlay.tsx` is R-36-clean). **Action (when Lane C8 resumes):** extend the served mask projection to carry per-candidate bar values + masked ranking (`alternative_candidate_id`); the panel becomes a thin render. Findings collapse together. **Blocker:** Lane C8 write-side scope.
+
+**Tier 4 — doc / config drift (cheap).**
+- `promptpotter/application/CLAUDE.md:42` cites `configure_and_apply_pipeline()` at `config.py:342` — it's at `:426` (`:342` is `PreflightWarning.title`). **Fix or drop the line number.**
+- `promptpotter/application/optimization/CLAUDE.md:113` cites `call.py:408` for `run_optimizer_node` — it's at `:427` (`compile_prompt` call `:464`). **Fix.**
+- `docs/developer/stable-api.md:20,24` `SessionProtocol` shows `set_terms(terms)`/`recover()`; code (`domain/connector.py:42,49`) is `set_terms(http, base_url, terms)`/`recover(http, base_url)`. **Fix signatures.**
+- `docs/developer/stable-api.md:11-18` `Connector` dataclass missing 3 fields present in `connectors/protocol.py:80`: `execution`, `expected_revision`, `version_check`. Load-bearing (it's the *stable* surface). **Add fields + bump reviewed date.**
+- `docs/CLAUDE.md:27` links `template/`+`template/README.md` — no `docs/template/` dir exists. **Remove row or restore dir.**
+- `docs/specs/verdict-resolution.md:154` "Companion: `hard-sample-sorter.md`" — no such doc (sorter is code only). **Repoint to code path or remove.**
+- `datasets/CLAUDE.md:52` links `../docs/specs/m12-multi-connector.md` — consolidated into `roadmap.md` 2026-06-06. **Repoint to `docs/specs/roadmap.md#track-15`.**
+- `application/bootstrap/wiring.py:194,250` operator strings count rows as "queries" (`{len(items)} queries`) — glossary:178 reserves `query` for the field name only. **Rename to "samples".**
+- `application/config.py:145` `elimination_n_min` desc "Minimum queries…" — same. **"samples".**
+- **Meta:** 3 of the above are stale inline `file:line` citations in CLAUDE.md docs — the most rot-prone form. Consider dropping line numbers from prose docs entirely.
+
+**Tier 5 — medium, needs an operator call before action.**
+- `connectors/protocol.py:158` `Connector.to_dict()` — zero call sites in-repo; **verify** no external/operator script uses it before deleting.
+- `domain/pipeline_parsing.py:261` writes `"display_tag"` into `step_kwargs`, but `PipelineNode` has no such field → silently dropped on every parse of an LLM-generated pipeline (runtime tags come from `_build_display_tags`). On-disk datasets DO ship the key and the contract doc lists it optional, so the *write* is inert but the key isn't dead. **Drop the parse-path write; leave doc/datasets.**
+- `application/intelligence/indexes/config.py` `ConfigIndex` — `ingest_run` populates `_configs_to_runs`/`_configs_to_node_configs` but exposes no query method and `measurements_for_config` does its own O(N) scan. Documented as a first-class derived view (glossary + developer README), so likely a half-built skip-scan, not oversight. **Confirm intent;** if abandoned, drop the class + `AxisIndex.config_index`.
+- `application/optimization/validators/l1_behavior.py:78` `ValidatorContext.param_unlock_round` default 3 never overridden — possibly an intended future tunable. **Confirm before collapsing to a constant.**
+- `application/scoring/evaluators.py:44` `compute_accuracy` ↔ `metrics.py:59` `_compute_accuracy` — the deprecated-filter + mean-fitness accuracy line is byte-identical across the two seams (registry evaluator vs. the `{hits,total,accuracy,…}` bundle). Marginal; have `_compute_accuracy` reuse `compute_accuracy` for the scalar if touched.
 
 ### Considered, not debt (don't re-open)
 

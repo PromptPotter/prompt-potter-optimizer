@@ -22,6 +22,7 @@ from promptpotter.application.bootstrap.session import auto_mint_session
 from promptpotter.application.config import configure_and_apply_pipeline
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner import build_origin_cycle_id
+from promptpotter.domain.run_records import CycleSeed
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -34,6 +35,18 @@ if TYPE_CHECKING:
 
 def _noop_log(*_args: Any, **_kwargs: Any) -> None:
     """Default pipeline-apply trace sink — silent unless a caller wires one."""
+
+
+def _campaign_origin_seed(origin_override: dict[str, Any] | None) -> CycleSeed | None:
+    """A campaign-from-origin seed (a chosen prior origin's prompt fields as C0),
+    or ``None`` to use the dataset's authored origin.
+
+    The same :class:`CycleSeed` an operator-steered fork rides — so the fresh root
+    mint funnels through the one seed seam the runner already reads at bootstrap
+    (``runner/entry.py::_read_cycle_seed``). ``origin_source`` stamps the C0 lineage."""
+    if not origin_override:
+        return None
+    return CycleSeed(origin_prompt_fields=origin_override, origin_source="campaign_origin")
 
 
 @dataclass(frozen=True)
@@ -61,13 +74,17 @@ def resolve_cycle_plan(
     campaign_config: CampaignConfig,
     dataset: list[Sample],
     *,
+    origin_override: dict[str, Any] | None = None,
     log: Callable[..., None] | None = None,
 ) -> CyclePlan:
     """Apply the pipeline overlay, resolve the origin OSP, derive its cycle_id.
 
-    No disk mint — ``resume`` calls this to recompute the expected cycle_id and
-    compare it against ``campaign.json::root_content_hash`` for drift detection.
-    ``log`` traces the pipeline-apply step (CLI passes ``logger.info`` under ``-v``).
+    ``origin_override`` (campaign-from-origin) is a chosen prior origin's prompt
+    fields — when set it *is* the origin, so the cycle_id derives from it, not the
+    dataset's authored origin. No disk mint — ``resume`` calls this (with no
+    override) to recompute the expected cycle_id and compare it against
+    ``campaign.json::root_content_hash`` for drift detection. ``log`` traces the
+    pipeline-apply step (CLI passes ``logger.info`` under ``-v``).
     """
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log or _noop_log)
@@ -75,6 +92,7 @@ def resolve_cycle_plan(
         session.experiment_extract,
         prompt_node_names=schema.prompt_node_names() if schema else [],
         dataset_dir=session.dataset_config_dir,
+        seed=_campaign_origin_seed(origin_override),
     )
     return CyclePlan(
         pipeline_params=pipeline_params,
@@ -88,6 +106,7 @@ def prepare_fresh_cycle(
     campaign_config: CampaignConfig,
     dataset: list[Sample],
     *,
+    origin_override: dict[str, Any] | None = None,
     log: Callable[..., None] | None = None,
 ) -> MintedCycle:
     """Mint a fresh campaign + session + root cycle from a resolved dataset.
@@ -97,8 +116,17 @@ def prepare_fresh_cycle(
     4-key active pointer (also threading ``campaign_id`` onto *session*). Callers
     own everything around it — quota/spend gates + the detached task (web), the
     inline display + task-context check-in (CLI).
+
+    ``origin_override`` (campaign-from-origin) re-homes C0 to a chosen prior
+    origin: the plan's cycle_id derives from it, and the matching
+    :class:`CycleSeed` is written to ``.overrides/seed.json`` so the runner seam
+    resolves the same origin at bootstrap (the generic fork/steer read path). The
+    root is parentless, so the origin still scores fresh — no inherited measurement.
     """
-    plan = resolve_cycle_plan(session, campaign_config, dataset, log=log)
+    seed = _campaign_origin_seed(origin_override)
+    plan = resolve_cycle_plan(
+        session, campaign_config, dataset, origin_override=origin_override, log=log
+    )
     session_id, campaign_id, cycle_id = auto_mint_session(
         session,
         campaign_config,
@@ -109,6 +137,8 @@ def prepare_fresh_cycle(
         pipeline_params=plan.pipeline_params,
         active_steps=list(plan.pipeline_params.get("steps", [])),
     )
+    if seed is not None:
+        session.store.campaigns.write_cycle_seed(campaign_id, cycle_id, seed)
     return MintedCycle(
         pipeline_params=plan.pipeline_params,
         origin=plan.origin,
