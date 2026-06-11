@@ -24,7 +24,6 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | [`methods/`](methods/) | The two spend-control procedures: PoBB elimination + hard-sample leaderboard. | [`methods/README.md`](methods/README.md) |
 | [`research/`](research/) | Benchmarks (BBEH comparison, pEvol-bench), metrics, related-work table (incl. MCTS comparison). | [`research/README.md`](research/README.md) |
 | [`specs/`](specs/) | Forward direction in one [`roadmap.md`](specs/roadmap.md) + living contracts (verdict-resolution, frontend-surface-contract, the two CI-checked control-plane YAMLs) + the debt backlog. **Specs index has its own CLAUDE.md.** | [`specs/CLAUDE.md`](specs/CLAUDE.md) |
-| [`template/`](template/) | Fork recipe — framework/specifics split, what to replace, what you get for free. Read when starting a new Python + webtech project on top of PromptPotter. | [`template/README.md`](template/README.md) |
 | `assets/` | Images and diagrams; no contract. | n/a |
 
 ## Anchor docs for hot questions

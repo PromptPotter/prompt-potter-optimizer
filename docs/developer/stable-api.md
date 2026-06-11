@@ -1,6 +1,6 @@
 # Stable API surface — what forks can rely on
 
-> **Stable API v1** · Last reviewed: 2026-05-14
+> **Stable API v1** · Last reviewed: 2026-06-11
 
 What downstream forks build on without breaking on the next refactor. Anything not listed is **internal** — free to rename, restructure, or delete in any PR. Forks on internal symbols are on their own. Breaking changes here bump the major; pre-release the version is informational only. Non-promises spelled out in §8.
 
@@ -15,9 +15,13 @@ class Connector:
     wire_adapter: Callable[[str, dict | None], dict]                # outbound HTTP body shaper
     session_factory: Callable[[], SessionProtocol]                  # fresh session per BackendClient
     extract_experiment: Callable[[dict], tuple[list[dict], list[str]]]  # → (queries, index_terms)
+    execution: ConnectorExecution = "remote_http"                   # "remote_http" | "in_process" (L4 inner cycle)
+    expected_revision: str | None = None                            # backend rev this PP rev expects (paired w/ version_check)
+    version_check: VersionCheck | None = None                       # async (http, base_url) -> str | None; bootstrap WARNs on drift
+    preflight: PreflightFn | None = None                            # async (backend_url) -> None reachability probe; None opts out
 ```
 
-`SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(terms)` (backend handshake; noop ok) · `async recover()` (re-establish after transport error).
+`SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(http, base_url, terms)` (backend handshake; noop ok) · `async recover(http, base_url)` (re-establish after transport error).
 
 Each connector self-registers at import via `promptpotter/connectors/__init__.py::CONNECTORS`. Adding a connector is one new file under `promptpotter/connectors/` — no edits to `application/config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
 

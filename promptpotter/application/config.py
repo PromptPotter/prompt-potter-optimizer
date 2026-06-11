@@ -142,7 +142,7 @@ class OptimizationConfig(BaseModel):
 
     elimination_n_min: int = Field(
         6,
-        description="Minimum queries before PoBB starts firing (floor on n for "
+        description="Minimum samples before PoBB starts firing (floor on n for "
         "the Normal-CLT posterior to be meaningful).",
     )
     pobb_epsilon: float = Field(
