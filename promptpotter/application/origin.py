@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "ORIGIN_RESOLUTION_PRIORITY",
     "CampaignOrigin",
-    "DatasetRunSummary",
     "DatasetSummary",
     "build_campaign_emitter",
     "establish_campaign_origin",
@@ -33,7 +32,6 @@ __all__ = [
     "prepare_datasets",
     "prepare_scoring_context",
     "resolve_origin_opt_search_point",
-    "summarize_archive_runs",
     "try_inherit_fork_origin",
 ]
 
@@ -384,7 +382,7 @@ async def prepare_scoring_context(
     from promptpotter.shared.errors import graceful
 
     session: Session = svc
-    sp_budget = campaign_config.sp_budget_ttest or 15
+    sp_budget = campaign_config.sp_budget_ttest
     scoring_set = sample_dataset(dataset, sp_budget)
     spec = split_scoring_block(campaign_config.scoring)
 
@@ -516,34 +514,4 @@ def prepare_datasets(
         index_terms=sorted(gt_set),
         splits=splits,
         n_unique_samples=len(all_queries),
-    )
-
-
-class DatasetRunSummary(NamedTuple):
-    """Aggregated dataset run statistics for dashboard display."""
-
-    total: int
-    by_source: dict[str, int]
-    best_accuracy: float
-    best_name: str
-
-
-def summarize_archive_runs(runs: list[dict[str, Any]]) -> DatasetRunSummary:
-    """Aggregate measurement-archive runs by source prefix and find best accuracy."""
-    by_source: dict[str, int] = {}
-    best_acc = 0.0
-    best_name = ""
-    for r in runs:
-        name = r.get("name", "")
-        source = name.split("_")[0] if "_" in name else "other"
-        by_source[source] = by_source.get(source, 0) + 1
-        acc = r.get("scores", {}).get("accuracy", 0.0)
-        if acc > best_acc:
-            best_acc = acc
-            best_name = name
-    return DatasetRunSummary(
-        total=len(runs),
-        by_source=by_source,
-        best_accuracy=best_acc,
-        best_name=best_name,
     )

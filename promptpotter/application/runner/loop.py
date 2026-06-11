@@ -85,7 +85,8 @@ async def run_round_loop(
     # resumed_from_round = next L1 round (fresh=1); clean_rounds = lifetime L1 completed (origin not counted).
     round_num = session.state.resumed_from_round
     clean_rounds = max(session.state.resumed_from_round - 1, 0)
-    max_rounds = opt.max_rounds or 999
+    # None ⇒ unlimited; HARD_CAP is the real ceiling either way.
+    max_rounds = opt.max_rounds if opt.max_rounds is not None else HARD_CAP
 
     # Origin is round 0 — emit it through the standard completion path before the
     # L1 loop on a fresh start (clean_rounds == 0) when it isn't already on disk.

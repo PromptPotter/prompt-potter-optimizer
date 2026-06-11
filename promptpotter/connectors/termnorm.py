@@ -136,18 +136,15 @@ def _split_query(query: str) -> tuple[str, str]:
     return primary, secondary
 
 
-def _build_query_item(query: str, ground_truth: str = "") -> dict[str, Any]:
+def _build_query_item(query: str) -> dict[str, Any]:
     """Build a query dict with TermNorm bom_material/process fields."""
     primary, secondary = _split_query(query)
-    item: dict[str, Any] = {
+    return {
         "query": query,
         "bom_material": primary,
         "process": secondary,
         "query_fields": {"bom_material": primary, "process": secondary},
     }
-    if ground_truth:
-        item["ground_truth"] = ground_truth
-    return item
 
 
 def _extract_index_terms(experiment_data: dict[str, Any]) -> list[str]:

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterable
 
 from promptpotter.config.settings import settings
 
@@ -51,11 +50,9 @@ class SecretRedactionFilter(logging.Filter):
     filter if env keys are rotated mid-process.
     """
 
-    def __init__(self, extra_values: Iterable[str] = ()) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._values: tuple[str, ...] = _snapshot_secret_values() + tuple(
-            v for v in extra_values if v
-        )
+        self._values: tuple[str, ...] = _snapshot_secret_values()
 
     def _redact(self, text: str) -> str:
         for v in self._values:

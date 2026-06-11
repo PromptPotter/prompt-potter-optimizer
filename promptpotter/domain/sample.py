@@ -3,8 +3,8 @@
 ``Sample`` is data-side peer to SearchPoint: cross-campaign ``id``, inputs, and
 accumulating metadata (``escalation_count``, ``run_ids``). Per-sample aggregate
 stats live in ``SampleIndex``, measurements in ``archive/measurements/`` —
-accessed via the methods below, never duplicated on the model. Mutable because
-``run_ids`` accumulates over the campaign lifecycle.
+read via ``SampleIndex`` / ``MeasurementArchive`` directly, never duplicated on
+the model. Mutable because ``run_ids`` accumulates over the campaign lifecycle.
 
 ``Measurement`` is the denormalized read-only archive row returned by both
 ``measurements_for_sample`` / ``measurements_for_config`` views.
@@ -13,12 +13,9 @@ accessed via the methods below, never duplicated on the model. Mutable because
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, Field
-
-if TYPE_CHECKING:
-    from promptpotter.application.intelligence.indexes import SampleIndex
 
 
 class Sample(BaseModel):
@@ -45,21 +42,6 @@ class Sample(BaseModel):
         if "id" not in data and fallback_id is not None:
             data = {**data, "id": fallback_id}
         return cls(**data)
-
-    # --- Cross-campaign signal accessors (resolve via SampleIndex) ---
-    # Trace-content retrieval lives on ``MeasurementArchive`` directly — SampleIndex has no store access.
-
-    def hits(self, index: SampleIndex) -> list[bool]:
-        """Hit/miss history across all measurements touching this sample."""
-        return index.hits(self.id)
-
-    def failure_modes(self, index: SampleIndex) -> list[str]:
-        """Failure mode (``terminated_at``) history for this sample."""
-        return index.failure_modes(self.id)
-
-    def degradation_count(self, index: SampleIndex) -> int:
-        """Number of measurements that produced degradation warnings."""
-        return index.degradation_count(self.id)
 
 
 @dataclass(frozen=True, slots=True)
