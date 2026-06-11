@@ -151,5 +151,4 @@ To be answered with the operator before implementation:
 - Population profile fit: `promptpotter/application/intelligence/exploration.py::fit_rasch`
 - Observation: `promptpotter/application/intelligence/exploration.py:38-44`
 - Persisted ranking writer: `promptpotter/application/intelligence/hard_sample_sorter.py::build_hard_samples_artifact_from_observations`
-- Companion: [`hard-sample-sorter.md`](hard-sample-sorter.md)
 - Superseded: `bayesian-sample-picker.md`

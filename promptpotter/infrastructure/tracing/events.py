@@ -17,9 +17,9 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Union
 
 
-def generate_observation_id(length: int = 32) -> str:
+def generate_observation_id() -> str:
     prefix = datetime.now(UTC).strftime("%y%m%d%H%M%S")
-    suffix = uuid.uuid4().hex[: length - len(prefix)]
+    suffix = uuid.uuid4().hex[: 32 - len(prefix)]
     return f"{prefix}{suffix}"
 
 

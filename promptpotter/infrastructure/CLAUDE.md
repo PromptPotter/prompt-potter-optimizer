@@ -88,9 +88,9 @@ not raw `str`/`Path`. `archive/` is cross-cycle/session/tenant;
 `MeasurementArchive` is the DB core.
 
 `CampaignStore` mixes in `CycleOverrideMixin` (`store/campaign_store/overrides.py`):
-`write_fork_seed`/`read_fork_seed` over `cycles/{id}/.overrides/seed.json` —
-the **read-once** per-cycle override home (an operator-steered fork's typed
-`OperatorForkOverride`, written by `_mint_fork`, read once at the runner seam). Distinct
+`write_cycle_seed`/`read_cycle_seed` over `cycles/{id}/.overrides/seed.json` —
+the **read-once** per-cycle override home (a steered fork's or campaign-origin's
+typed `CycleSeed`, written by `_mint_fork` / the mint seam, read once at the runner seam). Distinct
 from `.runtime/{stop,pause,spend_cap}` (the **polled** per-round flags,
 `runtime_flags.py`): the dir name encodes read-cadence, so the two never
 share a cache path.

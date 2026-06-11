@@ -44,7 +44,7 @@ from promptpotter import connectors
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
-from promptpotter.domain.run_records import CommandRecord, OperatorForkOverride
+from promptpotter.domain.run_records import CommandRecord, CycleSeed
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.models import (
@@ -367,7 +367,7 @@ class CommandDispatcher:
         if kind == "fork-cycle":
             from promptpotter.application.optimization.resume_and_fork import mint_operator_fork
 
-            seed = _parse_fork_seed(payload_extras.get("seed"))
+            seed = _parse_cycle_seed(payload_extras.get("seed"))
 
             async def _apply_fork() -> None:
                 # Mint the operator-steered fork (writes the cycle + seed,
@@ -573,6 +573,8 @@ class CommandDispatcher:
                 "job registry not initialised", code="job_registry_unavailable"
             )
         dataset_name = str(payload.get("dataset_name", ""))
+        raw_origin = payload.get("origin_override")
+        origin_override = raw_origin if isinstance(raw_origin, dict) else None
         # Quota (429) / Launch (422) / BackendUnreachable (503) are PotterErrors —
         # the central catch in _record_and_apply maps them. No per-applier arm.
         await mint_campaign_command(
@@ -581,6 +583,7 @@ class CommandDispatcher:
             job_registry=self._job_registry,
             halt_at_accuracy=_optional_float(payload.get("halt_at_accuracy")),
             spend_budget_usd=_optional_float(payload.get("spend_budget_usd")),
+            origin_override=origin_override,
         )
 
     async def _apply_start_run(
@@ -683,17 +686,19 @@ def _optional_float(raw: object) -> float | None:
     return None
 
 
-def _parse_fork_seed(raw: object) -> OperatorForkOverride:
-    """Validate the required ``fork-cycle`` seed into a typed :class:`OperatorForkOverride`.
+def _parse_cycle_seed(raw: object) -> CycleSeed:
+    """Validate the required ``fork-cycle`` seed into a typed :class:`CycleSeed`.
 
     Every operator fork is `operator_steered` and carries a seed (the edited
-    searchpoint + reconciled limits). A missing or malformed seed is a 422 (the
-    typed schema is the contract; `LimitOverrides` bounds ride
+    searchpoint + reconciled limits). The wire payload is always a fork, so the
+    C0 lineage provenance is stamped ``origin_source="fork_seed"`` here (the wire
+    schema `OperatorForkOverride` doesn't carry it). A missing or malformed seed
+    is a 422 (the typed schema is the contract; `LimitOverrides` bounds ride
     `m12-api-openapi.yaml`)."""
     if not isinstance(raw, dict):
         raise PayloadInvalidError("payload.seed (object) is required.")
     try:
-        return OperatorForkOverride.model_validate(raw)
+        return CycleSeed.model_validate({**raw, "origin_source": "fork_seed"})
     except ValidationError as exc:
         raise PayloadInvalidError(f"payload.seed invalid: {exc}") from exc
 

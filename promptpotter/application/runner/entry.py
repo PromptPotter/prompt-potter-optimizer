@@ -37,7 +37,7 @@ from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import CycleError, CycleResult
-from promptpotter.domain.run_records import ForkSpec, LimitOverrides, OperatorForkOverride
+from promptpotter.domain.run_records import CycleSeed, ForkSpec, LimitOverrides
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.models import emit_error_record
@@ -141,15 +141,16 @@ def _apply_limit_overrides(
     return new_config, effective_spend
 
 
-def _read_fork_seed(session: Session) -> OperatorForkOverride | None:
-    """Read this cycle's declared-at-fork seed, or ``None`` for a non-steered run.
+def _read_cycle_seed(session: Session) -> CycleSeed | None:
+    """Read this cycle's declared-at-mint seed, or ``None`` for an unseeded run.
 
-    The fork cycle_id is known (active-pointer / override, not hashed) and set on
+    The cycle_id is known (active-pointer / override, not hashed) and set on
     ``session.state`` before the runner seam, so the lookup is non-circular with
-    cycle-id derivation."""
+    cycle-id derivation. Set for an operator-steered fork or a campaign-from-origin
+    root mint; ``None`` otherwise."""
     if not session.state.cycle_id:
         return None
-    return session.store.campaigns.read_fork_seed(session.campaign_id, session.state.cycle_id)
+    return session.store.campaigns.read_cycle_seed(session.campaign_id, session.state.cycle_id)
 
 
 async def run_optimization(
@@ -176,25 +177,26 @@ async def run_optimization(
     started_at = utcnow_iso()
     cb = observers.callbacks
 
-    # Operator-steered fork: the edited searchpoint, declared at fork time, lives
-    # at `.overrides/seed.json` (read-once-at-bootstrap, keyed by the known fork
-    # cycle_id — set before this seam by both the CLI resume and API start-run
-    # launchers). It re-homes the origin (`origin_prompt_fields`) and layers its
-    # `pipeline_overlay` ON TOP of the dataset overlay (seed > dataset > backend).
-    # Read here — the single runner seam every launch path funnels through — not
-    # threaded through each launcher + every `configure_and_apply_pipeline` caller.
-    fork_seed = _read_fork_seed(session)
-    if fork_seed is not None and fork_seed.pipeline_overlay:
+    # Cycle seed: the chosen searchpoint, declared at mint, lives at
+    # `.overrides/seed.json` (read-once-at-bootstrap, keyed by the known cycle_id —
+    # set before this seam by the CLI resume, the API start-run launchers, and the
+    # campaign-from-origin mint). It re-homes the origin (`origin_prompt_fields`)
+    # and layers its `pipeline_overlay` ON TOP of the dataset overlay
+    # (seed > dataset > backend). Read here — the single runner seam every launch
+    # path funnels through — not threaded through each launcher + every
+    # `configure_and_apply_pipeline` caller.
+    seed = _read_cycle_seed(session)
+    if seed is not None and seed.pipeline_overlay:
         merged = dict(session.pipeline_params or {})
-        for node, cfg in fork_seed.pipeline_overlay.items():
+        for node, cfg in seed.pipeline_overlay.items():
             merged[node] = {**merged.get(node, {}), **cfg}
         session.pipeline_params = merged
-    if fork_seed is not None:
-        # Reconcile the fork's run limits (rounds / spend / patience / epsilon)
+    if seed is not None:
+        # Reconcile the seed's run limits (rounds / spend / patience / epsilon)
         # onto a fresh config snapshot — the loop starts at round 1 and stops
         # after the reconciled max_rounds. Reassign before any downstream call.
         campaign_config, spend_budget_usd = _apply_limit_overrides(
-            campaign_config, spend_budget_usd, fork_seed.limit_overrides
+            campaign_config, spend_budget_usd, seed.limit_overrides
         )
 
     if origin is None:
@@ -202,7 +204,7 @@ async def run_optimization(
         # its branch-point candidate's recorded accuracy (skipping the re-score, which
         # would re-roll under a nondeterministic backend); everything else scores it.
         origin = await establish_campaign_origin(
-            session, dataset, campaign_config, fork_seed=fork_seed, listener=cb
+            session, dataset, campaign_config, seed=seed, listener=cb
         )
         if observers.display is not None and hasattr(observers.display, "set_origin"):
             observers.display.set_origin(origin.origin_acc)

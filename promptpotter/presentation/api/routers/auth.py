@@ -51,9 +51,6 @@ from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.presentation.api.deps import IdentityDep, StoreDep
 from promptpotter.presentation.api.middleware import SESSION_COOKIE_NAME
-from promptpotter.presentation.api.middleware.oidc import (
-    _identity_context_from_session,
-)
 from promptpotter.shared.errors import NotFoundError, ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
@@ -542,13 +539,6 @@ def _provider_from_model(model: str) -> str:
 def _claim_email(store: Stores) -> str | None:
     raw = store.identity.claims.get("email")
     return raw if isinstance(raw, str) else None
-
-
-def _refresh_identity(bundle: IdentityBundle, session_id: str | None) -> Any:
-    """Test seam — exposed so tests can simulate a refreshed identity lookup."""
-    if not session_id:
-        return None
-    return _identity_context_from_session(session_id, bundle)
 
 
 __all__ = [

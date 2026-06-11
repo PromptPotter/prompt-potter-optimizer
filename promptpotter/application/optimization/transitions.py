@@ -13,7 +13,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.application.optimization.dispatch.schemas import ForkProposal
+from promptpotter.application.optimization.dispatch.schemas import (
+    ForkProposal,
+    OptimizerAction,
+)
 from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.opt_search_point import (
     L1SituationalExample,
@@ -29,12 +32,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "LayerStrategy",
-    "OptimizerAction",
     "TransitionResult",
 ]
-
-
-OptimizerAction = Literal["normal_round", "probe_round"]
 
 
 @dataclass

@@ -219,7 +219,7 @@ class EscalationFSM:
                 0 if bool(record.payload["improved"]) else self._l1_stall_count + 1
             )
         elif record.phase == "l2_context" and record.event == "exit":
-            escalation_state = record.payload.get("data") or {}
+            escalation_state = record.payload["data"]
             self._l1_stall_count = 0
             self._l2_round = int(escalation_state["l2_round"])
             self._l2_stall_count = int(escalation_state["l2_stall_count"])
@@ -228,7 +228,7 @@ class EscalationFSM:
                 escalation_state["l2_best_composite_fitness_at_entry"]
             )
         elif record.phase == "l3_plan" and record.event == "exit":
-            escalation_state = record.payload.get("data") or {}
+            escalation_state = record.payload["data"]
             best_acc = float(escalation_state["l3_best_accuracy_at_entry"])
             best_comp = float(escalation_state["l3_best_composite_fitness_at_entry"])
             self._l1_stall_count = 0

@@ -18,9 +18,9 @@ from __future__ import annotations
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import _mint_fork
 from promptpotter.domain.run_records import (
     UNATTRIBUTED_OPERATOR,
+    CycleSeed,
     ForkSpec,
     ForkTrigger,
-    OperatorForkOverride,
 )
 from promptpotter.infrastructure.store import Stores
 
@@ -32,7 +32,7 @@ def mint_operator_fork(
     cycle_id: str,
     from_round: int,
     from_candidate_id: str,
-    seed: OperatorForkOverride,
+    seed: CycleSeed,
     steered_by: str,
 ) -> str:
     """Mint an ``operator_steered`` fork off *cycle_id*; returns the new cycle id.

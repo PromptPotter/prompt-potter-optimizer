@@ -343,7 +343,7 @@ measured sibling cycle via the existing policy-scope config + branch-from-origin
   - *Substrate note (the deferred hard part).* The existing operator-fork seam
     roots at **round + candidate** (`ForkSpec.from_round`/`from_candidate_id`),
     requires `fork_from_round=0`, carries forward only the edited searchpoint
-    (`OperatorForkOverride`), and re-runs fresh — it inherits **no measurement
+    (`CycleSeed`), and re-runs fresh — it inherits **no measurement
     order** (the order picker re-derives each run). So an *order*-mask
     fork-from-divergence ("measure sample B next instead of A") is **not on
     existing rails**: it needs a mid-scoring write-point + an order-seed the fork

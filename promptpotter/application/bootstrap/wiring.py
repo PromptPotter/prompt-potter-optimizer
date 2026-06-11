@@ -191,7 +191,7 @@ def _load_dataset_into_session(
     valid = [item for item in items if item.get("query") and item.get("ground_truth")]
     session.samples = samples_from_dicts(valid)
     session.index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
-    status(f"Dataset: {dataset_name} ({len(items)} queries)")
+    status(f"Dataset: {dataset_name} ({len(items)} samples)")
 
 
 async def _sync_and_extract_experiment(
@@ -247,7 +247,7 @@ async def _sync_and_extract_experiment(
         index_terms = sorted(gt_set)
 
     exp_name = extract.get("experiment", {}).get("name", experiment_id)
-    status(f"Experiment: {exp_name} ({len(queries)} queries, {len(index_terms)} session terms)")
+    status(f"Experiment: {exp_name} ({len(queries)} samples, {len(index_terms)} session terms)")
 
     session.samples = samples_from_dicts(queries)
     session.experiment_extract = extract

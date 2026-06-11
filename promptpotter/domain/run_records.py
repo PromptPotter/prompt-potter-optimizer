@@ -18,6 +18,7 @@ __all__ = [
     "CommandAckRecord",
     "CommandRecord",
     "CycleRecord",
+    "CycleSeed",
     "DecisionRecord",
     "ErrorRecord",
     "ForkSpec",
@@ -26,7 +27,6 @@ __all__ = [
     "LLMCallRecord",
     "LLMCallStartRecord",
     "LimitOverrides",
-    "OperatorForkOverride",
     "OperatorSweepFile",
     "PhaseRecord",
     "ResumeCheckpointKind",
@@ -354,20 +354,29 @@ class LimitOverrides(BaseModel):
     pobb_epsilon: float | None = None
 
 
-class OperatorForkOverride(BaseModel):
-    """The edited-searchpoint origin override carried by every `operator_steered`
-    fork: a fork's origin = chosen searchpoint + operator edits. `origin_prompt_fields`
-    is a `PromptTemplate.prompt_field_dict()` shape → becomes the origin
-    `OptSearchPoint` at bootstrap. `pipeline_overlay` merges ON TOP of the dataset
-    overlay (seed > dataset > backend default) for this fork only — the dataset
-    `pipeline.json` stays immutable. (Non-operator triggers — sweep / diag /
-    rebase — carry no seed.)"""
+class CycleSeed(BaseModel):
+    """The chosen starting point a non-root cycle begins from — origin prompt +
+    config overlay + reconciled limits. `origin_prompt_fields` is a
+    `PromptTemplate.prompt_field_dict()` shape → becomes the origin `OptSearchPoint`
+    at bootstrap. `pipeline_overlay` merges ON TOP of the dataset overlay
+    (seed > dataset > backend default) for this cycle only — the dataset
+    `pipeline.json` stays immutable. `origin_source` stamps the C0 lineage
+    provenance: `fork_seed` for an operator-steered fork, `campaign_origin` for a
+    fresh campaign minted from a chosen prior origin.
+
+    Carried by every `operator_steered` fork (the wire `OperatorForkOverride`
+    command payload deserializes into this) and written by the mint seam for
+    campaign-from-origin; non-operator triggers (sweep / diag / rebase) carry no
+    seed."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     origin_prompt_fields: dict[str, Any] = Field(default_factory=dict)
     pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
     limit_overrides: LimitOverrides = Field(default_factory=LimitOverrides)
+    origin_source: str = Field(
+        description="C0 lineage provenance — 'fork_seed' | 'campaign_origin'.",
+    )
 
 
 # The `issued_by` value an operator fork carries when the client sent no
@@ -391,7 +400,7 @@ class ForkSpec(BaseModel):
     from_round: int | None = None
     from_candidate_id: str | None = None
     l1_layout: dict[str, list[str]] | None = None
-    seed: OperatorForkOverride | None = None
+    seed: CycleSeed | None = None
 
 
 class RebaseRequest(BaseModel):
