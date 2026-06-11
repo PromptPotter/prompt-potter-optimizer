@@ -6,6 +6,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Planned for 0.8.3 (~2 weeks)
+
+> Low-hanging fruit pulled ahead of the broad-launch milestones (BYO per-user keys, state-sync) — UI emphasis. To refine; shipped items will accrue under the usual sections below as they land.
+
+- **Origin-picker UI** — campaign-from-origin Phase 2: a `GET /origins` derived read + a New-Campaign / ingest origin picker (the backend mint seam already ships).
+- **Dashboard L2/L3-terminal loading bug** — fitness bars vanish + panel hangs when a cycle's last phase was L2/L3.
+- **UI-polish pass** over the lineage / fitness / samples surfaces (empty states, mobile, copy).
+- **Code-hygiene tail** — `ConfigIndex`, `param_unlock_round`, `to_dict`, the inert `display_tag` write, `EMPTY_SCORER_ID`.
+- **`*_override → *_updates`** L1 delta-key rename (live-round-gated).
+
+## [0.8.2] — 2026-06-11
+
+> Continued 0.8.x beta-hardening toward the 0.9.0 broad launch. 24 commits since `v0.8.1`; no breaking changes. Deferred to later: BYO per-user keys, full state-sync, the Lane-C8 mask write-side, the live-gated `*_override → *_updates` rename, the cross-repo TermNorm `model` wire.
+
+### Added
+
+- **Scoring-divergence "mask" overlay (read-side).** A backend projection over stored measurements surfaces where an alternative scoring criterion would diverge — fold + verdict + serve + lineage-tree overlay, an abort verdict, What-If / fitness integration, and a row-derivable evaluators + "Lens" API. Read-side only; the write-side is deferred (Lane C8).
+- **Campaign-from-origin.** Start a fresh campaign from a chosen prior origin: `origin_override` threads through the fresh-mint seam (`jobs/mint.py`), `OperatorForkOverride` collapsed into the one typed `CycleSeed`, and C0 lineage is data-driven from `origin_source`.
+- **Machine-busy gate + capacity-1 run-admission seam** — atomic reserve, `409 machine_busy`, `/machine-status` banner.
+- **New-Campaign origin reuse + a PoBB lock-in knob** in the webapp.
+- **Sample-order trajectory ("Steps" view)** + per-candidate fixed-sample-set fitness recompute.
+- **Two dev skills** — `potter-dev` (self-improving dev/investigation playbook) and `potter-debt-sweep` (daily five-lens code-hygiene sweep that ends in a PR; wired to a 05:30 CET cloud routine).
+
+### Changed
+
+- **Origin is a first-class round 0** — emitted through the standard `close_round` path like any round (label C0); the separate origin block is gone.
+- **Optimizer LLM config is install-global, per-node** (`datasets/_optimizer/pipeline.json::nodes.*.config`), resolved through the normal overlay merge; the `OptimizerLLMConfig` / `campaign.json::optimizer_llm` knot is removed.
+- **Webapp** — lineage made vertical + human-owned (view/data split); `LiveDashboardView` split; build modes split with pane code-splitting; emoji icon + card refresh.
+- Model-selection knot gutted + dataset materialization unified; round/candidate payloads + resume-rewind errors typed.
+- **List A polish** — state-sync, L3 deadline, login + value-prop copy.
+- Docs — fixed `stable-api.md` Connector/SessionProtocol drift + stale CLAUDE.md line-cites + broken cross-refs; operator-facing `queries` → `samples` vocab.
+
+### Fixed
+
+- React #185 post-login render loop (de-referenced the unstable-dep cascade).
+
+### Internal
+
+- Code-hygiene sweep — removed dead code (`OptimizerAction` dup, `summarize_archive_runs`, `_refresh_identity`, `Sample` proxies, dead params) and hidden defaults (`sp_budget_ttest or 15`, `max_rounds or 999`, dead `or {}` guards); backlog reconciled.
+- Test suites charter-named + import-time invariant guards.
+- `APP_VERSION` + `pyproject.toml` → 0.8.2.
+
 ## [0.8.1] — 2026-06-06
 
 > Beta-hardening release. `0.8.0` was an interim version bump with no changelog entry; this section covers everything since (29 commits: 8 feat, 14 refactor, 5 fix, docs).
