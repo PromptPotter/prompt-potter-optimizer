@@ -93,6 +93,20 @@ def test_render_does_not_leak_l3_plan_into_target_prompt() -> None:
     assert sentinel not in osp.render()
 
 
+def test_compile_prompt_preserves_non_slot_placeholders() -> None:
+    """A node prompt echoed into an optimizer template (the ``rendered_prompt`` injection)
+    carries the backend's own ``{{query}}``-style placeholders — the target backend fills
+    those, not PromptPotter. ``compile_prompt`` fills the slots it is handed and leaves
+    foreign braces as literal text, never raising (the lca-bom-termnorm crash)."""
+    osp = OptSearchPoint(
+        persona="Profile {{combined_text}} about {{query}}.",
+        instruction="Return {{format_string}}.",
+    )
+    out = osp.compile_prompt(format_string="the schema")
+    assert "Return the schema." in out
+    assert "{{query}}" in out and "{{combined_text}}" in out
+
+
 def test_copy_memory_deep_copies_l1_layout_into_adoption_target() -> None:
     custom = L1Layout(
         persona=["plan"],

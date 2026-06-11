@@ -155,6 +155,30 @@ export function fetchDatasetIndex(signal?: AbortSignal): Promise<DatasetIndexRes
   return jget<DatasetIndexResponse>(`${API}/datasets`, signal);
 }
 
+// Origins registry — the runnable starting points the "Reuse an origin" picker
+// shows. An origin is a content identity (resolved prompt + pipeline config),
+// distinct from a dataset (raw material) and a campaign (a run). Campaign-backed
+// origins carry run history (`n_campaigns`, `origin_accuracy`); a `prepared`
+// origin is a ready dataset config with no campaign yet (potter-run / edited
+// config). Wire shape: `GET /origins`.
+export interface OriginEntry {
+  origin_id: string;
+  dataset_name: string;
+  label: string;
+  n_samples: number;
+  n_campaigns: number;
+  origin_accuracy: number | null;
+  prepared: boolean;
+  created_at: string;
+}
+export interface OriginListResponse {
+  origins: OriginEntry[];
+  total: number;
+}
+export function fetchOrigins(signal?: AbortSignal): Promise<OriginListResponse> {
+  return jget<OriginListResponse>(`${API}/origins`, signal);
+}
+
 export function fetchPipeline(signal?: AbortSignal): Promise<unknown> {
   return jget(`${API}/optimizer-pipeline`, signal);
 }

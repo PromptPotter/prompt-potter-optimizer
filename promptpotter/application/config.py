@@ -9,16 +9,19 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.config.settings import POBB_DEFAULT_EPSILON
+from promptpotter.config.settings import POBB_DEFAULT_EPSILON, PROMPT_STRING_FIELDS
+from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.domain.sample import Sample
 
@@ -32,6 +35,7 @@ __all__ = [
     "PreflightWarning",
     "configure_and_apply_pipeline",
     "load_campaign_config",
+    "resolve_pipeline_config_params",
     "run_preflight_checks",
 ]
 
@@ -58,6 +62,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("sp_budget_ttest",): "policy",
     ("exclude_nodes",): "data",
     ("pipeline_overrides",): "data",
+    ("optimizer_narrowing",): "data",
     ("scoring",): "data",
     ("dataset_split",): "policy",  # display-only metadata — no data fork
     # OptimizationConfig
@@ -263,6 +268,14 @@ class CampaignConfig(BaseModel):
     )
     exclude_nodes: list[str] = Field(default_factory=list)
     pipeline_overrides: dict[str, Any] = Field(default_factory=dict)
+    optimizer_narrowing: dict[str, NodeSearchNarrowing] = Field(
+        default_factory=dict,
+        description="Per-node narrowing of the dataset-declared optimizer search "
+        "space — the per-campaign param-lock + allowed-values lever beside "
+        "`exclude_nodes` (whole node) and `optimization.forbidden_axes_strict` "
+        "(model/provider). Subsets only; applied onto the schema by "
+        "`PipelineSchema.narrow` at pipeline setup.",
+    )
     scoring: str | dict[str, str] | None = Field(None)
     dataset_split: DatasetSplit | None = Field(
         None,
@@ -423,6 +436,46 @@ def run_preflight_checks(
     return warnings
 
 
+def resolve_pipeline_config_params(
+    active: list[str],
+    pipeline_overrides: Mapping[str, Any],
+    dataset_dir: Path | None,
+) -> dict[str, Any]:
+    """The dataset→effective node-config merge, pure: the sparse ``{"steps": active}``
+    base layered with the per-dataset overlay (``pipeline.json::nodes.{name}.config``) and
+    the campaign's ``pipeline_overrides``, restricted to *active* nodes. Prompts and
+    model validation are NOT here — they ride the ``OptSearchPoint`` / live ``Session``.
+
+    This is the SINGLE definition of which node config a cycle id and measurement key hash.
+    Shared by :func:`configure_and_apply_pipeline` (which adds prompts + validation + the
+    session apply) and the ``GET /origins`` prospective-origin id, so the two can never
+    silently diverge. Takes no live ``Session`` — resolvable from disk."""
+    from promptpotter.application.datasets import load_dataset_node_overlay
+
+    pipeline_params: dict[str, Any] = {"steps": list(active)}
+    if dataset_dir is not None:
+        # Per-dataset overlay — sparse overrides on backend defaults (e.g. AIME →
+        # OpenRouter+Mistral). `dataset_dir` is tenant-first, so ingested datasets honor it.
+        for node, cfg in load_dataset_node_overlay(dataset_dir).items():
+            if node in active:
+                pipeline_params.setdefault(node, {}).update(cfg)
+    for key, value in pipeline_overrides.items():
+        if isinstance(value, dict) and key in active:
+            pipeline_params.setdefault(key, {}).update(value)
+        elif isinstance(value, dict):
+            logger.debug(
+                "resolve_pipeline_config_params: skipping override for inactive node %r", key
+            )
+        else:
+            logger.warning(
+                "resolve_pipeline_config_params: ignoring non-nested override %r=%r "
+                '(use {"node_name": {"param": value}} format)',
+                key,
+                value,
+            )
+    return pipeline_params
+
+
 def configure_and_apply_pipeline(
     session: Session,
     campaign_config: CampaignConfig,
@@ -430,11 +483,7 @@ def configure_and_apply_pipeline(
     log: Callable[[str], None] = logger.info,
 ) -> dict[str, Any]:
     """Build pipeline identity, apply filtered schema + overrides onto *session*."""
-    from promptpotter.application.datasets import (
-        has_dataset_prompts,
-        load_dataset_node_overlay,
-        load_node_prompt,
-    )
+    from promptpotter.application.datasets import has_dataset_prompts, load_node_prompt
     from promptpotter.infrastructure.backend import extract_pipeline_config
 
     pipeline_schema = session.pipeline_schema
@@ -455,32 +504,22 @@ def configure_and_apply_pipeline(
     filtered = pipeline_schema
     if pipeline_schema and exclude:
         filtered = pipeline_schema.filter_to_steps(active)
+    # Campaign search-space narrowing — the per-node param-lock + allowed-values
+    # subset, peer to exclude (above) and forbidden_axes_strict. The dataset
+    # declares the max; the campaign snapshot may only narrow it.
+    if filtered and campaign_config.optimizer_narrowing:
+        filtered = filtered.narrow(campaign_config.optimizer_narrowing)
 
-    valid_overrides: dict[str, dict[str, Any]] = {}
     dataset_name = campaign_config.dataset_name or (session.dataset_name or "")
     dataset_dir = session.dataset_config_dir
 
-    # Per-dataset overlay from `{dataset_dir}/pipeline.json::nodes.{name}.config` — sparse
-    # overrides on backend defaults (e.g. AIME → OpenRouter+Mistral). `dataset_dir`
-    # is resolved tenant-first at bootstrap, so ingested datasets honor it too.
-    if dataset_dir is not None:
-        for node, cfg in load_dataset_node_overlay(dataset_dir).items():
-            if node in active:
-                valid_overrides.setdefault(node, {}).update(cfg)
-
-    if overrides:
-        for key, value in overrides.items():
-            if isinstance(value, dict) and key in active:
-                valid_overrides.setdefault(key, {}).update(value)
-            elif isinstance(value, dict):
-                logger.debug("configure_pipeline: skipping override for inactive node %r", key)
-            else:
-                logger.warning(
-                    "configure_pipeline: ignoring non-nested override %r=%r "
-                    '(use {"node_name": {"param": value}} format)',
-                    key,
-                    value,
-                )
+    # The dataset→effective node-config merge (sparse `{steps}` base + dataset overlay +
+    # campaign overrides) is the shared resolver — the SAME definition the prospective-origin
+    # id uses, so a fresh run and `GET /origins` agree on which config the cycle id hashes.
+    # This is where the connector `model`/config enters BOTH the measurement identity
+    # (`content_hash`/`node_configs` over `session.pipeline_params`) AND the origin cycle id
+    # (`build_origin_cycle_id` hashes these merged params). Starting prompts land on top below.
+    pipeline_params = resolve_pipeline_config_params(active, overrides, dataset_dir)
 
     # Starting prompts from `{dataset_dir}/prompts/[<node>|default].json`, per prompt-bearing node.
     if dataset_dir is not None and filtered and has_dataset_prompts(dataset_dir):
@@ -499,17 +538,38 @@ def configure_and_apply_pipeline(
                 dataset_name,
                 active,
             )
+        prompt_info_by_node = {n.name: n.prompt_info for n in filtered.nodes}
         for pnode in prompt_nodes:
             template = load_node_prompt(dataset_dir, pnode, "default")
-            valid_overrides.setdefault(pnode, {})["prompt"] = template.render()
+            rendered = template.render()
+            # A prompt-bearing node declares the `{{vars}}` the backend injects by
+            # literal substitution (query / research / output-schema). If the rendered
+            # prompt omits one, that injection silently no-ops and the model never sees
+            # it — the bug that made entity_profiling emit term-not-JSON → NO_RESULT.
+            # Fail loud at setup, before a single degraded backend call. Exclude the
+            # 8-field decomposition names (PROMPT_STRING_FIELDS): some nodes (e.g. the
+            # promptpotter-self L4 connector) declare THOSE as template_variables, but
+            # `render()` ASSEMBLES them — they are never `{{substituted}}`.
+            pinfo = prompt_info_by_node.get(pnode)
+            declared = pinfo.template_variables if pinfo else []
+            missing = [
+                v
+                for v in declared
+                if v not in PROMPT_STRING_FIELDS and "{{" + v + "}}" not in rendered
+            ]
+            if missing:
+                raise ValueError(
+                    f"Dataset {dataset_name!r} prompt for node {pnode!r} is missing required "
+                    f"template variables {missing} — the backend injects these by literal "
+                    f"{{{{name}}}} substitution, so without them the query / research / output "
+                    f"schema never reach the model. Add the placeholders to "
+                    f"datasets/{dataset_name}/prompts/[{pnode}|default].json "
+                    f"(node declares: {declared})."
+                )
+            # Starting prompt lands on the sparse wire payload, on top of the merged
+            # config above — never on `current_config`.
+            pipeline_params.setdefault(pnode, {})["prompt"] = rendered
             log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|default].json → {pnode}")
-
-    pipeline_params: dict[str, Any] = (
-        filtered.to_pipeline_params() if filtered else {"steps": active}
-    )
-    # Overrides + starting prompt land on the sparse wire payload, never on `current_config`.
-    for node, cfg in valid_overrides.items():
-        pipeline_params.setdefault(node, {}).update(cfg)
 
     # The dataset OWNS its task model — every LLM node's resolved config must carry
     # an explicit `model`, sourced from the dataset's own `nodes.{node}.config`

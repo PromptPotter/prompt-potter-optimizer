@@ -210,9 +210,11 @@ function AppShellInner() {
           setTab("dashboard");
         }}
         onNewCycle={() => {
-          // New campaigns are conceived on the Chat page — jump there first so
-          // the ingest popup appears in context, not as a detached window.
-          setTab("chat");
+          // "New campaign" opens the menu directly — pick a dataset / reuse an
+          // origin / drop a file — over whatever tab is in view. It is its own
+          // self-contained flow (menu → context → ready → Start); do NOT also
+          // jump to the Chat tab — that detour buried the menu behind the chat
+          // page and read as "nothing happened".
           setNewCampaignOpen(true);
         }}
         collapsed={sidebarCollapsed}

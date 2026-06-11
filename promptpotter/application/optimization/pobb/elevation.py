@@ -83,7 +83,7 @@ def discover_compare_arms(
 
     if discover_family:
         family_root = root_cycle_id(active_cycle_id)
-        summaries = session.store.campaigns.list_all(session.backend_id)
+        summaries = session.store.campaigns.list_all()
         cycle_ids = [
             s["cycle_id"]
             for s in summaries

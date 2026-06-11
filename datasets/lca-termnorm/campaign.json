@@ -16,6 +16,10 @@
         "max_tokens": 4000
       }
     },
+    "optimizer_narrowing": {
+      "fuzzy_matching": { "param_keys": [] },
+      "token_matching": { "param_keys": [] }
+    },
     "optimization": {
       "l1_patience": 3,
       "max_rounds": 15,

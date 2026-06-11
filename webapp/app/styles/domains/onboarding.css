@@ -64,6 +64,11 @@
 .opt-locks-tag{flex-shrink:0;font-size:10px;font-weight:600;padding:1px 7px;border-radius:9px;border:0.5px solid var(--color-border-tertiary);white-space:nowrap}
 .opt-locks-tag.is-locked{color:var(--color-text-secondary)}
 .opt-locks-tag.is-free{color:var(--color-text-tertiary)}
+/* Pipeline mode toggle — two inline buttons (LLM only / Research + Match). */
+.pipeline-mode-toggle{display:flex;gap:6px;margin:4px 0 8px}
+.pipeline-mode-toggle .pmode{flex:1;font-size:12px;padding:6px 10px;border-radius:6px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary);color:var(--color-text-secondary);cursor:pointer}
+.pipeline-mode-toggle .pmode.is-active{border-color:var(--color-accent);color:var(--color-text-primary);font-weight:600}
+.pipeline-mode-toggle .pmode:disabled{opacity:.5;cursor:not-allowed}
 /* Starting-prompt control panel — the editable 6-field decomposition. */
 .prompt-editor{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:6px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)}
 .prompt-editor-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
@@ -100,7 +105,11 @@
 .config-level.is-on{color:white;background:var(--color-accent);border-color:var(--color-accent);font-weight:600}
 .config-level.is-off{opacity:0.55;border-style:dashed;text-decoration:line-through}
 .config-level.is-origin{box-shadow:0 0 0 1.5px var(--color-success)}
+.config-level.is-disabled{opacity:0.4;cursor:not-allowed;text-decoration:none}
 .config-origin-tag{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:0 3px;border-radius:4px;background:var(--color-success);color:white;text-decoration:none}
+/* Node-level master lock — separated from the per-param rows below it. */
+.config-node-row{padding-bottom:8px;margin-bottom:2px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.config-check{width:15px;height:15px;accent-color:var(--color-accent);cursor:pointer}
 /* Check-in agent working — a compact inline line (real resolve + demo sim). */
 .checkin-loading{display:flex;align-items:center;gap:8px;font-size:13px;line-height:1.5;color:var(--color-text-secondary);padding:8px 0}
 .checkin-loading-bot{font-size:20px;animation:checkin-bob 1s ease-in-out infinite}

@@ -51,6 +51,7 @@ from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, TaskDecomposition
 from promptpotter.infrastructure.store import Stores
 from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
@@ -136,6 +137,7 @@ async def mint_campaign_command(
     halt_at_accuracy: float | None = None,
     spend_budget_usd: float | None = None,
     origin_override: dict[str, Any] | None = None,
+    pipeline_overlay: dict[str, Any] | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> tuple[str, str, Job]:
     """Mint a fresh campaign + cycle, then spawn the runner in the background.
@@ -146,6 +148,13 @@ async def mint_campaign_command(
 
     ``origin_override`` (campaign-from-origin) seeds C0 from a chosen prior
     origin's prompt fields instead of the dataset's authored origin.
+
+    ``pipeline_overlay`` carries a reused-dataset draft's operator setup edits
+    (lock/allow + origin-floor values). It is split (``split_overlay``) onto the
+    per-campaign config snapshot — narrowing the dataset's declared search space
+    + overriding origin-floor values for THIS campaign only, leaving the shared
+    dataset immutable. A fresh upload commits its edits into its own
+    ``pipeline.json`` instead, so this stays ``None`` for that path.
     """
     # Heal any dataset Replace interrupted mid-migration before resolving a pin —
     # a crashed version-and-repoint can leave a campaign pointing at a name whose
@@ -191,6 +200,18 @@ async def mint_campaign_command(
         file_config = read_campaign_config_file(dataset_root / "campaign.json")
         profile = session.store.backends.load_connector_profile(session.backend_id) or {}
         campaign_config = load_campaign_config({**profile, **file_config})
+        # Reused-dataset setup edits land on the per-campaign snapshot (not the
+        # shared dataset): config blocks → pipeline_overrides, optimizer blocks →
+        # optimizer_narrowing, merged over the dataset's defaults (operator wins
+        # per node). prepare_fresh_cycle freezes this into the Campaign manifest.
+        if pipeline_overlay:
+            overrides, narrowing = split_overlay(pipeline_overlay)
+            campaign_config = campaign_config.model_copy(
+                update={
+                    "pipeline_overrides": {**campaign_config.pipeline_overrides, **overrides},
+                    "optimizer_narrowing": {**campaign_config.optimizer_narrowing, **narrowing},
+                }
+            )
 
         train_data = session.samples or []
         # The one shared mint prologue — same seam CLI ``new`` runs (inline). See
@@ -362,6 +383,9 @@ async def mint_campaign_from_draft_command(
             job_registry=job_registry,
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
+            # Persist the reused-dataset draft's lock/allow + origin-floor edits on
+            # the per-campaign snapshot (the shared dataset stays immutable).
+            pipeline_overlay=draft.pipeline_overlay,
             backend_url=backend_url,
         )
         draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)
@@ -393,9 +417,11 @@ def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     overrides the backend's pipeline order per the merge contract in
     ``application/bootstrap/wiring.py::_apply_dataset_overlay``.
 
-    Per R4 the step list comes from :attr:`Connector.default_pipeline` —
-    the launcher carries no hard-coded ``["llm_only"]``. Connectors that
-    leave the field empty inherit the backend's own default.
+    The step list is the draft's chosen pipeline (``draft.pipeline_steps`` —
+    preserved when reusing an existing dataset) and falls back to
+    :attr:`Connector.default_pipeline` for a fresh upload. The launcher carries
+    no hard-coded ``["llm_only"]``; connectors that leave the field empty inherit
+    the backend's own default.
     """
     pipeline: dict[str, Any] = {
         "name": draft.slug,
@@ -403,8 +429,9 @@ def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
         "backend_name": draft.connector,
     }
     connector = connectors.get(draft.connector)
-    if connector.default_pipeline:
-        pipeline["pipelines"] = {"default": list(connector.default_pipeline)}
+    steps = draft.pipeline_steps or list(connector.default_pipeline)
+    if steps:
+        pipeline["pipelines"] = {"default": list(steps)}
 
     nodes = merge_pipeline_overlay(draft, connector)
     if nodes:
@@ -432,6 +459,37 @@ def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[s
     return nodes
 
 
+def split_overlay(
+    pipeline_overlay: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, NodeSearchNarrowing]]:
+    """Split a draft ``pipeline_overlay`` into its two campaign-config homes.
+
+    The lock editor writes one transport shape — ``nodes.{n}.{config, optimizer}``.
+    Each node's ``config`` block is the origin-floor value override
+    (→ ``CampaignConfig.pipeline_overrides``); its ``optimizer`` block
+    (``param_keys`` subset + narrowed ``param_allowed_values``) is the
+    search-space narrowing (→ ``CampaignConfig.optimizer_narrowing``). A reused
+    dataset's mint applies this split onto the per-campaign snapshot so the
+    shared, immutable dataset is never mutated. Fresh uploads instead fold the
+    whole overlay into the committed ``pipeline.json`` (``merge_pipeline_overlay``)
+    — the dataset is theirs to author."""
+    overrides: dict[str, Any] = {}
+    narrowing: dict[str, NodeSearchNarrowing] = {}
+    for node, block in pipeline_overlay.items():
+        if not isinstance(block, dict):
+            continue
+        config = block.get("config")
+        if isinstance(config, dict) and config:
+            overrides[node] = dict(config)
+        optimizer = block.get("optimizer")
+        if isinstance(optimizer, dict) and optimizer:
+            narrowing[node] = NodeSearchNarrowing(
+                param_keys=optimizer.get("param_keys"),
+                param_allowed_values=optimizer.get("param_allowed_values", {}),
+            )
+    return overrides, narrowing
+
+
 def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
     """The backend-pipeline permission surface the new-campaign UI renders.
 
@@ -446,15 +504,25 @@ def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
     """
     connector = connectors.get(draft.connector)
     forbidden_strict = draft.lock_model
+    # The active pipeline is the permission surface — the optimizer can only move
+    # nodes that actually run. Scope the per-node locks to it so the panel shows
+    # only the dataset's real nodes (not every node the backend has registered,
+    # e.g. llm_only / direct_prompt for a Research+Match dataset).
+    steps = draft.pipeline_steps or list(connector.default_pipeline)
+    active = set(steps)
     node_locks: dict[str, Any] = {}
     for node_name, overlay in merge_pipeline_overlay(draft, connector).items():
+        if active and node_name not in active:
+            continue
         optimizer = overlay.get("optimizer", {})
         node_locks[node_name] = {
             "config": dict(overlay.get("config", {})),
             "param_allowed_values": dict(optimizer.get("param_allowed_values", {})),
         }
     return {
-        "pipeline": list(connector.default_pipeline),
+        # The draft's chosen pipeline (preserved on reuse) over the connector
+        # default — so the UI shows the dataset's real pipeline, not llm_only.
+        "pipeline": steps,
         "forbidden_axes": sorted(PARAM_FORBIDDEN_KEYS) if forbidden_strict else [],
         "nodes": node_locks,
     }

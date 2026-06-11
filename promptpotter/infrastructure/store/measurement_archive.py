@@ -373,6 +373,13 @@ class MeasurementArchive:
         non-error; partial → prefix-trusted nodes only. `is_fatal` prevents a deprecated archive
         row shadowing a saved valid retry. *dataset_name* scopes reuse (same sample_id across
         datasets is a different problem).
+
+        Operating consequence (the answer to "will changing a connector tunable re-score?"):
+        `node_configs` carries each node's effective config INCLUDING `model`, so a change at
+        node N breaks the prefix match at N — every sample whose pipeline ran PAST N is
+        re-measured; only samples that short-circuited upstream (`terminated_at` in a trusted
+        prefix node, e.g. cache/fuzzy) replay. So editing a node's model and minting a fresh
+        campaign genuinely re-scores the LLM-path samples.
         """
         if not node_configs:
             return {}

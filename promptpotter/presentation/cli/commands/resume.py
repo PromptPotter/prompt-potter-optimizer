@@ -93,8 +93,19 @@ def _prepare_cycle_for_resume(
         )
     elif campaign.root_content_hash == current_hash:
         print(f"config: unchanged (content hash {current_hash})")
+    elif (drift := campaign_config.classify_diff_against(campaign.config))[0] is DiffScope.NONE:
+        # Hash differs but the config is byte-identical — an identity-formula change
+        # (the old config-blind hash vs the new config-aware one), NOT an operator edit.
+        # Re-stamp the fingerprint and resume in place; the stored cycle_id (read from
+        # active_session.json) already resolves the dir, so nothing else moves.
+        session.store.campaigns.update_campaign(
+            ctx.campaign_id, {"root_content_hash": current_hash}
+        )
+        print(
+            f"config: unchanged (identity re-stamped {campaign.root_content_hash} → {current_hash})"
+        )
     else:
-        scope, diffed = campaign_config.classify_diff_against(campaign.config)
+        scope, diffed = drift
         dataset_name = ctx.init_params.get("dataset_name") or "<dataset>"
         print()
         print("Config changed since the campaign was minted.")

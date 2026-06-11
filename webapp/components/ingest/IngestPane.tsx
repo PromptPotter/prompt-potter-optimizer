@@ -14,7 +14,12 @@
 //   POST /commands/mint-campaign-from-draft     (commit + spawn runner)
 
 import { useEffect, useState } from "react";
-import { fetchDatasetIndex, type DatasetIndexEntry } from "@/lib/api";
+import {
+  fetchDatasetIndex,
+  fetchOrigins,
+  type DatasetIndexEntry,
+  type OriginEntry,
+} from "@/lib/api";
 import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { IngestConversation } from "./IngestConversation";
 import { useAuth } from "@/lib/auth-context";
@@ -31,7 +36,7 @@ interface Props {
 type LoadState =
   | { kind: "loading" }
   | { kind: "needsAuth" }
-  | { kind: "ready"; entries: DatasetIndexEntry[] }
+  | { kind: "ready"; origins: OriginEntry[]; entries: DatasetIndexEntry[] }
   | { kind: "error" };
 
 export function IngestPane({ open, onClose, onMinted }: Props) {
@@ -80,9 +85,10 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
   useEffect(() => {
     if (!open || status !== "authed") return;
     let cancelled = false;
-    fetchDatasetIndex()
-      .then((r) => {
-        if (!cancelled) setList({ kind: "ready", entries: r.datasets });
+    Promise.all([fetchDatasetIndex(), fetchOrigins()])
+      .then(([datasets, origins]) => {
+        if (!cancelled)
+          setList({ kind: "ready", origins: origins.origins, entries: datasets.datasets });
       })
       .catch(() => {
         if (!cancelled) setList({ kind: "error" });
@@ -96,7 +102,12 @@ export function IngestPane({ open, onClose, onMinted }: Props) {
 
   const body =
     list.kind === "ready" ? (
-      <IngestConversation flow={flow} datasets={list.entries} variant="modal" />
+      <IngestConversation
+        flow={flow}
+        origins={list.origins}
+        datasets={list.entries}
+        variant="modal"
+      />
     ) : list.kind === "needsAuth" ? (
       <div className="new-campaign-body">
         <SignInPrompt message="Sign in to start a campaign." />

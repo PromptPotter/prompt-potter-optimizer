@@ -204,6 +204,9 @@ def draft_from_dataset(
             "max_rounds": max_rounds,
             "pipeline_overlay": pipeline_overlay,
             "origin_prompt_fields": origin_prompt_fields,
+            # Preserve the dataset's own pipeline (full Research+Match, llm_only, …)
+            # so reuse doesn't reset to the connector default.
+            "pipeline_steps": authored.active_steps,
         },
         provenance={"task_description": Provenance.CONFIRMED},
     )

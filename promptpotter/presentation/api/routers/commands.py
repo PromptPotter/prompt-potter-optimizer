@@ -195,6 +195,10 @@ class _EditDraftPatch(BaseModel):
     max_rounds: int | None = Field(default=None, ge=1, le=100)
     raw_task_description: str | None = Field(default=None, max_length=16384)
     pipeline_overlay: dict[str, Any] | None = None
+    # The active pipeline step list (e.g. ["llm_only"] vs the full
+    # cache_lookup→…→token_matching). The setup-panel mode toggle writes it;
+    # commit's `_build_origin_pipeline_json` + `derive_optimizer_locks` read it.
+    pipeline_steps: list[str] | None = None
     column_query: str | None = Field(default=None, max_length=256)
     column_ground_truth: str | None = Field(default=None, max_length=256)
     # Operator edits to the campaign's origin prompt (PromptTemplate field
@@ -204,6 +208,11 @@ class _EditDraftPatch(BaseModel):
     # Whether the optimizer is barred from mutating model/provider (the
     # forbidden_axes_strict knob). The pipeline-config control panel toggles it.
     lock_model: bool | None = None
+    # Audit marker stamped when an agent simulates the check-in node (authors the
+    # origin decomposition by hand instead of spending the LLM call) — see
+    # `DraftCampaign.simulated_checkin`. Free dict `{by, model, at}`; lands in the
+    # resolution block. Empty/absent on a real check-in.
+    simulated_checkin: dict[str, Any] | None = None
 
 
 class _EditDraftEnvelope(BaseModel):
@@ -291,6 +300,8 @@ async def edit_draft_campaign(
         (patch.pipeline_overlay, "pipeline_overlay"),
         (patch.origin_prompt_fields, "origin_prompt_fields"),
         (patch.lock_model, "lock_model"),
+        (patch.simulated_checkin, "simulated_checkin"),
+        (patch.pipeline_steps, "pipeline_steps"),
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val

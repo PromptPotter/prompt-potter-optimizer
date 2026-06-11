@@ -14,6 +14,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       options: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
       description: "",
       optimizer_locked: true,
+      optimizer_tunable: false,
     },
     {
       key: "reasoning_effort",
@@ -22,9 +23,26 @@ const schema: Record<string, NodeConfigParam[]> = {
       options: ["low", "medium", "high"],
       description: "",
       optimizer_locked: false,
+      optimizer_tunable: true,
     },
-    { key: "temperature", value: 0, kind: "number", options: [], description: "", optimizer_locked: false },
-    { key: "max_tokens", value: null, kind: "number", options: [], description: "", optimizer_locked: false },
+    {
+      key: "temperature",
+      value: 0,
+      kind: "number",
+      options: [],
+      description: "",
+      optimizer_locked: false,
+      optimizer_tunable: true,
+    },
+    {
+      key: "max_tokens",
+      value: null,
+      kind: "number",
+      options: [],
+      description: "",
+      optimizer_locked: false,
+      optimizer_tunable: true,
+    },
   ],
 };
 

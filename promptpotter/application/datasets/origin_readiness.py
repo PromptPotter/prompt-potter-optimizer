@@ -202,10 +202,11 @@ def resolution_block(draft: DraftCampaign) -> dict[str, Any]:
     """Serialize the draft's checklist state for the on-disk ``cache.json``.
 
     ``{complete, provenance: {field: tag}, values: {field: value},
-    gaps: [{field, reason, hint}]}`` — the AI-readable record of what blocks
-    mint, the current value + provenance of every gated field, and why each
-    blocks. The resolver additionally stamps its last resolution
-    alongside this block.
+    gaps: [{field, reason, hint}], simulated_checkin: {...}}`` — the AI-readable
+    record of what blocks mint, the current value + provenance of every gated
+    field, why each blocks, and (when non-empty) the audit marker for an origin
+    whose check-in was simulated by an agent rather than the LLM node. The
+    resolver additionally stamps its last resolution alongside this block.
     """
     readiness = origin_readiness(draft)
     return {
@@ -215,6 +216,9 @@ def resolution_block(draft: DraftCampaign) -> dict[str, Any]:
         },
         "values": field_values(draft),
         "gaps": [gap.to_wire() for gap in readiness.gaps],
+        # Empty unless an agent simulated the check-in (authored the origin by
+        # hand). Records WHO/WHAT/WHEN so a simulated origin is auditable on disk.
+        "simulated_checkin": dict(draft.simulated_checkin),
     }
 
 

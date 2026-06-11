@@ -15,7 +15,7 @@ share origin scores (every sample cache-hits) but have different ``campaign_id``
 from __future__ import annotations
 
 import secrets
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -45,9 +45,21 @@ def build_origin_cycle_id(
     osp: OptSearchPoint,
     schema: PipelineSchema | None,
     dataset: list[Sample],
+    base_pipeline_params: dict[str, Any] | None = None,
 ) -> str:
-    """Cycle ID for an origin ``OptSearchPoint`` — the OSP → JSP projection ceremony."""
-    base_pp = schema.to_pipeline_params() if schema else {}
+    """Cycle ID for an origin ``OptSearchPoint`` — the OSP → JSP projection ceremony.
+
+    Config-AWARE: callers pass the overlay-merged ``session.pipeline_params`` (which
+    carries the connector ``model``/config) as ``base_pipeline_params``, so the cycle id
+    reflects the connector config and AGREES with the measurement key (``content_hash``
+    over the same merged params). A connector-config edit (e.g. model 120B→20B) therefore
+    yields a DISTINCT origin. Falls back to the sparse ``to_pipeline_params()`` only when
+    no merged params are in scope."""
+    base_pp = (
+        base_pipeline_params
+        if base_pipeline_params is not None
+        else (schema.to_pipeline_params() if schema else {})
+    )
     jsp = osp.to_job_search_point(base_pipeline_params=base_pp, schema=schema)
     return cycle_config_identity(jsp, dataset)
 

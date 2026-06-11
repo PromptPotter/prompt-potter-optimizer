@@ -217,6 +217,7 @@ export interface NodeConfigParam {
   options: string[];
   description: string;
   optimizer_locked: boolean;
+  optimizer_tunable: boolean;
 }
 
 /** Resolved output schema for a pipeline node. */

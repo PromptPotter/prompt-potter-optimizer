@@ -620,6 +620,10 @@ async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineRes
         craw = json.loads(campaign_path.read_text(encoding="utf-8"))
         cfg = load_campaign_config(craw.get("campaign_config", craw))
         forbidden_strict = cfg.optimization.forbidden_axes_strict
+        # Apply the dataset's default search-space narrowing so the setup editor
+        # opens showing the recommended per-node locks (e.g. retrieval nodes
+        # origin-locked); the draft's own overlay edits layer on top client-side.
+        schema = schema.narrow(cfg.optimizer_narrowing)
     # Origin prompt for the first pipeline step — read-only seed the node panel
     # shows. `load_node_prompt` resolves `{node}.json` → `default.json`; absent a
     # `prompts/` dir it raises, which we surface as null origin_prompt_fields.

@@ -15,6 +15,67 @@
   gap: 8px;
 }
 
+/* Per-node surface: a kind chip in the title + a one-line role descriptor, so a
+   retriever/tool/cache node reads as what it is rather than an empty prompt. */
+.bnode-kind {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-sm);
+  color: var(--color-text-tertiary);
+  vertical-align: middle;
+}
+.bnode-role {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+/* Vanilla inline node list — the plain "business mechanics" pipeline view. Bare
+   layout only: nodes in a row, separators, a button reset. No theming. */
+.pipeline-node-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  margin: 8px auto 0;
+  padding: 0;
+  max-width: 560px;
+  font-size: 12px;
+}
+.pipeline-node-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pipeline-node-list button {
+  font: inherit;
+  cursor: pointer;
+  background: none;
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-sm);
+  padding: 2px 8px;
+  color: inherit;
+}
+.pipeline-node-list button[aria-pressed="true"] {
+  border-color: var(--color-accent);
+}
+.pipeline-node-list small {
+  color: var(--color-text-tertiary);
+}
+/* Lock glyph on a collapsed node toggle — mirrors the NodeLockEditor lock state
+   shown when the node is expanded. Small, leading the label. */
+.pipeline-node-list .pnl-lock {
+  font-size: 10px;
+  line-height: 1;
+  margin-right: 2px;
+}
+
 /* Close affordance grouped with the sub-note at the right of the reused
    `.setup-preview-head` (title left, sub + × right). */
 .setup-preview-side { display: inline-flex; align-items: center; gap: 8px; }

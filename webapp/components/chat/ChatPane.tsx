@@ -15,6 +15,7 @@ import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHe
 import { CyclePicker } from "@/components/shell/CyclePicker";
 import { TargetPipelineHero } from "@/components/dashboard/pipeline/TargetPipelineHero";
 import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
+import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
 import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetControl";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { targetNodeIds } from "@/lib/connector-nodes";
@@ -239,6 +240,7 @@ export function ChatPane({
 
       <div className="wf-hero">
         <TargetPipelineHero samplesOpen={samplesOpen} onToggle={toggleSamples} cv={cv} />
+        <PipelineNodeList cv={cv} />
         {showBackendDetail && (
           <BackendNodeDetail
             cv={cv}

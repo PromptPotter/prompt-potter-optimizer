@@ -15,6 +15,13 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 # steer panel edits them through `PromptFieldsEditor`, not the config widgets).
 _PROMPT_OWNED_FIELDS = frozenset(PROMPT_STRING_FIELDS) | {"few_shot_examples", "plan"}
 
+# Structured-output schema fields owned by the output-schema view — excluded from
+# the lock-editor config surface the same way prompt fields are. The schema is one
+# concept shown ONCE as the "Structured output" tree (`NodeOutputSchemaView`):
+# `output_schema` is its content, `schema_family`/`schema_version` its registry
+# identity. Surfacing them ALSO as config chips duplicates the structured output.
+_SCHEMA_OWNED_FIELDS = frozenset({"output_schema", "schema_family", "schema_version"})
+
 
 def stable_hash(value: Any) -> str:
     """Deterministic 16-char hex digest of an arbitrary JSON-able value."""
@@ -136,7 +143,11 @@ class NodeConfigParam(BaseModel):
     choices for `model` (from `available_models`) and `enum` (from
     `param_allowed_values`). `optimizer_locked` flags a param the *optimizer* may
     not permute (model/provider under a strict campaign) — shown for the operator,
-    who may still set it on a steered fork via the seed overlay."""
+    who may still set it on a steered fork via the seed overlay. `optimizer_tunable`
+    is the inverse permission the lock editor renders: whether the optimizer may
+    currently MOVE this param (it sits in the node's `param_keys`, model gated by
+    the campaign-wide strict flag). A config-only key is not tunable; a node whose
+    every param is non-tunable is optimizer-fixed (origin-locked)."""
 
     model_config = {"frozen": True}
 
@@ -146,6 +157,26 @@ class NodeConfigParam(BaseModel):
     options: list[str] = Field(default_factory=list)
     description: str = ""
     optimizer_locked: bool = False
+    optimizer_tunable: bool = False
+
+
+class NodeSearchNarrowing(BaseModel):
+    """A campaign's per-node narrowing of the dataset-declared optimizer search
+    space — the third per-campaign search-space lever beside ``exclude_nodes``
+    (whole node) and ``forbidden_axes_strict`` (model/provider). The dataset's
+    ``pipeline.json`` declares the MAXIMUM tunable surface; a campaign may only
+    SUBSET it, frozen into the ``Campaign`` snapshot at mint and applied by
+    :meth:`PipelineSchema.narrow`.
+
+    ``param_keys`` is the tunable config subset the optimizer may move (``None`` =
+    inherit the node's full declared set; prompt-decomposition fields stay tunable
+    regardless — the prompt is always evolved). ``param_allowed_values`` narrows a
+    param's enum to a subset of the dataset's allowed set."""
+
+    model_config = {"frozen": True}
+
+    param_keys: list[str] | None = None
+    param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class PipelineSchema(BaseModel):
@@ -183,14 +214,20 @@ class PipelineSchema(BaseModel):
         return self._observation_keys
 
     def to_pipeline_params(self) -> dict[str, Any]:
-        """``{"steps": [...]}`` sparse scaffold — backend merges per-node config defaults."""
+        """``{"steps": [...]}`` sparse scaffold — backend merges per-node config defaults.
+
+        This is the WIRE base only. The origin cycle id no longer derives from it:
+        ``build_origin_cycle_id`` hashes the overlay-merged ``session.pipeline_params``
+        (connector config included), so the cycle id and the measurement key agree."""
         return {"steps": list(self.active_steps)}
 
     def node_config_schema(self, forbidden_strict: bool) -> dict[str, list[NodeConfigParam]]:
         """The operator-editable config surface per node — the FULL config the
         node carries (the UNION of ``param_keys`` and the node's actual
         ``current_config``) except the prompt-decomposition fields (the prompt
-        editor owns those). Config-only keys not advertised as tunable (e.g.
+        editor owns those) and the structured-output schema fields (the
+        ``NodeOutputSchemaView`` tree owns ``output_schema`` / ``schema_family`` /
+        ``schema_version`` — see ``_SCHEMA_OWNED_FIELDS``). Config-only keys not advertised as tunable (e.g.
         ``provider: groq``) bundle in too, so the operator sees the WHOLE node as
         one unit. Unlike :meth:`optimizer_locks`, model/provider are INCLUDED
         (the operator isn't the optimizer — the seed overlay outranks the
@@ -203,7 +240,9 @@ class PipelineSchema(BaseModel):
         out: dict[str, list[NodeConfigParam]] = {}
         for n in self.nodes:
             params: list[NodeConfigParam] = []
-            for key in sorted((n.param_keys | set(n.current_config)) - _PROMPT_OWNED_FIELDS):
+            for key in sorted(
+                (n.param_keys | set(n.current_config)) - _PROMPT_OWNED_FIELDS - _SCHEMA_OWNED_FIELDS
+            ):
                 if key == "model":
                     kind, options = "model", list(self.available_models)
                 elif key in n.param_allowed_values:
@@ -218,6 +257,13 @@ class PipelineSchema(BaseModel):
                         else "string"
                     )
                     options = []
+                # Tunable = the optimizer may MOVE this param. model/provider ride
+                # the campaign-wide strict flag (forbidden when locked); every other
+                # param is tunable iff the node advertises it in `param_keys`. A
+                # config-only key (in current_config, not param_keys) is fixed.
+                tunable = (
+                    not forbidden_strict if key in PARAM_FORBIDDEN_KEYS else key in n.param_keys
+                )
                 params.append(
                     NodeConfigParam(
                         key=key,
@@ -226,6 +272,7 @@ class PipelineSchema(BaseModel):
                         options=options,
                         description=n.param_descriptions.get(key, ""),
                         optimizer_locked=key in locked,
+                        optimizer_tunable=tunable,
                     )
                 )
             out[n.name] = params
@@ -257,6 +304,40 @@ class PipelineSchema(BaseModel):
         return self.model_copy(
             update={"nodes": [n for n in self.nodes if n.name not in names]},
         )
+
+    def narrow(self, narrowing: dict[str, NodeSearchNarrowing] | None) -> "PipelineSchema":
+        """Return a copy with each node's optimizer search space narrowed to the
+        campaign's per-node subset (the third search-space lever beside
+        :meth:`exclude` and ``forbidden_axes_strict``).
+
+        A node's ``param_keys`` intersect the campaign subset (``None`` = inherit
+        the full set); prompt-decomposition fields are always kept tunable (the
+        prompt is owned by the prompt editor, not the lock editor, and is always
+        evolved). ``param_allowed_values`` intersect the narrowed enum. Empty
+        narrowing is a no-op; a node absent from the mapping is unchanged."""
+        if not narrowing:
+            return self
+        new_nodes: list[PipelineNode] = []
+        for n in self.nodes:
+            nv = narrowing.get(n.name)
+            if nv is None:
+                new_nodes.append(n)
+                continue
+            if nv.param_keys is None:
+                keys = n.param_keys
+            else:
+                kept = set(nv.param_keys)
+                keys = (n.param_keys & kept) | (n.param_keys & _PROMPT_OWNED_FIELDS)
+            allowed = dict(n.param_allowed_values)
+            for param, vals in nv.param_allowed_values.items():
+                subset = set(vals)
+                allowed[param] = (
+                    [v for v in allowed[param] if v in subset] if param in allowed else list(vals)
+                )
+            new_nodes.append(
+                n.model_copy(update={"param_keys": keys, "param_allowed_values": allowed})
+            )
+        return self.model_copy(update={"nodes": new_nodes})
 
     def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         """Canonical SearchPoint identity: ordered ``[(node, config), ...]`` for hashing."""

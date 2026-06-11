@@ -1,19 +1,16 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { DatasetIndexEntry } from "@/lib/api";
+import type { DatasetIndexEntry, OriginEntry } from "@/lib/api";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { originReadiness } from "@/lib/origin-readiness";
-import { lockedParams } from "@/lib/optimizer-locks";
 import { cx } from "@/lib/cx";
 import { ChatFileChip } from "@/components/chat/ChatFileChip";
 import { NumberField } from "@/components/forms/NumberField";
 import { SlugField } from "@/components/forms/SlugField";
-import { AllowedValuesEditor } from "@/components/dashboard/control/AllowedValuesEditor";
-import { LockTable } from "@/components/dashboard/control/LockTable";
-import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsEditor";
 import { CheckinLoadingWindow } from "./CheckinLoadingWindow";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
+import { PipelineSetupSection } from "./PipelineSetupSection";
 import { OriginCheckinPanel } from "./OriginCheckinPanel";
 import { DatasetPickList } from "./DatasetPickList";
 
@@ -23,11 +20,14 @@ import { DatasetPickList } from "./DatasetPickList";
 // One thread: pick/drop → ask context only if missing → one check-in → Start.
 export function IngestConversation({
   flow,
+  origins,
   datasets,
   variant,
 }: {
   flow: IngestFlow;
-  // Only the modal supplies the registered-dataset entry list.
+  // Only the modal supplies the entry lists: existing origins to reuse +
+  // datasets to make a new origin from.
+  origins?: OriginEntry[];
   datasets?: DatasetIndexEntry[];
   variant: "modal" | "inline";
 }) {
@@ -46,6 +46,7 @@ export function IngestConversation({
         {showIllustration ? <FirstRunIllustration /> : null}
         {showEntryList ? (
           <DatasetPickList
+            origins={origins ?? []}
             datasets={datasets!}
             onOpenOrigin={flow.openOrigin}
             onPick={flow.pickDataset}
@@ -186,16 +187,11 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
 
       <ColumnMappingPicker draft={draft} onApply={flow.applyPatch} />
 
-      <section className="setup-preview ingest-origin-confirm">
-        <PromptFieldsEditor value={draft.origin_prompt_fields} onApply={flow.applyPatch} flat />
-      </section>
-
-      <AllowedValuesEditor
-        locks={draft.optimizer_locks}
-        overlayBase={draft.pipeline_overlay}
-        lockModel={draft.lock_model}
-        onApply={flow.applyPatch}
-      />
+      {/* Per node: the optimizer search-space controls (lock/allow + origin
+          value) and, for the LLM node, the starting prompt — all inside that
+          node's surface (config → prompt → output), editable. The old
+          single-node AllowedValuesEditor folded into NodeLockEditor here. */}
+      <PipelineSetupSection draft={draft} onApply={flow.applyPatch} />
 
       <details className="new-campaign-optional ingest-advanced">
         <summary>Optimizer (optional)</summary>
@@ -208,7 +204,6 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
             onApply={(max_rounds) => flow.applyPatch({ max_rounds })}
           />
           <SlugField slug={draft.slug} onApply={(slug) => flow.applyPatch({ slug })} />
-          <LockTable params={lockedParams(draft.optimizer_locks)} />
         </div>
       </details>
 

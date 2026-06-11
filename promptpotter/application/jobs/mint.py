@@ -97,7 +97,12 @@ def resolve_cycle_plan(
     return CyclePlan(
         pipeline_params=pipeline_params,
         origin=origin,
-        cycle_id=build_origin_cycle_id(origin, schema, dataset),
+        # Config-aware identity: pass the overlay-merged params (connector model/config
+        # included) so the cycle id reflects the connector config and agrees with the
+        # measurement key. Resume recomputes this for drift detection — an existing
+        # config-blind campaign's stored hash won't match, handled as a benign re-stamp
+        # when the config diff is NONE (resume.py).
+        cycle_id=build_origin_cycle_id(origin, schema, dataset, pipeline_params),
     )
 
 

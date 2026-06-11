@@ -42,6 +42,7 @@ from promptpotter.presentation.api.routers.campaigns import campaigns_router
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.datasets import datasets_router
 from promptpotter.presentation.api.routers.measurements import measurements_router
+from promptpotter.presentation.api.routers.origins import origins_router
 from promptpotter.presentation.api.routers.verify import verify_router
 
 __all__ = [
@@ -52,5 +53,6 @@ __all__ = [
     "commands_router",
     "datasets_router",
     "measurements_router",
+    "origins_router",
     "verify_router",
 ]

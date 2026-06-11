@@ -31,7 +31,11 @@ from promptpotter.application.optimization.validators.l1_strict import (
     validate_overrides,
 )
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+from promptpotter.domain.pipeline_schema import (
+    NodeSearchNarrowing,
+    PipelineNode,
+    PipelineSchema,
+)
 from promptpotter.infrastructure.llm import OpenAICompatibleClient, RateLimiter
 from promptpotter.shared.errors import RequestTooLargeError
 
@@ -403,8 +407,83 @@ def test_node_config_schema_full_surface_excludes_prompt_fields():
     assert params["temperature"].kind == "number"
     assert params["max_tokens"].kind == "number"  # WELL_KNOWN integer → number widget
     assert params["max_tokens"].value is None
-    relaxed = schema.node_config_schema(forbidden_strict=False)["llm_only"]
-    assert {p.key for p in relaxed if p.optimizer_locked} == set()
+    # optimizer_tunable: every param_keys member is tunable EXCEPT model under a
+    # strict campaign (model rides forbidden_axes_strict, not per-node param_keys).
+    assert params["temperature"].optimizer_tunable is True
+    assert params["reasoning_effort"].optimizer_tunable is True
+    assert params["model"].optimizer_tunable is False
+    relaxed = {p.key: p for p in schema.node_config_schema(forbidden_strict=False)["llm_only"]}
+    assert {k for k, p in relaxed.items() if p.optimizer_locked} == set()
+    assert relaxed["model"].optimizer_tunable is True  # unlocked → model becomes tunable
+
+
+def test_pipeline_schema_narrow_subsets_search_space():
+    """Campaign narrowing only SUBSETS the dataset-declared space: param_keys
+    intersect the kept subset (prompt fields always survive — the prompt is
+    optimized regardless), allowed-values intersect, an unlisted node is
+    untouched, and `optimizer_tunable` reflects the narrowed surface."""
+    schema = PipelineSchema(
+        name="termnorm",
+        nodes=[
+            PipelineNode(
+                name="fuzzy_matching",
+                param_keys={"threshold", "scorer"},
+                param_allowed_values={"scorer": ["WRatio", "QRatio", "ratio"]},
+            ),
+            PipelineNode(
+                name="entity_profiling",
+                param_keys={"temperature", "max_tokens", "persona", "instruction"},
+            ),
+        ],
+    )
+    narrowed = schema.narrow(
+        {
+            # Lock fuzzy_matching entirely, and narrow its scorer enum (still
+            # subset even though the param is no longer tunable).
+            "fuzzy_matching": NodeSearchNarrowing(
+                param_keys=[], param_allowed_values={"scorer": ["WRatio", "dropped"]}
+            ),
+            # Keep only temperature tunable on the LLM node — prompt fields survive.
+            "entity_profiling": NodeSearchNarrowing(param_keys=["temperature"]),
+        }
+    )
+    fuzzy = narrowed.get_node("fuzzy_matching")
+    prof = narrowed.get_node("entity_profiling")
+    assert fuzzy is not None and prof is not None
+    assert fuzzy.param_keys == set()  # locked
+    assert fuzzy.param_allowed_values["scorer"] == ["WRatio"]  # intersect, "dropped" gone
+    assert prof.param_keys == {"temperature", "persona", "instruction"}  # prompt fields kept
+    # Source schema is untouched (frozen copy).
+    assert schema.get_node("fuzzy_matching").param_keys == {"threshold", "scorer"}
+    # No narrowing entry → no-op for that node; empty mapping → identity.
+    assert schema.narrow({}).get_node("fuzzy_matching").param_keys == {"threshold", "scorer"}
+
+
+def test_split_overlay_routes_config_and_optimizer_blocks():
+    """A reused-dataset draft overlay splits to its two campaign-config homes:
+    `config` → pipeline_overrides (origin-floor values), `optimizer` →
+    optimizer_narrowing (the search-space subset). Nodes with neither drop out."""
+    from promptpotter.application.jobs.launcher import split_overlay
+
+    overrides, narrowing = split_overlay(
+        {
+            "entity_profiling": {
+                "config": {"temperature": 0.2},
+                "optimizer": {
+                    "param_keys": ["temperature"],
+                    "param_allowed_values": {"reasoning_effort": ["low"]},
+                },
+            },
+            "fuzzy_matching": {"optimizer": {"param_keys": []}},
+            "web_search": {"config": {"max_sites": 5}},
+            "noise": {"config": {}},  # empty config → dropped
+        }
+    )
+    assert overrides == {"entity_profiling": {"temperature": 0.2}, "web_search": {"max_sites": 5}}
+    assert narrowing["entity_profiling"].param_keys == ["temperature"]
+    assert narrowing["entity_profiling"].param_allowed_values == {"reasoning_effort": ["low"]}
+    assert narrowing["fuzzy_matching"].param_keys == []  # locked
+    assert "web_search" not in narrowing and "noise" not in overrides
 
 
 @pytest.mark.parametrize(

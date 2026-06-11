@@ -271,14 +271,10 @@ class CycleIndexMixin(CampaignStoreKernel):
         with graceful("Cycle completion update failed"):
             self.update(campaign_id, cycle_id, updates, remove=remove_keys)
 
-    def list_all(self, backend_id: str) -> list[dict[str, Any]]:
+    def list_all(self) -> list[dict[str, Any]]:
         results = []
         for index_path in self._index_files():
             data = read_json(index_path)
-            header = data.get("header") if isinstance(data.get("header"), dict) else {}
-            row_backend = header.get("backend_id", "")
-            if backend_id and row_backend and row_backend != backend_id:
-                continue
             campaign_id, cycle_id = self._ids_from_index_path(index_path)
             results.append(
                 {

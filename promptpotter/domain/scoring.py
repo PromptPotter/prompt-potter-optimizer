@@ -18,6 +18,12 @@ from promptpotter.shared.errors import ErrorCategory
 class PipelineData(TypedDict, total=False):
     """Nested pipeline execution details within a QueryMeasurement."""
 
+    # The pipeline's result ranking — the terminal ranker's output, derived at
+    # measurement time (``terminal_ranking``). The scorer + ``find_gt_rank`` read this.
+    result_ranking: list[dict[str, Any]]
+    # Raw per-node ranker outputs, copied from the wire response for per-node
+    # diagnostics (retriever recall vs ranker precision). One of these is the source
+    # ``result_ranking`` was derived from; both may be absent for non-ranking pipelines.
     final_ranking: list[dict[str, Any]]
     total_time: float
     terminated_at: str

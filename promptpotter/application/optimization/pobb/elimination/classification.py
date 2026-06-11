@@ -192,6 +192,29 @@ def get_ranked_items(r: Mapping[str, Any], ranked_item_keys: list[str] | None = 
     return []
 
 
+def terminal_ranking(r: Mapping[str, Any], schema: PipelineSchema | None) -> list[Any]:
+    """The ranked list from the LAST ranker/candidate_source node that emitted its
+    key — the pipeline's result ranking, whichever node is terminal. So a pipeline
+    ending at ``token_matching`` yields its ``candidate_ranking``; one that re-ranks
+    with ``llm_ranking`` yields that node's ``final_ranking`` (later → wins).
+
+    Distinct from :func:`get_ranked_items` (first non-empty across ALL ranker keys,
+    for "did GT appear in ANY ranking" analysis): the prediction is the TERMINAL
+    ranker's verdict, decided by key *presence* — an empty terminal list is a
+    legitimate NO_RESULT, not a fall-through to an earlier node's candidate pool.
+    """
+    pd = r.get("pipeline_data") or {}
+    if not schema:
+        return []
+    for node in reversed(schema.nodes):
+        if node.node_type in ("ranker", "candidate_source"):
+            for key in node.output_keys:
+                if key in pd:
+                    val = pd[key]
+                    return val if isinstance(val, list) else []
+    return []
+
+
 def extract_warning_types(result: Mapping[str, Any]) -> list[str]:
     """Extract every advisory + fatal code seen on this result.
 
@@ -218,4 +241,5 @@ __all__ = [
     "get_ranked_items",
     "is_deprecated",
     "ranked_item_keys_from_schema",
+    "terminal_ranking",
 ]

@@ -123,6 +123,22 @@ class DraftCampaign:
     # run reads it instead of re-decomposing at run-start (the second LLM call
     # that used to recompute exactly this). Empty until the check-in fills it.
     decomposed_task_context: dict[str, Any] = field(default_factory=dict)
+    # Audit marker for WHO authored the origin decomposition. Empty = the real
+    # ``checkin`` LLM node resolved it (the default ``resolve_origin_turn`` path).
+    # Populated = a simulated check-in: an operator/agent (e.g. the ``/potter-run``
+    # skill) authored the six prompt fields + task_context + column map by hand
+    # instead of spending the LLM call, then set this via ``edit-draft-campaign``.
+    # Shape ``{by, model, at}`` (free dict). Persisted in the draft resolution
+    # block (``cache.json``) as an audit breadcrumb — material provenance, on
+    # disk, human/agent-readable. NOT branched on in code (no consumer enforces
+    # it); it documents who authored the origin, it doesn't gate anything.
+    simulated_checkin: dict[str, Any] = field(default_factory=dict)
+    # The chosen active pipeline (``pipeline.json::pipelines.default``) — e.g. the
+    # full ``cache_lookup → … → token_matching`` vs a bare ``llm_only``. Empty =
+    # fall back to the connector's ``default_pipeline``. Carried so reusing an
+    # existing dataset PRESERVES its pipeline through display + commit instead of
+    # silently resetting to the connector default (the llm_only-on-reuse bug).
+    pipeline_steps: list[str] = field(default_factory=list)
     # Whether the optimizer is barred from mutating model/provider campaign-wide
     # (the ``forbidden_axes_strict`` knob). Default locked — the conservative
     # floor. Operator-editable in the pipeline-config control panel; drives both

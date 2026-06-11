@@ -224,12 +224,26 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     if (!datasetName) return { ...EMPTY, isLive, currentNodes, phase };
     const active = connector ? backends.find((b) => b.name === connector) ?? null : null;
     const baseUrl = active?.base_url ?? null;
+    // One physical endpoint can hold many registrations — today the mint/ingest
+    // path registers a BackendConnection PER DATASET, all cloning the same
+    // termnorm URL — so the raw list renders a dataset name + N duplicate
+    // "termnorm" rows. Collapse to one row per (backend_type, base_url); active
+    // first so it owns its endpoint and never re-appears under "Other backends".
+    // (Upstream fix: stop the per-dataset registration so this is a no-op.)
+    const distinct: BackendInfo[] = [];
+    const seenEndpoints = new Set<string>();
+    for (const b of active ? [active, ...backends.filter((b) => b !== active)] : backends) {
+      const key = `${b.backend_type} ${b.base_url}`;
+      if (seenEndpoints.has(key)) continue;
+      seenEndpoints.add(key);
+      distinct.push(b);
+    }
     return {
       connector,
       backendType,
       view,
       active,
-      others: active ? backends.filter((b) => b !== active) : backends,
+      others: active ? distinct.filter((b) => b !== active) : distinct,
       baseUrl,
       isTls: baseUrl ? baseUrl.startsWith("https://") : null,
       currentNodes,

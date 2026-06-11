@@ -35,8 +35,13 @@ from promptpotter.application.mask import (
     make_abort_verdict,
     make_scoring_verdict,
 )
+from promptpotter.application.optimization.pobb.elimination import terminal_ranking
 from promptpotter.application.scoring.evaluators import all_evaluators, materialize_round_values
-from promptpotter.application.scoring.formula import compile_scorer, extract_display_answer
+from promptpotter.application.scoring.formula import (
+    compile_scorer,
+    extract_display_answer,
+    extract_item_label,
+)
 from promptpotter.application.scoring.formula.matchers import (
     _aime_match,
     _exact_match,
@@ -257,6 +262,45 @@ def test_materialize_recall_only_emits_for_typed_nodes():
     assert values["source_recall"] == pytest.approx(1.0)
     assert values["candidate_recall"] == pytest.approx(0.5)
     assert "cache_hit_rate" in values
+
+
+def test_terminal_ranking_sources_the_prediction():
+    """The prediction is the head of the LAST ranker/candidate_source node that emitted
+    its key — final_ranking when the ranker ran, else the candidate pool. An empty
+    terminal list is a verdict (NO_RESULT), not a fall-through to the earlier pool."""
+    schema = (
+        _recall_schema()
+    )  # order: cache_lookup, fuzzy(candidate_ranking), ranker(final_ranking)
+
+    def r(pd: dict) -> dict:
+        return {"pipeline_data": pd}
+
+    # Both keys present → the later ranker's final_ranking wins over the earlier pool.
+    assert terminal_ranking(
+        r(
+            {
+                "candidate_ranking": [{"candidate": "pool"}],
+                "final_ranking": [{"candidate": "ranked"}],
+            }
+        ),
+        schema,
+    ) == [{"candidate": "ranked"}]
+    # Token-terminal shape (no final_ranking) → the candidate pool IS the result ranking.
+    assert terminal_ranking(r({"candidate_ranking": [("Nylon 6-6", 0.5)]}), schema) == [
+        ("Nylon 6-6", 0.5)
+    ]
+    # Ranker ran but found nothing → [] (NO_RESULT), no fall-through to the pool.
+    assert (
+        terminal_ranking(
+            r({"candidate_ranking": [{"candidate": "pool"}], "final_ranking": []}), schema
+        )
+        == []
+    )
+    # No ranking keys / no schema → [].
+    assert terminal_ranking(r({"total_time": 1.0}), schema) == []
+    assert terminal_ranking(r({"final_ranking": [{"candidate": "x"}]}), None) == []
+    # Shape-agnostic head extraction: a (name, score) tuple item yields the name.
+    assert extract_item_label(("Nylon 6-6", 0.5)) == "Nylon 6-6"
 
 
 def test_composite_fitness_matches_default_formula():

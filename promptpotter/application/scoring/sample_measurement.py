@@ -313,21 +313,27 @@ async def measure_sample(
         )
         data = resp.get("data", {})
 
-        ranked = data.get("final_ranking", [])
-        predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
+        # The prediction is the head of the TERMINAL ranker's output — candidate_ranking
+        # when token_matching is terminal, final_ranking when an llm_ranking/llm_only node
+        # is — read through the schema, not a hardcoded key. extract_item_label is
+        # shape-agnostic (dict {candidate}, (name, score) tuple, or bare string).
+        from promptpotter.application.optimization.pobb.elimination import terminal_ranking
+        from promptpotter.application.scoring.formula import extract_item_label
+
+        ranked = terminal_ranking({"pipeline_data": data}, pipeline_schema)
+        predicted = extract_item_label(ranked[0]) if ranked else NO_RESULT
         if predicted == "ERROR":
             return _error_result(
                 sample,
                 "Backend returned ERROR as candidate — pipeline internal failure for this query.",
                 category=ErrorCategory.PIPELINE,
             )
-        gt_rank = next(
-            (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth),
-            None,
-        )
+        gt_rank = find_rank(ranked, ground_truth)
 
-        # Project wire response → pipeline_data.
-        pd: dict[str, Any] = {"final_ranking": ranked}
+        # Project wire response → pipeline_data. `result_ranking` is the canonical derived
+        # terminal ranking the scorer + find_gt_rank read; the raw per-node observation keys
+        # (candidate_ranking / final_ranking) are copied below for their per-node diagnostics.
+        pd: dict[str, Any] = {"result_ranking": ranked}
         for key in pipeline_schema.observation_keys | _INFRA_KEYS:
             val = data.get(key)
             if val is not None:
@@ -424,12 +430,12 @@ async def measure_sample(
 
 
 def find_gt_rank(result: Mapping[str, Any]) -> int | None:
-    """Find ground truth rank in final_ranking. Returns 1-indexed or None."""
+    """Find ground truth rank in the terminal ranking. Returns 1-indexed or None."""
     gt = result.get("ground_truth", "")
     if not gt:
         return None
     pd = result.get("pipeline_data") or {}
-    return find_rank(pd.get("final_ranking", []), gt)
+    return find_rank(pd.get("result_ranking", []), gt)
 
 
 def compare_rerun(

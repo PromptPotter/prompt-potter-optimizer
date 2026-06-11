@@ -117,6 +117,23 @@ def resolve_dataset_config_dir(store: Stores, project_root: Path, dataset_name: 
     return project_root / "datasets" / dataset_name
 
 
+def _warn_if_no_terminal_ranker(schema: PipelineSchema, status: Callable[[str], None]) -> None:
+    """A pipeline yields a prediction only if some ranker/candidate_source node emits a
+    ranked list — ``terminal_ranking`` reads the terminal one's head as ``predicted``.
+    Without such a node every sample silently scores NO_RESULT (the lca-bom-termnorm trap).
+    Surface it loudly at setup, on the operator-visible status line, not at score time."""
+    if not schema.nodes:
+        return
+    if any(n.node_type in ("ranker", "candidate_source") and n.output_keys for n in schema.nodes):
+        return
+    msg = (
+        f"Pipeline {schema.name!r} has no terminal ranker — no node emits a ranked list, "
+        "so every sample will score NO_RESULT (check node_role on the final node)"
+    )
+    logger.warning(msg)
+    status(f"⚠ {msg}")
+
+
 async def _resolve_pipeline_schema(
     client: BackendClient,
     dataset_config_dir: Path | None,
@@ -142,6 +159,7 @@ async def _resolve_pipeline_schema(
         merged = _apply_dataset_overlay(backend_resp, local_raw or {})
         try:
             schema = parse_pipeline_response(merged)
+            _warn_if_no_terminal_ranker(schema, status)
             status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
             return schema
         except Exception as exc:
@@ -150,6 +168,7 @@ async def _resolve_pipeline_schema(
     if local_raw is not None:
         try:
             schema = parse_pipeline_response(local_raw)
+            _warn_if_no_terminal_ranker(schema, status)
             status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes, offline)")
             return schema
         except Exception as exc:
@@ -277,8 +296,6 @@ async def init_services(
 
     resolved_identity = identity if identity is not None else default_identity()
 
-    if not backend_id:
-        backend_id = dataset_name or DEFAULT_BACKEND_ID
     if project_root is None:
         project_root = (
             Path(__file__).resolve().parent.parent.parent.parent
@@ -305,6 +322,23 @@ async def init_services(
     pipeline_schema = await _resolve_pipeline_schema(client, dataset_config_dir, status)
     await _verify_connector_revision(client, connector)
 
+    # One physical endpoint = one BackendConnection. With no explicit
+    # --backend-id, REUSE an existing registration for this (base_url,
+    # backend_type) instead of minting a fresh per-dataset backend — the old
+    # `dataset_name` fallback spawned one "termnorm" row per dataset, polluting
+    # the "Other backends" list. Fall back to DEFAULT_BACKEND_ID only when this
+    # endpoint is genuinely new.
+    if not backend_id:
+        norm = backend_url.rstrip("/")
+        existing = next(
+            (
+                b
+                for b in store.backends.list_all()
+                if b.base_url.rstrip("/") == norm and b.backend_type == backend_type
+            ),
+            None,
+        )
+        backend_id = existing.id if existing else DEFAULT_BACKEND_ID
     if not store.backends.get(backend_id):
         store.backends.register(
             BackendConnection(

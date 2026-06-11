@@ -32,6 +32,7 @@ from promptpotter.application.optimization.pobb.elimination.classification impor
     get_ranked_items,
     is_deprecated,
     ranked_item_keys_from_schema,
+    terminal_ranking,
 )
 
 __all__ = [
@@ -47,4 +48,5 @@ __all__ = [
     "get_ranked_items",
     "is_deprecated",
     "ranked_item_keys_from_schema",
+    "terminal_ranking",
 ]

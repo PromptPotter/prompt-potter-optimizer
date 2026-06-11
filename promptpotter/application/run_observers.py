@@ -337,7 +337,9 @@ def _ensure_session_minted(
     auto_mint_session(
         session,
         campaign_config,
-        cycle_id=build_origin_cycle_id(resolved_origin, session.pipeline_schema, dataset),
+        cycle_id=build_origin_cycle_id(
+            resolved_origin, session.pipeline_schema, dataset, session.pipeline_params
+        ),
         origin_acc=origin_accuracy,
         origin_prompt_fields=resolved_origin.prompt_field_dict(),
         dataset_size=len(dataset),

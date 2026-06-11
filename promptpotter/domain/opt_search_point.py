@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import re
 import uuid
 from typing import TYPE_CHECKING, Any, Self
 
@@ -71,14 +70,20 @@ class PromptTemplate(SearchPoint):
         return "\n".join(lines)
 
     def compile_prompt(self, **kwargs: str | int) -> str:
-        """Render and substitute ``{{variable}}`` placeholders. Raises on unsubstituted."""
+        """Render and substitute the supplied ``{{variable}}`` placeholders.
+
+        Any ``{{…}}`` left after substitution is kept as literal text — prompt-field
+        content legitimately carries braces that are NOT optimizer slots. The chief
+        case: an evolved node prompt echoed into an optimizer template (the
+        ``rendered_prompt`` injection) embeds the backend's own ``{{query}}`` /
+        ``{{combined_text}}`` injection placeholders, which the target backend fills,
+        not PromptPotter. Authored-template slot typos are caught at load time by
+        ``dispatch.validate_template`` (which knows the INJECTIONS vocabulary); this
+        method only fills what it is handed.
+        """
         text = self.render()
-        expected = set(re.findall(r"\{\{(\w+)\}\}", text))
         for key, value in kwargs.items():
             text = text.replace("{{" + key + "}}", str(value))
-        missing = expected - set(kwargs.keys())
-        if missing:
-            raise KeyError(f"Unsubstituted template variables: {sorted(missing)}")
         return text
 
     def prompt_fields(self) -> dict[str, str]:

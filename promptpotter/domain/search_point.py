@@ -61,7 +61,12 @@ class JobSearchPoint(SearchPoint):
         return ""
 
     def sp_hash(self, pipeline_schema: PipelineSchema | None = None) -> str:
-        """SearchPoint identity hash; falls back to flat ``pipeline_params`` hash without schema."""
+        """SearchPoint identity hash; falls back to flat ``pipeline_params`` hash without schema.
+
+        Role split (the codebase has TWO hashes — don't conflate): ``sp_hash`` is the
+        optimizer/prompt-side dedup over the node-config structure; ``content_hash``
+        (below) is the **measurement-archive key**. "Will this re-score?" is answered by
+        ``content_hash`` / ``node_configs``, not this one."""
         if pipeline_schema is not None:
             return pipeline_schema.sp_hash(self.pipeline_params or {})
         from promptpotter.domain.pipeline_schema import stable_hash
@@ -69,7 +74,11 @@ class JobSearchPoint(SearchPoint):
         return stable_hash(self.pipeline_params or {})
 
     def content_hash(self, dataset: list[Any]) -> str:
-        """Content-addressed hash for measurement deduplication."""
+        """Content-addressed hash for measurement deduplication — the ``archive/
+        measurements/`` key (rendered prompt + dataset + ``pipeline_params``). Because
+        ``pipeline_params`` here is the overlay-merged set (config.py folds the connector
+        ``model``/config in), two points differing only by model hash DIFFERENTLY and do
+        NOT share measurements. This is the hash that decides re-score vs cache-replay."""
         return content_hash(
             self.render(),
             dataset,

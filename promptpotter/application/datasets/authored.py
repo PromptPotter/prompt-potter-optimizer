@@ -48,6 +48,13 @@ class AuthoredDataset:
     sub-block, so dropping to ``nodes.*.config`` (as ``load_dataset_node_overlay``
     does) would silently lose ``optimizer.param_allowed_values`` locks."""
 
+    active_steps: list[str]
+    """``pipeline.json::pipelines.default`` — the dataset's chosen pipeline (e.g.
+    the full ``cache_lookup → … → token_matching`` vs a bare ``llm_only``). ``[]``
+    when absent, in which case the connector's ``default_pipeline`` applies. The
+    draft path carries this so reusing a dataset PRESERVES its pipeline instead of
+    resetting to the connector default."""
+
 
 def read_campaign_config_file(path: Path) -> dict[str, Any]:
     """Read ``campaign.json`` → dict, unwrapping the optional outer
@@ -83,12 +90,14 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
     )
     backend_type = str(pipeline.get("backend_type") or "").lower()
     pipeline_nodes = dict(pipeline.get("nodes") or {})
+    active_steps = [str(s) for s in (pipeline.get("pipelines") or {}).get("default") or []]
 
     return AuthoredDataset(
         campaign_config=campaign_config,
         task_description=task_description,
         backend_type=backend_type,
         pipeline_nodes=pipeline_nodes,
+        active_steps=active_steps,
     )
 
 
