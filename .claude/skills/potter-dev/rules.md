@@ -33,6 +33,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-21](#r-21) — CLI timeouts ≤30s; never background the runner
 - [R-22](#r-22) — `--config` means mint-fresh, not "use this config"
 - [R-37](#r-37) — scope `git add` to changed files; never commit a sibling repo's WIP
+- [R-39](#r-39) — end a substantial task with a compact recommendation
 
 **Investigation / interaction**
 - [R-23](#r-23) — say "origin", never "baseline"
@@ -197,6 +198,12 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Rule:** run `git status` FIRST, then `git add` only the exact paths you changed. `git add <path>` on an *untracked* file stages the WHOLE file, not a diff — so a one-line edit to an untracked file commits the entire file. And never commit in a separate repo that holds active operator WIP without explicit per-repo confirmation — the operator owns those commits ("I'll go there later").
 - **Why:** add-by-path on an untracked file swept a 57-line operator page into a commit meant for a one-word headline swap; committing in the marketing repo crossed a boundary the operator manages. [[R-19]] [[R-29]]
 - **Origin:** 2026-06-10 — operator: "don't commit anything over there, I'll go there later" + the untracked-file wholesale-commit slip.
+
+### R-39 — end a substantial task with a compact recommendation
+- **Trigger:** finishing a substantial / multi-step turn — a completed arc, a feature, a big refactor, a deep investigation — the kind that piled up context.
+- **Rule:** end the reply with an explicit one-line verdict: **`Compact: yes`** (+ why it's a clean boundary) or **`Compact: no`** (+ why hold). When it's "yes", keep the preceding writeup short — the operator compacts instead of reading detail. A clean checkpoint = work verified green + next step well-scoped + nothing half-applied in the working tree.
+- **Why:** the operator uses the verdict to decide whether to read the writeup or just `/compact`; saying "compact" is permission to be terse. [[R-26]]
+- **Origin:** 2026-06-11 — operator: "always end such a task with the recommendation whether to compact or not. if you say compact, I don't need to read too much."
 
 ## Investigation / interaction
 

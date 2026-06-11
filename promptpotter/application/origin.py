@@ -12,7 +12,7 @@ from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
-from promptpotter.domain.run_records import OperatorForkOverride
+from promptpotter.domain.run_records import CycleSeed
 from promptpotter.domain.sample import Sample
 
 if TYPE_CHECKING:
@@ -117,7 +117,7 @@ def extract_campaign_origin(campaign_rounds: list[dict[str, Any]]) -> CampaignOr
 
 def try_inherit_fork_origin(
     session: Session,
-    fork_seed: OperatorForkOverride | None,
+    seed: CycleSeed | None,
     *,
     resolved_origin: OptSearchPoint,
 ) -> CampaignOrigin | None:
@@ -138,7 +138,7 @@ def try_inherit_fork_origin(
     missing coords, edited prompt → different render) returns ``None`` and the caller
     re-scores as before.
     """
-    if fork_seed is None or not fork_seed.origin_prompt_fields:
+    if seed is None or not seed.origin_prompt_fields:
         return None
 
     store = session.store.campaigns
@@ -189,7 +189,7 @@ def try_inherit_fork_origin(
     # file, and the reuse cache is noisy under nondeterminism. Hard-sample seeding for
     # round 1 starts clean; the inherited C0 accuracy (the operator-facing value) is exact.
     # resolved_origin carries the OSP object (not a prompt-field dict) so the inherited C0 keeps
-    # its lineage(source="fork_seed") — same shape the re-score path produces.
+    # its lineage(source=seed.origin_source) — same shape the re-score path produces.
     return CampaignOrigin(
         resolved_origin=resolved_origin,
         origin_acc=origin_acc,
@@ -199,7 +199,7 @@ def try_inherit_fork_origin(
 
 
 ORIGIN_RESOLUTION_PRIORITY = (
-    "fork_seed",  # operator-steered fork: the edited searchpoint IS the origin
+    "seed",  # operator-steered fork OR campaign-from-origin: the chosen searchpoint IS the origin
     "experiment",  # experiment_extract dependencies' prompt registry
     "dataset",  # {dataset_dir}/prompts/{node}.json (tenant-first)
     "empty",  # no prompt node active — param-only optimization
@@ -207,29 +207,37 @@ ORIGIN_RESOLUTION_PRIORITY = (
 """Origin-OSP resolution order, highest wins — the single legible statement of the
 precedence that ``resolve_origin_opt_search_point`` walks branch by branch."""
 
+# C0 lineage description per ``CycleSeed.origin_source`` — keyed lookup, no
+# branch: the seed declares its own provenance, the resolver stamps it.
+_SEED_ORIGIN_LINEAGE = {
+    "fork_seed": "Operator-steered fork — edited searchpoint as origin",
+    "campaign_origin": "Fresh campaign minted from a chosen prior origin",
+}
+
 
 def resolve_origin_opt_search_point(
     experiment_extract: dict[str, Any],
     prompt_node_names: list[str] | None = None,
     dataset_dir: Path | None = None,
     *,
-    fork_seed: OperatorForkOverride | None = None,
+    seed: CycleSeed | None = None,
 ) -> OptSearchPoint:
     """Resolve the origin OptSearchPoint by :data:`ORIGIN_RESOLUTION_PRIORITY`
-    (fork-seed → experiment prompts → {dataset_dir}/prompts → empty).
+    (seed → experiment prompts → {dataset_dir}/prompts → empty).
 
-    A *fork_seed* with non-empty ``origin_prompt_fields`` wins outright — an
-    operator-steered fork's origin *is* the edited searchpoint, so we build the
-    OSP straight from those fields and short-circuit (no dataset/experiment
-    lookup). *dataset_dir* is the resolved config dir
+    A *seed* with non-empty ``origin_prompt_fields`` wins outright — an
+    operator-steered fork's (or a campaign-from-origin's) origin *is* the chosen
+    searchpoint, so we build the OSP straight from those fields and short-circuit
+    (no dataset/experiment lookup), stamping the C0 lineage from
+    ``seed.origin_source``. *dataset_dir* is the resolved config dir
     (``Session.dataset_config_dir``, tenant-first), so an ingested dataset's
     authored prompts are found the same way a repo benchmark's are."""
-    if fork_seed is not None and fork_seed.origin_prompt_fields:
+    if seed is not None and seed.origin_prompt_fields:
         return OptSearchPoint.from_prompt_fields(
-            fork_seed.origin_prompt_fields,
+            seed.origin_prompt_fields,
             lineage=IndividualLineage(
-                changes_description="Operator-steered fork — edited searchpoint as origin",
-                source="fork_seed",
+                changes_description=_SEED_ORIGIN_LINEAGE[seed.origin_source],
+                source=seed.origin_source,
             ),
         )
 
@@ -295,7 +303,7 @@ async def establish_campaign_origin(
     dataset: list[Sample],
     campaign_config: CampaignConfig,
     *,
-    fork_seed: OperatorForkOverride | None,
+    seed: CycleSeed | None,
     listener: Any | None,
 ) -> CampaignOrigin:
     """The single origin-establishment seam: resolve the origin OSP once, then either
@@ -311,9 +319,9 @@ async def establish_campaign_origin(
             session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
         ),
         dataset_dir=getattr(session, "dataset_config_dir", None),
-        fork_seed=fork_seed,
+        seed=seed,
     )
-    inherited = try_inherit_fork_origin(session, fork_seed, resolved_origin=resolved_origin)
+    inherited = try_inherit_fork_origin(session, seed, resolved_origin=resolved_origin)
     if inherited is not None:
         return inherited
 
@@ -325,7 +333,7 @@ async def establish_campaign_origin(
         pipeline_schema=session.pipeline_schema,
         svc=session,
         listener=listener,
-        fork_seed=fork_seed,
+        seed=seed,
         resolved_origin=resolved_origin,
     )
     return extract_campaign_origin(campaign_rounds)
@@ -341,7 +349,7 @@ async def prepare_scoring_context(
     svc: Any = None,
     listener: Any | None = None,
     obs: Any | None = None,
-    fork_seed: OperatorForkOverride | None = None,
+    seed: CycleSeed | None = None,
     resolved_origin: OptSearchPoint | None = None,
 ) -> tuple[OptSearchPoint, list[Sample], list[dict[str, Any]], list[Any]]:
     """Resolve origin (fork-seed wins), set dataset, produce a populated ``campaign_rounds[0]``.
@@ -356,7 +364,7 @@ async def prepare_scoring_context(
             experiment_extract or {},
             prompt_node_names=prompt_nodes,
             dataset_dir=getattr(svc, "dataset_config_dir", None),
-            fork_seed=fork_seed,
+            seed=seed,
         )
     dataset = train_data or []
 

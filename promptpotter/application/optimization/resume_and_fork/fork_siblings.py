@@ -12,7 +12,7 @@ All :class:`ForkTrigger` variants wired:
   (``fork_from_round=0`` + ``sweep_batch_id`` + ``sweep_source_file``).
 * ``OPERATOR_STEERED`` — operator fork from the lineage/control panel
   (``fork_from_round=0``, ``_fork_`` id), carrying an edited-searchpoint
-  ``OperatorForkOverride`` written to ``.overrides/seed.json``. Application entry:
+  ``CycleSeed`` written to ``.overrides/seed.json``. Application entry:
   ``operator_fork.py::mint_operator_fork``.
 
 A fork is a new *cycle* inside the **same campaign** — all cycles land
@@ -252,7 +252,7 @@ def _mint_fork(
         # The steered seed (edited searchpoint + reconciled limits) rides its own
         # read-once home; the ledger FORK_CUT still carries it as SoT.
         if payload.seed is not None:
-            campaign_store.write_fork_seed(campaign_id, new_cycle_id, payload.seed)
+            campaign_store.write_cycle_seed(campaign_id, new_cycle_id, payload.seed)
     elif payload.trigger is ForkTrigger.OPERATOR_SWEEP:
         if sweep_batch_id is None or sweep_source_file is None:
             raise ValueError(
