@@ -325,20 +325,8 @@ __all__ = [
     "fmt_ci",
     "fmt_pct",
     "fmt_pvalue",
-    "render_markdown_box",
     "render_pipeline_overrides",
 ]
-
-
-def render_markdown_box(title: str, content: str, empty_label: str, *, width: int = 74) -> str:
-    """Render a titled box around ``content``, or a dim empty label."""
-    if not content:
-        return f"  {DIM}{empty_label}{RESET}"
-    out = [f"  {_box_top(title, width=width)}"]
-    for line in content.split("\n"):
-        out.append(f"  {_box_line(line, width=width)}")
-    out.append(f"  {_box_bottom(width=width)}")
-    return "\n".join(out)
 
 
 def render_pipeline_overrides(
