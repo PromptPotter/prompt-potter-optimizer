@@ -12,14 +12,6 @@ export function fmtPct0(v: number | null | undefined): string {
   return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : "—";
 }
 
-// Signed percentage-point delta between two ratios — "+1.2pp" / "0.0pp".
-export function fmtDelta(a: number | null, b: number | null): string {
-  if (a == null || b == null) return "—";
-  const d = (b - a) * 100;
-  if (Math.abs(d) < 0.05) return "0.0pp";
-  return `${d > 0 ? "+" : ""}${d.toFixed(1)}pp`;
-}
-
 // Short elapsed time — "840ms" / "4.20s" / "1.5m". Non-finite → "—".
 export function fmtSecs(s: number | null | undefined): string {
   if (typeof s !== "number" || !Number.isFinite(s)) return "—";

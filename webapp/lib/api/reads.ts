@@ -32,14 +32,6 @@ export function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return jget<HealthResponse>(`${API}/health`, signal);
 }
 
-// Live state of the active session — the stable façade keyed on the active
-// pointer (no campaign/cycle ids needed). New data panels and chat
-// state-reads code against this rather than the per-cycle dashboard route,
-// so they're insulated from the eventual state-sync persistence swap. 404
-// when no session is active; `{warming_up: true, ...}` while origin runs.
-export function fetchLiveState(signal?: AbortSignal): Promise<Record<string, unknown>> {
-  return jget<Record<string, unknown>>(`${API}/sessions/active/live-state`, signal);
-}
 
 // Run-control state for the VIEWED cycle now rides `dashboard.json::run_phase`
 // (declared by the runner, projected by LiveDashboardView) on the 2 s poll — the
@@ -250,7 +242,7 @@ export function fetchMachineStatus(signal?: AbortSignal): Promise<MachineStatus>
 // Per-cycle file content. Files live either under the cycle dir
 // (`scope=cycle`) or at the campaign dir (`scope=campaign` — campaign.json,
 // log.md, hard_samples.json). `dashboard.json` is NOT a campaign artifact —
-// it is per-session; fetch it via `fetchDashboard`.
+// it is per-session; fetch it via `fetchDashboardConditional`.
 export function fetchCycleFile(
   campaignId: string,
   cycleId: string,
@@ -311,23 +303,6 @@ export function fetchMeasurementSeries(
   if (scope === "cycle" && cycleId) params.set("cycle_id", cycleId);
   return jget<MeasurementSeriesResponse>(
     `${API}/datasets/${encodeURIComponent(name)}/measurement-series?${params.toString()}`,
-    signal,
-  );
-}
-
-// Live session telemetry. `dashboard.json` is per-session — it lives in
-// the session's root cycle dir and is shared by that session's forks. The
-// server resolves the session-family root from any cycle of the session,
-// so pass the cycle currently in view. Returns the raw dashboard dict
-// (cast to `DashboardSnapshot` at the use site in poll.tsx).
-export function fetchDashboard(
-  campaignId: string,
-  cycleId: string,
-  signal?: AbortSignal,
-): Promise<Record<string, unknown>> {
-  return jget<Record<string, unknown>>(
-    `${API}/campaigns/${encodeURIComponent(campaignId)}` +
-      `/cycles/${encodeURIComponent(cycleId)}/dashboard`,
     signal,
   );
 }

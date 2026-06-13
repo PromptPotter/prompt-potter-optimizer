@@ -193,7 +193,7 @@ def _replay_leader_lock_in(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
     """PoBB leader-lock under rescored paired scores; tolerant of MC noise."""
-    if int(inputs_ref.get("queries_scored", 0)) < int(inputs_ref.get("lock_in_n_min", 8)):
+    if int(inputs_ref["queries_scored"]) < int(inputs_ref["lock_in_n_min"]):
         return False
     snap = _pobb_replay_snapshot(ctx, inputs_ref, data)
     if snap is None:
@@ -201,7 +201,7 @@ def _replay_leader_lock_in(
     candidate_id, snapshot = snap
     # Paired PoBB: ``cid → min`` is the lock-in metric; no separate leader guard.
     fresh = float(snapshot.get(candidate_id, 0.0))
-    threshold = float(inputs_ref.get("lock_in", 0.95))
+    threshold = float(inputs_ref["lock_in"])
     recorded = inputs_ref.get("recorded_p_best")
     if recorded is not None and abs(fresh - float(recorded)) < _POBB_REPLAY_TOLERANCE:
         return float(recorded) >= threshold

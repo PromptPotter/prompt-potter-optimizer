@@ -199,7 +199,6 @@ def render_composite_fitness_block(
     formula: str | None,
     *,
     origin: float | None = None,
-    width: int = 70,
     use_short_names: bool = False,
     legend: str | None = None,
 ) -> list[str]:
@@ -217,11 +216,6 @@ def render_composite_fitness_block(
 
     Falls back to a single line ``composite_fitness=0.6042 (formula unavailable)``
     when *formula* is None / empty.
-
-    *width* is informational only — used by callers to decide whether to
-    request short names; the function does NOT wrap. If the values line
-    exceeds *width*, it overflows and the caller must pick a wider frame
-    or set ``use_short_names=True``.
     """
     # Line 1: composite_fitness + trajectory anchor
     line1 = f"composite_fitness = {composite_fitness:.4f}"

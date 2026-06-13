@@ -149,17 +149,7 @@ def _paired_diff_posterior(diffs: list[float]) -> tuple[float, float]:
 
     SE floored at ``1/(4n)`` — same Beta-Binomial bound as ``_normal_posterior``.
     """
-    n = len(diffs)
-    if n == 0:
-        return (0.0, 1.0)
-    arr = np.asarray(diffs, dtype=np.float64)
-    mean = float(arr.mean())
-    if n == 1:
-        return (mean, 0.5)
-    variance = float(arr.var(ddof=1))
-    se = math.sqrt(variance / n)
-    se_floor = 1.0 / (4.0 * n)
-    return (mean, max(se, se_floor))
+    return _normal_posterior(diffs)
 
 
 def paired_better_probabilities(
