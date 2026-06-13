@@ -32,7 +32,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-19](#r-19) — never commit or push unless told
 - [R-20](#r-20) — solo dev: commit to `main`, no PR ceremony unless asked
 - [R-21](#r-21) — CLI timeouts ≤30s; never background the runner
-- [R-22](#r-22) — `--config` means mint-fresh, not "use this config"
+- [R-22](#r-22) — `new` mints fresh; `resume` continues, not "use this config"
 - [R-37](#r-37) — scope `git add` to changed files; never commit a sibling repo's WIP
 - [R-39](#r-39) — end a substantial task with a compact recommendation
 
@@ -196,11 +196,11 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Why:** a long unattended run burns spend; foreground keeps the operator in control.
 - **Origin:** 2026-06-07 — seeded from conventions / `feedback_cli_timeout`.
 
-### R-22 — `--config` means mint-fresh
-- **Trigger:** operator edited a config and wants the run to pick it up.
-- **Rule:** `optimize --config <path>` = mint a brand-new session+cycle from round 0; it is NOT "use this config". `campaign.json` is loaded on every `optimize`. Optimizer-policy edits (`pobb_*`, `exploration.*`, …) don't flip the cycle hash → resume diverges → recover with bare `optimize --fork-on-divergence` (no `--config`). Target-spec edits flip the hash → `--config` auto-mints. Read the error's `fork_hint:` literally; don't embellish.
-- **Why:** the mental model "--config = which config to use" is wrong and the CLI rejects the combination.
-- **Origin:** 2026-06-07 — seeded from `feedback_optimize_config_vs_resume`.
+### R-22 — `new` mints fresh; `resume` continues
+- **Trigger:** operator edited a config and wants the run to pick it up, or any question about CLI verbs.
+- **Rule:** CLI verbs are `new` (mint fresh session+cycle from round 0) and `resume` (extend the active session). There is NO `optimize` verb. `campaign.json` is loaded on every `new`. Optimizer-policy edits (`pobb_*`, `exploration.*`, …) don't flip the cycle hash → `resume` diverges → recover with bare `resume --fork-on-divergence`. Target-spec edits flip the hash → `new` auto-mints a fresh cycle. Read the error's `fork_hint:` literally; don't embellish.
+- **Why:** the old "optimize --config" framing was a stale CLI name; the actual commands are `new` and `resume`.
+- **Origin:** 2026-06-07 — seeded from `feedback_optimize_config_vs_resume`; updated 2026-06-13 (doc drift — `optimize` verb removed, correct verbs are `new` + `resume`).
 
 ### R-37 — scope `git add` to changed files; never commit a sibling repo's WIP
 - **Trigger:** committing while other uncommitted work (a concurrent agent's, or operator WIP) sits in the tree, OR committing in a sibling/separate repo (`promptpotter-web`, TermNorm).
@@ -229,7 +229,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Origin:** 2026-06-07 — seeded from `feedback_no_hidden_defaults`.
 
 ### R-25 — no cost / round predictions
-- **Trigger:** before an `optimize`/`new`/`resume` run.
+- **Trigger:** before a `new`/`resume` run.
 - **Rule:** never predict rounds/samples/total LLM calls/cost ahead of the run.
 - **Why:** the operator finds the guesses noise; spend is observed, not forecast.
 - **Origin:** 2026-06-07 — seeded from `feedback_no_cost_predictions`.

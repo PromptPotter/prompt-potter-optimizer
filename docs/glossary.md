@@ -320,7 +320,8 @@ The persisted world is a four-entity containment hierarchy
   `application/run_observers.py`.
 - **MeasurementArchive** — cross-cycle DB core. Content-addressed.
   Lives at `archive/measurements/`. The optimizer's long-term memory.
-  See `infrastructure/store/archive_views.py`.
+  `infrastructure/store/measurement_archive.py`; facade functions in
+  `infrastructure/store/archive_views.py`.
 - **Projection** — a `DerivedView` subclass that subscribes to the
   ledger and writes its own artifact (dashboard.json, audit cache,
   PoBB stream). `infrastructure/projections/`.
