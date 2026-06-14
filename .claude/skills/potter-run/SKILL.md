@@ -111,7 +111,7 @@ Trigger if any of: `.env` missing, backend `/status` unreachable, or requested d
 ## Phase 0: Audit (silent)
 
 1. Read `datasets/{name}/dataset.md` + `campaign.json` + `pipeline.json` (+ BBEH notebook).
-2. `curl -s {backend_url}/status` — backend up?
+2. `curl -s {backend_url}/status` — backend up? (`{backend_url}` = the backend, default `:8000`; the PromptPotter API on `:8001` has no `/status` — hitting it there 404s.)
 3. Active pointer → `index.json` + `dashboard.json` if present.
 
 **Print only if** no dataset arg, dataset not implemented (scorer in `promptpotter/application/scoring/formula/matchers.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets/loaders.py::DATASET_LOADERS`), or an anomaly from the allowlist below fires.

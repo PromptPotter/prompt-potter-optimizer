@@ -7,7 +7,7 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 | Category | Meaning | First Step |
 |----------|---------|------------|
 | `[CLIENT]` | Bad request (invalid params, missing fields) | Check command flags and config |
-| `[SERVER]` | Backend error (500, timeout) | Check backend status: `curl -s {url}/status` |
+| `[SERVER]` | Backend error (500, timeout) | Check backend status: `curl -s {backend_url}/status` (the backend, default `:8000` — *not* the PromptPotter API on `:8001`, which has no `/status`) |
 | `[CONNECTION]` | Can't reach backend | Is the backend running? Check URL and port |
 | `[PIPELINE]` | Pipeline execution error (node failure) | Check the latest `rounds/round_NNNN.json` and `.runtime/cache/rounds/round_NNNN.json` for node-level details |
 | `[UNKNOWN]` | Unclassified | Read full error + `output.log` |
@@ -78,7 +78,7 @@ To inspect: `cat .promptpotter/active_session.json`
 
 If `resume` fails with connection errors:
 
-1. Check backend is running: `curl -s {backend_url}/status`
+1. Check backend is running: `curl -s {backend_url}/status` (the backend, default `:8000` — *not* PromptPotter's own API on `:8001`, which serves no `/status`)
 2. Check the URL and port match what's in `dataset.md`
 3. Backend may have crashed — check its logs
 4. If using a remote backend, check network/firewall

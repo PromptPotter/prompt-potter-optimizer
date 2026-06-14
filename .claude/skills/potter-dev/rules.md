@@ -46,6 +46,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-29](#r-29) — no data deletion
 - [R-30](#r-30) — CWD errors → tell the operator to `cd`, don't paper over
 - [R-40](#r-40) — large-scope dataset assembly: audit silent-drop hazards before proposing execution
+- [R-43](#r-43) — operator in debug-mode → halt at round-1 + test-and-fix loop, don't run the full loop past known-broken rounds
 - [R-31](#r-31) — root `CLAUDE.md` is a thin entry point
 - [R-32](#r-32) — canonical test set first
 - [R-33](#r-33) — `dashboard.json` and on-disk surfaces stay live-written
@@ -305,6 +306,12 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Rule:** do NOT converge or call the build "mechanical." First ground a **real data audit** (load the actual rows, don't hand-wave) and surface the long tail explicitly: (1) **placeholder/no-match targets** (`--`/empty/`n/a`) that, scored as misses, silently cap accuracy; (2) **gold-string-vs-candidate-pool exactness** — abbreviated/alias golds that fail raw-string scoring even when correct; (3) **multi-target / ambiguous** rows; (4) **per-domain accuracy hiding under an aggregate** (90% mean can mask a science domain at 40% → stratify the eval slice + gate on the worst domain); (5) **short-circuit nodes** (cache/fuzzy) masking the path being tuned. Give every row a *defined fate*; reconcile every gold to its exact pool entry; THEN propose the plan + gates.
 - **Why:** these are the items "pushed aside as harmless" that wreck the end-state — the operator twice pushed back on premature convergence here. Cleverness = nothing silently dropped, nothing forgotten. [[R-32]] [[R-24]] [[R-08]]
 - **Origin:** 2026-06-11 — operator: "really LARGE scope… various science domains… otherwise we get stuck at the end with some item we push aside, wrongfully thinking it harmless. Or we forget something."
+
+### R-43 — operator in debug-mode → halt at round-1 + test-and-fix loop
+- **Trigger:** the operator frames a campaign run as iterative debugging/finetuning — "ping-pong", "this'll take all day", "tons of bugs", "won't work right away", "you do the unit testing and fixing", "lots of finetuning required". Especially on a dataset with a known-broken later-round signature (e.g. lca-bom-termnorm rounds 2–5 collapsing).
+- **Rule:** do NOT push to run the full `max_rounds` loop unattended, and do NOT offer "accept the known failure and run to completion" as an option. Halt at the **round-1 gate** and enter the loop: reproduce → write a **failing unit test** that captures the bug → root-fix → green `pytest/ruff/mypy` → re-run the affected slice (origin / round 1). The deliverable each iteration is a fix backed by a test, not more rounds. The operator drives cadence; you fix.
+- **Why:** in debug-mode, rounds past the first broken one are wasted spend that produce no new signal — the bug is already visible at round 1. The work is the fix, not the run. I proposed running the full 5-round loop and "accepting the round-2+ risk"; the operator rejected both. [[R-21]] [[R-08]] [[R-42]] [[R-25]]
+- **Origin:** 2026-06-14 — operator: "no don't accept the round-2+ risk… you do unit testing and fixing, this will take us the whole day, ping pong work… tons of bugs and finetuning required… don't do directly 5 rounds."
 
 ### R-38 — overlay markers: one calm indicator where the operator points; scope edits to the named surface
 - **Trigger:** adding OR removing a visual marker for a divergence / mask / overlay / counterfactual state on any dashboard surface (lineage tree, round axis, fitness chart, samples).
