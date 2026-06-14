@@ -3,6 +3,7 @@ import type { CampaignSummary } from "@/lib/api";
 import { campaignOriginHash } from "@/lib/ids";
 import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { fmtPct0 } from "@/lib/format";
+import { runPhaseLabel } from "@/lib/run-phase";
 import { buildUnitTree, type SessionGroup } from "./grouping";
 import { UnitBranchRows } from "./UnitBranchRows";
 import { CampaignMenu } from "./CampaignMenu";
@@ -39,6 +40,12 @@ export function SessionSubtree({
   const selected = cid === campaignId && root.cycle_id === cycleId;
   const active = cid === activeCampaignId && root.cycle_id === activeCycleId;
   const live = root.run_phase === "running";
+  // Terminal (stopped) cycles surface their stop-reason so a CLI-aborted campaign
+  // reads as stale, not identical to the live one. Per-cycle (not the campaign
+  // rollup) so multi-session campaigns stay correct.
+  const statusLabel =
+    !live && root.run_phase === "terminal" ? runPhaseLabel(root.run_phase, root.status) : null;
+  const interrupted = root.status === "interrupted";
 
   // Branch-kind chips (only on the row that owns the fork-tree twist).
   const counts = { fork: 0, sweep: 0, diag: 0 };
@@ -89,7 +96,20 @@ export function SessionSubtree({
                 </span>
               )}
             </span>
-            <span className="unit-library-meta">{fmtPct0(session.bestAccuracy)}</span>
+            <span className="unit-library-meta">
+              {statusLabel && (
+                <>
+                  <span
+                    className="unit-library-status"
+                    data-interrupted={interrupted || undefined}
+                  >
+                    {statusLabel}
+                  </span>
+                  {" · "}
+                </>
+              )}
+              {fmtPct0(session.bestAccuracy)}
+            </span>
           </span>
         </button>
         {chips.length > 0 && (

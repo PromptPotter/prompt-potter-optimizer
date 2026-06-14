@@ -85,6 +85,11 @@
   border:0.5px solid currentColor;border-radius:var(--border-radius-md);padding:3px 10px;cursor:pointer;flex-shrink:0}
 .critical-alert-jump:hover{background:var(--color-background-hover)}
 .critical-alert-jump:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+/* Stop is the destructive primary action on a critical banner — solid danger fill
+   so it reads as the consequential choice, not a peer of the secondary "Files →" jump. */
+.critical-alert-stop{background:var(--color-danger);color:var(--color-background-primary);
+  border-color:var(--color-danger);font-weight:700}
+.critical-alert-stop:hover{background:var(--color-danger-border);border-color:var(--color-danger-border)}
 @keyframes critical-pulse{0%,100%{opacity:1}50%{opacity:.72}}
 
 /* RunErrorBanner — surfaces dashboard.json::error when the runner crashed.
@@ -195,6 +200,14 @@
    Same Trend + Score Frequency cards from the dropped Verdict lane. */
 .lsc-charts{display:flex;flex-direction:column;gap:14px;margin-top:14px}
 .lsc-charts > *{margin-bottom:0;min-width:0}
+
+/* Quiet per-round degraded notices under the trend — amber, never loud (the
+   critical grade owns the cross-tab banner). Webapp twin of the CLI yellow line. */
+.trend-degraded{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
+.trend-degraded-row{display:flex;align-items:baseline;gap:6px;font-size:11px;line-height:1.4;min-width:0}
+.trend-degraded-dot{color:var(--color-warn);flex:none;font-size:9px}
+.trend-degraded-label{color:var(--color-warn);font-weight:600;flex:none}
+.trend-degraded-detail{color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* Round-tabs strip — clickable circle per L1 round, plus a LIVE pill for
    the in-flight round. Sits directly above the fitness/lineage/inspector

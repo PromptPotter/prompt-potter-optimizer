@@ -10,7 +10,14 @@ import type { RoundSummary } from "@/lib/api/types";
 import type { SampleOrderStep } from "@/lib/types/round";
 
 const round = (r: number, selection: number[]): RoundSummary =>
-  ({ round: r, accuracy: 0, composite_fitness: 0, candidates: [], selection }) as RoundSummary;
+  ({
+    round: r,
+    accuracy: 0,
+    composite_fitness: 0,
+    candidates: [],
+    selection,
+    health: null,
+  }) as RoundSummary;
 
 describe("sample-set primitives", () => {
   it("sameSampleSet is order-insensitive and null-safe", () => {

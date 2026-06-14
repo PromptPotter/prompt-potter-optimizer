@@ -5,6 +5,7 @@ import { ensureChartRegistered, lineChartDefaults } from "@/lib/chart-config";
 import { cssRgba, getCss, useThemeVersion } from "@/lib/theme";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { CardFrame } from "@/components/ui/Card";
+import { degradedRoundNotices } from "@/lib/derivations/round-health";
 
 ensureChartRegistered();
 
@@ -37,6 +38,9 @@ export const TrendChart = memo(function TrendChart({ dash }: Props) {
   });
   const curData = points.map((p) => p.composite);
   const labels = points.map((p) => String(p.round));
+  // Quiet amber notices for rounds the backend graded `degraded` — the webapp
+  // twin of the CLI's yellow degraded line. `critical` stays on the loud banner.
+  const degraded = degradedRoundNotices(dash);
 
   const data = {
     labels,
@@ -61,6 +65,21 @@ export const TrendChart = memo(function TrendChart({ dash }: Props) {
           <Line data={data} options={options} />
         )}
       </div>
+      {degraded.length > 0 && (
+        <ul className="trend-degraded" aria-label="Degraded rounds">
+          {degraded.map((d) => (
+            <li key={d.round} className="trend-degraded-row" title={d.detail}>
+              <span className="trend-degraded-dot" aria-hidden="true">
+                ●
+              </span>
+              <span className="trend-degraded-label">
+                {d.round === 0 ? "Origin" : `R${d.round}`} degraded
+              </span>
+              <span className="trend-degraded-detail">{d.detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </CardFrame>
   );
 });

@@ -133,4 +133,45 @@ describe("criticalAlert", () => {
     });
     expect(out?.title).toBe("Backend unreachable — termnorm");
   });
+
+  const roundWithGrade = (round: number, grade: string, suggested: string | null) => ({
+    round,
+    accuracy: 0.16,
+    composite_fitness: 0.5,
+    candidates: [],
+    selection: [],
+    health: {
+      grade,
+      reasons: [],
+      samples: 20,
+      structural_count: grade === "critical" ? 12 : 0,
+      transient_count: 5,
+      degraded_rate: 0.3,
+      consecutive_degraded_rounds: 1,
+      prior_clean_rounds: 0,
+      dominant_node: "entity_profiling",
+      ci_lo: 0.03,
+      ci_hi: 0.3,
+      suggested_action: suggested,
+    },
+  });
+
+  it("flags a structurally-critical latest round as critical with a stop action", () => {
+    const dash = {
+      rounds: [roundWithGrade(0, "critical", "entity_profiling failing on 60% — abort")],
+    } as unknown as DashboardSnapshot;
+    expect(criticalAlert({ ...base, dash })).toEqual({
+      severity: "critical",
+      title: "Degraded origin — pipeline may be structurally broken",
+      detail: "entity_profiling failing on 60% — abort",
+      action: "stop",
+    });
+  });
+
+  it("stays quiet when the latest round is merely degraded (noise — keep going)", () => {
+    const dash = {
+      rounds: [roundWithGrade(3, "degraded", null)],
+    } as unknown as DashboardSnapshot;
+    expect(criticalAlert({ ...base, dash })).toBeNull();
+  });
 });

@@ -10,6 +10,7 @@
 // `dash` and the connection-aware `runPhaseResolved`) — no new state, no new
 // poll. Reader-side and pure, so it sits in the Vitest derivation scope.
 
+import type { RoundSummary } from "@/lib/api/types";
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
 
 export interface CriticalAlert {
@@ -19,6 +20,10 @@ export interface CriticalAlert {
   severity: "critical" | "warn";
   title: string;
   detail?: string;
+  // When set, the banner offers a one-click operator action. `"stop"` = the
+  // run is alive but its measurement is structurally broken — surface a
+  // "Stop campaign" button (the run never auto-stops; the operator decides).
+  action?: "stop";
 }
 
 interface Args {
@@ -104,6 +109,29 @@ export function criticalAlert({
   // should know writes stopped.
   if (runPhaseResolved === "detached") {
     return { severity: "warn", title: "Run went silent", detail: bannerText };
+  }
+  // Degradation verdict — the run is alive and writing, but its latest round's
+  // measurement is structurally broken (backend-graded `critical`: e.g. a node
+  // failing on most samples, or sustained degradation). Abort-worthy, so it
+  // surfaces here as the loud cross-tab bar with a one-click stop. LOWEST
+  // precedence — a genuine outage/crash above still wins. `healthy` is silent;
+  // `degraded` stays quiet too (the run is fine to keep going) but IS surfaced —
+  // as amber per-round notices under the Trend chart (`round-health.ts`), the
+  // webapp twin of the CLI's yellow degraded line.
+  const latest = (dash?.rounds ?? []).reduce<RoundSummary | null>(
+    (acc, r) => (acc === null || r.round >= acc.round ? r : acc),
+    null,
+  );
+  if (latest?.health?.grade === "critical") {
+    return {
+      severity: "critical",
+      title:
+        latest.round === 0
+          ? "Degraded origin — pipeline may be structurally broken"
+          : `Round ${latest.round} degraded — pipeline may be structurally broken`,
+      detail: latest.health.suggested_action ?? undefined,
+      action: "stop",
+    };
   }
   // `warming_up` (server reachable, no snapshot yet — e.g. a forked cycle whose
   // runner hasn't started) is NOT a lost connection, so it raises nothing here.
