@@ -34,8 +34,11 @@ def next_resume_round(round_summaries: list[dict[str, Any]]) -> int:
     Keyed on the round number, never ``len()``: the origin is round 0 in
     ``index.json::rounds`` now, so counting entries over-counts by one and the loop
     skips a round (round_0000, round_0002, never round_0001). A clean fresh start
-    (origin only) → max 0 → next round 1."""
-    return max((int(r.get("round", 0)) for r in round_summaries), default=0) + 1
+    (origin only) → max 0 → next round 1.
+
+    Entries are ``index.json::rounds`` (``RoundSummary``, ``round: int`` required),
+    so the key is read directly — no ``.get`` default papering over an absent key."""
+    return max((int(r["round"]) for r in round_summaries), default=0) + 1
 
 
 def bootstrap_cycle(

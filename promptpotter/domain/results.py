@@ -608,12 +608,20 @@ def compute_round_health(
         max(structural_nodes, key=lambda k: structural_nodes[k]) if structural_nodes else None
     )
 
-    prior_clean = sum(1 for h in prior_healths if h is None or h.grade == "healthy")
+    # An ungraded prior (``None`` — a probe round, or a round that measured zero
+    # samples) is TRANSPARENT to the track record: it is not a clean round (so it
+    # can't fake ``untested=False`` and suppress the untested escalations) and it
+    # does not break the consecutive-degraded chain (a probe interleaving two
+    # degraded rounds must still reach ``persistent``). Only a real ``healthy``
+    # verdict counts clean; a ``None`` in the consecutive walk is skipped, not a stop.
+    prior_clean = sum(1 for h in prior_healths if h is not None and h.grade == "healthy")
     consecutive = 0
     if structural + transient > 0:
         consecutive = 1
         for h in reversed(list(prior_healths)):
-            if h is not None and h.grade in ("degraded", "critical"):
+            if h is None:
+                continue
+            if h.grade in ("degraded", "critical"):
                 consecutive += 1
             else:
                 break

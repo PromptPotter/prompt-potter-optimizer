@@ -1485,6 +1485,36 @@ def test_origin_verdict_is_first_in_the_l1_track_record():
     assert h is not None and h.grade == "critical" and "persistent" in h.reasons
 
 
+def test_ungraded_prior_round_is_transparent_to_the_track_record():
+    """An ungraded prior verdict (``None`` — a probe round, or a round that measured
+    zero samples) must be TRANSPARENT to the track record: it neither counts as a
+    clean round nor breaks the consecutive-degraded chain. A probe interleaved in a
+    ``degraded → probe → degraded`` run must still reach the ``persistent`` critical;
+    the probe's ``None`` must not fake a clean prior that suppresses ``untested``."""
+    from promptpotter.domain.results import compute_degradation_health, compute_round_health
+
+    degraded = compute_degradation_health(
+        hits=15,
+        total=20,
+        structural_count=0,
+        transient_count=5,
+        prior_clean_rounds=5,
+        consecutive_degraded_rounds=1,
+    )
+    assert degraded is not None and degraded.grade == "degraded"
+
+    # Priors oldest→newest: degraded, probe(None), degraded. The current round is also
+    # degrading → 3 consecutive once the probe is skipped (not counted, not a break).
+    transient_rows = [
+        {"pipeline_data": {"diagnostics": {"step_statuses": {"web_search": "degraded"}}}}
+        for _ in range(5)
+    ] + [{"pipeline_data": {"diagnostics": {}}} for _ in range(15)]
+    h = compute_round_health(
+        hits=15, total=20, results=transient_rows, prior_healths=[degraded, None, degraded]
+    )
+    assert h is not None and h.grade == "critical" and "persistent" in h.reasons
+
+
 def test_degradation_health_none_when_unmeasured():
     """Zero samples ⇒ no verdict (None), not a fabricated healthy grade."""
     from promptpotter.domain.results import compute_degradation_health
