@@ -318,7 +318,6 @@ class RoundDigestView:
     # Per-candidate P(best) trajectory from ``.runtime/streams/round_NNNN_p_best.jsonl``;
     # empty for resumed / pre-PoBB rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)
-    p_best_stopped: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

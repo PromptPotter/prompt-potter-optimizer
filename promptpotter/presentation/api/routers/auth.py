@@ -389,7 +389,6 @@ async def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
         remaining = effective_spend_cap_usd(
             requested_cap_usd=user.spend_budget_usd_daily,
             user=user,
-            job_registry=job_registry,
             stores=store,
         )
         spent = max(0.0, user.spend_budget_usd_daily - float(remaining or 0.0))

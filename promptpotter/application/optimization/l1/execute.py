@@ -181,7 +181,6 @@ async def execute_round(
                 critique_result = await run_l1_critique(
                     cycle,
                     round_result,
-                    session.pipeline_schema,
                     round_num=round_num,
                     ledger=session.state.ledger,
                 )

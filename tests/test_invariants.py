@@ -1331,7 +1331,6 @@ def test_default_round_rules_reproduce_observe_round_fsm():
     from promptpotter.application.optimization.escalation.state import NextAction
 
     perfect = EscalationInputs(
-        improved=True,
         current_accuracy=1.0,
         l1_stall_count=0,
         l1_patience=3,
@@ -1339,7 +1338,6 @@ def test_default_round_rules_reproduce_observe_round_fsm():
     assert decide_escalation(perfect).next_action == NextAction.STOP_PERFECT
 
     continuing = EscalationInputs(
-        improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
@@ -1347,7 +1345,6 @@ def test_default_round_rules_reproduce_observe_round_fsm():
     assert decide_escalation(continuing).next_action == NextAction.CONTINUE
 
     fire = EscalationInputs(
-        improved=False,
         current_accuracy=0.5,
         l1_stall_count=3,
         l1_patience=3,
@@ -1364,7 +1361,6 @@ def test_l2_axis_yield_drought_rule_fires_when_signal_supports_it():
     from promptpotter.application.optimization.escalation.state import NextAction
 
     drought = EscalationInputs(
-        improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
@@ -1373,7 +1369,6 @@ def test_l2_axis_yield_drought_rule_fires_when_signal_supports_it():
     assert decide_escalation(drought).next_action == NextAction.FIRE_L2
 
     productive = EscalationInputs(
-        improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
@@ -1382,7 +1377,6 @@ def test_l2_axis_yield_drought_rule_fires_when_signal_supports_it():
     assert decide_escalation(productive).next_action == NextAction.CONTINUE
 
     no_evidence = EscalationInputs(
-        improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
@@ -1400,7 +1394,6 @@ def test_l1_patience_zero_fires_l2_every_round():
     from promptpotter.application.optimization.escalation.state import NextAction
 
     improving = EscalationInputs(
-        improved=True,
         current_accuracy=0.5,
         l1_stall_count=0,
         l1_patience=0,
@@ -1408,7 +1401,6 @@ def test_l1_patience_zero_fires_l2_every_round():
     assert decide_escalation(improving).next_action == NextAction.FIRE_L2
 
     stalling = EscalationInputs(
-        improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=0,
@@ -1416,7 +1408,6 @@ def test_l1_patience_zero_fires_l2_every_round():
     assert decide_escalation(stalling).next_action == NextAction.FIRE_L2
 
     perfect = EscalationInputs(
-        improved=True,
         current_accuracy=1.0,
         l1_stall_count=0,
         l1_patience=0,
@@ -2317,7 +2308,6 @@ def test_quota_contract(tmp_path: Path) -> None:
     cap = effective_spend_cap_usd(
         requested_cap_usd=0.80,
         user=user_spend,
-        job_registry=spend_registry,
         stores=stores,
     )
     assert cap is not None
@@ -2326,7 +2316,6 @@ def test_quota_contract(tmp_path: Path) -> None:
     cap_unset = effective_spend_cap_usd(
         requested_cap_usd=None,
         user=user_spend,
-        job_registry=spend_registry,
         stores=stores,
     )
     assert cap_unset == pytest.approx(0.60)
@@ -2335,7 +2324,6 @@ def test_quota_contract(tmp_path: Path) -> None:
         effective_spend_cap_usd(
             requested_cap_usd=2.50,
             user=_mk_user(),
-            job_registry=spend_registry,
             stores=stores,
         )
         == 2.50

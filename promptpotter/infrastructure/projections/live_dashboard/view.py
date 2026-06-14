@@ -179,7 +179,6 @@ class LiveDashboardView(DerivedView):
     @classmethod
     def for_session(
         cls,
-        origin_accuracy: float,
         cycle_id: str | None,
         *,
         project_root: str,

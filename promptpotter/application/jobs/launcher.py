@@ -187,7 +187,6 @@ async def mint_campaign_command(
         spend_budget_usd = effective_spend_cap_usd(
             requested_cap_usd=spend_budget_usd,
             user=user,
-            job_registry=job_registry,
             stores=stores,
         )
 
@@ -629,7 +628,6 @@ async def start_run_command(
         spend_budget_usd = effective_spend_cap_usd(
             requested_cap_usd=spend_budget_usd,
             user=user,
-            job_registry=job_registry,
             stores=stores,
         )
 

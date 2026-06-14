@@ -205,7 +205,6 @@ async def _ingest_to_dataset(args: argparse.Namespace) -> str:
 
 async def _checkin_task(
     session: Session,
-    campaign_config: CampaignConfig,
     session_id: str,
     *,
     task_file: str | None,
@@ -534,7 +533,6 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
 
     await _checkin_task(
         session,
-        campaign_config,
         session_id,
         task_file=args.task_file,
         task_text=args.task_text,

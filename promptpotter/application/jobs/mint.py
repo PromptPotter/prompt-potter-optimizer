@@ -62,8 +62,6 @@ class CyclePlan:
 class MintedCycle:
     """A fresh campaign + root cycle on disk, carrying the plan it was minted from."""
 
-    pipeline_params: dict[str, Any]
-    origin: OptSearchPoint
     cycle_id: str
     session_id: str
     campaign_id: str
@@ -145,8 +143,6 @@ def prepare_fresh_cycle(
     if seed is not None:
         session.store.campaigns.write_cycle_seed(campaign_id, cycle_id, seed)
     return MintedCycle(
-        pipeline_params=plan.pipeline_params,
-        origin=plan.origin,
         cycle_id=cycle_id,
         session_id=session_id,
         campaign_id=campaign_id,

@@ -125,7 +125,6 @@ def effective_spend_cap_usd(
     *,
     requested_cap_usd: float | None,
     user: User,
-    job_registry: JobRegistry,
     stores: Stores,
 ) -> float | None:
     """Compose the per-cycle spend cap with the user's daily cap.

@@ -26,7 +26,6 @@ class EscalationInputs:
     when the corresponding derived state exists (e.g. AxisIndex initialised); rules must handle None.
     """
 
-    improved: bool
     current_accuracy: float
     l1_stall_count: int
     l1_patience: int
@@ -48,10 +47,7 @@ def decide_escalation(
         if rule.when(inputs):
             return EscalationEvent(
                 next_action=rule.fire,
-                stall_depth=inputs.l1_stall_count,
                 reason=rule.format_reason(inputs),
-                rule_name=rule.name,
-                rule_priority=rule.priority,
             )
     raise RuntimeError(
         f"No escalation rule matched observe_round inputs (rules={[r.name for r in active]}); "

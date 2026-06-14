@@ -60,17 +60,6 @@ class LangfuseLogger:
                 logger.warning("Failed to initialize Langfuse", exc_info=True)
                 self.enabled = False
 
-    def create_trace_id(self) -> str | None:
-        """Bare trace ID, no root observation — prevents root-chain collapse in the Langfuse graph view."""
-        if not self.enabled or not self.client:
-            return None
-        try:
-            trace_id: str = self.client.create_trace_id()
-            return trace_id
-        except Exception:
-            logger.debug("Failed to create Langfuse trace ID", exc_info=True)
-            return None
-
     def create_trace(
         self,
         name: str,

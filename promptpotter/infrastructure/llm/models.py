@@ -41,7 +41,6 @@ class LLMResponse(BaseModel):
         default_factory=dict,
         description="Token usage: prompt_tokens, completion_tokens, total_tokens",
     )
-    finish_reason: str | None = Field(None, description="Why generation stopped")
     parsed: Any | None = Field(
         None,
         description=(

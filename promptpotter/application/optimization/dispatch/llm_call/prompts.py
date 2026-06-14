@@ -30,7 +30,6 @@ __all__ = [
     "get_optimizer_schema",
     "list_optimizer_prompts",
     "load_optimizer_prompt",
-    "push_all_to_langfuse",
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -193,35 +192,6 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
     template = lf_prompt or _load_local(name)
     validate_template(name, template)
     return template
-
-
-def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
-    """Push manifest-registry prompt defaults to Langfuse; returns {name: success}."""
-    lf = _prompt_langfuse()
-    if not lf.enabled or not lf.client:
-        logger.warning("push_all_to_langfuse: Langfuse not available")
-        return {}
-
-    results: dict[str, bool] = {}
-    for name in list_optimizer_prompts():
-        try:
-            tpl = _load_local(name)
-            lf.client.create_prompt(
-                name=f"{_LANGFUSE_PREFIX}{name}",
-                prompt=tpl.render(),
-                config=tpl.model_dump(),
-                labels=[label],
-                tags=["optimizer", "meta-prompt"],
-                commit_message=f"Push manifest default for {name}",
-            )
-            results[name] = True
-            logger.info("Pushed optimizer prompt %s to Langfuse", name)
-        except Exception:
-            logger.warning("Failed to push %s to Langfuse", name, exc_info=True)
-            results[name] = False
-
-    _load_local.cache_clear()
-    return results
 
 
 def list_optimizer_prompts() -> list[str]:

@@ -281,7 +281,6 @@ def _check_l1_schema_compliance(
 
 L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
     id="l1_schema_compliance",
-    description="Verify L1's pipeline_params_override vs schema's allowed values.",
     nurse_target="l2",
     check=_check_l1_schema_compliance,
 )
@@ -341,12 +340,6 @@ def _check_l1_config_in_runtime_failures(
 
 L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
     id="l1_config_not_in_runtime_failures",
-    description=(
-        "Reject L1 candidates whose pipeline_params_override matches an "
-        "(axis, value) tuple already recorded as failing in "
-        "opt_sp.memory.wounds.runtime_failures. Mechanical wire-level check; no "
-        "LLM citation required. Heals via Wound 1 (L2 absorbs)."
-    ),
     nurse_target="l2",
     check=_check_l1_config_in_runtime_failures,
 )

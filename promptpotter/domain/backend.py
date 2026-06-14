@@ -13,7 +13,6 @@ class BackendConnection(BaseModel):
     backend_type: str = Field(..., description="Backend type, e.g. 'default'")
     base_url: str = Field(..., description="Backend API base URL")
     created_at: str = Field(default_factory=utcnow_iso)
-    last_synced_at: str | None = None
 
 
 __all__ = ["BackendConnection"]

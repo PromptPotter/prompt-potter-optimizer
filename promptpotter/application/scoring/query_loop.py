@@ -103,7 +103,6 @@ class QueryLoopState:
     session: Session
     cached_sample_results: dict[str, QueryMeasurement]
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
-    on_sample_starting: Callable[[str, int, int, int], None] | None
     axes: AxisIndex | None
     scorer: Scorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
     scorer_id: str
@@ -290,7 +289,6 @@ async def run_query_loop(
         session=session,
         cached_sample_results=cached_sample_results,
         on_sample_scored=on_sample_scored,
-        on_sample_starting=on_sample_starting,
         axes=axes,
         scorer=session.scoring.scorer,
         scorer_id=session.scoring.scorer_id,

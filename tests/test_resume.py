@@ -849,7 +849,6 @@ def test_live_dashboard_for_session_recovers_round_after_interrupt(tmp_path: Pat
     )
 
     proj = LiveDashboardView.for_session(
-        origin_accuracy=0.1,
         cycle_id=cycle_id,
         project_root=str(project_root),
         session_id="s_test",

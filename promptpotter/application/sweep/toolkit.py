@@ -64,7 +64,6 @@ SWEEP_RESULT_FIELDS: tuple[str, ...] = (
     "early_exit_reason",
     "parse_fail_rate",
     "pipeline_params_entropy",
-    "diversity_l2_score",
     "cost_usd",
     "final_accuracy",
     "notes",

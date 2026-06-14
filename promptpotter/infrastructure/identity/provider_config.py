@@ -53,7 +53,6 @@ class OIDCProviderConfig:
     common case). GitHub is OAuth-2.0 and ignores these fields.
     """
 
-    name: str
     client_id: str
     client_secret: str
     redirect_uri: str
@@ -78,13 +77,6 @@ class ProviderConfigBundle:
         if self.github is not None:
             out.append("github")
         return tuple(out)
-
-    def get(self, name: str) -> OIDCProviderConfig | None:
-        if name == "google":
-            return self.google
-        if name == "github":
-            return self.github
-        return None
 
 
 class OIDCConfigError(ValueError):
@@ -122,7 +114,6 @@ def _parse_provider(name: str, raw: object) -> OIDCProviderConfig | None:
     if missing:
         raise OIDCConfigError(f"oidc.json[{name!r}] missing required keys: {', '.join(missing)}")
     return OIDCProviderConfig(
-        name=name,
         client_id=str(raw["client_id"]),
         client_secret=str(raw["client_secret"]),
         redirect_uri=str(raw["redirect_uri"]),
