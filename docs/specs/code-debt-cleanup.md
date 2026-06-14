@@ -161,6 +161,34 @@ Both surface from the `wiring.py` root fix that made one `BackendConnection` per
   only bites once a 2nd endpoint/connector exists; defer to the multi-connector lane, but
   recorded so it isn't rediscovered live.
 
+### Untracked-debt sweep (2026-06-14) — holds from today's run
+
+Dead-field / single-caller-indirection sweep. Code fixes **shipped** in `debt-sweep/2026-06-14` (see PR). Items below held — each has a reason verified before holding:
+
+**Security-adjacent / operator-decision holds:**
+- `infrastructure/identity/provider_config.py::ProviderIdentity.email_verified` — field is always `True` on Google/GitHub tokens (the provider guarantees it), so it reads as dead. But `.email_verified` is a security-adjacent claim; before deleting, confirm no future OIDC provider (e.g. a hypothetical SAML bridge) might set it `False`. Operator decision. **Action:** delete if confirmed no provider sends `False`.
+
+**Cascade holds (dropping would require wider refactor):**
+- `application/optimization/escalation/state.py::EscalationEvent.reason` — set in every `EscalationEvent` constructor, never read by any consumer (only `.next_action` / `.stop_reason` are read). **Cascade:** removing it requires also removing `EscalationRule.format_reason(inputs)` (called only to populate this field in `decide.py:52`) and `EscalationRule.reason` (the callable/string that `format_reason` delegates to). Straightforward cascade but touches 3 files; file together. **Action:** drop `EscalationEvent.reason`, `EscalationRule.format_reason`, and `EscalationRule.reason` in one pass.
+- `decide_escalation(rules=...)` default kwarg — the `rules` param carries a DI seam (test override + `__all__` note); no test currently exercises a non-default ruleset beyond the two tests that use `DEFAULT_ESCALATION_RULES` directly. **Confirm** no test passes a custom `rules=` list; if so, collapse the kwarg to a positional-required or an import-time constant. Needs a live test read.
+- `domain/round_diagnostics.py::RoundDiagnostics.cache_share: float = 0.0` — always 0.0, only populated as the explicit `cache_share=0.0` default we stripped from `round_analysis.py` this sweep. The field itself (`cache_share`) is still in `RoundDiagnostics`; its render block in `panels.py` was deleted. **Blocker:** round diagnostics serialize to `round_NNNN.json`; confirm no existing on-disk round files carry a non-zero `cache_share` (safe to delete the field since default is 0.0 — old files will deserialize cleanly when the field is missing). **Action:** `grep cache_share .promptpotter/ -r` on operator's data, then delete the field.
+
+**Needs-verify / operator-script holds:**
+- `application/datasets/loaders.py::load_dataset()` — exported from `application/datasets/__init__.py` but zero callers in-repo. Public export might mean an operator notebook or external script uses it. **Action:** verify no external use, then delete.
+- `infrastructure/store/entity_store.py` CRUD base class — `save`/`load`/`update`/`_entity_path`/`_entity_dir`/`_subdir` never called through the base class (all subclasses call the store-layer directly). **Action:** confirm via grep; if confirmed, delete the base-class methods or collapse the hierarchy.
+
+**Tracing layer — medium (multiple files, safe but tedious):**
+- `domain/run_records.py::RoundEnd.temperature` — populated but `temperature` is never read by any projection or display. Confirm and drop.
+- `infrastructure/tracing/replay.py` — `schema` param on the replay entry point accepted but not threaded through; dead branches inside. File for a dedicated tracing cleanup pass.
+- `infrastructure/tracing/event_stream/view.py::cycle_dir` property — computed but never accessed via the property (callers use the constructor arg directly). Confirm and drop.
+- `infrastructure/tracing/langfuse_sink.py::LangfuseObservation.usage_details` — populated (maybe) but never read. Confirm and drop.
+
+**Numeric / always-false slot:**
+- `application/scoring/search_point_scorer.py:308` — the 3rd return slot of an internal function is always `False`; the caller destructures it but doesn't use the third value. Confirm the always-False invariant and collapse to a 2-tuple return.
+
+**Variadic hold:**
+- `infrastructure/store/measurement_archive.py::register_alias(...)` — variadic `*args` or keyword-only params that are never passed by the sole caller. Verify and drop the dead params.
+
 ### Considered, not debt (don't re-open)
 
 - **`RunCallbacks` ↔ `emit_*`** — two writer APIs, but `RunCallbacks._phase_ctx: ViewContext` is owned write-then-read cross-event state; folding it into an ambient ContextVar is a downgrade. The "which do I use" rule is in [`developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1.

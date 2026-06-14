@@ -1,6 +1,6 @@
 # CLI Reference
 
-Two write verbs: `new` and `resume`. Reads happen by opening the on-disk artifact tree — no read CLI.
+Loop-mint verbs: `new` and `resume`. Lifecycle verbs: `archive`, `delete`, `unarchive`, `reset`. Diagnostic verbs: `verify`, `compare`, `sweep`. Reads happen by opening the on-disk artifact tree — no read CLI.
 
 ```bash
 python -m promptpotter [--tenant <id>] <subcommand> [options]
@@ -12,7 +12,7 @@ State files: [`persistence-and-state.md`](persistence-and-state.md). Rewind / fo
 
 ---
 
-## The two write verbs
+## The loop-mint verbs
 
 | Verb | Behavior |
 |------|----------|
@@ -63,6 +63,9 @@ If a gap survives the resolver (e.g. an ambiguous column or unstated framing), `
 | `--task-file` | *(name form)* Override `<dataset>/task_description.md` |
 | `--task-text` | *(name form)* Override `<dataset>/task_description.md` inline |
 | `--halt-at` / `--spend-budget` | Run-halt gates (both forms) |
+| `--diag` | Diagnostic mode — marks `index.json::final.mode` as `'diag'`; branches off a counted sibling on re-run |
+| `--excel-path` | Path to an Excel workbook to load alongside the dataset (name form) |
+| `--sweep-batch` | Sweep-batch config path (name form) |
 
 ---
 
@@ -82,6 +85,9 @@ While `resume` runs, the live in-flight round mirrors into the active cycle's ow
 | `--from <round>` | Rewind the active cycle to after round N before resuming |
 | `--no-check` | On resume, rescore but skip the decision-replay halt |
 | `--fork-on-divergence` | On *data-affecting* config divergence (scoring, pipeline_overrides, exclude_nodes, dataset_name), mint a sibling cycle (with `parent_cycle_id`) and re-run the divergent round under the current scorer. Policy-only edits (PoBB knobs, patience, thresholds, n_variants, exploration) continue in-place — no fork, the flag is a no-op. See `CampaignConfig.classify_diff_against` for the field-by-field split. |
+| `--rewind <round>` | Fork a sibling cycle at round N (parent preserved intact). Contrast with `--from N` which rewinds in place. |
+| `--rewind-reason <text>` | Operator note recorded on the fork; ignored unless `--rewind ROUND` is set. |
+| `--diag` | Diagnostic mode (see `new --diag`). On a previously-completed diag cycle, branches off a counted sibling. |
 
 ---
 
