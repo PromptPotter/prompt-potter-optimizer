@@ -10,12 +10,18 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
-from promptpotter.application.optimization.cycle import Cycle
+from promptpotter.application.optimization.cycle import Cycle, build_round_payload
 from promptpotter.application.optimization.escalation import NextAction, escalate_l2
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.domain.phases import StopLoop
-from promptpotter.domain.results import RoundResult, ScoredCandidate, candidate_label
+from promptpotter.domain.results import (
+    RoundResult,
+    ScoredCandidate,
+    assemble_prior_healths,
+    candidate_label,
+    compute_round_health,
+)
 from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
 from promptpotter.presentation.writers import (
     write_hard_samples_artifacts,
@@ -95,50 +101,7 @@ async def emit_origin_round(
         cumulative_total=base["total"],
         cumulative_accuracy=tr.origin_accuracy,
     )
-    round_payload: dict[str, Any] = {
-        "round_id": "round_0",
-        "round": 0,
-        "label": label,
-        "accuracy": round_result.accuracy,
-        "composite_fitness": round_result.composite_fitness,
-        "hits": round_result.hits,
-        "total": round_result.total,
-        "improved": False,
-        "p_value": None,
-        "origin_accuracy": round_result.origin_accuracy,
-        "matched_origin_accuracy": round_result.matched_origin_accuracy,
-        "matched_origin_hits": round_result.matched_origin_hits,
-        "matched_origin_composite": round_result.matched_origin_composite,
-        "cumulative_total": round_result.cumulative_total,
-        "cumulative_accuracy": round_result.cumulative_accuracy,
-        "scoreboard": [
-            {
-                "rank": 1,
-                "candidate_id": sc.candidate_id,
-                "label": sc.changes_description,
-                "accuracy": sc.accuracy,
-                "composite_fitness": sc.composite_fitness,
-                "hits": sc.hits,
-                "total": sc.total,
-                "ci_lo": sc.ci_lo,
-                "ci_hi": sc.ci_hi,
-                "is_winner": True,
-                "escalation_aborted": False,
-                "matched_origin_accuracy": sc.matched_origin_accuracy,
-                "matched_origin_hits": sc.matched_origin_hits,
-                "matched_origin_composite": sc.matched_origin_composite,
-            }
-        ],
-        "prompt_fields": prompt_fields,
-        "results": results,
-        "all_candidate_results": {osp.lineage.id: results},
-        "candidates_scored": 1,
-        "candidate_scores": [sc.model_dump()],
-        "decisions": [],
-        "evaluators": {},
-        "critique": None,
-        "opt_search_point": osp.model_dump(),
-    }
+    round_payload = build_round_payload(round_result, 0, osp)
     await close_round(cycle, round_result, round_payload, 0, session, cb)
 
 
@@ -241,7 +204,35 @@ async def close_round(
 ) -> None:
     """Round-completion bookkeeping every completed round runs.
     Emits ``round:display`` (via ``cb.on_round_complete``) + ``round:complete`` (via ``persist_round``),
-    writes ``round_NNNN.json``, refreshes axis memory. Independent of whether the round feeds escalation."""
+    writes ``round_NNNN.json``, refreshes axis memory. Independent of whether the round feeds escalation.
+
+    SINGLE degradation-verdict compute site (origin + L1 both funnel here): stamp
+    ``round_result.health`` and mirror it onto ``round_payload`` BEFORE the dashboard emit
+    (``cb.on_round_complete`` reads ``rr.health``) and the round-file write (``persist_round``),
+    so the verdict reaches every surface in one shape.
+
+    Track record = prior rounds' verdicts: the origin (round 0) first, then the prior
+    L1 rounds. The origin lives on ``cycle.origin_health`` (``cycle.rounds`` is the
+    1-indexed L1 trajectory that omits it), so it's prepended explicitly and the
+    round-0 entry that ``replay_priors`` leaves in ``cycle.rounds`` is excluded to
+    avoid double-counting. The round being closed is excluded too (L1's
+    ``absorb_round`` already appended it to ``cycle.rounds``).
+
+    Probe rounds get NO verdict: they rescore a warned-query subset, not the round's
+    scoring set, so a grade over that biased slice would be meaningless — and they
+    must not seed the track record either. ``health`` stays ``None`` on a probe."""
+    if not is_probe:
+        round_result.health = compute_round_health(
+            hits=round_result.hits,
+            total=round_result.total,
+            results=round_result.results,
+            prior_healths=assemble_prior_healths(cycle.origin_health, cycle.rounds, round_num),
+        )
+        if round_num == 0:
+            cycle.origin_health = round_result.health
+    round_payload["health"] = (
+        round_result.health.model_dump() if round_result.health is not None else None
+    )
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
     persist_round(cycle, round_result, round_payload, round_num, session, is_probe=is_probe)
     if cycle.axes and session.store and session.backend_id:

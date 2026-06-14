@@ -505,8 +505,25 @@ def test_split_overlay_routes_config_and_optimizer_blocks():
             "not_in_available_models",
             None,
         ),
+        # output_schema is the pipeline's structural wire contract — rejected
+        # UNCONDITIONALLY (no ablation unlock, unlike model). An L1 variant that
+        # mutated it to a raw template broke the backend; this is the backstop.
+        (
+            {"output_schema": "{{format_string}}"},
+            {},
+            "llm_only.output_schema",
+            "forbidden_axis",
+            None,
+        ),
+        (
+            {"output_schema": "{{format_string}}"},
+            {"forbidden_axes_strict": False},
+            "llm_only.output_schema",
+            "forbidden_axis",
+            None,
+        ),
     ],
-    ids=["enum", "stringified_number", "model_strict", "model_lax"],
+    ids=["enum", "stringified_number", "model_strict", "model_lax", "schema_strict", "schema_lax"],
 )
 def test_validate_overrides_rejects(override, strict_kw, axis, reason, allowed_contains):
     """One failure per poisonous axis — caught before the wire payload is built."""

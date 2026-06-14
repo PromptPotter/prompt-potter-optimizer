@@ -156,6 +156,16 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
    hash that won't match its stored config-blind one; the drift check treats an identical
    config — `DiffScope.NONE` — as benign and re-stamps the hash in place.)
 
+   **Invariant — always key a surface by `(campaign_id, cycle_id)`, never `cycle_id`
+   alone.** A direct consequence of the content-addressed id: two campaigns on the same
+   dataset+config (e.g. two `new lca-bom-termnorm` runs that didn't touch the pipeline)
+   share the **same** root `cycle_id` — only their random `campaign_id`s differ. The cycle
+   id is unique *within* a campaign, not globally. Every persistence path already resolves
+   as `(campaign_id, cycle_id)` (`save_round_file`, `load`, the per-cycle dashboard route),
+   and the webapp keys its unit map by the pair (`poll.tsx` `unitKey = \`${campaignId} ${cycleId}\``),
+   so two same-dataset campaigns render distinctly. Any **new** read/write surface MUST
+   carry the campaign id too; a lookup by bare `cycle_id` would cross-wire siblings.
+
 ## Steering composite scoring between rounds
 
 Hot-swap the cycle's per-round formula by dropping a file; the next round-end consumes it, the running optimizer never restarts.

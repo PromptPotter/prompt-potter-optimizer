@@ -18,6 +18,7 @@ sys.path.insert(0, str(_REPO))
 
 from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema
 from promptpotter.domain.results import (
+    DegradationHealth,
     DiagnosticRunRecord,
     RoundSummary,
     RoundSummaryCandidate,
@@ -75,6 +76,7 @@ from promptpotter.presentation.api.routers.verify import DiagnosticRunListRespon
 EXPORTED_MODELS: list[type[BaseModel]] = [
     # Nested types first so the TS file reads top-down.
     RoundSummaryCandidate,
+    DegradationHealth,
     RoundSummary,
     DiagnosticRunRecord,
     # --- live dashboard state ---
