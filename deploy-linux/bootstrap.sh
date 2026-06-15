@@ -94,16 +94,16 @@ else
 fi
 cd "$INSTALL_DIR"
 
-# --- 4. venv + pip install ----------------------------------------------
+# --- 4. venv + uv sync (pinned graph from uv.lock) ----------------------
 if [[ ! -d .venv ]]; then
     say "creating .venv"
     python3.13 -m venv .venv
 fi
-say "installing python deps (this can take a minute)"
-# shellcheck disable=SC1091
-source .venv/bin/activate
-pip install --upgrade pip wheel
-pip install -e ".[all,dev]"
+say "installing python deps from uv.lock (this can take a minute)"
+# Install the exact pinned graph from uv.lock — same source of truth as CI.
+# uv is fetched to ~/.local/bin (outside .venv, so a sync never wipes it).
+command -v uv >/dev/null 2>&1 || python3 -m pip install --user -q uv
+PATH="$HOME/.local/bin:$PATH" uv sync --frozen --extra all --extra dev
 
 # --- 5. .env -------------------------------------------------------------
 if [[ ! -f .env ]]; then
