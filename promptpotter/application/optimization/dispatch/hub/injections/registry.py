@@ -31,6 +31,7 @@ from promptpotter.application.optimization.dispatch.hub.injections import (
     panels,
     wounds,
 )
+from promptpotter.domain.l1_layout import L1_POSSIBLE
 
 INJECTIONS: dict[str, _Injection] = injection_registry()
 
@@ -53,5 +54,13 @@ if _orphans:
     raise RuntimeError(
         "Orphaned injection renderers — defined but never wired into INJECTIONS "
         f"(missing an @signal decorator?): {sorted(_orphans)}"
+    )
+
+# Every name L2 may pick into an L1 layout (`L1_POSSIBLE`) must resolve to a
+# registered injection — else `DispatchHub.fill_l1` would KeyError at fill time.
+# Asserted here, the one place both the registry and the picklist are visible.
+if not set(INJECTIONS) >= L1_POSSIBLE:
+    raise RuntimeError(
+        f"L1_POSSIBLE names with no registered injection: {sorted(L1_POSSIBLE - set(INJECTIONS))}"
     )
 del _wired, _key, _inj, _orphans

@@ -165,7 +165,7 @@ def _build_divergence_hint() -> str:
     archival = sorted(
         k.value for k, m in RESUME_CHECKPOINT_GATING.items() if m is GatingMode.ARCHIVAL
     )
-    return (
+    hint = (
         f"Checked decisions: {', '.join(replayed)}.\n"
         f"(Archival, not divergence-gated: {', '.join(archival)}.)\n\n"
         "Options:\n"
@@ -176,6 +176,13 @@ def _build_divergence_hint() -> str:
         "  • Revert `campaign.json::scoring` — continue the original trajectory.\n"
         "  • `python -m promptpotter resume --no-check` — accept the divergence."
     )
+    # Import-time exhaustiveness (built once at module load): every gated kind
+    # must surface in the operator hint. Fails at the source if a format edit
+    # ever drops a branch — replaces a standalone completeness test.
+    assert all(k.value in hint for k in RESUME_CHECKPOINT_GATING), (
+        "divergence hint must name every ResumeCheckpointKind"
+    )
+    return hint
 
 
 _DIVERGENCE_HINT = _build_divergence_hint()

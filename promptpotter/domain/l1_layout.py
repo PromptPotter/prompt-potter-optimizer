@@ -101,6 +101,23 @@ def default_l1_layout() -> L1Layout:
     )
 
 
+# Import-time exhaustiveness — the structural contract `validate_l1_layout`
+# enforces per round, asserted once at module load so a drift in the constants
+# or the origin layout fails at the source (no standalone wiring test):
+#   * every mandatory placeholder is a possible one,
+#   * the origin layout only references possible placeholders, and
+#   * the origin layout already satisfies the mandatory set.
+_default_placeholders = set(default_l1_layout().all_placeholders())
+assert L1_POSSIBLE >= L1_MANDATORY, "L1_MANDATORY must be a subset of L1_POSSIBLE"
+assert _default_placeholders <= L1_POSSIBLE, (
+    "default_l1_layout references a placeholder absent from L1_POSSIBLE"
+)
+assert _default_placeholders >= L1_MANDATORY, (
+    "default_l1_layout must reference every L1_MANDATORY placeholder"
+)
+del _default_placeholders
+
+
 def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
     """Coerce `{slot: [name…]}` → L1Layout. `{}` is the sanctioned omit-sentinel ("keep current
     layout") — driver treats None as "no layout proposed". Malformed non-empty input also returns

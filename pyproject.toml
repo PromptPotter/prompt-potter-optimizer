@@ -74,11 +74,6 @@ dev = [
     "ruff>=0.3.0",            # why kept: lint + format
     "mypy>=1.10.0",           # why kept: static type-check (CI gate)
     "deptry>=0.20.0",         # why kept: dependency audit (CI gate)
-    "pyyaml>=6.0",            # why kept: parse the Control-remote wire-contract YAMLs
-                              # (docs/specs/m12-api-openapi.yaml,
-                              # docs/specs/m12-events-asyncapi.yaml) for the
-                              # tests/test_contracts.py invariant.
-    "types-PyYAML>=6.0",      # why kept: mypy --strict stubs for the yaml import above.
 ]
 
 [project.urls]
@@ -97,10 +92,9 @@ promptpotter = ["py.typed", "shared/data/rates.json"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["tests"]
-# Charter files carry their reason-to-exist in the name (test_contracts, test_invariants,
-# …) under the standard `test_` prefix, so default discovery picks them up; the support
-# modules (conftest/_scan/_factories — fixtures + the scan engine, never test fns) are
-# excluded by the underscore prefix.
+# Test files carry their reason-to-exist in the name (test_numerics, test_security,
+# test_resume) under the standard `test_` prefix, so default discovery picks them up;
+# `conftest.py` (fixtures, not test fns) is excluded by the underscore prefix.
 addopts = "-q --tb=short --no-header"
 filterwarnings = ["ignore::RuntimeWarning"]
 markers = ["slow: orchestrator integration tests (>1s each)"]
@@ -111,6 +105,9 @@ strict = true
 plugins = ["pydantic.mypy"]
 exclude = ["^datasets/"]
 namespace_packages = false
+# One SQLite DB instead of ~12.5k tiny JSON files — kills the Windows small-file
+# stat() tax that dominated every warm run.
+sqlite_cache = true
 
 # Tests are loosely typed by charter — strict applies to shipped code only.
 [[tool.mypy.overrides]]
@@ -123,11 +120,18 @@ check_untyped_defs = false
 warn_return_any = false
 warn_unused_ignores = false
 
+# Deps we never type-check through. `follow_imports = "skip"` (not just
+# ignore_missing_imports, a no-op when the package is installed + typed) stops
+# mypy expanding their bodies — mlflow alone dragged the SQLAlchemy dialect tree
+# + alembic into the graph (5488 nodes for 291 first-party modules).
 [[tool.mypy.overrides]]
 module = [
     "anthropic.*",
+    "openai.*",
     "langfuse.*",
     "mlflow.*",
+    "sqlalchemy.*",
+    "alembic.*",
     "scalar_fastapi.*",
     "openpyxl.*",
     "datasets.*",
@@ -135,7 +139,17 @@ module = [
     "tqdm.*",
     "IPython.*",
     "tests.*",
+    # Pure transitive (0 first-party imports) — pulled in by the skipped sinks /
+    # CLI rendering chains; nothing here is in our typed call surface.
+    "rich.*",
+    "markdown_it.*",
+    "mdurl.*",
+    "werkzeug.*",
+    "google.*",
+    "rsa.*",
+    "itsdangerous.*",
 ]
+follow_imports = "skip"
 ignore_missing_imports = true
 follow_untyped_imports = false
 implicit_reexport = true
@@ -209,11 +223,6 @@ DEP002 = [
     "ruff",
     "mypy",
     "deptry",
-    # test-only imports — pyyaml parses the M12 wire-contract YAMLs in
-    # tests/test_contracts.py; types-PyYAML is the matching
-    # mypy-strict stub. Neither is imported by promptpotter/ itself.
-    "pyyaml",
-    "types-PyYAML",
 ]
 # Optional features — imported lazily with install-message guards.
 # Declared in extras ([excel], [benchmarks], [observability], [anthropic], [jupyter]).
