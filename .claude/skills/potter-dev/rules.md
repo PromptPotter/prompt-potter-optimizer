@@ -14,6 +14,7 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - [R-06](#r-06) — don't trim load-bearing copy (docstrings, `Field(description=)`, registry `description=`)
 - [R-07](#r-07) — delete on sight: shims, fallback chains, breadcrumb comments
 - [R-08](#r-08) — root-fix, not symptom-patch
+- [R-44](#r-44) — fail-loud is for contracts WE own; defensiveness at trust boundaries is correct
 
 **Architecture / seams**
 - [R-09](#r-09) — reuse before adding; no sidecar
@@ -107,6 +108,12 @@ One rule per block. Update-don't-duplicate. Delete a rule the operator later con
 - **Rule:** name the structural cause and propose the upstream fix *before* touching the visible surface. Default to root. The operator may still pick the patch — but knowingly.
 - **Why:** symptom patches accrete into the shim/fallback debt R-07 forbids.
 - **Origin:** 2026-06-07 — seeded from root CLAUDE.md `<root-fix>`.
+
+### R-44 — fail-loud is for contracts WE own; defensiveness at a trust boundary is correct
+- **Trigger:** a "strip the over-careful fallback" pass (operator feels the codebase is "too careful"), OR you're about to convert a `.get() or {}` / isinstance-guard / `or default` to direct access citing R-03/R-04/R-07.
+- **Rule:** before stripping, classify the data source. **Strip** (fail-loud wins) only when the key/attr is guaranteed by an **internal contract we own** — a frozen domain model, our own `index.json::rounds` shape, a required config field — where a default silently hides our broken contract. **KEEP** the defensiveness when the value crosses a **trust boundary**: (a) **backend wire** responses (TermNorm `/matches`, per-sample diagnostics that may be omitted, cross-version per-node-vs-top-level reads); (b) **optional on-disk files** (a dataset's optional `pipeline.json`, `spend_cap.json`, partial overlays); (c) **foreign sibling-cycle round files** (wounds/runtime_failures legitimately absent = empty); (d) **absent-means-empty** view/event payloads; (e) **required-field boundary defaults** (`max_tokens or 8192` — provider mandates it); (f) **deliberate security posture** (last-mile log redaction, defensive regex). The litmus: *does removing it fail loud on a genuine bug in code WE control, or does it just crash on a shape an external producer is allowed to vary?* If the latter, it's not baggage — it's the boundary doing its job. Also: an intentional pluggability seam (ABC, Protocol over `.append`, connector dispatch, Langfuse→manifest CMS) is architecture, not a shim — `_DecisionSink` covering both `list` and `CycleEventLog` is structural typing, not dead generality.
+- **Why:** R-03/R-04/R-07 are real but get over-applied. A whole "strip baggage" arc (~40 candidates) hand-verified down to **3** truly-dead sites (a double-default `dict(x or {}, {})`, a lambda-currying helper replaceable by `functools.partial`, one banned-phrase comment) — the other ~37 were correctly guarding genuinely-variable external inputs. The operator's "too careful" intuition mostly does NOT survive contact with the code, because most of the defensiveness sits at boundaries where it belongs. mypy is the cheap proof: turning `.get() or {}` into direct access surfaces any real optionality as a type error — a clean strict run means the guard was dead. [[R-03]] [[R-04]] [[R-07]] [[R-08]] [[R-13]] [[R-24]]
+- **Origin:** 2026-06-15 — operator: "strip unnecessary careful code… I was too careful as the owner… heavy baggage." The honest finding was that the premise mostly didn't hold; the lesson is the internal-contract-vs-trust-boundary discernment, so future strip passes don't gut correct boundary defensiveness.
 
 ## Architecture / seams
 
