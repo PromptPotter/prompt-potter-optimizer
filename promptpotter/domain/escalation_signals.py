@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field
 class EscalationTarget(enum.StrEnum):
     """Where an escalation check directs the feedback cycle."""
 
-    RETRY = "retry"
     L2 = "l2"
     L3 = "l3"
     ELIMINATE_CANDIDATE = "eliminate_candidate"

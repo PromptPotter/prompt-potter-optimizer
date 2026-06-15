@@ -96,6 +96,8 @@ Five-lens verification audit. Tiers 1–2 dead-code/hidden-default deletes + all
 **Tier 3 — webapp client-side scoring recompute (R-36), all Lane C8 served-projection write-side.**
 - `webapp/components/whatif/fitness-bars.ts:51-88` (`accuracyOverSampleSet`, `correctedFromEvaluators`) + `whatif/FitnessRankSummary.tsx:5-23` (`ranks()`/`pickWinner()`) — recompute what-if fitness, fixed-sample-set accuracy, and alternative ordering/winner-flip in TS. The **deferred mask WRITE-SIDE** (read-side shipped 2026-06-10; `lib/lineage-overlay.tsx` already proves the served-projection pattern R-36-clean).
 - `webapp/lib/derivations/round-candidates.ts:82` `computeAccuracyFromSamples(c.samples)` — NOT a clean delete (initial read was wrong). Root cause: `live_dashboard/render.py:113` serves all-or-nothing `scores.get("accuracy")`, which is **null until a candidate fully scores** (`view.py:410` "pending node, null accuracy"), so the TS recompute fills *partial* mid-scoring accuracy the projection doesn't serve. **Root-fix (R-08):** have the projection serve partial accuracy over scored-so-far samples, then delete the TS recompute. Belongs with the Lane C8 served-projection work above. **Blocker:** Lane C8 write-side scope.
+- `webapp/components/tree/RoundFileView.tsx:49-58` `isHit()` — full scorer reimplementation in TS (fallback chain: served `hit` → `fitness >= 0.5` → `score >= 0.5` → substring-match); drives per-sample HIT/MISS column and the `hits` rollup when `doc.hits` is absent (`?? results.filter(isHit).length`, line 74). Root-fix: ensure `AuditTrailView` always serves `hit` per-sample so the fallback chain never fires; then delete `isHit()` and drop the rollup fallback. **Blocker:** Lane C8 write-side (same as above). (found 2026-06-12)
+- `webapp/components/eval/FreqChart.tsx:31-43` `bucketScores` fallback — same substring-match scorer triggered when `r.score` is absent; synthesizes a 1/0 score bucketed into the Score-Frequency histogram. Root-fix: same; bucket only the served `r.score`, skipping rows without one. **Blocker:** Lane C8 write-side. (found 2026-06-12)
 
 **Tier 5 — medium, needs an operator call before action.**
 - `connectors/protocol.py:158` `Connector.to_dict()` — zero call sites in-repo; **verify** no external/operator script uses it before deleting.
@@ -103,6 +105,27 @@ Five-lens verification audit. Tiers 1–2 dead-code/hidden-default deletes + all
 - `application/intelligence/indexes/config.py` `ConfigIndex` — `ingest_run` populates `_configs_to_runs`/`_configs_to_node_configs` but exposes no query method and `measurements_for_config` does its own O(N) scan. Documented as a first-class derived view (glossary + developer README), so likely a half-built skip-scan, not oversight. **Confirm intent;** if abandoned, drop the class + `AxisIndex.config_index`.
 - `application/optimization/validators/l1_behavior.py:78` `ValidatorContext.param_unlock_round` default 3 never overridden — possibly an intended future tunable. **Confirm before collapsing to a constant.**
 - `application/scoring/evaluators.py:44` `compute_accuracy` ↔ `metrics.py:59` `_compute_accuracy` — the deprecated-filter + mean-fitness accuracy line is byte-identical across the two seams (registry evaluator vs. the `{hits,total,accuracy,…}` bundle). Marginal; have `_compute_accuracy` reuse `compute_accuracy` for the scalar if touched.
+
+### Untracked-debt sweep (2026-06-12) — holds after verification
+
+Five-lens audit. **Shipped:** `EscalationTarget.RETRY` (dead enum variant), `render_markdown_box()` (dead function + `__all__` entry), three glossary/doc path fixes (`l1/score/` package, `l2_driver`/`l3_driver` → `executor.py`, `score/loop.py::score_population`). Gate green. Webapp T3 finds appended to the existing T3 block above. What stayed:
+
+**Tier 1 hold:**
+- `application/optimization/dispatch/schemas.py:391` `CheckinOutput.consultation: str = ""` — write-only field; `load_or_build_task_context` / `_apply_findings` never read it; only reference is the rotted notebook at `notebooks/optimization_campaign.ipynb:178`. **Blocker:** `model_config = extra="forbid"` — the field and its counterpart in `datasets/_optimizer/pipeline.json` (auto-generated `checkin` output-schema block) must drop atomically; verify the schema regen and re-gate before committing.
+
+**Tier 2 holds — dead defensiveness (verified writer, but save() has direct-call test paths):**
+- `application/optimization/validators/l2_output.py:237-239,279-280,289-291,325-330` — dual-arm dict-fallback (`getattr(entry, "rule_id", None) or (entry.get("rule_id") if isinstance(entry, dict) else None)`) on `L1SupplementalRule`/`L1SituationalExample` entries; the dict-arm appears dead because `_parse_l2` always passes typed model objects. **Blocker:** trace ALL callers of `run_l2_output_validators` to confirm no direct-dict invocation exists (safety-critical validator path).
+- `application/optimization/dispatch/hub/facade.py:118` `getattr(template, slot) or ""` — dead `or ""`; `PromptTemplate` slot fields are `str = ""`, never None. Action: drop ` or ""`. (medium, cosmetic)
+- `application/scoring/evaluators.py:185` `node.current_config or {}` — dead `or {}`; `current_config: dict = Field(default_factory=dict)`, never None. Action: `node.current_config`. (medium, cosmetic)
+- `application/optimization/dispatch/hub/injections/catalogues.py:40-41` `node.param_descriptions or {}` / `node.param_allowed_values or {}` — same `default_factory=dict` guarantee. (medium, cosmetic)
+- `presentation/views/view_ingress.py:325` `l2_prompt=d.get("l2_prompt", "") or ""` — double-default; key is always set by `executor.py:197` `_l2_exit()`. Action: `d["l2_prompt"]`. (medium)
+
+**Tier 5 structural holds — single-caller indirections, no tests, inline candidates:**
+- `presentation/writers.py:206` `_load_p_best_trajectory`, `:339` `_fork_summary_from_index`, `:420` `_load_sibling_indices` — each called only by `from_disk_log`; no dedicated test. Inline into caller loop. Blocker: none.
+- `application/intelligence/indexes/axis.py:74` `_collect()` (called only by `axis.digest()`) and `application/intelligence/indexes/sample.py:287` `_dominant_failure_mode()` (called only by `records()`) — 1–3 line helpers, no dedicated tests. Inline. Blocker: none.
+- `application/jobs/launcher.py:779` `_claim_email()` — byte-identical implementation duplicated at `presentation/api/routers/auth.py:539`. Extract to `shared/` or a common identity utility. Blocker: none.
+- `application/jobs/launcher.py:302-304 + 373-375` — identical 3-line origin-readiness guard at two call sites (`commit_draft_to_dataset` / `mint_campaign_from_draft_command`). Extract to `_assert_origin_ready(draft)`. Blocker: none.
+- `application/jobs/launcher.py:755` `_repo_root()` — called 3× in same module (lines 163, 606, 643); 1-line `Path(__file__).resolve().parents[3]`. Convert to module-level constant. Blocker: none.
 
 ### Benchmarks: dev-surface-only, hidden from the distributed end-user app (2026-06-11)
 
@@ -165,6 +188,7 @@ Both surface from the `wiring.py` root fix that made one `BackendConnection` per
 
 - **`RunCallbacks` ↔ `emit_*`** — two writer APIs, but `RunCallbacks._phase_ctx: ViewContext` is owned write-then-read cross-event state; folding it into an ambient ContextVar is a downgrade. The "which do I use" rule is in [`developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1.
 - **`from_disk_round` / `from_disk_log`** — looks like a roundtrip shim, but it's a genuine separate source: foreign fork-sibling + historical cycles have no live ledger, so on-disk `round_NNNN.json` is the only source. `test_round_complete_view_roundtrip` keeps both factories honest against one View.
+- **`measurement_archive.py:115,122,125` `.get("name", run_id)` / `.get("rendered_prompt_hash", "")` / `.get("source", "")` — looked dead (production writer `loaders.py` always sets them), but `save()` is called directly from test fixtures with partial dicts, so the defaults ARE live boundary guards at the `save()` entry point. Not debt.**
 
 ### Standing entries
 
