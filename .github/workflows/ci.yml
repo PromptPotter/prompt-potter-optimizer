@@ -18,7 +18,7 @@ jobs:
       # what makes CI reproducible: a dependency only moves when uv.lock is
       # deliberately regenerated in a PR, never silently at install time.
       - name: Install uv
-        uses: astral-sh/setup-uv@v8
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           enable-cache: true
 
