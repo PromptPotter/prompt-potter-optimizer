@@ -10,6 +10,7 @@ from fastapi import Depends, Request
 
 from promptpotter.application.datasets.draft_campaign import DraftCampaignRegistry
 from promptpotter.application.jobs import JobRegistry
+from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store import Stores, build_stores
@@ -23,10 +24,27 @@ def _auth_off() -> bool:
     return os.environ.get(PROMPTPOTTER_AUTH_OFF_ENV, "").strip().lower() == "off"
 
 
+def _dev_without_providers(request: Request) -> bool:
+    """Development with ZERO auth providers configured can't complete a login —
+    the auth wall would only dead-end the webapp (404 ``provider_not_configured``,
+    401 ``/auth/me``). Treat that like ``PROMPTPOTTER_AUTH=off``: resolve the single
+    local operator, giving CLI↔webapp identity parity with no flag.
+
+    Gated on ``ENVIRONMENT == "development"`` (the permissive value, explicitly —
+    not ``!= production``) so a production deploy that misconfigures providers stays
+    STRICT (401), never silently opens to ``default``. Configure any provider (e.g.
+    the local Dex OIDC harness) and the real sign-in flow returns automatically."""
+    if settings.ENVIRONMENT != "development":
+        return False
+    bundle = getattr(request.app.state, "identity_bundle", None)
+    return bundle is not None and not bundle.config.configured
+
+
 def resolve_identity(request: Request) -> IdentityContext:
     """Stage-1 identity resolver.
 
-    ``PROMPTPOTTER_AUTH=off`` → :func:`registered_or_default_identity`, the
+    ``PROMPTPOTTER_AUTH=off`` (or development with no providers configured —
+    :func:`_dev_without_providers`) → :func:`registered_or_default_identity`, the
     *same* single-operator resolution the CLI uses: a registered developer
     (default-claim marker) resolves to their own tenant, else anonymous
     ``default``. This keeps the auth-off web surface and terminal runs in one
@@ -36,7 +54,7 @@ def resolve_identity(request: Request) -> IdentityContext:
     missing/expired session raises 401 ``unauthenticated``. Every other API
     site keeps consuming :data:`IdentityDep` / :data:`StoreDep` unchanged.
     """
-    if _auth_off():
+    if _auth_off() or _dev_without_providers(request):
         return registered_or_default_identity()
     identity_ctx: IdentityContext | None = getattr(request.state, "identity_ctx", None)
     if identity_ctx is None:

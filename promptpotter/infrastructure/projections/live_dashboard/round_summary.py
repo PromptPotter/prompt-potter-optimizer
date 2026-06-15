@@ -50,6 +50,10 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
     candidate whose ``changes_description`` matches the round's elected label
     is the winner. This builder is the sole writer of the persisted
     ``is_winner`` flag on the summary row.
+
+    ``health`` is copied straight from ``rr.health`` (stamped once at round close
+    by ``compute_round_health``) — the projection renders the served verdict, it
+    does not recompute it (R-36).
     """
     winner_label = rr.label
     candidates: list[RoundSummaryCandidate] = []
@@ -74,6 +78,7 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
         composite_fitness=float(rr.composite_fitness),
         candidates=candidates,
         selection=selection,
+        health=rr.health,
     )
 
 

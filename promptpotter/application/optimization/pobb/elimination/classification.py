@@ -5,6 +5,16 @@ classify_result(result) → three-bucket classification:
   llm_only:content_empty + length + reasoning=0 → infra:output_truncated
   llm_only:content_empty + stop                 → fatal:empty_response
   *:content_filtered                            → fatal (passthrough)
+  *:<kind=structural>                           → fatal (source-stamped)
+
+The last rule reads the backend's **source-stamped** ``WarningKind`` (TermNorm owns
+the structural/transient verdict; ``domain.results.WarningDict.kind``): a warning the
+backend stamped ``structural`` is a deterministic-for-config break, so it fast-
+eliminates the candidate exactly as the degradation verdict grades it structural-
+critical — one source of truth, two consumers (no PromptPotter-side code taxonomy).
+A warning with no ``kind`` is NOT treated structural (no guessing). Transient codes
+are NOT blanket-routed to infra: ``infra`` means *deprecate the sample*, which a
+transient (e.g. low-document-count) measurement is not.
 
 ``infra_codes`` mark the sample deprecated for accounting + display, but
 DegradationCheck's one-sighting fast-path (``dominant_fatal``) reads only
@@ -111,6 +121,22 @@ def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
     return advisories
 
 
+def _structural_advisory_keys(result: Mapping[str, Any]) -> set[str]:
+    """``"step:code"`` keys whose **source-stamped** ``kind`` is structural.
+
+    The backend (TermNorm ``WarningKind``) owns the structural/transient verdict;
+    PoBB reads it directly so elimination stays in lockstep with the degradation
+    verdict — one truth, no re-derivation from the code. A warning with no ``kind``
+    is NOT treated structural (no guessing): unstamped → under-counts, never
+    over-eliminates."""
+    pd = result.get("pipeline_data") or {}
+    keys: set[str] = set()
+    for w in (pd.get("diagnostics") or {}).get("warnings") or []:
+        if isinstance(w, dict) and w.get("kind") == "structural":
+            keys.add(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
+    return keys
+
+
 def _llm_only_shape(result: Mapping[str, Any]) -> tuple[str | None, int]:
     """(finish_reason, reasoning_tokens) from step_tokens.llm_only; (None, 0) if missing."""
     pd = result.get("pipeline_data") or {}
@@ -137,6 +163,7 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
     of retrying every remaining sample with the same poisonous config.
     """
     advisories = _collect_advisories(result)
+    structural_advs = _structural_advisory_keys(result)
     infra: set[str] = set()
     fatals: set[str] = set()
 
@@ -160,6 +187,14 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
             # so L2 sees the pattern and can propose mitigations
             # (different model, less safety-triggering instruction).
             infra.add(adv)
+        elif adv in structural_advs:
+            # Source-stamped structural (``WarningKind.STRUCTURAL`` from the backend):
+            # a deterministic-for-config candidate failure — route to fatal so
+            # DegradationCheck fast-eliminates the candidate instead of retrying the
+            # same broken config on every remaining sample. Lockstep with the
+            # degradation verdict, which grades the same warning structural-critical
+            # off the same stamped field (one truth, not two disagreeing classifiers).
+            fatals.add(adv)
 
     if is_error_result(result) and error_category(result) == ErrorCategory.CLIENT:
         fatals.add("backend:client_error")

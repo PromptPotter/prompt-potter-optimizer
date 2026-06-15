@@ -20,6 +20,10 @@ interface Props {
   dash: DashboardSnapshot | null;
   runPhaseResolved: string | null;
   onOpenFiles: () => void;
+  // Invoked by the one-click "Stop campaign" button the banner shows when the
+  // verdict is structurally-degraded (`alert.action === "stop"`). The run never
+  // auto-stops — this is the operator pulling the trigger.
+  onStopCampaign?: () => void;
 }
 
 export function CriticalAlertBanner({
@@ -29,6 +33,7 @@ export function CriticalAlertBanner({
   dash,
   runPhaseResolved,
   onOpenFiles,
+  onStopCampaign,
 }: Props) {
   // Same connector reachability the ConnectorInspector LED reads — one shared
   // `useConnector()` probe, one shared `down` verdict (connector-state.ts).
@@ -67,6 +72,16 @@ export function CriticalAlertBanner({
         <strong className="critical-alert-title">{alert.title}</strong>
         {alert.detail ? <span className="critical-alert-detail">{alert.detail}</span> : null}
       </span>
+      {alert.action === "stop" && onStopCampaign ? (
+        <button
+          type="button"
+          className="critical-alert-jump critical-alert-stop"
+          onClick={onStopCampaign}
+          aria-label="Stop the campaign"
+        >
+          Stop campaign
+        </button>
+      ) : null}
       <button
         type="button"
         className="critical-alert-jump"

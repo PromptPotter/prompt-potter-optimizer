@@ -15,6 +15,22 @@ export interface RoundSummaryCandidate {
   changes_description: string;
 }
 
+/** Backend-computed, context-aware degradation verdict for a round (origin */
+export interface DegradationHealth {
+  grade: string;
+  reasons: string[];
+  samples: number;
+  structural_count: number;
+  transient_count: number;
+  degraded_rate: number;
+  consecutive_degraded_rounds: number;
+  prior_clean_rounds: number;
+  dominant_node: string | null;
+  ci_lo: number;
+  ci_hi: number;
+  suggested_action: string | null;
+}
+
 /** Display row for `dashboard.json::rounds[]` — webapp's completed-round source. */
 export interface RoundSummary {
   round: number;
@@ -22,6 +38,7 @@ export interface RoundSummary {
   composite_fitness: number;
   candidates: RoundSummaryCandidate[];
   selection: number[];
+  health: DegradationHealth | null;
 }
 
 /** One on-demand candidate verification → webapp Verify tab. */

@@ -237,7 +237,7 @@ priors will surface as divergence via the candidate side).
 |---|---|
 | `promptpotter/application/optimization/pobb/elimination/checks.py::PoBBCheck` | Sample-keyed priors, `backfill_for_sample`, paired `check()`, `snapshot_priors`, `set_sample_universe` (budget for the dominance gate) |
 | `promptpotter/application/intelligence/adaptive_queue_mechanism.py` | Online adaptive queue mechanism: `update_theta_posterior`, `decision_information_gain`, `pick_value`, `next_sample`, `expected_order` |
-| `promptpotter/application/optimization/l1/score.py::score_population` | Builds the `backfill_fn` closure + the `_next_sample(scored_outcomes)` closure; injects both into PoBB / the query loop |
+| `promptpotter/application/optimization/l1/score/loop.py::score_population` | Builds the `backfill_fn` closure + the `_next_sample(scored_outcomes)` closure; injects both into PoBB / the query loop |
 | `promptpotter/application/optimization/l1/score/candidate.py::score_one_candidate` | Builds `_backfill_for_sample(sample_id)` closure and passes it as `on_sample_pre_check` — reactive per-sample backfill, no upfront wall |
 | `promptpotter/application/scoring/query_loop.py::run_query_loop` | Per-step `next_sample(scored_outcomes)` + fires `on_sample_pre_check(sample.id)` after each sample lands, before degradation checks read prior coverage |
 | `promptpotter/application/optimization/l1/population.py::pobb_decision_data` | Embeds `candidate_sample_ids` + `prior_histories` into the decision record |

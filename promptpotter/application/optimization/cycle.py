@@ -13,6 +13,7 @@ from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
+    DegradationHealth,
     RoundOrigin,
     RoundResult,
     ScoredCandidate,
@@ -66,6 +67,49 @@ def _build_scoreboard(
             }
         )
     return rows
+
+
+def build_round_payload(
+    rr: RoundResult,
+    round_num: int,
+    opt_sp: OptSearchPoint,
+) -> dict[str, Any]:
+    """Serialize a closed ``RoundResult`` to the persisted round-file dict — the
+    SINGLE round-payload builder both the origin path (``emit_origin_round``) and
+    the L1 path (``absorb_round``) build through. Every field is derived from
+    ``rr``, so a new ``RoundResult`` field reaches ``rounds/round_NNNN.json`` in one
+    place instead of silently dropping out of two hand-mirrored dicts.
+
+    ``health`` is NOT set here — it's stamped + injected once at ``close_round``
+    (which runs after this builder, after the cycle's track record is settled)."""
+    return {
+        "round_id": f"round_{round_num}",
+        "round": round_num,
+        "label": rr.label,
+        "accuracy": rr.accuracy,
+        "composite_fitness": rr.composite_fitness,
+        "hits": rr.hits,
+        "total": rr.total,
+        "improved": rr.improved,
+        "p_value": rr.p_value,
+        "origin_accuracy": rr.origin_accuracy,
+        "matched_origin_accuracy": rr.matched_origin_accuracy,
+        "matched_origin_hits": rr.matched_origin_hits,
+        "matched_origin_composite": rr.matched_origin_composite,
+        "cumulative_total": rr.cumulative_total,
+        "cumulative_accuracy": rr.cumulative_accuracy,
+        "scoreboard": _build_scoreboard(rr.candidate_scores, rr.label),
+        "prompt_fields": rr.prompt_fields,
+        "results": rr.results,
+        "all_candidate_results": dict(rr.all_candidate_results),
+        "sample_order_timeline": [s.model_dump() for s in rr.sample_order_timeline],
+        "candidates_scored": rr.candidates_scored,
+        "candidate_scores": [c.model_dump() for c in rr.candidate_scores],
+        "decisions": list(rr.decisions),
+        "evaluators": dict(rr.evaluators),
+        "critique": rr.critique,
+        "opt_search_point": opt_sp.model_dump(),
+    }
 
 
 def _rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
@@ -195,6 +239,12 @@ class Cycle:
     config: CampaignConfig
 
     rounds: list[RoundResult] = field(default_factory=list)
+    # Round-0 (origin) degradation verdict, stashed at origin close. ``cycle.rounds``
+    # is the 1-indexed L1 trajectory and omits the origin, but the origin's verdict
+    # still belongs to every L1 round's track record (``prior_clean`` / consecutive-
+    # degraded counting). ``close_round`` folds this in for L1 rounds; on resume,
+    # ``replay_priors`` repopulates it from the persisted round-0 file.
+    origin_health: DegradationHealth | None = None
     tracking: CycleRoundState = field(default_factory=CycleRoundState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
     # L2 inter-round bridge: probe_next_round set on action="probe_round" (consumed next round); last_l2_axis labels the probe.
@@ -265,18 +315,37 @@ class Cycle:
         """Reconstruct round-loop state from persisted prior rounds (in-place).
 
         ``EscalationFSM`` is NOT touched — caller rebuilds via ``from_ledger``.
+
+        The origin (round 0) is the floor, not an L1 round: it seeds the cumulative
+        base + the verdict track record but stays OUT of ``cycle.rounds`` (the
+        1-indexed L1 trajectory), so a resumed cycle reconstructs exactly what a
+        fresh ``Cycle.start`` + ``absorb_round`` holds. Resume loads round 0 in
+        ``priors`` (origin is a persisted round file post-unification), so it's
+        peeled off here rather than silently swelling the trajectory (which would
+        drift ``best_round`` by one and double-count the origin).
         """
         if not priors:
             return
         schema = self.session.pipeline_schema
         tr = self.tracking
+        origin_results: list[dict[str, Any]] = []
+        l1_priors: list[dict[str, Any]] = []
         for round_data in priors:
             rr = RoundResult.model_validate(round_data)
-            self.rounds.append(rr)
+            if rr.round == 0:
+                self.origin_health = rr.health
+                origin_results = list(rr.results or [])
+            else:
+                self.rounds.append(rr)
+                l1_priors.append(round_data)
             for r in rr.results or []:
                 if extract_warning_types(r) and (q := r.get("query")):
                     self.warned_queries.add(q)
-        last = priors[-1]
+        if not l1_priors:
+            # Resumed right after origin — no L1 trajectory to replay; the origin
+            # floor was already seeded by Cycle.start (its verdict captured above).
+            return
+        last = l1_priors[-1]
         self.opt_sp = OptSearchPoint(**last["opt_search_point"])
         last_rr = self.rounds[-1]
         for f in PROMPT_STRING_FIELDS:
@@ -288,10 +357,12 @@ class Cycle:
             else tr.current_sp.pipeline_params
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=last_pp, schema=schema)
-        # best_round = cumulative-state high-water-mark (mirrors absorb_round);
-        # without this, resume/fork after lock-in reseeds PoBB priors on the wrong subset.
-        acc_cum: list[dict[str, Any]] = []
-        for i, rr in enumerate(self.rounds, start=1):
+        # best_round = cumulative-state high-water-mark over the L1 trajectory,
+        # seeded from the origin floor (mirrors absorb_round). best_round is the
+        # round NUMBER, not a positional index — origin sits outside cycle.rounds, so
+        # a positional counter would drift one ahead of the real round.
+        acc_cum: list[dict[str, Any]] = list(origin_results)
+        for rr in self.rounds:
             acc_cum = _merge_into_cumulative(acc_cum, list(rr.results))
             if schema is not None:
                 cumi = compute_composite_fitness(
@@ -308,7 +379,7 @@ class Cycle:
             if cum_comp > tr.best_composite_fitness:
                 tr.best_composite_fitness = cum_comp
                 tr.best_accuracy = cum_acc
-                tr.best_round = i
+                tr.best_round = rr.round
                 tr.best_sp = self.opt_sp.to_job_search_point(
                     base_pipeline_params=(rr.pipeline_params or last_pp), schema=schema
                 )
@@ -381,34 +452,7 @@ class Cycle:
         rr.cumulative_total = len(tr.current_results)
         rr.cumulative_accuracy = tr.current_accuracy
 
-        return {
-            "round_id": f"round_{round_num}",
-            "round": round_num,
-            "label": rr.label,
-            "accuracy": rr.accuracy,
-            "composite_fitness": rr.composite_fitness,
-            "hits": rr.hits,
-            "total": rr.total,
-            "improved": rr.improved,
-            "p_value": rr.p_value,
-            "origin_accuracy": rr.origin_accuracy,
-            "matched_origin_accuracy": rr.matched_origin_accuracy,
-            "matched_origin_hits": rr.matched_origin_hits,
-            "matched_origin_composite": rr.matched_origin_composite,
-            "cumulative_total": rr.cumulative_total,
-            "cumulative_accuracy": rr.cumulative_accuracy,
-            "scoreboard": _build_scoreboard(rr.candidate_scores, rr.label),
-            "prompt_fields": rr.prompt_fields,
-            "results": rr.results,
-            "all_candidate_results": dict(rr.all_candidate_results),
-            "sample_order_timeline": [s.model_dump() for s in rr.sample_order_timeline],
-            "candidates_scored": rr.candidates_scored,
-            "candidate_scores": [c.model_dump() for c in rr.candidate_scores],
-            "decisions": list(rr.decisions),
-            "evaluators": dict(rr.evaluators),
-            "critique": rr.critique,
-            "opt_search_point": self.opt_sp.model_dump(),
-        }
+        return build_round_payload(rr, round_num, self.opt_sp)
 
     def origin_for_round(self, scoring_set: list[Sample], round_num: int) -> RoundOrigin:
         """Build round origin; on probe rounds, rescore over the probe subset."""

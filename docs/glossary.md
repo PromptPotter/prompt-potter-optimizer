@@ -14,7 +14,7 @@ implementation site lands, or rename to a term already on the list.
 
 - **L1** — `l1_generate`: the candidate-mutation layer that emits new
   pipeline_params variants every round. Lives at
-  `application/optimization/l1/` (`generate.py`, `score.py`,
+  `application/optimization/l1/` (`generate.py`, `score/`,
   `critique.py`, `execute.py`, `resume.py`, `population.py`,
   `stats.py`). Contract: `promptpotter/CLAUDE.md`.
 
@@ -22,12 +22,12 @@ implementation site lands, or rename to a term already on the list.
   L1 stall. Writes `OptSearchPoint.task_context`. Cannot mutate
   `pipeline_params`. Implementation: `escalate_l2` in
   `application/optimization/escalation/firing/executor.py`; per-layer
-  parse/apply in `firing/l2_driver.py`.
+  parse/apply (`_parse_l2`/`_apply_l2`) in `firing/executor.py`.
 
 - **L3** — `l3_plan`: the strategic-replan layer. Fires on L2 stall.
   Writes `OptSearchPoint.plan`. Rewrites the framing surface, not the
   next variant. Implementation: `escalate_l2`'s L3 cascade in
-  `firing/executor.py`; parse/apply in `firing/l3_driver.py`.
+  `firing/executor.py`; parse/apply (`_parse_l3`/`_apply_l3`) in `firing/executor.py`.
 
 - **Critique** — L1's per-round LLM self-analysis. `run_l1_critique`
   in `application/optimization/l1/critique.py`. Output dict
