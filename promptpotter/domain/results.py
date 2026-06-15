@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from collections.abc import Mapping, Sequence
+from typing import Any, NotRequired, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -20,6 +21,7 @@ __all__ = [
     "CritiqueReadout",
     "CycleResult",
     "DegradationContext",
+    "DegradationHealth",
     "DiagnosticRunRecord",
     "EliminationContext",
     "PayloadOutcome",
@@ -32,9 +34,31 @@ __all__ = [
     "SampleOrderStep",
     "ScoredCandidate",
     "SweepBatchResult",
+    "WarningDict",
+    "assemble_prior_healths",
     "candidate_label",
+    "classify_sample_failure",
+    "compute_degradation_health",
+    "compute_round_health",
     "is_round_winner",
 ]
+
+# Degradation-health thresholds (explicit — no hidden defaults). The verdict
+# distinguishes a structurally-broken pipeline (abort-worthy) from transient
+# backend noise (keep going), weighted by track record. See
+# ``compute_degradation_health``.
+STRUCTURAL_FLAG_RATE: float = 0.30
+"""Fraction of samples whose pipeline node *hard-failed* (``step_statuses``
+``failed`` — e.g. a schema/json break) at/above which the round is structurally
+broken → ``critical``, regardless of track record."""
+
+DEGRADED_RATE_FLAG: float = 0.20
+"""Fraction of samples that degraded at all (failed OR soft) at/above which a
+round with a clean track record is at least ``degraded``."""
+
+CONSECUTIVE_DEGRADED_CRITICAL: int = 3
+"""Consecutive degraded rounds at/above which persistence alone escalates to
+``critical`` — a sustained problem, not a one-round blip."""
 
 
 class EliminationContext(TypedDict, total=False):
@@ -269,6 +293,9 @@ class RoundResult(RoundMetadata, RoundPayload):
 
     diagnostics: RoundDiagnostics | None = None
     critique: CritiqueReadout | None = None
+    # Context-aware degradation verdict, stamped at round close (sole compute
+    # site); every surface (dashboard summary, CLI, round file) renders this.
+    health: DegradationHealth | None = None
 
 
 class CycleError(BaseModel):
@@ -354,6 +381,262 @@ class RoundSummaryCandidate(BaseModel):
     changes_description: str = ""
 
 
+class WarningDict(TypedDict):
+    """One backend diagnostics warning as it rides ``round_file::results[].pipeline_data.diagnostics.warnings``.
+
+    ``kind`` is **source-stamped by the backend** (TermNorm's ``WarningKind`` enum —
+    ``structural`` = config/schema fault the operator must fix, ``transient`` =
+    recoverable noise). PromptPotter reads it directly and keeps NO shadow code→kind
+    taxonomy: an absent or unrecognized ``kind`` is SKIPPED, never guessed. That
+    inverts the old failure mode safely — a backend site that forgets to stamp
+    under-counts (and surfaces in the live smoke), instead of silently grading a
+    transient blip as an abort-worthy ``structural`` break."""
+
+    step: str
+    code: str
+    message: str
+    kind: str
+    details: NotRequired[list[Any]]
+    stats: NotRequired[dict[str, Any]]
+
+
+def classify_sample_failure(
+    step_statuses: Mapping[str, str],
+    warnings: Sequence[WarningDict],
+) -> tuple[str | None, str | None]:
+    """Classify ONE sample's pipeline outcome AND attribute the causing node.
+
+    Returns ``(kind, causing_node)`` — ``kind ∈ {"structural","transient",None}``.
+    Reads the **source-stamped** ``WarningDict.kind`` (no PromptPotter-side code
+    taxonomy); an absent/unrecognized kind is SKIPPED, never defaulted to structural
+    (that was the shadow-taxonomy bug — it false-alarmed ``critical`` on ordinary
+    transient noise the backend's frozenset hadn't enumerated).
+
+    Attribution follows the **warning-bearing** node (the explained failure), not raw
+    ``step_statuses``: a node merely stamped ``failed`` with no warning is silent
+    collateral (e.g. an upstream node marked failed because the real break was
+    downstream), and must NOT outvote the node that actually broke. A node that DID
+    warn — even with an unclassifiable kind — counts as *explained*, so the bare-
+    ``failed`` fallback won't re-grade it. Only a genuinely silent ``failed`` (no
+    warning at all) drives the verdict structural. ``causing_node`` is ``None`` when clean."""
+    structural_node: str | None = None
+    transient_node: str | None = None
+    warned_nodes: set[str] = set()
+    for w in warnings or []:
+        node = str(w.get("step") or "") or None
+        if node is not None:
+            warned_nodes.add(node)  # explained (has a warning), even if kind is unclassifiable
+        kind = w.get("kind")
+        if kind == "structural" and structural_node is None:
+            structural_node = node
+        elif kind == "transient" and transient_node is None:
+            transient_node = node
+        # else: missing/unknown kind → skip, no default. The node is already in
+        # warned_nodes, so the silent-failed fallback won't re-grade it structural.
+    if structural_node is not None:
+        return "structural", structural_node
+    # A node stamped ``failed`` with NO warning is an unexplained hard break →
+    # structural. A failed node that DID warn is already classified by that warning
+    # (e.g. a 429 ``rate_limited`` → transient), so it must not fall through.
+    silent_failed = [
+        n for n, st in step_statuses.items() if st == "failed" and n not in warned_nodes
+    ]
+    if silent_failed:
+        return "structural", silent_failed[0]
+    if transient_node is not None:
+        return "transient", transient_node
+    degraded = [n for n, st in step_statuses.items() if st == "degraded"]
+    if degraded:
+        return "transient", degraded[0]
+    return None, None
+
+
+class DegradationHealth(BaseModel):
+    """Backend-computed, context-aware degradation verdict for a round (origin
+    included) — the single graded signal every surface renders (R-36).
+
+    ``grade`` distinguishes a structurally-broken pipeline (``critical``,
+    abort-worthy) from transient backend noise (``degraded``, keep going) from a
+    sound round (``healthy``). The SAME degradation grades differently by track
+    record: structural failures at an untested config (``prior_clean_rounds == 0``)
+    are abort-suspect, while the same isolated failure deep in a proven campaign is
+    noise. The verdict NEVER stops the run — ``suggested_action`` (set only at
+    ``critical``) is an operator-facing recommendation, surfaced read-only."""
+
+    model_config = ConfigDict(frozen=True)
+
+    grade: str  # "healthy" | "degraded" | "critical"
+    reasons: list[str] = Field(default_factory=list)
+    samples: int
+    structural_count: int
+    transient_count: int
+    degraded_rate: float
+    consecutive_degraded_rounds: int
+    prior_clean_rounds: int
+    dominant_node: str | None = None
+    ci_lo: float
+    ci_hi: float
+    suggested_action: str | None = None
+
+
+def compute_degradation_health(
+    *,
+    hits: int,
+    total: int,
+    structural_count: int,
+    transient_count: int,
+    prior_clean_rounds: int,
+    consecutive_degraded_rounds: int,
+    dominant_node: str | None = None,
+) -> DegradationHealth | None:
+    """Grade a round's degradation health from its winner's per-sample outcomes
+    plus the cycle's track record. Returns ``None`` when nothing was measured
+    (``total <= 0``) — genuinely no verdict, not a fabricated clean one.
+
+    Precedence (first match wins), thresholds = the module constants:
+      * **critical** — structural failures dominate (``structural`` rate ≥
+        :data:`STRUCTURAL_FLAG_RATE`), OR *any* structural failure at an untested
+        config (no clean round precedes this one), OR ≥
+        :data:`CONSECUTIVE_DEGRADED_CRITICAL` consecutive degraded rounds.
+      * **degraded** — degraded fraction ≥ :data:`DEGRADED_RATE_FLAG` (transient /
+        noise on a proven pipeline), OR an untested origin with a wide CI.
+      * **healthy** — otherwise."""
+    if total <= 0:
+        return None
+    from promptpotter.shared.statistics import wilson_ci
+
+    ci_lo, ci_hi = wilson_ci(hits, total)
+    structural_rate = structural_count / total
+    degraded_rate = (structural_count + transient_count) / total
+    untested = prior_clean_rounds == 0
+
+    reasons: list[str] = []
+    if structural_rate >= STRUCTURAL_FLAG_RATE:
+        grade, reasons = "critical", ["structural"]
+    elif untested and structural_count > 0:
+        grade, reasons = "critical", ["structural_untested"]
+    elif consecutive_degraded_rounds >= CONSECUTIVE_DEGRADED_CRITICAL:
+        grade, reasons = "critical", ["persistent"]
+    elif degraded_rate >= DEGRADED_RATE_FLAG:
+        grade, reasons = "degraded", ["degraded"]
+    elif untested and (ci_hi - ci_lo) >= DEGRADED_RATE_FLAG:
+        grade, reasons = "degraded", ["untested"]
+    else:
+        grade = "healthy"
+
+    suggested_action: str | None = None
+    if grade == "critical":
+        where = f"{dominant_node} " if dominant_node else ""
+        if "persistent" in reasons:
+            suggested_action = (
+                f"{consecutive_degraded_rounds} consecutive degraded rounds — "
+                "likely a persistent pipeline problem; consider aborting and fixing config."
+            )
+        else:
+            pct = round(structural_rate * 100)
+            suggested_action = (
+                f"{where}failing structurally on {pct}% of samples — likely a config/schema "
+                "fault, not noise; consider aborting, fixing config, and re-minting."
+            )
+
+    return DegradationHealth(
+        grade=grade,
+        reasons=reasons,
+        samples=total,
+        structural_count=structural_count,
+        transient_count=transient_count,
+        degraded_rate=round(degraded_rate, 6),
+        consecutive_degraded_rounds=consecutive_degraded_rounds,
+        prior_clean_rounds=prior_clean_rounds,
+        dominant_node=dominant_node,
+        ci_lo=ci_lo,
+        ci_hi=ci_hi,
+        suggested_action=suggested_action,
+    )
+
+
+def assemble_prior_healths(
+    origin_health: DegradationHealth | None,
+    rounds: Sequence[RoundResult],
+    round_num: int,
+) -> list[DegradationHealth | None]:
+    """The track record for the round being closed: the origin's verdict first
+    (round 0 — the floor every L1 round improves on), then the prior L1 rounds in
+    order. The origin lives on ``Cycle.origin_health`` because ``Cycle.rounds`` is
+    the 1-indexed L1 trajectory that omits it; the round-0 entry that resume's
+    ``replay_priors`` leaves in ``rounds`` is dropped here so it isn't double-counted,
+    and the round being closed (``round_num``, already appended by ``absorb_round``)
+    is dropped too. Ordering is oldest→newest so ``compute_round_health``'s reversed
+    consecutive-degraded walk reads most-recent-first."""
+    prior: list[DegradationHealth | None] = []
+    if origin_health is not None:
+        prior.append(origin_health)
+    prior.extend(r.health for r in rounds if r.round not in (0, round_num))
+    return prior
+
+
+def compute_round_health(
+    *,
+    hits: int,
+    total: int,
+    results: list[dict[str, Any]],
+    prior_healths: Sequence[DegradationHealth | None],
+) -> DegradationHealth | None:
+    """Stamp a closed round's degradation verdict — the SINGLE computation site
+    (the app-layer round close). Every surface reads ``RoundResult.health``; none
+    recomputes (R-36). Counts structural/transient over the winner's per-sample
+    rows (``results``) via the backend's ``step_statuses``, derives the track
+    record (clean rounds + consecutive degraded run) from prior rounds' verdicts,
+    then grades via :func:`compute_degradation_health`."""
+    structural = transient = 0
+    structural_nodes: dict[str, int] = {}
+    for r in results or []:
+        diag = (r.get("pipeline_data") or {}).get("diagnostics") or {}
+        statuses = diag.get("step_statuses") or {}
+        warnings = diag.get("warnings") or []
+        kind, node = classify_sample_failure(statuses, warnings)
+        if kind == "structural":
+            structural += 1
+            if node is not None:
+                structural_nodes[node] = structural_nodes.get(node, 0) + 1
+        elif kind == "transient":
+            transient += 1
+    # ``dominant_node`` names the structural CAUSE (warning-attributed) — never a
+    # silently-cascaded ``failed`` node — so the critical message points at the node
+    # that actually broke.
+    dominant = (
+        max(structural_nodes, key=lambda k: structural_nodes[k]) if structural_nodes else None
+    )
+
+    # An ungraded prior (``None`` — a probe round, or a round that measured zero
+    # samples) is TRANSPARENT to the track record: it is not a clean round (so it
+    # can't fake ``untested=False`` and suppress the untested escalations) and it
+    # does not break the consecutive-degraded chain (a probe interleaving two
+    # degraded rounds must still reach ``persistent``). Only a real ``healthy``
+    # verdict counts clean; a ``None`` in the consecutive walk is skipped, not a stop.
+    prior_clean = sum(1 for h in prior_healths if h is not None and h.grade == "healthy")
+    consecutive = 0
+    if structural + transient > 0:
+        consecutive = 1
+        for h in reversed(list(prior_healths)):
+            if h is None:
+                continue
+            if h.grade in ("degraded", "critical"):
+                consecutive += 1
+            else:
+                break
+
+    return compute_degradation_health(
+        hits=hits,
+        total=total,
+        structural_count=structural,
+        transient_count=transient,
+        prior_clean_rounds=prior_clean,
+        consecutive_degraded_rounds=consecutive,
+        dominant_node=dominant,
+    )
+
+
 class RoundSummary(BaseModel):
     """Display row for `dashboard.json::rounds[]` — webapp's completed-round source.
 
@@ -371,6 +654,10 @@ class RoundSummary(BaseModel):
     # in measurement order (longest candidate sequence carries the full
     # series since PoBB truncates losers, not the queue mechanism itself).
     selection: list[int] = Field(default_factory=list)
+    # Backend-computed degradation verdict for this round (origin included).
+    # ``None`` only when the round measured zero samples. Webapp/CLI render it;
+    # never recompute (R-36).
+    health: DegradationHealth | None = None
 
 
 class PayloadOutcome(BaseModel):

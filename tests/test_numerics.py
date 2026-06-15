@@ -635,6 +635,61 @@ def test_classify_result_routes_refusal_to_infra() -> None:
     assert "llm_only:model_refusal" not in cls.infra_codes
 
 
+def test_classify_result_routes_structural_warning_to_fatal() -> None:
+    """One source of truth, two consumers: a warning the backend **source-stamped**
+    ``kind=structural`` is a deterministic-for-config failure, so PoBB elimination must
+    fast-cut it (``fatal_codes`` → ``dominant_fatal``) exactly as the degradation verdict
+    grades it structural-critical off the same stamped field. A transient-stamped code
+    stays advisory-only — NOT deprecated, since the measurement is still valid. An
+    unstamped warning is NOT routed fatal (no guessing)."""
+    from promptpotter.application.optimization.pobb.elimination import classify_result
+
+    structural = classify_result(
+        {
+            "pipeline_data": {
+                "diagnostics": {
+                    "warnings": [
+                        {
+                            "step": "entity_profiling",
+                            "code": "json_validate_failed",
+                            "kind": "structural",
+                        }
+                    ]
+                }
+            }
+        }
+    )
+    assert "entity_profiling:json_validate_failed" in structural.fatal_codes
+    assert structural.dominant_fatal == "entity_profiling:json_validate_failed"
+
+    transient = classify_result(
+        {
+            "pipeline_data": {
+                "diagnostics": {
+                    "warnings": [
+                        {"step": "web_search", "code": "low_document_count", "kind": "transient"}
+                    ]
+                }
+            }
+        }
+    )
+    assert "web_search:low_document_count" in transient.advisory_codes
+    assert not transient.fatal_codes and not transient.infra_codes
+
+    # No ``kind`` stamped → NOT fatal (the source-stamp is the only structural signal;
+    # an unstamped warning under-counts rather than over-eliminating).
+    unstamped = classify_result(
+        {
+            "pipeline_data": {
+                "diagnostics": {
+                    "warnings": [{"step": "entity_profiling", "code": "json_validate_failed"}]
+                }
+            }
+        }
+    )
+    assert not unstamped.fatal_codes
+
+
 # ===========================================================================
 # Pass B — proposal validators, PoBB posterior, round diagnostics, queue math
 # ===========================================================================
@@ -1202,6 +1257,279 @@ def test_leader_eligibility_excludes_fatal_degradation_and_keeps_pobb_eliminated
     assert not is_leader_eligible(fatal)
     assert is_leader_eligible(pobb_eliminated)
     assert is_leader_eligible(clean_loser)
+
+
+@pytest.mark.parametrize(
+    ("statuses", "warnings", "kind", "node"),
+    [
+        # The lca-bom-termnorm shape: entity_profiling hard-broke (source-stamped
+        # ``kind=structural``), web_search is silent collateral (failed, NO warning) —
+        # attribution must follow the warning-bearing node, never the cascade-failed one.
+        (
+            {"web_search": "failed", "entity_profiling": "failed"},
+            [
+                {
+                    "step": "entity_profiling",
+                    "code": "schema_invalid",
+                    "message": "bad schema",
+                    "kind": "structural",
+                }
+            ],
+            "structural",
+            "entity_profiling",
+        ),
+        # A 429 rate-limit, backend-stamped ``kind=transient`` → transient.
+        (
+            {"entity_profiling": "failed"},
+            [
+                {
+                    "step": "entity_profiling",
+                    "code": "rate_limited",
+                    "message": "429",
+                    "kind": "transient",
+                }
+            ],
+            "transient",
+            "entity_profiling",
+        ),
+        # TermNorm 5xx → ``server_error`` stamped transient, not a structural break.
+        (
+            {"entity_profiling": "failed"},
+            [
+                {
+                    "step": "entity_profiling",
+                    "code": "server_error",
+                    "message": "503",
+                    "kind": "transient",
+                }
+            ],
+            "transient",
+            "entity_profiling",
+        ),
+        # The exact false-alarm the source-stamp fixes: a websearch ``scrape_failed``
+        # the old frozenset omitted. Stamped transient → transient noise, NOT critical.
+        (
+            {"web_search": "degraded"},
+            [
+                {
+                    "step": "web_search",
+                    "code": "scrape_failed",
+                    "message": "0 usable",
+                    "kind": "transient",
+                }
+            ],
+            "transient",
+            "web_search",
+        ),
+        # Unknown/missing ``kind`` → SKIPPED, never defaulted to structural (the shadow-
+        # taxonomy bug). The warned node is still "explained", and with a clean status
+        # there is no silent-failed fallback → no verdict at all.
+        (
+            {"entity_profiling": "success"},
+            [{"step": "entity_profiling", "code": "some_new_code", "message": "?"}],
+            None,
+            None,
+        ),
+        # Hard-failed node with no explanatory warning → structural, best-effort attribution.
+        ({"web_search": "failed"}, [], "structural", "web_search"),
+        # Fully clean → no degradation, no cause.
+        ({"fuzzy_matching": "success", "token_matching": "skipped"}, [], None, None),
+    ],
+)
+def test_classify_sample_failure_attributes_the_warning_bearing_node(
+    statuses, warnings, kind, node
+):
+    """Structural-vs-transient reads the backend's **source-stamped** ``WarningDict.kind``
+    (no PromptPotter code taxonomy; unknown/missing kind is SKIPPED, never structural),
+    and the causing node follows the WARNING, so silent-collateral failed nodes can't
+    outvote the node that actually broke."""
+    from promptpotter.domain.results import classify_sample_failure
+
+    assert classify_sample_failure(statuses, warnings) == (kind, node)
+
+
+def test_compute_round_health_names_the_structural_cause_not_collateral():
+    """End-to-end on the lca-bom-termnorm shape: web_search is silently ``failed``
+    (collateral, no warning) while entity_profiling carries the structural warning.
+    The verdict must name entity_profiling as ``dominant_node`` — the prior
+    tally-by-failed-status picked web_search by 12-12 tie + insertion order."""
+    from promptpotter.domain.results import compute_round_health
+
+    def _struct_fail() -> dict:
+        return {
+            "hit": False,
+            "pipeline_data": {
+                "diagnostics": {
+                    "step_statuses": {"web_search": "failed", "entity_profiling": "failed"},
+                    "warnings": [
+                        {
+                            "step": "entity_profiling",
+                            "code": "schema_invalid",
+                            "message": "max completion tokens reached",
+                            "kind": "structural",
+                        }
+                    ],
+                }
+            },
+        }
+
+    def _clean_hit() -> dict:
+        return {
+            "hit": True,
+            "pipeline_data": {"diagnostics": {"step_statuses": {"entity_profiling": "success"}}},
+        }
+
+    results = [_struct_fail() for _ in range(12)] + [_clean_hit() for _ in range(8)]
+    h = compute_round_health(hits=8, total=20, results=results, prior_healths=[])
+    assert h is not None
+    assert h.grade == "critical"
+    assert h.dominant_node == "entity_profiling"
+    assert h.suggested_action and "entity_profiling" in h.suggested_action
+    assert "web_search" not in (h.suggested_action or "")
+
+
+@pytest.mark.parametrize(
+    ("hits", "total", "structural", "transient", "prior_clean", "consec", "grade", "reasons"),
+    [
+        # lca-bom-termnorm origin: 60% structural failures, untested → critical/structural.
+        (3, 20, 12, 0, 0, 1, "critical", ["structural"]),
+        # First-sight structural at an untested config, even at low rate → critical.
+        (18, 20, 1, 0, 0, 1, "critical", ["structural_untested"]),
+        # The SAME isolated structural failure deep in a proven campaign → NOT critical.
+        (18, 20, 1, 0, 5, 1, "healthy", []),
+        # Sustained: 3 consecutive degraded rounds escalates on persistence alone.
+        (15, 20, 0, 5, 5, 3, "critical", ["persistent"]),
+        # Transient noise on a proven pipeline above the rate floor → degraded, quiet.
+        (15, 20, 0, 5, 5, 1, "degraded", ["degraded"]),
+        # Untested origin, no degradation but few samples (wide CI) → degraded/under-probed.
+        (10, 20, 0, 0, 0, 0, "degraded", ["untested"]),
+    ],
+)
+def test_degradation_health_is_context_aware(
+    hits, total, structural, transient, prior_clean, consec, grade, reasons
+):
+    """The verdict grades the SAME degradation differently by track record, and only a
+    ``critical`` grade carries an operator-facing suggested action (never auto-stops)."""
+    from promptpotter.domain.results import compute_degradation_health
+
+    h = compute_degradation_health(
+        hits=hits,
+        total=total,
+        structural_count=structural,
+        transient_count=transient,
+        prior_clean_rounds=prior_clean,
+        consecutive_degraded_rounds=consec,
+        dominant_node="entity_profiling",
+    )
+    assert h is not None
+    assert h.grade == grade
+    assert h.reasons == reasons
+    assert (h.suggested_action is not None) is (grade == "critical")
+    assert h.ci_lo <= hits / total <= h.ci_hi
+
+
+def test_origin_verdict_is_first_in_the_l1_track_record():
+    """The origin (round 0) is the floor every L1 round improves on, so its verdict
+    must lead the track record. ``Cycle.rounds`` omits the origin (1-indexed L1
+    trajectory), but on resume ``replay_priors`` leaves a round-0 entry in it — the
+    assembly must take the origin from ``origin_health`` and drop that round-0 entry
+    (no double-count) plus the round being closed. End-to-end: an origin that graded
+    ``critical`` makes a degrading L1 round see ≥3 consecutive → ``persistent``."""
+    from promptpotter.domain.results import (
+        RoundResult,
+        assemble_prior_healths,
+        compute_degradation_health,
+        compute_round_health,
+    )
+
+    def _health(grade):
+        return compute_degradation_health(
+            hits=15,
+            total=20,
+            structural_count=(0 if grade == "healthy" else 5),
+            transient_count=0,
+            prior_clean_rounds=(5 if grade != "critical" else 0),
+            consecutive_degraded_rounds=1,
+        )
+
+    def _round(round_num: int, grade: str | None) -> RoundResult:
+        return RoundResult(
+            round=round_num,
+            label=f"C{round_num}",
+            accuracy=0.75,
+            composite_fitness=0.75,
+            hits=15,
+            total=20,
+            improved=False,
+            prompt_fields={},
+            candidates_scored=1,
+            health=(_health(grade) if grade else None),
+        )
+
+    origin_h = _health("critical")
+    # Fresh run: origin lives only on origin_health, rounds = [R1, R2].
+    fresh = assemble_prior_healths(origin_h, [_round(1, "degraded"), _round(2, "degraded")], 3)
+    # Resume: replay_priors left a round-0 entry in rounds — must not double-count.
+    resumed = assemble_prior_healths(
+        origin_h, [_round(0, "critical"), _round(1, "degraded"), _round(2, "degraded")], 3
+    )
+    assert fresh == resumed, "resume's round-0 entry must not double-count the origin"
+    assert fresh[0] is origin_h and len(fresh) == 3
+
+    # Degrading R3 on top of (critical origin, degraded R1, degraded R2) → 3 consecutive.
+    transient_rows = [
+        {"pipeline_data": {"diagnostics": {"step_statuses": {"web_search": "degraded"}}}}
+        for _ in range(5)
+    ] + [{"pipeline_data": {"diagnostics": {}}} for _ in range(15)]
+    h = compute_round_health(hits=15, total=20, results=transient_rows, prior_healths=fresh)
+    assert h is not None and h.grade == "critical" and "persistent" in h.reasons
+
+
+def test_ungraded_prior_round_is_transparent_to_the_track_record():
+    """An ungraded prior verdict (``None`` — a probe round, or a round that measured
+    zero samples) must be TRANSPARENT to the track record: it neither counts as a
+    clean round nor breaks the consecutive-degraded chain. A probe interleaved in a
+    ``degraded → probe → degraded`` run must still reach the ``persistent`` critical;
+    the probe's ``None`` must not fake a clean prior that suppresses ``untested``."""
+    from promptpotter.domain.results import compute_degradation_health, compute_round_health
+
+    degraded = compute_degradation_health(
+        hits=15,
+        total=20,
+        structural_count=0,
+        transient_count=5,
+        prior_clean_rounds=5,
+        consecutive_degraded_rounds=1,
+    )
+    assert degraded is not None and degraded.grade == "degraded"
+
+    # Priors oldest→newest: degraded, probe(None), degraded. The current round is also
+    # degrading → 3 consecutive once the probe is skipped (not counted, not a break).
+    transient_rows = [
+        {"pipeline_data": {"diagnostics": {"step_statuses": {"web_search": "degraded"}}}}
+        for _ in range(5)
+    ] + [{"pipeline_data": {"diagnostics": {}}} for _ in range(15)]
+    h = compute_round_health(
+        hits=15, total=20, results=transient_rows, prior_healths=[degraded, None, degraded]
+    )
+    assert h is not None and h.grade == "critical" and "persistent" in h.reasons
+
+
+def test_degradation_health_none_when_unmeasured():
+    """Zero samples ⇒ no verdict (None), not a fabricated healthy grade."""
+    from promptpotter.domain.results import compute_degradation_health
+
+    assert (
+        compute_degradation_health(
+            hits=0,
+            total=0,
+            structural_count=0,
+            transient_count=0,
+            prior_clean_rounds=0,
+            consecutive_degraded_rounds=0,
+        )
+        is None
+    )
 
 
 # ===========================================================================

@@ -1,6 +1,6 @@
 ---
 name: potter-debt-sweep
-description: The daily automated code-hygiene sweep for PromptPotter. Runs a five-lens verification audit (dead code / fallbacks+hidden-defaults / structural / webapp R-36 / doc-drift), verifies every finding before touching anything, applies only the gate-safe fixes, reconciles the debt backlog, and ends with a PR. Use on the daily schedule, before any release, or whenever the operator says "run the debt sweep" / "do the daily cleanup" / "sweep for untracked debt". Edits code autonomously — so the verify-before-act discipline and the gate are non-negotiable. Distinct from potter-dev (the imprinted playbook this skill loads) and spec-buddy (spec docs, not code).
+description: The daily automated code-hygiene sweep for PromptPotter. Runs a five-lens verification audit (dead code / fallbacks+hidden-defaults / structural / webapp R-36 / doc-drift), verifies every finding before touching anything, applies only the gate-safe fixes, reconciles the debt backlog, and appends to one rolling PR. Use on the daily schedule, before any release, or whenever the operator says "run the debt sweep" / "do the daily cleanup" / "sweep for untracked debt". Edits code autonomously — so the verify-before-act discipline and the gate are non-negotiable. Distinct from potter-dev (the imprinted playbook this skill loads) and spec-buddy (spec docs, not code).
 model: opus
 ---
 
@@ -9,7 +9,7 @@ model: opus
 **Goal:** every day, surface code debt the linters can't (dead code, hidden
 defaults, single-caller indirection, client-side scoring, doc drift), apply
 *only* the fixes that are provably safe and pass the full gate, file the rest
-on the backlog, and **open a PR** so the operator reviews at leisure and `main`
+on the backlog, and **append to one rolling PR** so the operator reviews at leisure and `main`
 never takes an unreviewed auto-edit. The operator must be able to trust this
 running unattended — so the rigor below is the product, not the speed.
 
@@ -26,9 +26,22 @@ directly and NEVER touches a sibling repo (TermNorm, marketing).
    do not entangle the sweep with operator WIP. Report "tree dirty, skipped" and stop.
 2. **On `main`, up to date.** `git fetch && git checkout main && git pull --ff-only`.
    If the pull isn't fast-forward, abort and report.
-3. **Gate is green at HEAD before you start** (so any red later is *yours*):
-   `python -m ruff check promptpotter/ tests/ && python -m mypy promptpotter/ && python -m pytest -q`.
-   If already red, abort and report — don't pile cleanup onto a broken main.
+3. **`main`'s own CI must already be green.** `gh run list --branch main --workflow CI --limit 1`
+   — if the latest run is `failure` or still `in_progress`, **abort and report** ("main CI
+   <state> — fix before sweeping"). A sweep never builds on a red main and never stacks a PR
+   on top of one (this is exactly how the 2026-06-15 pile-up happened).
+4. **Gate is green at HEAD, in the *pinned* environment** (so local-green ⇒ CI-green — the
+   sweep must see what CI sees, not a stale local resolve):
+   `pip install -q uv` (if absent) → `python -m uv sync --extra stats --extra dev --frozen` →
+   `python -m uv run ruff check promptpotter/ tests/ && python -m uv run mypy promptpotter/ &&
+   python -m uv run pytest -q`. The `--frozen` flag installs the exact `uv.lock` graph CI uses;
+   never gate against an ad-hoc `pip install` set. If already red, abort and report.
+5. **Establish the rolling branch.** `gh pr list --head debt-sweep/rolling --state open`. If a
+   rolling PR is open → `git checkout -B debt-sweep/rolling origin/debt-sweep/rolling &&
+   git merge --no-edit origin/main` (fold main in by **merge, never rebase/force-push**; on a
+   conflict, abort and report — let the operator land it). If none is open → stay on `main`; the
+   fresh `debt-sweep/rolling` branch is cut in Phase 7. The audit runs on this ref so prior-day
+   fixes not yet merged aren't re-flagged.
 
 ## Phase 1 — Baseline
 
@@ -77,10 +90,10 @@ When in doubt, HOLD. A missed cleanup is free; a wrong auto-edit on `main`-bound
 
 ## Phase 5 — Gate (never ship red)
 
-After applying the safe fixes:
-`python -m ruff format promptpotter/ tests/` →
-`python -m ruff check promptpotter/ tests/` → `python -m mypy promptpotter/` →
-`python -m pytest -q`. If any TypeScript changed: `cd webapp && npm run lint && npx tsc --noEmit && npm run test && npm run build`.
+After applying the safe fixes, gate through the **pinned** env (same as Phase 0.4):
+`python -m uv run ruff format promptpotter/ tests/` →
+`python -m uv run ruff check promptpotter/ tests/` → `python -m uv run mypy promptpotter/` →
+`python -m uv run pytest -q`. If any TypeScript changed: `cd webapp && npm run lint && npx tsc --noEmit && npm run test && npm run build`.
 If the gate goes red, **revert the offending edit** (`git checkout -- <file>`) and
 re-gate — do not open a PR with a red gate. A fix that can't pass the gate becomes a backlog entry instead.
 
@@ -90,19 +103,29 @@ In `docs/specs/code-debt-cleanup.md`: strip every item that shipped (git log is 
 history layer — do not leave a done-log), and **add** the held + medium findings with
 the file's required shape (file+line · why · action · blockers). Augment in place; never restructure (R-27).
 
-## Phase 7 — End with a PR
+## Phase 7 — Append to the rolling PR
 
-- Branch: `debt-sweep/YYYY-MM-DD` (date from the run; pass it in — do not call `Date.now()` inside a workflow).
+One stable branch, `debt-sweep/rolling`, carries every sweep until the operator merges it —
+daily runs **append**, they never open a second PR. (The 06-15 pile-up was fresh-branch-per-day;
+rolling collapses the queue to one reviewable PR.)
+
+- Branch: always `debt-sweep/rolling` (set up in Phase 0.5 — already checked out if a PR was open).
 - Commit in **~2 coherent commits** (R-16): one for the code fixes
   (`refactor: drop dead code + hidden defaults (daily debt sweep)`), one for docs/backlog
   (`docs: fix <surface> drift + reconcile debt backlog`). Conventional prefixes, ≤800 chars,
   the `Co-Authored-By` trailer. `git add` only the paths you changed (R-37).
-- Push the branch; `gh pr create` with a body that mirrors this skill's report:
-  **Shipped** (tiered, with the verified why), **Held + reasons** (the verify-before-act
-  catches), **Medium for operator** (T5). Title: `Daily debt sweep — YYYY-MM-DD`.
-- **If nothing was safe to fix and nothing changed**: open no PR; emit a one-line
-  "swept YYYY-MM-DD — clean, nothing to fix" so the daily signal still lands. If only
-  the backlog changed (new holds filed), open the PR with just the docs commit.
+- Push (`git push -u origin debt-sweep/rolling`) — fast-forward only; **never force-push** (fold
+  `main` in via the Phase 0.5 merge, never a rebase, so the operator's in-flight review survives).
+- **PR body:** if the rolling PR is open, **append** a dated section via `gh pr edit` (R-27 —
+  augment, never rewrite the existing body); else `gh pr create`, title `Debt sweep — rolling`.
+  Each dated section mirrors the report: **Shipped** (tiered, verified why), **Held + reasons**,
+  **Medium for operator** (T5). (Date passed in — do not call `Date.now()` inside a workflow.)
+- **Confirm the PR's CI is green before declaring done.** After pushing, `gh pr checks
+  debt-sweep/rolling --watch` (or poll). If the `check` job goes red, **report the failure** —
+  do not claim a clean sweep. Local-green is necessary, the PR's own CI is the proof.
+- **If nothing was safe to fix and nothing changed**: push nothing, open/append nothing; emit a
+  one-line "swept YYYY-MM-DD — clean, nothing to fix" so the daily signal still lands. If only
+  the backlog changed (new holds filed), append the docs commit alone.
 
 ## Guardrails (unattended-safe)
 
@@ -110,5 +133,7 @@ the file's required shape (file+line · why · action · blockers). Augment in p
 - **No sibling-repo edits** (R-37) — TermNorm + marketing are off-limits; cross-repo
   items stay on the backlog as cross-repo notes.
 - **Hold all feature/lane work** — this skill ships cleanup only.
-- **One run = one PR** (or none). Never push to `main`. Never force-push.
-- If a prior `debt-sweep/*` branch is still open/unmerged, note it in the new PR body and continue.
+- **One open rolling PR at a time** — every run appends to `debt-sweep/rolling` until the operator
+  merges it; never open a second debt-sweep PR. Never push to `main`. Never force-push.
+- **Never sweep on red, never declare done on red** — Phase 0.3 aborts if main's CI is red;
+  Phase 7 won't claim a clean sweep until the rolling PR's CI is green.

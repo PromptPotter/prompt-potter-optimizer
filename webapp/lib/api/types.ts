@@ -21,6 +21,7 @@ export type {
   DatasetItem,
   DatasetPipelineResponse,
   DatasetPreviewResponse,
+  DegradationHealth,
   DiagnosticRunListResponse,
   DiagnosticRunRecord,
   FileContentResponse,

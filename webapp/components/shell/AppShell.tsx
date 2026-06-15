@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { fetchCycleFile, fetchPipeline, type HardSamplesScope } from "@/lib/api";
+import { postStopCycle } from "@/lib/api/mutations";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -245,6 +246,11 @@ function AppShellInner() {
           dash={dash}
           runPhaseResolved={runPhaseResolved}
           onOpenFiles={() => setTab("files")}
+          onStopCampaign={
+            campaignId && cycleId
+              ? () => void postStopCycle(campaignId, cycleId)
+              : undefined
+          }
         />
         {cycleId ? (
           <StatusAssistant

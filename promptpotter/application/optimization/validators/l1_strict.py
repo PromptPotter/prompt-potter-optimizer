@@ -26,7 +26,7 @@ from promptpotter.application.optimization.dispatch.schemas import L1GenerateOut
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.escalation_signals import ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
@@ -198,6 +198,13 @@ def validate_overrides(
     JSON-schema ``type`` constraint in :func:`build_l1_output_schema` is
     meant to prevent — both layers run because not every provider/SDK
     enforces structured-output schemas with full fidelity.
+
+    ``SCHEMA_OWNED_FIELDS`` (``output_schema`` + schema registry identity) are
+    rejected UNCONDITIONALLY (no ablation unlock): the output schema is the
+    pipeline's structural wire contract, and a mutated one breaks the backend.
+    ``node_param_keys`` already strips them from the emittable surface, so this is
+    the deterministic backstop for a provider that leaks the key past its schema —
+    the structural twin of the model/provider lock.
     """
     failures: list[ValidationFailure] = []
     allowed_models = list(pipeline_schema.available_models)
@@ -208,7 +215,9 @@ def validate_overrides(
         node_allowed = (node.param_allowed_values if node else None) or {}
         node_types = (node.param_types if node else None) or {}
         for param, value in node_params.items():
-            if forbidden_axes_strict and param in PARAM_FORBIDDEN_KEYS:
+            if param in SCHEMA_OWNED_FIELDS or (
+                forbidden_axes_strict and param in PARAM_FORBIDDEN_KEYS
+            ):
                 failures.append(
                     ValidationFailure(
                         axis=f"{node_name}.{param}",

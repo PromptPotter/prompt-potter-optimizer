@@ -64,7 +64,12 @@ def _r_validation_failures(b: InjectionBundle) -> str:
     "runtime_failures",
     kind=InjectionKind.MEASUREMENT,
     description="Wound 2: DegradationCheck mid-eval evidence — per-candidate runtime failures.",
-    char_cap=800,
+    # This is the "do not re-propose" list — truncating it mid-list lets L1
+    # re-propose a config it dropped, the exact failure this channel prevents. The
+    # source is already bounded by RUNTIME_FAILURE_RECENCY_WINDOW (older failures
+    # collapse to "… N older suppressed"), so the cap only has to fit one window's
+    # worth; raised from 800 (a high-failure round on a complex pipeline hit 1031).
+    char_cap=2000,
 )
 def _r_runtime_failures(b: InjectionBundle) -> str:
     """Wound 2 — DegradationCheck mid-eval evidence. Fenced (echoes pipeline warnings).

@@ -173,8 +173,12 @@ def test_pipeline_schema_node_param_keys_drops_unparametrized_nodes() -> None:
                 langfuse_type="tool",
             ),
             PipelineNode(
+                # `output_schema` + schema registry identity are structural, not
+                # tunables — they must be stripped from the optimizer's emittable
+                # surface even when a node lists them in param_keys (a mutated
+                # output_schema breaks the backend).
                 name="rank",
-                param_keys={"temperature"},
+                param_keys={"temperature", "output_schema", "schema_family", "schema_version"},
                 observation_name="rank",
                 observation_mappings=[ObservationMapping(pipeline_key="ranked", is_llm=True)],
                 langfuse_type="generation",

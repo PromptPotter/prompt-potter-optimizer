@@ -77,6 +77,18 @@ def test_rescore_results_accumulates_and_projects_active() -> None:
     assert result["fitness"] == 0.0 and result["hit"] is False
 
 
+def test_next_resume_round_keys_on_round_number_not_count() -> None:
+    """Resume's next-round is highest persisted round NUMBER + 1, never ``len()``.
+    Origin is round 0 in ``index.json::rounds`` now, so counting entries over-counts
+    by one and the loop would skip a round (round_0000, round_0002, no round_0001)."""
+    from promptpotter.application.bootstrap.scoring_context import next_resume_round
+
+    assert next_resume_round([]) == 1  # nothing persisted → fresh
+    assert next_resume_round([make_round(0)]) == 1  # origin only → first L1 round
+    assert next_resume_round([make_round(0), make_round(1)]) == 2  # NOT 3
+    assert next_resume_round([make_round(0), make_round(1), make_round(2)]) == 3
+
+
 def _r(score: float) -> dict:
     return {"query": "q", "predicted": "p", "ground_truth": "g", "fitness": score, "hit": False}
 

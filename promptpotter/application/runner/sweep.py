@@ -42,6 +42,16 @@ async def run_sweep_generation_only(
 
     if session.state.cycle_id:
         with graceful("Sweep generation-only round_data write failed"):
+            # NOT routed through ``build_round_payload`` — that serializer is for a
+            # SCORED ``RoundResult`` (scoreboard, per-sample results, matched-origin,
+            # critique, and the ``health`` verdict stamped at ``close_round``). A
+            # generation-only round has no measurement: no RoundResult, no scoring,
+            # and — by design — NO ``health`` (a degradation verdict needs scored
+            # samples). It is a deliberately distinct artifact keyed by
+            # ``status: generation_only`` and carries its own ``l1_*`` yield fields
+            # that a scored round lacks. Forcing it through the scored serializer
+            # would fabricate zero-valued scoring fields and still couldn't express
+            # these — so this stays a hand-built dict, not a hand-MIRRORED one.
             session.store.campaigns.save_round_file(
                 session.campaign_id,
                 session.state.cycle_id,

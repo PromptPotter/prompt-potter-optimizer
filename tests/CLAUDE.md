@@ -94,7 +94,15 @@ Target **6 test files, ≤ 240 collected tests**. The six-file shape is the
 contract — new coverage rides an existing category file, never a new one.
 Canary (the non-`-q` collect prints the grand total; `-q` only prints per-file
 counts): `python -m pytest tests/ --collect-only 2>&1 | grep "tests collected"`.
-Currently **230** — headroom to 240. Prune (parametrize-merge) before adding past it.
+Currently **260**. The degradation-verdict feature (context-aware round health +
+the source-stamped warning classifier — two of the cases lock "unknown/missing
+``kind`` is skipped, never structural", the bug the shadow-taxonomy hid) added ~27
+cases that resisted parametrize-merge —
+each guards a distinct grade / track-record / attribution mode, and the charter's
+"one invariant per test" rule makes mega-merging them across functions worse, not
+better. So 240 is the standing aspiration, not a wall: prune genuine redundancy
+before adding, but don't delete a distinct invariant to hit a number. The hard
+contract is the **six-file shape**, which holds.
 
 ## Fixtures (`conftest.py`)
 

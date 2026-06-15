@@ -13,28 +13,32 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v6
+      # uv provisions Python 3.13 and installs the EXACT pinned graph from
+      # uv.lock (--frozen fails if the lock drifted from pyproject). This is
+      # what makes CI reproducible: a dependency only moves when uv.lock is
+      # deliberately regenerated in a PR, never silently at install time.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.13"
-          cache: pip
+          enable-cache: true
 
       - name: Install dependencies
-        run: pip install -e ".[stats,dev]"
+        run: uv sync --extra stats --extra dev --frozen
 
       - name: Lint
-        run: ruff check promptpotter/ tests/
+        run: uv run ruff check promptpotter/ tests/
 
       - name: Format check
-        run: ruff format --check promptpotter/ tests/
+        run: uv run ruff format --check promptpotter/ tests/
 
       - name: Dependency check
-        run: deptry .
+        run: uv run deptry .
 
       - name: Type check
-        run: mypy promptpotter/
+        run: uv run mypy promptpotter/
 
       - name: Tests
-        run: pytest tests/ -q --tb=short --cov=promptpotter --cov-report=term-missing
+        run: uv run pytest tests/ -q --tb=short --cov=promptpotter --cov-report=term-missing
 
   webapp:
     runs-on: ubuntu-latest

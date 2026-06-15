@@ -2015,6 +2015,27 @@ def test_stage1_identity_gates(monkeypatch, tmp_path: Path) -> None:
     else:
         raise AssertionError("resolve_identity must raise 401 when no session bound")
 
+    # Revamp: development with ZERO providers configured can't complete a login,
+    # so it resolves the SAME single operator as auth-off (no flag) — CLI↔webapp
+    # parity. PROMPTPOTTER_AUTH stays unset here; the gate is purely env + providers.
+    from promptpotter.config.settings import settings as _settings
+
+    monkeypatch.setattr(_settings, "ENVIRONMENT", "development")
+    request.app.state.identity_bundle.config.configured = ()
+    assert resolve_identity(request) == registered_or_default_identity(), (
+        "development + no providers configured must resolve like the CLI, not 401"
+    )
+
+    # ...but PRODUCTION with no providers stays STRICT — a misconfigured deploy
+    # must 401, never silently open to the default tenant.
+    monkeypatch.setattr(_settings, "ENVIRONMENT", "production")
+    try:
+        resolve_identity(request)
+    except PotterError as exc:
+        assert exc.http_status == 401
+    else:
+        raise AssertionError("production + no providers must stay strict (401), never open")
+
     # Sanity — gate #2 file allowlist references files that actually exist.
     for path in allowed:
         assert path.is_file(), f"gate #2 allowlist references missing file: {path}"
@@ -2886,3 +2907,38 @@ def test_audit_trail_persists_origin_as_round_0000(tmp_path: Path) -> None:
     assert origin_path.exists(), "origin phase must flush to round_0000.json"
     assert round_1_path.exists(), "first L1 round must flush to round_0001.json"
     assert not legacy_origin_path.exists(), "round_origin.json must not be written"
+
+
+def test_round_payload_is_one_builder_for_origin_and_l1() -> None:
+    """Origin (round 0) and L1 round files are serialized through the SINGLE
+    ``build_round_payload`` — same key shape, every field derived from
+    ``RoundResult``. Guards against the prior rot of two hand-mirrored dicts where
+    a new field (``health`` was the casualty) silently dropped from one path.
+    ``health`` is deliberately absent here — it's stamped + injected at
+    ``close_round``, after the cycle's track record settles."""
+    from promptpotter.application.optimization.cycle import build_round_payload
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.results import RoundResult
+
+    def _rr(round_num: int, label: str) -> RoundResult:
+        return RoundResult(
+            round=round_num,
+            label=label,
+            accuracy=0.5,
+            composite_fitness=0.5,
+            hits=5,
+            total=10,
+            improved=False,
+            prompt_fields={"instruction": "x"},
+            results=[{"query": "q", "hit": True}],
+            candidates_scored=1,
+        )
+
+    osp = OptSearchPoint()
+    origin = build_round_payload(_rr(0, "C0"), 0, osp)
+    l1 = build_round_payload(_rr(3, "C3.1"), 3, osp)
+
+    assert origin.keys() == l1.keys(), "origin and L1 round payloads must share one shape"
+    assert "health" not in origin, "health is injected at close_round, not the builder"
+    assert origin["round_id"] == "round_0" and origin["round"] == 0
+    assert l1["round_id"] == "round_3" and l1["round"] == 3

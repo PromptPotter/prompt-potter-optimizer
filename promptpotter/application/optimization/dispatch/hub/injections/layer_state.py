@@ -58,7 +58,12 @@ def _r_l3_to_l2_note(b: InjectionBundle) -> str:
     "rendered_prompt",
     kind=InjectionKind.TRACE,
     description="Current best searchpoint's compiled prompt body.",
-    char_cap=2500,
+    # The cap is a runaway backstop, NOT a budget knob — this is the exact prompt
+    # L1 is editing, so it must never arrive truncated (a cut-off prompt makes L1
+    # mis-edit or hallucinate the missing tail). Sized above a fully-evolved
+    # complex prompt (the 8-field scheme + situational rules for a hard task like
+    # entity-linking, which overran the old 2500 at 2766); only true runaway trips.
+    char_cap=8000,
 )
 def _r_rendered_prompt(b: InjectionBundle) -> str:
     """Current best searchpoint's compiled prompt body."""

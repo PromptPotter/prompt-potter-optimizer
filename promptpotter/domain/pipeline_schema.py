@@ -15,12 +15,20 @@ from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 # steer panel edits them through `PromptFieldsEditor`, not the config widgets).
 _PROMPT_OWNED_FIELDS = frozenset(PROMPT_STRING_FIELDS) | {"few_shot_examples", "plan"}
 
-# Structured-output schema fields owned by the output-schema view — excluded from
-# the lock-editor config surface the same way prompt fields are. The schema is one
-# concept shown ONCE as the "Structured output" tree (`NodeOutputSchemaView`):
-# `output_schema` is its content, `schema_family`/`schema_version` its registry
-# identity. Surfacing them ALSO as config chips duplicates the structured output.
-_SCHEMA_OWNED_FIELDS = frozenset({"output_schema", "schema_family", "schema_version"})
+# Structured-output schema fields owned by the output-schema view. TWO reasons to
+# fence them off:
+#   1. Display — excluded from the operator lock-editor config surface the same way
+#      prompt fields are: the schema is one concept shown ONCE as the "Structured
+#      output" tree (`NodeOutputSchemaView`) — `output_schema` is its content,
+#      `schema_family`/`schema_version` its registry identity. Surfacing them ALSO
+#      as config chips duplicates the structured output.
+#   2. Optimizer — they are STRUCTURAL, not tunables: the output schema is the
+#      pipeline's wire contract, and a mutated `output_schema` (e.g. an L1 variant
+#      that replaced it with a raw `{{format_string}}` template) breaks the backend
+#      ("Schema must contain 'properties'"). So `node_param_keys` strips them from
+#      the optimizer's emittable surface — UNCONDITIONALLY, unlike model/provider
+#      (`PARAM_FORBIDDEN_KEYS`), which have an ablation unlock; the schema never does.
+SCHEMA_OWNED_FIELDS = frozenset({"output_schema", "schema_family", "schema_version"})
 
 
 def stable_hash(value: Any) -> str:
@@ -227,7 +235,7 @@ class PipelineSchema(BaseModel):
         ``current_config``) except the prompt-decomposition fields (the prompt
         editor owns those) and the structured-output schema fields (the
         ``NodeOutputSchemaView`` tree owns ``output_schema`` / ``schema_family`` /
-        ``schema_version`` — see ``_SCHEMA_OWNED_FIELDS``). Config-only keys not advertised as tunable (e.g.
+        ``schema_version`` — see ``SCHEMA_OWNED_FIELDS``). Config-only keys not advertised as tunable (e.g.
         ``provider: groq``) bundle in too, so the operator sees the WHOLE node as
         one unit. Unlike :meth:`optimizer_locks`, model/provider are INCLUDED
         (the operator isn't the optimizer — the seed overlay outranks the
@@ -241,7 +249,7 @@ class PipelineSchema(BaseModel):
         for n in self.nodes:
             params: list[NodeConfigParam] = []
             for key in sorted(
-                (n.param_keys | set(n.current_config)) - _PROMPT_OWNED_FIELDS - _SCHEMA_OWNED_FIELDS
+                (n.param_keys | set(n.current_config)) - _PROMPT_OWNED_FIELDS - SCHEMA_OWNED_FIELDS
             ):
                 if key == "model":
                     kind, options = "model", list(self.available_models)
@@ -364,10 +372,17 @@ class PipelineSchema(BaseModel):
         the `model` axis is synthesized onto each LLM node (value space =
         `available_models`); that is the sole ablation lever. `provider` is never
         an optimizer axis.
+
+        `SCHEMA_OWNED_FIELDS` (`output_schema` + schema registry identity) are
+        stripped UNCONDITIONALLY — they are the pipeline's structural wire contract,
+        not tunables; an L1 variant that mutated `output_schema` would break the
+        backend. Unlike model/provider there is no unlock: the schema is never an
+        optimizer axis. Stripping here keeps `build_l1_output_schema` from declaring
+        them, so the LLM can't emit a key the schema omits.
         """
         out: dict[str, set[str]] = {}
         for step in self.nodes:
-            keys = set(step.param_keys) - PARAM_FORBIDDEN_KEYS
+            keys = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
             if not forbidden_strict and self.available_models and step.is_llm:
                 keys = keys | {"model"}
             if keys:

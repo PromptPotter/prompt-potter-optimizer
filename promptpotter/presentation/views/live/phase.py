@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.presentation.views.display import (
+    BOLD,
     GREEN,
+    RED,
     RESET,
     YELLOW,
     _node_line,
@@ -95,6 +97,19 @@ def render_round_stats(
             f"{round_result.candidates_scored} candidates"
         )
     )
+
+    # Degradation verdict — the served ``round_result.health`` (R-36: rendered,
+    # not recomputed). Loudness scales with grade; ``healthy`` stays silent.
+    h = round_result.health
+    if h is not None and h.grade == "critical":
+        lines.append(_node_line(f"{BOLD}{RED}⛔ CRITICAL — {h.suggested_action}{RESET}"))
+    elif h is not None and h.grade == "degraded":
+        why = (
+            f"{h.structural_count + h.transient_count}/{h.samples} samples degraded"
+            if (h.structural_count + h.transient_count)
+            else f"under-probed (CI {h.ci_lo:.0%}-{h.ci_hi:.0%})"
+        )
+        lines.append(_node_line(f"{YELLOW}⚠ DEGRADED — {why}; numbers soft{RESET}"))
 
     if not round_result.results:
         return "\n".join(lines)

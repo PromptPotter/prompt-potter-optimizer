@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -26,6 +26,19 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def next_resume_round(round_summaries: list[dict[str, Any]]) -> int:
+    """Next L1 round to run on resume = highest persisted round NUMBER + 1.
+
+    Keyed on the round number, never ``len()``: the origin is round 0 in
+    ``index.json::rounds`` now, so counting entries over-counts by one and the loop
+    skips a round (round_0000, round_0002, never round_0001). A clean fresh start
+    (origin only) → max 0 → next round 1.
+
+    Entries are ``index.json::rounds`` (``RoundSummary``, ``round: int`` required),
+    so the key is read directly — no ``.get`` default papering over an absent key."""
+    return max((int(r["round"]) for r in round_summaries), default=0) + 1
 
 
 def bootstrap_cycle(
@@ -54,7 +67,7 @@ def bootstrap_cycle(
             # Diag forks re-measure against their own JSP; refresh on drift from inherited value.
             if existing.get("origin_accuracy") != origin_accuracy:
                 store.update(campaign_id, resolved, {"origin_accuracy": origin_accuracy})
-            return resolved, len(existing.get("rounds", [])) + 1
+            return resolved, next_resume_round(existing.get("rounds", []))
         return resolved, 1
     except (OSError, json.JSONDecodeError, KeyError):
         logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
