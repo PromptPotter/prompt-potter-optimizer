@@ -894,7 +894,11 @@ def test_control_plane_drift() -> None:
     from promptpotter.main import app
 
     channel_address = cycle_events.get("address") or ""
-    registered_paths = [getattr(r, "path", "") for r in app.routes]
+    # Assert against the OpenAPI schema (the public, stable path contract), not
+    # app.routes: FastAPI keeps included routes behind a lazy proxy in
+    # app.routes rather than a flat APIRoute list, so a `.path` scan is not a
+    # reliable registry of what is actually served.
+    registered_paths = list(app.openapi()["paths"].keys())
     expected_route = "/api/v1" + channel_address
     assert any(channel_address in p for p in registered_paths), (
         f"AsyncAPI declares channel at {channel_address!r} but no FastAPI route "
