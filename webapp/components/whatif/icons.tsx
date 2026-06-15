@@ -1,4 +1,4 @@
-// Per-evaluator glyphs — lifted verbatim from vanilla webapp/index.html:1690.
+// Per-evaluator glyphs.
 // Namespaced display names (e.g. ``fuzzy_matching_source_recall``) fall back
 // to their registry stem icon so node-type-bound metrics render with the
 // right glyph regardless of which node owns them this round.

@@ -26,6 +26,7 @@ from promptpotter.infrastructure.llm.json_parse import MetaPromptParseError
 from promptpotter.infrastructure.llm.models import emit_round_warning
 from promptpotter.infrastructure.tracing import CandidateCreated
 from promptpotter.shared.errors import graceful
+from promptpotter.shared.text import truncate_ellipsis
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -138,7 +139,7 @@ async def l1_generate(
         opt_sp.memory.wounds.validation_failures.append(
             ValidationFailure(
                 axis="l1_generate.output",
-                value=_truncate_raw(parse_err.raw, 300),
+                value=truncate_ellipsis(parse_err.raw, 300),
                 allowed=[],
                 reason=reason,
             )
@@ -186,7 +187,7 @@ async def l1_generate(
         opt_sp.memory.wounds.validation_failures.append(
             ValidationFailure(
                 axis="l1_generate.output",
-                value=_truncate_raw(str(generated), 300),
+                value=truncate_ellipsis(str(generated), 300),
                 allowed=[],
                 reason="meta_prompt_unexpected_type",
             )
@@ -243,10 +244,6 @@ async def l1_generate(
                 )
 
     return population
-
-
-def _truncate_raw(s: str, n: int) -> str:
-    return s if len(s) <= n else s[: n - 1] + "…"
 
 
 __all__ = ["candidate_summaries", "l1_generate"]

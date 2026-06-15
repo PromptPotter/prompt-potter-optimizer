@@ -22,6 +22,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
     apply_discovered_caps,
     raise_if_request_too_large,
 )
+from promptpotter.shared.text import truncate_ellipsis
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -140,7 +141,7 @@ class OpenAICompatibleClient(LLMClientBase):
                     "role": "user",
                     "content": (
                         "Your previous response failed schema validation. Errors:\n"
-                        f"{_truncate(str(validation_err), 600)}\n\n"
+                        f"{truncate_ellipsis(str(validation_err), 600)}\n\n"
                         "Return ONLY a JSON object that strictly matches the "
                         "requested schema. No prose, no markdown fences, no "
                         "extra fields."
@@ -257,10 +258,6 @@ class OpenAICompatibleClient(LLMClientBase):
         return try_groq_json_validate_repair(
             exc, request_params, self._provider_name, response_model
         )
-
-
-def _truncate(s: str, n: int) -> str:
-    return s if len(s) <= n else s[: n - 1] + "…"
 
 
 __all__ = ["OpenAICompatibleClient"]

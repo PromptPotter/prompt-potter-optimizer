@@ -4,7 +4,7 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 
 **Two axes describe every wound — there is no "four-wound taxonomy" to memorise.** What used to read as four parallel pipelines is two orthogonal axes:
 
-- **Detection point** → record type + score effect + lifecycle. Parse-time → `ValidationFailure`, synthetic-0, per-candidate. Mid-eval → `RuntimeFailure`, real score + rate, accumulated/deduped. Post-parse → `ValidatorOutcome`, no score effect, per-round. The three typed `WoundChannels` lists encode this axis (kept distinct — merging them is over-collapse).
+- **Detection point** → record type + score effect + lifecycle. Parse-time → `ValidationFailure`, synthetic-0, per-candidate. Mid-eval → `RuntimeFailure`, real score + rate, accumulated/deduped. Post-parse → `ValidatorOutcome`, no score effect, per-round. Three detection points, but **four** typed `WoundChannels` lists: post-parse splits `l2_guard_breaches` vs `l3_guard_breaches` because `escalate_l2` reads L2's breach-stream as its L3-fire trigger while L3 self-reads its own — distinct consumers, not redundancy (merging them would need a discriminator = over-collapse). A fifth channel, `l3_note`, is a sticky free-text L3→L2 steer, not a failure record.
 - **Nurse owner** → who heals it. This axis is **mostly structural — it falls out of the record type**, so only one record carries a field for it. A `ValidationFailure` is *always* L1's own malformed output (L1 retunes). A guard-breach `ValidatorOutcome` *always* routes to L3 — via the non-empty-`l2_guard_breaches`-stream → `escalate_l2` mechanism, not a stored value. Only a `RuntimeFailure` carries a genuine choice, so it (and only it) carries an `owner: NurseOwner` field ∈ `{L1, OPERATOR}`: an L1-retunable rate-degradation vs an operator-terminal break (the token blowout) no in-loop layer can reach. L2 produces wounds (its guard breaches) but heals none.
 
 A new mechanism picks its stream by **detection point**; its owner is implied by the record type, except a `RuntimeFailure` which stamps `owner` where the choice is real. No nurse wired by hand, no sidecar. The producer-keyed `nurse_target` field is **retired** (set everywhere, read nowhere — a `tests/test_structure.py` ban keeps it gone). The prompt-budget unit (below) is a **separate** mechanism, not a wound.
@@ -28,8 +28,8 @@ A new mechanism picks its stream by **detection point**; its owner is implied by
 ## The wounds, mapped to the two axes
 
 Four historical "wounds" — but read them as (detection point × nurse owner), not as four
-pipelines. Storage stays three typed lists; **rendering collapses to two owner-grouped signals**
-(`l1_wounds` = validation + runtime; `guard_breaches` = L2 + L3 post-parse).
+pipelines. Storage stays four typed lists (+ `l3_note`); **rendering collapses to two
+owner-grouped signals** (`l1_wounds` = validation + runtime; `guard_breaches` = L2 + L3 post-parse).
 
 |  | Wound 1 | Wound 2 | Wound 3 | Wound 4 |
 |---|---|---|---|---|
@@ -153,6 +153,7 @@ Fields on `OptSearchPoint.memory` (the `L2L3Memory` sub-model in `domain/opt_sea
 | `wounds.runtime_failures` | per-candidate + cumulative outer-memory mirror | Wound 2 + 3 |
 | `wounds.l2_guard_breaches` | per-round, set by L2 post-parse | Wound 4 — L3 reads |
 | `wounds.l3_guard_breaches` | per-round, set by L3 post-parse | L3 self-heal |
+| `wounds.l3_note` | sticky free-text; set by L3, survives the L2-fire OSP swap via `copy_memory_to` | L3→L2 steer (not a failure record) |
 
 The L1 critique itself lives on `RoundResult.critique` (a dict, not on `L2L3Memory`); the dispatch hub's `critique` injection reads it from `cycle.latest_round.critique`. Per-round trajectory + cumulative warned-query subset (probe-round source) live on `Cycle` (`Cycle.rounds`, `Cycle.warned_queries`), not OSP.
 

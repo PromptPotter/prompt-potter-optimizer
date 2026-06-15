@@ -234,6 +234,30 @@ Dead-field / single-caller-indirection sweep. Code fixes **shipped** in `debt-sw
 **Variadic hold:**
 - `infrastructure/store/measurement_archive.py::register_alias(...)` — variadic `*args` or keyword-only params that are never passed by the sole caller. Verify and drop the dead params.
 
+### Untracked-debt sweep (2026-06-15) — holds after verification
+
+Five-lens audit. The tree came back near-clean (recent sweeps drained the
+dead-symbol backlog); the safe set that shipped this run — `_truncate`/`_truncate_raw`
+collapse into `shared/text.py::truncate_ellipsis` + dead `vanilla webapp/index.html:NNNN`
+breadcrumb-comment strips — is in git log. One genuine new hold:
+
+**Tier 5 — webapp CSS cascade-order drift (operator call: reordering changes the cascade).**
+- `webapp/app/styles/index.css:34-40` — `foundation/reduced-motion.css` is imported at line 34,
+  **before** five domain files (`login`/`onboarding`/`backend-node`/`account`/`auth`, lines 35-39),
+  yet `webapp/CLAUDE.md § Stylesheet` declares reduced-motion + responsive the "two cross-cutting
+  tail files imported last so their overrides win." So any motion rule in those five domains
+  currently wins over `reduced-motion`'s suppression — a latent `prefers-reduced-motion` a11y gap.
+  **Action:** move the five domain `@import`s above line 34 so the cascade tail is just
+  `reduced-motion` then `responsive`. **Blocker:** it's a cascade-behavior change — verify against
+  the light/dark + reduced-motion harness before landing, not a blind reorder.
+
+**Verified NOT new debt (checked, left alone):** the three `M12 control-plane … write half`
+comments (`ChatPane.tsx:71`, `ConnectorInspector.tsx:12`, `webapp/CLAUDE.md`) — M12 is genuinely
+in-flight per root CLAUDE.md + the milestone reorg, so they describe *pending* work accurately,
+not stale drift. The `.get`/`except` defensiveness at `scoring_context.py:70` / `authored.py:69`
+/ `l1_layout.py:120` / `backend.py:59` / `connectors/termnorm.py:259` are legit external-input /
+JSON-parse boundary guards (or already tracked in the 2026-06-12 holds), not contract-key fallbacks.
+
 ### Considered, not debt (don't re-open)
 
 - **`RunCallbacks` ↔ `emit_*`** — two writer APIs, but `RunCallbacks._phase_ctx: ViewContext` is owned write-then-read cross-event state; folding it into an ambient ContextVar is a downgrade. The "which do I use" rule is in [`developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1.

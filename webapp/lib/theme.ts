@@ -1,5 +1,4 @@
 // Theme-aware color resolution for JS-painted things (Chart.js, SVG markers).
-// Lifted from webapp/index.html:890 + :896 (vanilla preservation list).
 // Canvas/SVG can't resolve var(...); these read off :root at call time.
 
 import { useSyncExternalStore } from "react";

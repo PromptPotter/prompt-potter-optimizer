@@ -35,8 +35,7 @@ function parseProgress(raw: string | undefined): { cur: number; tot: number } | 
   return { cur: parseInt(m[1], 10), tot: parseInt(m[2], 10) };
 }
 
-// Rolling qps — same EMA logic as the ex-ProgressCard, lifted verbatim
-// from vanilla webapp/index.html:1521.
+// Rolling qps — EMA over the n/total progress string.
 function estimateQps(state: QpsState, dash: DashboardSnapshot | null): number | null {
   const m = String((dash as { query?: string } | null)?.query || "").match(/^(\d+)\/(\d+)$/);
   if (!m) return state.qps;

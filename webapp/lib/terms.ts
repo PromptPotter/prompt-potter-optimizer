@@ -1,5 +1,4 @@
 // Operator vocabulary — single source of truth for in-product tooltips.
-// Lifted verbatim from webapp/index.html:909 (vanilla preservation list).
 // Keep entries to one short sentence; longer explanations belong in docs/manual/.
 
 export const TERMS: Record<string, string> = {
