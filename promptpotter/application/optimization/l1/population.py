@@ -28,13 +28,12 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "INVALID_SCORES",
     "build_score_report",
-    "merge_pipeline_params",
     "parse_population",
     "pobb_decision_data",
 ]
 
 
-def merge_pipeline_params(
+def _merge_pipeline_params(
     base: dict[str, Any] | None,
     overrides: dict[str, Any] | None,
     schema: PipelineSchema | None,
@@ -103,7 +102,7 @@ def parse_population(
                         vf.reason,
                     )
         osp_list.append(osp)
-        merged.append(merge_pipeline_params(pipeline_params, pipeline_params_override, schema))
+        merged.append(_merge_pipeline_params(pipeline_params, pipeline_params_override, schema))
     return osp_list, merged
 
 

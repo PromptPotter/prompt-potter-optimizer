@@ -1,6 +1,6 @@
 """HTTP read API — backend storage + campaign registry + per-cycle live reads.
 
-Six router objects mounted at ``/api/v1`` from ``main.py``:
+Nine router objects mounted at ``/api/v1`` from ``main.py``:
 
 1. **Backend storage** (``backends_router``) — manages backend connections,
    syncs experiments from backends in their native format, and exposes
@@ -25,7 +25,14 @@ Six router objects mounted at ``/api/v1`` from ``main.py``:
 6. **Verify** (``verify_router``) — workspace-scope diagnostic-run records
    produced by ``cmd_verify``; feeds the Verify tab.
 
-7. **Auth** (``auth_router``) — Stage-1 OIDC sign-in surface (Google +
+7. **Commands** (``commands_router``) — the ``POST /commands/{kind}``
+   Control-remote highway; closed inbound command set declared in
+   ``docs/specs/m12-api-openapi.yaml``.
+
+8. **Origins** (``origins_router``) — campaign-origin reads; ``GET /origins``
+   derived view over ``list_campaigns()`` deduped by ``root_content_hash``.
+
+9. **Auth** (``auth_router``) — Stage-1 OIDC sign-in surface (Google +
    GitHub). ``/auth/providers``, ``/auth/login/{provider}``,
    ``/auth/callback/{provider}``, ``/auth/logout``, ``/auth/me``.
    Runs pre-auth; populates the opaque session cookie consumed by the

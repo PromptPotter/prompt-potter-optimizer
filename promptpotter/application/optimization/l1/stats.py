@@ -11,7 +11,7 @@ from typing import Any
 
 from promptpotter.application.optimization.validators.l1_behavior import CheckResult
 
-__all__ = ["L1Stats", "compute_l1_stats", "compute_round_1_verdict"]
+__all__ = ["L1Stats", "compute_l1_stats"]
 
 
 # Headline-accuracy threshold for ``rounds_to_95``.
@@ -47,7 +47,7 @@ def compute_l1_stats(
     behavior_pass_rate = _behavior_pass_rate(behavior_results)
     l2_behavior_pass_rate = _behavior_pass_rate(l2_behavior_results or [])
     l2_fires = sum(1 for r in rounds if _round_source(r) == "l2_context")
-    round_1_verdict = compute_round_1_verdict(
+    round_1_verdict = _compute_round_1_verdict(
         rounds,
         round_1_behavior=behavior_results[0] if behavior_results else [],
     )
@@ -63,7 +63,7 @@ def compute_l1_stats(
     )
 
 
-def compute_round_1_verdict(
+def _compute_round_1_verdict(
     rounds: list[dict[str, Any]],
     *,
     round_1_behavior: list[CheckResult],
