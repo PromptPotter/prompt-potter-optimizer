@@ -14,7 +14,6 @@ from promptpotter.application.optimization.dispatch.llm_call import (
     run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
-from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CritiqueReadout
 
 if TYPE_CHECKING:
@@ -32,7 +31,6 @@ __all__ = [
 async def run_l1_critique(
     cycle: Cycle,
     round_result: RoundResult,
-    schema: PipelineSchema | None,
     *,
     round_num: int,
     ledger: CycleEventLog | None = None,

@@ -109,7 +109,6 @@ class AnthropicClient(LLMClientBase):
                 "completion_tokens": response.usage.output_tokens,
                 "total_tokens": total,
             },
-            finish_reason=response.stop_reason,
             parsed=parsed,
         )
 

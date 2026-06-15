@@ -163,11 +163,6 @@ def _check_duplicate_insert(
 
 L2_TASK_CONTEXT_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
     id="l2_task_context_verbatim_repeat",
-    description=(
-        "L2's proposed ``task_context`` refinement merged to a no-op "
-        "against the prior OSP framing — the LLM tried to refine but "
-        "produced no semantic delta. L3 must replan to break the loop."
-    ),
     nurse_target="l3",
     check=_check_task_context_verbatim_repeat,
 )
@@ -175,12 +170,6 @@ L2_TASK_CONTEXT_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
 
 L2_DUPLICATE_INSERT: LLMOutputValidator = LLMOutputValidator(
     id="l2_duplicate_insert",
-    description=(
-        "L2's proposed ``task_context`` re-asserts ≥3 lines already in "
-        "the prior framing. Different from verbatim_repeat (no-op merge): "
-        "the merge succeeds, but L2 is still pasting back what's there. "
-        "The framing-refinement surface is exhausted — L3 must replan."
-    ),
     nurse_target="l3",
     check=_check_duplicate_insert,
 )
@@ -188,13 +177,6 @@ L2_DUPLICATE_INSERT: LLMOutputValidator = LLMOutputValidator(
 
 L2_TASK_CONTEXT_PARAPHRASE_REPEAT: LLMOutputValidator = LLMOutputValidator(
     id="l2_task_context_paraphrase_repeat",
-    description=(
-        "L2's proposed ``task_context`` paraphrases the prior framing — "
-        "the merge succeeds with a new string, but per-field token-set "
-        "Jaccard ≥ 0.5 means no real semantic delta lands. Sibling of "
-        "verbatim_repeat (no-op merge) and duplicate_insert (≥3 verbatim "
-        "lines); catches the paraphrase middle ground. L3 must replan."
-    ),
     nurse_target="l3",
     check=_check_task_context_paraphrase_repeat,
 )
@@ -353,10 +335,6 @@ def _check_supplemental_rule_duplicates_auto_trigger(
 
 L2_SUPPLEMENTAL_RULE_DUP_ID: LLMOutputValidator = LLMOutputValidator(
     id="l2_supplemental_rule_dup_id",
-    description=(
-        "Two or more L2-authored supplemental rules share a rule_id. "
-        "The situational-examples filter can't decide which body to render."
-    ),
     nurse_target="l3",
     check=_check_supplemental_rule_dup_id,
 )
@@ -364,12 +342,6 @@ L2_SUPPLEMENTAL_RULE_DUP_ID: LLMOutputValidator = LLMOutputValidator(
 
 L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER: LLMOutputValidator = LLMOutputValidator(
     id="l2_situational_example_dangling_trigger",
-    description=(
-        "An L2-authored situational example's trigger_id matches neither an "
-        "auto-trigger nor a currently-authored rule_id. The example would be "
-        "silently filtered by the renderer — surface as evidence so L2 fixes "
-        "the trigger_id or removes the example."
-    ),
     nurse_target="l3",
     check=_check_situational_example_dangling_trigger,
 )
@@ -377,13 +349,6 @@ L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER: LLMOutputValidator = LLMOutputValidator
 
 L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER: LLMOutputValidator = LLMOutputValidator(
     id="l2_supplemental_rule_duplicates_auto_trigger",
-    description=(
-        "An L2-authored supplemental rule body paraphrases a canonical "
-        "auto-rule (Jaccard ≥ 0.5 against AUTO_RULES). The dispatch hub "
-        "already injects the auto-rule when its trigger fires; L2's slot is "
-        "wasted. Author a rule that addresses a failure mode the auto-trigger "
-        "registry doesn't cover."
-    ),
     nurse_target="l3",
     check=_check_supplemental_rule_duplicates_auto_trigger,
 )

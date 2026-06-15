@@ -29,7 +29,6 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
     optimizer_model,
     optimizer_node_config,
-    push_all_to_langfuse,
 )
 
 __all__ = [
@@ -42,6 +41,5 @@ __all__ = [
     "load_optimizer_prompt",
     "optimizer_model",
     "optimizer_node_config",
-    "push_all_to_langfuse",
     "run_optimizer_node",
 ]

@@ -44,7 +44,6 @@ class LLMOutputValidator:
     """Registry-shaped validator. Mirrors :class:`Evaluator`."""
 
     id: str
-    description: str
     nurse_target: NurseTarget
     check: Callable[..., ValidatorOutcome | None]
 

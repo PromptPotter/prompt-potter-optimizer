@@ -94,7 +94,6 @@ def compute_round_diagnostics(
         anomalies=anomalies,
         cross_candidate_diff=diff_lines,
         l1_diversity=float(round_result.l1_yield or 1.0),
-        cache_share=0.0,
         samples=samples,
         probe_outcome=probe_outcome,
     )

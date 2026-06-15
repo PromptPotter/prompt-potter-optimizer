@@ -55,7 +55,6 @@ def build_campaign_emitter(
 
     opt = campaign_config.optimization
     return LiveDashboardView.for_session(
-        origin_accuracy,
         session.state.cycle_id,
         project_root=session.project_root,
         session_id=session.session_id,

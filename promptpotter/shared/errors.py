@@ -75,13 +75,6 @@ class UnauthorizedError(PotterError):
     code = "unauthenticated"
 
 
-class ForbiddenError(PotterError):
-    """Authenticated but not permitted — 403."""
-
-    http_status = 403
-    code = "capability_denied"
-
-
 class NotFoundError(PotterError):
     """Target resource doesn't exist (or isn't visible to the caller) — 404."""
 
@@ -245,23 +238,18 @@ def has_pipeline_warnings(result: Mapping[str, Any]) -> bool:
 
 
 @contextmanager
-def graceful(msg: str, *, level: int = logging.WARNING) -> Iterator[None]:
+def graceful(msg: str) -> Iterator[None]:
     """Suppress non-interrupt exceptions with a log message.
 
     Re-raises ``KeyboardInterrupt`` and ``asyncio.CancelledError``
     so that graceful-shutdown logic is never swallowed.
-
-    Args:
-        msg: Log message on failure.
-        level: Log level (default WARNING). Use ``logging.DEBUG`` for
-               observability/tracing code where failures are expected.
     """
     try:
         yield
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception:
-        logger.log(level, msg, exc_info=True)
+        logger.warning(msg, exc_info=True)
 
 
 def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
@@ -286,7 +274,6 @@ __all__ = [
     "ConflictError",
     "ContentTooLargeError",
     "ErrorCategory",
-    "ForbiddenError",
     "MachineBusyError",
     "NotFoundError",
     "PayloadInvalidError",

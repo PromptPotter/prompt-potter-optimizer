@@ -189,7 +189,6 @@ class OpenAICompatibleClient(LLMClientBase):
                 "completion_tokens": usage.completion_tokens if usage else 0,
                 "total_tokens": usage.total_tokens if usage else 0,
             },
-            finish_reason=response.choices[0].finish_reason,
             parsed=parsed,
             schema_repair_attempts=schema_repair_attempts,
         )

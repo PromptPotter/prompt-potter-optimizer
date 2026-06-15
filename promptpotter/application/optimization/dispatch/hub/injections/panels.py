@@ -111,13 +111,8 @@ def _r_diagnostics(b: InjectionBundle) -> str:
             + "\n".join(d.cross_candidate_diff)
         )
 
-    pop_bits: list[str] = []
     if d.l1_diversity != 1.0:
-        pop_bits.append(f"diversity={d.l1_diversity:.2f}")
-    if d.cache_share > 0:
-        pop_bits.append(f"cache_share={d.cache_share:.0%}")
-    if pop_bits:
-        parts.append("POPULATION: " + ", ".join(pop_bits))
+        parts.append(f"POPULATION: diversity={d.l1_diversity:.2f}")
 
     miss_samples = [s for s in d.samples if not s.hit][:SAMPLE_RENDER_CAP]
     if miss_samples:

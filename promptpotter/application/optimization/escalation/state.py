@@ -38,16 +38,10 @@ _NEXT_ACTION_TO_STOP: dict[NextAction, StopReason] = {
 
 @dataclass(frozen=True)
 class EscalationEvent:
-    """Escalation-observation outcome. `stall_depth` is the layer-relevant counter at decision time.
-    `rule_name`/`priority` populated by the post-round rule engine; left None on the imperative
-    L2/L3 cascade path.
-    """
+    """Escalation-observation outcome."""
 
     next_action: NextAction
-    stall_depth: int
     reason: str
-    rule_name: str | None = None
-    rule_priority: int | None = None
 
     @property
     def stop_reason(self) -> StopReason | None:
@@ -137,7 +131,6 @@ class EscalationFSM:
         self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
 
         inputs = EscalationInputs(
-            improved=improved,
             current_accuracy=current_accuracy,
             l1_stall_count=self._l1_stall_count,
             l1_patience=l1_patience,
@@ -162,7 +155,6 @@ class EscalationFSM:
         if l2_patience is None or self._l2_stall_count < l2_patience:
             return EscalationEvent(
                 next_action=NextAction.FIRE_L2,
-                stall_depth=self._l2_stall_count,
                 reason=f"L2 stall {self._l2_stall_count}/{l2_patience}",
             )
 
@@ -173,13 +165,11 @@ class EscalationFSM:
         if l3_patience is None or self._l3_stall_count < l3_patience:
             return EscalationEvent(
                 next_action=NextAction.FIRE_L3,
-                stall_depth=self._l3_stall_count,
                 reason=f"L2 patience -> L3 stall {self._l3_stall_count}/{l3_patience}",
             )
 
         return EscalationEvent(
             next_action=NextAction.STOP_L3_PATIENCE,
-            stall_depth=self._l3_stall_count,
             reason="L3 patience exhausted",
         )
 

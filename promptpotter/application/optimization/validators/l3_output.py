@@ -60,11 +60,6 @@ def _check_plan_verbatim_repeat(
 
 L3_PLAN_LENGTH_FLOOR: LLMOutputValidator = LLMOutputValidator(
     id="l3_plan_length_floor",
-    description=(
-        "L3's plan is below the minimum length floor. A terse plan rarely "
-        "carries enough strategic framework to steer L2/L1 — surface as "
-        "evidence so the next L3 fire produces a richer plan."
-    ),
     nurse_target="l3",
     check=_check_plan_length_floor,
 )
@@ -72,11 +67,6 @@ L3_PLAN_LENGTH_FLOOR: LLMOutputValidator = LLMOutputValidator(
 
 L3_PLAN_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
     id="l3_plan_verbatim_repeat",
-    description=(
-        "L3's plan this fire equals the prior plan on the OSP. L3 repeated "
-        "itself — no strategic shift. Surface as evidence; if the loop "
-        "retriggers, the next L3 fire has the prior repetition as input."
-    ),
     nurse_target="l3",
     check=_check_plan_verbatim_repeat,
 )

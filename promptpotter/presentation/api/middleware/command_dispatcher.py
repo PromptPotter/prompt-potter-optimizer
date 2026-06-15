@@ -473,9 +473,10 @@ class CommandDispatcher:
         )
 
     async def _apply_sync_backend_experiments(self, payload: dict[str, Any]) -> None:
-        """Pull experiments from the backend's API into the local store; bump
-        ``last_synced_at`` on success. Unknown backend ⇒ 404; upstream
-        failures ⇒ 503 (both ride the central ``PotterError`` rejection path)."""
+        """Pull experiments from the backend's API into the local store.
+
+        Unknown backend ⇒ 404; upstream failures ⇒ 503 (both ride the central
+        ``PotterError`` rejection path)."""
         backend_id = str(payload["backend_id"])
         backend = self._store.backends.get(backend_id)
         if backend is None:
@@ -496,7 +497,6 @@ class CommandDispatcher:
             raise ServiceUnavailableError(
                 f"Failed to sync from {backend.base_url}: {exc}", code="backend_sync_failed"
             ) from exc
-        backend.last_synced_at = utcnow_iso()
         self._store.backends.update(backend)
 
     def _apply_stop_cycle(self, campaign_id: str, cycle_id: str) -> None:

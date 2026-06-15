@@ -137,7 +137,7 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 
 ## 5. CLI flags — `new` and `resume`
 
-`python -m promptpotter new <name>` and `python -m promptpotter resume` are the two write verbs. Stable flag set:
+`python -m promptpotter new <name>` and `python -m promptpotter resume` are the loop-mint verbs (lifecycle + diagnostic verbs also exist — see CLI reference). Stable flag set:
 
 | Verb | Flag | Meaning |
 |---|---|---|

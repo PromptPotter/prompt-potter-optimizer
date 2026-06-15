@@ -268,7 +268,7 @@ def from_disk_log(
         lineage = osp.get("lineage") or {}
         rnd_raw = t.get("round")
         rnd = rnd_raw if isinstance(rnd_raw, int) else 0
-        traj, stopped = _load_p_best_trajectory(streams_dir, rnd)
+        traj, _ = _load_p_best_trajectory(streams_dir, rnd)
         round_views.append(
             RoundDigestView(
                 round=rnd,
@@ -286,7 +286,6 @@ def from_disk_log(
                 candidates_scored=int(t.get("candidates_scored", 0)),
                 evaluators=dict(t.get("evaluators") or {}),
                 p_best_trajectory=traj,
-                p_best_stopped=stopped,
             )
         )
 
