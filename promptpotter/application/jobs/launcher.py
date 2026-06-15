@@ -714,19 +714,19 @@ async def _run_in_background(
             halt_at_accuracy=halt_at_accuracy,
             spend_budget_usd=spend_budget_usd,
         )
-        stop_reason = getattr(result, "stop_reason", None)
+        stop_reason = result.stop_reason
         # Job terminal status derives from the single StopReason outcome table —
         # the SAME classification index.json / dashboard.json / the webapp read.
         # No private reconciler: a cycle can no longer read "failed" here and
         # "completed" there (the optimizer_timeout split is gone). For a FAILED
         # outcome, ``result.error.message`` is the operator-facing string the
         # runner picked at the throw site (same as dashboard.json::error.message).
-        outcome = stop_reason_outcome(stop_reason) if stop_reason else StopOutcome.SUCCESS
+        outcome = stop_reason_outcome(stop_reason)
         status: JobStatus = _JOB_STATUS_BY_OUTCOME[outcome]
         if outcome is StopOutcome.FAILED and result.error is not None:
             persisted_reason: str | None = result.error.message
         else:
-            persisted_reason = str(stop_reason) if stop_reason else None
+            persisted_reason = stop_reason
         job_registry.mark_finished(
             job_id,
             status=status,

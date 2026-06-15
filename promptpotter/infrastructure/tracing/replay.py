@@ -109,10 +109,6 @@ def _fresh_state() -> dict[str, Any]:
     }
 
 
-def _load_state(store: Stores, backend_id: str) -> dict[str, Any]:
-    return read_json_optional(_state_path(store, backend_id)) or _fresh_state()
-
-
 def _save_state(store: Stores, backend_id: str, state: dict[str, Any]) -> None:
     write_json(_state_path(store, backend_id), state)
 
@@ -257,7 +253,7 @@ def push_all_runs(
     if lf_sink is None:
         return {"error": "Langfuse is disabled (missing credentials or LANGFUSE_ENABLED=false)"}
 
-    state = _load_state(store, backend_id)
+    state = read_json_optional(_state_path(store, backend_id)) or _fresh_state()
     already_done = set(state["backfilled_run_ids"])
 
     # Cross-dataset by design (admin/observability) — see backfill comment above.

@@ -170,7 +170,7 @@ def _matches_declared_type(value: Any, declared: str) -> bool:
     """JSON-Schema-flavoured isinstance: booleans are not numbers."""
     py_types = _JSON_TYPE_TO_PY.get(declared)
     if py_types is None:
-        return True  # unknown declared type → no check (forward-compat)
+        return True  # type we don't model → unconstrained here (schema gates structure)
     # JSON Schema: booleans are NOT integers/numbers, even though Python
     # says `isinstance(True, int)`. Treat bool as exclusive to "boolean".
     if isinstance(value, bool):

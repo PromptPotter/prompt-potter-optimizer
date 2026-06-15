@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from pathlib import Path
-from typing import IO
 
 from pydantic import TypeAdapter
 
@@ -46,7 +45,12 @@ class CycleEventLog:
     def __init__(self, path: Path) -> None:
         self._path = path
         self._subscribers: list[Projection] = []
-        self._next_offset = self._scan_existing_offset()
+        # Next append's offset = count of existing lines (0 if the file is absent).
+        if path.exists():
+            with path.open("rb") as fh:
+                self._next_offset = sum(1 for _ in fh)
+        else:
+            self._next_offset = 0
         self._inherit_parent: CycleEventLog | None = None
         self._inherit_offset: int = 0
 
@@ -80,7 +84,7 @@ class CycleEventLog:
         offset = self._next_offset
         line = _RECORD_ADAPTER.dump_json(record, fallback=str).decode("utf-8")
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._open_append() as fh:
+        with self._path.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
         self._next_offset += 1
         for sub in self._subscribers:
@@ -139,17 +143,3 @@ class CycleEventLog:
     def next_offset(self) -> int:
         """Offset that the next ``append`` will receive."""
         return self._next_offset
-
-    # -- internals -------------------------------------------------------------
-
-    def _scan_existing_offset(self) -> int:
-        if not self._path.exists():
-            return 0
-        count = 0
-        with self._path.open("rb") as fh:
-            for _ in fh:
-                count += 1
-        return count
-
-    def _open_append(self) -> IO[str]:
-        return self._path.open("a", encoding="utf-8")

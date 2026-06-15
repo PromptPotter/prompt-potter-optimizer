@@ -86,12 +86,11 @@ def _make_mock_client() -> LLMClientBase:
     return client
 
 
-def _bind_openai_compat(spec: ProviderSpec) -> Callable[[], LLMClientBase]:
-    return lambda: _make_openai_compat(spec)
-
-
 _PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
-    **{name: _bind_openai_compat(spec) for name, spec in _OPENAI_COMPAT_SPECS.items()},
+    **{
+        name: functools.partial(_make_openai_compat, spec)
+        for name, spec in _OPENAI_COMPAT_SPECS.items()
+    },
     "anthropic": _make_anthropic_client,
     "mock": _make_mock_client,
 }

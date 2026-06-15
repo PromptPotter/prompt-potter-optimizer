@@ -206,8 +206,8 @@ def _infer_param_types(opt: dict[str, Any], node_config: dict[str, Any]) -> dict
        Booleans are matched before ints because ``isinstance(True, int)`` is
        True in Python — dict-iteration order in ``_PY_TO_JSON_TYPE`` matters.
     """
-    declared: dict[str, str] = dict(opt.get("param_types", {}) or {})
-    param_keys = list(opt.get("param_keys", []) or [])
+    declared: dict[str, str] = dict(opt.get("param_types") or {})
+    param_keys = list(opt.get("param_keys") or [])
     config_only = [k for k in node_config if k not in param_keys]
     for param in (*param_keys, *config_only):
         if param in declared:
