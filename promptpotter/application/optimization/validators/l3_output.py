@@ -28,10 +28,7 @@ def _check_plan_length_floor(source_output: Mapping[str, Any], **_: Any) -> Vali
         return None
     return ValidatorOutcome(
         validator_id=L3_PLAN_LENGTH_FLOOR.id,
-        passed=False,
-        score=0.5,
         evidence={"length": len(text), "floor": PLAN_LENGTH_FLOOR_CHARS},
-        nurse_target="l3",
     )
 
 
@@ -51,23 +48,18 @@ def _check_plan_verbatim_repeat(
         return None
     return ValidatorOutcome(
         validator_id=L3_PLAN_VERBATIM_REPEAT.id,
-        passed=False,
-        score=0.0,
         evidence={"plan": new_plan},
-        nurse_target="l3",
     )
 
 
 L3_PLAN_LENGTH_FLOOR: LLMOutputValidator = LLMOutputValidator(
     id="l3_plan_length_floor",
-    nurse_target="l3",
     check=_check_plan_length_floor,
 )
 
 
 L3_PLAN_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
     id="l3_plan_verbatim_repeat",
-    nurse_target="l3",
     check=_check_plan_verbatim_repeat,
 )
 

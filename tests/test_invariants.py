@@ -843,7 +843,10 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         InjectionBundle,
         RoundDigest,
     )
-    from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
+    from promptpotter.domain.escalation_signals import (
+        RuntimeFailure,
+        ValidationFailure,
+    )
     from promptpotter.domain.opt_search_point import L2L3Memory, OptSearchPoint, WoundChannels
     from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
     from promptpotter.domain.validators import ValidatorOutcome
@@ -905,22 +908,10 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
                     )
                 ],
                 l2_guard_breaches=[
-                    ValidatorOutcome(
-                        validator_id="l2_verbatim_self_repeat",
-                        passed=False,
-                        score=0.0,
-                        evidence={},
-                        nurse_target="l3",
-                    )
+                    ValidatorOutcome(validator_id="l2_verbatim_self_repeat", evidence={})
                 ],
                 l3_guard_breaches=[
-                    ValidatorOutcome(
-                        validator_id="l3_plan_verbatim_repeat",
-                        passed=False,
-                        score=0.0,
-                        evidence={},
-                        nurse_target="l3",
-                    )
+                    ValidatorOutcome(validator_id="l3_plan_verbatim_repeat", evidence={})
                 ],
             ),
         ),
@@ -940,23 +931,18 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     fence_open_idx = diagnostics_text.index("<UNTRUSTED_DATASET_CONTENT")
     assert poisoned_query in diagnostics_text[fence_open_idx:]
 
-    vfail_text = DispatchHub.render("validation_failures", bundle)
-    assert vfail_text.startswith("<UNTRUSTED_DATASET_CONTENT")
-    assert vfail_text.endswith("</UNTRUSTED_DATASET_CONTENT>")
-    assert poisoned_value in vfail_text
+    # l1_wounds (validation + runtime) is fenced — echoes LLM-proposed values + warnings.
+    wounds_text = DispatchHub.render("l1_wounds", bundle)
+    assert wounds_text.startswith("<UNTRUSTED_DATASET_CONTENT")
+    assert wounds_text.endswith("</UNTRUSTED_DATASET_CONTENT>")
+    assert poisoned_value in wounds_text
+    assert poisoned_warning in wounds_text
 
-    rfail_text = DispatchHub.render("runtime_failures", bundle)
-    assert rfail_text.startswith("<UNTRUSTED_DATASET_CONTENT")
-    assert rfail_text.endswith("</UNTRUSTED_DATASET_CONTENT>")
-    assert poisoned_warning in rfail_text
-
-    l2of_text = DispatchHub.render("l2_guard_breaches", bundle)
-    assert "UNTRUSTED" not in l2of_text
-    assert "l2_verbatim_self_repeat" in l2of_text
-
-    l3of_text = DispatchHub.render("l3_guard_breaches", bundle)
-    assert "UNTRUSTED" not in l3of_text
-    assert "l3_plan_verbatim_repeat" in l3of_text
+    # guard_breaches (L2 + L3 post-parse) is plain — controlled validator ids only.
+    guards_text = DispatchHub.render("guard_breaches", bundle)
+    assert "UNTRUSTED" not in guards_text
+    assert "l2_verbatim_self_repeat" in guards_text
+    assert "l3_plan_verbatim_repeat" in guards_text
 
     plan_text = DispatchHub.render("plan", bundle)
     assert "UNTRUSTED" not in plan_text

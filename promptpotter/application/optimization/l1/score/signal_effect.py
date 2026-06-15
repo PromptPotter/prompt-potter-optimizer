@@ -15,7 +15,11 @@ from typing import Any
 from promptpotter.application.optimization.l1.population import pobb_decision_data
 from promptpotter.application.optimization.pobb.elimination import PoBBCheck
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
-from promptpotter.domain.escalation_signals import EscalationSignal, RuntimeFailure
+from promptpotter.domain.escalation_signals import (
+    EscalationSignal,
+    NurseOwner,
+    RuntimeFailure,
+)
 from promptpotter.domain.results import DegradationContext, EliminationContext
 
 
@@ -101,6 +105,15 @@ def decode_signal_effect(
     else:
         rf_kind = None
     if rf_kind is not None:
+        # Stamp who owns the fix. A DETERMINISTIC-for-config break (DegradationCheck
+        # fatal fast-path, ``cr["fatal"]``) or a scoring-error abort is one the in-loop
+        # param retune cannot be relied on to fix — the backend eliminated the candidate
+        # as broken-for-all-queries — so it escalates to the OPERATOR (trim the
+        # schema/prompt, change the model). The canonical case is the token blowout
+        # (output exceeds the provider ceiling on a locked schema). A RATE-based
+        # degradation is partial noise L1 can retune around → owner L1. The render + the
+        # L1 directive read this so L1 never burns a variant "fixing" an operator-bound break.
+        operator_terminal = bool(cr.get("fatal")) or rf_kind == "scoring_error_abort"
         new_rf = RuntimeFailure(
             source=rf_kind,
             dominant_warning=dominant,
@@ -111,6 +124,7 @@ def decode_signal_effect(
             observed_config=dict(node_cfg),
             first_seen_round=round_num,
             candidate_label=candidate_label,
+            owner=NurseOwner.OPERATOR if operator_terminal else NurseOwner.L1,
         )
 
     elim_ctx: EliminationContext | None = None

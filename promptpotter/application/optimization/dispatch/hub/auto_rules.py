@@ -28,9 +28,12 @@ AUTO_RULES: dict[str, str] = {
         "on the same axis OR escalation_panel.exploration_budget=wide."
     ),
     "runtime_failure": (
-        "KNOWN-FAILING configs (see runtime_failures above): do not re-propose. "
-        "To revisit that region, change a different axis simultaneously so the new "
-        "variant is not a repeat."
+        "RUNTIME FAILURES are owner-tagged above. owner=l1 is YOURS to FIX: propose a "
+        "corrective config change on that node — relieve the binding budget (e.g. raise "
+        "max_tokens), simplify the demanded output, or pick a valid value — not merely a "
+        "different axis to dodge it; never re-propose the exact failing config. "
+        "owner=operator needs a locked surface (output schema / model) — do NOT spend a "
+        "variant on it; it is flagged for the operator."
     ),
     "continuous_envelope": (
         "Continuous-axis envelope: for numeric knobs (max_tokens, temperature, "

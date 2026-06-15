@@ -1,6 +1,6 @@
 # application/optimization/ — L1 / L2 / L3 agent contracts
 
-This file is the **agent contract** for the three-layer loop — what each layer reads, writes, and decides; when each escalates; what triggers healing. The orchestration shape (Cycle, dispatch, escalation rules) lives in [`../CLAUDE.md`](../CLAUDE.md). Channels, signal routing, and the four-wound graph live in [`../../../docs/developer/dispatch-hub.md`](../../../docs/developer/dispatch-hub.md) — that's the canonical info-flow doc.
+This file is the **agent contract** for the three-layer loop — what each layer reads, writes, and decides; when each escalates; what triggers healing. The orchestration shape (Cycle, dispatch, escalation rules) lives in [`../CLAUDE.md`](../CLAUDE.md). Channels, signal routing, and the wound-signal graph (two rendered signals over the two-axis self-healing model) live in [`../../../docs/developer/dispatch-hub.md`](../../../docs/developer/dispatch-hub.md) — that's the canonical info-flow doc.
 
 The optimizer is three nested generation loops. Each layer mutates with cause, never at random.
 

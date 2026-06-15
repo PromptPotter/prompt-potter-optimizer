@@ -15,8 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from promptpotter.domain.validators import ValidatorOutcome
 
 # Cross-layer protocol fields L1 cannot operate without. Dropping any (esp. critique) fires
-# `l1_layout_missing_mandatory` with `nurse_target='l3'` — L3 replans rather than letting L2
-# starve L1 of failure context.
+# `l1_layout_missing_mandatory` — a guard breach that routes to L3 (replan) rather than letting
+# L2 starve L1 of failure context.
 L1_MANDATORY: frozenset[str] = frozenset(
     {"plan", "task_context", "rendered_prompt", "pipeline_param_catalogue", "critique"}
 )
@@ -29,8 +29,7 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "rendered_prompt",
         "pipeline_param_catalogue",
         "diagnostics",
-        "validation_failures",
-        "runtime_failures",
+        "l1_wounds",
         "task_context",
         "critique",
         "axis_memory",
@@ -92,8 +91,7 @@ def default_l1_layout() -> L1Layout:
             "pipeline_param_catalogue",
             "plan",
             "diagnostics",
-            "validation_failures",
-            "runtime_failures",
+            "l1_wounds",
             "critique",
             "axis_memory",
             "archive_top_runs",
@@ -152,10 +150,7 @@ def validate_l1_layout(
         outcomes.append(
             ValidatorOutcome(
                 validator_id="l1_layout_missing_mandatory",
-                passed=False,
-                score=0.0,
                 evidence={"missing": sorted(missing)},
-                nurse_target="l3",
             )
         )
         is_valid = False
@@ -166,10 +161,7 @@ def validate_l1_layout(
         outcomes.append(
             ValidatorOutcome(
                 validator_id="l1_layout_unknown_placeholder",
-                passed=False,
-                score=0.0,
                 evidence={"unknown": sorted(unknown)},
-                nurse_target="l3",
             )
         )
         is_valid = False
@@ -182,10 +174,7 @@ def validate_l1_layout(
             outcomes.append(
                 ValidatorOutcome(
                     validator_id="l1_layout_dups_within_slot",
-                    passed=False,
-                    score=0.0,
                     evidence={"slot": slot_name, "duplicates": dups},
-                    nurse_target="l3",
                 )
             )
             is_valid = False
@@ -195,10 +184,7 @@ def validate_l1_layout(
         outcomes.append(
             ValidatorOutcome(
                 validator_id="l1_layout_unchanged_from_prior",
-                passed=False,
-                score=0.5,
                 evidence={"slots": list(L1_LAYOUT_SLOTS)},
-                nurse_target="l3",
             )
         )
 

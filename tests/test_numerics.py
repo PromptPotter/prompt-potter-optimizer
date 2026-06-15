@@ -724,7 +724,10 @@ from promptpotter.application.optimization.validators.l3_output import (  # noqa
     L3_PLAN_VERBATIM_REPEAT,
     run_l3_output_validators,
 )
-from promptpotter.domain.escalation_signals import EscalationTarget  # noqa: E402
+from promptpotter.domain.escalation_signals import (  # noqa: E402
+    EscalationTarget,
+    NurseOwner,
+)
 from promptpotter.domain.l1_layout import L1Layout, validate_l1_layout  # noqa: E402
 from promptpotter.domain.opt_search_point import OptSearchPoint  # noqa: E402
 from promptpotter.domain.results import CandidateProposal, ScoredCandidate  # noqa: E402
@@ -829,9 +832,6 @@ def test_task_context_verbatim_repeat_fires_when_proposed_merge_is_no_op():
         opt_sp=_osp(),
     )
     assert out is not None
-    assert out.passed is False
-    assert out.score == 0.0
-    assert out.nurse_target == "l3"
     assert out.evidence["proposed_keys"] == ["domain"]
 
 
@@ -867,9 +867,6 @@ def test_duplicate_insert_fires_when_proposed_lines_already_in_prior_framing():
         opt_sp=osp,
     )
     assert out is not None
-    assert out.passed is False
-    assert out.score == 0.0
-    assert out.nurse_target == "l3"
     assert out.evidence["duplicate_lines"] == 3
     assert out.evidence["fields"] == ["key_challenges"]
 
@@ -909,8 +906,6 @@ def test_paraphrase_repeat_fires_on_word_set_overlap_above_threshold():
         opt_sp=osp,
     )
     assert out is not None
-    assert out.passed is False
-    assert out.nurse_target == "l3"
     assert out.evidence["field"] == "key_challenges"
     assert out.evidence["jaccard"] >= 0.5
 
@@ -954,8 +949,6 @@ def test_l1_config_not_in_runtime_failures_fires_on_reproposal():
     ]
     out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run({"llm_only": {"max_tokens": 1800}}, opt_sp=osp)
     assert out is not None
-    assert out.passed is False
-    assert out.nurse_target == "l2"
     failures = out.evidence["failures"]
     assert len(failures) == 1
     assert failures[0].axis == "llm_only.max_tokens"
@@ -994,8 +987,6 @@ def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
 def test_plan_length_floor_fires_on_short_plan():
     out = L3_PLAN_LENGTH_FLOOR.run({"plan": "do better"}, opt_sp=_osp())
     assert out is not None
-    assert out.passed is False
-    assert out.nurse_target == "l3"
 
 
 def test_plan_verbatim_repeat_fires():
@@ -1004,7 +995,51 @@ def test_plan_verbatim_repeat_fires():
         {"plan": "Maintain current strategy and explore persona axis carefully."}, opt_sp=osp
     )
     assert out is not None
-    assert out.score == 0.0
+
+
+def test_fatal_degradation_runtime_failure_escalates_to_operator():
+    """A deterministic-for-config break (DegradationCheck fatal fast-path) is not L1's
+    to retune — its ``owner`` is stamped OPERATOR (the token-blowout case), so the L1
+    render flags it instead of telling L1 to 'raise max_tokens'. A rate-based degradation
+    stays L1-owned (retune-able partial noise). ``owner`` is the only wound field that
+    varies — the other two wounds' owners are structural (record type + guard stream).
+    """
+    from promptpotter.application.optimization.l1.score.signal_effect import decode_signal_effect
+    from promptpotter.application.optimization.pobb.elimination import PoBBCheck, PoBBConfig
+    from promptpotter.domain.escalation_signals import EscalationSignal
+
+    def _decode(check_result):
+        sig = EscalationSignal(
+            check_name="degradation",
+            target=EscalationTarget.ELIMINATE_CANDIDATE,
+            check_result=check_result,
+            candidate_idx=0,
+            candidates_scored=1,
+            candidates_skipped=0,
+        )
+        return decode_signal_effect(
+            sig,
+            results=[{"sample_id": "0"}],
+            dataset=[{}, {}],
+            effective_pipeline_params={"entity_profiling": {"max_tokens": None}},
+            round_num=1,
+            elim_check=PoBBCheck(PoBBConfig(), n_samples=2),
+            candidate_id="C1",
+            candidate_label="C1",
+            priors_at_test=[],
+        ).runtime_failure
+
+    fatal = _decode(
+        {"fatal": True, "dominant_warning": "entity_profiling:client_error", "degraded_rate": 1.0}
+    )
+    assert fatal is not None
+    assert fatal.owner is NurseOwner.OPERATOR
+
+    rate_based = _decode(
+        {"dominant_warning": "web_search:low_document_count", "degraded_rate": 0.5}
+    )
+    assert rate_based is not None
+    assert rate_based.owner is NurseOwner.L1
 
 
 def test_run_l3_output_validators_aggregates():

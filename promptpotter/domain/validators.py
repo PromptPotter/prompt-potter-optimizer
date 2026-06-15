@@ -1,9 +1,10 @@
 """LLM-output validators + mid-round stop rules — two distinct contracts.
 
 **LLMOutputValidator** — deterministic check on a parsed LLM-node output;
-emits :class:`ValidatorOutcome` whose ``nurse_target`` names which LLM heals
-the producer (L1 output → L2 heals; L2 output → L3 heals). ``score`` mirrors
-``Evaluator.compute`` (1.0 clean, 0.0 fail) so composite_fitness can ingest it.
+emits a :class:`ValidatorOutcome` naming the failing ``validator_id`` + its
+``evidence``. A guard-breach outcome carries no owner field: post-parse breaches
+always route to L3 via the non-empty-stream → ``escalate_l2`` mechanism, so the
+owner is structural, not a stored choice.
 
 **StopRule** — mid-round check on the running results stream; emits
 :class:`EscalationSignal` to stop the candidate (ELIMINATE / LEADER_LOCKED) or
@@ -15,25 +16,25 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from promptpotter.domain.escalation_signals import EscalationSignal
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.scoring import QueryMeasurement
 
-NurseTarget = Literal["l2", "l3"]
-
 
 @dataclass(frozen=True)
 class ValidatorOutcome:
-    """Issues found in one LLM-node output; clean outputs return ``None`` instead."""
+    """One issue found in an LLM-node output; clean outputs return ``None`` instead.
+
+    No ``passed`` (an outcome only exists for a failure), no ``score`` (the
+    self-healers count events, not graded scores), and no owner field (a
+    guard-breach always routes to L3 structurally — see the module docstring).
+    """
 
     validator_id: str
-    passed: bool
-    score: float
     evidence: dict[str, Any] = field(default_factory=dict)
-    nurse_target: NurseTarget = "l2"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -44,7 +45,6 @@ class LLMOutputValidator:
     """Registry-shaped validator. Mirrors :class:`Evaluator`."""
 
     id: str
-    nurse_target: NurseTarget
     check: Callable[..., ValidatorOutcome | None]
 
     def run(self, source_output: Mapping[str, Any], **context: Any) -> ValidatorOutcome | None:
@@ -86,7 +86,6 @@ class StopRule(Protocol):
 
 __all__ = [
     "LLMOutputValidator",
-    "NurseTarget",
     "StopRule",
     "ValidatorOutcome",
     "run_validators",

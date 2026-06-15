@@ -94,7 +94,11 @@ Target **6 test files, ≤ 240 collected tests**. The six-file shape is the
 contract — new coverage rides an existing category file, never a new one.
 Canary (the non-`-q` collect prints the grand total; `-q` only prints per-file
 counts): `python -m pytest tests/ --collect-only 2>&1 | grep "tests collected"`.
-Currently **260**. The degradation-verdict feature (context-aware round health +
+Currently **263** (+3: the fatal→operator escalation guard + the `nurse_target` retirement ban
+— the self-healing owner reframe that dissolved the producer-keyed `nurse_target` into a single
+`RuntimeFailure.owner` field; the routing-map test went away with the `CorrectiveSurface`/`route()`
+tower it guarded).
+The degradation-verdict feature (context-aware round health +
 the source-stamped warning classifier — two of the cases lock "unknown/missing
 ``kind`` is skipped, never structural", the bug the shadow-taxonomy hid) added ~27
 cases that resisted parametrize-merge —

@@ -85,6 +85,17 @@ REGEX_BANS: tuple[RegexBan, ...] = (
         ),
         under="presentation/api",
     ),
+    RegexBan(
+        id="nurse_target_retired",
+        patterns=(r"\bnurse_target\b",),
+        message=(
+            "nurse_target (producer-keyed routing) is retired. A wound's owner is "
+            "structural: a RuntimeFailure carries an `owner: NurseOwner` field (the one "
+            "wound whose owner varies — L1 vs OPERATOR); ValidationFailure is always L1 "
+            "and a guard-breach ValidatorOutcome always L3 via the escalate_l2 stream. "
+            "Don't re-introduce a producer→nurse field."
+        ),
+    ),
 )
 
 

@@ -11,7 +11,7 @@ Inputs (left) fill placeholders in optimizer process nodes (right).
 - **Amber pill** — optimizer process node: the four LLM prompts (L1_GENERATE, L1_CRITIQUE, L2_CONTEXT, L3_PLAN) plus L1_SCORE (deterministic).
 - **Solid orange** — deterministic input (schema, measurements, counters, constants).
 - **Default node** — AI-generated input (content originates from another LLM stage).
-- **Red arrow** — LLM-produced edge: the feedback loops that close the optimizer. L1_SCORE outputs (`diagnostics`, `validation_failures`, `runtime_failures`) are computed, so they draw in normal color. `l2_guard_breaches` and `l3_guard_breaches` are LLM-produced (post-parse validators on L2's / L3's own output), so their producer edges are red.
+- **Red arrow** — LLM-produced edge: the feedback loops that close the optimizer. L1_SCORE outputs (`diagnostics`, `l1_wounds`) are computed, so they draw in normal color. `guard_breaches` (post-parse validators on L2's / L3's own output) is LLM-produced, so its producer edges are red.
 
 ```mermaid
 flowchart LR
@@ -21,20 +21,16 @@ flowchart LR
   %% Standalone AI-generated inputs (not produced inside a single LLM stage)
   CPAR["l1_overrides<br/>• n_variants<br/>• temp"]
 
-  %% L1_SCORE readouts — distinct hub variables, same producer cluster.
-  %% diagnostics is per-round on Bundle.digest; the failures variants
-  %% accumulate on OptSearchPoint cross-round.
+  %% L1_SCORE readouts — diagnostics is per-round on Bundle.digest; l1_wounds
+  %% (validation parse-time + runtime mid-eval) accumulates on OptSearchPoint cross-round.
   subgraph SR["L1_SCORE readouts"]
     DIAG["diagnostics⁴<br/>• STATUS: round, current, best, stalls<br/>• trajectory + evolution<br/>• rank dist, anomalies, near-misses<br/>• pipeline health, probe outcome"]:::det
-    VFAIL["validation_failures⁵<br/>• Wound 1 (parse-time)<br/>• axis, value, allowed, reason"]:::det
-    RFAIL["runtime_failures¹¹<br/>• Wound 2 (mid-eval)<br/>• per-candidate DegradationCheck evidence"]:::det
+    L1W["l1_wounds⁵<br/>• validation (parse-time) + runtime (mid-eval)<br/>• fenced; owner-tagged (l1 | operator)"]:::det
   end
   style SR fill:none,stroke:#888,stroke-dasharray: 5 5
 
-  %% LLM-output validator failures — produced by L2/L3 post-parse.
-  %% Sits outside the L1_SCORE readouts cluster because the producers are L2P / L3P.
-  L2OF[l2_guard_breaches¹²]
-  L3OF[l3_guard_breaches¹³]
+  %% Post-parse guard breaches — produced by L2P / L3P; both owner=L3 (replan).
+  GB[guard_breaches¹²]
 
   %% Loop-Settings — read-only loop-time constants
   subgraph LS["Loop-Settings"]
@@ -70,14 +66,12 @@ flowchart LR
   end
   style L3G fill:none,stroke:none
 
-  %% L1_GENERATE inputs — sees measurement-derived failures only.
-  %% LAYOUT is structural (drives fill_l1's slot walk), not content.
+  %% L1_GENERATE inputs — sees its own wounds (l1_wounds). LAYOUT is structural.
   PLAN --> L1G
   TC --> L1G
   TUN --> L1G
   DIAG --> L1G
-  VFAIL --> L1G
-  RFAIL --> L1G
+  L1W --> L1G
   CRIT --> L1G
   CPAR --> L1G
   LAYOUT --> L1G
@@ -87,31 +81,26 @@ flowchart LR
   PLAN --> L1C
   TC --> L1C
   DIAG --> L1C
-  VFAIL --> L1C
-  RFAIL --> L1C
+  L1W --> L1C
 
-  %% L2_CONTEXT inputs — sees measurement-derived failures only.
-  %% L2 doesn't see l2_guard_breaches because Wound 4 fires L3 immediately
-  %% when they appear; L3 replans, then L2 fires fresh against the new plan.
+  %% L2_CONTEXT inputs — its framing wounds are guard_breaches; L1's own wounds
+  %% are L1's to heal now (the old L2-briefs-L1 path is cut).
   PLAN --> L2P
   L3N --> L2P
   DIAG --> L2P
-  VFAIL --> L2P
-  RFAIL --> L2P
+  GB --> L2P
   CRIT --> L2P
   CPAR --> L2P
   TC --> L2P
   CAT --> L2P
   AXM --> L2P
 
-  %% L3_PLAN inputs — universal nurse: sees all four failure variants.
+  %% L3_PLAN inputs — sink: sees both wound groups.
   PLAN --> L3P
   TC --> L3P
   DIAG --> L3P
-  VFAIL --> L3P
-  RFAIL --> L3P
-  L2OF --> L3P
-  L3OF --> L3P
+  L1W --> L3P
+  GB --> L3P
   CRIT --> L3P
   AXM --> L3P
 
@@ -122,16 +111,15 @@ flowchart LR
   L2P --> CPAR
   L2P --> LAYOUT
   L1C --> CRIT
-  L2P --> L2OF
-  L3P --> L3OF
+  L2P --> GB
+  L3P --> GB
 
   %% L1_SCORE derivations — deterministic; normal color
   L1S --> DIAG
-  L1S --> VFAIL
-  L1S --> RFAIL
+  L1S --> L1W
 
   %% Red styling for the 8 LLM-produced feedback edges (post-round)
-  linkStyle 31,32,33,34,35,36,37,38 stroke:#B22222,stroke-width:2px
+  linkStyle 29,30,31,32,33,34,35,36 stroke:#B22222,stroke-width:2px
 ```
 
 ## Reference
@@ -140,7 +128,7 @@ flowchart LR
 
 Each entry in `INJECTIONS` is a frozen `_Injection(name, kind, render, doc)`. `kind` is one of:
 
-- **MEASUREMENT** — deterministic round-end output (e.g. `diagnostics`, `validation_failures`, `runtime_failures`).
+- **MEASUREMENT** — deterministic round-end output (e.g. `diagnostics`, `l1_wounds`, `guard_breaches`).
 - **DERIVED** — view/digest over MeasurementArchive or AxisIndex (e.g. `axis_memory`).
 - **TRACE** — narrative state from prior LLM calls (e.g. `critique`, `plan`, `task_context`).
 - **DIRECTIVE** — short-lived directive consumed by exactly one downstream layer (e.g. `l3_to_l2_note`).
@@ -152,19 +140,14 @@ This is where the reader's mental model of a round usually starts: candidates we
 - ⁴ **`diagnostics`** ← STATUS prefix (plain) + fenced `RoundDiagnostics` body
   - **STATUS prefix** ← `bundle.cycle_slice` — `round`🧩, `current`🧩 (parent fitness `f"{cs.current_accuracy:.1%}"`), `best`🧩 (acc + round), `L1 stall`🧩 (rounds), and — when fired — `L2 fired`🧩 (count + stall), `L3 fired`🧩 (count + stall). Plain text (cycle counters are trusted optimizer state, not untrusted dataset content). Always renders, including pre-round-1 when `digest.diagnostics is None`. Despite the `current`/`best` accuracy labels, the rendered values are mean composite *fitness* under the active scorer, not hit-rates.
   - **Body** [fenced] ← `bundle.digest.diagnostics`: `RoundDiagnostics` from `compute_round_diagnostics` (built deterministically by L1_SCORE) — trajectory + recent-rounds evolution, anomalies, rank dist + top-k, pipeline-health termination split, failures by step / warning class, near-misses, cross-candidate diff, diversity, cache-share, miss-sample, prompt-size warning, probe outcome 🧩
-- ⁵ **`validation_failures`** [fenced] ← `opt_sp.wounds.validation_failures` · Wound 1 evidence
-  - Each entry: `axis`🧩, `value`🧩 (LLM-proposed), `allowed`🧩, `reason`🧩. Fenced because `value` is arbitrary LLM output.
-  - L1 parse-time deterministic validator (`L1_SCHEMA_COMPLIANCE`). Accumulates on `OptSearchPoint` cross-round.
-- ¹¹ **`runtime_failures`** [fenced] ← `opt_sp.wounds.runtime_failures` · Wound 2 evidence
-  - Per-candidate runtime failures from `DegradationCheck`; accumulates on `OptSearchPoint` cross-round.
-  - Fenced because it echoes pipeline warning strings.
-- ¹² **`l2_guard_breaches`** ← `opt_sp.wounds.l2_guard_breaches` · Wound 4 evidence
-  - Plain (only `validator_id`🧩 from a controlled registry + `score`🧩 float — no untrusted content).
-  - Set by L2_CONTEXT post-parse validators (`run_l2_output_validators`); non-empty triggers immediate L3 fire. **L3-only consumer** because L2 doesn't fire while these are outstanding (L3 replans first, then L2 fires fresh).
-- ¹³ **`l3_guard_breaches`** ← `opt_sp.wounds.l3_guard_breaches` · L3 self-healing evidence
-  - Plain (only `validator_id`🧩 + `score`🧩).
-  - Set by L3_PLAN post-parse validators. **L3-only consumer** — L3 reads its own past failures to avoid repeating them on next replan.
-- ⁸ **`critique`** ← `bundle.digest.critique` (L1_CRITIQUE output, consumes ⁴ + ⁵ + ¹¹)
+- ⁵ **`l1_wounds`** [fenced] ← `opt_sp.wounds.{validation_failures, runtime_failures}` · L1-owned wounds, one block
+  - **Validation** (parse-time): `axis`🧩, `value`🧩 (LLM-proposed), `allowed`🧩, `reason`🧩 — from `L1_SCHEMA_COMPLIANCE`; synthetic-0, per-candidate.
+  - **Runtime** (mid-eval): per-candidate `DegradationCheck` evidence, owner-tagged (`owner=l1` retune · `owner=operator` flagged, not in-loop fixable); accumulates cross-round (NEW vs ACCUMULATED).
+  - Fenced (echoes arbitrary LLM output + pipeline warnings). Renderer `_r_l1_wounds`.
+- ¹² **`guard_breaches`** ← `opt_sp.wounds.{l2_guard_breaches, l3_guard_breaches}` · post-parse breaches, both owner=L3 (replan)
+  - Plain (only `validator_id`🧩 from a controlled registry — no untrusted content). Renderer `_r_guard_breaches`.
+  - Set by L2/L3 post-parse validators. A non-empty L2 block force-triggers an immediate L3 fire (read off the stream by `escalate_l2`, not this render); L3 also reads its own past breaches to avoid repeating them.
+- ⁸ **`critique`** ← `bundle.digest.critique` (L1_CRITIQUE output, consumes ⁴ + ⁵)
   - Compact view via `format_l1_critique_for_prompt`
   - `summary`🧩, `priority_fix`🧩, `suggested_axes`🧩, `failure_highlights`🧩 (top 5)
 
@@ -212,9 +195,9 @@ Substituted directly by `compile_prompt`; not signals.
 ## Mechanics
 
 - **Fill** — L1_GENERATE slot bodies are plain text; `fill_l1` walks `opt_sp.l1_layout` (per-slot injection-name lists) and appends rendered injection text to each slot. L1_CRITIQUE / L2_CONTEXT / L3_PLAN bodies carry literal `{{name}}` markers; `fill_fixed` regex-extracts and resolves them. `validate_template()` (called from `load_optimizer_prompt`) errors at module load if any `{{slot}}` is not in the `INJECTIONS` registry.
-- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, validation_failures, runtime_failures, critique, axis_memory}` 🧩; the other injections (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `prompt_budget_status`, `l2_guard_breaches`, `l3_guard_breaches`) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal.
-- **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` with `nurse_target='l3'` — L3_PLAN replans rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state.
+- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, l1_wounds, critique, axis_memory}` 🧩; the other injections (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `prompt_budget_status`, `guard_breaches`) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal.
+- **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` — a guard breach that routes to L3_PLAN (replan) rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state.
 
-## Future — possible merge of L1_SCORE readouts
+## Future — diagnostics vs l1_wounds
 
-The three `L1_SCORE readouts` (`diagnostics`, `validation_failures`, `runtime_failures`) are kept as distinct hub variables today because their lifecycles diverge: `diagnostics` is per-round on `Bundle.digest`; the failure variants accumulate on `OptSearchPoint` cross-round. Unifying them into one `MeasurementReadout` object would require either widening `RoundDigest` with cross-round views (duplicates state) or moving accumulating failure fields off OSP (breaks the per-candidate-attribution invariant in `self-healing-internals.md`). Park until the readout shapes have stabilized.
+The wound-render merge is **done**: validation + runtime render as one `l1_wounds` block, and the two guard streams as `guard_breaches`. What stays distinct is `diagnostics` vs `l1_wounds` — `diagnostics` is per-round on `Bundle.digest` while the wound streams accumulate on `OptSearchPoint` cross-round, so a shared `MeasurementReadout` would either duplicate state into `RoundDigest` or move accumulating fields off OSP (breaking per-candidate attribution). Storage stays the three typed `WoundChannels` lists **deliberately** (`self-healing-internals.md`) — only rendering collapsed. Park the diagnostics↔wounds merge until the readout shapes stabilise.

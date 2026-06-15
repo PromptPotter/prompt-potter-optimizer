@@ -53,10 +53,7 @@ def _check_task_context_verbatim_repeat(
         return None
     return ValidatorOutcome(
         validator_id=L2_TASK_CONTEXT_VERBATIM_REPEAT.id,
-        passed=False,
-        score=0.0,
         evidence={"proposed_keys": sorted(proposed.keys())},
-        nurse_target="l3",
     )
 
 
@@ -104,14 +101,11 @@ def _check_task_context_paraphrase_repeat(
         return None
     return ValidatorOutcome(
         validator_id=L2_TASK_CONTEXT_PARAPHRASE_REPEAT.id,
-        passed=False,
-        score=0.0,
         evidence={
             "field": worst_field,
             "jaccard": round(worst_overlap, 3),
             "threshold": PARAPHRASE_REPEAT_JACCARD_THRESHOLD,
         },
-        nurse_target="l3",
     )
 
 
@@ -150,34 +144,28 @@ def _check_duplicate_insert(
         return None
     return ValidatorOutcome(
         validator_id=L2_DUPLICATE_INSERT.id,
-        passed=False,
-        score=0.0,
         evidence={
             "duplicate_lines": duplicate_lines,
             "threshold": DUPLICATE_INSERT_LINE_THRESHOLD,
             "fields": sorted(overlapped_fields),
         },
-        nurse_target="l3",
     )
 
 
 L2_TASK_CONTEXT_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
     id="l2_task_context_verbatim_repeat",
-    nurse_target="l3",
     check=_check_task_context_verbatim_repeat,
 )
 
 
 L2_DUPLICATE_INSERT: LLMOutputValidator = LLMOutputValidator(
     id="l2_duplicate_insert",
-    nurse_target="l3",
     check=_check_duplicate_insert,
 )
 
 
 L2_TASK_CONTEXT_PARAPHRASE_REPEAT: LLMOutputValidator = LLMOutputValidator(
     id="l2_task_context_paraphrase_repeat",
-    nurse_target="l3",
     check=_check_task_context_paraphrase_repeat,
 )
 
@@ -229,10 +217,7 @@ def _check_supplemental_rule_dup_id(
         return None
     return ValidatorOutcome(
         validator_id=L2_SUPPLEMENTAL_RULE_DUP_ID.id,
-        passed=False,
-        score=0.0,
         evidence={"duplicate_rule_ids": sorted(set(dups))},
-        nurse_target="l3",
     )
 
 
@@ -277,10 +262,7 @@ def _check_situational_example_dangling_trigger(
         return None
     return ValidatorOutcome(
         validator_id=L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER.id,
-        passed=False,
-        score=0.0,
         evidence={"dangling_trigger_ids": sorted(set(dangling)), "allowed": sorted(allowed)},
-        nurse_target="l3",
     )
 
 
@@ -321,35 +303,29 @@ def _check_supplemental_rule_duplicates_auto_trigger(
         return None
     return ValidatorOutcome(
         validator_id=L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER.id,
-        passed=False,
-        score=0.0,
         evidence={
             "duplicates": [
                 {"rule_id": rid, "auto_trigger": atid, "jaccard": j} for rid, atid, j in offenders
             ],
             "threshold": PARAPHRASE_REPEAT_JACCARD_THRESHOLD,
         },
-        nurse_target="l3",
     )
 
 
 L2_SUPPLEMENTAL_RULE_DUP_ID: LLMOutputValidator = LLMOutputValidator(
     id="l2_supplemental_rule_dup_id",
-    nurse_target="l3",
     check=_check_supplemental_rule_dup_id,
 )
 
 
 L2_SITUATIONAL_EXAMPLE_DANGLING_TRIGGER: LLMOutputValidator = LLMOutputValidator(
     id="l2_situational_example_dangling_trigger",
-    nurse_target="l3",
     check=_check_situational_example_dangling_trigger,
 )
 
 
 L2_SUPPLEMENTAL_RULE_DUPLICATES_AUTO_TRIGGER: LLMOutputValidator = LLMOutputValidator(
     id="l2_supplemental_rule_duplicates_auto_trigger",
-    nurse_target="l3",
     check=_check_supplemental_rule_duplicates_auto_trigger,
 )
 

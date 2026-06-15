@@ -1,14 +1,19 @@
 # Self-Healing Internals
 
-Failures attach to the **candidate that produced them** (direct fields on `OptSearchPoint`), never to the round, so a losing candidate's problem never disrupts the round winner. New mechanisms must land as one of the four wounds below — no sidecars, no silent drops. The one sanctioned non-wound healing class is the prompt-budget unit (see [Beyond the wounds](#beyond-the-wounds--the-prompt-budget-unit-tier-2)); it still rides the dispatch-hub registry, not a sidecar.
+Failures attach to the **candidate that produced them** (direct fields on `OptSearchPoint`), never to the round, so a losing candidate's problem never disrupts the round winner.
+
+**Two axes describe every wound — there is no "four-wound taxonomy" to memorise.** What used to read as four parallel pipelines is two orthogonal axes:
+
+- **Detection point** → record type + score effect + lifecycle. Parse-time → `ValidationFailure`, synthetic-0, per-candidate. Mid-eval → `RuntimeFailure`, real score + rate, accumulated/deduped. Post-parse → `ValidatorOutcome`, no score effect, per-round. The three typed `WoundChannels` lists encode this axis (kept distinct — merging them is over-collapse).
+- **Nurse owner** → who heals it. This axis is **mostly structural — it falls out of the record type**, so only one record carries a field for it. A `ValidationFailure` is *always* L1's own malformed output (L1 retunes). A guard-breach `ValidatorOutcome` *always* routes to L3 — via the non-empty-`l2_guard_breaches`-stream → `escalate_l2` mechanism, not a stored value. Only a `RuntimeFailure` carries a genuine choice, so it (and only it) carries an `owner: NurseOwner` field ∈ `{L1, OPERATOR}`: an L1-retunable rate-degradation vs an operator-terminal break (the token blowout) no in-loop layer can reach. L2 produces wounds (its guard breaches) but heals none.
+
+A new mechanism picks its stream by **detection point**; its owner is implied by the record type, except a `RuntimeFailure` which stamps `owner` where the choice is real. No nurse wired by hand, no sidecar. The producer-keyed `nurse_target` field is **retired** (set everywhere, read nowhere — a `tests/test_structure.py` ban keeps it gone). The prompt-budget unit (below) is a **separate** mechanism, not a wound.
 
 ## Producer / detector / nurse
 
-Each wound has three roles:
-
 - **Producer** — the LLM that left the wound (L1 or L2).
 - **Detector** — the deterministic check that caught it (validator, mid-eval check, patience timer).
-- **Nurse** — the LLM that tends it next round (L2 or L3).
+- **Nurse** — the layer that **owns the fix**, **not** the producer. So L1 tends its own malformed proposal (it owns pipeline_params), and a deterministic-for-config break whose only fix is a locked surface escalates to the **operator** instead of churning at a layer that can't reach the lever. The owner is structural (record type) except for a `RuntimeFailure`, whose `owner` field decides L1-vs-OPERATOR.
 
 **Healing is gradual.** A nurse firing once produces *one* nudge, not a guaranteed fix. The producer's distribution shifts; whether the next proposal lands depends on how clear the evidence was and how strongly the nurse encoded it. Hard one-shot briefs ("do NOT propose X") aren't required — softer pointers toward the right region are enough, because the nurse is built to retry. If the wound recurs:
 
@@ -20,31 +25,32 @@ Each wound has three roles:
 
 **Round-over-round feedback (separate).** `l1_critique → l1_generate` fires every round, regardless of failure. Performance-driven feedback, not failure-driven healing.
 
-## The four wounds at a glance
+## The wounds, mapped to the two axes
+
+Four historical "wounds" — but read them as (detection point × nurse owner), not as four
+pipelines. Storage stays three typed lists; **rendering collapses to two owner-grouped signals**
+(`l1_wounds` = validation + runtime; `guard_breaches` = L2 + L3 post-parse).
 
 |  | Wound 1 | Wound 2 | Wound 3 | Wound 4 |
 |---|---|---|---|---|
-| **Producer → Nurse** | L1 → L2 | L1 → L2 | L2 → L3 | L2 → L3 |
+| **Producer → Nurse** (owner-keyed, not producer-keyed) | L1 → **L1** | L1 → **L1 / OPERATOR** | L2 → L3 | L2 → L3 |
+| **Owner source** | structural (L1's own output) | `RuntimeFailure.owner`: `L1` (rate) · `OPERATOR` (fatal) | (patience event) | structural (guard stream → L3) |
 | **Detector** | `L1_SCHEMA_COMPLIANCE` validator | `DegradationCheck` (mid-eval) | `escalate_l2` patience | `L2_*` validators (post-parse) |
 | **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
 | **OSP storage** | `validation_failures` | `runtime_failures` | `escalation.l2.stall_count` | `l2_guard_breaches` |
 | **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.wounds.runtime_failures` | none | per-round on the OSP itself |
-| **Nurse prompt slot** | `{{validation_failures}}` | `{{runtime_failures}}` | (whole `l3_plan` template) | `{{l2_guard_breaches_section}}` |
-| **Renderer** | `_r_validation_failures` | `_r_runtime_failures` | `_r_runtime_failures` | `_r_l2_guard_breaches` |
-| **Nurse's writeback** | `cycle.opt_sp.task_context` | `task_context` / scheme + text overrides | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
+| **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
+| **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
+| **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
 | **Score effect** | synthetic 0 (Path 1 in `score_population`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
-## Beyond the wounds — the prompt-budget unit (tier 2)
+## The prompt-budget unit (a separate mechanism)
 
-The four wounds are the **vanilla** healing class: each is one
-producer→nurse channel — one detector, one failure record, one nurse
-layer, one prompt slot. Uniform by design.
-
-The **prompt-budget unit** (full spec:
-`git log`)
-is a different kind of mechanism — the project's most sophisticated
-healing unit. It guards one concern, the size of a composed optimizer
-meta-prompt, with **four healing modes stacked on one another**:
+The wounds heal **candidate** failures. The prompt-budget unit is a
+**different mechanism** — not a tier or escape-hatch of the wound model —
+that guards one unrelated concern: the size of a composed optimizer
+meta-prompt. It earns its own section because it isn't a wound, not
+because the taxonomy needed an exception. It stacks **four healing modes**:
 
 1. **Truncate** — per-injection `char_cap`; an LLM-authored block over
    its cap is cut + warned in `DispatchHub.render`.
@@ -61,19 +67,19 @@ Why it is not a wound: it has no single producer→nurse pair. Modes 1–2
 are mechanical (no LLM), mode 3 is LLM-routed but only for blocks L2
 itself authored, mode 4 escalates to a human. It is the one place
 mechanical healing, LLM-routed healing, and a graceful halt meet on one
-concern — hence "tier 2". It still obeys the no-sidecar rule: every mode
+concern. It still obeys the no-sidecar rule: every mode
 rides the `INJECTIONS` registry, `DispatchHub`, and the existing
 `StopLoop` / round-loop teardown.
 
-## Wound 1 — L2 tends L1's `ValidationFailure`
+## Wound 1 — L1 tends its own `ValidationFailure`
 
 `L1_SCHEMA_COMPLIANCE` (`application/optimization/validators/l1_strict.py`) wraps `validate_overrides()` and runs at L1 parse time in `parse_population()`. When L1's `pipeline_params_override` proposes a value outside `PipelineSchema.available_models`, outside a node's `param_allowed_values`, mismatched against the declared `param_types`, or touches an operator-locked axis (`PARAM_FORBIDDEN_KEYS = {model, provider}`, gated by `OptimizationConfig.forbidden_axes_strict` — default on), the validator emits a `ValidatorOutcome` whose `evidence["failures"]` is `list[ValidationFailure(axis, value, allowed, reason)]`. `reason` is one of `not_in_available_models`, `not_in_param_allowed_values`, `type_mismatch`, or `forbidden_axis`.
 
 Failures land on `OptSearchPoint.wounds.validation_failures` — outer-layer optimizer state, not target-layer. Effect chain: `score_population()` shortcuts to a synthetic-0 report (Path 1) → inline winner-selection deprioritises the candidate → round checkpoint persists the failure.
 
-L2's template (`optimizer_pipeline.json::resolved_prompts['l2_context/1']`) renders `{{validation_failures}}` via `_r_validation_failures()`. L2 writes a brief pointing L1 toward the allowed region. Healing is gradual — if L1 still proposes invalid values next round, the validator fires again and L2 gets fresh evidence.
+L1's own layout (`l1_layout`) renders the validation block inside the `{{l1_wounds}}` signal via `_r_l1_wounds()` (validation + runtime in one owner-grouped block) — L1 reads its own wounds and re-proposes toward the allowed region (the L2-briefs-L1 hop is gone). Healing is gradual — if L1 still proposes invalid values next round, the validator fires again and L1 gets fresh evidence.
 
-## Wound 2 — L2 tends L1's `RuntimeFailure`
+## Wound 2 — L1 (or the operator) tends the `RuntimeFailure`
 
 `DegradationCheck` (`application/optimization/pobb/elimination/checks.py`) fires mid-evaluation. Two paths:
 
@@ -84,7 +90,7 @@ Both produce `EscalationSignal(target=ELIMINATE_CANDIDATE)`. `score_population` 
 
 End-of-round, `execute_round` mirrors new `RuntimeFailure`s onto `cycle.opt_sp.wounds.runtime_failures`, deduplicated by `(source, dominant_warning, observed_config)`. Never cleared — represents discovered runtime constraints.
 
-`_r_runtime_failures()` partitions into NEW (this round) vs ACCUMULATED (`first_seen_round != current_round`). ACCUMULATED is the real signal — surviving items mean L2's prior angle didn't take. L2 updates its outputs; if ACCUMULATED keeps growing, Wound 3 takes over.
+The runtime block inside `_r_l1_wounds()` partitions into NEW (this round) vs ACCUMULATED (`first_seen_round != current_round`) and tags each entry `[owner=l1|operator]` from `RuntimeFailure.owner`. ACCUMULATED is the real signal — surviving items mean L2's prior angle didn't take. L2 updates its outputs; if ACCUMULATED keeps growing, Wound 3 takes over.
 
 ## Wound 3 — L3 replans on L2 stall
 
@@ -92,22 +98,24 @@ End-of-round, `execute_round` mirrors new `RuntimeFailure`s onto `cycle.opt_sp.w
 
 L3's prompt (`optimizer_pipeline.json::resolved_prompts['l3_plan/1']`) reads:
 
-- `{{runtime_failures}}` — accumulated `RuntimeFailure` trail rendered by `_r_runtime_failures()`.
-- `{{l2_guard_breaches}}` — Wound 4 evidence rendered by `_r_l2_guard_breaches()`.
-- `{{l3_guard_breaches}}` — L3's own past validator failures rendered by `_r_l3_guard_breaches()`.
-- `{{plan}}`, `{{task_context}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{critique}}`.
+- `{{l1_wounds}}` — accumulated `RuntimeFailure` trail (+ validation block) rendered by `_r_l1_wounds()`.
+- `{{guard_breaches}}` — Wound 4 evidence (L2 + L3 post-parse breaches) rendered by `_r_guard_breaches()`.
+- `{{plan}}`, `{{task_context}}`, `{{diagnostics}}`, `{{critique}}`.
 
 L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPoint.plan`; feeds both L1's `{{plan}}` slot and the next L2 invocation. Only wound with cross-layer authority — L3 changes pipeline composition or strategy framing.
 
 ## Wound 4 — L3 tends L2's parsed-output failure
 
-`L2_OUTPUT_VALIDATORS` registry (`application/optimization/validators/l2_output.py`) — three starter validators, all `nurse_target="l3"`:
+`L2_OUTPUT_VALIDATORS` registry (`application/optimization/validators/l2_output.py`) — six validators; every guard-breach `ValidatorOutcome` routes to L3 (replan) structurally, via the non-empty-stream → `escalate_l2` trigger, so none carries an owner field:
 
 | Validator id | Detects |
 |---|---|
-| `l2_cross_field_duplication` | Same N+ line block in ≥2 of `{brief, template_override, text_overrides[*]}` |
-| `l2_verbatim_self_repeat` | L2's `brief` this round equals previous round's brief on OSP |
-| `l2_catalogue_redundancy` | `text_overrides[section]` equals existing override on OSP for that section |
+| `l2_task_context_verbatim_repeat` | proposed `task_context` merged to a no-op vs prior framing |
+| `l2_task_context_paraphrase_repeat` | per-field word-set Jaccard ≥ 0.5 vs prior framing |
+| `l2_duplicate_insert` | proposed `task_context` re-asserts ≥3 lines already in prior framing |
+| `l2_supplemental_rule_dup_id` | two L2-authored rules share a `rule_id` |
+| `l2_situational_example_dangling_trigger` | example `trigger_id` matches no auto-trigger or authored rule |
+| `l2_supplemental_rule_duplicates_auto_trigger` | rule body paraphrases a canonical `AUTO_RULES` entry |
 
 Validators run inside `L2RefineStrategy.build_result()` between LLM-output parse and `TransitionResult` construction. Outcomes ride on `TransitionResult.l2_guard_breaches` and are written by `apply_side_effects` to `cycle.opt_sp.wounds.l2_guard_breaches`.
 
@@ -119,21 +127,20 @@ When `cycle.opt_sp.wounds.l2_guard_breaches` is non-empty after L2 runs, `escala
 @dataclass(frozen=True)
 class ValidatorOutcome:
     validator_id: str
-    passed: bool
-    score: float                # 1.0 = clean, 0.0 = full failure
     evidence: dict[str, Any]
-    nurse_target: Literal["l2", "l3"]
 
 
 @dataclass(frozen=True)
 class LLMOutputValidator:
     id: str
-    description: str
-    nurse_target: Literal["l2", "l3"]
     check: Callable[..., ValidatorOutcome | None]
 ```
 
-Mirrors `Evaluator` (`name, description, scope, compute, …`) so future composite scoring can read validator outcomes through the same channel. `score` is the seam — currently for display only, but flows into a `campaign.json::scoring` formula the same way `accuracy` does.
+An outcome only exists for a failure — so no `passed` flag — and the self-healers count
+**events**, not graded scores, so there is no `score` field (the old "score flows into
+`campaign.json::scoring`" symmetry was aspirational and never wired; it's gone). No owner field
+either: a guard-breach outcome always routes to L3 structurally (see above), so there is no
+per-outcome choice to store.
 
 ## Optimizer-memory state
 
@@ -142,7 +149,7 @@ Fields on `OptSearchPoint.memory` (the `L2L3Memory` sub-model in `domain/opt_sea
 | Field | Lifecycle | Wound |
 |---|---|---|
 | `task_context` | persistent, accumulative; merged on each L2 fire; inherits through `mutate()` | Wound 1, Wound 2 — L2 writeback |
-| `wounds.validation_failures` | per-candidate (set at L1 parse) | Wound 1 — L2 reads |
+| `wounds.validation_failures` | per-candidate (set at L1 parse) | Wound 1 — L1 reads (via `l1_wounds`) |
 | `wounds.runtime_failures` | per-candidate + cumulative outer-memory mirror | Wound 2 + 3 |
 | `wounds.l2_guard_breaches` | per-round, set by L2 post-parse | Wound 4 — L3 reads |
 | `wounds.l3_guard_breaches` | per-round, set by L3 post-parse | L3 self-heal |
@@ -182,11 +189,12 @@ This is a load-boundary filter, not a score-time fallback. Trace records continu
 
 ## Adding a new mechanism
 
-Pick one of the four wounds based on producer/nurse pair:
+Pick the storage stream by detector + score-effect (the four wounds); the owner falls out of the
+record type — you never wire a nurse by hand:
 
-- New gen-time check on L1's output → **Wound 1**. Add a validator next to `L1_SCHEMA_COMPLIANCE`.
-- New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `score_population`.
+- New gen-time check on L1's output → **Wound 1**. Add a validator next to `L1_SCHEMA_COMPLIANCE`; owner is L1 structurally (its own malformed output).
+- New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `score_population`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can (a locked schema/model the in-loop layer can't reach).
 - New strategic-stall trigger → **Wound 3** isn't a registry; it's the patience timer.
-- New post-parse check on L2's output → **Wound 4**. Add a validator to `L2_OUTPUT_VALIDATORS` in `validators/l2_output.py`.
+- New post-parse check on L2/L3's output → **Wound 4**. Add a validator to `L2_OUTPUT_VALIDATORS` / `L3_OUTPUT_VALIDATORS`; owner is L3 structurally (guard-breach stream → `escalate_l2`).
 
-For each: declare `LLMOutputValidator` with stable id, write the `check` callable, append to the appropriate registry. Prompt-section render and persistence path are already wired — they iterate the registry, not a hard-coded list.
+For each: declare `LLMOutputValidator` with a stable id, write the `check` callable, append to the appropriate registry. Prompt-section render and persistence path are already wired — they iterate the registry, not a hard-coded list. Only add a `NurseOwner` member when a producer actually stamps it (today only `RuntimeFailure` does, with `L1`/`OPERATOR`).

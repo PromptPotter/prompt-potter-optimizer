@@ -75,12 +75,12 @@ SELF_HEALERS: tuple[SelfHealerSpec, ...] = (
     SelfHealerSpec(
         "validation_failure_rate",
         "validation_failures",
-        "Fraction of samples where L1 output was malformed; L2 healed.",
+        "Fraction of samples where L1 output was malformed; L1 re-proposes (owner=L1).",
     ),
     SelfHealerSpec(
         "runtime_failure_rate",
         "runtime_failures",
-        "Fraction of samples that triggered DegradationCheck; L2 healed.",
+        "Fraction of samples that triggered DegradationCheck; L1 retunes, or operator-flagged if locked.",
     ),
     SelfHealerSpec(
         "l2_guard_breach_rate",

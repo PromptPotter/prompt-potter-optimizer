@@ -306,7 +306,7 @@ def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkSpec) -> None
             )
         result = validate_l1_layout(layout, prior_layout=opt_sp.memory.l1_layout)
         if not result.is_valid:
-            ids = sorted({o.validator_id for o in result.outcomes if not o.passed})
+            ids = sorted({o.validator_id for o in result.outcomes})
             raise ValueError(f"Fork payload l1_layout failed hard validators: {ids}")
         opt_sp.memory.l1_layout = layout
 

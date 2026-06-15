@@ -8,8 +8,8 @@ Three concerns, all validation-shaped:
   constrained at output-time across all three override slots.
 - **Schema compliance**: ``validate_overrides`` + ``L1_SCHEMA_COMPLIANCE``
   catch ``pipeline_params_override`` values that violate the schema
-  after the fact (LLMs sometimes ignore parts of the schema). Failures
-  route to L2 via ``ValidatorOutcome``.
+  after the fact (LLMs sometimes ignore parts of the schema). The
+  ``ValidatorOutcome`` lands on L1's own ``l1_wounds`` — L1 re-proposes.
 - **Variant invariants**: ``detect_invariants`` flags ``no_op_variant``
   (no mutation vs parent) and ``duplicate_variant`` (sig-equal across
   population). Returns ``L1YieldStats`` for the round.
@@ -271,7 +271,7 @@ def _check_l1_schema_compliance(
     forbidden_axes_strict: bool = True,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Wrap validate_overrides → ValidatorOutcome (nurse_target=L2)."""
+    """Wrap validate_overrides → ValidatorOutcome (L1 retunes its own override)."""
     if not source_output or not pipeline_schema:
         return None
     failures = validate_overrides(
@@ -281,16 +281,12 @@ def _check_l1_schema_compliance(
         return None
     return ValidatorOutcome(
         validator_id=L1_SCHEMA_COMPLIANCE.id,
-        passed=False,
-        score=0.0,
         evidence={"failures": failures},
-        nurse_target="l2",
     )
 
 
 L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
     id="l1_schema_compliance",
-    nurse_target="l2",
     check=_check_l1_schema_compliance,
 )
 
@@ -340,16 +336,12 @@ def _check_l1_config_in_runtime_failures(
         return None
     return ValidatorOutcome(
         validator_id=L1_CONFIG_NOT_IN_RUNTIME_FAILURES.id,
-        passed=False,
-        score=0.0,
         evidence={"failures": out_failures},
-        nurse_target="l2",
     )
 
 
 L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
     id="l1_config_not_in_runtime_failures",
-    nurse_target="l2",
     check=_check_l1_config_in_runtime_failures,
 )
 

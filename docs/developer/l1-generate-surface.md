@@ -32,9 +32,9 @@ Every injection name in the layout maps to a renderer `(InjectionBundle) → str
 
 `answer_format` is omitted on purpose — it carries L1's output JSON schema (a code contract), not L2's call. Static text in each slot stays; the layout's injection renderings are appended.
 
-`L1_POSSIBLE` (subset of `INJECTIONS`) is the menu L2 picks from. L2-internal injections (`l1_overrides`, `l1_signal_catalogue`) are deliberately excluded from L1's slots — `l1_overrides`'s contents reach L1 only via the `n_variants`/`creativity` caller extras (the in-prompt directive + the LLM-call temperature, respectively). `L1_MANDATORY` (`plan`, `task_context`, `rendered_prompt`, `pipeline_param_catalogue`, `critique`) must appear somewhere across the slots — without these L1 has no parent prompt, no plan, no task framing, no mutation surface, and no round-local failure digest. Dropping any of them fires `l1_layout_missing_mandatory` with `nurse_target='l3'` so L3 replans rather than letting L2 starve L1.
+`L1_POSSIBLE` (subset of `INJECTIONS`) is the menu L2 picks from. L2-internal injections (`l1_overrides`, `l1_signal_catalogue`) are deliberately excluded from L1's slots — `l1_overrides`'s contents reach L1 only via the `n_variants`/`creativity` caller extras (the in-prompt directive + the LLM-call temperature, respectively). `L1_MANDATORY` (`plan`, `task_context`, `rendered_prompt`, `pipeline_param_catalogue`, `critique`) must appear somewhere across the slots — without these L1 has no parent prompt, no plan, no task framing, no mutation surface, and no round-local failure digest. Dropping any of them fires `l1_layout_missing_mandatory` — a guard breach that routes to L3 (replan) rather than letting L2 starve L1.
 
-Default layout (`default_l1_layout`): `task_context` in `task_intent`; `rendered_prompt`, `pipeline_param_catalogue`, `plan`, `diagnostics`, `validation_failures`, `runtime_failures`, `critique` in `problem_description`. Most L2 fires don't touch the layout.
+Default layout (`default_l1_layout`): `task_context` in `task_intent`; `rendered_prompt`, `pipeline_param_catalogue`, `plan`, `diagnostics`, `l1_wounds`, `critique` in `problem_description`. Most L2 fires don't touch the layout.
 
 ## Dispatch hub — `DispatchHub`
 

@@ -19,6 +19,22 @@ class EscalationTarget(enum.StrEnum):
     ABORT_CAMPAIGN = "abort_campaign"
 
 
+class NurseOwner(enum.StrEnum):
+    """Who heals a wound: the in-loop generator (L1) or the operator.
+
+    Stamped on a :class:`RuntimeFailure` — the one wound whose owner genuinely
+    varies (an L1-retunable degradation vs an operator-terminal break no in-loop
+    layer can reach). The other two wounds carry no owner field because theirs is
+    structural, not a choice: a :class:`ValidationFailure` is always L1's own
+    malformed output, and a guard-breach :class:`ValidatorOutcome` always routes
+    to L3 via the non-empty-stream → ``escalate_l2`` mechanism. A member earns its
+    place only once a producer stamps it — `L3` isn't here because nothing does.
+    """
+
+    L1 = "l1"
+    OPERATOR = "operator"
+
+
 @dataclass
 class EscalationSignal:
     """Signal emitted when an escalation check triggers mid-round."""
@@ -147,6 +163,21 @@ class RuntimeFailure(BaseModel):
         default="",
         description="Label of the originating candidate; informational, not a join key.",
     )
+    owner: NurseOwner = Field(
+        default=NurseOwner.L1,
+        description=(
+            "Who heals this runtime failure. Defaults to ``L1`` (a rate-based "
+            "degradation L1 retunes the node config around); a deterministic-for-"
+            "config break whose only fix is a locked surface (schema/model) is "
+            "stamped ``OPERATOR`` so it escalates instead of churning in-loop."
+        ),
+    )
 
 
-__all__ = ["EscalationSignal", "EscalationTarget", "RuntimeFailure", "ValidationFailure"]
+__all__ = [
+    "EscalationSignal",
+    "EscalationTarget",
+    "NurseOwner",
+    "RuntimeFailure",
+    "ValidationFailure",
+]

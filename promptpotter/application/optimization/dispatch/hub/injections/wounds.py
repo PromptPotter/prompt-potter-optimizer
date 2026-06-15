@@ -39,14 +39,8 @@ def _rf_matches_current_config(
     return all(observed.get(k) == current.get(k) for k in PARAM_FORBIDDEN_KEYS if k in observed)
 
 
-@signal(
-    "validation_failures",
-    kind=InjectionKind.MEASUREMENT,
-    description="Wound 1: L1 parse-time validator failures (per-axis, per-value).",
-    char_cap=500,
-)
-def _r_validation_failures(b: InjectionBundle) -> str:
-    """Wound 1 — L1 parse-time validator. Fenced (echoes LLM-proposed values)."""
+def _validation_block(b: InjectionBundle) -> str:
+    """Parse-time validation failures (all owner=L1 — L1's own invalid variants)."""
     failures = b.opt_sp.memory.wounds.validation_failures
     if not failures:
         return ""
@@ -57,22 +51,11 @@ def _r_validation_failures(b: InjectionBundle) -> str:
             f"  axis={vf.axis} value={vf.value!r} reason={vf.reason}"
             + (f" allowed=[{allowed_str}]" if allowed_str else "")
         )
-    return fence_untrusted("\n".join(sec))
+    return "\n".join(sec)
 
 
-@signal(
-    "runtime_failures",
-    kind=InjectionKind.MEASUREMENT,
-    description="Wound 2: DegradationCheck mid-eval evidence — per-candidate runtime failures.",
-    # This is the "do not re-propose" list — truncating it mid-list lets L1
-    # re-propose a config it dropped, the exact failure this channel prevents. The
-    # source is already bounded by RUNTIME_FAILURE_RECENCY_WINDOW (older failures
-    # collapse to "… N older suppressed"), so the cap only has to fit one window's
-    # worth; raised from 800 (a high-failure round on a complex pipeline hit 1031).
-    char_cap=2000,
-)
-def _r_runtime_failures(b: InjectionBundle) -> str:
-    """Wound 2 — DegradationCheck mid-eval evidence. Fenced (echoes pipeline warnings).
+def _runtime_block(b: InjectionBundle) -> str:
+    """Mid-eval runtime failures, owner-tagged (owner=l1 → retune; owner=operator → flagged).
     ACCUMULATED entries filter through `_rf_matches_current_config`; NEW (first-seen this round)
     always pass — they describe the failure being heard right now.
     """
@@ -92,7 +75,7 @@ def _r_runtime_failures(b: InjectionBundle) -> str:
     dropped = sum(1 for rf in runtime_failures if rf.first_seen_round < cutoff)
     if not (new_rfs or acc_rfs or dropped):
         return ""
-    sec = ["RUNTIME FAILURES (do not re-propose):"]
+    sec = ["RUNTIME FAILURES (owner=l1 → fix it; owner=operator → flagged, not in-loop fixable):"]
     if new_rfs:
         sec.append("  NEW:")
         sec.extend(_format_runtime_failure_group(new_rfs))
@@ -101,7 +84,23 @@ def _r_runtime_failures(b: InjectionBundle) -> str:
         sec.extend(_format_runtime_failure_group(acc_rfs))
     if dropped:
         sec.append(f"  … {dropped} older suppressed (>{RUNTIME_FAILURE_RECENCY_WINDOW} rounds).")
-    return fence_untrusted("\n".join(sec))
+    return "\n".join(sec)
+
+
+@signal(
+    "l1_wounds",
+    kind=InjectionKind.MEASUREMENT,
+    description="L1-owned wounds — parse-time validation + mid-eval runtime failures (owner-tagged).",
+    # Fenced (echoes LLM-proposed values + pipeline warnings). Cap fits one
+    # RUNTIME_FAILURE_RECENCY_WINDOW of runtime + the validation list; runtime is
+    # already window-bounded ("… N older suppressed"). Truncating runtime mid-list
+    # would invite L1 to re-propose a dropped config (the validator still blocks it).
+    char_cap=2500,
+)
+def _r_l1_wounds(b: InjectionBundle) -> str:
+    """The two L1-owned wound streams in one block — validation + runtime. Fenced."""
+    blocks = [blk for blk in (_validation_block(b), _runtime_block(b)) if blk]
+    return fence_untrusted("\n\n".join(blocks)) if blocks else ""
 
 
 def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
@@ -111,30 +110,30 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
     if not outcomes:
         return ""
     lines = [f"{layer} GUARD BREACHES (post-parse guards on {layer}'s output caught thrashing):"]
-    lines.extend(f"  • {o.validator_id} (score={o.score:.2f})" for o in outcomes)
+    lines.extend(f"  • {o.validator_id}" for o in outcomes)
     return "\n".join(lines)
 
 
 @signal(
-    "l2_guard_breaches",
+    "guard_breaches",
     kind=InjectionKind.MEASUREMENT,
-    description="Wound 4: L2_CONTEXT post-parse guard outcomes; non-empty force-triggers L3 heal.",
-    char_cap=300,
+    description="Post-parse guard breaches on L2 + L3 output — both owner=L3 (replan). Plain ids.",
+    char_cap=400,
 )
-def _r_l2_guard_breaches(b: InjectionBundle) -> str:
-    """Wound 4 — L2_CONTEXT guard outcomes; non-empty force-triggers an L3 heal."""
-    return _render_guard_breaches(b.opt_sp.memory.wounds.l2_guard_breaches, "L2")
-
-
-@signal(
-    "l3_guard_breaches",
-    kind=InjectionKind.MEASUREMENT,
-    description="L3_PLAN post-parse guard outcomes. L3 reads its own past breaches.",
-    char_cap=300,
-)
-def _r_l3_guard_breaches(b: InjectionBundle) -> str:
-    """L3_PLAN guard outcomes — L3 reads its own past breaches to avoid repeating them."""
-    return _render_guard_breaches(b.opt_sp.memory.wounds.l3_guard_breaches, "L3")
+def _r_guard_breaches(b: InjectionBundle) -> str:
+    """L2 + L3 post-parse guard outcomes in one block — both route to L3 (`PLAN`): L3 replans,
+    and reads its own past breaches to avoid repeating them. A non-empty L2 block is what
+    `escalate_l2` force-triggers L3 on (it reads the stream directly, not this render)."""
+    wounds = b.opt_sp.memory.wounds
+    blocks = [
+        blk
+        for blk in (
+            _render_guard_breaches(wounds.l2_guard_breaches, "L2"),
+            _render_guard_breaches(wounds.l3_guard_breaches, "L3"),
+        )
+        if blk
+    ]
+    return "\n".join(blocks)
 
 
 def _format_runtime_failure_lines(rf: Any) -> list[str]:
@@ -143,10 +142,11 @@ def _format_runtime_failure_lines(rf: Any) -> list[str]:
     cfg_parts = [f"{k}={v}" for k, v in (rf.observed_config or {}).items() if k != "prompt"]
     cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
     label = (rf.candidate_label or "")[:60]
+    owner = rf.owner.value
     head = (
-        f"    BLOCKED: {label} — {rate_pct}% degraded on {rf.total_scored}, dom={rf.dominant_warning}"
+        f"    [owner={owner}] {label} — {rate_pct}% degraded on {rf.total_scored}, dom={rf.dominant_warning}"
         if label
-        else f"    BLOCKED: {rf.dominant_warning} — {rate_pct}% degraded on {rf.total_scored}"
+        else f"    [owner={owner}] {rf.dominant_warning} — {rate_pct}% degraded on {rf.total_scored}"
     )
     return [head, f"      cfg: {cfg_str}"]
 
@@ -172,7 +172,8 @@ def _format_runtime_failure_group(rfs: list[Any]) -> list[str]:
             out.extend(_format_runtime_failure_lines(group[0]))
             continue
         backend = f"{provider}/{model}" if (provider or model) else "(backend n/a)"
-        out.append(f"    BLOCKED x{len(group)} — dom={warning}, model={backend}")
+        owner = group[0].owner.value
+        out.append(f"    [owner={owner}] x{len(group)} — dom={warning}, model={backend}")
         varied: dict[str, set[str]] = defaultdict(set)
         for rf in group:
             for k, v in (rf.observed_config or {}).items():
