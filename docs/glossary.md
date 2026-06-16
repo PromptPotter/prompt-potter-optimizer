@@ -84,12 +84,22 @@ The persisted world is a four-entity containment hierarchy
   version-and-repoint contract, not an in-place overwrite (the old data
   is preserved under `{slug}-vN`; orchestration in
   `application/datasets/dataset_replace.py`).
-- **Origin** — the optimizer's **starting point**: the origin
-  `OptSearchPoint` (`resolve_origin_opt_search_point`) the loop evolves
-  from, and the round-0 "origin accuracy" before any mutation. Reserve
-  this word for that meaning. The data a campaign starts from is a
-  **Dataset**, not an "origin" — historical UI/spec copy that called the
-  dataset an "Origin" was renamed to **Dataset**.
+- **Origin** — the **complete specification the potter loop starts from**:
+  the prompt fields, the per-node pipeline config, the pipeline's
+  **required inputs** (query/target column map, answer space, and any
+  node-type dependency such as a `candidate_source` node's candidate
+  library), and the dataset binding — the *starting program* the optimizer
+  evolves from. **Per-pipeline** and **independent of measurement**: it
+  exists fully formed *before* anything is scored. Resolved by
+  `resolve_origin_opt_search_point` (`application/origin.py`). Reserve this
+  word for that meaning; the data a campaign starts from is a **Dataset**,
+  not an "origin" — historical UI/spec copy that called the dataset an
+  "Origin" was renamed to **Dataset**.
+  - **origin's round-0 score** (`origin_accuracy` / round 0 / **C0**) — the
+    **measurement** produced by scoring the origin, emitted as round 0. It
+    is *downstream of* the origin, **not part of its definition**; say
+    "the origin's round-0 score", never equate it with the origin itself.
+    Scoring step: `establish_campaign_origin` → `emit_origin_round`.
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, and the optimizer meta-prompts it runs
   under. A first-class entity holding one session root + its fork/diag/

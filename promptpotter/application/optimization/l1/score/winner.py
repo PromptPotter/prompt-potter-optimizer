@@ -133,7 +133,7 @@ async def l1_score(
     ]
     # The incumbent floor, scored on the SAME samples the candidates ran. PoBB already
     # backfilled the incumbent (seed) onto every sample a candidate touched, so re-scoring
-    # it over the touched union is all cache hits — a real matched baseline at no added
+    # it over the touched union is all cache hits — a real matched origin floor at no added
     # spend, and nothing wasted on subset samples no candidate reached. Probe rounds keep
     # their cumulative re-scope (the incumbent already measured the warned-query set).
     if cycle.probe_next_round:
@@ -161,7 +161,7 @@ async def l1_score(
     # Elect by improvement over MATCHED origin (origin on the candidate's own measured samples),
     # NOT raw accuracy vs origin's full-set rate. The online picker scores each candidate on a
     # different hard-first subset, so origin's full-set accuracy (inflated by the easy samples
-    # the candidate never ran) is the wrong baseline — a candidate that genuinely beats origin
+    # the candidate never ran) is the wrong comparison floor — a candidate that genuinely beats origin
     # on the hard samples it ran would lose to that inflated average. Origin is the floor at delta 0.
     best_delta = 0.0
     winner_idx: int | None = None
@@ -198,7 +198,7 @@ async def l1_score(
                     "matched_origin_composite": matched["composite_fitness"],
                 }
             )
-        # No baseline overlap ⇒ no comparison. A candidate scored on samples the incumbent
+        # No origin-floor overlap ⇒ no comparison. A candidate scored on samples the incumbent
         # never ran would "beat" a phantom 0.0 floor (the matched empty-set bug: round 1
         # showed improved=True on 0 hits). The incumbent is re-scored on this round's subset
         # upstream (`rescore_origin`), so this is the safety net for any partial-coverage gap.

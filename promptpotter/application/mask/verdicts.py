@@ -55,7 +55,7 @@ def make_scoring_verdict(criterion: RoundScorer | str | None) -> Verdict:
         recorded_winner = next((c.candidate_id for c in rnd.candidates if c.is_winner), None)
 
         best_key = _key(rnd.anchor_evaluators, rnd.anchor_accuracy)
-        # Anchor unscorable under this mask ⇒ no baseline to reproduce the
+        # Anchor unscorable under this mask ⇒ no origin floor to reproduce the
         # "origin held" case against → honest: claim no divergence this round.
         if best_key is None:
             return VerdictOutcome(diverged=False)

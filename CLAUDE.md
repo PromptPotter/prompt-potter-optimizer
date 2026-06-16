@@ -6,12 +6,24 @@
 
 PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. **Orchestration is the product — backends are pluggable and read-only.** Node tunables ride a per-call overlay (`datasets/{name}/pipeline.json::nodes.{name}.config`);
 
+## Origin & check-in — the two words that confuse
+
+These are distinct and constantly conflated. Keep them straight:
+
+- **Origin** = the **complete specification required to start the potter loop** — the *starting program* the optimizer evolves from. It is everything needed to begin: the prompt fields, the per-node pipeline config, the **required inputs** a pipeline declares (query/target column map, answer space, and any node-type-raised dependency like a `candidate_source` node's candidate library), and the dataset binding. It is **per-pipeline** — different backends require different inputs — and it is **independent of measurement**: the origin exists fully formed *before* anything is scored. Scoring it produces round 0 / **C0** / `origin_accuracy`, but that measurement is *downstream of* the origin, **not part of its definition** (the recurring conflation: "origin" the spec vs "the origin's round-0 score"). Resolution: `resolve_origin_opt_search_point` (`application/origin.py`); scoring it is a separate step (`establish_campaign_origin`). Say "origin", never "baseline" (R-23).
+
+- **Check-in** = the **process that produces a complete origin** from a raw upload. One LLM resolver node (`application/datasets/origin_resolve.py`) *proposes* the column map, the decomposed Layer-1 prompt fields, and the 7-field `task_context`; a deterministic, no-LLM **readiness gate** (`origin_readiness.py`) *gates* — mint is blocked until query + ground_truth + framing + answer-space are all CONFIRMED. The check-in **nudges the operator** (the ingest UI surfaces each open gap + unfulfilled pipeline dependency) until the spec is complete, then it's stored as the per-pipeline origin under `projects/{tenant}/datasets/{slug}/`. Dependencies (e.g. a candidate library) are dropped in place here and committed alongside the origin, not chased at bootstrap.
+
+The line: **origin is the complete start specification; check-in is the resolver+gate that produces a complete one; round 0 / C0 is its measurement, downstream and separate.** Loop seam: `docs/architecture.md` §0.5; `docs/specs/roadmap.md § Origin check-in`.
+
 ## STOP — no backward compatibility, ever
 
 Zero released versions, zero stale on-disk data — nothing to be compatible with. **This is the rule that gets ignored most often.**
 
 Delete on sight — don't ask, don't TODO, don't "remove later":
-- **Shim code**, **Fallback chains**, **Breadcrumb comments**
+- **Shim code**, **Fallback chains**, **Breadcrumb comments**, **Redundant mechanisms** (a second validator / surface / code path doing the same *kind* of work as an existing one — fold it into the canonical mechanism, never add beside it).
+
+The codebase is mature: the remaining wins are low-value-but-they-all-count consolidations, and they get ignored precisely because each looks too small to bother. **Lean to suspicion.** When a change *could* ride an existing channel, assume it *should*; when you pass redundant paths mid-task, collapse them then — don't note-and-move-on. Fewer lines beats more lines at equal behavior.
 
 <root-fix>
 When a fix would compensate for something an upstream layer should already have made true, the fix belongs upstream — not at the site where the symptom shows up. Name the structural cause and propose the upstream fix <em>before</em> touching the visible surface. The operator can still pick the patch, but they pick it knowingly. Default to root, not to symptom.
@@ -45,6 +57,15 @@ The user is the operator. **The project file tree IS the dashboard**, plus a rea
 ## Known issues
 
 - **TermNorm backend** lives in a sibling repo (`TermNorm-excel/backend-api`); clone alongside. It's not a third party — **same author, same project, just a separate repo for now**, and the goal is to eliminate the split and fold it in when practical. Cross-repo edits authorized; coordinate explicitly.
+
+### Debugging the PP↔TermNorm highway (hard-won 2026-06-16 — read before flailing)
+
+A long debug session taught these; future-me: be systematic and code-first, not operational-first.
+
+- **Diagnose from the code path, not by restarting.** When the backend "goes down" — `/status` itself times out, scoring stalls — the cause is almost always a **blocking call in an `async def` request path**, not a crash / SQLite lock / double-start. Symptom→action: grep the handler for sync I/O (`requests`, `ThreadPoolExecutor.map`, `time.sleep`, blocking DB) FIRST. Killing/restarting the worker and theorizing about ports/timeouts is the slow path and hid the real bug for an hour. Root found: `web_generate_entity_profile` (async) ran `_brave_search` + `list(executor.map(scrape_url…))` synchronously, freezing the single uvicorn worker for the whole web step → every concurrent request (incl. `/status`) stalled. Fix = offload via `asyncio.to_thread` / `run_in_executor`. **Backend async hygiene is a standing check: no sync I/O on the event loop.**
+- **The highway IS a cross-repo contract — change one side, fix both.** PP consumes TermNorm response *shapes*, so a shape change on either side silently breaks the other. Known coupling points: the error envelope is TermNorm's `{status, message, code}` (a global handler in `main.py`), **not** FastAPI's `{detail}` — PP must read `message`. Session-loss self-heal keys on a stable machine-readable `code: "no_session"` (prefer codes over substring/shape guessing). The web_search warning `stats` dict keys are read by PP's display. When you touch a response field, grep the *other* repo for its consumer.
+- **`--reload` wipes the in-memory session every backend code edit.** TermNorm holds sessions in `user_sessions = {}` (process memory). Any backend edit → uvicorn reload → in-flight PP runs hit `400 no_session`. PP now self-heals (re-`POST /sessions` + retry); keep it that way — a developer editing the backend mid-run must not abort the campaign.
+- **openrouter latency is the recurring root.** The same provider slowness hit (a) the optimizer (`datasets/_optimizer/pipeline.json` loop nodes at `reasoning_effort=high` + `max_tokens=20000` on openrouter/gpt-oss-120b → blew the 360s `OPTIMIZER_CALL_DEADLINE_S`×2 deadline → `OPTIMIZER_TIMEOUT` before round 1) and (b) `entity_profiling` (openrouter/gpt-oss-20b, ~20 tok/s, 47s tails). Survival guards: bounded optimizer reasoning (`medium`) + request timeouts under PP's 120s `QUERY_TIMEOUT`. The durable fix is provider (groq is far faster) — but that's the operator's daily-volume knob; don't flip it unprompted.
 
 ## Pre-flight gate
 

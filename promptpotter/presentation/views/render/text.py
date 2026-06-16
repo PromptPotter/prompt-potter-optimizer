@@ -153,7 +153,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
     # matched-pair origin (origin restricted to the winner's measured samples).
     # When the winner ran the full set, ``matched_origin_accuracy == origin_acc``
     # and the displayed value is unchanged. PoBB-locked winners get a fair
-    # subset baseline instead of being compared against origin's full 20.
+    # subset origin floor instead of being compared against origin's full 20.
     matched_origin = v.matched_origin_accuracy or v.origin_acc
 
     if v.improved:

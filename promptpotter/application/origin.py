@@ -52,21 +52,21 @@ async def rescore_origin(
     compares candidate-vs-incumbent on the SAME hard-first samples the candidates run.
 
     ``force_fresh`` bypasses the measurement cache (see ``score_search_point``). The
-    winner-baseline path leaves it ``False`` — the incumbent's own prior measurements
+    winner-election path leaves it ``False`` — the incumbent's own prior measurements
     replay for free. The origin gate sets it ``True`` so a re-score after a backend-code
     fix reflects the fix instead of replaying the stale (broken) origin.
 
     The online picker scores each candidate on a different hard-first subset, but the
     incumbent (the origin at round 1, the prior winner after) was only ever scored on
     its own earlier rounds. ``matched_origin_stats`` therefore intersected disjoint
-    sample sets and returned a fake ``0.0`` floor — letting a candidate "improve" over a
-    baseline that was never measured (round 1: 0 hits, ``improved=True``). Re-scoring the
+    sample sets and returned a fake ``0.0`` floor — letting a candidate "improve" over an
+    origin floor that was never measured (round 1: 0 hits, ``improved=True``). Re-scoring the
     incumbent here, through the ``score_search_point`` gateway + content-hash cache,
     yields a real same-subset floor; samples it already measured replay from cache for
     free, so the cost is one measurement per *new* hard sample the incumbent hasn't seen.
 
     ``candidate_idx=-1`` is the backfill sentinel (the display layer prefixes the row so
-    the operator sees the baseline spend); ``degradation_checks=None`` blocks the floor
+    the operator sees the origin's spend); ``degradation_checks=None`` blocks the floor
     from aborting itself.
     """
     from functools import partial
