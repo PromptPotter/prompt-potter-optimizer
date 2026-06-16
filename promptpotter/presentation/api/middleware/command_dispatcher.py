@@ -197,7 +197,7 @@ class CommandDispatcher:
                 client_metadata=client_metadata,
             )
 
-        applier = self._build_cycle_applier(kind, campaign, campaign_id, cycle_id, payload_extras)
+        applier = self._build_cycle_applier(kind, campaign_id, cycle_id, payload_extras)
         return await self._record_and_apply(
             ledger=ledger,
             kind=kind,
@@ -359,7 +359,6 @@ class CommandDispatcher:
     def _build_cycle_applier(
         self,
         kind: CycleScopedKind,
-        campaign: Any,
         campaign_id: str,
         cycle_id: str,
         payload_extras: dict[str, Any],

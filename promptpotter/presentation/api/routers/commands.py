@@ -429,7 +429,6 @@ async def mint_campaign_from_draft(
 
 @commands_router.post("/replace-dataset")
 async def replace_dataset(
-    request: Request,
     store: StoreDep,
     envelope: _ReplaceDatasetEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
