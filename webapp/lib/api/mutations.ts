@@ -180,6 +180,26 @@ export async function postResumeCycle(
 // boundary, raising above current usage releases. Pass `null` for a ceiling to
 // leave it unchanged (the applier merges). At least one must be a number.
 // Cycle-scoped command per `m12-api-openapi.yaml::changeSpendBudget`.
+// Resolve a cycle blocked at the round-0 origin gate (`run_phase: gate`): the
+// origin verdict was not `healthy`, so the runner is holding before L1. Writes
+// `.runtime/gate_decision.json`, which the runner polls. `rescore` re-measures
+// the origin force-fresh (reflecting a backend-code fix) and re-evaluates the
+// gate in place; `proceed` overrides into L1; `abort` ends the cycle with
+// `StopReason.ORIGIN_GATE`. Cycle-scoped per `m12-api-openapi.yaml::originGateDecision`.
+export type OriginGateDecision = "rescore" | "proceed" | "abort";
+
+export async function postOriginGateDecision(
+  campaignId: string,
+  cycleId: string,
+  decision: OriginGateDecision,
+): Promise<CommandAcceptedBody> {
+  return _postCommand("origin-gate-decision", {
+    campaign_id: campaignId,
+    cycle_id: cycleId,
+    decision,
+  });
+}
+
 export async function postChangeSpendBudget(
   campaignId: string,
   cycleId: string,

@@ -23,6 +23,7 @@ from promptpotter.application.optimization.dispatch.hub import InjectionRenderEr
 from promptpotter.application.optimization.l1 import execute_round
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.run_phase_control import pause_gate
+from promptpotter.application.runner.origin_gate import run_origin_gate
 from promptpotter.application.runner.round import (
     close_round,
     emit_origin_round,
@@ -88,36 +89,33 @@ async def run_round_loop(
     # None ⇒ unlimited; HARD_CAP is the real ceiling either way.
     max_rounds = opt.max_rounds if opt.max_rounds is not None else HARD_CAP
 
-    # Origin is round 0 — emit it through the standard completion path before the
-    # L1 loop on a fresh start (clean_rounds == 0) when it isn't already on disk.
-    # Resume (round 0 present) and divergence/sweep forks (clean_rounds > 0, round 0
-    # inherited from the parent lane) skip it.
-    if not sweep and not diag and clean_rounds == 0:
-        round0_present = bool(
-            session.state.cycle_id
-            and session.store.campaigns.load_round_file(
-                session.campaign_id, session.state.cycle_id, 0
-            )
-        )
-        if not round0_present:
-            await emit_origin_round(cycle, session, cb)
-            # Origin gate: a non-healthy round-0 verdict halts before L1 instead of
-            # burning a campaign against a broken floor (the common case while a dev
-            # brings up a new connector). The operator overrides knowingly with a
-            # plain ``resume`` — round 0 is now on disk, so this whole block is
-            # skipped and the loop goes straight to L1.
-            gate_stop = origin_gate_tripped(cycle.origin_health, opt.origin_gate)
-            if gate_stop is not None:
-                grade = cycle.origin_health.grade if cycle.origin_health else "unknown"
-                logger.warning(
-                    "Origin gate (%s): round-0 verdict is %s — halting before L1. "
-                    "Fix the origin and re-mint, or `resume` to proceed anyway.",
-                    opt.origin_gate,
-                    grade,
-                )
-                return gate_stop, None
-
     try:
+        # Origin is round 0 — emit it through the standard completion path before
+        # the L1 loop on a fresh start (clean_rounds == 0) when it isn't already on
+        # disk. Resume (round 0 present) and divergence/sweep forks (clean_rounds >
+        # 0, round 0 inherited from the parent lane) skip it.
+        if not sweep and not diag and clean_rounds == 0:
+            round0_present = bool(
+                session.state.cycle_id
+                and session.store.campaigns.load_round_file(
+                    session.campaign_id, session.state.cycle_id, 0
+                )
+            )
+            if not round0_present:
+                await emit_origin_round(cycle, session, cb)
+                # Origin gate: a non-healthy round-0 verdict holds at an interactive
+                # checkpoint before L1 instead of burning a campaign against a broken
+                # floor (the common case while a dev brings up a new connector). The
+                # operator decides — rescore (re-measure force-fresh after a backend
+                # fix) / proceed (override) / abort — across webapp + CLI + notebook.
+                # ``None`` ⇒ proceed into L1; a StopReason ⇒ end the cycle.
+                if origin_gate_tripped(cycle.origin_health, opt.origin_gate) is not None:
+                    gate_stop = await run_origin_gate(
+                        cycle, dataset, config, session, cb, opt.origin_gate
+                    )
+                    if gate_stop is not None:
+                        return gate_stop, None
+
         while clean_rounds < max_rounds and round_num < HARD_CAP:
             # Pause cooperation: block at the round boundary while the operator
             # has the pause flag set. The per-sample loop (run_query_loop) holds

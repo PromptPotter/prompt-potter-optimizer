@@ -83,6 +83,7 @@ _CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(
         "cleanup-empty-cycles",
         "pause-cycle",
         "resume-cycle",
+        "origin-gate-decision",
         "change-spend-budget",
         "start-run",
     }
@@ -546,6 +547,13 @@ async def post_command(
             raise PayloadInvalidError(
                 "change-spend-budget requires at least one of max_usd / max_tokens."
             )
+    elif kind == "origin-gate-decision":
+        decision = payload.get("decision")
+        if decision not in ("rescore", "proceed", "abort"):
+            raise PayloadInvalidError(
+                "payload.decision must be one of 'rescore', 'proceed', 'abort'."
+            )
+        extras["decision"] = decision
     elif kind == "start-run":
         kind_raw = payload.get("kind")
         if kind_raw not in ("new", "resume"):

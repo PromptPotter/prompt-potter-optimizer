@@ -13,6 +13,7 @@ import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
 const RUN_PHASE_LABEL: Record<string, string> = {
   running: "Running",
   paused: "Paused",
+  gate: "Origin gate",
   stopping: "Stopping",
   detached: "Detached",
 };

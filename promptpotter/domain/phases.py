@@ -84,6 +84,9 @@ class RunPhase(enum.StrEnum):
     - ``RUNNING`` — a process is attached and driving the active cycle.
     - ``PAUSED`` — operator paused; alive, holding at a round boundary.
       Reversible (``pause.flag`` / ``resume-cycle``).
+    - ``GATE`` — alive, holding at the round-0 origin gate awaiting an
+      operator decision (rescore / proceed / abort) because the origin
+      verdict was not ``healthy``. Reversible (``origin-gate-decision``).
     - ``STOPPING`` — operator requested stop; alive, exits at the next
       boundary (``stop.flag`` / ``stop-cycle``). Terminal-intent.
     - ``DETACHED`` — active lifecycle but no live producer (CLI exited or
@@ -96,6 +99,7 @@ class RunPhase(enum.StrEnum):
 
     RUNNING = "running"
     PAUSED = "paused"
+    GATE = "gate"
     STOPPING = "stopping"
     DETACHED = "detached"
     TERMINAL = "terminal"

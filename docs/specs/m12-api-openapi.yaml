@@ -148,6 +148,42 @@ paths:
         '409': { $ref: '#/components/responses/VersionConflict' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/origin-gate-decision:
+    post:
+      operationId: originGateDecision
+      summary: Resolve the round-0 origin gate (rescore / proceed / abort).
+      description: |
+        Delivered to a runner blocked at the origin gate (`run_phase: gate`):
+        the round-0 origin verdict was not `healthy`, so the loop paused before
+        L1 instead of optimizing against a broken floor. `rescore` re-scores the
+        origin force-fresh (reflecting a backend-code fix) and re-evaluates the
+        gate in place; `proceed` overrides the gate and enters L1; `abort` ends
+        the cycle with `StopReason.ORIGIN_GATE`. The applier writes
+        `.runtime/gate_decision.json`, which the runner polls at the gate — the
+        one decision channel all three surfaces (webapp / CLI / notebook) write.
+      tags: [cycle-control]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: origin-gate-decision }
+                    payload: { $ref: '#/components/schemas/OriginGateDecisionPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/stop-cycle:
     post:
       operationId: stopCycle
@@ -1435,6 +1471,21 @@ components:
 
     ResumeCyclePayload:
       $ref: '#/components/schemas/CycleRef'
+
+    OriginGateDecisionPayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          required: [decision]
+          additionalProperties: false
+          properties:
+            decision:
+              type: string
+              enum: [rescore, proceed, abort]
+              description: |
+                `rescore` re-scores the origin force-fresh and re-evaluates the
+                gate; `proceed` overrides the gate into L1; `abort` ends the
+                cycle with `StopReason.ORIGIN_GATE`.
 
     StopCyclePayload:
       $ref: '#/components/schemas/CycleRef'

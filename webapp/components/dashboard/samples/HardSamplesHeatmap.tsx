@@ -10,6 +10,7 @@ import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
+import { OriginGateModal } from "@/components/dashboard/control/OriginGateModal";
 import { type MeasurementDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
@@ -193,6 +194,7 @@ export function HardSamplesHeatmap({
           onToggle={() => setBankExpanded((e) => !e)}
         />
         <RunControlButton campaignId={campaignId} cycleId={cycleId} dash={dash} />
+        <OriginGateModal campaignId={campaignId} cycleId={cycleId} dash={dash} />
       </div>
       {(bankExpanded || heatExpanded) && (
         <RotatePrompt surfaceName="The sample heat-map" skipRender>

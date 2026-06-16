@@ -87,6 +87,7 @@ CycleScopedKind = Literal[
     "cleanup-empty-cycles",
     "pause-cycle",
     "resume-cycle",
+    "origin-gate-decision",
     "change-spend-budget",
     "start-run",
 ]
@@ -404,6 +405,13 @@ class CommandDispatcher:
             return lambda: self._apply_pause_cycle(campaign_id, cycle_id)
         if kind == "resume-cycle":
             return lambda: self._apply_resume_cycle(campaign_id, cycle_id)
+        if kind == "origin-gate-decision":
+            decision = str(payload_extras.get("decision", ""))
+            if decision not in ("rescore", "proceed", "abort"):
+                raise PayloadInvalidError(
+                    "origin-gate-decision requires decision ∈ {rescore, proceed, abort}."
+                )
+            return lambda: self._apply_origin_gate_decision(campaign_id, cycle_id, decision)
         if kind == "change-spend-budget":
             max_usd = payload_extras.get("max_usd")
             max_tokens = payload_extras.get("max_tokens")
@@ -524,6 +532,18 @@ class CommandDispatcher:
         cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
         flag = cycle_dir / ".runtime" / "pause.flag"
         flag.unlink(missing_ok=True)
+
+    def _apply_origin_gate_decision(self, campaign_id: str, cycle_id: str, decision: str) -> None:
+        """Write ``.runtime/gate_decision.json`` (``{decision}``); the runner's
+        origin-gate wait-loop polls it (``run_origin_gate``) and acts: ``rescore``
+        re-scores force-fresh and re-evaluates the gate in place, ``proceed`` enters
+        L1, ``abort`` ends the cycle with ``StopReason.ORIGIN_GATE``. The one
+        decision channel all three surfaces write; the runner clears the file after
+        consuming it. Last write wins."""
+        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
+        runtime_dir = cycle_dir / ".runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        write_json(runtime_dir / "gate_decision.json", {"decision": decision})
 
     def _apply_change_spend_budget(
         self,

@@ -32,7 +32,8 @@ _CONTROL_PHASE = "control"
 
 
 def declare_run_phase(
-    session: Session, phase: Literal[RunPhase.RUNNING, RunPhase.PAUSED, RunPhase.STOPPING]
+    session: Session,
+    phase: Literal[RunPhase.RUNNING, RunPhase.PAUSED, RunPhase.GATE, RunPhase.STOPPING],
 ) -> None:
     """Append a control ``PhaseRecord`` so the dashboard projection flips
     ``run_phase``. No-op before the ledger is bound. Idempotent at the

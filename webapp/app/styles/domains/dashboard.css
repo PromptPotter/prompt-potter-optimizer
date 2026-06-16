@@ -277,3 +277,12 @@
 
 .page-header{display:flex;align-items:center;margin-bottom:0;gap:20px;flex-wrap:wrap}
 .breadcrumb{font-size:13px;color:var(--color-text-secondary);margin-bottom:6px;font-family:var(--font-mono)}
+
+/* Origin-gate modal — the round-0 HITL decision surface (run_phase: gate). */
+.origin-gate-lead{margin:0 0 14px;font-size:13px;line-height:1.5;color:var(--color-text-secondary)}
+.origin-gate-verdict{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0 0 12px;font-size:13px}
+.origin-gate-verdict>div{display:contents}
+.origin-gate-verdict dt{color:var(--color-text-secondary)}
+.origin-gate-verdict dd{margin:0;font-family:var(--font-mono);color:var(--color-text)}
+.origin-gate-reasons{margin:0 0 8px;padding-left:18px;font-size:12px;color:var(--color-text-secondary);line-height:1.5}
+.origin-gate-err{margin:8px 0 0;font-size:12px;color:var(--color-danger,#c0392b)}

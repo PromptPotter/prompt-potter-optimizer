@@ -41,7 +41,7 @@ export interface DashboardSnapshot {
   // reads this — it does NOT re-derive "running" from `state` freshness. The
   // server-side cycle list adds "detached"; the live view composes that as
   // run_phase==="running" + connection offline (see `isLive`).
-  run_phase?: "running" | "paused" | "stopping" | "terminal";
+  run_phase?: "running" | "paused" | "gate" | "stopping" | "terminal";
   // Terminal reason (raw StopReason value) once run_phase==="terminal".
   stop_reason?: string;
   round?: number;

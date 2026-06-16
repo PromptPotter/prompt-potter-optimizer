@@ -60,6 +60,19 @@ export function RunControlButton({ campaignId, cycleId, dash }: Props) {
 
   if (!campaignId || !cycleId) return null;
 
+  // At the origin gate the run is alive but holding for a decision the
+  // OriginGateModal owns — a play/pause toggle would misfire (start-run on a
+  // live cycle → machine_busy). Show a non-actionable status instead.
+  if (runPhase === "gate") {
+    return (
+      <div className="run-ctl" role="group" aria-label="Run control">
+        <span className="run-ctl-pausing" role="status">
+          At origin gate — decide below.
+        </span>
+      </div>
+    );
+  }
+
   const playing = phase === "running";
 
   const act = async (fn: () => Promise<unknown>) => {
