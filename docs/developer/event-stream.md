@@ -34,7 +34,7 @@ data: {"kind": "phase", "version": 1, "cycle_id": "cycle_abc123",
 | `payload` | object | Per-kind body. For record-derived kinds, the record's `model_dump` content; for `stream_snapshot`, `dashboard.json` + `snapshot_at_offset`. |
 | `emitted_at` | string | Server wall-clock at envelope mint. Debugging only — never load-bearing for ordering. |
 
-Adding a new kind requires updating [`m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml) **first** (closed-set policy — security box 1), then `ProjectionKind` in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or the projection-only allowlist in `tests/test_contracts.py`). Drift between the YAML enum and the Python Literal is a hard test failure.
+Adding a new kind requires updating [`m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml) **first** (closed-set policy — security box 1), then `ProjectionKind` in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or the `_PROJECTION_ONLY_KINDS` allowlist in [`projection_envelope.py`](../../promptpotter/domain/projection_envelope.py)). Keep the YAML enum and the Python Literal in sync by hand — drift fails loud (an unknown kind raises on dispatch); no standing test (see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
 ## Subscription contract — snapshot-then-tail
 
@@ -82,10 +82,12 @@ The registry holds a process-global lock. Cycles can register and deregister con
 
 ## Testing
 
-One bundled invariant test: [`tests/test_invariants.py::test_event_stream_view_contract`](../../tests/test_invariants.py). Exercises subscribe → publish → multi-subscriber fan-out → heartbeat → drain on a real `EventStreamView` (no HTTP).
-
-Drift teeth in [`tests/test_contracts.py`](../../tests/test_contracts.py) assert:
-- `ProjectionKind` Literal matches the AsyncAPI `kind` enum exactly.
+No standing test (the structural/contract suite was cut to the silent-harm
+core — see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)). The event stream
+fails loud: a broken subscribe/publish/fan-out/heartbeat/drain path stops the
+dashboard updating, which is visible in use. Keep these in sync by hand —
+each drifts loud, not silent:
+- `ProjectionKind` Literal matches the AsyncAPI `kind` enum exactly (unknown kind raises on dispatch).
 - Every YAML-required envelope field exists in the Python model.
 - A FastAPI route is registered at the AsyncAPI-declared channel address.
 

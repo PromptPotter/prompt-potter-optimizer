@@ -9,8 +9,13 @@ optimizer manifest, this is the contract you implement against.
 
 Concept-level intro for the node model lives in
 [`node-standard.md`](node-standard.md); this doc is the strict
-field-level shape, pinned by
-[`tests/test_contracts.py`](../../tests/test_contracts.py).
+field-level shape. The silent-harm parts are tested — the flat-format
+rejection and content-hash sensitivity by
+[`tests/test_integrity.py`](../../tests/test_integrity.py)
+(`test_pipeline_params_rejects_flat_param_map`,
+`test_content_hash_distinguishes_pipeline_params`); the rest fails loud
+(a malformed pipeline is a loud setup error), no standing test — see
+[`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
 
 ## Top-level shape
 
@@ -152,8 +157,7 @@ M12 L4 self-optimization closure (see
 [`docs/specs/roadmap.md`](../specs/roadmap.md)
 + [`docs/specs/roadmap.md`](../specs/roadmap.md)).
 
-The parity is enforced by
-[`tests/test_contracts.py`](../../tests/test_contracts.py)
-— if `optimizer_pipeline.json` ever drifts from a backend
-pipeline's shape (parallel registries, ad-hoc keys, special-case
-fields), the test fails.
+The parity fails loud — if `optimizer_pipeline.json` ever drifts from a
+backend pipeline's shape (parallel registries, ad-hoc keys, special-case
+fields), the shared parser rejects it at load. No standing test (the
+structural/contract suite was cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).

@@ -61,7 +61,7 @@ Internal `User` / `Group` records use SCIM 2.0 Core + EnterpriseUser field names
 
 ### Confirmation
 
-`tests/test_invariants.py::test_identity_seam_no_drift` bundles the no-drift gates that protect the seam from regression — gates #3 (`build_stores` signature), #4 (`Stores.identity` sole tenant source), #6 (SCIM-named field set). Future Stage-1 / Stage-2 work extends this invariant rather than adding parallel tests. The §0-first rule (CLAUDE.md Pre-flight gate Q4) blocks any new identity-bearing ingress from landing without amending `docs/architecture.md` §0; Stage 1 (OIDC ingress) and Stage 2 (B2B SSO) each require an §0 note.
+The no-drift gates that protect the seam from regression — gates #3 (`build_stores` signature), #4 (`Stores.identity` sole tenant source), #6 (SCIM-named field set) — are enforced by the typed seam itself (a wrong `build_stores` signature fails to typecheck) plus review; there is no standing `test_invariants.py` (the structural/contract suite was cut to the silent-harm core, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)). The §0-first rule (CLAUDE.md Pre-flight gate Q4) blocks any new identity-bearing ingress from landing without amending `docs/architecture.md` §0; Stage 1 (OIDC ingress) and Stage 2 (B2B SSO) each require an §0 note.
 
 ## Pros and Cons of the Options
 
@@ -192,11 +192,11 @@ class IdentityContext:
 
 ### No-drift gates
 
-Enforceable rules. A PR violating any of these is a block; gates marked **(test)** land as `tests/test_invariants.py` checks.
+Enforceable rules. A PR violating any of these is a block. The **(test)** marker names the *kind* of check that would catch each gate — but none are standing tests today (the structural/contract suite was cut to the silent-harm core, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)); they are enforced by the typed seam + review, and most fail loud.
 
 1. **Every API request resolves an `IdentityContext`.** No router accepts an unauthenticated request outside the auth-off boundary. **(test)** — middleware coverage check.
 2. **No JWT in first-party cookies.** Session cookie is an opaque server-side session id, period. ID Tokens cross trust boundaries only. **(test)** — grep for JWT types in `presentation/` outside the middleware path.
-3. **No `tenant_id: str` parameter past the seam.** Every store / query call takes `IdentityContext`; `tenant_id` is a `TenantId` newtype derived from it. **(test)** — `build_stores` signature + caller scan (`tests/test_invariants.py::test_identity_seam_no_drift`).
+3. **No `tenant_id: str` parameter past the seam.** Every store / query call takes `IdentityContext`; `tenant_id` is a `TenantId` newtype derived from it. **(test)** — `build_stores` signature + caller scan (typed seam + review; no standing test).
 4. **`IdentityContext.tenant_id` is the only source of tenant scope.** No `request.headers["X-Tenant"]`, no `args.tenant` past the resolver. The seam derives, downstream consumes. **(test)** — invariant on the resolver call sites.
 5. **Adding a new identity-bearing ingress amends §0 first.** Per CLAUDE.md Pre-flight gate Q4 sub-rule. Stage 1 (OIDC ingress on the API) and Stage 2 (B2B SSO ingress, eventual SAML/SCIM) each require an §0 note.
 6. **Internal `User` / `Group` shape uses SCIM 2.0 field names verbatim.** No custom field invention that diverges from SCIM Core or EnterpriseUser. New fields land in the SCIM extension namespace (`urn:ietf:params:scim:schemas:extension:<name>:2.0:User`). **(test)** — invariant on the User dataclass field set.
@@ -251,11 +251,11 @@ Skip-list (do not adopt):
 
 ### Stage 1 implementation (shipped)
 
-Stage 1 OIDC sign-up landed at `promptpotter/infrastructure/identity/` and `promptpotter/presentation/api/middleware/oidc.py`. The package splits per provider (`google.py`, `github.py`) on top of shared infrastructure (`verifier.py`, `jwks.py`, `session.py`, `bundle.py`, `provider_config.py`, `allowlist.py`, `migration.py`, `paths.py`, `user.py`); `cryptography` is the only new Python dep per the minimal-deps invariant. The middleware at `presentation/api/middleware/oidc.py` verifies the inbound ID Token against the issuer's JWKS, populates `IdentityContext`, and ensures tokens never appear past the boundary (gate #2, CI-checked). `presentation/api/deps.py::resolve_identity` reads the verified context from the session-cookie store; Stage 0 (auth-off) substitutes `default_identity()`. Auto-mint at first sign-in is one-tenant-per-user (`tenant_id = UserId`), encoded by `infrastructure/identity/user.py::derive_user_id`. Sign-up surface lives at `webapp/app/login/page.tsx` over `/auth/login/{provider}` → `/auth/callback/{provider}`; provider list rides `GET /auth/providers`.
+Stage 1 OIDC sign-up landed at `promptpotter/infrastructure/identity/` and `promptpotter/presentation/api/middleware/oidc.py`. The package splits per provider (`google.py`, `github.py`) on top of shared infrastructure (`verifier.py`, `jwks.py`, `session.py`, `bundle.py`, `provider_config.py`, `allowlist.py`, `migration.py`, `paths.py`, `user.py`); `cryptography` is the only new Python dep per the minimal-deps invariant. The middleware at `presentation/api/middleware/oidc.py` verifies the inbound ID Token against the issuer's JWKS, populates `IdentityContext`, and ensures tokens never appear past the boundary (gate #2 — review-enforced; no standing test). `presentation/api/deps.py::resolve_identity` reads the verified context from the session-cookie store; Stage 0 (auth-off) substitutes `default_identity()`. Auto-mint at first sign-in is one-tenant-per-user (`tenant_id = UserId`), encoded by `infrastructure/identity/user.py::derive_user_id`. Sign-up surface lives at `webapp/app/login/page.tsx` over `/auth/login/{provider}` → `/auth/callback/{provider}`; provider list rides `GET /auth/providers`.
 
 ### Anchors
 
-Every claim in this ADR names a file. The drift detector (`tests/test_invariants.py::test_identity_seam_no_drift`) covers the Stage-0 gates today; Stage-1 / Stage-2 work extends the same invariant. Path existence is asserted by `tests/test_contracts.py::test_adr_anchor_files_exist` (shared with ADR-0001 / ADR-0003).
+Every claim in this ADR names a file. Drift is caught by review against the typed seam (no standing test — the structural/contract suite was cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)); a stale path here fails loud as a broken link.
 
 | Concern | File |
 |---|---|

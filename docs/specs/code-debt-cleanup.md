@@ -159,7 +159,7 @@ Five-lens audit. What stayed:
 1. Confirm the **distributed-app default identity does NOT hold `datasets.benchmarks.read`** (and `demo_mode_enabled=false`), while the CLI/headless/dev identity DOES. Find where the capability is granted (grep `datasets.benchmarks.read`) and check the default-user/anonymous grant path. This is the load-bearing line.
 2. Audit the webapp for any path that surfaces a benchmark to a non-capable user despite the API gate — esp. the "prefill a draft from a benchmark/Origin" feature (`datasets.py:190`), the IngestPane dataset list, and any hardcoded benchmark name in `webapp/`.
 3. CLI / folder-UI / python entrypoint must NOT route through the capability check (they're the dev surfaces that keep benchmarks) — confirm `new <name>` and direct file-tree access stay unscoped.
-4. Add a `tests/test_structure.py` (or contract test) lock so a benchmark can't leak to a no-capability identity (R-15).
+4. Add a leak check to [`tests/test_security.py`](../../tests/test_security.py) so a benchmark can't leak to a no-capability identity (R-15) — a leak is the one silent-harm class that earns a standing test (see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
 **Blockers:** operator confirmation on (a) whether `demo` tier stays visible to end-users or also hides, and (b) the exact default-identity capability set for the distributed app vs. the dev clone. Ties to identity ADR-0002.
 

@@ -72,8 +72,9 @@ state-tracking bundle (`session.state`).
 If a piece of state must survive across `new` / `resume` invocations, it goes
 through the ledger (or its projections), not `Session`. If it's
 per-process per-cycle, it lives on `Session.state` or `Cycle`. The
-separation is enforced by
-`tests/test_structure.py::test_forbidden_calls`.
+separation fails loud (state that skips the ledger doesn't survive a
+restart — visible immediately); no standing test, see
+[`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
 
 ## When the chain breaks
 

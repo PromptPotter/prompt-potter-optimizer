@@ -56,7 +56,10 @@ The §0 amendment defining the Control-remote I/O kind is the precondition. Sche
 
 ### Confirmation
 
-`tests/test_contracts.py` is a bundled invariant that asserts:
+These are the contract requirements the two control-plane YAMLs must satisfy
+(verified by review + schema lint — there is no standing `test_contracts.py`;
+the structural/contract suite was cut to the silent-harm core, see
+[`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)):
 
 1. OpenAPI 3.1 + AsyncAPI 3.0 versions are declared.
 2. Reusable trust-boundary parameters (`IdempotencyKey`, `ExpectedVersion`) are required headers.

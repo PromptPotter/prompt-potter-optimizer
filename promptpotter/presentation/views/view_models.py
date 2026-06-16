@@ -4,7 +4,8 @@ Producers: ``views.view_ingress`` (live PhaseEvents) + ``presentation.writers``
 (post-hoc disk round_data). Consumers: ``render.py`` (``to_text``/``to_markdown``).
 Pure data — no I/O, no methods that emit text.
 
-Round-trip invariant (``tests/test_invariants.py``):
+Round-trip invariant (no standing test — a broken round-trip surfaces as a
+wrong/empty dashboard; see ``tests/CLAUDE.md``):
 ``from_phase_event(e) == from_disk_round(write_then_load(e))`` on
 ``RoundCompleteView`` — the one event that lands on disk. Live-only events
 (refine/probe/plan/escalation) have no disk counterpart.

@@ -109,9 +109,10 @@ reconstructor to keep in sync** — that synchronized third edit is gone.
    `round_NNNN.json` for **cross-cycle** rendering and is a genuinely separate
    source, not a roundtrip shim.
 
-**CI guard:** `test_round_complete_view_roundtrip` (`tests/test_invariants.py`)
-proves the live builder and the disk builder produce an equal
-`RoundCompleteView` — the two-factories-onto-one-View correctness invariant.
+**Guard:** the two-factories-onto-one-View correctness invariant — the live
+builder and the disk builder must produce an equal `RoundCompleteView`. No
+standing test (a broken round-trip surfaces as a wrong/empty dashboard; the
+structural/contract suite was cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
 Contract: [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md).
 

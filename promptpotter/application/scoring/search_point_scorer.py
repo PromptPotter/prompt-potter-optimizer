@@ -146,9 +146,9 @@ async def score_search_point(
     intent). The class of bug being guarded: a backend running
     ``measure_sample`` for tens of seconds while the CLI stays silent,
     burning LLM credits with the operator unable to tell the front-end
-    apart from a frozen process. ``tests/test_structure.py::
-    test_score_search_point_callers_pass_on_sample_scored``
-    statically enforces the same invariant.
+    apart from a frozen process. The required-keyword signature **is** the
+    enforcement — a caller that omits the choice fails to compile/typecheck;
+    there is no standing test.
     """
     store = session.store
     backend_id = session.backend_id

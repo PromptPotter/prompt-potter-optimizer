@@ -26,7 +26,8 @@ __all__ = ["ProjectionEnvelope", "ProjectionKind"]
 # Closed enum mirroring ``ProjectionEnvelope.kind`` in
 # ``docs/specs/m12-events-asyncapi.yaml``. Eleven entries match
 # ``record_type`` literals on ``CycleRecord``; one is projection-only.
-# ``tests/test_contracts.py`` enforces this set stays in sync.
+# Keep this set in sync with the YAML by hand — drift fails loud (an
+# unknown kind raises on dispatch); no standing test (see tests/CLAUDE.md).
 ProjectionKind = Literal[
     # record_type literals (11)
     "decision",

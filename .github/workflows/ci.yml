@@ -37,6 +37,15 @@ jobs:
       - name: Type check
         run: uv run mypy promptpotter/
 
+      # Regenerate the TS type surface from the Pydantic models and fail on any
+      # diff. Without this, a drifted model silently ships a stale
+      # webapp/lib/api/types.generated.ts that the webapp typechecks against —
+      # the generator's "CI re-runs this" contract was previously unenforced.
+      - name: Types contract (Pydantic → TS)
+        run: |
+          uv run python scripts/build_ts_types.py
+          git diff --exit-code webapp/lib/api/types.generated.ts
+
       - name: Tests
         run: uv run pytest tests/ -q --tb=short --cov=promptpotter --cov-report=term-missing
 

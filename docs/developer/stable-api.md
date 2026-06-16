@@ -172,7 +172,7 @@ Typed records in `events.jsonl` from `domain/run_records.py`:
 
 Forks within a family share one event stream via `CycleEventLog.inherit_from(parent_offset)`. The forked cycle's `events.jsonl` starts with the parent's records up to `parent_offset` plus a `ResumeCheckpointRecord` of kind `FORK_CUT`.
 
-Subscribers read via `DerivedView.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist — enforced by `tests/test_structure.py::test_forbidden_calls`.
+Subscribers read via `DerivedView.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist — a structural invariant that fails loud (an out-of-allowlist write shows up in the file tree); no standing test, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
 
 ## 7. Per-cycle artifact paths
 

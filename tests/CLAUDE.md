@@ -17,11 +17,12 @@ for any test is not "does this guard a contract?" — almost everything does —
   Those are the only failures worth a standing test, because they are the only
   ones you *cannot* rediscover in use.
 
-## The three silent-harm classes (the whole suite)
+## The silent-harm classes (the whole suite)
 
 | File | Silent harm it catches |
 |------|------------------------|
 | `test_numerics.py` | A wrong score. Rasch / PoBB / composite-fitness / scorer-formula errors are invisible — the run completes, the dashboard looks fine, every result is subtly wrong. The math must be wrong-reveal. |
+| `test_integrity.py` | A wrong identity / a quiet cross-contamination. Content-hash collisions, a flat pipeline-param map slipping through, an L3 plan leaking into the target prompt, a hit-cache reused across datasets — each carries the wrong number or content forward with no error. |
 | `test_security.py` | A leak. A key reaching the logs, dataset content reaching the optimizer LLM unfenced (prompt injection), a path-segment escaping its tenant dir — no error, just harm, often irreversible in a multi-tenant product. |
 | `test_resume.py` | Lost / corrupted measurement data. A rescore that corrupts prior fitness, a replay that misses a flipped outcome, a fork that inherits the wrong origin, an aborted-run merge that shrinks an already-fuller archive. A killed-and-restarted run raises nothing — it just loses or mis-carries expensive, irreplaceable data. |
 

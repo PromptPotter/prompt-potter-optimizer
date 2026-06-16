@@ -13,8 +13,9 @@ Why a gateway and not an inline check per handler: capability enforcement that
 lives at each call site is only as strong as the least careful handler. Routing
 every dataset-directory access through here makes the check structural — a route
 that does not go through the gateway cannot resolve a dataset at all.
-Presentation code MUST NOT read :attr:`Stores.benchmarks_root` directly
-(guarded by ``tests/test_structure.py``).
+Presentation code MUST NOT read :attr:`Stores.benchmarks_root` directly —
+the structural guard is routing every access through this gateway; no
+standing test (see ``tests/CLAUDE.md``).
 """
 
 from __future__ import annotations

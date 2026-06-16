@@ -23,7 +23,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | [`operations/`](operations/) | Running it — CLI reference, env, persistence + recovery, observability, backend integration, **`secure-hosting.md`** (allowlist admin via the on-box bot), **`adding-a-dataset.md`**, **`dataset-selection-rationale.md`**, **`dataset-reasoning-matrix.md`** (per-dataset model + `reasoning_effort` + `max_tokens` defaults). | [`operations/README.md`](operations/README.md) |
 | [`methods/`](methods/) | The two spend-control procedures: PoBB elimination + hard-sample leaderboard. | [`methods/README.md`](methods/README.md) |
 | [`research/`](research/) | Benchmarks (BBEH comparison, pEvol-bench), metrics, related-work table (incl. MCTS comparison). | [`research/README.md`](research/README.md) |
-| [`specs/`](specs/) | Forward direction in one [`roadmap.md`](specs/roadmap.md) + living contracts (verdict-resolution, frontend-surface-contract, the two CI-checked control-plane YAMLs) + the debt backlog. **Specs index has its own CLAUDE.md.** | [`specs/CLAUDE.md`](specs/CLAUDE.md) |
+| [`specs/`](specs/) | Forward direction in one [`roadmap.md`](specs/roadmap.md) + living contracts (verdict-resolution, frontend-surface-contract, the two control-plane YAMLs) + the debt backlog. **Specs index has its own CLAUDE.md.** | [`specs/CLAUDE.md`](specs/CLAUDE.md) |
 | `assets/` | Images and diagrams; no contract. | n/a |
 
 ## Anchor docs for hot questions

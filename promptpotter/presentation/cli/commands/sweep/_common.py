@@ -17,7 +17,7 @@ from promptpotter.presentation.cli.commands._shared import (
     log_startup_summary,
 )
 from promptpotter.presentation.cli.commands.new import _build_observers
-from promptpotter.presentation.cli.commands.resume import _prepare_cycle_for_resume
+from promptpotter.presentation.cli.commands.resume_command import _prepare_cycle_for_resume
 from promptpotter.presentation.cli.session import load_session
 
 if TYPE_CHECKING:

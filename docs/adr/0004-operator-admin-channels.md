@@ -128,8 +128,9 @@ ADR-0002 gate #5.
 
 ### Confirmation
 
-`tests/test_contracts.py::test_adr_anchor_files_exist` includes this ADR in
-its set — every file named in the Anchors table below must exist on disk. The §0
+Every file named in the Anchors table below must exist on disk — verified by
+review, a stale path fails loud as a broken link (no standing test; the
+structural/contract suite was cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)). The §0
 amendment naming the operator-admin channel landed before the bot code, per the
 sequencing rule.
 
@@ -164,8 +165,8 @@ in `.env`, run `deploy-linux/install-allowlist-bot.sh`, then message the bot
 
 ### Anchors
 
-Every claim names a file. Path existence asserted by
-`tests/test_contracts.py::test_adr_anchor_files_exist`.
+Every claim names a file. A stale path fails loud as a broken link —
+verified by review, no standing test (see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
 | Concern | File |
 |---|---|

@@ -47,9 +47,9 @@ freshness-based "running" was the symptom that run-state was never owned state.
 `DerivedView.on_record` (`projections/base.py`) owns the
 `isinstance(record, …)` dispatch; subclasses override hooks. There's no
 second dispatch path because the base class is the only one. Subscribers
-MUST NOT write campaign artifacts beyond their declared allowlist (guarded
-by `tests/test_structure.py::test_forbidden_calls`
-+ `test_artifact_sets_are_disjoint_and_well_formed`).
+MUST NOT write campaign artifacts beyond their declared allowlist. This is
+a structural invariant that fails loud (an out-of-allowlist write shows up
+in the file tree) — no standing test; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
 
 `DerivedView.drain()` is the runner's teardown seam: `_finalize_run` calls
 `RunObservers.drain_all()` on every stop reason so buffered projection

@@ -373,7 +373,8 @@ measured sibling cycle via the existing policy-scope config + branch-from-origin
   scoring path ([R-12] holds). `value_with_mask_applied` reuses the scoring kernels, doesn't add
   a gateway.
 - **Future write = Control-remote** (fork-from-mask) — schema-first when it lands.
-- **New seams → `tests/test_structure.py` rows** ([R-15]) during the migration:
+- **New seams → conventions** (not tests — the structural suite was cut, see
+  [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md); each fails loud):
   "re-evaluation math only in `value_with_mask_applied`"; "`find_divergences` is the only
   divergence fold"; "no mask state is persisted" (it's a pure function — decision #1).
 

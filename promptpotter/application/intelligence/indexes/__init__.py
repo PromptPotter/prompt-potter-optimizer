@@ -40,7 +40,7 @@ from promptpotter.application.intelligence.indexes.axis import (
     AxisIndex,
     ValueRecord,
 )
-from promptpotter.application.intelligence.indexes.config import ConfigIndex
+from promptpotter.application.intelligence.indexes.index_config import ConfigIndex
 from promptpotter.application.intelligence.indexes.sample import (
     FailureCluster,
     SampleIndex,

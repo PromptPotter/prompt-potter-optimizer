@@ -3,7 +3,8 @@
 # This file is the source of truth for the inbound HTTP command surface.
 # Every `POST /commands/{kind}` operation MUST be declared here BEFORE a
 # handler lands in `promptpotter/presentation/api/routers/commands.py`.
-# Drift detection: `tests/test_contracts.py` + Spectral lint.
+# Drift detection: review + Spectral lint (no `test_contracts.py` — the
+# structural/contract suite was cut to the silent-harm core, see tests/CLAUDE.md).
 #
 # Permanent contract: docs/adr/0001-m12-control-plane.md
 # §0 definition: docs/architecture.md (§0 "State + persistence" — Five I/O kinds)

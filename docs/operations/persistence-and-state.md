@@ -67,7 +67,7 @@ A **Session** is one `new` invocation; a campaign holds one. `resume` extends it
 | `.runtime/streams/…_p_best.jsonl` | per cycle | Per-sample PoBB snapshots. |
 | `.runtime/cache/rounds\|candidates/` | per cycle | Per-node I/O (l1_generate/critique/score, l2/l3) + pre-scoring candidate checkpoint. |
 
-Material facts land on disk in human-readable form; reads happen by opening files (no read CLI). Entry points never write campaign artifacts directly — every write rides the per-cycle ledger through two projections (live telemetry + audit), allowlist-enforced in `tests/test_structure.py`.
+Material facts land on disk in human-readable form; reads happen by opening files (no read CLI). Entry points never write campaign artifacts directly — every write rides the per-cycle ledger through two projections (live telemetry + audit). The allowlist is a structural invariant that fails loud (an out-of-allowlist write shows up in the file tree); no standing test, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
 
 **Editing optimizer state by hand.** Open `cycles/{cycle_id}/rounds/round_{N:04d}.json` before `resume --from N` and edit; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. On resume the cycle replays every prior `round_NNNN.json` in order to rebuild its state — there is no separate write-ahead log.
 
@@ -224,4 +224,4 @@ Each is idempotent and writes a `CommandRecord` to the campaign's root-cycle led
 
 **Running jobs (`.runtime/jobs/{job_id}.json`).** The browser-launched runner is tracked one file per job (`campaign_id, cycle_id, user_id, status, …`); reads filter by user. Concurrent campaigns are isolated via the per-cycle ledger ContextVar. The Account modal's Security pane surfaces live spend/concurrency/daily-mint counts against their caps.
 
-**Identity** is the fifth I/O kind (§0 of `docs/architecture.md`): OIDC verification at the API trust boundary populates `IdentityContext`; tokens never appear past the middleware (ADR-0002, CI-checked). Stage 0 substitutes `default_identity()`. Contract: `docs/adr/0002-identity-foundation.md`.
+**Identity** is the fifth I/O kind (§0 of `docs/architecture.md`): OIDC verification at the API trust boundary populates `IdentityContext`; tokens never appear past the middleware (ADR-0002 — review-enforced; no standing test). Stage 0 substitutes `default_identity()`. Contract: `docs/adr/0002-identity-foundation.md`.

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.intelligence.indexes.config import ConfigIndex
+from promptpotter.application.intelligence.indexes.index_config import ConfigIndex
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.scoring import Scorer

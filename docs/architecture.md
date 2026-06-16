@@ -279,7 +279,7 @@ populates `IdentityContext` for the downstream resolver. Mutates no
 campaign state, is not a ledger subscriber, does not signal the loop
 — it is the gate establishing who the subsequent Control-remote call
 is *from*. Tokens are verified at this boundary and never appear past
-it (ADR-0002 gate #2, CI-checked). Stage 0 (auth-off, single
+it (ADR-0002 gate #2 — review-enforced; no standing test). Stage 0 (auth-off, single
 operator) is the degenerate case: `default_identity()` substitutes
 for the middleware. Permanent contract:
 `docs/adr/0002-identity-foundation.md`. This kind also
@@ -296,9 +296,9 @@ reachable from the lowest-trust zone. Permanent contract:
 `docs/adr/0004-operator-admin-channels.md`. Adding a new I/O kind requires
 amending §0 first; the pre-flight gate (CLAUDE.md Q4 sub-rule)
 blocks code that introduces one without §0 backing. Hexagonal layer
-separation is enforced by
-`tests/test_structure.py::test_runtime_layer_imports`
-(plus `test_cycle_does_not_import_prompt_surface`) so data types
+separation is a structural invariant that fails loud at import (a cross-layer
+import breaks the run; the `test_structure` scan was cut to the silent-harm
+core — see `tests/CLAUDE.md`) so data types
 stay free of I/O and the orchestrator can be reused without dragging
 a backend client along. SearchPoint types are
 **immutable**: once created, their fields can't change. That makes
@@ -309,11 +309,11 @@ mismatch. One per-cycle `CycleEventLog.append` is the sole persistence
 ingress; resume + fork ride dedicated checkpoint records on the
 ledger. Display and observability subscribe to the ledger as
 read-only views — never write campaign artifacts of their own.
-**Single-writer invariant on the ledger** (pinned by
-`tests/test_structure.py::test_forbidden_calls`
-+ `test_artifact_sets_are_disjoint_and_well_formed`): any module
+**Single-writer invariant on the ledger** (a structural invariant that
+fails loud — an out-of-allowlist write shows up in the file tree; no standing
+test, see `tests/CLAUDE.md`): any module
 besides the ledger writing to `events.jsonl`, or any projection
-writing outside its declared allowlist, fails the tests. **The MeasurementArchive (the
+writing outside its declared allowlist, is drift. **The MeasurementArchive (the
 other persistence layer, see "Measurement archive" below) does not
 have this invariant today** — there are 13 raw call sites;
 m10-cleanup §3.7 adds the facade that brings the archive under the
@@ -374,9 +374,9 @@ cross-campaign by design (see "Measurement archive" below).
 (`notebooks/optimization_campaign.ipynb`) is a thin UI shell — every
 non-display code cell calls into `application/` (no orchestration
 logic, no scoring, no LLM calls authored in the notebook).
-Verifiable via `tests/test_structure.py` extension: notebook
-cells whitelist-imports from `application/` + `presentation/views/`
-only. Additional notebooks
+Convention (not CI-enforced — the structural scan was cut; see
+`tests/CLAUDE.md`): notebook cells import from `application/` +
+`presentation/views/` only. Additional notebooks
 (currently `notebooks/bbeh_potter.ipynb`) are **work-in-progress** —
 kept but not part of the documented entry-point surface. Mark them
 WIP in cell-1 markdown so a reader knows status at a glance. The
@@ -470,8 +470,8 @@ the PR description.
 - **`pipeline.json` contract** for connector self-description — the
   backend's API surface to PromptPotter. Don't simplify "because
   TermNorm is the only consumer today."
-- **Hexagonal layer separation test**
-  (`tests/test_structure.py::test_runtime_layer_imports` + `test_cycle_does_not_import_prompt_surface`) — without it, the three entry points drift.
+- **Hexagonal layer separation** (fails loud at import — no standing test;
+  see `tests/CLAUDE.md`) — without the discipline, the three entry points drift.
 - **Resume + fork-on-divergence mechanism** — load-bearing for
   `--from N` and `--fork-on-divergence`. Today's symbols
   (`Decision`/`ResumeCheckpointKind`) and the post-cleanup symbols
