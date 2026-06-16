@@ -494,41 +494,13 @@ def materialize_sample_values(
 
 
 def default_per_round_formula(schema: PipelineSchema) -> str:
-    """``0.55*accuracy + 0.30*self_heal + 0.05*latency + 0.05*recall + 0.05*prompt_compactness``.
-    Self-heal split: L1/L2 wounds 0.10 each, L2/L3 guard breaches 0.05 each. Override via campaign.json::scoring."""
-    recall_names: list[str] = []
-    for display_name, ev, _node in _concrete_round_entries(schema):
-        if ev.node_type in ("candidate_source", "ranker", "cache"):
-            recall_names.append(display_name)
-
-    if recall_names:
-        terms = " + ".join(recall_names)
-        recall_expr = f"(({terms}) / {len(recall_names)})"
-    else:
-        recall_expr = "accuracy"
-
-    # Per-channel weights inside the 0.30 self-heal budget; name-driven so SELF_HEALERS additions just need a new entry.
-    healer_weights = {
-        "validation_failure_rate": 0.10,
-        "runtime_failure_rate": 0.10,
-        "l2_guard_breach_rate": 0.05,
-        "l3_guard_breach_rate": 0.05,
-    }
-    self_heal_terms = " + ".join(
-        f"{w} * (1 - {spec.name})" for spec in SELF_HEALERS if (w := healer_weights.get(spec.name))
-    )
-
-    return (
-        f"0.55 * accuracy + {self_heal_terms} + 0.05 * latency_norm "
-        f"+ 0.05 * {recall_expr} + 0.05 * prompt_compactness"
-    )
+    """``accuracy`` — composite_fitness defaults to plain accuracy so the decision metric
+    and the headline number agree (no latency/recall/self-heal blend inflating it above
+    the real score). Degradation is gated separately by the round ``health`` block, not
+    folded into fitness. Re-weight in other terms via campaign.json::scoring."""
+    return "accuracy"
 
 
 def default_per_round_formula_short(schema: PipelineSchema) -> str:
-    """Single-letter abbreviation of the default formula — fits the 70-char live-render frame."""
-    has_recall = any(
-        ev.node_type in ("candidate_source", "ranker", "cache")
-        for _name, ev, _node in _concrete_round_entries(schema)
-    )
-    recall_token = "R" if has_recall else "acc"
-    return f"0.55*acc + 0.30*SH + 0.05*lat + 0.05*{recall_token} + 0.05*pc"
+    """Short form of the default formula — fits the 70-char live-render frame."""
+    return "acc"

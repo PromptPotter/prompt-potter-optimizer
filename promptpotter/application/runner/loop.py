@@ -30,7 +30,7 @@ from promptpotter.application.runner.round import (
     post_round,
 )
 from promptpotter.application.runner.sweep import run_sweep_generation_only
-from promptpotter.application.runner.termination import BudgetGate
+from promptpotter.application.runner.termination import BudgetGate, origin_gate_tripped
 from promptpotter.domain.phases import (
     CampaignPhase,
     StopLoop,
@@ -101,6 +101,21 @@ async def run_round_loop(
         )
         if not round0_present:
             await emit_origin_round(cycle, session, cb)
+            # Origin gate: a non-healthy round-0 verdict halts before L1 instead of
+            # burning a campaign against a broken floor (the common case while a dev
+            # brings up a new connector). The operator overrides knowingly with a
+            # plain ``resume`` — round 0 is now on disk, so this whole block is
+            # skipped and the loop goes straight to L1.
+            gate_stop = origin_gate_tripped(cycle.origin_health, opt.origin_gate)
+            if gate_stop is not None:
+                grade = cycle.origin_health.grade if cycle.origin_health else "unknown"
+                logger.warning(
+                    "Origin gate (%s): round-0 verdict is %s — halting before L1. "
+                    "Fix the origin and re-mint, or `resume` to proceed anyway.",
+                    opt.origin_gate,
+                    grade,
+                )
+                return gate_stop, None
 
     try:
         while clean_rounds < max_rounds and round_num < HARD_CAP:

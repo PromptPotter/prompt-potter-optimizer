@@ -15,6 +15,7 @@ from promptpotter.application.optimization.resume_and_fork import (
     record_decision,
 )
 from promptpotter.application.optimization.validators.l1_strict import L1YieldStats
+from promptpotter.application.origin import rescore_origin
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
     compute_composite_fitness,
@@ -24,13 +25,12 @@ from promptpotter.application.scoring.metrics import (
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     CandidateProposal,
-    RoundOrigin,
     RoundResult,
     ScoredCandidate,
 )
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
-from promptpotter.shared.statistics import proportion_test
+from promptpotter.shared.statistics import paired_diff_posterior
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -43,6 +43,28 @@ def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[
     `pick_round_winner` so the SCOREBOARD `*` and the in-round winner never drift apart.
     """
     return (composite_fitness if composite_fitness is not None else accuracy, accuracy)
+
+
+def _paired_fitness(
+    candidate_results: list[QueryMeasurement],
+    origin_results: list[QueryMeasurement],
+) -> tuple[list[float], list[float]]:
+    """Per-sample reciprocal-rank fitness for the candidate and origin on the SAME samples,
+    aligned by ``sample_id``. The matched pairs the round-significance test runs on — origin's
+    fitness restricted to whatever subset the online picker scored the candidate on. A degraded
+    sample with no recorded fitness contributes 0 (the score it earned), not a dropped pair.
+    """
+    origin_by_sid = {
+        r.get("sample_id"): float(r.get("fitness", 0.0) or 0.0) for r in origin_results
+    }
+    cand_fit: list[float] = []
+    origin_fit: list[float] = []
+    for r in candidate_results:
+        sid = r.get("sample_id")
+        if sid in origin_by_sid:
+            cand_fit.append(float(r.get("fitness", 0.0) or 0.0))
+            origin_fit.append(origin_by_sid[sid])
+    return cand_fit, origin_fit
 
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
@@ -60,7 +82,6 @@ async def l1_score(
     cycle: Cycle,
     candidates: list[CandidateProposal],
     dataset: list[Sample],
-    origin: RoundOrigin,
     *,
     pipeline_params: dict[str, Any] | None = None,
     improvement_threshold: float = 0.01,
@@ -110,6 +131,22 @@ async def l1_score(
         for ind in osp_population
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
     ]
+    # The incumbent floor, scored on the SAME samples the candidates ran. PoBB already
+    # backfilled the incumbent (seed) onto every sample a candidate touched, so re-scoring
+    # it over the touched union is all cache hits — a real matched baseline at no added
+    # spend, and nothing wasted on subset samples no candidate reached. Probe rounds keep
+    # their cumulative re-scope (the incumbent already measured the warned-query set).
+    if cycle.probe_next_round:
+        origin = cycle.origin_for_round(dataset, round_num)
+    else:
+        scored_sids = {
+            r["sample_id"]
+            for results in all_candidate_results.values()
+            for r in results
+            if r.get("sample_id") is not None
+        }
+        touched = [s for s in dataset if int(s.id) in scored_sids]
+        origin = await rescore_origin(cycle, touched or dataset, round_num, callbacks=callbacks)
     # Full-set origin stats — fallback for `matched_origin` when every candidate ran every sample.
     origin_base = _compute_accuracy(cast("list[QueryMeasurement]", origin.results))
     best_acc = origin.accuracy
@@ -121,7 +158,12 @@ async def l1_score(
     best_matched_origin_acc = origin.accuracy
     best_matched_origin_hits = origin_base["hits"]
     best_matched_origin_composite = origin.composite_fitness
-    best_key = round_winner_key(origin.composite_fitness, origin.accuracy)
+    # Elect by improvement over MATCHED origin (origin on the candidate's own measured samples),
+    # NOT raw accuracy vs origin's full-set rate. The online picker scores each candidate on a
+    # different hard-first subset, so origin's full-set accuracy (inflated by the easy samples
+    # the candidate never ran) is the wrong baseline — a candidate that genuinely beats origin
+    # on the hard samples it ran would lose to that inflated average. Origin is the floor at delta 0.
+    best_delta = 0.0
     winner_idx: int | None = None
     # `score_population` runs per-sample with `opt_sp=None` (target layer can't see OSP), so
     # opt_sp-aware evaluators (prompt_compactness) collapse to vacuous fallback. Backfill the
@@ -156,11 +198,17 @@ async def l1_score(
                     "matched_origin_composite": matched["composite_fitness"],
                 }
             )
-        # Running max via shared `round_winner_key` so live + SCOREBOARD agree. Matched-origin
-        # `delta_ok` below decides `improved`, not who won.
-        cand_key = round_winner_key(s["composite_fitness"], s["accuracy"])
-        if cand_key > best_key:
-            best_key = cand_key
+        # No baseline overlap ⇒ no comparison. A candidate scored on samples the incumbent
+        # never ran would "beat" a phantom 0.0 floor (the matched empty-set bug: round 1
+        # showed improved=True on 0 hits). The incumbent is re-scored on this round's subset
+        # upstream (`rescore_origin`), so this is the safety net for any partial-coverage gap.
+        if matched["total"] == 0:
+            continue
+        # Running max of the matched-origin delta: the candidate's accuracy minus origin's
+        # accuracy on the SAME samples. Beating its own matched origin is what wins the round.
+        cand_delta = s["accuracy"] - matched["accuracy"]
+        if cand_delta > best_delta:
+            best_delta = cand_delta
             best_acc = s["accuracy"]
             best_comp = s["composite_fitness"]
             best_osp = ind
@@ -187,12 +235,22 @@ async def l1_score(
 
     base = _compute_accuracy(best_results)
     p_value: float | None = None
-    if base["total"] > 0:
-        # Real matched-pair hits from the same subset — extrapolating origin's full-set rate
-        # would mis-rate hard-first sampling, where origin underperforms on the early samples.
-        p_value = proportion_test(
-            base["hits"], base["total"], best_matched_origin_hits, base["total"]
+    if base["total"] > 0 and winner_idx is not None:
+        # Significance on the per-sample reciprocal-rank FITNESS (the chosen decision metric),
+        # not binary hits: a candidate that lifts ground-truth's rank without yet landing it at
+        # rank 1 is real improvement on the smooth signal, and a binary-hit test is blind to it.
+        # One-sided paired-difference posterior — the same machinery PoBB elimination runs.
+        cand_fit, origin_fit = _paired_fitness(
+            best_results, list(cast("list[QueryMeasurement]", origin.results))
         )
+        if cand_fit:
+            mean_d, se_d, _ = paired_diff_posterior(cand_fit, origin_fit)
+            if se_d > 1e-12:
+                from scipy.stats import norm
+
+                p_value = float(norm.sf(mean_d / se_d))
+            else:
+                p_value = 0.0 if mean_d > 0 else 1.0
 
     delta_ok = best_acc > best_matched_origin_acc + improvement_threshold
     n_min = pobb_config.n_min

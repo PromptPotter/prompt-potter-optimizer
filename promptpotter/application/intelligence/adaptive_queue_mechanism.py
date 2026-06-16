@@ -1,7 +1,18 @@
 """Adaptive queue mechanism — 1PL Rasch CAT.
 
-``score(s) = decision_information_gain(s)`` = MI between next outcome and verdict ``θ_c > θ_s``;
+``pick_value(s) = decision_information_gain(s) + delta_learning_gain(s)``.
+
+``decision_information_gain`` = MI between next outcome and verdict ``θ_c > θ_s``;
 means-known limit recovers Bernoulli Chernoff information (Garivier-Kaufmann 2016 Track-and-Stop).
+That term alone is **myopic**: it credits only what one measurement reveals about the verdict,
+not what it reveals about the *sample's difficulty* ``δ_s``. At the seed-centred first pick
+(``μ_c = μ_s`` ⇒ ``p₀ = Φ(0) = 0.5`` for every sample) the decision term degenerates to
+"prefer the lowest-``se_δ`` sample" — i.e. re-graze origin's already-measured samples and
+starve the unmeasured headroom (where a candidate could actually *beat* origin). The
+``delta_learning_gain`` term restores the omitted parameter-information so an under-measured
+sample is *maximally informative* (the contract `l1/score/loop.py` already documents), while
+``p(1-p)→0`` keeps resolved always-hit / always-miss samples from being re-promoted — the
+pathology that retired the old ``explore_weight`` blend.
 """
 
 from __future__ import annotations
@@ -11,6 +22,7 @@ from collections.abc import Iterable
 
 __all__ = [
     "decision_information_gain",
+    "delta_learning_gain",
     "expected_order",
     "marginal_hit_probability",
     "next_sample",
@@ -120,6 +132,29 @@ def decision_information_gain(
     )
 
 
+def delta_learning_gain(
+    mu_c: float,
+    var_c: float,
+    delta_s: float,
+    se_delta_s: float,
+) -> float:
+    """Expected entropy reduction (nats) in the sample difficulty ``δ_s`` from one measurement.
+
+    The non-myopic value the verdict-only :func:`decision_information_gain` omits. One Bernoulli
+    outcome adds Fisher info ``p(1−p)/scale²`` to the prior δ-precision ``1/se_δ²``, so the
+    Gaussian entropy drop is ``½·ln(1 + se_δ²·p(1−p)/scale²)`` with
+    ``scale² = 1 + π·se_δ²/8`` and ``p`` the probit-marginal hit probability. Largest for
+    **under-measured** samples (large ``se_δ``) whose outcome is genuinely uncertain
+    (``p≈0.5``); ``→0`` for well-measured samples (small ``se_δ``) AND for resolved
+    always-hit / always-miss samples (``p(1−p)→0``) — so it explores the unknown without
+    re-promoting samples the run has already pinned.
+    """
+    p = marginal_hit_probability(mu_c=mu_c, var_c=var_c, delta_s=delta_s, se_delta_s=se_delta_s)
+    scale_sq = 1.0 + _PROBIT_SCALE * se_delta_s * se_delta_s
+    se_sq = se_delta_s * se_delta_s
+    return 0.5 * math.log1p(se_sq * p * (1.0 - p) / scale_sq)
+
+
 def pick_value(
     mu_c: float,
     var_c: float,
@@ -128,8 +163,16 @@ def pick_value(
     delta_s: float,
     se_delta_s: float,
 ) -> float:
-    """Queue-mechanism score for one sample (nats) — alias over :func:`decision_information_gain`."""
-    return decision_information_gain(mu_c, var_c, mu_s, var_s, delta_s, se_delta_s)
+    """Total acquisition score for one sample (nats): verdict decision-IG + δ-learning gain.
+
+    ``decision_information_gain`` resolves ``θ_c > θ_s``; :func:`delta_learning_gain` values
+    sharpening the sample's difficulty. Without the second term the seed-centred first pick
+    degenerates to "prefer lowest ``se_δ``" and starves the unmeasured headroom — see the
+    module docstring.
+    """
+    return decision_information_gain(
+        mu_c, var_c, mu_s, var_s, delta_s, se_delta_s
+    ) + delta_learning_gain(mu_c, var_c, delta_s, se_delta_s)
 
 
 def next_sample(

@@ -25,8 +25,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
 
 from promptpotter.domain.phases import StopReason
+
+if TYPE_CHECKING:
+    from promptpotter.domain.results import DegradationHealth
+
+OriginGateMode = Literal["strict", "critical_only", "off"]
 
 
 @dataclass(frozen=True)
@@ -49,4 +55,25 @@ class BudgetGate:
         return None
 
 
-__all__ = ["BudgetGate"]
+def origin_gate_tripped(
+    health: DegradationHealth | None, mode: OriginGateMode
+) -> StopReason | None:
+    """``ORIGIN_GATE`` when the round-0 origin verdict warrants a halt, else ``None``.
+
+    The round-0 sibling of :meth:`BudgetGate.tripped`. A non-healthy origin means
+    candidates would be measured against a broken floor (the common case while a
+    developer brings up a new connector whose ``pipeline.json`` or backend code is
+    still buggy). ``strict`` halts on any non-healthy grade (``critical`` or
+    ``degraded``); ``critical_only`` halts only on a structurally-broken origin;
+    ``off`` disarms the gate. A missing verdict never trips.
+    """
+    if mode == "off" or health is None:
+        return None
+    if health.grade == "critical":
+        return StopReason.ORIGIN_GATE
+    if mode == "strict" and health.grade == "degraded":
+        return StopReason.ORIGIN_GATE
+    return None
+
+
+__all__ = ["BudgetGate", "OriginGateMode", "origin_gate_tripped"]

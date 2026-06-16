@@ -128,8 +128,17 @@ async def score_search_point(
     l1_diversity: float = 1.0,
     next_sample: Callable[[dict[int, bool]], int | None] | None = None,
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
+    force_fresh: bool = False,
 ) -> tuple[list[QueryMeasurement], dict[str, Any], bool, EscalationSignal | None]:
     """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe).
+
+    ``force_fresh`` skips the measurement-archive reuse and measures every sample
+    live. The content hash keys the cache on *PromptPotter-visible* config, so a
+    backend-code fix (a connector bug, a schema bound) is invisible to it — a
+    re-run would silently replay the broken measurement. ``force_fresh`` is the
+    escape hatch for exactly that: re-score an origin after fixing the connector
+    and see the new result. Fresh measurements still persist to the archive
+    normally, overwriting the stale rows.
 
     Per-sample callbacks ``on_sample_scored`` and ``on_sample_starting`` are
     **required keywords without a default** — every call site must declare its
@@ -152,7 +161,7 @@ async def score_search_point(
     run_id = f"{safe_label}_{content_hash[:8]}"
 
     cached_sample_results: dict[str, QueryMeasurement] = {}
-    if store and backend_id:
+    if store and backend_id and not force_fresh:
         from promptpotter.application.optimization.pobb.elimination import is_deprecated
 
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})

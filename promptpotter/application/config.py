@@ -81,6 +81,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "zero_signal_filter_enabled"): "policy",
     ("optimization", "spend_budget_usd"): "policy",
     ("optimization", "token_budget"): "policy",
+    ("optimization", "origin_gate"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
     ("optimization", "rebase_capability"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
@@ -202,6 +203,20 @@ class OptimizationConfig(BaseModel):
             "while this counts backend work too. Default ≈ a 5-round run (measured "
             "~158k tokens) with headroom. Whichever of the two ceilings trips first "
             "halts the cycle. ``None`` disarms the token ceiling."
+        ),
+    )
+
+    origin_gate: Literal["strict", "critical_only", "off"] = Field(
+        "strict",
+        description=(
+            "Halt after round 0 when the origin's degradation verdict is "
+            "non-healthy, instead of optimizing against a broken floor — the "
+            "common failure while bringing up a new connector. ``strict`` "
+            "(default) halts on ``critical`` or ``degraded``; ``critical_only`` "
+            "halts only on a structurally-broken origin; ``off`` disarms the "
+            "gate. The operator overrides knowingly with a plain ``resume`` — "
+            "round 0 is already on disk, so the loop skips the gate and goes "
+            "straight to L1."
         ),
     )
 

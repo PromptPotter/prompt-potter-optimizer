@@ -304,23 +304,15 @@ def test_terminal_ranking_sources_the_prediction():
 
 
 def test_composite_fitness_matches_default_formula():
+    # The default formula is plain ``accuracy`` — composite_fitness must equal accuracy
+    # so the decision metric and the headline number agree (no latency/recall/self-heal
+    # blend inflating it above the real score). Degradation is gated by the round health
+    # block, not folded into fitness.
     schema = _single_node_schema()
     results = [_eval_result(score=1.0, total_time=100), _eval_result(score=0.0, total_time=200)]
     scored = compute_composite_fitness(results, schema)
-    # Accuracy=0.5, latency_norm=0.985, recall falls back to accuracy.
-    # With no opt_sp all four self-heal rates are 0 → (1 - rate) = 1 each.
-    # prompt_compactness defaults to 1.0 when no opt_sp passed (vacuous).
-    expected = (
-        0.55 * 0.5
-        + 0.10 * 1.0  # 1 - validation_failure_rate
-        + 0.10 * 1.0  # 1 - runtime_failure_rate
-        + 0.05 * 1.0  # 1 - l2_guard_breach_rate
-        + 0.05 * 1.0  # 1 - l3_guard_breach_rate
-        + 0.05 * 0.985
-        + 0.05 * 0.5
-        + 0.05 * 1.0
-    )
-    assert scored["composite_fitness"] == pytest.approx(expected, abs=1e-4)
+    assert scored["composite_fitness"] == pytest.approx(scored["accuracy"], abs=1e-9)
+    assert scored["composite_fitness"] == pytest.approx(0.5, abs=1e-4)
 
 
 def test_matched_origin_stats_restricts_to_candidate_subset():
@@ -1724,6 +1716,37 @@ def test_decision_information_gain_peaks_at_candidate_ability() -> None:
     far_hard = decision_information_gain(0.0, 1.0, mu_s=1.0, var_s=1.0, delta_s=4.0, se_delta_s=0.1)
     assert near > far_easy
     assert near > far_hard
+
+
+def test_pick_value_explores_undermeasured_headroom_at_seed_centred_pick() -> None:
+    """At the first pick the candidate prior is seed-centred (μ_c=μ_s ⇒ p₀=0.5 everywhere), so the
+    verdict-only decision-IG degenerates to 'prefer lowest se_δ' and *starves* the unmeasured
+    headroom. The δ-learning term in ``pick_value`` must flip that: an under-measured sample with a
+    genuinely uncertain outcome out-ranks an equally-positioned well-measured one — WITHOUT
+    re-promoting a settled always-easy sample (p→1)."""
+    from promptpotter.application.intelligence.adaptive_queue_mechanism import (
+        decision_information_gain,
+        pick_value,
+    )
+
+    seed = 0.5
+    # Same δ≈μ_c (uncertain outcome) — differ only in measurement precision.
+    headroom = {"delta_s": 0.5, "se_delta_s": 1.2}  # under-measured (wide δ): the real headroom
+    well_measured = {"delta_s": 0.5, "se_delta_s": 0.1}  # already pinned
+    settled_easy = {"delta_s": -4.0, "se_delta_s": 0.1}  # origin aces it (p→1): no headroom
+
+    def dig(s: dict[str, float]) -> float:
+        return decision_information_gain(seed, 1.0, seed, 1.0, s["delta_s"], s["se_delta_s"])
+
+    def pv(s: dict[str, float]) -> float:
+        return pick_value(seed, 1.0, seed, 1.0, s["delta_s"], s["se_delta_s"])
+
+    # The bug, revealed: verdict-only IG ranks the well-measured sample ABOVE the headroom.
+    assert dig(well_measured) > dig(headroom)
+    # The fix: total acquisition flips it — explore the under-measured headroom first.
+    assert pv(headroom) > pv(well_measured)
+    # Anti-pathology: a settled always-easy sample is NOT promoted over the headroom.
+    assert pv(headroom) > pv(settled_easy)
 
 
 def test_pick_score_artifact_ranks_contested_above_settled() -> None:

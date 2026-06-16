@@ -95,7 +95,6 @@ async def execute_round(
         improvement_threshold=opt.improvement_threshold,
         current_pipeline_params=cycle.tracking.current_sp.pipeline_params,
     )
-    origin = cycle.origin_for_round(scoring_set, round_num)
     async with observed_node(
         f"l1_score_r{round_num}",
         "scoring",
@@ -108,7 +107,6 @@ async def execute_round(
             cycle,
             candidates,
             scoring_set,
-            origin,
             pipeline_params=cycle.tracking.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
             improvement_significance=opt.improvement_significance,
