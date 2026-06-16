@@ -51,14 +51,27 @@ def extract_pipeline_config(experiment_extract: dict[str, Any]) -> dict[str, Any
 
 
 def _is_session_error(resp: httpx.Response) -> bool:
-    """True when a 400 response body names a missing/invalid session."""
+    """True when a 400 body signals a missing/invalid session (→ recover + retry).
+
+    The session-loss contract over the PP↔backend highway: the backend either
+    stamps a machine-readable ``code: "no_session"`` (the stable signal — survives
+    message rewording) OR carries the word ``session`` in its human message. We
+    accept either, and across both error envelopes — TermNorm's
+    ``{"status","message","code"}`` and FastAPI's default ``{"detail": …}`` — so a
+    backend restart/reload (which wipes the in-memory session, e.g. on every
+    ``--reload``) self-heals instead of aborting the round."""
     try:
-        detail = resp.json().get("detail", "")
+        body = resp.json()
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception:
         return False
-    return "session" in detail.lower()
+    if not isinstance(body, dict):
+        return False
+    if body.get("code") == "no_session":
+        return True
+    text = " ".join(str(body.get(k, "")) for k in ("message", "detail", "error"))
+    return "session" in text.lower()
 
 
 class BackendClient:

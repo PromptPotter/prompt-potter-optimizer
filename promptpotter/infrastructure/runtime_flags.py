@@ -33,6 +33,18 @@ def is_stop_requested(runtime_dir: Path) -> bool:
     return (runtime_dir / "stop.flag").is_file()
 
 
+def clear_run_control_flags(runtime_dir: Path) -> None:
+    """Drop any consumed ``stop.flag`` / ``pause.flag`` left by a prior run.
+
+    A fresh launch through the runner seam IS the operator's intent to run, so it
+    supersedes prior run-control intent. The flags are one-shot requests, not
+    persistent state — once the loop that they targeted has exited they are stale,
+    and a stale ``stop.flag`` would otherwise kill the very next resume on its first
+    poll (a stopped cycle could never be resumed). Idempotent."""
+    (runtime_dir / "stop.flag").unlink(missing_ok=True)
+    (runtime_dir / "pause.flag").unlink(missing_ok=True)
+
+
 def read_spend_cap(runtime_dir: Path) -> float | None:
     """Live USD cap from ``spend_cap.json::max_usd``; ``None`` when absent/unreadable."""
     path = runtime_dir / "spend_cap.json"
@@ -94,6 +106,7 @@ def derive_run_phase(
 
 __all__ = [
     "RUN_FRESH_S",
+    "clear_run_control_flags",
     "derive_run_phase",
     "is_paused",
     "is_stop_requested",

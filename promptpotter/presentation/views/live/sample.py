@@ -39,8 +39,6 @@ def fmt_query_result(
     *scoring_formula* (from ``campaign_config["scoring"]``) routes ``predicted``
     through ``extract_display_answer`` so ``**bold**`` / ``\\boxed{…}`` collapse to one token.
     """
-    from promptpotter.application.scoring.metrics import find_rank
-
     raw_pred = r.get("predicted") or ""
     pred = _ellide(extract_display_answer(raw_pred, scoring_formula), 30)
     gt_full = r.get("ground_truth", "") or ""
@@ -61,13 +59,14 @@ def fmt_query_result(
     elif r.get("hit"):
         tag = "HIT"
     else:
-        ranked = pd.get("ranked_items", [])
-        n_cand = len(ranked)
-        gt_rank: int | None = None
-        if gt_full:
-            for key in ("ranked_items", "token_matches"):
-                if (gt_rank := find_rank(pd.get(key, []), gt_full)) is not None:
-                    break
+        # Read the rank + candidate count stamped at scoring time
+        # (``sample_measurement.py`` — computed once from the canonical
+        # ``result_ranking``); never re-derive here. The old re-derivation read
+        # ``ranked_items``/``token_matches`` — keys this pipeline never emits (it
+        # stamps ``result_ranking``/``candidate_ranking``) — so every MISS rendered
+        # ``--/0`` even when the GT was genuinely ranked (e.g. rank 20 of 20).
+        gt_rank = r.get("ground_truth_rank")
+        n_cand = r.get("n_candidates") or 0
         if gt_rank is not None:
             tag = f"MISS {gt_rank}/{n_cand}"
         elif n_cand:
@@ -114,11 +113,11 @@ def fmt_query_result(
     warnings = diag.get("warnings", [])
     if warnings:
         for w in warnings:
-            stats = w.get("stats")
-            if stats:
-                msg = f"{stats['min']} min, {stats['usable']} usable, {stats['fetched']} fetched, {stats['requested']} requested"
-            else:
-                msg = w["message"]
+            # The backend owns the warning's human string (``message``); display
+            # it verbatim rather than re-deriving from ``stats`` (that duplicated
+            # the format across the repo boundary — a key rename on one side broke
+            # the other). Fall back to the step/code if a message is ever absent.
+            msg = w.get("message") or w.get("code") or w.get("step", "warning")
             line += f"\n{_ann_indent}{YELLOW}⚠ {w['step']}: {msg}{RESET}"
 
     if r.get("retry_of_degraded"):

@@ -41,6 +41,7 @@ from promptpotter.domain.run_records import CycleSeed, ForkSpec, LimitOverrides
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.models import emit_error_record
+from promptpotter.infrastructure.runtime_flags import clear_run_control_flags
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
 
@@ -176,6 +177,17 @@ async def run_optimization(
     *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
     started_at = utcnow_iso()
     cb = observers.callbacks
+
+    # A fresh launch supersedes any prior run-control intent: drop a consumed
+    # stop/pause flag left on this cycle's `.runtime/` by an earlier stopped run,
+    # else a stale stop.flag kills this very resume on its first poll (a stopped
+    # cycle could never be resumed). Once, here at the seam every launch funnels
+    # through — before the stop_check hook binds in the rebase loop below.
+    if session.state.cycle_id:
+        clear_run_control_flags(
+            session.store.campaigns.cycle_dir(session.campaign_id, session.state.cycle_id)
+            / ".runtime"
+        )
 
     # Cycle seed: the chosen searchpoint, declared at mint, lives at
     # `.overrides/seed.json` (read-once-at-bootstrap, keyed by the known cycle_id —
