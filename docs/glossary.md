@@ -207,7 +207,7 @@ The persisted world is a four-entity containment hierarchy
 - **Posterior width** — `1 - max(p_best)`. Operator-visible measure of
   how confidently the leader can be locked in. Surfaced on
   `dashboard.json::current_round.pobb`.
-- **Candidate budget allocation** — how the round's query budget is
+- **Candidate budget allocation** — how the round's sample budget is
   spent across the N candidates. Implemented by PoBB. The umbrella
   term — NEVER call this "query ranking."
 - **Rasch sort** — two-axis ordering of (sample-difficulty rank,
@@ -269,7 +269,7 @@ The persisted world is a four-entity containment hierarchy
   `application/optimization/dispatch/hub/facade.py`.
 - **Bundle** (`InjectionBundle`) — frozen per-call state container
   every renderer reads. Built by `build_bundle(cycle)`.
-  `application/optimization/dispatch/hub/bundle.py`.
+  `application/optimization/dispatch/hub/facade.py`.
 - **l1_layout** — the L2-authored placeholder layout that drives which
   signals appear in each L1 prompt slot. Read at L1 fill time.
   `domain/l1_layout.py`.

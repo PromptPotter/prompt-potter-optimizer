@@ -5,7 +5,7 @@ The use-case layer between `domain/` (pure types, frozen models) and
 `runner/` — coordinates everything; subpackages each own a coherent
 slice of orchestration.
 
-## Layer rule (enforced by `tests/test_structure.py::test_runtime_layer_imports`)
+## Layer rule (fails loud at import if violated)
 
 `application/intelligence/` MUST NOT import from `application/optimization/`.
 The optional sensitivity scan and the optimization loop both *consume*

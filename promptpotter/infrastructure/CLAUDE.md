@@ -6,7 +6,7 @@ or talks to a network without going through one of these seams.
 
 ## Persistence — one ingress, two projections
 
-**Sole ingress:** per-cycle `CycleEventLog` (`ledger.py`, `events.jsonl`).
+**Sole ingress:** per-cycle `CycleEventLog` (`ledger.py`, `.runtime/ledger.jsonl`; workspace variant uses `.workspace/events.jsonl`).
 Forks via `CycleEventLog.inherit_from(parent, offset)`. The writer-side API
 above the ledger is `RunCallbacks` (`application/run_observers.py`) — a
 typed event constructor over `CycleEventLog.append`. Orchestration uses
@@ -47,9 +47,7 @@ freshness-based "running" was the symptom that run-state was never owned state.
 `DerivedView.on_record` (`projections/base.py`) owns the
 `isinstance(record, …)` dispatch; subclasses override hooks. There's no
 second dispatch path because the base class is the only one. Subscribers
-MUST NOT write campaign artifacts beyond their declared allowlist (guarded
-by `tests/test_structure.py::test_forbidden_calls`
-+ `test_artifact_sets_are_disjoint_and_well_formed`).
+MUST NOT write campaign artifacts beyond their declared allowlist.
 
 `DerivedView.drain()` is the runner's teardown seam: `_finalize_run` calls
 `RunObservers.drain_all()` on every stop reason so buffered projection
@@ -80,7 +78,8 @@ the sole source of tenant scope, with `Stores.tenant_id` a derived
 `@property` returning the `TenantId` newtype (identity-foundation
 no-drift gate #4 — never an independent field). Composite over focused
 leaf stores (`BackendStore`, `CampaignStore` (`store/campaign_store/`),
-`DatasetRunStore`, `PlanStore`, `SessionStore`). Shared I/O +
+`TenantDatasetStore`, `SessionStore`, `SweepStore`, `MeasurementArchive`,
+`OptimizerCallCache`, `DiagnosticRunStore`, `UserStore`). Shared I/O +
 `EntityStore` in `store/base.py`. Path helpers in `store/paths.py`; the
 `CycleDir` / `WorkspaceDir` write-target newtypes in
 `domain/cycle_paths.py` — projections and stores accept these newtypes,

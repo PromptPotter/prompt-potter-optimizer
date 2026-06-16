@@ -123,7 +123,7 @@ Five-lens verification audit. Tiers 1–2 dead-code/hidden-default deletes + all
 
 **Tier 3 — webapp R-36 (backend projection needed; same blocker as existing Lane C8 items).**
 - `webapp/components/dashboard/samples/columns.ts:129-145` `hit_rate` cell — computes `const hits = meas.reduce((k,m)=>k+(m.hit?1:0),0); const rate = hits/n` from raw `MeasurementDot[]`; the served `DatasetItem` carries `delta`/`p_hat`/`pick_score` but NOT a per-sample `hit_rate`, while the sibling `PerQueryRow` (types.generated.ts:444) already has one. **Action:** add `hit_rate` to `DatasetItem` projection; render the served value. **Blocker:** Lane C8 write-side scope (same as existing T3 items).
-- `webapp/components/eval/TrendChart.tsx:33-37` — builds cumulative running-best fitness trajectory in TS (`runningBest = Math.max(runningBest, p.composite)`) — a best-so-far series the optimizer already owns (`dash.best`). **Action:** serve a `best_so_far` per-round series from the backend projection; delete the TS derivation. **Blocker:** Lane C8 write-side scope.
+- `webapp/components/eval/TrendChart.tsx:33-37` + `webapp/components/dashboard/layout/TopStrip.tsx:71-74` — both build a cumulative running-best fitness trajectory in TS (`runningBest = Math.max(runningBest, p.composite)`) — byte-for-byte the same derivation. **Action:** serve a `best_so_far` per-round series from the backend projection; delete both TS derivations together. **Blocker:** Lane C8 write-side scope. (TopStrip sibling confirmed 2026-06-16.)
 
 **Tier 5 — operator call before action.**
 - `shared/composite.py:204` `legend: str | None = None` — never overridden by any caller (zero non-`None` call sites); the function body does use it (appends a 4th line when present). Low urgency. **Action:** drop the param if the 4th-line feature is confirmed dead; or add a caller. **Blocker:** operator decision.
@@ -257,6 +257,88 @@ in-flight per root CLAUDE.md + the milestone reorg, so they describe *pending* w
 not stale drift. The `.get`/`except` defensiveness at `scoring_context.py:70` / `authored.py:69`
 / `l1_layout.py:120` / `backend.py:59` / `connectors/termnorm.py:259` are legit external-input /
 JSON-parse boundary guards (or already tracked in the 2026-06-12 holds), not contract-key fallbacks.
+
+### Untracked-debt sweep (2026-06-16) — holds after verification
+
+Five-lens audit. Shipped: dead `campaign` param on `_build_cycle_applier` + dead `request`
+param on `replace_dataset`; doc-drift fixes in six per-layer CLAUDE.md files + glossary
+(`RunnerCommandSubscriber` → `emit_command_ack`; ledger path; store names; `build_bundle`
+file; `query budget` → `sample budget`; `RESUME_CHECKPOINT_GATING` module; layer-rule test
+citations). What stayed — held due to caller-shape uncertainty, root-fix ownership, or
+structural scope:
+
+**Tier 2 revert — round_summary `.get` removal partially safe but `label` absent in test fixtures.**
+- `infrastructure/store/campaign_store/index_helpers.py:10-19` `round_summary()` — the Lens-2
+  agent identified 7 `.get` calls on keys it believed contract-guaranteed by
+  `build_round_payload`. Gate failed: `KeyError: 'label'` in `test_inherit_fork_origin` — so
+  `label` is not guaranteed on every `round_data` dict passed to `save_round_file` (rewind /
+  on-disk-rebuild path may supply partial payloads). **Action:** trace all callers of
+  `save_round_file` + `round_summary` to identify which keys are truly always present before
+  removing any `.get`. Reverted 2026-06-16 — remains at `.get` until verified. **Blocker:**
+  caller-shape audit on the rewind/rebuild path.
+
+**Tier 3 — structural near-duplicates (new helper needed before deleting copies).**
+- `presentation/api/routers/backends.py:124-131` and `:163-170` + `api/middleware/command_dispatcher.py:486-493` — `BackendClient` construction block byte-identical at 3 sites. **Action:** extract `build_backend_client(backend)` shared by the 3 record-based sites. **Blocker:** none.
+- `presentation/cli/commands/new.py:472-482` + `resume.py:387-397` — byte-identical 10-line finalize tail (`ctx.state["best_accuracy"]` → `CommandResult(...)`). **Action:** extract `_finalize_cycle_result(ctx, session, cycle_result)` in `commands/_shared.py`. **Blocker:** none.
+- `presentation/cli/commands/new.py:519-526` + `resume.py:416-424` — byte-identical backend-unreachable `CommandResult` message (only `backend_url` arg differs). **Action:** extract `backend_unreachable_result(backend_url)`. **Blocker:** none.
+- `presentation/cli/commands/sweep/panel.py:46` (`_fork_and_bind`) + `:192`/`:314` (`_run_panel_verb`) — reimplements per-variant fork orchestration inline in presentation; mirrors `application/sweep/sweep_runner.py::run_sweep_batch`. **Action:** generalize `run_sweep_batch`, reduce panel verb to thin shim. **Blocker:** medium — `presentation/CLAUDE.md` no-business-logic rule makes this a root-fix.
+- `application/intelligence/sibling_wounds.py:22` + `application/optimization/cycle.py:115` — `_rf_dedup_key` byte-identical ("Mirror of Cycle._rf_dedup_key" in docstring). Layer constraint (intelligence ↮ optimization) makes a direct shared import forbidden. **Action:** extract to `domain/` (pure dict over `RuntimeFailure`). **Blocker:** medium; layer move.
+- `presentation/api/routers/commands.py:75-92` + `command_dispatcher.py:76-93` — command-kind taxonomy declared twice (router as `frozenset` literals, dispatcher as `Literal[...]` aliases). Drift = a kind the router accepts but the dispatcher can't handle. **Action:** one source-of-truth module; derive frozensets via `get_args(...)`. **Blocker:** none.
+
+**Tier 3 — misplaced responsibility (root-fix; wider change).**
+- `application/scoring/{metrics.py:70, search_point_scorer.py:108,156, evaluators.py:47, sample_measurement.py:320,484}` — 5 lazy/function-local upward imports of `is_deprecated`/`classify_result`/`terminal_ranking` from `application/optimization/pobb/elimination/` (circular-import workaround). Those pure result classifiers are mis-homed: `pobb/elimination/classification.py` has zero runtime dep on optimization. **Action:** move `classify_result`/`is_deprecated`/`ResultClassification` to `application/scoring/` or `domain/`; scoring imports top-level. **Blocker:** architectural; confirm no optimization-layer invariant breaks.
+- `infrastructure/store/campaign_store/rounds.py:46` + `cycles.py:216` + `forks.py:49` — store independently selects `best_round_id`/`best_accuracy` by raw accuracy max, but the application selects winners by composite_fitness (`cycle.py:379`). **Root-fix:** have the store record the application-supplied best, not recompute it. **Blocker:** 3-file change touching documented self-healing.
+- `presentation/views/live/phase.py:117-163` `render_round_stats` — recomputes recall@1/recall@5 + degradation % from raw `round_result.results` in the view layer; sibling `health` is already served. **Root-fix:** stamp these metrics onto `RoundResult` at round close, render served values. **Blocker:** medium; display-only but requires a domain + runner change.
+
+**Tier 3 — single-caller indirection batch (medium; none have dedicated tests; all are inline/relocate candidates).**
+The following are verified single-caller across the codebase (cross-file, no test, not an ABC/Protocol seam). Filed in batch; execute in one or two passes per cluster:
+- `domain/opt_search_point.py:372` `build_candidate_flat` (sole caller: `view_ingress.py:209`) — inline.
+- `domain/opt_search_point.py:387` `group_diff_keys` (sole caller: `render/sp_diff.py:83`) — inline.
+- `infrastructure/projections/audit_trail.py:43` `load_round_audits` (sole caller: `writers.py:456`) — inline.
+- `infrastructure/projections/audit_trail.py:78` `read_most_recent_round_nodes` (sole caller: `live_dashboard/view.py:222`) — inline.
+- `infrastructure/projections/live_state.py:50` `backfill_spend_rates` (sole caller: `live_dashboard/view.py:153`) — inline.
+- `infrastructure/backend.py:35` `extract_pipeline_config` (sole caller: `application/config.py:497`) — inline.
+- `infrastructure/store/stores.py::hash_call` (sole caller: `dispatch/llm_call/call.py:241`) — fold into `OptimizerCallCache` as static method.
+- `infrastructure/llm/rate_limit.py:193` `raise_if_request_too_large` (sole caller: `llm/openai_compat.py:249`) — inline.
+- `infrastructure/llm/rate_limit.py:346` `build_rate_limiter` (sole caller: `llm/registry.py`) — inline.
+- `infrastructure/identity/user.py:15` `derive_user_id` (sole caller: `api/routers/auth.py:273`) — inline.
+- `application/origin.py:82` `extract_campaign_origin` (sole caller: `views/notebook_run.py:217`) — inline.
+- `application/origin.py:468` `prepare_datasets` (sole caller: `cli/commands/new.py:299`; notebook import is dead module path) — inline; **blocker:** HITL-notebook retire decision.
+- `application/run_observers.py:307` `ForkInfo` dataclass (sole caller: `runner/entry.py:268,438`; 1 field) — collapse to `fork_parent_cycle_id: str | None` kwarg on `build_run_observers`.
+- `application/datasets/origin_readiness.py:186` `field_values` (sole caller: `datasets/origin_resolve.py:88`) — inline.
+- `application/datasets/csv_ingest.py:77` `format_from_filename` (sole caller: `datasets/ingest.py`) — inline.
+- `application/datasets/draft_campaign.py:417` `default_slug_from_filename` (sole caller: `datasets/ingest.py`) — inline.
+- `application/datasets/draft_campaign.py:405` `dataset_source_of` (sole caller: `jobs/launcher.py`, 2 sites) — inline.
+- `application/scoring/evaluators.py:467` `materialize_row_derivable` (sole caller: `application/mask/load.py:76`) — relocate beside caller.
+- `application/scoring/evaluators.py:481` `materialize_sample_values` (sole caller: `scoring/sample_measurement.py:399`) — inline.
+- `application/scoring/formula/compiler.py:77` `validate_ast` (sole caller: `formula/round_scorer.py`) — inline.
+- `application/optimization/l1/population.py:109` `build_score_report` (sole caller: `l1/score/candidate.py`) — relocate.
+- `application/optimization/l1/population.py:157` `pobb_decision_data` (sole caller: `l1/score/signal_effect.py`) — relocate.
+- `application/optimization/l1/stats.py:34` `compute_l1_stats` (sole caller: `application/review.py:45`) — fold into review.py.
+- `application/optimization/validators/l1_strict.py:349` `filter_pipeline_params_override` (sole caller: `l1/generate.py:215`) — inline.
+- `application/optimization/validators/_text.py:21` `word_set_jaccard` (sole caller: `validators/l2_output.py`; module has only one realized consumer) — inline `_text.py` into l2_output.py.
+- `application/intelligence/adaptive_queue_mechanism.py:46` `marginal_hit_probability` (sole caller: `api/routers/datasets.py:422`) — inline at router or add sibling-equivalent test.
+- `application/intelligence/measurement_series.py:82` `campaign_measurement_series` (sole caller: `api/routers/datasets.py:545`) — inline.
+- `application/intelligence/hard_sample_sorter.py:120` `build_hard_samples_artifact` — self-described thin wrapper; its sole caller can call the tested delegate `build_hard_samples_artifact_from_observations` directly. **Blocker:** none; high confidence.
+- `presentation/views/render/heatmap.py:19` `render_hard_sample_heatmap` — dead `__init__.py` re-export (nothing imports from package root; docstring claims "standalone CLI" second caller that doesn't exist). **Action:** drop dead re-export from `render/__init__.py:5`; fix stale docstring. **Blocker:** none; high confidence.
+- `presentation/views/startup_checklist.py:23` `checkin_line` (sole importer: `cli/commands/new.py`, 11 call sites) — inline as local helper in new.py.
+- `application/mask/load.py:103` `load_mask_record` (sole caller: `api/routers/campaigns/lineage.py:265`) — inline.
+
+**Tier 4 — stale test-file citations in larger docs (doc-only sweep; operator decision on replacement text).**
+The following docs still cite deleted files (`tests/test_structure.py`, `tests/test_contracts.py`,
+`tests/test_invariants.py`, `tests/_scan.py`) and need a dedicated update pass:
+- `docs/architecture.md:300,313,377,474` — `test_structure.py::test_runtime_layer_imports` / `::test_forbidden_calls`
+- `docs/specs/CLAUDE.md` — `tests/test_contracts.py` (the m12 yaml files are NOT currently CI-checked; citation is wrong)
+- `docs/developer/stable-api.md:175`, `docs/developer/bootstrap-sequence.md:76`
+- `docs/operations/persistence-and-state.md:70`
+- `docs/specs/mask-projection.md:376`
+- `docs/adr/0001-m12-control-plane.md:59`, `docs/developer/event-stream.md:37,87`, `docs/developer/pipeline-json-contract.md:13,156`
+- `docs/adr/0002-identity-foundation.md:258` (and 0003:179, 0004:131,168)
+- `.claude/skills/potter-dev/rules.md` R-15 — references `tests/test_structure.py` + `tests/_scan.py` as the lock engine
+**Action:** replace each citation with the honest enforcement status: import-time assert (name the module if one exists) or "fails loud at import / by convention." **Blocker:** needs a per-invariant check of whether an import-time assert actually exists.
+
+**Tier 5 — single-actor doc consistency (operator-vocabulary pass).**
+- `docs/methods/candidate-elimination.md`, `methods/exploration-exploitation.md`, `concepts/paired-sample-pobb.md`, `operations/dataset-reasoning-matrix.md` — use `query` as a synonym for sample/measurement throughout ("per-query", "query count", "20-query slice"). Glossary defines `query` as only a schema field name; these should use `sample`. **Blocker:** multi-doc vocabulary pass, operator call on scope.
 
 ### Considered, not debt (don't re-open)
 
