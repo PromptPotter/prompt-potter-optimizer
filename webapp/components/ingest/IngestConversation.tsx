@@ -11,6 +11,7 @@ import { SlugField } from "@/components/forms/SlugField";
 import { CheckinLoadingWindow } from "./CheckinLoadingWindow";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
 import { PipelineSetupSection } from "./PipelineSetupSection";
+import { PipelineDependencies } from "./PipelineDependencies";
 import { OriginCheckinPanel } from "./OriginCheckinPanel";
 import { DatasetPickList } from "./DatasetPickList";
 
@@ -186,6 +187,19 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       ) : null}
 
       <ColumnMappingPicker draft={draft} onApply={flow.applyPatch} />
+
+      {/* The active pipeline's required inputs beyond (pipeline + dataset +
+          origin) — e.g. a candidate_source node's target library — surfaced so
+          the operator drops the missing one in place. Soft: doesn't gate Start. */}
+      <PipelineDependencies
+        dependencies={draft.dependencies}
+        librarySize={draft.candidate_library_size}
+        headers={draft.headers}
+        targetColumn={draft.column_ground_truth}
+        onUpload={flow.uploadCandidateLibrary}
+        onBuildFromColumn={flow.buildCandidateLibraryFromColumn}
+        busy={flow.busy}
+      />
 
       {/* Per node: the optimizer search-space controls (lock/allow + origin
           value) and, for the LLM node, the starting prompt — all inside that

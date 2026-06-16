@@ -490,6 +490,8 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'escalation_abort': 'Escalation abort',
   'spend_budget': 'Spend budget reached',
   'token_budget': 'Token budget reached',
+  'origin_gate': 'Origin gate (unhealthy origin)',
+  'backend_unreachable': 'Backend unreachable',
   'crashed': 'Crashed',
   'render_error': 'Render error',
   'diverged': 'Diverged',

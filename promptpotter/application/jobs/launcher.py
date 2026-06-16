@@ -51,7 +51,12 @@ from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.pipeline_schema import (
+    CANDIDATE_LIBRARY,
+    NodeSearchNarrowing,
+    PipelineDependency,
+    dependencies_from_node_types,
+)
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, TaskDecomposition
 from promptpotter.infrastructure.store import Stores
 from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
@@ -335,8 +340,24 @@ async def commit_draft_to_dataset(
         prompt_default=prompt_default,
         task_context=task_context,
     )
+    persist_origin_candidate_library(stores, draft.slug, draft)
     draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)
     return draft.slug
+
+
+def persist_origin_candidate_library(stores: Stores, slug: str, draft: DraftCampaign) -> None:
+    """Write the draft's candidate library into the dataset origin — the ONE
+    origin-write seam for the library, called on every mint route.
+
+    The library is part of the origin spec, so it persists whenever a draft
+    establishes/re-establishes an origin: a fresh-upload commit and a
+    reused-dataset mint (which skips ``commit_draft``) both land here. Scoped to
+    tenant datasets — a reopened repo benchmark isn't ours to mutate, and on
+    reopen the committed library already round-tripped through the draft, so
+    re-writing it would be a no-op anyway. A draft with no library is a no-op
+    (nothing was dropped)."""
+    if draft.candidate_library and stores.tenant_datasets.slug_exists(slug):
+        stores.tenant_datasets.write_candidate_library(slug, draft.candidate_library)
 
 
 async def mint_campaign_from_draft_command(
@@ -373,6 +394,11 @@ async def mint_campaign_from_draft_command(
         if not readiness.complete:
             raise OriginIncompleteError(readiness.gaps)
         await _run_preflight(draft.connector, backend_url)
+        # The derived path skips commit_draft_to_dataset (the dataset already
+        # exists), so persist a built/dropped candidate library through the SAME
+        # origin-write seam — otherwise a library the operator supplied on reopen
+        # would be lost. The run reads it from the resolved tenant-first config dir.
+        persist_origin_candidate_library(stores, canonical, draft)
         # Discard ONLY after a successful mint — a failed mint (e.g. 409
         # machine_busy) must leave the draft intact so the operator can retry
         # without re-opening the origin (otherwise the retry 404s on a gone draft).
@@ -527,14 +553,47 @@ def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
     }
 
 
+def draft_pipeline_dependencies(draft: DraftCampaign) -> tuple[PipelineDependency, ...]:
+    """The categorical inputs the draft's ACTIVE pipeline requires, read off the
+    connector's static ``node_types`` for the chosen steps.
+
+    Scoped to the active steps (operator override, else the connector default) so a
+    dependency surfaces only when a node that needs it actually runs — TermNorm's
+    ``llm_only`` default raises none; selecting the full pipeline (with
+    ``token_matching``) raises ``candidate_library``. Mirrors the live
+    :meth:`PipelineSchema.required_dependencies` via the shared
+    :func:`dependencies_from_node_types`."""
+    connector = connectors.get(draft.connector)
+    active = set(draft.pipeline_steps or connector.default_pipeline)
+    node_types = {n: t for n, t in connector.node_types.items() if n in active}
+    return dependencies_from_node_types(node_types)
+
+
+def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool:
+    """Whether the draft already carries the input ``dep`` asks for."""
+    if dep.kind == CANDIDATE_LIBRARY:
+        return bool(draft.candidate_library)
+    return False
+
+
 def draft_wire_with_locks(draft: DraftCampaign) -> dict[str, Any]:
-    """``DraftCampaign.to_wire()`` plus the connector-derived ``optimizer_locks``.
+    """``DraftCampaign.to_wire()`` plus the connector-derived ``optimizer_locks``
+    and ``dependencies`` blocks.
 
     The single wire shape every draft-returning endpoint emits — keeps
     :meth:`DraftCampaign.to_wire` pure (no connector import) and adds the
-    permission block once at the I/O boundary.
+    connector-derived blocks once at the I/O boundary. ``dependencies`` carries
+    each required input + whether it's ``fulfilled``, so the ingest UI shows the
+    operator which input is missing and offers a drop in place.
     """
-    return {**draft.to_wire(), "optimizer_locks": derive_optimizer_locks(draft)}
+    return {
+        **draft.to_wire(),
+        "optimizer_locks": derive_optimizer_locks(draft),
+        "dependencies": [
+            {**dep.model_dump(), "fulfilled": _dependency_fulfilled(dep, draft)}
+            for dep in draft_pipeline_dependencies(draft)
+        ],
+    }
 
 
 def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
@@ -787,5 +846,6 @@ __all__ = [
     "commit_draft_to_dataset",
     "mint_campaign_command",
     "mint_campaign_from_draft_command",
+    "persist_origin_candidate_library",
     "start_run_command",
 ]

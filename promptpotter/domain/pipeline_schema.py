@@ -3,6 +3,7 @@
 import enum
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -45,6 +46,73 @@ class NodeType(enum.StrEnum):
     RANKER = "ranker"
     ENRICHER = "enricher"
     CACHE = "cache"
+
+
+# The dependency kind a ``candidate_source`` node raises, and the file that
+# fulfils it on disk. A candidate_source node ranks each query against a target
+# library; without one the pool is just the answers already in the dataset (a
+# degenerate pool). The library is the "4th required input" — beyond
+# pipeline + dataset + origin — surfaced in the ingest UI, dropped in place, and
+# committed alongside the per-pipeline origin as ``candidate_library.txt``.
+CANDIDATE_LIBRARY = "candidate_library"
+CANDIDATE_LIBRARY_FILE = "candidate_library.txt"
+
+
+class PipelineDependency(BaseModel):
+    """A categorical input a pipeline requires beyond (pipeline + dataset + origin),
+    derived from its **node types** — not hardcoded per backend.
+
+    A ``candidate_source`` node needs a target library to rank against; a future
+    enricher might need a knowledge base. The requirement is read off the node
+    taxonomy (``NodeType``), so a new connector declares one node type and gets
+    detection for free. Surfaced in the check-in / ingest UI so the operator sees
+    *which* input is missing and drops it in place — never a hidden bootstrap
+    default. ``node`` names the node(s) it serves (comma-joined when one input feeds
+    several); ``hint`` says how to fulfil it.
+    """
+
+    model_config = {"frozen": True}
+
+    kind: str
+    node: str
+    title: str
+    hint: str
+
+
+def dependencies_from_node_types(
+    node_type_by_name: Mapping[str, NodeType],
+) -> tuple[PipelineDependency, ...]:
+    """Derive a pipeline's required inputs from its node-type map (categorical).
+
+    The single derivation both ingest (connector-declared ``node_types`` for the
+    active steps) and a live :class:`PipelineSchema` share, so the two never drift.
+    Today one arm: a pipeline with any ``CANDIDATE_SOURCE`` node raises ONE
+    ``candidate_library`` dependency — every candidate_source node ranks against the
+    same shared term index, so the library is one input, not one-per-node (hence the
+    dependency is collapsed, ``node`` listing the nodes it serves). New
+    node-type→input rules add an arm here, nowhere else.
+    """
+    deps: list[PipelineDependency] = []
+    candidate_sources = sorted(
+        name
+        for name, node_type in node_type_by_name.items()
+        if node_type == NodeType.CANDIDATE_SOURCE
+    )
+    if candidate_sources:
+        served = ", ".join(candidate_sources)
+        deps.append(
+            PipelineDependency(
+                kind=CANDIDATE_LIBRARY,
+                node=served,
+                title="Candidate library",
+                hint=(
+                    f"The candidate-source stage ({served}) ranks each query against a target "
+                    "library. Drop the full target list (one entry per line, or a single-column "
+                    "CSV/Excel) so ranking isn't limited to the answers already in your data."
+                ),
+            )
+        )
+    return tuple(deps)
 
 
 class ObservationMapping(BaseModel):
@@ -221,6 +289,12 @@ class PipelineSchema(BaseModel):
         """``pipeline_data`` keys written by all nodes' observation mappings."""
         return self._observation_keys
 
+    def required_dependencies(self) -> tuple[PipelineDependency, ...]:
+        """The categorical inputs this pipeline needs, read off its node types
+        (:func:`dependencies_from_node_types`) — the authoritative live view that
+        mirrors the connector's ingest-time declaration."""
+        return dependencies_from_node_types({n.name: n.node_type for n in self.nodes})
+
     def to_pipeline_params(self) -> dict[str, Any]:
         """``{"steps": [...]}`` sparse scaffold — backend merges per-node config defaults.
 
@@ -395,15 +469,19 @@ class PipelineSchema(BaseModel):
 
 
 __all__ = [
+    "CANDIDATE_LIBRARY",
+    "CANDIDATE_LIBRARY_FILE",
     "NodeConfigParam",
     "NodeOutputSchema",
     "NodePromptInfo",
     "NodeType",
     "ObservationMapping",
+    "PipelineDependency",
     "PipelineNode",
     "PipelineSchema",
     "PipelineView",
     "PipelineViewEdge",
     "PipelineViewNode",
+    "dependencies_from_node_types",
     "stable_hash",
 ]

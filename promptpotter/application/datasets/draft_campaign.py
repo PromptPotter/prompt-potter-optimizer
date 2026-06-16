@@ -144,6 +144,14 @@ class DraftCampaign:
     # floor. Operator-editable in the pipeline-config control panel; drives both
     # the wire ``optimizer_locks.forbidden_axes`` and the committed campaign.json.
     lock_model: bool = True
+    # The target library a ``candidate_source`` pipeline ranks each query against —
+    # the "4th required input" the operator drops in the ingest UI when a node type
+    # raises the dependency (see ``PipelineDependency``). Empty until dropped; on
+    # commit it materializes to ``{slug}/candidate_library.txt`` and the run unions
+    # it into the session's term index. NOT gated at the readiness checklist — a
+    # surfaced-and-droppable dependency, not a hard mint block (the answers already
+    # in the data are a degenerate-but-runnable pool).
+    candidate_library: tuple[str, ...] = ()
 
     def to_wire(self) -> dict[str, Any]:
         """Wire shape matching the OpenAPI ``DraftCampaign`` schema.
@@ -180,6 +188,12 @@ class DraftCampaign:
             },
             "origin_prompt_fields": dict(self.origin_prompt_fields),
             "lock_model": self.lock_model,
+            # Count, not the full list — a library can run to tens of thousands of
+            # entries; the UI needs only "is it fulfilled, and how big". The
+            # per-dependency ``fulfilled`` flag rides ``optimizer_locks``' sibling
+            # ``dependencies`` block (added at the wire boundary, which has the
+            # connector's node types).
+            "candidate_library_size": len(self.candidate_library),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

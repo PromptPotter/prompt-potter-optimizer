@@ -24,6 +24,7 @@ from typing import Any
 
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.config import load_campaign_config as validate_campaign_config
+from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,13 @@ class AuthoredDataset:
     when absent, in which case the connector's ``default_pipeline`` applies. The
     draft path carries this so reusing a dataset PRESERVES its pipeline instead of
     resetting to the connector default."""
+
+    candidate_library: tuple[str, ...]
+    """``candidate_library.txt`` — the per-pipeline origin's target list, part of
+    the origin spec (a ``candidate_source`` node ranks each query against it).
+    ``()`` when absent. The draft path carries this so reopening a dataset surfaces
+    its already-dropped library as FULFILLED (the origin HOLDS the value); the run
+    reads the same file directly for the term-index union."""
 
 
 def read_campaign_config_file(path: Path) -> dict[str, Any]:
@@ -98,6 +106,7 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
         backend_type=backend_type,
         pipeline_nodes=pipeline_nodes,
         active_steps=active_steps,
+        candidate_library=read_candidate_library_file(dataset_dir),
     )
 
 

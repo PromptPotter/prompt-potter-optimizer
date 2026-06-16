@@ -24,8 +24,10 @@ import io
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
 from promptpotter.domain.sample import Sample
 
 MAX_SAMPLES = 50_000
@@ -334,6 +336,68 @@ def materialize_samples(table: Table, *, query_col: str, ground_truth_col: str) 
     return samples
 
 
+def _dedup_terms(values: Iterable[str]) -> tuple[str, ...]:
+    """Strip, drop blanks + the TermNorm ``--`` placeholder, dedup to first
+    occurrence (order-preserving). The shared shape of a candidate library however
+    it's sourced — a dropped file or a dataset column — so the two never diverge."""
+    seen: dict[str, None] = {}
+    for value in values:
+        term = value.strip()
+        if term and term != "--":
+            seen.setdefault(term, None)
+    return tuple(seen)
+
+
+def parse_candidate_library(blob: bytes, filename: str) -> tuple[str, ...]:
+    """Parse a dropped candidate-library file into the flat target list.
+
+    Two shapes, split on extension (matching the dependency hint "one entry per
+    line, or a single-column CSV/Excel"): a ``.txt`` / extensionless file is read
+    line-by-line (no header assumption — every non-blank line is a target); any
+    tabular format reuses :func:`read_tabular` and takes the **first column**,
+    dropping its header. Blanks and the TermNorm ``--`` placeholder are skipped;
+    order is preserved and duplicates collapse to first occurrence (so the index
+    stays stable). Raises :class:`IngestError` on an unparseable tabular blob.
+
+    Entries that themselves contain commas (e.g. ``"Steel, low-alloyed, ... U"``)
+    are safe via ``.txt`` (one per line) or ``.xlsx`` (cells read verbatim), and via
+    CSV only when the source quotes them (valid CSV). An UNQUOTED-comma ``.csv``
+    splits mid-entry — so the operator-facing hint steers comma-laden lists to
+    per-line ``.txt`` / Excel, not raw CSV."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext in ("txt", ""):
+        return _dedup_terms(_decode(blob).splitlines())
+    table = read_tabular(blob, fmt=format_from_filename(filename))
+    return _dedup_terms(row.get(table.headers[0], "") for row in table.rows)
+
+
+def read_candidate_library_file(dataset_config_dir: Path) -> tuple[str, ...]:
+    """Read the candidate library committed alongside an origin (``candidate_library.txt``).
+
+    The single file-read seam for the per-pipeline origin's target list — the
+    runtime term-index union (``bootstrap/wiring.py``) and the reopen draft
+    (``ingest.draft_from_dataset`` via :class:`AuthoredDataset`) both read it
+    through here, so the parse (one entry per line) and normalization
+    (:func:`_dedup_terms`: strip, drop blanks + the ``--`` placeholder, dedup)
+    match however the library was sourced. Absent file → ``()`` (no dependency
+    was dropped; the pool is the answers alone — degenerate but runnable)."""
+    path = dataset_config_dir / CANDIDATE_LIBRARY_FILE
+    if not path.is_file():
+        return ()
+    return _dedup_terms(path.read_text(encoding="utf-8").splitlines())
+
+
+def candidate_library_from_rows(rows: Iterable[dict[str, Any]], column: str) -> tuple[str, ...]:
+    """Build a candidate library from the distinct values of ``column`` across a
+    dataset's own rows — the "build from dataset" source.
+
+    The unified alternative to a file drop: when the targets already live in the
+    data (the ground-truth/target column, the union of the dataset's category
+    sheets), the library is derived rather than re-uploaded. Same dedup shape as
+    :func:`parse_candidate_library`."""
+    return _dedup_terms(str(row.get(column, "")) for row in rows)
+
+
 MAX_ENUMERATED_LABELS = 40
 """Upper bound on a closed label set. Above this the target column reads as
 open-ended (free text / high-cardinality id), not a fixed taxonomy worth
@@ -369,8 +433,11 @@ __all__ = [
     "MAX_SAMPLES",
     "IngestError",
     "Table",
+    "candidate_library_from_rows",
     "closed_label_set",
     "format_from_filename",
     "materialize_samples",
+    "parse_candidate_library",
+    "read_candidate_library_file",
     "read_tabular",
 ]

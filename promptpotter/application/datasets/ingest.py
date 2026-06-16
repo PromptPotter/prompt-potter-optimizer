@@ -207,6 +207,10 @@ def draft_from_dataset(
             # Preserve the dataset's own pipeline (full Research+Match, llm_only, …)
             # so reuse doesn't reset to the connector default.
             "pipeline_steps": authored.active_steps,
+            # The origin HOLDS its candidate library — carry the committed value so
+            # reopening surfaces the dependency as already FULFILLED (not Missing),
+            # and a re-mint re-persists it through the one origin-write seam.
+            "candidate_library": authored.candidate_library,
         },
         provenance={"task_description": Provenance.CONFIRMED},
     )

@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
 from promptpotter.infrastructure.store.base import (
     read_json_optional,
     validate_path_component,
@@ -238,7 +239,9 @@ class TenantDatasetStore:
 
         ``task_context.json`` is the run-start domain framing the check-in already
         decomposed — written here so the run reads it instead of recomputing it via
-        a second LLM call.
+        a second LLM call. The candidate library is NOT written here: it rides the
+        one origin-write seam (:meth:`write_candidate_library`) the launcher calls
+        on every mint route, fresh-upload or reused-dataset alike.
 
         On collision raises ``FileExistsError`` (caller maps to 409 with a
         :meth:`suggest_free_slug` suggestion). On unknown draft raises
@@ -260,6 +263,18 @@ class TenantDatasetStore:
         write_json(dst / "task_context.json", task_context)
         write_json(dst / "prompts" / "default.json", prompt_default)
         return dst
+
+    def write_candidate_library(self, slug: str, library: Sequence[str]) -> Path:
+        """Write/replace a committed dataset's ``candidate_library.txt`` (one entry
+        per line) — the per-pipeline origin's target list, part of the origin spec,
+        sourced from a drop or a build-from-dataset. The run unions it into the
+        session term index. This is the SOLE origin-write seam for the library: the
+        launcher calls it on every mint route (fresh-upload commit + reused-dataset
+        mint), so a dropped/built library persists identically however the origin
+        was minted."""
+        path = self.dataset_dir(slug) / CANDIDATE_LIBRARY_FILE
+        write_text(path, "\n".join(library))
+        return path
 
 
 __all__ = ["TenantDatasetStore"]

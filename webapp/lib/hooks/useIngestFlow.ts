@@ -7,8 +7,10 @@ import {
   postEditDraftCampaign,
   postIngestDataset,
   postMintCampaignFromDraft,
+  postBuildCandidateLibraryFromColumn,
   postReplaceDataset,
   postResolveOrigin,
+  postUploadCandidateLibrary,
   type DatasetIndexEntry,
   type DraftCampaignWire,
   type DraftPatch,
@@ -72,6 +74,10 @@ export interface IngestFlow {
   submitContext: () => void;
   // Inline patch in the ready state (column mapping / question answers).
   applyPatch: (patch: DraftPatch) => void;
+  // Drop the target list for an unfulfilled candidate_source dependency.
+  uploadCandidateLibrary: (file: File) => void;
+  // Build that library from one of the dataset's own columns instead of a file.
+  buildCandidateLibraryFromColumn: (column: string) => void;
   // Commit the ready draft + spawn the runner.
   startFromReady: () => void;
   // Collision choices.
@@ -102,6 +108,15 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
 
   const pushAi = (text: string) =>
     setMessages((m) => [...m, { id: uid(), kind: "ai", text }]);
+
+  // Commit a server draft into the LIVE ready phase. Functional update so the
+  // rendered draft is always the latest server response (overlapping patches —
+  // a pipeline-mode toggle + a library drop, the 2 s poll re-rendering between —
+  // can't write a stale snapshot back). The whole ready panel, the dependency
+  // card included, renders strictly from this draft, so it never lags the server:
+  // switch to `llm_only` → server returns `dependencies: []` → the card drops.
+  const commitDraftUpdate = (updated: DraftCampaignWire) =>
+    setPhase((p) => (p.stage === "ready" ? { ...p, draft: updated } : p));
   const pushError = (e: unknown) =>
     setMessages((m) => [
       ...m,
@@ -254,10 +269,36 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
 
   const applyPatch = async (patch: DraftPatch) => {
     if (phase.stage !== "ready") return;
-    const { draft, resolution } = phase;
     try {
-      const updated = await postEditDraftCampaign(draft.draft_id, patch);
-      setPhase({ stage: "ready", draft: updated, resolution });
+      const updated = await postEditDraftCampaign(phase.draft.draft_id, patch);
+      commitDraftUpdate(updated);
+    } catch (e) {
+      pushError(e);
+    }
+  };
+
+  // Drop a candidate library onto the ready draft → the unfulfilled
+  // `candidate_source` dependency reads fulfilled. The library doesn't gate mint
+  // (the answers are a runnable pool), so this never blocks Start — it sharpens
+  // the candidate pool the backend ranks against.
+  const uploadCandidateLibrary = async (file: File) => {
+    if (phase.stage !== "ready" || busy) return;
+    try {
+      const updated = await postUploadCandidateLibrary(phase.draft.draft_id, file);
+      pushAi(`Candidate library attached — ${updated.candidate_library_size} targets.`);
+      commitDraftUpdate(updated);
+    } catch (e) {
+      pushError(e);
+    }
+  };
+
+  // Build the candidate library from one of the dataset's own columns (no file).
+  const buildCandidateLibraryFromColumn = async (column: string) => {
+    if (phase.stage !== "ready" || busy) return;
+    try {
+      const updated = await postBuildCandidateLibraryFromColumn(phase.draft.draft_id, column);
+      pushAi(`Candidate library built from “${column}” — ${updated.candidate_library_size} targets.`);
+      commitDraftUpdate(updated);
     } catch (e) {
       pushError(e);
     }
@@ -328,6 +369,8 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     openOrigin: (entry) => void openOrigin(entry),
     submitContext: () => void submitContext(),
     applyPatch: (patch) => void applyPatch(patch),
+    uploadCandidateLibrary: (file) => void uploadCandidateLibrary(file),
+    buildCandidateLibraryFromColumn: (column) => void buildCandidateLibraryFromColumn(column),
     startFromReady: () => void startFromReady(),
     useExistingFromCollision,
     saveAsNew,

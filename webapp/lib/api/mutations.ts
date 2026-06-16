@@ -273,6 +273,20 @@ export interface OptimizerNodeLocks {
   param_allowed_values: Record<string, string[]>;
 }
 
+// A categorical input the draft's active pipeline requires beyond
+// (pipeline + dataset + origin), derived server-side from the pipeline's node
+// types. `kind` is the dependency family (`candidate_library` today); `node`
+// names the node that raised it; `fulfilled` is whether the draft already
+// carries it. The ingest UI renders the unfulfilled ones with a drop-zone so the
+// operator supplies the missing input in place.
+export interface PipelineDependencyWire {
+  kind: string;
+  node: string;
+  title: string;
+  hint: string;
+  fulfilled: boolean;
+}
+
 export interface DraftCampaignWire {
   draft_id: string;
   slug: string;
@@ -303,10 +317,17 @@ export interface DraftCampaignWire {
   // (the `forbidden_axes_strict` knob). Default `true` (locked). Toggled in the
   // pipeline-config control panel; drives `optimizer_locks.forbidden_axes`.
   lock_model: boolean;
+  // Number of entries in the dropped candidate library (0 = none yet). The full
+  // list isn't sent — a library can run to tens of thousands of entries; the UI
+  // needs only fulfilled-ness + size.
+  candidate_library_size: number;
   created_at: string;
   updated_at: string;
   // Connector-derived backend-pipeline permission surface; see `OptimizerLocks`.
   optimizer_locks: OptimizerLocks;
+  // The active pipeline's required inputs + whether each is fulfilled. Drives the
+  // "drop the missing input" affordance in the ready panel.
+  dependencies: PipelineDependencyWire[];
 }
 
 // One origin field still blocking mint, as returned by the server's
@@ -429,6 +450,44 @@ export async function postIngestDataset(
   const r = await fetch(`${API}/datasets/ingest`, {
     method: "POST",
     body: form,
+    cache: "no-store",
+  });
+  if (!r.ok) await _throwApiError(r);
+  return (await r.json()) as DraftCampaignWire;
+}
+
+// Drop a candidate library onto a draft — the operator's "drop in place" for an
+// unfulfilled `candidate_source` dependency. The file is parsed server-side (one
+// entry per line, or the first column of a CSV/Excel); the returned draft's
+// `dependencies` block reports the dependency `fulfilled`.
+export async function postUploadCandidateLibrary(
+  draftId: string,
+  file: File,
+): Promise<DraftCampaignWire> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("draft_id", draftId);
+  const r = await fetch(`${API}/datasets/draft/candidate-library`, {
+    method: "POST",
+    body: form,
+    cache: "no-store",
+  });
+  if (!r.ok) await _throwApiError(r);
+  return (await r.json()) as DraftCampaignWire;
+}
+
+// Build a draft's candidate library from one of its OWN columns — the unified
+// "build from dataset" path. When the targets already live in the data (the
+// target column / the union of the dataset's category sheets), the library is
+// derived server-side, no external file. Returns the updated draft wire.
+export async function postBuildCandidateLibraryFromColumn(
+  draftId: string,
+  column: string,
+): Promise<DraftCampaignWire> {
+  const r = await fetch(`${API}/datasets/draft/candidate-library/from-column`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ draft_id: draftId, column }),
     cache: "no-store",
   });
   if (!r.ok) await _throwApiError(r);

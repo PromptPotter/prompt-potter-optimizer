@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.connector import SessionProtocol, WireAdapter
+from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
@@ -141,6 +142,15 @@ class Connector:
     fields (``improvement_threshold`` / ``degradation_threshold``) MUST be
     present here when the connector intends to seed them — there is no
     silent schema default."""
+
+    node_types: Mapping[str, NodeType] = field(default_factory=dict)
+    """Static node→:class:`NodeType` classification, mirroring what the live
+    backend's ``GET /pipeline`` reports — declared here so the ingest UI can
+    detect a pipeline's required inputs *before* the backend is reached
+    (``launcher.draft_pipeline_dependencies`` reads it for the active steps). A
+    ``CANDIDATE_SOURCE`` node raises a ``candidate_library`` dependency the
+    operator drops in place. Only nodes that carry a dependency-bearing type need
+    an entry; unlisted nodes are untyped (no dependency)."""
 
     default_node_config: Mapping[str, Any] = field(default_factory=dict)
     """Per-node ``pipeline.json::nodes.{name}`` overlay the chat-first ingest

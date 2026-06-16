@@ -1260,6 +1260,122 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /datasets/draft/candidate-library:
+    post:
+      operationId: uploadCandidateLibrary
+      summary: Attach a candidate library to a draft, fulfilling a `candidate_source` dependency.
+      description: |
+        The operator's "drop in place" for an unfulfilled pipeline dependency: when
+        the draft's active pipeline has a `candidate_source` node (declared by the
+        connector's node types), the draft's `dependencies` block reports a
+        `candidate_library` dependency `fulfilled: false`. This uploads the target
+        list — one entry per line for `.txt`, else the first column of a
+        CSV/TSV/JSON/JSONL/XLSX — onto the in-flight draft. On commit it
+        materializes to `{slug}/candidate_library.txt` alongside the per-pipeline
+        origin, and the run unions it into the session's term index.
+
+        Soft dependency — it sharpens the candidate pool but does NOT gate mint
+        (the answers already in the data are a runnable pool). NOT a Control-remote
+        command — like `/datasets/ingest` it mutates the draft only; no
+        `CommandRecord` lands until mint.
+      tags: [datasets]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, draft_id]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Target library — one entry per line (.txt), or a single-column CSV/Excel.
+                draft_id:
+                  type: string
+                  minLength: 8
+                  maxLength: 64
+                  description: The draft to attach the library to.
+      responses:
+        '200':
+          description: |
+            Library attached. Body is the updated `DraftCampaign`; its
+            `dependencies` block now reports the `candidate_library` dependency
+            `fulfilled: true` and `candidate_library_size` carries the entry count.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftCampaign'
+        '404':
+          description: Draft not found (or owned by another tenant).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: |
+            Parse failure or empty library. `details.reason` is the specific
+            failure (`bad_csv`, `bad_json`, `unsupported_format`, `empty`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /datasets/draft/candidate-library/from-column:
+    post:
+      operationId: buildCandidateLibraryFromColumn
+      summary: Build a draft's candidate library from one of its own columns.
+      description: |
+        The unified "build from dataset" path: when the targets already live in
+        the data (the ground-truth/target column, the union of the dataset's
+        category sheets), derive the candidate library from the distinct values of
+        a chosen column rather than uploading an external file. Blanks and the
+        TermNorm `--` placeholder are dropped; order preserved, duplicates
+        collapsed. NOT a Control-remote command.
+      tags: [datasets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [draft_id, column]
+              additionalProperties: false
+              properties:
+                draft_id:
+                  type: string
+                  minLength: 8
+                  maxLength: 64
+                column:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+                  description: One of the draft's `headers` to take distinct values from.
+      responses:
+        '200':
+          description: |
+            Library built. Body is the updated `DraftCampaign`; its
+            `candidate_library` dependency reads `fulfilled: true` and
+            `candidate_library_size` carries the distinct-value count.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftCampaign'
+        '404':
+          description: Draft not found (or owned by another tenant).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422':
+          description: |
+            Column is not one of the draft's `headers`, the draft has no cached
+            rows, or the column has no usable values (`details.reason: empty`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
 components:
   parameters:
     IdempotencyKey:
@@ -2059,6 +2175,34 @@ components:
             panel. Drives the committed
             `campaign.json::optimization.forbidden_axes_strict` and the derived
             optimizer-locks permission view.
+        candidate_library_size:
+          type: integer
+          minimum: 0
+          default: 0
+          description: |
+            Entry count of the dropped candidate library (0 = none yet). The full
+            list isn't sent — a library can run to tens of thousands of entries.
+            Populated via `POST /datasets/draft/candidate-library`; committed to
+            `{slug}/candidate_library.txt`.
+        dependencies:
+          type: array
+          description: |
+            The active pipeline's required inputs beyond (pipeline + dataset +
+            origin), derived from its node types. Boundary-added (needs the
+            connector's node-type map). Each entry is a `PipelineDependency` plus a
+            `fulfilled` flag. Today one kind — `candidate_library`, raised by a
+            `candidate_source` node. Soft: an unfulfilled dependency does NOT block
+            mint; it's surfaced so the operator drops the missing input in place.
+          items:
+            type: object
+            required: [kind, node, title, hint, fulfilled]
+            additionalProperties: false
+            properties:
+              kind: { type: string, description: 'Dependency family, e.g. `candidate_library`.' }
+              node: { type: string, description: 'The node that raised it.' }
+              title: { type: string }
+              hint: { type: string, description: 'How to fulfil it (operator-facing).' }
+              fulfilled: { type: boolean }
         created_at:
           type: string
           format: date-time

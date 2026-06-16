@@ -17,6 +17,7 @@ from typing import Any
 from promptpotter import connectors
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.datasets import (
+    read_candidate_library_file,
     resolve_dataset_items,
     samples_from_dicts,
 )
@@ -209,7 +210,20 @@ def _load_dataset_into_session(
 
     valid = [item for item in items if item.get("query") and item.get("ground_truth")]
     session.samples = samples_from_dicts(valid)
-    session.index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
+    gt_terms = {r["ground_truth"] for r in items if r.get("ground_truth")}
+    config_dir = resolve_dataset_config_dir(session.store, Path(session.project_root), dataset_name)
+    # The candidate library is part of the per-pipeline origin; read it through the
+    # one origin-file seam. Unioned with the ground-truth answers (never replacing
+    # them) so every label stays rankable even when the library uses a different
+    # surface form — the SimaPro Cut-off **S** labels vs the Cut-off **U** library
+    # that share no verbatim string, where a plain swap would zero the score.
+    library = read_candidate_library_file(config_dir)
+    session.index_terms = sorted(gt_terms | set(library))
+    if library:
+        status(
+            f"Candidate library: +{len(set(library) - gt_terms)} targets "
+            f"(term index now {len(session.index_terms)})"
+        )
     status(f"Dataset: {dataset_name} ({len(items)} samples)")
 
 

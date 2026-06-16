@@ -7,12 +7,14 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.config import load_campaign_config
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
+    candidate_library_from_rows,
+    parse_candidate_library,
 )
 from promptpotter.application.datasets.ingest import (
     MAX_UPLOAD_BYTES,
@@ -178,6 +180,90 @@ async def ingest_dataset(
             details={"slug": exc.slug, "suggested_slug": exc.suggested},
         ) from None
     return draft_wire_with_locks(draft)
+
+
+@datasets_router.post("/draft/candidate-library")
+async def upload_candidate_library(
+    request: Request,
+    store: StoreDep,
+    file: Annotated[
+        UploadFile,
+        File(description="Target library — one entry per line, or a single-column CSV/Excel."),
+    ],
+    draft_id: Annotated[str, Form(description="Draft to attach the library to.")],
+) -> dict[str, Any]:
+    """Attach a candidate library to a draft — the operator's "drop in place" for an
+    unfulfilled ``candidate_source`` dependency. Returns the updated draft wire (its
+    ``dependencies`` block now reports the dependency ``fulfilled``).
+
+    Like ``/datasets/ingest`` this is NOT a Control-remote command — it mutates the
+    in-flight draft only; nothing lands on a ledger until mint. Wire contract pinned
+    in ``docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library``.
+    """
+    registry = get_draft_registry(request)
+    draft = registry.get(draft_id, tenant_id=store.identity.tenant_id)
+    if draft is None:
+        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
+
+    blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
+    try:
+        terms = parse_candidate_library(blob, file.filename or "")
+    except IngestError as exc:
+        raise PayloadInvalidError(
+            exc.message, code="ingest_failed", details={"reason": exc.reason}
+        ) from None
+    if not terms:
+        raise PayloadInvalidError(
+            "The candidate library has no usable entries (every line was blank).",
+            code="ingest_failed",
+            details={"reason": "empty"},
+        )
+    updated = registry.update(draft.patch(candidate_library=terms))
+    return draft_wire_with_locks(updated)
+
+
+class _BuildLibraryBody(BaseModel):
+    """Body for building a candidate library from one of the draft's own columns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    draft_id: str = Field(min_length=8, max_length=64)
+    column: str = Field(min_length=1, max_length=256)
+
+
+@datasets_router.post("/draft/candidate-library/from-column")
+async def build_candidate_library_from_column(
+    request: Request, store: StoreDep, body: _BuildLibraryBody
+) -> dict[str, Any]:
+    """Build a draft's candidate library from the distinct values of one of its own
+    columns — the unified "build from dataset" path (no external file).
+
+    When the targets already live in the data (the ground-truth/target column, the
+    union of the dataset's category sheets), the library is derived rather than
+    uploaded. Returns the updated draft wire (its `candidate_library` dependency now
+    `fulfilled`). NOT a Control-remote command. Wire contract pinned in
+    `docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library/from-column`.
+    """
+    registry = get_draft_registry(request)
+    draft = registry.get(body.draft_id, tenant_id=store.identity.tenant_id)
+    if draft is None:
+        raise NotFoundError(f"draft {body.draft_id!r} not found.", code="command_target_not_found")
+    if body.column not in draft.headers:
+        raise PayloadInvalidError(
+            f"column {body.column!r} is not one of the dataset's columns {list(draft.headers)}."
+        )
+    cache = store.tenant_datasets.load_draft_cache(body.draft_id)
+    if cache is None:
+        raise PayloadInvalidError("draft has no cached rows to build from.")
+    terms = candidate_library_from_rows(cache.get("items", []), body.column)
+    if not terms:
+        raise PayloadInvalidError(
+            f"column {body.column!r} has no usable values.",
+            code="ingest_failed",
+            details={"reason": "empty"},
+        )
+    updated = registry.update(draft.patch(candidate_library=terms))
+    return draft_wire_with_locks(updated)
 
 
 @datasets_router.post("/{name}/draft")

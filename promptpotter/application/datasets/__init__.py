@@ -22,6 +22,7 @@ from promptpotter.application.datasets.csv_ingest import (
     IngestError,
     Table,
     materialize_samples,
+    read_candidate_library_file,
     read_tabular,
 )
 from promptpotter.application.datasets.loaders import (
@@ -73,6 +74,7 @@ __all__ = [
     "materialize_samples",
     "read_authored_dataset",
     "read_campaign_config_file",
+    "read_candidate_library_file",
     "read_tabular",
     "resolve_dataset_items",
     "sample_dataset",

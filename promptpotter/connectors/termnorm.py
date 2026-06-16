@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from promptpotter.connectors.protocol import BackendUnreachableError, Connector
+from promptpotter.domain.pipeline_schema import NodeType
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +283,15 @@ CONNECTOR = Connector(
     # The production-benchmark pipeline includes them; a fresh CSV upload
     # should not pay Brave Search billing + multi-second latency on round 1.
     default_pipeline=("llm_only",),
+    # The retrieval nodes rank each query against the session's term index — so a
+    # pipeline that includes one needs a candidate library, surfaced as a
+    # dependency the operator drops in place. ``llm_only`` (the fresh-upload
+    # default) lists neither, so no dependency appears until the operator selects
+    # the full pipeline.
+    node_types={
+        "token_matching": NodeType.CANDIDATE_SOURCE,
+        "fuzzy_matching": NodeType.CANDIDATE_SOURCE,
+    },
     # R4: connector-owned seed for ``campaign.json::optimization``. The required
     # thresholds mirror ``datasets/gsm8k/campaign.json``. (``n_variants`` is the
     # round candidate count, NOT a single-request size lever — the optimizer-LLM
