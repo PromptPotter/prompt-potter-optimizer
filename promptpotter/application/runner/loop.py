@@ -31,7 +31,11 @@ from promptpotter.application.runner.round import (
     post_round,
 )
 from promptpotter.application.runner.sweep import run_sweep_generation_only
-from promptpotter.application.runner.termination import BudgetGate, origin_gate_tripped
+from promptpotter.application.runner.termination import (
+    BudgetGate,
+    backend_unreachable_tripped,
+    origin_gate_tripped,
+)
 from promptpotter.domain.phases import (
     CampaignPhase,
     StopLoop,
@@ -188,6 +192,8 @@ async def run_round_loop(
                     warning_types=signal.check_result.get("warning_types"),
                 )
                 await close_round(cycle, round_result, round_payload, round_num, session, cb)
+                if backend_unreachable_tripped(round_result.health) is not None:
+                    return StopReason.BACKEND_UNREACHABLE, None
                 if signal.routes_to_optimizer:
                     await escalate_or_stop(cycle, config, session, round_num, cb)
                 elif signal.is_abort:
@@ -203,6 +209,11 @@ async def run_round_loop(
                 continue
 
             await post_round(cycle, round_result, round_payload, round_num, config, session, cb)
+            # A round that was mostly backend-down isn't a measurement — halt instead
+            # of grinding more zero-accuracy rounds against a dead backend (the operator
+            # restarts it and ``resume``s). Mid-run sibling of the round-0 origin gate.
+            if backend_unreachable_tripped(round_result.health) is not None:
+                return StopReason.BACKEND_UNREACHABLE, None
             round_num += 1
             clean_rounds += 1
 

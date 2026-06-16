@@ -48,6 +48,10 @@ class StopReason(enum.StrEnum):
       Fix the renderer and ``resume``.
     - ``OPTIMIZER_TIMEOUT`` — optimizer LLM blew its wall-clock twice (provider
       stalled mid-stream, see ``llm_call._chat_under_deadline``); plain ``resume``.
+    - ``BACKEND_UNREACHABLE`` — a round was ≥ ``BACKEND_UNREACHABLE_RATE``
+      backend-down samples (CONNECTION / consecutive-error skips). The loop halts
+      instead of grinding zero-accuracy rounds against a dead backend; restart the
+      backend and ``resume``.
 
     ``CRASHED`` is the catch-all for unhandled exceptions in the round loop.
     """
@@ -66,6 +70,7 @@ class StopReason(enum.StrEnum):
     SPEND_BUDGET = "spend_budget"
     TOKEN_BUDGET = "token_budget"
     ORIGIN_GATE = "origin_gate"
+    BACKEND_UNREACHABLE = "backend_unreachable"
     RENDER_ERROR = "render_error"
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
     REBASED = "rebased_to_fork"
@@ -148,6 +153,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.SPEND_BUDGET: StopReasonInfo("Spend budget reached", StopOutcome.HALTED),
     StopReason.TOKEN_BUDGET: StopReasonInfo("Token budget reached", StopOutcome.HALTED),
     StopReason.ORIGIN_GATE: StopReasonInfo("Origin gate (unhealthy origin)", StopOutcome.HALTED),
+    StopReason.BACKEND_UNREACHABLE: StopReasonInfo("Backend unreachable", StopOutcome.HALTED),
     StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED),
     StopReason.RENDER_ERROR: StopReasonInfo("Render error", StopOutcome.FAILED),
     StopReason.DIVERGED: StopReasonInfo("Diverged", StopOutcome.FAILED),

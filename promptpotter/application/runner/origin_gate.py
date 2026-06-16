@@ -86,9 +86,12 @@ async def run_origin_gate(
         )
         if stdin_q is not None:
             # Operator-facing gate prompt; the gate state is also on disk
-            # (dashboard run_phase=gate + round_0000.json health).
+            # (dashboard run_phase=gate + round_0000.json health). ASCII-only:
+            # this prints to the launching console, whose encoding may be cp1252
+            # (Windows) — a non-ASCII glyph (e.g. an emoji) raises
+            # UnicodeEncodeError there and crashes the whole run.
             print(
-                f"\n  ⛔ Origin gate [{grade}] — type r=rescore / p=proceed / a=abort "
+                f"\n  [ORIGIN GATE: {grade}] type r=rescore / p=proceed / a=abort "
                 "then Enter (or use the webapp):",
                 flush=True,
             )

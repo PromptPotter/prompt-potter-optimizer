@@ -63,17 +63,53 @@ def origin_gate_tripped(
     The round-0 sibling of :meth:`BudgetGate.tripped`. A non-healthy origin means
     candidates would be measured against a broken floor (the common case while a
     developer brings up a new connector whose ``pipeline.json`` or backend code is
-    still buggy). ``strict`` halts on any non-healthy grade (``critical`` or
-    ``degraded``); ``critical_only`` halts only on a structurally-broken origin;
-    ``off`` disarms the gate. A missing verdict never trips.
+    still buggy). ``strict`` halts on ``critical`` and on a ``degraded`` floor whose
+    degradation the rescore remedy can re-measure away (transient backend noise) —
+    but NOT on a purely ``untested`` degraded grade (a wide-CI low-sample round 0),
+    which is statistical uncertainty, not a broken measurement. ``critical_only``
+    halts only on a structurally-broken origin; ``off`` disarms the gate. A missing
+    verdict never trips.
     """
     if mode == "off" or health is None:
         return None
     if health.grade == "critical":
         return StopReason.ORIGIN_GATE
-    if mode == "strict" and health.grade == "degraded":
+    # Strict also halts on a degraded floor — but only when the degradation is a
+    # corrupted measurement the gate's rescore remedy can re-measure away (transient
+    # backend noise, reason "degraded"). A degraded grade whose only reason is
+    # "untested" is the wide confidence interval of a small round-0 sample, not a
+    # broken floor: re-scoring the SAME samples can't narrow a CI and ``untested``
+    # stays true at round 0, so the gate would offer a non-remedy and deadlock.
+    # Statistical uncertainty isn't gate-worthy — the operator proceeds (or scores
+    # more samples); only a corrupted floor halts.
+    if (
+        mode == "strict"
+        and health.grade == "degraded"
+        and any(reason != "untested" for reason in health.reasons)
+    ):
         return StopReason.ORIGIN_GATE
     return None
 
 
-__all__ = ["BudgetGate", "OriginGateMode", "origin_gate_tripped"]
+def backend_unreachable_tripped(health: DegradationHealth | None) -> StopReason | None:
+    """``BACKEND_UNREACHABLE`` when a closed round's verdict says the backend is down,
+    else ``None``. The mid-run sibling of :func:`origin_gate_tripped`.
+
+    Unconditional (no operator mode): a backend unreachable for most of a round is
+    never an optimization signal — there is nothing to decide, only a corpse to grind.
+    Halting at the round boundary turns six silent zero-accuracy rounds into one clear
+    "restart the backend and ``resume``". A missing verdict never trips.
+    """
+    if health is None:
+        return None
+    if health.grade == "critical" and "backend_unreachable" in health.reasons:
+        return StopReason.BACKEND_UNREACHABLE
+    return None
+
+
+__all__ = [
+    "BudgetGate",
+    "OriginGateMode",
+    "backend_unreachable_tripped",
+    "origin_gate_tripped",
+]

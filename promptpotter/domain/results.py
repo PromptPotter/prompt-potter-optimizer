@@ -60,6 +60,16 @@ CONSECUTIVE_DEGRADED_CRITICAL: int = 3
 """Consecutive degraded rounds at/above which persistence alone escalates to
 ``critical`` — a sustained problem, not a one-round blip."""
 
+BACKEND_UNREACHABLE_RATE: float = 0.50
+"""Fraction of a round's samples that hit a backend-down signal (CONNECTION error
+or the per-candidate consecutive-error circuit-breaker skip) at/above which the
+round is graded ``critical`` with reason ``backend_unreachable``. Unlike a
+structural node fault, an unreachable backend carries NO ``diagnostics.warnings``
+(its ``pipeline_data`` is empty), so ``classify_sample_failure`` can't see it — it
+was the blind spot that let a dead-backend round grade ``healthy`` and the loop
+grind zero-accuracy rounds against a corpse. This is not an optimization signal:
+the operator must restart the backend and ``resume``."""
+
 
 class EliminationContext(TypedDict, total=False):
     """PoBB exit context on a ``ScoredCandidate`` — written by ``decode_signal_effect``
@@ -488,13 +498,16 @@ def compute_degradation_health(
     prior_clean_rounds: int,
     consecutive_degraded_rounds: int,
     dominant_node: str | None = None,
+    unreachable_count: int = 0,
 ) -> DegradationHealth | None:
     """Grade a round's degradation health from its winner's per-sample outcomes
     plus the cycle's track record. Returns ``None`` when nothing was measured
     (``total <= 0``) — genuinely no verdict, not a fabricated clean one.
 
     Precedence (first match wins), thresholds = the module constants:
-      * **critical** — structural failures dominate (``structural`` rate ≥
+      * **critical** — the backend was unreachable for ≥
+        :data:`BACKEND_UNREACHABLE_RATE` of samples (down, not a pipeline fault),
+        OR structural failures dominate (``structural`` rate ≥
         :data:`STRUCTURAL_FLAG_RATE`), OR *any* structural failure at an untested
         config (no clean round precedes this one), OR ≥
         :data:`CONSECUTIVE_DEGRADED_CRITICAL` consecutive degraded rounds.
@@ -511,7 +524,11 @@ def compute_degradation_health(
     untested = prior_clean_rounds == 0
 
     reasons: list[str] = []
-    if structural_rate >= STRUCTURAL_FLAG_RATE:
+    # Backend-down outranks every other verdict: an unreachable backend isn't a
+    # pipeline problem the optimizer can move, it's a halt-and-restart condition.
+    if unreachable_count / total >= BACKEND_UNREACHABLE_RATE:
+        grade, reasons = "critical", ["backend_unreachable"]
+    elif structural_rate >= STRUCTURAL_FLAG_RATE:
         grade, reasons = "critical", ["structural"]
     elif untested and structural_count > 0:
         grade, reasons = "critical", ["structural_untested"]
@@ -527,7 +544,13 @@ def compute_degradation_health(
     suggested_action: str | None = None
     if grade == "critical":
         where = f"{dominant_node} " if dominant_node else ""
-        if "persistent" in reasons:
+        if "backend_unreachable" in reasons:
+            pct = round(unreachable_count / total * 100)
+            suggested_action = (
+                f"backend unreachable on {pct}% of samples — it is down or overloaded, "
+                "not a pipeline fault; restart the backend and `resume`."
+            )
+        elif "persistent" in reasons:
             suggested_action = (
                 f"{consecutive_degraded_rounds} consecutive degraded rounds — "
                 "likely a persistent pipeline problem; consider aborting and fixing config."
@@ -588,9 +611,20 @@ def compute_round_health(
     rows (``results``) via the backend's ``step_statuses``, derives the track
     record (clean rounds + consecutive degraded run) from prior rounds' verdicts,
     then grades via :func:`compute_degradation_health`."""
-    structural = transient = 0
+    from promptpotter.shared.errors import ErrorCategory, error_category
+
+    structural = transient = unreachable = 0
     structural_nodes: dict[str, int] = {}
     for r in results or []:
+        # Backend-down samples carry NO diagnostics (empty pipeline_data), so they're
+        # invisible to classify_sample_failure — count them off the typed error channel
+        # instead. CONNECTION = the transport failed; ``skipped_after_consecutive_errors``
+        # = the per-candidate circuit-breaker that only fires after a run of those.
+        if error_category(r) == ErrorCategory.CONNECTION or (
+            str(r.get("error") or "") == "skipped_after_consecutive_errors"
+        ):
+            unreachable += 1
+            continue
         diag = (r.get("pipeline_data") or {}).get("diagnostics") or {}
         statuses = diag.get("step_statuses") or {}
         warnings = diag.get("warnings") or []
@@ -616,7 +650,7 @@ def compute_round_health(
     # verdict counts clean; a ``None`` in the consecutive walk is skipped, not a stop.
     prior_clean = sum(1 for h in prior_healths if h is not None and h.grade == "healthy")
     consecutive = 0
-    if structural + transient > 0:
+    if structural + transient + unreachable > 0:
         consecutive = 1
         for h in reversed(list(prior_healths)):
             if h is None:
@@ -634,6 +668,7 @@ def compute_round_health(
         prior_clean_rounds=prior_clean,
         consecutive_degraded_rounds=consecutive,
         dominant_node=dominant,
+        unreachable_count=unreachable,
     )
 
 
