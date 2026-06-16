@@ -23,6 +23,7 @@ from promptpotter.application.scoring.metrics import (
     matched_origin_stats,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.rendering import round_winner_key as round_winner_key
 from promptpotter.domain.results import (
     CandidateProposal,
     RoundResult,
@@ -36,13 +37,6 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
-
-
-def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
-    """Composite-first, accuracy-tiebreak. Shared between live `l1_score` + post-hoc
-    `pick_round_winner` so the SCOREBOARD `*` and the in-round winner never drift apart.
-    """
-    return (composite_fitness if composite_fitness is not None else accuracy, accuracy)
 
 
 def _paired_fitness(

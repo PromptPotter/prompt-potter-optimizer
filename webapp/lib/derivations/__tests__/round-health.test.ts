@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { degradedRoundNotices } from "@/lib/derivations/round-health";
+import { degradedRoundNotices } from "../round-health";
 import type { DashboardSnapshot } from "@/lib/poll";
 import type { DegradationHealth } from "@/lib/api/types";
 

@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
-import type { SelectedCandidate } from "@/lib/types/selection";
+import type { SelectedCandidate } from "@/lib/types";
 
 // One shared selection store for the dashboard. Three axes:
 //

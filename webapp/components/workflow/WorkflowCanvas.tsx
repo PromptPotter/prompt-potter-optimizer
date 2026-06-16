@@ -12,7 +12,7 @@ import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import { getCss } from "@/lib/theme";
 import { type DashboardSnapshot } from "@/lib/poll";
-import { availableRounds } from "@/lib/derivations/round-axis";
+import { availableRounds } from "@/lib/derivations";
 import { useSelection } from "@/lib/SelectionContext";
 import type { NodeDataLike, PipelineDoc } from "./types";
 

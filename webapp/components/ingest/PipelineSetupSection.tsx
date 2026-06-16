@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { ConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
-import { targetNodeIds } from "@/lib/connector-nodes";
+import { targetNodeIds } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
 import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";

@@ -14,9 +14,10 @@ import { useAuth } from "@/lib/auth-context";
 import {
   candidateSearchPoint,
   liveCandidateSearchPoint,
-} from "@/lib/derivations/candidateSearchPoint";
-import { forkReconcileDefaults, limitOverridesFromDefaults } from "@/lib/derivations/forkReconcile";
-import type { SelectedCandidate } from "@/lib/types/selection";
+  forkReconcileDefaults,
+  limitOverridesFromDefaults,
+} from "@/lib/derivations";
+import type { SelectedCandidate } from "@/lib/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { PromptFieldsEditor } from "./PromptFieldsEditor";
 import { NodeConfigEditor } from "./NodeConfigEditor";

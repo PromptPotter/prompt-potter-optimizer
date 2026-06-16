@@ -12,7 +12,7 @@
 // .account-pane-body + .account-close, plus .auth-headline / .auth-note /
 // .auth-link / .auth-legal-row from the auth domain stylesheet.
 
-import { instance } from "@/lib/instance";
+import { instance } from "@/lib/brand";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
 import { AuthCore } from "@/components/login/AuthCore";
 

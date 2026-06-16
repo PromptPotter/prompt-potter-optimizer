@@ -19,6 +19,7 @@ import {
   toggleInSet,
 } from "@/lib/sample-set";
 import { SampleTrajectorySeries } from "@/components/dashboard/samples/SampleTrajectory";
+import { NEW_BG, NEW_BORDER, NEW_COLOR } from "@/components/dashboard/samples/trajectoryStyles";
 
 const BTN: CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -34,9 +35,9 @@ const BTN: CSSProperties = {
 function activeStyle(on: boolean): CSSProperties {
   return {
     ...BTN,
-    borderColor: on ? "rgba(59,130,246,0.42)" : "var(--color-border-tertiary)",
-    background: on ? "rgba(59,130,246,0.14)" : "transparent",
-    color: on ? "#3b82f6" : "var(--color-text-secondary)",
+    borderColor: on ? NEW_BORDER : "var(--color-border-tertiary)",
+    background: on ? NEW_BG : "transparent",
+    color: on ? NEW_COLOR : "var(--color-text-secondary)",
   };
 }
 
@@ -94,7 +95,7 @@ export function SampleSetControl({
                 border: "0.5px solid var(--color-border-tertiary)",
                 borderColor: on ? "rgba(59,130,246,0.55)" : "var(--color-border-tertiary)",
                 background: on ? "rgba(59,130,246,0.18)" : "var(--color-background-secondary)",
-                color: on ? "#3b82f6" : "var(--color-text-tertiary)",
+                color: on ? NEW_COLOR : "var(--color-text-tertiary)",
                 fontWeight: on ? 600 : 400,
               }}
             >

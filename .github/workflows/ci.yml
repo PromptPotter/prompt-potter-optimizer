@@ -37,6 +37,46 @@ jobs:
       - name: Type check
         run: uv run mypy promptpotter/
 
+      # Anti-rot for the package public surface (abstraction-shape guard).
+      # External callers import a concept home from its package __init__, not a
+      # deep submodule — a deep import re-leaks internals and re-scatters the
+      # concept. Allowlist = the documented foundational exceptions (the
+      # EscalationFSM state type, imported below the firing driver to avoid an
+      # import cycle — see escalation/__init__). Extend the allowlist only with
+      # a reason; the allowlist is the remaining-debt ledger.
+      - name: Surface guard — no deep imports past a concept home
+        run: |
+          violations=$(grep -rn "from promptpotter.application.optimization.escalation\." promptpotter/ --include=*.py \
+            | grep -v "/escalation/" \
+            | grep -v "escalation.state import EscalationFSM" \
+            || true)
+          if [ -n "$violations" ]; then
+            echo "❌ Deep import past the escalation concept home. Import from the package surface (from ...escalation import X)."
+            echo "   Allowlisted exception: the foundational EscalationFSM via .state (cycle.py / resume.py)."
+            echo "$violations"
+            exit 1
+          fi
+
+      # Layering guard: application/ MUST NOT import presentation/ (the one
+      # inversion that matters — presentation→application is the normal
+      # direction). The view-emit machinery lives in application/views now;
+      # ANSI/terminal rendering stays in presentation and imports upward.
+      # Allowlist = the remaining CLI-seam debt (load_session/SessionCtx in
+      # presentation/cli, and the LiveDisplay subscriber type) — a separate
+      # follow-up arc; the allowlist is the debt ledger, shrink it to zero.
+      - name: Layering guard — application must not import presentation
+        run: |
+          violations=$(grep -rn "from promptpotter.presentation\|import promptpotter.presentation" promptpotter/application/ --include=*.py \
+            | grep -v "presentation.views.live import LiveDisplay" \
+            | grep -v "presentation.cli.session import SessionCtx" \
+            | grep -v "presentation.cli.session import load_session" \
+            || true)
+          if [ -n "$violations" ]; then
+            echo "❌ application/ imports presentation/ — wrong direction. Move the shared piece into application/ (presentation imports upward)."
+            echo "$violations"
+            exit 1
+          fi
+
       # Regenerate the TS type surface from the Pydantic models and fail on any
       # diff. Without this, a drifted model silently ships a stale
       # webapp/lib/api/types.generated.ts that the webapp typechecks against —

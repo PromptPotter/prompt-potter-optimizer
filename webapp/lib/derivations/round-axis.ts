@@ -12,7 +12,7 @@
 // so they cannot disagree about whether a round is live.
 
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
-import type { RoundAxis } from "@/lib/types/round";
+import type { RoundAxis } from "@/lib/types";
 
 export function availableRounds(
   dash: DashboardSnapshot | null,

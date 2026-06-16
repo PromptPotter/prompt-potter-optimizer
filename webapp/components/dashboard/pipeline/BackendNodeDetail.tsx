@@ -1,8 +1,8 @@
 "use client";
-import type { ConnectorView } from "@/lib/types/connector";
+import type { ConnectorView } from "@/lib/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
-import { resolveSearchPoint } from "@/lib/derivations/searchPoint";
+import { resolveSearchPoint } from "@/lib/derivations";
 import { useSelection } from "@/lib/SelectionContext";
 import { SearchPointPreview } from "./SearchPointPreview";
 import { NodeSurface } from "./NodeSurface";

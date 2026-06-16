@@ -2,7 +2,7 @@
 import { useState } from "react";
 import type { DraftPatch, NodeConfigParam } from "@/lib/api";
 import { cx } from "@/lib/cx";
-import { nodeOverlayPatch, type ParamState } from "@/lib/derivations/nodeOverlay";
+import { nodeOverlayPatch, type ParamState } from "@/lib/derivations";
 
 // The per-node optimizer search-space editor — the generalization of the old
 // `llm_only`-only AllowedValuesEditor (model 🔒 + thinking chips) to EVERY node

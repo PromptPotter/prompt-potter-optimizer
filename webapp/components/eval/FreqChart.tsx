@@ -1,8 +1,7 @@
 "use client";
 import { useMemo, useRef } from "react";
 import { Bar } from "react-chartjs-2";
-import { barChartDefaults, ensureChartRegistered } from "@/lib/chart-config";
-import { getCss, useThemeVersion } from "@/lib/theme";
+import { barChartDefaults, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
 import { parseSampleLine } from "@/lib/sample-line";
 import {
@@ -12,9 +11,9 @@ import {
 } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
-import { CardFrame } from "@/components/ui/Card";
+import { CardFrame } from "@/components/ui";
 import { useSelection } from "@/lib/SelectionContext";
-import type { RawResultRow } from "@/lib/types/round";
+import type { RawResultRow } from "@/lib/types";
 
 ensureChartRegistered();
 

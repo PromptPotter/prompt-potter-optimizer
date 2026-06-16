@@ -7,8 +7,8 @@
 
 import { liveL1InputCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
 import { candidateLabel } from "@/lib/candidate-label";
-import type { CandidateSearchPoint } from "@/lib/derivations/candidateSearchPoint";
-import type { ConnectorView } from "@/lib/types/connector";
+import type { CandidateSearchPoint } from "./candidateSearchPoint";
+import type { ConnectorView } from "@/lib/types";
 import type { DraftCampaignWire } from "@/lib/api";
 
 export type SearchPointMode = "draft" | "live" | "origin";

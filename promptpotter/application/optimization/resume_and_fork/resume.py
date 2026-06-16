@@ -21,6 +21,10 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.config import DiffScope
+
+# Leaf import (not the package surface): rebuilding the foundational FSM via
+# escalation/__init__ would load the firing driver, which imports resume_and_fork
+# back → import cycle. See escalation/__init__ "MAPPED" note.
 from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,

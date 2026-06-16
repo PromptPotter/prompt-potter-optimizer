@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { criticalAlert } from "@/lib/derivations/critical-alert";
+import { criticalAlert } from "../critical-alert";
 import type { DashboardSnapshot } from "@/lib/poll";
 
 const base = {

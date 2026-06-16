@@ -16,6 +16,7 @@ from promptpotter.application.origin import (
     build_campaign_emitter,
     resolve_origin_opt_search_point,
 )
+from promptpotter.application.views import ViewContext, from_phase_event
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -33,8 +34,6 @@ from promptpotter.infrastructure.projections import (
     deregister_event_stream,
     register_event_stream,
 )
-from promptpotter.presentation.views.view_ingress import from_phase_event
-from promptpotter.presentation.views.view_models import ViewContext
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:

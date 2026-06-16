@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { NodeConfigParam } from "@/lib/api";
-import { nodeConfigRows, seedOverlayFromRows } from "@/lib/derivations/nodeConfigRows";
+import { nodeConfigRows, seedOverlayFromRows } from "@/lib/derivations";
 
 // The FULL node-config editor for the operator-steered fork. Edits the flat
 // `{node:{param:value}}` overlay the fork is seeded with, driven by the server's

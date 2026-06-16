@@ -15,7 +15,7 @@ import {
   type RoundFileDoc,
 } from "@/lib/poll";
 import { parseSampleLine } from "@/lib/sample-line";
-import type { SampleRow } from "@/lib/types/sample";
+import type { SampleRow } from "@/lib/types";
 
 // Live-mode samples for one candidate in the in-flight round. Reads
 // from `dashboard.json::current_round.nodes.l1_score.output.candidates`

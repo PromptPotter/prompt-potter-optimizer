@@ -24,7 +24,7 @@ import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { IngestConversation } from "./IngestConversation";
 import { useAuth } from "@/lib/auth-context";
 import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
-import { SignInPrompt } from "@/components/ui/states";
+import { SignInPrompt } from "@/components/ui";
 import type { OnMinted } from "./types";
 
 interface Props {

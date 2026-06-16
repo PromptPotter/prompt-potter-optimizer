@@ -13,6 +13,9 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from promptpotter.domain.rendering import DISPLAY_EXTRACTORS as DISPLAY_EXTRACTORS
+from promptpotter.domain.rendering import extract_display_answer as extract_display_answer
+
 GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
 """Matches the GSM8K answer-field format ``#### N``. Shared with the
 dataset loader, which normalises raw ground truth to the same shape."""
@@ -116,27 +119,6 @@ def _smoothstep(x: float, edge0: float, edge1: float) -> float:
     return t * t * (3 - 2 * t)
 
 
-def _extract_gsm8k_display(text: str) -> str:
-    n = _extract_gsm8k_number(text or "")
-    if n is None:
-        return (text or "").strip()
-    return str(int(n)) if n.is_integer() else str(n)
-
-
-def _extract_boxed_display(text: str) -> str:
-    if not text:
-        return ""
-    boxed = _BOXED_RE.findall(text)
-    if boxed:
-        last_boxed: str = boxed[-1]
-        return last_boxed.strip()
-    nums = _NUMBER_RE.findall(text)
-    if nums:
-        last_num: str = nums[-1]
-        return last_num
-    return text.strip()
-
-
 SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "rr": _rr,
     "gsm8k_match": _gsm8k_match,
@@ -147,24 +129,6 @@ SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "sigmoid": _sigmoid,
     "smoothstep": _smoothstep,
 }
-
-
-DISPLAY_EXTRACTORS: dict[str, Callable[[str], str]] = {
-    "exact_match": _extract_bold,
-    "gsm8k_match": _extract_gsm8k_display,
-    "aime_match": _extract_boxed_display,
-}
-
-
-def extract_display_answer(predicted: str, formula: str | None) -> str:
-    """Return the parsed answer for *predicted* under *formula*; falls back to stripped text."""
-    text = (predicted or "").strip()
-    if not formula:
-        return text
-    for name, extractor in DISPLAY_EXTRACTORS.items():
-        if name in formula:
-            return extractor(predicted or "").strip()
-    return text
 
 
 __all__ = [

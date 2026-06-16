@@ -12,6 +12,11 @@ from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle, build_round_payload
 from promptpotter.application.optimization.escalation import NextAction, escalate_l2
+from promptpotter.application.output import (
+    write_hard_samples_artifacts,
+    write_log_md,
+    write_review_md,
+)
 from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.domain.phases import StopLoop
@@ -23,11 +28,6 @@ from promptpotter.domain.results import (
     compute_round_health,
 )
 from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
-from promptpotter.presentation.writers import (
-    write_hard_samples_artifacts,
-    write_log_md,
-    write_review_md,
-)
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:

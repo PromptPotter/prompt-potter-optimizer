@@ -24,8 +24,7 @@ import {
   type DashboardSnapshot,
 } from "@/lib/poll";
 import { computeAccuracyFromSamples } from "@/lib/sample-line";
-import type { CandidateRow } from "@/lib/types/candidate";
-import type { RoundCandidates } from "@/lib/types/round";
+import type { CandidateRow, RoundCandidates } from "@/lib/types";
 
 // All candidate rows for the dashboard, in display order:
 //   1. Completed rounds from `dash.rounds[]`, ascending by round (round 0

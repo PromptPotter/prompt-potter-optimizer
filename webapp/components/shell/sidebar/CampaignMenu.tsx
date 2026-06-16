@@ -8,7 +8,7 @@ import {
 } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
-import { Popover } from "@/components/ui/Popover";
+import { Popover } from "@/components/ui";
 
 // Per-campaign three-dots menu. Surfaces the lifecycle commands wired in
 // `mutations.ts`: archive / unarchive (soft-mark, reversible) and delete

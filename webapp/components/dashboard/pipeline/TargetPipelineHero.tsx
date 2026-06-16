@@ -1,6 +1,6 @@
 "use client";
-import type { PipelineView, PipelineViewNode } from "@/components/workflow/types";
-import type { ConnectorView } from "@/lib/types/connector";
+import type { PipelineView, PipelineViewNode } from "@/components/workflow";
+import type { ConnectorView } from "@/lib/types";
 import type { NodeConfigParam } from "@/lib/api";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { useSelection } from "@/lib/SelectionContext";

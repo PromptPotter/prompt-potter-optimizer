@@ -14,6 +14,11 @@ from promptpotter.application.optimization.resume_and_fork import _mint_fork
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     cleanup_stub_fork_if_empty,
 )
+from promptpotter.application.views import (
+    SweepPayloadRow,
+    SweepSummaryView,
+    render_sweep_summary,
+)
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
@@ -21,11 +26,6 @@ from promptpotter.infrastructure.store import (
     build_stores,
     root_cycle_id,
     save_active_pointer,
-)
-from promptpotter.presentation.views.render import render_sweep_summary
-from promptpotter.presentation.views.view_models import (
-    SweepPayloadRow,
-    SweepSummaryView,
 )
 from promptpotter.shared.clock import utcnow_iso
 

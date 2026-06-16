@@ -13,8 +13,8 @@
 // control-plane wires the write half).
 
 import { cx } from "@/lib/cx";
-import { connectorReachability } from "@/lib/derivations/connector-state";
-import type { ConnectorView } from "@/lib/types/connector";
+import { connectorReachability } from "@/lib/derivations";
+import type { ConnectorView } from "@/lib/types";
 
 const SECURITY_DOC_URL =
   "https://github.com/runfish5/prompt-potter-optimizer/blob/main/docs/operations/backend-integration.md#connection-security";

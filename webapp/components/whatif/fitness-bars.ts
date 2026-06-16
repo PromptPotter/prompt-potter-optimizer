@@ -2,7 +2,7 @@
 // No React — FitnessPanel assembles the bar list, FitnessChart renders it.
 
 import { WHATIF_INLINE_META, type Row } from "./meta";
-import type { SampleRow } from "@/lib/types/sample";
+import type { SampleRow } from "@/lib/types";
 
 // Default weight for a selected evaluator with no parsed composite coefficient
 // (the operator added one that isn't in the realized formula). Modest, like a

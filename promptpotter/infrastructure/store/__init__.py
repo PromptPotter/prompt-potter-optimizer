@@ -1,4 +1,21 @@
-"""Focused store modules for file-based persistence.
+"""Store — composite over focused leaf stores for file-based persistence.
+
+CONCEPT MAP (re-exported surface; import from each leaf for internals):
+* **stores** — :class:`Stores` frozen bundle + :func:`build_stores(identity)`
+  builder (composite over the leaves); ``OptimizerCallCache`` (SHA-256-keyed,
+  cross-fork optimizer-call cache, mirror of the archive).
+* **leaf stores** — :class:`BackendStore`, :class:`CampaignStore`
+  (``campaign_store/`` package), :class:`SessionStore`, :class:`SweepStore`,
+  :class:`DiagnosticRunStore`, :class:`TenantDatasetStore`, :class:`UserStore`
+  (+ ``User``).
+* **base** (:mod:`.base`) — shared I/O (``write_json`` / ``read_json``,
+  ``validate_path_component``) + :class:`EntityStore`, the leaf-store base.
+* **paths** (:mod:`.paths`) — pure campaign/cycle dir builders + cycle-id
+  parsing (``cycle_dir_for``, ``root_cycle_id``, ``sibling_kind``, …).
+* **dataset_access** — identity-aware dataset read gateway
+  (``list_readable_datasets`` / ``readable_dataset_dir`` / ``DatasetRef``).
+* **measurement_archive** — :class:`MeasurementArchive`, the append-only
+  content-addressed DB core (sole source for the derived intelligence views).
 
 Also owns the per-tenant active-session pointer
 (``mint_session_id`` / ``save_active_pointer`` / ``read_active_pointer`` /

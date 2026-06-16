@@ -8,12 +8,8 @@
 
 import { useMemo } from "react";
 import { useCycleStream } from "@/lib/poll";
-import {
-  roundCandidates,
-  roundCandidatesByRound,
-} from "@/lib/derivations/round-candidates";
-import type { CandidateRow } from "@/lib/types/candidate";
-import type { RoundCandidates } from "@/lib/types/round";
+import { roundCandidates, roundCandidatesByRound } from "@/lib/derivations";
+import type { CandidateRow, RoundCandidates } from "@/lib/types";
 
 export interface RoundCandidatesHookState {
   all: CandidateRow[];

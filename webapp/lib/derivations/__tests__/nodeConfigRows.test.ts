@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nodeConfigRows, seedOverlayFromRows } from "@/lib/derivations/nodeConfigRows";
+import { nodeConfigRows, seedOverlayFromRows } from "../nodeConfigRows";
 import type { NodeConfigParam } from "@/lib/api";
 
 // The server `node_config_schema` for an llm_only node: model (a select of

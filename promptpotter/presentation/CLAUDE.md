@@ -11,16 +11,15 @@ points MUST NOT write campaign artifacts directly — they call into
 | Module | Owns |
 |---|---|
 | `cli/` | `campaign_runner.py` (CLI entry-point — COMMANDS dispatch + `main()`), `session.py` (session-state plumbing — `SessionCtx` typed accessors), `parsers.py` (argparse). Thin shells over `application/runner/` and `application/bootstrap`. **Two write verbs:** `new` (dataset name *or* raw file) + `resume`. The raw-file form is the CLI's origin-ingest path — `new`'s `Path(arg).is_file()` branch (`commands/new.py::_ingest_to_dataset`) parses + origin-resolves the file, then commits via `launcher.py::commit_draft_to_dataset` (the *same* commit step the web `/commands/mint-campaign-from-draft` runs) and falls through to the authored mint+loop. There is no separate `ingest` verb. |
-| `views/` | Display formatters: `view_models.py` (frozen view dataclasses), `display.py` (ANSI primitives), `view_ingress.py` (live `PhaseEvent → typed View` ingress via `from_phase_event`; the producer emits the **typed** view on `payload['view']` and Pydantic serializes it byte-identically to disk + SSE — no wire-dict, no reconstruction), `render/` (`to_text` / `to_markdown` dispatchers + heatmap + sweep summary + sp_diff), `live/` (`LiveDisplay` ledger subscriber + per-sample / per-candidate / phase formatters), `notebook_run.py`. Pure data → text/markdown — no I/O outside the file-tree-readable surface. Disk-side reconstruction (`from_disk_round` / `from_disk_log`) lives in `presentation/writers.py` next to its single consumer. |
+| `views/` | **Terminal display only**: `display.py` (ANSI primitives — CYAN/DIM/RESET/etc.), `render/` (`to_text` + `sp_diff` ANSI renderers; re-exports `to_markdown`/heatmap/sweep-summary from `application.views.render` for one terminal import surface), `live/` (`LiveDisplay` ledger subscriber + per-sample / per-candidate / phase formatters), `notebook_run.py`, `startup_checklist.py`. The typed View dataclasses + the `PhaseEvent → View` builder (`from_phase_event`) + markdown rendering are the **application's emit contract** and live in [`application/views/`](../application/views/) — presentation imports them UPWARD (`presentation → application`, the allowed direction). Disk-side reconstruction (`from_disk_round` / `from_disk_log`) lives in `application/output/writers.py`. |
 | `api/` | FastAPI API. `routers/{backends, campaigns/, active, datasets, measurements, verify, commands, origins, auth}` (backend storage, campaign registry + per-cycle live reads, active-session reads, dataset preview + ingest, measurement leverage, diagnostic-run verify, the `POST /commands/{kind}` highway, campaign-origin reads, OIDC auth; `campaigns/` is a package, the rest are modules). `deps.py` has `resolve_identity` → `IdentityDep` → `build_stores_from_identity` → `StoreDep` + `get_backend_or_404`. Stage 1 (M12 OIDC client) replaces only `resolve_identity`; every route keeps consuming `IdentityDep` / `StoreDep` unchanged. `__init__.py` re-exports the nine router objects for `main.py`. |
-| `writers.py` | Per-cycle markdown writers (`write_log_md`, `write_review_md`); disk-side view reconstruction (`from_disk_round`, `from_disk_log`) feeds the same `RoundCompleteView` / `LogMdView` shapes the live ingress emits. |
 
 ## Out-of-bounds
 
 - **No campaign-artifact writes from entry-point code.** Disk writes go
   through `CycleEventLog.append` (orchestration) or a declared projection
-  (display); the per-cycle markdown writers (`log.md`, `review.md`) in
-  `writers.py` are the documented exception, audited in §1.
+  (display); the per-cycle markdown writers (`log.md`, `review.md`) now live
+  in `application/output/writers.py` (orchestration-side), not here.
 - **No business logic in CLI commands or API handlers.** `cli/` and
   `api/` are thin shells: parse args / route requests, call into
   `application/`, format the result. Business logic that creeps in here

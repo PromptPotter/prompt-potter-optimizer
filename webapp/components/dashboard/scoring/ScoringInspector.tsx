@@ -3,10 +3,9 @@ import { useMemo, useState } from "react";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { fmtPct1 } from "@/lib/format";
-import type { SelectedCandidate } from "@/lib/types/selection";
-import type { ScoreboardEntry } from "@/lib/types/round";
+import type { ScoreboardEntry, SelectedCandidate } from "@/lib/types";
 import { liveCandidate, type DashboardSnapshot } from "@/lib/poll";
-import { Dialog } from "@/components/ui/Dialog";
+import { Dialog } from "@/components/ui";
 import { SteerForkPanel } from "@/components/dashboard/control/SteerForkPanel";
 
 interface Props {

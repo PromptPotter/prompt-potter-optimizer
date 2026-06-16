@@ -3,9 +3,9 @@ Per-candidate flat param diff: unchanged → ``·``, short inline, long → lege
 
 from __future__ import annotations
 
+from promptpotter.application.views.view_models import SpDiffView
 from promptpotter.domain.opt_search_point import group_diff_keys
 from promptpotter.presentation.views.display import CYAN, DIM, RESET, YELLOW, _node_line
-from promptpotter.presentation.views.view_models import SpDiffView
 
 _SP_DIFF_ABSENT = "-"
 _SP_DIFF_UNCHANGED = "·"

@@ -30,6 +30,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 
 | Question | Read first |
 |---|---|
+| Where does concept X live? | [`developer/concept-map.md`](developer/concept-map.md) |
 | What is the shape of this project? | [`architecture.md`](architecture.md) §0 |
 | What is the load-bearing surface? | [`architecture.md`](architecture.md) §0.5 |
 | What does this domain word mean? | [`glossary.md`](glossary.md) |

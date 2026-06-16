@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadCycleFixture } from "@/lib/test-utils/fixtures";
-import { roundCandidates } from "@/lib/derivations/round-candidates";
+import { roundCandidates } from "../round-candidates";
 
 describe("roundCandidates — l2_terminal fixture", () => {
   // Reproduces the operator's justlogic__ca6d4d/cycle_2451d3cf6ebc exit

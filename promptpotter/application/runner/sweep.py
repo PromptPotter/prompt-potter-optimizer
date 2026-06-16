@@ -8,13 +8,13 @@ from __future__ import annotations
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.l1 import generate_or_load_candidates
-from promptpotter.application.run_observers import RunCallbacks
-from promptpotter.domain.run_records import PhaseRecord
-from promptpotter.presentation.writers import (
+from promptpotter.application.output import (
     write_hard_samples_artifacts,
     write_log_md,
     write_review_md,
 )
+from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.shared.errors import graceful
 
 

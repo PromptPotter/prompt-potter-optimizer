@@ -5,11 +5,10 @@ import type { DatasetItem, HardSamplesScope, MeasurementDot } from "@/lib/api";
 import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
-import { TERMS } from "@/lib/terms";
-import { headlineStats } from "@/lib/derivations/headline-stats";
-import { readSpend } from "@/lib/derivations/spend";
+import { TERMS, targetNodeIds } from "@/lib/terms";
+import { headlineStats, readSpend } from "@/lib/derivations";
 import { fmtText, fmtDuration, fmtUsd, fmtTokens } from "@/lib/format";
-import { Switch } from "@/components/ui/Switch";
+import { Switch } from "@/components/ui";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
 import { CyclePicker } from "@/components/shell/CyclePicker";
@@ -18,7 +17,6 @@ import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDe
 import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
 import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetControl";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { targetNodeIds } from "@/lib/connector-nodes";
 import { useSelection } from "@/lib/SelectionContext";
 
 interface Props {

@@ -14,12 +14,10 @@ import {
   seedFromOrder,
   type SelectMode,
   type StepOrder,
-} from "@/lib/derivations/round-timeline";
-import {
   cumulativeEverSeen,
   unionFirstAppearance,
   type SortedRounds,
-} from "@/lib/derivations/sample-trajectory";
+} from "@/lib/derivations";
 import { sameSampleSet } from "@/lib/sample-set";
 import {
   COL_HEADER,

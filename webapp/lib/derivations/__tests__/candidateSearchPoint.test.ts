@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candidateSearchPoint } from "@/lib/derivations/candidateSearchPoint";
+import { candidateSearchPoint } from "../candidateSearchPoint";
 import type { RoundFileDoc } from "@/lib/poll";
 
 // A round file with two candidates, each carrying its own evolved prompt

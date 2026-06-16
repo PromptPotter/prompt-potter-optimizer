@@ -12,7 +12,7 @@ import { accuracyOverSampleSet, correctedFromEvaluators } from "./fitness-bars";
 import {
   historicalSamplesFor,
   liveSamplesFor,
-} from "@/lib/derivations/round-samples";
+} from "@/lib/derivations";
 import type { BarSlot } from "./FitnessChart";
 import type { DiagnosticRunRecord } from "@/lib/api";
 import type { DashboardSnapshot, RoundFileDoc } from "@/lib/poll";

@@ -8,8 +8,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from promptpotter.presentation.views.render.heatmap import render_hard_sample_heatmap
-from promptpotter.presentation.views.view_models import (
+from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
+from promptpotter.application.views.view_models import (
     ForkSummaryView,
     HardSamplesView,
     LogMdView,

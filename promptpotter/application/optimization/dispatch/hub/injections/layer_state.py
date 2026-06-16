@@ -20,7 +20,9 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     InjectionKind,
     signal,
 )
-from promptpotter.domain.results import CritiqueReadout
+from promptpotter.domain.rendering import (
+    format_l1_critique_for_prompt as format_l1_critique_for_prompt,
+)
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 logger = logging.getLogger(__name__)
@@ -110,51 +112,6 @@ def _r_task_context(b: InjectionBundle) -> str:
             v = v[:TASK_CONTEXT_VALUE_CAP] + "…"
         lines.append(f"  {k}: {v}")
     return "TASK CONTEXT:\n" + "\n".join(lines)
-
-
-def _valid_axis_set(schema: Any) -> set[str]:
-    """Schema-legitimate axes (prompt fields + node names + param keys) — used to filter L2's
-    hallucinated `suggested_axes` (e.g. `prompt_size`) before they seed the next round.
-    """
-    from promptpotter.config.settings import PROMPT_STRING_FIELDS
-
-    out: set[str] = set(PROMPT_STRING_FIELDS) | {"few_shot_examples", "plan"}
-    if schema is None:
-        return out
-    for node in getattr(schema, "nodes", ()):
-        name = getattr(node, "name", "")
-        if name:
-            out.add(name)
-        for pk in getattr(node, "param_keys", ()) or ():
-            out.add(pk)
-            if name:
-                out.add(f"{name}.{pk}")
-    return out
-
-
-def format_l1_critique_for_prompt(
-    critique: CritiqueReadout | None, pipeline_schema: Any = None
-) -> str:
-    """L1 critique → compact text for L1_GENERATE + L2_CONTEXT. Three load-bearing fields:
-    `priority_fix`, schema-filtered `suggested_axes`, `failure_highlights`.
-    """
-    if not critique:
-        return ""
-    parts: list[str] = []
-    if pf := critique.get("priority_fix"):
-        parts.append(f"Fix: {pf}")
-    sa = critique.get("suggested_axes") or []
-    if sa:
-        if pipeline_schema is not None:
-            valid = _valid_axis_set(pipeline_schema)
-            sa = [a for a in sa if a in valid]
-        if sa:
-            parts.append(f"Axes: {', '.join(sa)}")
-    if fh := critique.get("failure_highlights"):
-        parts.append("Failures:")
-        for h in fh[:3]:
-            parts.append(f"  {h}")
-    return "\n".join(parts)
 
 
 @signal(

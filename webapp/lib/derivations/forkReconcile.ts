@@ -15,7 +15,7 @@
 
 import type { LimitOverrides } from "@/lib/api";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { readSpend } from "@/lib/derivations/spend";
+import { readSpend } from "./spend";
 
 export interface ForkReconcileDefaults {
   // Completed rounds on the parent — the "3" in "3 of 6 used".

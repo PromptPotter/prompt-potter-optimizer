@@ -2,7 +2,18 @@
 
 import type { DraftCampaignWire, DraftPatch, ProvenanceTag } from "@/lib/api";
 import { ORIGIN_KEY } from "@/lib/origin-readiness";
-import { ProvenanceBadge } from "./ProvenanceBadges";
+
+const PROVENANCE_LABEL: Record<ProvenanceTag, string> = {
+  unset: "Not set",
+  proposed: "Proposed",
+  confirmed: "Confirmed",
+};
+
+function ProvenanceBadge({ tag }: { tag: ProvenanceTag }) {
+  return (
+    <span className={`origin-prov origin-prov--${tag}`}>{PROVENANCE_LABEL[tag]}</span>
+  );
+}
 
 // The required tier: pick which uploaded header is the input and which is the
 // target. Selecting a column confirms it (rides `edit-draft-campaign` with

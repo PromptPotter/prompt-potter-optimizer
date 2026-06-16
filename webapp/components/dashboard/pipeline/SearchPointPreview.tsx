@@ -1,6 +1,6 @@
 "use client";
 import type { NodeConfigParam, NodeOutputSchema } from "@/lib/api";
-import type { CandidateSearchPoint } from "@/lib/derivations/candidateSearchPoint";
+import type { CandidateSearchPoint } from "@/lib/derivations";
 import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsEditor";
 import { NodeConfigEditor } from "@/components/dashboard/control/NodeConfigEditor";
 import { NodeOutputSchemaView } from "@/components/dashboard/control/NodeOutputSchemaView";

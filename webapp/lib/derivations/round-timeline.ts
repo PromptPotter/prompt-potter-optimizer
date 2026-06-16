@@ -5,7 +5,7 @@
 // the same step→order derivation instead of re-deriving it in a component.
 
 import type { RoundFileDoc } from "@/lib/poll";
-import type { SampleOrderStep } from "@/lib/types/round";
+import type { SampleOrderStep } from "@/lib/types";
 
 export function historicalTimeline(roundDoc: RoundFileDoc | null): SampleOrderStep[] {
   const t = roundDoc?.sample_order_timeline;

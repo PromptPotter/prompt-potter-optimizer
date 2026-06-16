@@ -1,7 +1,6 @@
 "use client";
 
-import { Button } from "@/components/ui/Button";
-import { Dialog } from "@/components/ui/Dialog";
+import { Button, Dialog } from "@/components/ui";
 import s from "@/components/ui/Dialog.module.css";
 
 export interface ModalAction {

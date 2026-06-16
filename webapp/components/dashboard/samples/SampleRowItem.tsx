@@ -1,0 +1,63 @@
+"use client";
+import type { SampleRow } from "@/lib/types";
+
+function truncate(s: string | undefined, n: number): string {
+  if (!s) return "—";
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+// One per-sample row inside a candidate group. A raw (unparsed) line renders
+// as a flat body; a parsed row expands to query / ground-truth / predicted.
+// Pure renderer — extracted from RoundSamplesView, which owns the source +
+// selection state.
+export function SampleRowItem({ row }: { row: SampleRow }) {
+  if (row.status == null && row.raw_line) {
+    return (
+      <div className="rsv-row rsv-row-raw">
+        <span className="body">{row.raw_line}</span>
+      </div>
+    );
+  }
+  const tag = row.status === "HIT" ? "tag-hit" : "tag-miss";
+  const pred = row.predicted ? row.predicted : "∅";
+  return (
+    <details className="rsv-row">
+      <summary>
+        <span className={tag}>{row.status ?? "—"}</span>
+        <span className="idx">
+          #{String(row.sample_id ?? "").padStart(3, "0")}
+        </span>
+        {row.elapsed_s != null && (
+          <span className="elapsed">{row.elapsed_s.toFixed(1)}s</span>
+        )}
+        {row.scorer && <span className="scorer">{row.scorer}</span>}
+        {row.cached && (
+          <span
+            className="rsv-cached"
+            title="Reused from a prior identical searchpoint — no fresh backend call"
+          >
+            📖 cached
+          </span>
+        )}
+        <span className="body">
+          gt:{truncate(row.ground_truth, 22)} · pred:{truncate(pred, 22)}
+          {row.query ? ` · q:${truncate(row.query, 36)}` : ""}
+        </span>
+      </summary>
+      <div className="rsv-detail">
+        <div>
+          <span className="kv-label">query</span>
+          <span>{row.query || "—"}</span>
+        </div>
+        <div>
+          <span className="kv-label">ground truth</span>
+          <span>{row.ground_truth || "—"}</span>
+        </div>
+        <div>
+          <span className="kv-label">predicted</span>
+          <span>{pred}</span>
+        </div>
+      </div>
+    </details>
+  );
+}

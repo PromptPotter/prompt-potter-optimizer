@@ -1,7 +1,7 @@
 "use client";
 import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
-import type { CandidateSearchPoint } from "@/lib/derivations/candidateSearchPoint";
-import type { PipelineViewNode } from "@/components/workflow/types";
+import type { CandidateSearchPoint } from "@/lib/derivations";
+import type { PipelineViewNode } from "@/components/workflow";
 import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsEditor";
 import { NodeLockEditor } from "@/components/dashboard/control/NodeLockEditor";
 import { NodeOutputSchemaView } from "@/components/dashboard/control/NodeOutputSchemaView";

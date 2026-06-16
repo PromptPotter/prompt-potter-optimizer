@@ -9,7 +9,7 @@ import {
 } from "./meta";
 import { FitnessChart } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
-import { CardFrame } from "@/components/ui/Card";
+import { CardFrame } from "@/components/ui";
 import {
   liveL1Candidates,
   type DashboardSnapshot,
@@ -17,7 +17,7 @@ import {
 } from "@/lib/poll";
 import type { RoundSummary } from "@/lib/api/types";
 import { useSelection } from "@/lib/SelectionContext";
-import { WhatIfGrid } from "./WhatIfGrid";
+import { FitnessFormulaEditor } from "./FitnessFormulaEditor";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
@@ -382,7 +382,7 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
           />
         </div>
         {showWhatIf && (
-          <WhatIfGrid
+          <FitnessFormulaEditor
             rows={rows}
             selected={selected}
             inActive={inActive}

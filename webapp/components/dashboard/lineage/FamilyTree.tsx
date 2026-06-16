@@ -3,7 +3,7 @@ import { memo, type CSSProperties } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { sessionIndexOf, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
-import { CardFrame } from "@/components/ui/Card";
+import { CardFrame } from "@/components/ui";
 import { Forest } from "./Forest";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";

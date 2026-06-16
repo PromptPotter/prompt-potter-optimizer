@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectorReachability } from "@/lib/derivations/connector-state";
+import { connectorReachability } from "../connector-state";
 import type { BackendHealth } from "@/lib/api";
 
 const health = (status: BackendHealth["status"]): BackendHealth => ({

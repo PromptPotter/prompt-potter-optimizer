@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
-import { CardFrame } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
+import { Badge, CardFrame } from "@/components/ui";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface ScoreboardEntry {

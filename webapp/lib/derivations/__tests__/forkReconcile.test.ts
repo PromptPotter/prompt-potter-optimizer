@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  forkReconcileDefaults,
-  limitOverridesFromDefaults,
-} from "@/lib/derivations/forkReconcile";
+import { forkReconcileDefaults, limitOverridesFromDefaults } from "../forkReconcile";
 import type { DashboardSnapshot } from "@/lib/poll";
 
 // "3 of 6 rounds used → 3 left"; "$4 of $10 spent → $6 left". The cap lives in

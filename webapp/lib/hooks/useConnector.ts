@@ -49,8 +49,8 @@ import {
 import { useAuthGate } from "@/lib/auth-context";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { usePoll } from "@/lib/hooks/usePoll";
-import type { ConnectorView } from "@/lib/types/connector";
-import type { NodeDataLike, PipelineView } from "@/components/workflow/types";
+import type { ConnectorView } from "@/lib/types";
+import type { NodeDataLike, PipelineView } from "@/components/workflow";
 
 const EMPTY: ConnectorView = {
   connector: null,

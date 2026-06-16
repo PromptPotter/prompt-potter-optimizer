@@ -1,15 +1,15 @@
 "use client";
 import { useMemo, useState } from "react";
 import type { RoundSummary } from "@/lib/api/types";
-import { CardFrame } from "@/components/ui/Card";
-import type { SelectMode } from "@/lib/derivations/round-timeline";
+import { CardFrame } from "@/components/ui";
 import {
+  type SelectMode,
   buildSorted,
   classifyCell,
   cumulativeEverSeen,
   unionFirstAppearance,
   type SortedRounds,
-} from "@/lib/derivations/sample-trajectory";
+} from "@/lib/derivations";
 import { SeriesView } from "./TrajectorySeriesView";
 import { ROW_LABEL, SQ_ADD, SQ_DROP, SQ_KEPT } from "./trajectoryStyles";
 

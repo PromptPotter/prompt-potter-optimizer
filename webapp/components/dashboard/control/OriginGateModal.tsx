@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Dialog } from "@/components/ui/Dialog";
-import { Button } from "@/components/ui/Button";
+import { Button, Dialog } from "@/components/ui";
 import {
   postOriginGateDecision,
   IngestApiError,

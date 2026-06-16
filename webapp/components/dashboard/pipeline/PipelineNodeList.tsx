@@ -1,5 +1,5 @@
 "use client";
-import type { ConnectorView } from "@/lib/types/connector";
+import type { ConnectorView } from "@/lib/types";
 import { useSelection } from "@/lib/SelectionContext";
 
 // Vanilla, extendable inline list of the active pipeline's nodes — the plain

@@ -8,25 +8,19 @@ attribute reads); Pydantic serializes it to its wire dict on persist + SSE, so
 no hand-rolled reconstruction is needed.
 
 Score-entry helpers (``pick_round_winner``, ``score_entry_from_dict``) are also
-consumed by ``presentation/writers.py`` for disk-derived ``log.md`` rendering.
+consumed by ``application/output/writers.py`` for disk-derived ``log.md`` rendering.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.application.optimization.dispatch.hub import (
-    format_l1_critique_for_prompt,
-)
 from promptpotter.application.optimization.dispatch.llm_call import optimizer_model
-from promptpotter.application.optimization.l1.score import round_winner_key
-from promptpotter.domain.opt_search_point import (
-    build_candidate_flat,
-    flatten_sp_summary,
+from promptpotter.application.scoring.evaluators import (
+    default_per_round_formula,
+    default_per_round_formula_short,
 )
-from promptpotter.domain.phases import PhaseEvent
-from promptpotter.domain.results import ScoredCandidate
-from promptpotter.presentation.views.view_models import (
+from promptpotter.application.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
     EscalationEnterView,
@@ -46,6 +40,16 @@ from promptpotter.presentation.views.view_models import (
     ViewContext,
     WarningEntry,
 )
+from promptpotter.domain.opt_search_point import (
+    build_candidate_flat,
+    flatten_sp_summary,
+)
+from promptpotter.domain.phases import PhaseEvent
+from promptpotter.domain.rendering import (
+    format_l1_critique_for_prompt,
+    round_winner_key,
+)
+from promptpotter.domain.results import ScoredCandidate
 from promptpotter.shared.statistics import min_detectable_effect
 
 __all__ = [
@@ -96,11 +100,6 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     elif schema is None:
         full, short = None, None
     else:
-        from promptpotter.application.scoring.evaluators import (
-            default_per_round_formula,
-            default_per_round_formula_short,
-        )
-
         full = default_per_round_formula(schema)
         short = default_per_round_formula_short(schema)
     ctx.composite_fitness_formula = full
@@ -134,11 +133,6 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     elif schema is None:
         full, short = None, None
     else:
-        from promptpotter.application.scoring.evaluators import (
-            default_per_round_formula,
-            default_per_round_formula_short,
-        )
-
         full = default_per_round_formula(schema)
         short = default_per_round_formula_short(schema)
     ctx.composite_fitness_formula = full
@@ -385,7 +379,7 @@ def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
     return builder(event.data, ctx) if builder is not None else None
 
 
-# --- score-entry helpers (shared with presentation/writers disk render) ---
+# --- score-entry helpers (shared with application/output/writers disk render) ---
 
 
 def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:

@@ -1,7 +1,6 @@
 "use client";
 import { cx } from "@/lib/cx";
-import { connectorReachability } from "@/lib/derivations/connector-state";
-import { criticalAlert } from "@/lib/derivations/critical-alert";
+import { connectorReachability, criticalAlert } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";

@@ -1,5 +1,5 @@
 import { AppShell } from "@/components/shell/AppShell";
-import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ErrorBoundary } from "@/components/ui";
 import { WorkspaceProvider } from "@/lib/workspace";
 
 export default function Home() {

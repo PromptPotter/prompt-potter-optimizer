@@ -5,9 +5,9 @@ import {
   sameSampleSet,
   toggleInSet,
 } from "@/lib/sample-set";
-import { orderAtStep, seedFromOrder } from "@/lib/derivations/round-timeline";
+import { orderAtStep, seedFromOrder } from "@/lib/derivations";
 import type { RoundSummary } from "@/lib/api/types";
-import type { SampleOrderStep } from "@/lib/types/round";
+import type { SampleOrderStep } from "@/lib/types";
 
 const round = (r: number, selection: number[]): RoundSummary =>
   ({

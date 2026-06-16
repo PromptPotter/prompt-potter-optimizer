@@ -6,20 +6,7 @@ from __future__ import annotations
 
 import json
 
-from promptpotter.presentation.views.display import (
-    BOLD,
-    CYAN,
-    GREEN,
-    RESET,
-    YELLOW,
-    _fmt_delta,
-    _node_block,
-    _round_rule,
-    _scoreboard,
-    fmt_pvalue,
-)
-from promptpotter.presentation.views.render.sp_diff import render_sp_diff
-from promptpotter.presentation.views.view_models import (
+from promptpotter.application.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
     EscalationEnterView,
@@ -35,6 +22,19 @@ from promptpotter.presentation.views.view_models import (
     RoundCompleteView,
     RoundStartView,
 )
+from promptpotter.presentation.views.display import (
+    BOLD,
+    CYAN,
+    GREEN,
+    RESET,
+    YELLOW,
+    _fmt_delta,
+    _node_block,
+    _round_rule,
+    _scoreboard,
+    fmt_pvalue,
+)
+from promptpotter.presentation.views.render.sp_diff import render_sp_diff
 from promptpotter.shared.composite import render_composite_fitness_block
 
 

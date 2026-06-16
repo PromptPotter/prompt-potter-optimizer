@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.application.optimization.pobb.elimination import classify_result
-from promptpotter.application.scoring.formula import extract_display_answer
+from promptpotter.domain.rendering import classify_result, extract_display_answer
 from promptpotter.presentation.views.display import (
     DIM,
     DISPLAY_TAGS,

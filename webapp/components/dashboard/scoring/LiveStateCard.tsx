@@ -1,6 +1,6 @@
 import type { DashboardSnapshot } from "@/lib/poll";
 import { fmtNum, fmtClock } from "@/lib/format";
-import { CardFrame } from "@/components/ui/Card";
+import { CardFrame } from "@/components/ui";
 import { FreqChart } from "@/components/eval/FreqChart";
 import { TrendChart } from "@/components/eval/TrendChart";
 

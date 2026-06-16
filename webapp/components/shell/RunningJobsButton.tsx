@@ -1,6 +1,6 @@
 "use client";
 import { useWorkspace } from "@/lib/workspace";
-import { Popover } from "@/components/ui/Popover";
+import { Popover } from "@/components/ui";
 
 // The most direct "is anything running?" signal, sitting in the topbar next to
 // the view tabs. Absent when idle, the Potter glyph when one cycle is live, and

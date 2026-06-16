@@ -1,14 +1,16 @@
 "use client";
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
-import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
-import { OptimizerNodeDetail } from "@/components/workflow/OptimizerNodeDetail";
-import { isOptimizerNodeId } from "@/components/workflow/layout";
+import {
+  isOptimizerNodeId,
+  OptimizerNodeDetail,
+  WorkflowCanvas,
+  type PipelineDoc,
+} from "@/components/workflow";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { FamilyTree } from "@/components/dashboard/lineage/FamilyTree";
 import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
 import { useSelection } from "@/lib/SelectionContext";
 import { LineageOverlayProvider } from "@/lib/lineage-overlay";
-import type { PipelineDoc } from "@/components/workflow/types";
 
 // The Now lane's main row + drill-down. Renders the Fitness + Lineage row,
 // then (when a candidate is selected) the Scoring inspector on its own

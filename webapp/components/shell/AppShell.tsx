@@ -24,7 +24,7 @@ import { NowTriad } from "@/components/dashboard/layout/NowTriad";
 import { RunErrorBanner } from "@/components/dashboard/layout/RunErrorBanner";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 
-import type { PipelineDoc } from "@/components/workflow/types";
+import type { PipelineDoc } from "@/components/workflow";
 
 // The non-landing surfaces load on demand, not on first paint. The operator
 // lands on the dashboard tab; Chat / Files / Verify (and the markdown renderer

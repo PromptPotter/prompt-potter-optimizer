@@ -4,7 +4,6 @@ import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import { postLogout } from "@/lib/api";
 import { BRAND } from "@/lib/brand";
-import { SignInPrompt } from "@/components/ui/states";
 import { rootCycleId } from "@/lib/ids";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { TERMS } from "@/lib/terms";
@@ -15,7 +14,7 @@ import {
   groupCampaigns,
   sessKey,
 } from "./sidebar/grouping";
-import { CampaignNode } from "./sidebar/CampaignNode";
+import { SidebarContent } from "./SidebarContent";
 
 interface Props {
   // A unit is the pair (campaignId, cycleId) — cycle_id alone is ambiguous
@@ -171,90 +170,23 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
           + New campaign
         </button>
       </div>
-      <div className="unit-library">
-        <div className="unit-library-head">
-          <span>Campaigns</span>
-        </div>
-        <div className="unit-library-tabs" role="tablist" aria-label="Campaign lifecycle">
-          <button
-            type="button"
-            role="tab"
-            className={`unit-library-tab${lifecycleFilter === "active" ? " active" : ""}`}
-            onClick={() => setLifecycleFilter("active")}
-            aria-selected={lifecycleFilter === "active"}
-          >
-            Active
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`unit-library-tab${lifecycleFilter === "archived" ? " active" : ""}`}
-            onClick={() => setLifecycleFilter("archived")}
-            aria-selected={lifecycleFilter === "archived"}
-            title="Show archived campaigns. Deleted campaigns are hidden — read them by id from the file tree."
-          >
-            Archived
-          </button>
-        </div>
-        {datasetNames.length > 1 && (
-          <DatasetFilterBar
-            datasets={datasetNames}
-            selected={datasetFilter}
-            onSelect={setDatasetFilter}
-          />
-        )}
-        {status !== "authed" ? (
-          status === "loading" ? (
-            <div className="unit-library-note">loading…</div>
-          ) : (
-            <SignInPrompt
-              className="unit-library-note"
-              message="Sign in to see your campaigns."
-            />
-          )
-        ) : (
-          !loaded && <div className="unit-library-note">loading…</div>
-        )}
-        {loaded && groups.length === 0 && lifecycleFilter === "archived" && (
-          <div className="unit-library-empty">
-            <div className="empty-headline">No archived campaigns</div>
-            <div className="empty-body">
-              Archive a campaign from its <code>⋯</code> menu to declutter the
-              active list. Archives are reversible from this tab.
-            </div>
-          </div>
-        )}
-        {loaded && groups.length === 0 && lifecycleFilter !== "archived" && (
-          <div className="unit-library-empty">
-            <div className="empty-headline">No campaigns yet</div>
-            <div className="empty-body">
-              Start your first campaign from a terminal:
-            </div>
-            <pre className="empty-cmd"><code>python -m promptpotter new &lt;dataset&gt;</code></pre>
-            <div className="empty-hint">
-              See <code>docs/manual/</code> for the quickstart.
-            </div>
-          </div>
-        )}
-        {loaded && groups.length > 0 && (
-          <ul className="unit-library-list">
-            {groups.map((cg) => (
-              <li key={cg.campaign.campaign_id}>
-                <CampaignNode
-                  group={cg}
-                  collapsedNodes={collapsedNodes}
-                  toggleNode={toggleNode}
-                  campaignId={campaignId}
-                  cycleId={cycleId}
-                  activeCampaignId={activeCampaignId}
-                  activeCycleId={activeCycleId}
-                  onSelectCycle={onSelectCycle}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <SidebarContent
+        status={status}
+        loaded={loaded}
+        lifecycleFilter={lifecycleFilter}
+        setLifecycleFilter={setLifecycleFilter}
+        datasetNames={datasetNames}
+        datasetFilter={datasetFilter}
+        setDatasetFilter={setDatasetFilter}
+        groups={groups}
+        collapsedNodes={collapsedNodes}
+        toggleNode={toggleNode}
+        campaignId={campaignId}
+        cycleId={cycleId}
+        activeCampaignId={activeCampaignId}
+        activeCycleId={activeCycleId}
+        onSelectCycle={onSelectCycle}
+      />
       <div className="sidebar-footer">
         <a
           className="sidebar-footer-item"
@@ -276,39 +208,5 @@ export function Sidebar({ onSelectCycle, onNewCycle, collapsed, onToggleCollapse
         )}
       </div>
     </nav>
-  );
-}
-
-// Dataset filter chip-bar — narrows the flat campaign list to one dataset.
-function DatasetFilterBar({
-  datasets,
-  selected,
-  onSelect,
-}: {
-  datasets: string[];
-  selected: string | null;
-  onSelect: (d: string | null) => void;
-}) {
-  return (
-    <div className="unit-library-filter" role="group" aria-label="Filter by dataset">
-      <button
-        type="button"
-        className={`unit-library-filter-chip${selected == null ? " active" : ""}`}
-        onClick={() => onSelect(null)}
-      >
-        All
-      </button>
-      {datasets.map((d) => (
-        <button
-          key={d}
-          type="button"
-          className={`unit-library-filter-chip${selected === d ? " active" : ""}`}
-          onClick={() => onSelect(selected === d ? null : d)}
-          title={d}
-        >
-          {d}
-        </button>
-      ))}
-    </div>
   );
 }

@@ -4,7 +4,7 @@ import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { runPhaseLabel } from "@/lib/run-phase";
-import { headlineStats } from "@/lib/derivations/headline-stats";
+import { headlineStats } from "@/lib/derivations";
 import { fmtSecs, fmtPct0 } from "@/lib/format";
 
 // Single-line, frameless run summary. Everything the operator scans in

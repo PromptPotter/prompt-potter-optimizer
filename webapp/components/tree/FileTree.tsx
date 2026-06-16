@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { fetchFiles, type FileEntry } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { useFetch } from "@/lib/hooks/useFetch";
-import { Empty, Loading, ErrorNote } from "@/components/ui/states";
+import { Empty, Loading, ErrorNote } from "@/components/ui";
 
 interface DirNode {
   dirs: Record<string, DirNode>;

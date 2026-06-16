@@ -27,8 +27,6 @@ export const ORIGIN_KEY = {
   backendNodeConfig: "backend.node_config",
 } as const;
 
-export type OriginKey = (typeof ORIGIN_KEY)[keyof typeof ORIGIN_KEY];
-
 export interface OriginReadiness {
   complete: boolean;
   gaps: OriginGap[];

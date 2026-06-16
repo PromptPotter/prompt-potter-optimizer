@@ -22,7 +22,7 @@ import { bumpRevalidation } from "@/lib/revalidate";
 import { useLineageOverlay } from "@/lib/lineage-overlay";
 import { useExpandedDashboards } from "@/lib/hooks/useExpandedDashboards";
 import { useStableContent } from "@/lib/stable";
-import { roundCandidatesByRound } from "@/lib/derivations/round-candidates";
+import { roundCandidatesByRound } from "@/lib/derivations";
 import {
   COL_W,
   LEFT_PAD,

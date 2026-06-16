@@ -1,7 +1,6 @@
 "use client";
 
-import { Button } from "@/components/ui/Button";
-import { Dialog } from "@/components/ui/Dialog";
+import { Button, Dialog } from "@/components/ui";
 
 // Confirm dialog for the campaign-wide empty-stub cleanup. Empty-row stubs
 // accumulate because the fork-creation paths mint the cycle dir BEFORE the

@@ -1,17 +1,24 @@
 """Projections — subscribers to the ``CycleEventLog`` spine.
 
-Each module here owns one view over the ledger's record stream:
+Every view here extends :class:`base.DerivedView <.base>`, which owns the
+single ``isinstance(record, …)`` dispatch over the record stream; subclasses
+override only the hooks they care about (adding a ``CycleRecord`` subtype
+touches one file). No second dispatch path exists.
 
-* :mod:`live_dashboard` — the operator-facing ``dashboard.json`` writer,
-  per-cycle (every cycle — root, fork, sweep, diag — owns its own file in
-  its own cycle dir, stamped with its own ``cycle_id``). Constructor takes
-  ``CycleDir``.
-* :mod:`audit_trail` — the per-round node I/O recorder that flushes to
-  ``campaigns/{campaign_id}/cycles/{cycle_id}/.runtime/cache/rounds/round_NNNN.json``.
-  Per-cycle scope; constructor takes ``CycleDir`` so a fork's recorder
-  cannot accidentally write to a sibling's tree.
-* :mod:`pobb_stream` — appends per-sample P(best) updates to the cycle's
-  ``.runtime/streams/round_NNNN_p_best.jsonl``.
+CONCEPT MAP (one view per module):
+* :class:`LiveDashboardView` (:mod:`.live_dashboard`) — operator-facing
+  ``dashboard.json`` writer, per-cycle (every cycle — root/fork/sweep/diag —
+  owns its file, stamped with its ``cycle_id``). Built on the pure
+  ``live_state`` core (``LiveStateCore`` + ``apply_phase`` /
+  ``apply_p_best_update`` / ``roll_p_best_at_round_complete`` / ``top_n_p_best``).
+* :class:`AuditTrailView` (:mod:`.audit_trail`) — per-round node I/O recorder
+  flushing ``.runtime/cache/rounds/round_NNNN.json`` (the only buffering view).
+* :class:`PoBBStreamView` (:mod:`.pobb_stream`) — appends per-sample P(best)
+  updates to ``.runtime/streams/round_NNNN_p_best.jsonl``.
+* :class:`EventStreamView` (:mod:`.event_stream`) — SSE outbound highway;
+  broadcasts ``ProjectionEnvelope`` frames to N HTTP subscribers
+  (:class:`EventStreamSubscriber`). Looked up via the process-wide registry
+  (``register_event_stream`` / ``get_event_stream`` / ``deregister_event_stream``).
 """
 
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailView

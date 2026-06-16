@@ -1,11 +1,16 @@
 "use client";
 import { memo, useMemo } from "react";
 import { Line } from "react-chartjs-2";
-import { ensureChartRegistered, lineChartDefaults } from "@/lib/chart-config";
-import { cssRgba, getCss, useThemeVersion } from "@/lib/theme";
+import {
+  cssRgba,
+  ensureChartRegistered,
+  getCss,
+  lineChartDefaults,
+  useThemeVersion,
+} from "@/lib/theme";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { CardFrame } from "@/components/ui/Card";
-import { degradedRoundNotices } from "@/lib/derivations/round-health";
+import { CardFrame } from "@/components/ui";
+import { degradedRoundNotices } from "@/lib/derivations";
 
 ensureChartRegistered();
 

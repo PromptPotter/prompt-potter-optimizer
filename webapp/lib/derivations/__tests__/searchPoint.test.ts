@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { liveInFlightSearchPoint, resolveSearchPoint } from "../searchPoint";
 import type { DashboardSnapshot } from "@/lib/poll";
-import type { ConnectorView } from "@/lib/types/connector";
+import type { ConnectorView } from "@/lib/types";
 import type { DraftCampaignWire } from "@/lib/api";
 
 const cv = (over: Partial<ConnectorView> = {}): ConnectorView =>

@@ -3,12 +3,12 @@ import { useMemo } from "react";
 import type { PipelineDoc } from "./types";
 import { type DashboardSnapshot, type StatusKind, roundOf } from "@/lib/poll";
 import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
-import { availableRounds } from "@/lib/derivations/round-axis";
+import { availableRounds } from "@/lib/derivations";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useSelection } from "@/lib/SelectionContext";
 import { phaseToNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
-import type { NodeBlock } from "@/lib/types/round";
+import type { NodeBlock } from "@/lib/types";
 
 interface Props {
   id: string;

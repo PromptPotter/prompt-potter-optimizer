@@ -1,8 +1,7 @@
 "use client";
 import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
-import { ensureChartRegistered } from "@/lib/chart-config";
-import { cssRgba, getCss, useThemeVersion } from "@/lib/theme";
+import { cssRgba, ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import type { ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
 
 ensureChartRegistered();

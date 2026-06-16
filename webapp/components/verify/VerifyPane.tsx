@@ -9,7 +9,7 @@ import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ageText, fmtFitness, fmtPct0 } from "@/lib/format";
 import { useFetch } from "@/lib/hooks/useFetch";
-import { ErrorNote, Loading, SignInPrompt } from "@/components/ui/states";
+import { ErrorNote, Loading, SignInPrompt } from "@/components/ui";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 export function VerifyPane() {

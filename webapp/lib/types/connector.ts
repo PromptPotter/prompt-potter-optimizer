@@ -20,7 +20,7 @@
 // signal: whether the optimizer is actively scoring through this connector.
 
 import type { BackendHealth, BackendInfo, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
-import type { NodeDataLike, PipelineView } from "@/components/workflow/types";
+import type { NodeDataLike, PipelineView } from "@/components/workflow";
 
 export interface ConnectorView {
   connector: string | null;

@@ -1,6 +1,6 @@
 "use client";
 import { type DashboardSnapshot } from "@/lib/poll";
-import { availableRounds } from "@/lib/derivations/round-axis";
+import { availableRounds } from "@/lib/derivations";
 import { useSelection } from "@/lib/SelectionContext";
 
 interface Props {

@@ -1,0 +1,42 @@
+"""Render targets — typed View → markdown (application's emit contract).
+
+Genuinely-terminal rendering (ANSI ``to_text`` / ``render_sp_diff``) stays in
+``presentation/views/render`` — it's display-only. The markdown + heatmap +
+sweep-summary renderers here are part of what the application emits to disk
+(``log.md`` / ``summary.md``), so they live alongside the view models.
+"""
+
+from __future__ import annotations
+
+from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
+from promptpotter.application.views.render.markdown import to_markdown
+from promptpotter.application.views.view_models import SweepSummaryView
+
+
+def render_sweep_summary(view: SweepSummaryView) -> str:
+    """Markdown summary for a sweep batch — header + payload table."""
+    lines = [
+        f"# Sweep batch {view.batch_id}",
+        "",
+        f"- Parent cycle: `{view.parent_cycle_id}`",
+        f"- Family root: `{view.family_root}`",
+        f"- Started: {view.started_at}",
+        f"- Completed: {view.completed_at}",
+        f"- Forks minted: {view.n_minted} of {view.n_payloads}",
+        "",
+        "## Payloads",
+        "",
+        "| Source | Status | Cycle |",
+        "|---|---|---|",
+    ]
+    for row in view.payloads:
+        lines.append(f"| `{row.source_file}` | {row.status} | `{row.cycle_id}` |")
+    return "\n".join(lines) + "\n"
+
+
+__all__ = [
+    "SweepSummaryView",
+    "render_hard_sample_heatmap",
+    "render_sweep_summary",
+    "to_markdown",
+]
