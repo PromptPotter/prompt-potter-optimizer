@@ -2,8 +2,9 @@
 import { cx } from "@/lib/cx";
 import { connectorReachability, criticalAlert } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
-import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
+import type { StatusKind } from "@/lib/poll";
 
 // The loud, can't-miss failure surface — a full-width sticky bar pinned under
 // the Topbar and rendered on EVERY tab (Chat / Dashboard / Verify / Files), so
@@ -16,8 +17,6 @@ interface Props {
   bannerStatus: StatusKind;
   bannerText: string;
   bannerHint?: string;
-  dash: DashboardSnapshot | null;
-  runPhaseResolved: string | null;
   onOpenFiles: () => void;
   // Invoked by the one-click "Stop campaign" button the banner shows when the
   // verdict is structurally-degraded (`alert.action === "stop"`). The run never
@@ -29,11 +28,12 @@ export function CriticalAlertBanner({
   bannerStatus,
   bannerText,
   bannerHint,
-  dash,
-  runPhaseResolved,
   onOpenFiles,
   onStopCampaign,
 }: Props) {
+  // Live snapshot + connection-aware run phase, self-sourced from the cycle
+  // stream (the banner shows on every tab, so it owns its own read).
+  const { dash, runPhaseResolved } = useDashboard();
   // Same connector reachability the ConnectorInspector LED reads — one shared
   // `useConnector()` probe, one shared `down` verdict (connector-state.ts).
   const { health, connector } = useConnector();

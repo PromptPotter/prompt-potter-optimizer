@@ -3,15 +3,8 @@ import { useState } from "react";
 import { postPauseCycle, postResumeCycle, postStartRun, IngestApiError } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { phasePauseLabel } from "@/lib/run-phase";
-import type { DashboardSnapshot } from "@/lib/poll";
-
-interface Props {
-  campaignId: string | null;
-  cycleId: string | null;
-  // `dash.run_phase` (declared by the runner, projected to dashboard.json) is
-  // the run-state for the VIEWED cycle — no separate /runstate poll.
-  dash: DashboardSnapshot | null;
-}
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useWorkspace } from "@/lib/workspace";
 
 type RunPhase = "running" | "paused" | "stopped";
 
@@ -38,7 +31,11 @@ const PAUSE_ICON = (
 // affordance is the Scoring inspector's "Endorse / Steer & fork" — select a
 // candidate, then endorse-as-is or edit-and-steer. No blind "fork from the
 // current leader" parallel write path.
-export function RunControlButton({ campaignId, cycleId, dash }: Props) {
+export function RunControlButton() {
+  // `dash.run_phase` (declared by the runner, projected to dashboard.json) is
+  // the run-state for the VIEWED cycle — no separate /runstate poll.
+  const { dash } = useDashboard();
+  const { campaignId, cycleId } = useWorkspace();
   const runPhase = dash?.run_phase;
   const phase: RunPhase =
     runPhase === "paused" ? "paused" : runPhase === "running" ? "running" : "stopped";

@@ -1,40 +1,24 @@
 "use client";
 import { memo, type CSSProperties } from "react";
-import type { DashboardSnapshot } from "@/lib/poll";
 import { sessionIndexOf, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useWorkspace } from "@/lib/workspace";
 import { CardFrame } from "@/components/ui";
 import { Forest } from "./Forest";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { useLineage } from "./useLineage";
 
-interface Props {
-  // Live dashboard for the IN-VIEW cycle. Used to override that one cycle's
-  // expanded candidate detail with live (2 s, in-flight) data — every other
-  // cycle reads the fetched lineage snapshot. Source-by-cycle-role, never a
-  // per-field merge of the two (the banned stitch).
-  dash: DashboardSnapshot | null;
-  // The campaign whose lineage to render. A campaign is a FOREST: it holds
-  // N session roots, each with its own fork tree. One fetch returns every
-  // cycle; we render one cladogram per session.
-  campaignId: string | null;
-  // The cycle currently in view — its lane is the one that expands into the
-  // intra-cycle candidate cladogram (every other lane stays compact), and it's
-  // the lane that gets the live `dash` override.
-  cycleId: string | null;
-  onSelectCycle: (campaignId: string, cycleId: string) => void;
-}
-
-// The lineage card — presentational. All data, expand state, the live-dashboard
-// overlay, and the cleanup mutation live in useLineage; this renders the card
-// chrome, the fixed-height resizable viewport, and one Forest per session.
-export const FamilyTree = memo(function FamilyTree({
-  dash,
-  campaignId,
-  cycleId,
-  onSelectCycle,
-}: Props) {
+// The lineage card — presentational. All data, expand state, and the cleanup
+// mutation live in useLineage; this renders the card chrome, the fixed-height
+// resizable viewport, and one Forest per session. The in-view (campaignId,
+// cycleId) + the `selectCycle` jump come from the workspace; the in-view
+// cycle's live `best` (for the inherited-fork empty state) reads off the
+// dashboard stream. No props — every input is self-sourced from context.
+export const FamilyTree = memo(function FamilyTree() {
+  const { dash } = useDashboard();
+  const { campaignId, cycleId, selectCycle: onSelectCycle } = useWorkspace();
   const {
     forests,
     detailByCycle,
@@ -54,7 +38,7 @@ export const FamilyTree = memo(function FamilyTree({
     whatifActive,
     divergenceByKey,
     divergentKeys,
-  } = useLineage({ dash, campaignId, cycleId });
+  } = useLineage({ campaignId, cycleId });
 
   return (
     <CardFrame

@@ -1,5 +1,5 @@
 "use client";
-import type { ConnectorView } from "@/lib/types";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
 
 // Vanilla, extendable inline list of the active pipeline's nodes — the plain
@@ -8,7 +8,12 @@ import { useSelection } from "@/lib/SelectionContext";
 // same SelectionContext.node axis the hero writes. It maps straight over the
 // served view nodes, so adding a node to the pipeline just shows up here — no
 // per-node code. Intentionally near-unstyled; this is mechanics, not polish.
-export function PipelineNodeList({ cv }: { cv: ConnectorView }) {
+//
+// Self-sources the connector view from the nearest `ConnectorProvider`, so it
+// reads the shell connector on the Chat tab and the draft's nested connector
+// inside the ingest setup section — the same component, the right scope each.
+export function PipelineNodeList() {
+  const cv = useConnector();
   const { node: selected, setSelectionForNode } = useSelection();
   const nodes = (cv.view?.nodes ?? []).filter((n) => n.kind !== "io");
   const schema = cv.nodeConfigSchema;

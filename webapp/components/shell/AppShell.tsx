@@ -1,30 +1,22 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { fetchCycleFile, fetchPipeline, type HardSamplesScope } from "@/lib/api";
+import { fetchCycleFile, type HardSamplesScope } from "@/lib/api";
 import { postStopCycle } from "@/lib/api/mutations";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useDatasetPreview } from "@/lib/hooks/useDatasetPreview";
-import { useFetch } from "@/lib/hooks/useFetch";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { applyChartDefaults } from "@/lib/theme";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { StatusAssistant } from "@/components/status/StatusAssistant";
-import { TopStrip } from "@/components/dashboard/layout/TopStrip";
-import { Lane } from "@/components/dashboard/layout/Lane";
-import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
-import { RoundTabsStrip } from "@/components/dashboard/samples/RoundTabsStrip";
-import { CyclePicker } from "@/components/shell/CyclePicker";
+import { DashboardTab } from "@/components/dashboard/layout/DashboardTab";
 import { SelectionProvider } from "@/lib/SelectionContext";
-import { NowTriad } from "@/components/dashboard/layout/NowTriad";
-import { RunErrorBanner } from "@/components/dashboard/layout/RunErrorBanner";
+import { LineageOverlayProvider } from "@/lib/lineage-overlay";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
-
-import type { PipelineDoc } from "@/components/workflow";
 
 // The non-landing surfaces load on demand, not on first paint. The operator
 // lands on the dashboard tab; Chat / Files / Verify (and the markdown renderer
@@ -66,7 +58,6 @@ function AppShellInner() {
   const {
     campaignId,
     cycleId,
-    sessionId,
     activeError,
     cyclesError,
     cyclesLoaded,
@@ -129,18 +120,10 @@ function AppShellInner() {
     setSidebarMobileOpen(false);
   }
 
-  // Single-ingress dashboard read. `useDashboard` wraps `useCycleStream`
-  // and exposes the derived round number — no component re-runs `roundOf`
-  // on its own, no second snapshot path.
+  // Single-ingress dashboard read, kept here only for the status-banner
+  // derivation below. Every dashboard surface self-sources its own live state
+  // via `useDashboard()`/`useCycleStream()`, so nothing is threaded from here.
   const dashState = useDashboard();
-  const { dash, dashRound, isLive, runPhaseResolved } = dashState;
-
-  // One-shot pipeline (topology) lookup. Errors → pipeline stays null (panes
-  // that need it render their own empty state); no retry needed for a static read.
-  const { data: pipeline } = useFetch<PipelineDoc>(
-    () => fetchPipeline().then((p) => p as PipelineDoc),
-    [],
-  );
 
   // Cycle title (dataset name) from index.json. Hand-rolled on purpose: it
   // fans one fetch into two state slots (title + started-at) AND must KEEP the
@@ -196,6 +179,10 @@ function AppShellInner() {
 
   return (
     <SelectionProvider cycleId={cycleId}>
+    {/* The campaign lineage fetch + its mask/lens divergence overlay — owned once
+        at the shell root (inside CycleStreamProvider + SelectionProvider it reads
+        from), consumed by the lineage card and the fitness panel. */}
+    <LineageOverlayProvider campaignId={campaignId}>
     <ConnectorProvider datasetName={datasetName}>
     <div
       className={`shell${tab === "chat" ? " chat-mode sidebar-hidden" : sidebarCollapsed ? " sidebar-collapsed" : ""}${sidebarMobileOpen ? " sidebar-mobile-open" : ""}`}
@@ -243,8 +230,6 @@ function AppShellInner() {
           bannerStatus={bannerStatus}
           bannerText={bannerText}
           bannerHint={bannerHint}
-          dash={dash}
-          runPhaseResolved={runPhaseResolved}
           onOpenFiles={() => setTab("files")}
           onStopCampaign={
             campaignId && cycleId
@@ -263,13 +248,7 @@ function AppShellInner() {
         ) : null}
         {tab === "chat" ? (
           <ChatPane
-            campaignId={campaignId}
-            cycleId={cycleId}
-            sessionId={sessionId}
             datasetTitle={datasetTitle}
-            dash={dash}
-            isLive={isLive}
-            dashRound={dashRound}
             cycleStartedAt={cycleStartedAt}
             datasetName={datasetName}
             datasetItems={datasetItems}
@@ -283,45 +262,7 @@ function AppShellInner() {
             onMinted={(sel) => selectCycle(sel.campaignId, sel.cycleId)}
           />
         ) : tab === "dashboard" ? (
-          <div className="content" id="content-dashboard">
-            <div className="dash-spine-narrow">
-              <header className="dash-hero">
-                <div className="page-header">
-                  <div className="breadcrumb">
-                    Campaign »{" "}
-                    <CyclePicker />
-                  </div>
-                </div>
-              </header>
-            </div>
-            <div className="dash-spine-narrow">
-              <RunErrorBanner dash={dash} />
-              {/* TopStrip + RoundTabsStrip share one row so the round
-                  axis (LIVE pill + completed-round circles) sits beside
-                  the headline KPIs the operator scans first. */}
-              <div className="dash-top-row">
-                <TopStrip dash={dash} dashRound={dashRound} runPhase={runPhaseResolved} />
-                <RoundTabsStrip dash={dash} isLive={isLive} />
-              </div>
-            </div>
-            <div className="dash-spine-narrow">
-              <NowTriad
-                dash={dash}
-                dashRound={dashRound}
-                status={dashState.status}
-                pipeline={pipeline}
-                campaignId={campaignId}
-                cycleId={cycleId}
-                onSelectCycle={selectCycle}
-                isLive={isLive}
-              />
-            </div>
-            <Lane id="livestate" title="Live state" subtitle="Raw dashboard.json + trend + score frequency" defaultOpen>
-              <div className="dash-spine-narrow">
-                <LiveStateCard dash={dash} />
-              </div>
-            </Lane>
-          </div>
+          <DashboardTab />
         ) : tab === "files" ? (
           <FilesPane campaignId={campaignId} cycleId={cycleId} />
         ) : (
@@ -344,6 +285,7 @@ function AppShellInner() {
       )}
     </div>
     </ConnectorProvider>
+    </LineageOverlayProvider>
     </SelectionProvider>
   );
 }

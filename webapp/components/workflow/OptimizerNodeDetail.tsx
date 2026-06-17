@@ -1,11 +1,13 @@
 "use client";
 import { useMemo } from "react";
 import type { PipelineDoc } from "./types";
-import { type DashboardSnapshot, type StatusKind, roundOf } from "@/lib/poll";
+import { type DashboardSnapshot } from "@/lib/poll";
 import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
 import { availableRounds } from "@/lib/derivations";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
-import { useSelection } from "@/lib/SelectionContext";
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useWorkspace } from "@/lib/workspace";
+import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { phaseToNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
 import type { NodeBlock } from "@/lib/types";
@@ -13,17 +15,6 @@ import type { NodeBlock } from "@/lib/types";
 interface Props {
   id: string;
   pipeline: PipelineDoc | null;
-  dash: DashboardSnapshot | null;
-  // Freshness gate — a frozen cycle keeps `dash.state` at its last phase;
-  // without this the detail panel would claim the node is "live" forever.
-  isLive: boolean;
-  // Forwarded to the round-samples view, which renders inside this panel for
-  // the l1_score node (its live/historical body keys off the cycle status).
-  status: StatusKind;
-  // Needed for the lazy per-round fetch when the operator picks a
-  // historical round from the dropdown.
-  campaignId: string | null;
-  cycleId: string | null;
   onClose: () => void;
 }
 
@@ -64,16 +55,13 @@ function liveNodeBlock(
   return block && typeof block === "object" ? block : null;
 }
 
-export function OptimizerNodeDetail({
-  id,
-  pipeline,
-  dash,
-  isLive,
-  status,
-  campaignId,
-  cycleId,
-  onClose,
-}: Props) {
+export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
+  // Self-sourced: live snapshot + liveness from the cycle stream, (campaignId,
+  // cycleId) from the workspace for the lazy per-round fetch. `isLive` is the
+  // freshness gate — a frozen cycle keeps `dash.state` at its last phase, so
+  // without it the panel would claim the node is "live" forever.
+  const { dash, isLive, dashRound: liveRound } = useDashboard();
+  const { campaignId, cycleId } = useWorkspace();
   const view = pipeline?.view;
   const meta = view?.nodes.find((n) => n.id === id);
   const label = meta?.label ?? id;
@@ -82,18 +70,15 @@ export function OptimizerNodeDetail({
   const cfg = pipeline?.nodes?.[id];
   const cfgInner = (cfg?.config ?? {}) as Record<string, unknown>;
 
-  // The viewed round is owned by SelectionContext — the same source of
-  // truth the RoundTabsStrip, lineage tree, fitness chart, samples view,
-  // and the Optimizer card's toolbar picker all read/write. `null` =
-  // follow live; when no explicit pick exists we fall through to the
-  // live round, then to the most recent completed round.
-  const { round: selectedRound } = useSelection();
-  const liveRound = roundOf(dash);
+  // The viewed round comes from the single resolver every round-scoped
+  // surface shares (`useEffectiveRound`): the explicit pick, else the live
+  // in-flight round, else the most recent completed round. No bespoke
+  // fallback here — that is exactly the per-widget drift the resolver retired.
+  const { round: activeRound } = useEffectiveRound();
   // Completed rounds are owned by `availableRounds` (round-axis) — ascending,
-  // so the most recent fired round is the tail.
+  // so the most recent fired round is the tail. Used only for the status line.
   const completed = availableRounds(dash, isLive).completed;
   const lastFiredRound = completed.at(-1) ?? null;
-  const activeRound = selectedRound ?? liveRound ?? lastFiredRound;
 
   // Live round: read inline (no fetch). Historical round: lazy-fetch the
   // round file; `block` is null until it lands. `useRoundSource` owns the
@@ -252,12 +237,7 @@ export function OptimizerNodeDetail({
 
       {id === "l1_score" && (
         <section className="opt-detail-samples" aria-label="Round samples">
-          <RoundSamplesView
-            dash={dash}
-            status={status}
-            campaignId={campaignId}
-            cycleId={cycleId}
-          />
+          <RoundSamplesView />
         </section>
       )}
 

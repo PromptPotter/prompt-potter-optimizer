@@ -3,11 +3,10 @@ import { useState } from "react";
 import { postChangeSpendBudget, IngestApiError } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { fmtUsd, fmtTokens } from "@/lib/format";
+import { useWorkspace } from "@/lib/workspace";
 import { Modal } from "@/components/shell/Modal";
 
 interface Props {
-  campaignId: string | null;
-  cycleId: string | null;
   // The two standing ceilings as the live dashboard reports them
   // (`run_limits.spend_budget_usd` / `run_limits.token_budget`); `null` =
   // disarmed. Used to prefill the inputs + show the standing caps.
@@ -25,13 +24,12 @@ interface Props {
 // next round boundary. Setting a ceiling to `0` halts after the current round —
 // confirmed first, since that's effectively a stop.
 export function SpendBudgetControl({
-  campaignId,
-  cycleId,
   currentBudgetUsd,
   currentBudgetTokens,
   usedUsd,
   usedTokens,
 }: Props) {
+  const { campaignId, cycleId } = useWorkspace();
   const [usdDraft, setUsdDraft] = useState<string>(
     currentBudgetUsd != null ? String(currentBudgetUsd) : "",
   );

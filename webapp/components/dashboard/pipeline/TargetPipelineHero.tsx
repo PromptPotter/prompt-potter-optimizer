@@ -1,8 +1,8 @@
 "use client";
 import type { PipelineView, PipelineViewNode } from "@/components/workflow";
-import type { ConnectorView } from "@/lib/types";
 import type { NodeConfigParam } from "@/lib/api";
 import { ConnectorInspector } from "./ConnectorInspector";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
 import { cx } from "@/lib/cx";
 
@@ -32,10 +32,6 @@ function configuredModel(
 interface Props {
   samplesOpen: boolean;
   onToggle: () => void;
-  // The joined connector/backend surface — read by ChatPane from the shared
-  // `useConnector()` view and passed down so the same `cv` backs both this
-  // hero and the BackendNodeDetail panel below it (no double fetch).
-  cv: ConnectorView;
 }
 
 const ATTACH_ICON = (
@@ -252,7 +248,8 @@ function MultiNodeStrip({
   );
 }
 
-export function TargetPipelineHero({ samplesOpen, onToggle, cv }: Props) {
+export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
+  const cv = useConnector();
   const interior = cv.view ? interiorNodes(cv.view) : [];
   const isSingle = interior.length <= 1;
 

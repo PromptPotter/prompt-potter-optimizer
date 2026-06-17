@@ -1,12 +1,10 @@
 "use client";
 import { useMemo, useState } from "react";
-import {
-  roundOf,
-  type DashboardSnapshot,
-  type StatusKind,
-} from "@/lib/poll";
 import { CardFrame } from "@/components/ui";
 import { useSelection } from "@/lib/SelectionContext";
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useWorkspace } from "@/lib/workspace";
+import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import {
   roundCandidatesByRound,
@@ -23,22 +21,14 @@ import { RoundSamplesEmptyState } from "./RoundSamplesEmptyState";
 // The candidate list comes from `roundCandidatesByRound` in both
 // modes so the displayed groups stay aligned with lineage + fitness.
 
-interface Props {
-  dash: DashboardSnapshot | null;
-  status: StatusKind;
-  campaignId: string | null;
-  cycleId: string | null;
-}
-
-export function RoundSamplesView({ dash, status, campaignId, cycleId }: Props) {
-  const { round: selectedRound, setSelectionForCandidate, setSelectionForRound, candidate } =
-    useSelection();
-  const liveRound = roundOf(dash);
-  // null = follow live: fall through to the in-flight round when one
-  // exists. A completed-round pick stays explicit until the operator
-  // clicks the live pill or another tab. `useRoundSource` owns the
-  // live/historical guard + the historical round-file fetch.
-  const effectiveRound = selectedRound ?? liveRound;
+export function RoundSamplesView() {
+  const { dash, status } = useDashboard();
+  const { campaignId, cycleId } = useWorkspace();
+  const { setSelectionForCandidate, setSelectionForRound, candidate } = useSelection();
+  // The active round — the explicit pick, else the live in-flight round —
+  // from the single resolver every round-scoped surface shares. `useRoundSource`
+  // owns the live/historical guard + the historical round-file fetch.
+  const { round: effectiveRound } = useEffectiveRound();
   const {
     isLive: isLiveView,
     doc: roundDoc,

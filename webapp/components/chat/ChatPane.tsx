@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { DashboardSnapshot } from "@/lib/poll";
 import type { DatasetItem, HardSamplesScope, MeasurementDot } from "@/lib/api";
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useWorkspace } from "@/lib/workspace";
 import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import type { OnMinted } from "@/components/ingest/types";
@@ -20,14 +21,7 @@ import { useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
 
 interface Props {
-  campaignId: string | null;
-  cycleId: string | null;
-  sessionId: string | null;
   datasetTitle: string | null;
-  dash: DashboardSnapshot | null;
-  // Freshness gate — forwarded to the hard-samples heatmap.
-  isLive: boolean;
-  dashRound: number | null;
   cycleStartedAt: string | null;
   datasetName: string | null;
   datasetItems: DatasetItem[];
@@ -70,13 +64,7 @@ function etaToBudget(
 // rendered by the shared `IngestConversation` (same surface as the "New
 // campaign" modal): drop/pick → ask context if missing → one check-in → Start.
 export function ChatPane({
-  campaignId,
-  cycleId,
-  sessionId,
   datasetTitle,
-  dash,
-  isLive,
-  dashRound,
   cycleStartedAt,
   datasetName,
   datasetItems,
@@ -89,6 +77,9 @@ export function ChatPane({
   onHardSamplesScopeChange,
   onMinted,
 }: Props) {
+  // Self-sourced live state + identity for the job bar + spend chips.
+  const { dash } = useDashboard();
+  const { cycleId, sessionId } = useWorkspace();
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
   const [samplesOpen, setSamplesOpen] = useState(false);
@@ -218,13 +209,11 @@ export function ChatPane({
               <div className="row"><span className="lbl">Token cap</span><span className="val">{budgetTokens != null ? fmtTokens(budgetTokens) : "Uncapped"}</span></div>
             </div>
             <div className="job-whatif">
-              <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} />
+              <FitnessPanel />
             </div>
             <div className="job-section" title={TERMS.newjob_bar_adjust}>
               <div className="section-title">Finishing criteria</div>
               <SpendBudgetControl
-                campaignId={campaignId}
-                cycleId={cycleId}
                 currentBudgetUsd={budgetUsd}
                 currentBudgetTokens={budgetTokens}
                 usedUsd={usedUsd}
@@ -237,23 +226,16 @@ export function ChatPane({
       ) : null}
 
       <div className="wf-hero">
-        <TargetPipelineHero samplesOpen={samplesOpen} onToggle={toggleSamples} cv={cv} />
-        <PipelineNodeList cv={cv} />
+        <TargetPipelineHero samplesOpen={samplesOpen} onToggle={toggleSamples} />
+        <PipelineNodeList />
         {showBackendDetail && (
           <BackendNodeDetail
-            cv={cv}
-            dash={dash}
             draft={previewDraft}
             onClose={() => setSelectionForNode(null)}
           />
         )}
         {samplesOpen && (
           <HardSamplesHeatmap
-            campaignId={campaignId}
-            cycleId={cycleId}
-            dash={dash}
-            isLive={isLive}
-            dashRound={dashRound}
             datasetName={datasetName}
             datasetItems={datasetItems}
             datasetMeasuredCount={datasetMeasuredCount}

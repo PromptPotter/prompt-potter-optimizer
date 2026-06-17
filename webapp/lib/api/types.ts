@@ -60,29 +60,3 @@ export type SiblingKind = "root" | "fork" | "diag" | "sweep";
 // auto-forking (not emitted yet).
 export type UnitKind = "session" | "divergent_resume" | "user_fork" | "l3_fork";
 
-// Cycle detail — feeds the compare-campaigns view, read from index.json
-// (not a router response, so not in the generator scope).
-
-export interface CampaignRoundSummary {
-  round: number;
-  round_id?: string;
-  label?: string;
-  accuracy: number | null;
-  hits?: number | null;
-  total?: number | null;
-  improved?: boolean;
-  created_at?: string;
-}
-
-export interface CampaignDetail {
-  campaign_id: string;
-  status: string;
-  best_accuracy: number | null;
-  origin_accuracy: number | null;
-  n_rounds: number;
-  rounds: CampaignRoundSummary[];
-  header?: { dataset_name?: string; dataset_size?: number };
-  created_at?: string;
-  updated_at?: string;
-  finished_at?: string;
-}

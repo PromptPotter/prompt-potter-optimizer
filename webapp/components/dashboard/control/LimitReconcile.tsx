@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { LimitOverrides } from "@/lib/api";
 import { forkReconcileDefaults } from "@/lib/derivations";
 import { fmtUsd, fmtTokens } from "@/lib/format";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 
 // The run-limit reconcile half of the steer flow (decision E). A fork numbers
 // its rounds from 1, so the operator confirms the fork's OWN absolute ceilings
@@ -28,12 +28,11 @@ interface Fields {
 }
 
 export function LimitReconcile({
-  dash,
   onChange,
 }: {
-  dash: DashboardSnapshot | null;
   onChange: (limits: LimitOverrides) => void;
 }) {
+  const { dash } = useDashboard();
   // Snapshot the defaults once at open — the cycle is stopped/paused while
   // steering, but the 2 s poll keeps mutating `dash`; the operator's typed
   // values are the working copy and must not be clobbered by a later tick.

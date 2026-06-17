@@ -1,9 +1,9 @@
 "use client";
-import type { ConnectorView } from "@/lib/types";
-import type { DashboardSnapshot } from "@/lib/poll";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { resolveSearchPoint } from "@/lib/derivations";
 import { useSelection } from "@/lib/SelectionContext";
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useConnector } from "@/lib/hooks/useConnector";
 import { SearchPointPreview } from "./SearchPointPreview";
 import { NodeSurface } from "./NodeSurface";
 
@@ -19,8 +19,6 @@ import { NodeSurface } from "./NodeSurface";
 // `SteerForkPanel` Dialog. This panel is inspect-only; it never forks.
 
 interface Props {
-  cv: ConnectorView;
-  dash: DashboardSnapshot | null;
   // The active draft while a campaign is being set up; null otherwise. When set,
   // the preview shows the draft's searchpoint rather than the origin / live one.
   draft: DraftCampaignWire | null;
@@ -29,7 +27,11 @@ interface Props {
   onPromptApply?: (patch: DraftPatch) => void;
 }
 
-export function BackendNodeDetail({ cv, dash, draft, onClose, onPromptApply }: Props) {
+export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
+  // `cv` self-sourced from the nearest ConnectorProvider — the shell connector
+  // on the Chat tab, the draft's nested connector in the ingest setup section.
+  const cv = useConnector();
+  const { dash } = useDashboard();
   const { node: selectedId } = useSelection();
   const { point, label } = resolveSearchPoint({ draft, dash, cv });
   const node = cv.view?.nodes.find((n) => n.id === selectedId && n.kind !== "io") ?? null;

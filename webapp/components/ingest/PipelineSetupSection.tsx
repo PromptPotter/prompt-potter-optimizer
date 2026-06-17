@@ -119,11 +119,9 @@ function PipelineSetupInner({
         </>
       ) : (
         <>
-          <PipelineNodeList cv={cv} />
+          <PipelineNodeList />
           {showDetail ? (
             <BackendNodeDetail
-              cv={cv}
-              dash={null}
               draft={draft}
               onClose={() => setSelectionForNode(null)}
               onPromptApply={onApply}

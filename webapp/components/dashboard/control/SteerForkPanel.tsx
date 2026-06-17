@@ -10,6 +10,8 @@ import {
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useConnector } from "@/lib/hooks/useConnector";
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import {
   candidateSearchPoint,
@@ -18,7 +20,6 @@ import {
   limitOverridesFromDefaults,
 } from "@/lib/derivations";
 import type { SelectedCandidate } from "@/lib/types";
-import type { DashboardSnapshot } from "@/lib/poll";
 import { PromptFieldsEditor } from "./PromptFieldsEditor";
 import { NodeConfigEditor } from "./NodeConfigEditor";
 import { NodeOutputSchemaView } from "./NodeOutputSchemaView";
@@ -43,33 +44,29 @@ import { LimitReconcile } from "./LimitReconcile";
 // any caller under `ConnectorProvider` can mount it.
 
 export function SteerForkPanel({
-  campaignId,
-  cycleId,
   candidate,
-  dash,
-  isLive,
   onDone,
   onCancel,
 }: {
-  campaignId: string | null;
-  cycleId: string | null;
   candidate: SelectedCandidate;
-  dash: DashboardSnapshot | null;
-  // When the parent is running, confirm stops it before forking.
-  isLive: boolean;
   onDone: () => void;
   onCancel: () => void;
 }) {
-  // `roundIsLive` (is `candidate.round` the in-flight round) is distinct from
-  // the `isLive` prop (is the parent cycle running). The live round's seed
-  // comes from `dashboard.json`; a completed round's from its round file.
+  // Self-sourced live snapshot + ids + connector view. `isLive` (is the parent
+  // cycle running — confirm stops it before forking) is the connector's
+  // liveness; `roundIsLive` (is `candidate.round` the in-flight round) is
+  // distinct — the live round's seed comes from `dashboard.json`, a completed
+  // round's from its round file.
+  const { dash } = useDashboard();
+  const { campaignId, cycleId } = useWorkspace();
+  const cv = useConnector();
+  const isLive = cv.isLive;
   const { isLive: roundIsLive, doc } = useRoundSource(
     campaignId,
     cycleId,
     candidate.round,
     dash,
   );
-  const cv = useConnector();
   const { me } = useAuth();
   const seed = roundIsLive
     ? liveCandidateSearchPoint(dash, candidate.candidate_id)
@@ -150,7 +147,7 @@ export function SteerForkPanel({
 
       <NodeOutputSchemaView schema={cv.nodeOutputSchema} />
 
-      <LimitReconcile dash={dash} onChange={(l) => (limits.current = l)} />
+      <LimitReconcile onChange={(l) => (limits.current = l)} />
 
       {err && <span className="steer-fork-err" role="alert">fork: {err}</span>}
 

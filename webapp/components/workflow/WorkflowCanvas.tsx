@@ -11,9 +11,9 @@ import {
 import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import { getCss } from "@/lib/theme";
-import { type DashboardSnapshot } from "@/lib/poll";
 import { availableRounds } from "@/lib/derivations";
 import { useSelection } from "@/lib/SelectionContext";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import type { NodeDataLike, PipelineDoc } from "./types";
 
 // Edge variants — collapses three parallel switches (stroke colour key,
@@ -29,13 +29,12 @@ const EDGE_VARIANTS: Record<string, { color: ColorKey; dash: string; marker: str
 
 interface Props {
   pipeline: PipelineDoc | null;
-  dash: DashboardSnapshot | null;
-  // Real liveness from the cycle stream (poll age), not `dash` truthiness —
-  // a frozen campaign still has a `dash` snapshot but is not live.
-  isLive: boolean;
 }
 
-export function WorkflowCanvas({ pipeline, dash, isLive }: Props) {
+export function WorkflowCanvas({ pipeline }: Props) {
+  // Self-sourced liveness from the cycle stream (poll age), not `dash`
+  // truthiness — a frozen campaign still has a `dash` snapshot but is not live.
+  const { dash, isLive } = useDashboard();
   const view = pipeline?.view;
   // One compact wide-short layout at every width — keeps the optimizer
   // card (and the dashboard) short on desktop as well as phone.

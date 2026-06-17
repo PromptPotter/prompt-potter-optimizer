@@ -7,6 +7,7 @@ import {
 } from "@/lib/api";
 import { parseSampleLine } from "@/lib/sample-line";
 import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
@@ -15,15 +16,6 @@ import { type MeasurementDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 interface Props {
-  // Run-control target — the play/pause/fork cluster sits beside the heat-map
-  // + sample-trajectory toggles in this row, so the ids ride in here.
-  campaignId: string | null;
-  cycleId: string | null;
-  dash: DashboardSnapshot | null;
-  // Freshness gate — forwarded to HardSamplesTable so the row-scoring blink
-  // stops when the optimizer process dies.
-  isLive: boolean;
-  dashRound: number | null;
   datasetName: string | null;
   datasetItems: DatasetItem[];
   datasetMeasuredCount: number;
@@ -82,11 +74,6 @@ function liveMeasurements(
 // mostly miss, dark = no measurements. Clicking the badge expands the full
 // HardSamplesTable; the bottom-edge grip (hover to reveal) resizes it.
 export function HardSamplesHeatmap({
-  campaignId,
-  cycleId,
-  dash,
-  isLive,
-  dashRound,
   datasetName,
   datasetItems,
   datasetMeasuredCount,
@@ -97,6 +84,10 @@ export function HardSamplesHeatmap({
   hardSamplesScope,
   onHardSamplesScopeChange,
 }: Props) {
+  // Live snapshot, self-sourced — feeds the live mid-round measurement merge.
+  // The table, run-control, and trajectory children self-source their own
+  // liveness/ids now, so nothing is threaded down from here.
+  const { dash, dashRound } = useDashboard();
   const [heatExpanded, setHeatExpanded] = useState(false);
   const [bankExpanded, setBankExpanded] = useState(false);
 
@@ -193,23 +184,15 @@ export function HardSamplesHeatmap({
           rounds={dash?.rounds ?? []}
           onToggle={() => setBankExpanded((e) => !e)}
         />
-        <RunControlButton campaignId={campaignId} cycleId={cycleId} dash={dash} />
-        <OriginGateModal campaignId={campaignId} cycleId={cycleId} dash={dash} />
+        <RunControlButton />
+        <OriginGateModal />
       </div>
       {(bankExpanded || heatExpanded) && (
         <RotatePrompt surfaceName="The sample heat-map" skipRender>
-          {bankExpanded && (
-            <SampleTrajectory
-              rounds={dash?.rounds ?? []}
-              campaignId={campaignId}
-              cycleId={cycleId}
-            />
-          )}
+          {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
           {heatExpanded && (
             <div className="hs-expand-wrap">
               <HardSamplesTable
-                dash={dash}
-                isLive={isLive}
                 perSample={perSample}
                 datasetName={datasetName}
                 datasetItems={datasetItems}

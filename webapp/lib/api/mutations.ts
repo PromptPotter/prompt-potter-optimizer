@@ -116,16 +116,6 @@ export async function postStopCycle(
   });
 }
 
-export async function postDeleteCycle(
-  campaignId: string,
-  cycleId: string,
-): Promise<CommandAcceptedBody> {
-  return _postCommand("delete-cycle", {
-    campaign_id: campaignId,
-    cycle_id: cycleId,
-  });
-}
-
 // Campaign lifecycle — soft-marks `lifecycle_status` on the campaign
 // manifest. Measurements survive (cross-campaign cache-hits keep working).
 // Deletion is never physical at this site; `try_delete_stub_cycle` stays

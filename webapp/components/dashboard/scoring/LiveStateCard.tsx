@@ -1,12 +1,9 @@
 import type { DashboardSnapshot } from "@/lib/poll";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import { fmtNum, fmtClock } from "@/lib/format";
 import { CardFrame } from "@/components/ui";
 import { FreqChart } from "@/components/eval/FreqChart";
 import { TrendChart } from "@/components/eval/TrendChart";
-
-interface Props {
-  dash: DashboardSnapshot | null;
-}
 
 // Fields surfaced elsewhere (header, payload block, dedicated cards, workflow
 // toolbar) — or withheld from the UI entirely. `patience` is withheld pending
@@ -51,7 +48,8 @@ const FORMATTERS: Record<string, (v: unknown) => string> = {
   state_since: fmtClock,
 };
 
-export function LiveStateCard({ dash }: Props) {
+export function LiveStateCard() {
+  const { dash } = useDashboard();
   const formula = (dash as { composite_fitness_formula?: string } | null)?.composite_fitness_formula || "—";
 
   // Build the KV grid: derived origin row first (origin is round 0 in
@@ -133,8 +131,8 @@ export function LiveStateCard({ dash }: Props) {
           Stacked vertically because the narrow spine doesn't have room for
           the old side-by-side .dash-charts grid. */}
       <div className="lsc-charts">
-        <TrendChart dash={dash} />
-        <FreqChart dash={dash} />
+        <TrendChart />
+        <FreqChart />
       </div>
     </CardFrame>
   );

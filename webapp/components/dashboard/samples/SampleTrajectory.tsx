@@ -15,12 +15,6 @@ import { ROW_LABEL, SQ_ADD, SQ_DROP, SQ_KEPT } from "./trajectoryStyles";
 
 interface Props {
   rounds: RoundSummary[];
-  // The Series view's hover popup lazy-fetches the hovered round's timeline and
-  // its click seeds the fitness sample-set; both need the ids. Optional so the
-  // Delta/Series views still render standalone (the mini-button preview passes
-  // only `rounds`).
-  campaignId?: string | null;
-  cycleId?: string | null;
 }
 
 type ViewKind = "delta" | "series";
@@ -76,7 +70,7 @@ export function SampleTrajectoryMiniButton({
 
 // Content panel — Delta or Series view. Pure renderer; parent owns the
 // expand toggle (the mini-button above).
-export function SampleTrajectory({ rounds, campaignId = null, cycleId = null }: Props) {
+export function SampleTrajectory({ rounds }: Props) {
   const [view, setView] = useState<ViewKind>("delta");
   const sorted = useMemo(() => buildSorted(rounds), [rounds]);
 
@@ -98,7 +92,7 @@ export function SampleTrajectory({ rounds, campaignId = null, cycleId = null }: 
       {view === "delta" ? (
         <DeltaView sorted={sorted} />
       ) : (
-        <SeriesView sorted={sorted} campaignId={campaignId} cycleId={cycleId} />
+        <SeriesView sorted={sorted} />
       )}
     </CardFrame>
   );
@@ -111,28 +105,16 @@ export function SampleTrajectory({ rounds, campaignId = null, cycleId = null }: 
 // whether a click selects measured-only or the whole round.
 export function SampleTrajectorySeries({
   rounds,
-  campaignId = null,
-  cycleId = null,
   selectMode = "measured",
   maxHeight = 200,
 }: {
   rounds: RoundSummary[];
-  campaignId?: string | null;
-  cycleId?: string | null;
   selectMode?: SelectMode;
   maxHeight?: number;
 }) {
   const sorted = useMemo(() => buildSorted(rounds), [rounds]);
   if (sorted.rounds.length === 0) return null;
-  return (
-    <SeriesView
-      sorted={sorted}
-      campaignId={campaignId}
-      cycleId={cycleId}
-      selectMode={selectMode}
-      maxHeight={maxHeight}
-    />
-  );
+  return <SeriesView sorted={sorted} selectMode={selectMode} maxHeight={maxHeight} />;
 }
 
 function ViewToggle({ view, onChange }: { view: ViewKind; onChange: (v: ViewKind) => void }) {

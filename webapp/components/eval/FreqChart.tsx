@@ -6,13 +6,13 @@ import { TERMS } from "@/lib/terms";
 import { parseSampleLine } from "@/lib/sample-line";
 import {
   liveL1Candidates,
-  roundOf,
   type DashboardSnapshot,
 } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { CardFrame } from "@/components/ui";
-import { useSelection } from "@/lib/SelectionContext";
 import type { RawResultRow } from "@/lib/types";
 
 ensureChartRegistered();
@@ -20,10 +20,6 @@ ensureChartRegistered();
 // Local alias kept to the fields FreqChart actually buckets. Same
 // shape, narrower view — the chart never touches sample_id / hit / fitness.
 type ResultRow = Pick<RawResultRow, "score" | "error" | "predicted" | "ground_truth">;
-
-interface Props {
-  dash: DashboardSnapshot | null;
-}
 
 const LABELS = ["0", "", "", "", "", "", "", "", "", "1"];
 
@@ -57,20 +53,19 @@ function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
   return out;
 }
 
-export function FreqChart({ dash }: Props) {
+export function FreqChart() {
   useThemeVersion();
   const chartRef = useRef(null);
+  const { dash } = useDashboard();
   const { campaignId, cycleId } = useWorkspace();
-  const { round: selectedRound } = useSelection();
+  // The active round, from the single resolver every round-scoped surface shares.
+  const { round: effectiveRound, isLiveView } = useEffectiveRound();
 
   // Source-of-truth split (no-stitch rule): live mode reads only
   // `dashboard.json`'s in-flight sample lines; historical mode reads only
   // `round_NNNN.json`'s `results[]`. `useRoundSource` owns the guard —
   // it idles the fetch on the live round, so there's no fallback chain.
-  // `null` selection follows the in-flight round.
-  const liveRound = roundOf(dash);
-  const effectiveRound = selectedRound ?? liveRound;
-  const { isLive: isLiveView, doc: roundDoc } = useRoundSource(
+  const { isLive, doc: roundDoc } = useRoundSource(
     campaignId,
     cycleId,
     effectiveRound,
@@ -78,9 +73,9 @@ export function FreqChart({ dash }: Props) {
   );
 
   const results: ResultRow[] = useMemo(() => {
-    if (isLiveView) return liveResultsFrom(dash);
+    if (isLive) return liveResultsFrom(dash);
     return (roundDoc?.results as ResultRow[] | undefined) ?? [];
-  }, [isLiveView, dash, roundDoc]);
+  }, [isLive, dash, roundDoc]);
 
   const data = bucketScores(results);
   const accStrong = getCss("--color-accent-strong");
@@ -101,7 +96,7 @@ export function FreqChart({ dash }: Props) {
       title={<span title={TERMS.stub_score_freq}>Score Frequency</span>}
       actions={
         <span className="badge">
-          {isLiveView || selectedRound == null ? "live" : `R${selectedRound}`}
+          {isLiveView ? "live" : `R${effectiveRound}`}
         </span>
       }
     >

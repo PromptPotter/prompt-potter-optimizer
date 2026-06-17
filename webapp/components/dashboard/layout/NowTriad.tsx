@@ -1,5 +1,4 @@
 "use client";
-import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
 import {
   isOptimizerNodeId,
   OptimizerNodeDetail,
@@ -10,7 +9,6 @@ import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { FamilyTree } from "@/components/dashboard/lineage/FamilyTree";
 import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
 import { useSelection } from "@/lib/SelectionContext";
-import { LineageOverlayProvider } from "@/lib/lineage-overlay";
 
 // The Now lane's main row + drill-down. Renders the Fitness + Lineage row,
 // then (when a candidate is selected) the Scoring inspector on its own
@@ -18,71 +16,40 @@ import { LineageOverlayProvider } from "@/lib/lineage-overlay";
 // view is no longer a standalone card — it lives inside the l1_score node
 // panel (OptimizerNodeDetail), surfaced only when that node is clicked.
 //
-// All surfaces share `useSelection`: a click in any one re-anchors the
-// others through (candidate, round) — fitness ↔ lineage ↔ inspector ↔
-// samples stay structurally locked together. Extracted out of AppShell to
-// keep the page-level component a thin shell + lanes.
+// Every region reads its own state from context (`useDashboard`,
+// `useWorkspace`, `useSelection`); the only thing threaded is `pipeline` (a
+// one-shot topology read with no context home). A click in any one surface
+// re-anchors the others through `useSelection` — fitness ↔ lineage ↔ inspector
+// ↔ samples stay structurally locked together. The lineage fetch + its
+// mask/lens divergence overlay are owned by `LineageOverlayProvider` at the
+// shell root.
 
 interface Props {
-  dash: DashboardSnapshot | null;
-  dashRound: number | null;
-  status: StatusKind;
   pipeline: PipelineDoc | null;
-  campaignId: string | null;
-  cycleId: string | null;
-  onSelectCycle: (campaignId: string, cycleId: string) => void;
-  isLive: boolean;
 }
 
-export function NowTriad({
-  dash,
-  dashRound,
-  status,
-  pipeline,
-  campaignId,
-  cycleId,
-  onSelectCycle,
-  isLive,
-}: Props) {
+export function NowTriad({ pipeline }: Props) {
   const { candidate, node, setSelectionForCandidate, setSelectionForNode } =
     useSelection();
   return (
     <>
-      {/* The lineage fetch + its mask/lens divergence overlay are owned here, once,
-          and read by BOTH the fitness panel and the lineage card — one served
-          overlay, no cross-widget module global (R-36). */}
-      <LineageOverlayProvider campaignId={campaignId}>
-        <div className="dash-row-triad">
-          <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} />
-          <FamilyTree
-            dash={dash}
-            campaignId={campaignId}
-            cycleId={cycleId}
-            onSelectCycle={onSelectCycle}
-          />
-        </div>
-      </LineageOverlayProvider>
+      <div className="dash-row-triad">
+        <FitnessPanel />
+        <FamilyTree />
+      </div>
       {candidate && (
         <div className="card inspector-row">
           <ScoringInspector
-            campaignId={campaignId}
-            cycleId={cycleId}
             selected={candidate}
-            dash={dash}
             onClose={() => setSelectionForCandidate(null)}
           />
         </div>
       )}
-      <WorkflowCanvas pipeline={pipeline} dash={dash} isLive={isLive} />
+      <WorkflowCanvas pipeline={pipeline} />
       {node && isOptimizerNodeId(node) && (
         <OptimizerNodeDetail
           id={node}
           pipeline={pipeline}
-          dash={dash}
-          status={status}
-          isLive={isLive}
-          campaignId={campaignId}
-          cycleId={cycleId}
           onClose={() => setSelectionForNode(null)}
         />
       )}

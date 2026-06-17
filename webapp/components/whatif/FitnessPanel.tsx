@@ -12,11 +12,12 @@ import { setFitnessState, useFitnessState } from "./fitness-store";
 import { CardFrame } from "@/components/ui";
 import {
   liveL1Candidates,
-  type DashboardSnapshot,
   type LiveCandidate,
 } from "@/lib/poll";
 import type { RoundSummary } from "@/lib/api/types";
 import { useSelection } from "@/lib/SelectionContext";
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { FitnessFormulaEditor } from "./FitnessFormulaEditor";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -28,13 +29,11 @@ import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useLineageOverlay, divergenceRoundsFor } from "@/lib/lineage-overlay";
 
-interface Props {
-  dash: DashboardSnapshot | null;
-  dashRound: number | null;
-  cycleId: string | null;          // still used for one-shot evaluator-seed scoping
-}
-
-export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
+export function FitnessPanel() {
+  // Self-sourced: live snapshot from the cycle stream, (campaignId, cycleId)
+  // from the workspace. `cycleId` scopes the one-shot evaluator-seed.
+  const { dash } = useDashboard();
+  const { campaignId, cycleId } = useWorkspace();
   // Shared candidate selection — driving any of {fitness bar, lineage stub}
   // sets this context slot; the other surface(s) re-render highlighted.
   // FitnessChart resolves selectedKey → bar index by matching `bar.key`
@@ -77,7 +76,11 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
     () => liveL1Candidates(dash),
     [dash],
   );
-  const currentRound = dashRound ?? 0;
+  // The round in view — selected pick, else live — from the shared resolver, so
+  // the chip agrees with the samples + score-frequency cards (the bars below
+  // still span every round; this chip is the active round, not a scope on them).
+  const { round: effectiveRound } = useEffectiveRound();
+  const currentRound = effectiveRound ?? 0;
 
   // ── 2. Completed-round summaries from `dash.rounds[]` — sole source
   // of truth for historical bars. The projection accumulates these at
@@ -95,7 +98,6 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
   // (source_campaign, source_cycle) match the unit currently in view, then
   // keyed by source_label so the bars-assembly memo can attach diag data
   // to the matching candidate.
-  const { campaignId } = useWorkspace();
   // Gate on a confirmed session — diagnostic-runs is workspace-scoped and
   // 401s for anon; `null` fetcher means useFetch fires nothing on the public
   // preview (frontend-surface-contract.md § I5), matching VerifyPane.
@@ -295,7 +297,7 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
       title={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
           <span>Per-candidate fitness</span>
-          <span className="badge" title="Bars span every round, origin first; chip = current optimization round">R{currentRound}</span>
+          <span className="badge" title="Bars span every round, origin first; chip = the round in view (selected, else live)">R{currentRound}</span>
         </span>
       }
       actions={
@@ -334,9 +336,7 @@ export function FitnessPanel({ dash, dashRound, cycleId }: Props) {
       }
     >
       <div className="fitness-body">
-        {sampleSet && (
-          <SampleSetControl rounds={history} campaignId={campaignId} cycleId={cycleId} />
-        )}
+        {sampleSet && <SampleSetControl rounds={history} />}
         {/* Legend + chart wrapped so the legend sits over the chart's
             width specifically — when What-If opens and the card stretches,
             the legend stays anchored above the bars instead of drifting

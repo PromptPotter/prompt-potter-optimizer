@@ -3,7 +3,6 @@
 import { API, jget, jgetConditional, type Conditional } from "./client";
 import type {
   ActiveSessionResponse,
-  CampaignDetail,
   CampaignLineageResponse,
   CampaignListResponse,
   CyclesResponse,
@@ -361,12 +360,17 @@ export function fetchCycles(signal?: AbortSignal): Promise<CyclesResponse> {
   return jget<CyclesResponse>(`${API}/cycles`, signal);
 }
 
+// Conditional, like the dashboard poll: the unmasked request honors
+// `If-Modified-Since` → 304 so revalidation on the dashboard change-signal is
+// cheap during quiescent stretches. A masked request (lens/samples set) always
+// computes server-side — the server never 304s those.
 export function fetchCampaignLineage(
   campaignId: string,
   lens: string | null,
   samples: number[] | null,
+  ifModifiedSince?: string | null,
   signal?: AbortSignal,
-): Promise<CampaignLineageResponse> {
+): Promise<Conditional<CampaignLineageResponse>> {
   // One `lens` value drives the divergence overlay: `score:<formula>` = an
   // alternative scoring formula, `abort:<variant>` = a PoBB abort-contributor
   // switch-off. `samples` = the sample-set mask (re-score accuracy over only these
@@ -375,8 +379,9 @@ export function fetchCampaignLineage(
   if (lens) params.set("lens", lens);
   if (samples && samples.length > 0) params.set("samples", samples.join(","));
   const q = params.toString();
-  return jget<CampaignLineageResponse>(
+  return jgetConditional<CampaignLineageResponse>(
     `${API}/campaigns/${encodeURIComponent(campaignId)}/lineage${q ? `?${q}` : ""}`,
+    ifModifiedSince,
     signal,
   );
 }
@@ -389,17 +394,4 @@ export function fetchDiagnosticRuns(
 ): Promise<DiagnosticRunListResponse> {
   const qs = dataset ? `?dataset=${encodeURIComponent(dataset)}` : "";
   return jget<DiagnosticRunListResponse>(`${API}/diagnostic-runs${qs}`, signal);
-}
-
-// Cycle detail — reads index.json via the generic cycle-file endpoint (the
-// typed detail route's response schema doesn't always match the on-disk
-// shape; reading the raw file dodges that mismatch).
-export async function fetchCampaignDetail(
-  campaignId: string,
-  cycleId: string,
-  signal?: AbortSignal,
-): Promise<CampaignDetail> {
-  const file = await fetchCycleFile(campaignId, cycleId, "cycle", "index.json", signal);
-  if (!file.content) throw new Error("index.json is empty");
-  return JSON.parse(file.content) as CampaignDetail;
 }

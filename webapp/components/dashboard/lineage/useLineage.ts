@@ -1,28 +1,27 @@
 "use client";
 // Tree + state for the campaign lineage card. Everything that is NOT geometry
 // (layout.ts), NOT markup (FamilyTree/Forest), and NOT the shared fetch/overlay
-// (lib/lineage-overlay) lives here: the per-cycle expand set, the live-dashboard
-// overlay, the derived forests + natural width, and the empty-stub cleanup
-// mutation. The campaign fetch and the mask/lens divergence overlay are owned by
-// `LineageOverlayProvider` and read via `useLineageOverlay()` — the same source the
-// per-candidate fitness panel reads, so both surfaces render one served overlay.
+// (lib/lineage-overlay) lives here: the per-cycle expand set, the derived forests
+// + natural width, and the empty-stub cleanup mutation. The campaign fetch and the
+// mask/lens divergence overlay are owned by `LineageOverlayProvider` and read via
+// `useLineageOverlay()` — the SINGLE source both this card and the per-candidate
+// fitness panel render. The tree is the settled (closed-round, origin-C0-included)
+// structure served by `/lineage`, revalidated on the dashboard change-signal; the
+// in-flight round shows in the Fitness bars, not here (one source per data class).
 //
 // The mental model is three files, one per concern:
 //   layout.ts    pure geometry   (tree → SVG coordinates)
-//   useLineage   tree + state    (expand set, live overlay, cleanup)  ← here
+//   useLineage   tree + state    (expand set, forests, cleanup)  ← here
 //   FamilyTree   view            (card + viewport + Forest, presentational)
 
 import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
 import type { CampaignLineageCycle } from "@/lib/api";
-import type { DashboardSnapshot } from "@/lib/poll";
 import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
 import { rootCycleId, sessionIndexOf } from "@/lib/ids";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useLineageOverlay } from "@/lib/lineage-overlay";
-import { useExpandedDashboards } from "@/lib/hooks/useExpandedDashboards";
 import { useStableContent } from "@/lib/stable";
-import { roundCandidatesByRound } from "@/lib/derivations";
 import {
   COL_W,
   LEFT_PAD,
@@ -50,25 +49,6 @@ function detailFromLineage(c: CampaignLineageCycle): CycleDetail {
       })),
     })),
   };
-}
-
-// dashboard.json → normalized detail for the in-view cycle. Rides the same
-// per-round candidate derivation every other live surface uses.
-function detailFromDash(dash: DashboardSnapshot): CycleDetail {
-  const byRound = roundCandidatesByRound(dash);
-  const rounds = [...byRound.keys()]
-    .filter((r) => r > 0)
-    .sort((a, b) => a - b)
-    .map((round) => ({
-      round,
-      candidates: (byRound.get(round) ?? []).map((row) => ({
-        candidateId: row.candidate_id,
-        label: row.label,
-        accuracy: row.accuracy,
-        isWinner: row.is_winner,
-      })),
-    }));
-  return { rounds };
 }
 
 // Empty-stub cleanup — one campaign-wide modal mutation. Stubs accumulate
@@ -116,11 +96,9 @@ export interface Lineage {
 }
 
 export function useLineage({
-  dash,
   campaignId,
   cycleId,
 }: {
-  dash: DashboardSnapshot | null;
   campaignId: string | null;
   cycleId: string | null;
 }): Lineage {
@@ -168,34 +146,15 @@ export function useLineage({
     return roots;
   }, [data]);
 
-  // Other EXPANDED lanes (not the selected one) follow their OWN live
-  // dashboard.json — the web-only multi-cycle view. The selected cycle already
-  // rides the `dash` prop, so it's excluded here.
-  const expandedOthers = useMemo(
-    () => [...expanded].filter((cid) => cid !== cycleId),
-    [expanded, cycleId],
-  );
-  const liveDashboards = useExpandedDashboards(campaignId, expandedOthers);
-
-  // Normalized per-cycle detail. Base = lineage snapshot; each expanded lane is
-  // overlaid with its live dashboard when that snapshot carries data (so a
-  // warming/empty poll never wipes the snapshot). Source-by-cycle, not a
-  // per-field merge. Content-stabilized so Forest's layout memo only recomputes
-  // on a real shape change.
+  // Normalized per-cycle detail — purely the served lineage snapshot (closed
+  // rounds, origin C0 included), one source for every cycle. Content-stabilized
+  // so Forest's layout memo only recomputes on a real shape change.
   const detailEntries = useStableContent(
     useMemo(() => {
       const map = new Map<string, CycleDetail>();
       for (const c of data?.cycles ?? []) map.set(c.cycle_id, detailFromLineage(c));
-      const overlay = (cid: string | null, snap: DashboardSnapshot | null): void => {
-        if (!cid || !snap) return;
-        const live = detailFromDash(snap);
-        if (live.rounds.length > 0) map.set(cid, live);
-        else if (!map.has(cid)) map.set(cid, live);
-      };
-      overlay(cycleId, dash);
-      for (const [cid, snap] of liveDashboards) overlay(cid, snap);
       return [...map.entries()];
-    }, [data, cycleId, dash, liveDashboards]),
+    }, [data]),
   );
   const detailByCycle: DetailByCycle = useMemo(() => new Map(detailEntries), [detailEntries]);
 

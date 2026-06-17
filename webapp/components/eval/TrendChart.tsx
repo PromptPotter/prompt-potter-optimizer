@@ -8,9 +8,9 @@ import {
   lineChartDefaults,
   useThemeVersion,
 } from "@/lib/theme";
-import type { DashboardSnapshot } from "@/lib/poll";
 import { CardFrame } from "@/components/ui";
 import { degradedRoundNotices } from "@/lib/derivations";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 
 ensureChartRegistered();
 
@@ -19,11 +19,8 @@ interface Point {
   composite: number;
 }
 
-interface Props {
-  dash: DashboardSnapshot | null;
-}
-
-export const TrendChart = memo(function TrendChart({ dash }: Props) {
+export const TrendChart = memo(function TrendChart() {
+  const { dash } = useDashboard();
   // Subscribe to theme so a flip re-runs this component and pulls fresh
   // getCss() values into the chart data/options below.
   useThemeVersion();

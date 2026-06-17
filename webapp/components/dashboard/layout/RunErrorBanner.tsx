@@ -8,13 +8,10 @@
 //     ``_handle_round_warning``. Shown in a warn-toned variant of the same box.
 // Both absent on a clean run, so the component is always safe to mount.
 
-import type { DashboardSnapshot } from "@/lib/poll";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 
-interface Props {
-  dash: DashboardSnapshot | null;
-}
-
-export function RunErrorBanner({ dash }: Props) {
+export function RunErrorBanner() {
+  const { dash } = useDashboard();
   const err = dash?.error;
   const warnings = (dash?.recent_loop_warnings ?? []).slice(-4).reverse();
 

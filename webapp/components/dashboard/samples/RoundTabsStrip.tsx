@@ -1,12 +1,7 @@
 "use client";
-import { type DashboardSnapshot } from "@/lib/poll";
 import { availableRounds } from "@/lib/derivations";
 import { useSelection } from "@/lib/SelectionContext";
-
-interface Props {
-  dash: DashboardSnapshot | null;
-  isLive: boolean;
-}
+import { useDashboard } from "@/lib/hooks/useDashboard";
 
 // One circle per L1 round, plus a LIVE pill when an in-flight round exists
 // that hasn't been summarized into `dash.rounds[]` yet. Click writes
@@ -17,7 +12,8 @@ interface Props {
 //   round === null         → follow live (default, no explicit pick)
 //   round === liveRound    → explicit "show live" (same view as null)
 //   round  <  liveRound    → drill into a completed round
-export function RoundTabsStrip({ dash, isLive }: Props) {
+export function RoundTabsStrip() {
+  const { dash, isLive } = useDashboard();
   const { round: selectedRound, setSelectionForRound } = useSelection();
   // Single round-axis truth — `completed` circles + the `live` pill, the
   // latter already gated on `isLive` so a stopped run drops the pill.

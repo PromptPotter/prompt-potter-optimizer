@@ -8,13 +8,8 @@ import {
 } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { fmtPct0 } from "@/lib/format";
-import type { DashboardSnapshot } from "@/lib/poll";
-
-interface Props {
-  campaignId: string | null;
-  cycleId: string | null;
-  dash: DashboardSnapshot | null;
-}
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useWorkspace } from "@/lib/workspace";
 
 // The round-0 origin gate. When the freshly-scored origin verdict isn't
 // `healthy`, the runner holds before L1 (`run_phase: gate`) instead of
@@ -32,7 +27,9 @@ interface Props {
 // The decision drives a runner side-effect, not a UI close: the modal stays open
 // until the poll observes `run_phase` leave `gate` (a rescore re-enters it with a
 // fresh verdict; proceed/abort end it).
-export function OriginGateModal({ campaignId, cycleId, dash }: Props) {
+export function OriginGateModal() {
+  const { dash } = useDashboard();
+  const { campaignId, cycleId } = useWorkspace();
   const [pending, setPending] = useState<OriginGateDecision | null>(null);
   const [err, setErr] = useState<string | null>(null);
 

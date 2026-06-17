@@ -41,15 +41,7 @@ function activeStyle(on: boolean): CSSProperties {
   };
 }
 
-export function SampleSetControl({
-  rounds,
-  campaignId,
-  cycleId,
-}: {
-  rounds: RoundSummary[];
-  campaignId: string | null;
-  cycleId: string | null;
-}) {
+export function SampleSetControl({ rounds }: { rounds: RoundSummary[] }) {
   const { sampleSet, setSelectionForSampleSet } = useSelection();
   const [detailOpen, setDetailOpen] = useState(false);
   const [includePlanned, setIncludePlanned] = useState(false);
@@ -190,8 +182,6 @@ export function SampleSetControl({
           </div>
           <SampleTrajectorySeries
             rounds={rounds}
-            campaignId={campaignId}
-            cycleId={cycleId}
             selectMode={includePlanned ? "all" : "measured"}
             maxHeight={200}
           />

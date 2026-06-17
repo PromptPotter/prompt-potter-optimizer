@@ -12,13 +12,13 @@
 // card's live selection/weights (the `score:` formula, debounced), and the fixed
 // sample-set chip (the `samples` mask). All three compose here, once.
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCampaignLineage } from "@/lib/api";
 import type { CampaignLineageResponse, LineageDivergence } from "@/lib/api/types";
 import { useFitnessState } from "@/components/whatif/fitness-store";
 import { formulaFromWeights } from "@/components/whatif/fitness-bars";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useDebounced } from "@/lib/hooks/useDebounced";
-import { useFetch } from "@/lib/hooks/useFetch";
 import { useRevalidation } from "@/lib/revalidate";
 import { useSelection } from "@/lib/SelectionContext";
 
@@ -58,6 +58,14 @@ export function LineageOverlayProvider({
 }) {
   const [tick, setTick] = useState(0);
   const [lens, setLens] = useState<string>("");
+  // Lens is a campaign-level view choice; reset it when the campaign changes so a
+  // preset / What-If selection can't leak across campaigns (the provider now lives
+  // at the shell root, persisting across cycle + tab switches).
+  const [prevCampaign, setPrevCampaign] = useState(campaignId);
+  if (campaignId !== prevCampaign) {
+    setPrevCampaign(campaignId);
+    setLens("");
+  }
   // The What-If card is the master: when open, the lineage follows its live
   // selection + weights (the SAME weighted criterion as the bars), debounced so a
   // continuous drag doesn't spam the fetch.
@@ -88,16 +96,51 @@ export function LineageOverlayProvider({
       : (LENS_LABELS[lens] ?? "");
 
   // `cycleId` is deliberately NOT a fetch dep: /lineage is campaign-scoped, so a
-  // same-campaign cycle switch returns identical data. `lensParam`/`samplesKey` ARE
-  // deps: they change the served overlay. Refetch on any mutation (fork, cleanup,
-  // lifecycle) via the shared revalidation seam.
+  // same-campaign cycle switch returns identical data. `lensParam`/`samplesParam`
+  // ARE deps: they change the served overlay. Refetch on any mutation (fork,
+  // cleanup, lifecycle) via the shared revalidation seam.
   const reval = useRevalidation();
-  const { data } = useFetch(
-    campaignId
-      ? (s) => fetchCampaignLineage(campaignId, lensParam, samplesParam, s)
-      : null,
-    [campaignId, tick, reval, lensParam, samplesKey],
-  );
+  // Revalidate on the SAME signal the live header moves on — a round closing or a
+  // phase flip — so the tree never lags the 2 s dashboard poll. A quiescent stretch
+  // changes no key, so it makes no request; this provider sits under
+  // CycleStreamProvider, so `dash` is available here.
+  const { dash, dashRound, runPhaseResolved } = useDashboard();
+  const dashChangeKey = `${dash?.rounds?.length ?? 0}:${dashRound ?? -1}:${runPhaseResolved ?? ""}`;
+
+  const [data, setData] = useState<CampaignLineageResponse | null>(null);
+  // Query identity = campaign + lens + samples. A change is a DIFFERENT served
+  // body (different URL), so drop the prior tree in the same render before the
+  // refetch lands (render-phase guarded reset, webapp/CLAUDE.md).
+  const queryKey = `${campaignId ?? ""}|${lensParam ?? ""}|${samplesKey}`;
+  const [prevQueryKey, setPrevQueryKey] = useState(queryKey);
+  if (queryKey !== prevQueryKey) {
+    setPrevQueryKey(queryKey);
+    setData(null);
+  }
+
+  // Last-Modified validator, keyed to the query identity so it's only reused
+  // within the same body — a new query (campaign/lens/samples) fetches fresh.
+  const lastModifiedRef = useRef<{ key: string; value: string | null }>({ key: "", value: null });
+  useEffect(() => {
+    if (!campaignId) return;
+    const ac = new AbortController();
+    let cancelled = false;
+    const ims = lastModifiedRef.current.key === queryKey ? lastModifiedRef.current.value : null;
+    fetchCampaignLineage(campaignId, lensParam, samplesParam, ims, ac.signal)
+      .then((res) => {
+        if (cancelled) return;
+        lastModifiedRef.current = { key: queryKey, value: res.lastModified ?? ims };
+        // 304 keeps the current tree — a quiescent revalidation costs nothing.
+        if (res.kind === "ok") setData(res.data);
+      })
+      .catch(() => {
+        // Transient/aborted — keep the last good tree rather than blanking it.
+      });
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [campaignId, queryKey, lensParam, samplesParam, tick, reval, dashChangeKey]);
 
   // Served overlay → lookup structures keyed by `{cycle_id}::r{round}`.
   const divergenceByKey = useMemo(() => {

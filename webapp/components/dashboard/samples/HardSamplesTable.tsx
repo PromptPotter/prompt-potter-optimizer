@@ -2,7 +2,7 @@
 import { useRef, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type DatasetItem, type HardSamplesScope } from "@/lib/api";
-import { type DashboardSnapshot } from "@/lib/poll";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import { MeasHeatCell } from "./MeasHeatCell";
 import { heatLayout, ordIndexToXCss } from "@/lib/heat-canvas";
 import { cellFor, RANK_HINT, type CellValue, type MeasurementDot } from "./columns";
@@ -11,12 +11,6 @@ import { HardSamplesHeatTip, HardSamplesPopover } from "./HardSamplesPopover";
 import { useHardSamplesTableModel, wrappable } from "./useHardSamplesTableModel";
 
 interface Props {
-  dash: DashboardSnapshot | null;
-  // `status === "live"` — gates the row-scoring blink. When the optimizer
-  // process dies, `current_sample_id` is stranded in dashboard.json; without
-  // this gate the matched row would pulse forever. `isLive` goes false once
-  // the freshness signal lapses, so the blink stops on its own.
-  isLive: boolean;
   // Per-sample chronological measurement dots. When supplied, the table
   // shows a "measurements" column with one dot per measurement; when
   // omitted, the column is hidden.
@@ -37,8 +31,6 @@ interface Props {
 }
 
 export function HardSamplesTable({
-  dash,
-  isLive,
   perSample,
   compact,
   datasetName,
@@ -50,6 +42,10 @@ export function HardSamplesTable({
   onScopeChange,
   datasetStale,
 }: Props) {
+  // `isLive` (status === "live") gates the row-scoring blink. When the
+  // optimizer process dies, `current_sample_id` is stranded in dashboard.json;
+  // `isLive` goes false once freshness lapses, so the blink stops on its own.
+  const { dash, isLive } = useDashboard();
   const m = useHardSamplesTableModel({ datasetItems, perSample });
   const {
     stablePerSample,

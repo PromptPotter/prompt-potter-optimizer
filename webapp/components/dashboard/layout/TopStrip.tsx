@@ -3,6 +3,7 @@ import { memo, useEffect, useMemo, useRef } from "react";
 import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import { type DashboardSnapshot } from "@/lib/poll";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { headlineStats } from "@/lib/derivations";
 import { fmtSecs, fmtPct0 } from "@/lib/format";
@@ -13,14 +14,6 @@ import { fmtSecs, fmtPct0 } from "@/lib/format";
 //   Best 42% ╱╲╱╲ │ scoring R3 │ 24/40 · 60% · 1.2 q/s │ Last 0.8s
 //
 // No card chrome — it reads as a status line, not a panel.
-
-interface Props {
-  dash: DashboardSnapshot | null;
-  dashRound: number | null;
-  // Connection-aware run phase (poll.tsx) — "detached" when a running cycle's
-  // poll has gone quiet. Shown in place of raw dash.run_phase.
-  runPhase: string | null;
-}
 
 interface QpsState {
   lastQ: number | null;
@@ -56,7 +49,11 @@ function estimateQps(state: QpsState, dash: DashboardSnapshot | null): number | 
   return state.qps;
 }
 
-export const TopStrip = memo(function TopStrip({ dash, dashRound, runPhase }: Props) {
+export const TopStrip = memo(function TopStrip() {
+  // Self-sourced from the cycle stream — no props threaded through the frame.
+  // `runPhaseResolved` is the connection-aware run phase (poll.tsx) — "detached"
+  // when a running cycle's poll has gone quiet, shown over raw dash.run_phase.
+  const { dash, dashRound, runPhaseResolved: runPhase } = useDashboard();
   // Sparkline: running-best composite over rounds, read from the
   // dashboard's per-round summary block.
   const spark = useMemo(() => {

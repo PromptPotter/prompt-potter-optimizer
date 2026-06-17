@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useRoundFile } from "@/lib/hooks/useRoundFile";
 import { useSelection } from "@/lib/SelectionContext";
+import { useWorkspace } from "@/lib/workspace";
 import {
   historicalTimeline,
   orderAtStep,
@@ -43,17 +44,16 @@ interface HoverState {
 
 export function SeriesView({
   sorted,
-  campaignId,
-  cycleId,
   selectMode = "measured",
   maxHeight,
 }: {
   sorted: SortedRounds;
-  campaignId: string | null;
-  cycleId: string | null;
   selectMode?: SelectMode;
   maxHeight?: number;
 }) {
+  // (campaignId, cycleId) self-sourced — the hover popup's lazy round-file
+  // fetch is always under the workspace context, so no threading is needed.
+  const { campaignId, cycleId } = useWorkspace();
   const columns = useMemo(() => unionFirstAppearance(sorted.rounds), [sorted.rounds]);
   const { sampleSet, setSelectionForSampleSet } = useSelection();
   const [hover, setHover] = useState<HoverState | null>(null);

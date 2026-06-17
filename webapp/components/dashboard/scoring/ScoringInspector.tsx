@@ -1,28 +1,22 @@
 "use client";
 import { useMemo, useState } from "react";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
-import { useConnector } from "@/lib/hooks/useConnector";
+import { useDashboard } from "@/lib/hooks/useDashboard";
+import { useWorkspace } from "@/lib/workspace";
 import { fmtPct1 } from "@/lib/format";
 import type { ScoreboardEntry, SelectedCandidate } from "@/lib/types";
-import { liveCandidate, type DashboardSnapshot } from "@/lib/poll";
+import { liveCandidate } from "@/lib/poll";
 import { Dialog } from "@/components/ui";
 import { SteerForkPanel } from "@/components/dashboard/control/SteerForkPanel";
 
 interface Props {
-  campaignId: string | null;
-  cycleId: string | null;
   selected: SelectedCandidate | null;
-  dash: DashboardSnapshot | null;
   onClose: () => void;
 }
 
-export function ScoringInspector({
-  campaignId,
-  cycleId,
-  selected,
-  dash,
-  onClose,
-}: Props) {
+export function ScoringInspector({ selected, onClose }: Props) {
+  const { dash } = useDashboard();
+  const { campaignId, cycleId } = useWorkspace();
   // Composite + hits are deep-audit fields. For a *completed* round they live
   // in `round_NNNN.json::scoreboard`; for the *in-flight* round they live in
   // `dashboard.json`'s live l1_score stats. `useRoundSource` picks one source
@@ -34,7 +28,6 @@ export function ScoringInspector({
     selected?.round ?? null,
     dash,
   );
-  const cv = useConnector();
   const [steerOpen, setSteerOpen] = useState(false);
 
   const data = useMemo<{ composite?: number; hits?: number; total?: number } | null>(() => {
@@ -118,11 +111,7 @@ export function ScoringInspector({
           onClose={() => setSteerOpen(false)}
         >
           <SteerForkPanel
-            campaignId={campaignId}
-            cycleId={cycleId}
             candidate={selected}
-            dash={dash}
-            isLive={cv.isLive}
             onDone={() => setSteerOpen(false)}
             onCancel={() => setSteerOpen(false)}
           />
