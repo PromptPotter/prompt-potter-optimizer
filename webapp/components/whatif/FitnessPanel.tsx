@@ -9,7 +9,7 @@ import {
 } from "./meta";
 import { FitnessChart } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
-import { CardFrame } from "@/components/ui";
+import { CardFrame, CopyButton } from "@/components/ui";
 import {
   liveL1Candidates,
   type LiveCandidate,
@@ -332,6 +332,7 @@ export function FitnessPanel() {
           >
             Sample set{sampleSet ? ` · ${sampleSet.length}` : ""}
           </button>
+          <CopyButton data={bars} title="Copy all candidate fitness as JSON" />
         </div>
       }
     >

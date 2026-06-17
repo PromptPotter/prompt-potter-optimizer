@@ -14,6 +14,7 @@ import { getCss } from "@/lib/theme";
 import { availableRounds } from "@/lib/derivations";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
+import { CopyButton } from "@/components/ui";
 import type { NodeDataLike, PipelineDoc } from "./types";
 
 // Edge variants — collapses three parallel switches (stroke colour key,
@@ -146,6 +147,10 @@ export function WorkflowCanvas({ pipeline }: Props) {
             </select>
           </label>
         )}
+        <CopyButton
+          data={dash?.current_round ?? view}
+          title="Copy the optimizer round as JSON"
+        />
       </div>
       <div className="workflow-canvas-bg">
         <div className="workflow-canvas">

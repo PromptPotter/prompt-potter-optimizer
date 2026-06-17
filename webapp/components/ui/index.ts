@@ -4,6 +4,7 @@
 export * from "./Badge";
 export * from "./Button";
 export * from "./Card";
+export * from "./CopyButton";
 export * from "./Dialog";
 export * from "./ErrorBoundary";
 export * from "./Popover";

@@ -10,6 +10,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { phaseToNodeId } from "./layout";
 import { fmtSecs } from "@/lib/format";
+import { CopyButton } from "@/components/ui";
 import type { NodeBlock } from "@/lib/types";
 
 interface Props {
@@ -144,6 +145,10 @@ export function OptimizerNodeDetail({ id, pipeline, onClose }: Props) {
           </span>
         </div>
         <div className="opt-detail-head-actions">
+          <CopyButton
+            data={block ?? { id, label, kind, config: cfgInner }}
+            title="Copy this node's full I/O as JSON"
+          />
           {activeRound != null && (
             <span
               className="opt-detail-round-tag"

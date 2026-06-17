@@ -4,7 +4,7 @@ import { sessionIndexOf, shortFamilyTail } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
-import { CardFrame } from "@/components/ui";
+import { CardFrame, CopyButton } from "@/components/ui";
 import { Forest } from "./Forest";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
@@ -111,6 +111,7 @@ export const FamilyTree = memo(function FamilyTree() {
               cleaned
             </span>
           )}
+          <CopyButton data={forests} title="Copy lineage as JSON" />
         </span>
       }
     >
