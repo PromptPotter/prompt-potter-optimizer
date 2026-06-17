@@ -35,6 +35,24 @@ logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
+_SECTION_SEP = "\n\n"
+
+
+def _truncate_to_cap(text: str, cap: int) -> tuple[str, int]:
+    """Section-aware truncation for an over-budget injection. Renderers join sections with
+    ``\\n\\n`` highest-priority first, so dropping whole sections from the TAIL keeps the head
+    and never slices mid-section; a ``[…N section(s) dropped]`` marker records what was cut.
+    A lone section still over cap is hard-sliced as the last resort. Returns
+    ``(truncated_text, sections_dropped)``."""
+    sections = text.split(_SECTION_SEP)
+    for keep in range(len(sections) - 1, 0, -1):
+        dropped = len(sections) - keep
+        marker = f"{_SECTION_SEP}[…{dropped} section(s) dropped]"
+        body = _SECTION_SEP.join(sections[:keep])
+        if len(body) + len(marker) <= cap:
+            return body + marker, dropped
+    return sections[0][:cap] + "…", len(sections) - 1
+
 
 class InjectionRenderError(Exception):
     """Renderer raised — programmer mistake. Halts with ``RENDER_ERROR`` (distinct from CRASHED); chains the original via ``raise … from``."""
@@ -85,22 +103,32 @@ class DispatchHub:
             raise InjectionRenderError(name, exc) from exc
         cap = sig.char_cap
         if cap is not None and len(text) > cap:
+            overrun = len(text) - cap
+            truncated, dropped = _truncate_to_cap(text, cap)
             logger.warning(
-                "injection %r rendered %d chars (cap %d) — over budget; truncating",
+                "injection %r rendered %d chars (cap %d, %d over) — truncating, %d section(s) dropped",
                 name,
                 len(text),
                 cap,
+                overrun,
+                dropped,
             )
             emit_round_warning(
                 kind="injection_budget_overrun",
                 severity="warning",
                 message=(
-                    f"Optimizer prompt section {name!r} ran {len(text)} chars over its "
-                    f"{cap}-char budget and was truncated — some context didn't reach the LLM."
+                    f"Optimizer prompt section {name!r} ran {overrun} chars over its "
+                    f"{cap}-char budget; {dropped} section(s) dropped to fit — some context "
+                    "didn't reach the LLM."
                 ),
-                detail={"injection": name, "rendered_chars": len(text), "cap": cap},
+                detail={
+                    "injection": name,
+                    "rendered_chars": len(text),
+                    "cap": cap,
+                    "sections_dropped": dropped,
+                },
             )
-            text = text[:cap] + "…"
+            text = truncated
         return text
 
     @staticmethod

@@ -12,6 +12,7 @@
 import { useMemo } from "react";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useSelection } from "@/lib/SelectionContext";
+import { availableRounds } from "@/lib/derivations";
 
 export interface EffectiveRound {
   // The round to display: the explicit pick, else the live in-flight round,
@@ -25,17 +26,23 @@ export interface EffectiveRound {
 }
 
 export function useEffectiveRound(): EffectiveRound {
-  const { dash, dashRound } = useDashboard();
+  const { dash, isLive } = useDashboard();
   const { round: selectedRound } = useSelection();
-  // A frozen/completed cycle can have no in-flight round (`dashRound` null)
-  // yet carry completed rounds — fall to the latest so surfaces don't blank.
-  const lastCompleted = useMemo(() => {
-    const rounds = dash?.rounds ?? [];
-    return rounds.length ? Math.max(...rounds.map((r) => r.round)) : null;
-  }, [dash?.rounds]);
+  // Ride the canonical round axis so the effective round can't disagree with
+  // the live-round pill surfaces: `live` is the in-flight round ONLY when the
+  // run is actually live AND that round hasn't closed — NOT just `current_round.round`,
+  // which lingers on a terminal/interrupted cycle and pointed the round-scoped
+  // surfaces at a dead round (no `rounds[]` entry, no round file → blank/hang).
+  const { completed, live: liveRound } = useMemo(
+    () => availableRounds(dash, isLive),
+    [dash, isLive],
+  );
+  // A frozen/completed cycle has no live round yet carries completed rounds —
+  // fall to the latest (axis is ascending) so surfaces don't blank.
+  const lastCompleted = completed.length ? completed[completed.length - 1] : null;
   return {
-    round: selectedRound ?? dashRound ?? lastCompleted,
+    round: selectedRound ?? liveRound ?? lastCompleted,
     isLiveView:
-      dashRound != null && (selectedRound == null || selectedRound === dashRound),
+      liveRound != null && (selectedRound == null || selectedRound === liveRound),
   };
 }

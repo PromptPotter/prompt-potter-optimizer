@@ -184,7 +184,6 @@ Operator-visible files inside `campaigns/{cycle_id}/`. Webapp + downstream tooli
 | `review.md` | `presentation/writers.py::write_review_md` | Per-round behavior-check + L1Stats narrative. |
 | `rounds/round_NNNN.json` | `CampaignStore.save_round_file` | Full per-round detail: candidate scores, evaluators, prompt_fields, pipeline_params, OSP snapshot, decisions. |
 | `dashboard.json` (per cycle) | `LiveDashboardView._persist` | Live operator view; rewritten on every record. Refresh: 2 s. |
-| `output.log` (per cycle) | `LiveDashboardView._persist` (indirectly) | ANSI-colored line stream; CLI narration tail. Refresh: 1 s. |
 | `langfuse/*.json` | `infrastructure/tracing/langfuse_push.py` | Per-cycle Langfuse export snapshots. |
 | `prompts/{node}.json` | `infrastructure/tracing/langfuse_push.py` (and CLI `init`) | Resolved prompt templates for this cycle's runs. |
 | `.runtime/ledger.jsonl` | `CycleEventLog.append` | The sole-ingress event log. Internal-but-stable shape (see §6). |
@@ -194,7 +193,7 @@ Operator-visible files inside `campaigns/{cycle_id}/`. Webapp + downstream tooli
 | `.runtime/stop.flag` | `api/middleware/command_dispatcher.py` (`POST /commands/{kind}`, kind=`stop-cycle`) | Operator stop signal; consumed by `session.stop_check`. |
 | `.runtime/archived/resumed_at_<ts>/` | `CampaignStore.rewind_to_round` | Rewound rounds + candidates moved here on `--from N`. |
 
-Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the root. Each carries its own per-cycle artifacts, including its own `dashboard.json` + `output.log` (a fork's is seeded from its parent at the cut). `.runtime/` shapes may change between minor versions — the public `rounds/round_NNNN.json` tree + `index.json` + `log.md` are the contract for any tool reading per-cycle results.
+Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the root. Each carries its own per-cycle artifacts, including its own `dashboard.json` (a fork's is seeded from its parent at the cut). `.runtime/` shapes may change between minor versions — the public `rounds/round_NNNN.json` tree + `index.json` + `log.md` are the contract for any tool reading per-cycle results.
 
 ## 8. What is NOT stable
 

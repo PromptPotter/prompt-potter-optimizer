@@ -77,6 +77,7 @@ class OpenAICompatibleClient(LLMClientBase):
         max_tokens: int | None = None,
         response_model: type[BaseModel] | None = None,
         response_schema: dict[str, Any] | None = None,
+        reasoning_effort: str | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
         client = self._ensure_client()
@@ -88,6 +89,11 @@ class OpenAICompatibleClient(LLMClientBase):
         }
         if max_tokens is not None:
             request_params["max_tokens"] = max_tokens
+        # Bounded reasoning is a survival guard (the openrouter/gpt-oss optimizer nodes blow the
+        # call deadline at unbounded effort); the OpenAI-compatible field is top-level. Omitted
+        # when unset so a provider that doesn't accept it never sees a null.
+        if reasoning_effort is not None:
+            request_params["reasoning_effort"] = reasoning_effort
 
         wire_schema = response_schema or (
             response_model.model_json_schema() if response_model else None
@@ -114,7 +120,15 @@ class OpenAICompatibleClient(LLMClientBase):
             return result  # Groq json_validate_failed salvage — already typed.
         response, content, validation_err = result
         schema_repair_attempts = 0
+        # The failed first attempt still burned tokens; carry them so the returned usage
+        # meters BOTH round-trips (emit_token_usage otherwise under-reports a repaired call
+        # by one full call). Zero unless a repair fires below.
+        first_prompt = 0
+        first_completion = 0
         if validation_err is not None:
+            first_usage = response.usage
+            first_prompt = first_usage.prompt_tokens if first_usage else 0
+            first_completion = first_usage.completion_tokens if first_usage else 0
             # Repair retry: full second round-trip with the bad output + hint
             # appended. Logged so the ~2× cost + latency isn't silent.
             schema_name = response_model.__name__ if response_model else "<schema>"
@@ -153,6 +167,12 @@ class OpenAICompatibleClient(LLMClientBase):
             schema_repair_attempts = 1
             if isinstance(result, LLMResponse):
                 result.schema_repair_attempts = schema_repair_attempts
+                # Fold the failed first attempt's tokens onto the salvaged repair response.
+                result.usage["prompt_tokens"] += first_prompt
+                result.usage["completion_tokens"] += first_completion
+                result.usage["total_tokens"] = (
+                    result.usage["prompt_tokens"] + result.usage["completion_tokens"]
+                )
                 return result
             response, content, validation_err = result
             if validation_err is not None:
@@ -182,13 +202,15 @@ class OpenAICompatibleClient(LLMClientBase):
         usage = response.usage
         if reservation is not None and usage is not None:
             reservation.close(usage.total_tokens)
+        prompt_tokens = (usage.prompt_tokens if usage else 0) + first_prompt
+        completion_tokens = (usage.completion_tokens if usage else 0) + first_completion
         return LLMResponse(
             content=content,
             model=response.model,
             usage={
-                "prompt_tokens": usage.prompt_tokens if usage else 0,
-                "completion_tokens": usage.completion_tokens if usage else 0,
-                "total_tokens": usage.total_tokens if usage else 0,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
             },
             parsed=parsed,
             schema_repair_attempts=schema_repair_attempts,

@@ -1280,6 +1280,7 @@ def _cs(
     escalation_aborted: bool = False,
     elimination_stopped: bool = False,
     degradation_context: dict | None = None,
+    elimination_context: dict | None = None,
 ) -> ScoredCandidate:
     return ScoredCandidate(
         candidate_id=candidate_id,
@@ -1293,11 +1294,15 @@ def _cs(
         escalation_aborted=escalation_aborted,
         elimination_stopped=elimination_stopped,
         degradation_context=degradation_context or {},
+        elimination_context=elimination_context or {},
     )
 
 
-def test_leader_eligibility_excludes_fatal_degradation_and_keeps_pobb_eliminated():
-    """Winner-selection: fatal degradation disqualifies; PoBB elimination does not."""
+def test_leader_eligibility_excludes_fatal_degradation_and_pobb_loss():
+    """Winner-selection eligibility: fatal degradation disqualifies; a true PoBB *loss*
+    (p_best < epsilon, lead not locked) disqualifies — the eliminator's own verdict that the
+    candidate isn't the best; a LEADER_LOCKED stop stays eligible; a clean loser stays eligible.
+    """
     fatal = _cs(
         candidate_id="C1.3",
         accuracy=0.8333,
@@ -1305,17 +1310,23 @@ def test_leader_eligibility_excludes_fatal_degradation_and_keeps_pobb_eliminated
         elimination_stopped=True,
         degradation_context={"fatal": True, "dominant_warning": "llm_only:empty_response"},
     )
-    pobb_eliminated = _cs(
+    pobb_loss = _cs(
         candidate_id="C1.2",
         accuracy=0.40,
-        escalation_aborted=True,
         elimination_stopped=True,
-        degradation_context={},
+        elimination_context={"p_best": 0.048, "epsilon": 0.05, "leader_locked": False},
+    )
+    leader_locked = _cs(
+        candidate_id="C1.1",
+        accuracy=0.55,
+        elimination_stopped=True,
+        elimination_context={"p_best": 0.96, "epsilon": 0.05, "leader_locked": True},
     )
     clean_loser = _cs(candidate_id="C1.4", accuracy=0.45)
 
     assert not is_leader_eligible(fatal)
-    assert is_leader_eligible(pobb_eliminated)
+    assert not is_leader_eligible(pobb_loss)
+    assert is_leader_eligible(leader_locked)
     assert is_leader_eligible(clean_loser)
 
 

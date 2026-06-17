@@ -34,8 +34,9 @@ def _r_diagnostics(b: InjectionBundle) -> str:
     Section order is **actionability-first**: the per-sample failure detail (SAMPLE DIAGNOSTICS,
     NEAR MISSES, MISSED OPPORTUNITIES) — the only content that names *which* queries failed and how
     — renders before the aggregate distributions, and the historical TRAJECTORY/EVOLUTION narrative
-    renders last. The render façade truncates by blind tail-cut at `char_cap`, so whatever is least
-    actionable must sit last to be the first dropped when a round runs over budget.
+    renders last. The render façade truncates **section-aware** at `char_cap` (drops whole trailing
+    ``\n\n``-separated sections + a marker, head kept), so ordering least-actionable-last means the
+    least-actionable section is the first dropped when a round runs over budget — no mid-section slice.
     """
     sections: list[str] = []
     cs = b.cycle_slice

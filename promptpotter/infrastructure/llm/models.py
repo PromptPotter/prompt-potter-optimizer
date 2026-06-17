@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from promptpotter.config.settings import settings
 from promptpotter.domain.run_records import (
     CommandAckRecord,
     CommandRecord,
@@ -114,20 +113,10 @@ def emit_token_usage(
     """Build ``TokenUsageRecord`` and append it to the active cycle ledger.
 
     Reads ledger + round from ContextVars (per-asyncio-task isolation —
-    concurrent cycles for M12+ just work). Overlong-prompt warning fires
-    on the optimizer kind only, regardless of ledger presence (kept here
-    because it's a real signal about meta-prompt drift)."""
-    if kind == "optimizer":
-        threshold = settings.OPTIMIZER_PROMPT_WARN_TOKENS
-        if input_tokens > threshold:
-            logger.warning(
-                "optimizer node %r prompt at %d tokens (threshold=%d) — tune the "
-                "template or drop context; large meta-prompts reduce signal-to-noise "
-                "for the optimizer LLM and risk provider TPM caps",
-                node,
-                input_tokens,
-                threshold,
-            )
+    concurrent cycles for M12+ just work). The overlong-prompt signal is the
+    char gate at the pre-call site (``OPTIMIZER_PROMPT_WARN_CHARS``), which
+    fires before the call on the composed prompt — the duplicate post-call
+    token gate that could never fire first is gone."""
     _append_record(
         TokenUsageRecord(
             kind=kind,

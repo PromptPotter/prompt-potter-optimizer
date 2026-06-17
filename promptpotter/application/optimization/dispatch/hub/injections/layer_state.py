@@ -24,6 +24,7 @@ from promptpotter.domain.rendering import (
     format_l1_critique_for_prompt as format_l1_critique_for_prompt,
 )
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
+from promptpotter.infrastructure.llm.models import emit_round_warning
 
 logger = logging.getLogger(__name__)
 
@@ -100,17 +101,33 @@ def _r_task_context(b: InjectionBundle) -> str:
     if not pairs:
         return ""
     lines: list[str] = []
+    truncated: list[str] = []
     for k, v in pairs:
         if len(v) > TASK_CONTEXT_VALUE_CAP:
-            # L2-authored overrun — truncate (heal) + warn, don't bloat every prompt.
-            logger.warning(
-                "task_context.%s is %d chars (cap %d) — L2 overran its output budget; truncating",
-                k,
-                len(v),
-                TASK_CONTEXT_VALUE_CAP,
-            )
+            truncated.append(f"{k}({len(v)}→{TASK_CONTEXT_VALUE_CAP})")
             v = v[:TASK_CONTEXT_VALUE_CAP] + "…"
         lines.append(f"  {k}: {v}")
+    if truncated:
+        # L2-authored overrun — heal (truncate) but leave a DISK trace too, not just a log
+        # line: silently dropping L2's framing violates "material facts land on disk".
+        logger.warning(
+            "task_context field(s) over the %d-char cap — truncating: %s",
+            TASK_CONTEXT_VALUE_CAP,
+            ", ".join(truncated),
+        )
+        emit_round_warning(
+            kind="injection_budget_overrun",
+            severity="warning",
+            message=(
+                f"L2-authored task_context field(s) exceeded the {TASK_CONTEXT_VALUE_CAP}-char "
+                f"cap and were truncated: {', '.join(truncated)} — some framing didn't reach the LLM."
+            ),
+            detail={
+                "injection": "task_context",
+                "cap": TASK_CONTEXT_VALUE_CAP,
+                "fields": truncated,
+            },
+        )
     return "TASK CONTEXT:\n" + "\n".join(lines)
 
 

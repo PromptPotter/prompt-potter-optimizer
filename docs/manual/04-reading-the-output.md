@@ -95,12 +95,11 @@ The optimizer has already handled it — these exist for audit, not to ask for i
   python -m uvicorn promptpotter.main:app --port 8001
   ```
   then open <http://127.0.0.1:8001/>. The page polls `dashboard.json` every 2 s. Reads `active_session.json` on load — `new` a fresh cycle ⇒ reload the page. Keep `python -m promptpotter resume` running in another terminal for live refresh.
-- `output.log` — append-only HIT/MISS history, tail-friendly.
+- For a headless tail of the live run readout (per-sample HIT/MISS, round summaries), read the gitignored `.goldmine/latest.log` — the most-recent run's stdout, ANSI-stripped.
 
-Both live in the cycle's **own** dir. When you fork, the fork's dir is flat alongside its root at `campaigns/{campaign_id}/cycles/{fork_cycle_id}/`, and its `dashboard.json` / `output.log` live there too — each cycle owns its stream. Tail the cycle you're actually running.
+`dashboard.json` lives in the cycle's **own** dir. When you fork, the fork's dir is flat alongside its root at `campaigns/{campaign_id}/cycles/{fork_cycle_id}/`, and its `dashboard.json` lives there too — each cycle owns its stream. Tail the cycle you're actually running.
 
 - `dashboard.json::cycle_id` stamps the cycle that owns the file.
-- `output.log` gets a `=== FORK <id> from round N (parent: …) ===` banner inline at each cutover.
 
 The fork's own dir holds its per-cycle audit (`index.json`, `log.md`, `rounds/`, `.runtime/`). Open those when you want to inspect what specifically happened in one fork; tail the root for live progress.
 

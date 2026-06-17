@@ -283,9 +283,9 @@ async def llm_call(
             )
         # Pre-call info line — surfaces what we're waiting on so the operator
         # can distinguish "in-flight LLM call" from "frozen process" without
-        # opening dashboard.json. Lands in terminal AND output.log. An
-        # oversized prompt logs at warn level so it stands out in output.log
-        # the same way the CLI marker turns yellow.
+        # opening dashboard.json. Routes through Python logging to the terminal.
+        # An oversized prompt logs at warn level so it stands out the same way
+        # the CLI marker turns yellow.
         oversize = prompt_chars > OPTIMIZER_PROMPT_WARN_CHARS
         log = logger.warning if oversize else logger.info
         log(
@@ -325,6 +325,7 @@ async def llm_call(
                         max_tokens=merged.get("max_tokens"),
                         response_model=response_model,
                         response_schema=response_schema,
+                        reasoning_effort=merged.get("reasoning_effort"),
                     )
                     break
                 except Exception as exc:

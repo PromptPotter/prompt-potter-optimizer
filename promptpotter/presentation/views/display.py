@@ -160,6 +160,14 @@ def _node_line(text: str) -> str:
     return f"│  {text}"
 
 
+def _node_lines(text: str) -> list[str]:
+    """``_node_line`` for a possibly-multi-line value: prefix EACH physical line so an embedded
+    ``\\n`` (e.g. a multi-line prompt-field value in the SP-diff legend) doesn't escape the box —
+    only the first line was prefixed before, the rest broke the frame in the terminal + latest.log.
+    """
+    return [_node_line(line) for line in text.split("\n")]
+
+
 def _node_block(label: str, *lines: str, label_right: str = "") -> str:
     """Render a node block: ``├─ LABEL ─┤`` + content lines + ``├──┤``."""
     parts = [_node_top(label, label_right)]

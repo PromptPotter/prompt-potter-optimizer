@@ -63,13 +63,37 @@ def _paired_fitness(
 
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
     """Eligibility for round-leader election. Disqualifies (a) escalation-aborted-without-PoBB
-    (mid-run failure outside measured-comparison) and (b) degradation/scoring_error_abort
-    (partial subset accuracy can fake-inflate above origin). PoBB-eliminated candidates stay
-    in the pool — they went through fair paired comparison.
+    (mid-run failure outside measured-comparison), (b) degradation/scoring_error_abort
+    (partial subset accuracy can fake-inflate above origin), and (c) a true PoBB *loss* — the
+    eliminator's own verdict that this candidate is not the round's best. A LEADER_LOCKED stop
+    (the candidate that locked the lead) is the opposite verdict and stays eligible.
     """
     if cs.escalation_aborted and not cs.elimination_stopped:
         return False
-    return not cs.degradation_context
+    if cs.degradation_context:
+        return False
+    ec = cs.elimination_context
+    # elim_context is populated only for the "elimination" check, carrying the candidate's own
+    # P(best) and epsilon; a loss is p_best < epsilon with the lead NOT locked. Honoring it stops
+    # a PoBB-eliminated candidate (p_best below epsilon on a thin subset) from winning the round.
+    return not (ec and not ec["leader_locked"] and ec["p_best"] < ec["epsilon"])
+
+
+def _paired_delta_lcb(
+    candidate_results: list[QueryMeasurement],
+    origin_results: list[QueryMeasurement],
+) -> tuple[float, float]:
+    """One-sigma lower-confidence bound of the candidate's per-sample fitness lift over the
+    matched origin — the same paired posterior PoBB elimination runs. Returns ``(mean, lcb)``
+    with ``lcb = mean - se``: an under-probed candidate has a wide posterior (large ``se``), so
+    at equal mean it ranks below a fully-probed one — a lucky 6-sample run can't outrank a
+    full-20 candidate on a thin subset mean.
+    """
+    cand_fit, origin_fit = _paired_fitness(candidate_results, origin_results)
+    if not cand_fit:
+        return 0.0, 0.0
+    mean_d, se_d, _ = paired_diff_posterior(cand_fit, origin_fit)
+    return mean_d, mean_d - se_d
 
 
 async def l1_score(
@@ -155,13 +179,17 @@ async def l1_score(
     best_matched_origin_acc = origin.accuracy
     best_matched_origin_hits = origin_base["hits"]
     best_matched_origin_composite = origin.composite_fitness
-    # Elect by improvement over MATCHED origin (origin on the candidate's own measured samples),
-    # NOT raw accuracy vs origin's full-set rate. The online picker scores each candidate on a
-    # different hard-first subset, so origin's full-set accuracy (inflated by the easy samples
-    # the candidate never ran) is the wrong comparison floor — a candidate that genuinely beats origin
-    # on the hard samples it ran would lose to that inflated average. Origin is the floor at delta 0.
-    best_delta = 0.0
+    # Elect by confident improvement over MATCHED origin (origin on the candidate's own measured
+    # samples), NOT raw accuracy vs origin's full-set rate. The online picker scores each candidate
+    # on a different hard-first subset, so origin's full-set accuracy (inflated by the easy samples
+    # the candidate never ran) is the wrong comparison floor. Ranking is the paired-fitness LCB vs
+    # matched origin (the posterior PoBB eliminates on), tie-broken toward higher coverage; origin is
+    # the floor at rank (0.0, 0), so only a candidate confidently above origin (lcb > 0) can win.
+    best_rank: tuple[float, int] = (0.0, 0)
     winner_idx: int | None = None
+    # An under-probed candidate can't win the round: a subset thinner than the elimination floor is
+    # too noisy to trust over a fully-probed incumbent. Clamp to the dataset so a tiny set stays electable.
+    coverage_floor = min(pobb_config.n_min, len(dataset))
     # `score_population` runs per-sample with `opt_sp=None` (target layer can't see OSP), so
     # opt_sp-aware evaluators (prompt_compactness) collapse to vacuous fallback. Backfill the
     # opt_sp-aware composite + evaluators here before selecting the winner.
@@ -201,11 +229,18 @@ async def l1_score(
         # upstream (`rescore_origin`), so this is the safety net for any partial-coverage gap.
         if matched["total"] == 0:
             continue
-        # Running max of the matched-origin delta: the candidate's accuracy minus origin's
-        # accuracy on the SAME samples. Beating its own matched origin is what wins the round.
-        cand_delta = s["accuracy"] - matched["accuracy"]
-        if cand_delta > best_delta:
-            best_delta = cand_delta
+        cand_base = _compute_accuracy(cand_results)
+        if cand_base["total"] < coverage_floor:
+            continue
+        # Running max of the paired-fitness LCB vs matched origin, tie-broken toward higher
+        # coverage. A candidate wins the round only when it confidently clears origin on its own
+        # measured samples — not on a lucky subset mean.
+        _, lcb = _paired_delta_lcb(
+            cand_results, list(cast("list[QueryMeasurement]", origin.results))
+        )
+        rank = (lcb, cand_base["total"])
+        if rank > best_rank:
+            best_rank = rank
             best_acc = s["accuracy"]
             best_comp = s["composite_fitness"]
             best_osp = ind
@@ -255,7 +290,13 @@ async def l1_score(
     sig_ok = not round_significance_gate or (
         p_value is not None and p_value < improvement_significance
     )
-    improved = delta_ok and n_ok and sig_ok
+    # Anchor the promotion verdict to the FROZEN round-0 origin (C0), not just the current
+    # incumbent's matched floor. The incumbent re-anchors to whatever won last round, so each
+    # promotion lowers the bar; requiring the winner to also clear C0 stops the lineage from
+    # decaying below where it started while still stamping `improved=True`.
+    c0_floor = cycle.tracking.origin_accuracy
+    c0_ok = best_acc >= c0_floor
+    improved = delta_ok and n_ok and sig_ok and c0_ok
     improved_reason: str | None = None
     if delta_ok and not improved:
         reasons: list[str] = []
@@ -264,6 +305,8 @@ async def l1_score(
         if not sig_ok:
             p_repr = f"{p_value:.3f}" if p_value is not None else "None"
             reasons.append(f"p={p_repr} >= {improvement_significance:.2f}")
+        if not c0_ok:
+            reasons.append(f"acc={best_acc:.3f} < origin_c0={c0_floor:.3f}")
         improved_reason = "; ".join(reasons)
     round_result = RoundResult(
         round=round_num,

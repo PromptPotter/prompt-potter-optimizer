@@ -5,7 +5,14 @@ from __future__ import annotations
 
 from promptpotter.application.views.view_models import SpDiffView
 from promptpotter.domain.opt_search_point import group_diff_keys
-from promptpotter.presentation.views.display import CYAN, DIM, RESET, YELLOW, _node_line
+from promptpotter.presentation.views.display import (
+    CYAN,
+    DIM,
+    RESET,
+    YELLOW,
+    _node_line,
+    _node_lines,
+)
 
 _SP_DIFF_ABSENT = "-"
 _SP_DIFF_UNCHANGED = "·"
@@ -135,7 +142,9 @@ def render_sp_diff(view: SpDiffView) -> str:
         out.append(_node_line(""))
         out.append(_node_line(f"{CYAN}Values:{RESET}"))
         for code, full in legend:
-            out.append(_node_line(f"  {code} {full}"))
+            # full may be a multi-line prompt-field value — prefix every physical line so an
+            # embedded newline doesn't break the box (console + .goldmine/latest.log).
+            out.extend(_node_lines(f"  {code} {full}"))
 
     return "\n".join(out)
 

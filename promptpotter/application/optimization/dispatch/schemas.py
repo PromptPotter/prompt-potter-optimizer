@@ -53,16 +53,17 @@ from promptpotter.domain.opt_search_point import (
 
 
 def _truncate(max_len: int) -> Callable[[Any], Any]:
-    """Silent string truncation for LLM outputs that overshoot a Field max_length.
+    """Silent head-keeping truncation for LLM outputs that overshoot a Field cap — for both
+    string length and list count.
 
-    Pydantic's max_length raises ValidationError on overflow, which would
-    discard the *entire* critique on a single overrun field. The schema
-    cap stays (it tells the LLM the budget via JSON Schema export); this
-    BeforeValidator drops the tail and keeps the head.
+    Pydantic's max_length raises ValidationError on overflow, which would discard the *entire*
+    critique on a single overrun field AND force a full (paid) schema-repair round-trip. The
+    schema cap stays (it tells the LLM the budget via JSON Schema export); this BeforeValidator
+    drops the tail and keeps the head so a 5th axis or 4th highlight clips instead of hard-failing.
     """
 
     def _v(value: Any) -> Any:
-        if isinstance(value, str) and len(value) > max_len:
+        if isinstance(value, (str, list)) and len(value) > max_len:
             return value[:max_len]
         return value
 
@@ -196,12 +197,12 @@ class L1CritiqueOutput(BaseModel):
     priority_fix: Annotated[str, BeforeValidator(_truncate(200))] = Field(
         default="", max_length=200
     )
-    suggested_axes: list[str] = Field(
+    suggested_axes: Annotated[list[str], BeforeValidator(_truncate(4))] = Field(
         default_factory=list,
         max_length=4,
         description="≤4 short axis names. Each item ≤40 chars (downstream truncates).",
     )
-    failure_highlights: list[str] = Field(
+    failure_highlights: Annotated[list[str], BeforeValidator(_truncate(3))] = Field(
         default_factory=list,
         max_length=3,
         description="≤3 short failure-line excerpts. Each item ≤140 chars (downstream truncates).",
