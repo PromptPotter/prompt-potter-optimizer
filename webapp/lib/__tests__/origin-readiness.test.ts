@@ -30,6 +30,16 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     },
     origin_prompt_fields: {},
     lock_model: true,
+    mechanisms: {
+      selection: { per_round_resubset: true, online_reorder: true },
+      elimination: {
+        epsilon_elimination: true,
+        deterministic_dominance: true,
+        degradation_fatal_fastpath: true,
+        leader_lock_in: false,
+        round_significance_gate: false,
+      },
+    },
     candidate_library_size: 0,
     created_at: "2026-05-30T00:00:00Z",
     updated_at: "2026-05-30T00:00:00Z",

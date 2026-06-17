@@ -78,13 +78,13 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "pobb_lock_in"): "policy",
     ("optimization", "pobb_lock_in_n_min"): "policy",
     ("optimization", "improvement_significance"): "policy",
-    ("optimization", "zero_signal_filter_enabled"): "policy",
     ("optimization", "spend_budget_usd"): "policy",
     ("optimization", "token_budget"): "policy",
     ("optimization", "origin_gate"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
     ("optimization", "rebase_capability"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
+    ("optimization", "mechanisms"): "policy",  # entire subtree — every toggle, now and future
 }
 
 
@@ -132,6 +132,100 @@ class ExplorationConfig(BaseModel):
     )
 
 
+class SelectionMechanisms(BaseModel):
+    """Hard-sample sorting & selection — how each round's scoring subset is chosen
+    and ordered. Turn BOTH off to freeze the sample basis at campaign start: one
+    fixed subset, fixed order, identical for every round and candidate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    per_round_resubset: bool = Field(
+        True,
+        description=(
+            "Re-pick the most-informative scoring subset every round from the "
+            "train bank (adaptive Rasch selection). Off → the subset is the "
+            "campaign-start selection (deterministic bank prefix), reused "
+            "unchanged for the whole campaign so every round scores the same samples."
+        ),
+    )
+    online_reorder: bool = Field(
+        True,
+        description=(
+            "Within a round, re-rank the unscored samples after every measurement "
+            "(online 1PL-Rasch adaptive queue) and stream the live order to the "
+            "dashboard. Off → each candidate measures the subset in fixed "
+            "insertion order, identical across candidates, no live re-sort emitted."
+        ),
+    )
+
+
+class EliminationMechanisms(BaseModel):
+    """Early-abort / candidate-elimination rules that stop measuring a candidate —
+    or gate round promotion — before the full sample budget is spent. Off → the
+    mechanism never fires; candidates run their full budget. Numeric tuning for an
+    enabled mechanism lives on the sibling `OptimizationConfig` fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    epsilon_elimination: bool = Field(
+        True,
+        description=(
+            "PoBB ε-stop: drop a candidate once its posterior probability of being "
+            "the round's best falls below `pobb_epsilon`. The main loser-elimination rule."
+        ),
+    )
+    deterministic_dominance: bool = Field(
+        True,
+        description=(
+            "Abort a candidate when its best POSSIBLE final hit count (current hits "
+            "+ remaining budget) is already below the incumbent's — it cannot "
+            "mathematically catch up. Fires before the ε math."
+        ),
+    )
+    degradation_fatal_fastpath: bool = Field(
+        True,
+        description=(
+            "End a candidate at the first FATAL sample (empty response, "
+            "content-filtered, structurally broken) without spending the rest of "
+            "its budget. Active while the degradation check runs "
+            "(`degradation_threshold` > 0); the rate-based check stays governed by "
+            "that threshold."
+        ),
+    )
+    leader_lock_in: bool = Field(
+        False,
+        description=(
+            "Crown a decisive leader EARLY: stop measuring a candidate as the winner "
+            "once its P(best) against every prior reaches `pobb_lock_in`, before it "
+            "spends its full budget. Off (default) → only losers are eliminated "
+            "early; a leader measures its full budget."
+        ),
+    )
+    round_significance_gate: bool = Field(
+        False,
+        description=(
+            "Require statistical significance to promote a round: the challenger "
+            "must beat origin by `improvement_threshold` AND yield "
+            "p < `improvement_significance`. Off (default) → promote on observed "
+            "lift alone. Turn on for ablation runs that need significance."
+        ),
+    )
+
+
+class MechanismConfig(BaseModel):
+    """Pluggable orchestration mechanisms, grouped by kind. Each toggle turns one
+    mechanism on/off; numeric tuning for an enabled mechanism lives on its
+    `OptimizationConfig` field (`pobb_epsilon`, `pobb_lock_in`, …). Add a mechanism
+    by adding a bool to the right group — it auto-surfaces to the webapp via the
+    schema. (Patience-driven L1/L2/L3 escalation is governed separately by
+    `l1_patience` / `l2_patience` / `l3_patience`; None disarms L2/L3.)"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selection: SelectionMechanisms = Field(default_factory=SelectionMechanisms)
+    elimination: EliminationMechanisms = Field(default_factory=EliminationMechanisms)
+
+
 class OptimizationConfig(BaseModel):
     """Optimization-loop knobs. `improvement_threshold` + `degradation_threshold` are required (no default)."""
 
@@ -157,29 +251,26 @@ class OptimizationConfig(BaseModel):
         "round's best drops below this threshold. Default 5%; smaller → fewer stops.",
     )
     pobb_lock_in: float = Field(
-        1.0,
-        description="Leader lock-in: stop measuring a candidate once its P(best) "
-        "against every prior reaches this threshold. 1.0 (default) disables lock-in "
-        "— a leading candidate measures its full sample budget; only losers are "
-        "eliminated early. Set below 1.0 (e.g. 0.95) to crown decisive leaders early "
-        "and save spend, at the cost of committing rounds on partial evidence.",
+        0.95,
+        description="Leader lock-in threshold — the P(best) at which a leading "
+        "candidate is crowned early and stops measuring. Applies only when "
+        "`mechanisms.elimination.leader_lock_in` is on (that bool owns the on/off); "
+        "this is purely the threshold. Lower = lock in sooner on less evidence.",
     )
     pobb_lock_in_n_min: int = Field(
         8,
         description="Samples-floor for lock-in — a leader can only lock in after at "
-        "least this many measurements. Ignored when `pobb_lock_in` is 1.0.",
+        "least this many measurements. Applies only when "
+        "`mechanisms.elimination.leader_lock_in` is on.",
     )
 
     improvement_significance: float = Field(
-        1.0,
-        description="One-sided proportion-test threshold for declaring a round "
-        "IMPROVED. The challenger must beat origin by `improvement_threshold` AND "
-        "score at least `elimination_n_min` samples AND yield p < this. Smaller = "
-        "stricter. Default 1.0 disables the gate (promote on observed lift only); "
-        "set lower (e.g. 0.10) to require statistical significance for ablation runs.",
+        0.10,
+        description="One-sided proportion-test threshold for the round-significance "
+        "gate — the challenger must yield p < this to promote. Applies only when "
+        "`mechanisms.elimination.round_significance_gate` is on (that bool owns the "
+        "on/off); this is purely the threshold. Smaller = stricter.",
     )
-
-    zero_signal_filter_enabled: bool = Field(False)
 
     spend_budget_usd: float | None = Field(
         0.025,
@@ -257,6 +348,7 @@ class OptimizationConfig(BaseModel):
     )
 
     exploration: ExplorationConfig = Field(default_factory=ExplorationConfig)
+    mechanisms: MechanismConfig = Field(default_factory=MechanismConfig)
 
 
 class DatasetSplit(BaseModel):

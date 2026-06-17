@@ -360,6 +360,51 @@ export function fetchCycles(signal?: AbortSignal): Promise<CyclesResponse> {
   return jget<CyclesResponse>(`${API}/cycles`, signal);
 }
 
+// Campaign manifest detail — adds `config` (frozen CampaignConfig snapshot) +
+// the session forest to the summary. The MechanismsPanel reads the active
+// toggle states off `config.optimization.mechanisms`.
+export interface CampaignDetailResponse {
+  campaign_id: string;
+  dataset_name: string;
+  config: Record<string, unknown>;
+  // …plus every CampaignSummary field + `sessions`; only `config` is consumed here.
+}
+export function fetchCampaignDetail(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<CampaignDetailResponse> {
+  return jget<CampaignDetailResponse>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}`,
+    signal,
+  );
+}
+
+// Self-describing mechanism-toggle descriptor — groups, labels, descriptions,
+// defaults — derived live from the `MechanismConfig` Pydantic schema. Campaign-
+// independent: zip it with a campaign's `config.optimization.mechanisms` to
+// render active states. A future toggle (one bool added to a group) appears
+// here automatically. Wire shape: `GET /campaigns/mechanisms-schema`.
+export interface MechanismToggle {
+  key: string;
+  label: string;
+  description: string;
+  default: boolean;
+}
+export interface MechanismGroup {
+  key: string;
+  label: string;
+  description: string;
+  toggles: MechanismToggle[];
+}
+export interface MechanismSchemaResponse {
+  groups: MechanismGroup[];
+}
+export function fetchMechanismsSchema(
+  signal?: AbortSignal,
+): Promise<MechanismSchemaResponse> {
+  return jget<MechanismSchemaResponse>(`${API}/campaigns/mechanisms-schema`, signal);
+}
+
 // Conditional, like the dashboard poll: the unmasked request honors
 // `If-Modified-Since` → 304 so revalidation on the dashboard change-signal is
 // cheap during quiescent stretches. A masked request (lens/samples set) always

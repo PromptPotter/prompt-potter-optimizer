@@ -70,6 +70,11 @@ async def execute_round(
     # like-for-like.
     if cycle.probe_next_round:
         scoring_set = scoring_pool
+    elif not opt.mechanisms.selection.per_round_resubset:
+        # Frozen selection: ignore accumulating observations, so every round
+        # gets the deterministic campaign-start subset (bank prefix) — one fixed
+        # sample basis for the whole campaign.
+        scoring_set = select_round_subset(scoring_pool, [], config.sp_budget_ttest)
     else:
         # Archive obs are dataset-scoped + abort-residue-free → cross-cycle evidence.
         observations = [*cycle.archive_observations, *build_observations(cycle.rounds)]
@@ -110,6 +115,8 @@ async def execute_round(
             pipeline_params=cycle.tracking.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
             improvement_significance=opt.improvement_significance,
+            round_significance_gate=opt.mechanisms.elimination.round_significance_gate,
+            online_reorder=opt.mechanisms.selection.online_reorder,
             callbacks=callbacks,
             degradation_checks=degradation_checks,
             pobb_config=PoBBConfig(
@@ -117,6 +124,9 @@ async def execute_round(
                 epsilon=opt.pobb_epsilon,
                 lock_in=opt.pobb_lock_in,
                 lock_in_n_min=opt.pobb_lock_in_n_min,
+                epsilon_elimination=opt.mechanisms.elimination.epsilon_elimination,
+                deterministic_dominance=opt.mechanisms.elimination.deterministic_dominance,
+                leader_lock_in=opt.mechanisms.elimination.leader_lock_in,
             ),
             round_num=round_num,
             yield_stats=yield_stats,

@@ -2038,6 +2038,7 @@ components:
         - field_provenance
         - origin_prompt_fields
         - lock_model
+        - mechanisms
         - created_at
         - updated_at
       additionalProperties: false
@@ -2175,6 +2176,19 @@ components:
             panel. Drives the committed
             `campaign.json::optimization.forbidden_axes_strict` and the derived
             optimizer-locks permission view.
+        mechanisms:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: boolean
+          description: |
+            Pluggable orchestration mechanism toggles
+            (`optimization.mechanisms` — sorting/selection + early-abort groups).
+            Nested `{group: {toggle: bool}}`; seeded with stock defaults,
+            operator-editable in the new-campaign form, materialized verbatim into
+            the committed `campaign.json`. Self-describing schema served by
+            `GET /campaigns/mechanisms-schema`.
         candidate_library_size:
           type: integer
           minimum: 0
@@ -2356,6 +2370,16 @@ components:
               type: boolean
               description: |
                 Toggle the campaign-wide model/provider lock (`forbidden_axes_strict`).
+            mechanisms:
+              type: object
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: boolean
+              description: |
+                Replaces (not deep-merges) the draft's mechanism toggles — the
+                editor sends the full `{group:{toggle:bool}}` object, validated
+                against `MechanismConfig` server-side.
 
     MintCampaignFromDraftPayload:
       type: object

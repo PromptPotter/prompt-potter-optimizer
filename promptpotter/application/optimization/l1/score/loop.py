@@ -52,6 +52,7 @@ async def score_population(
     round_num: int = 0,
     decisions: list[ResumeCheckpointRecord] | None = None,
     l1_diversity: float = 1.0,
+    online_reorder: bool = True,
 ) -> tuple[
     dict[str, list[QueryMeasurement]],
     list[ScoredCandidate],
@@ -291,7 +292,9 @@ async def score_population(
             candidate_scores=candidate_scores,
             round_num=round_num,
             l1_diversity=l1_diversity,
-            next_sample=_next_sample,
+            # online_reorder off → no adaptive re-rank: fixed insertion order, no
+            # live sample-order preview emitted (query_loop's None fallback).
+            next_sample=_next_sample if online_reorder else None,
         )
         all_candidate_results[osp_c.lineage.id] = cr_result.results
         if order_steps:

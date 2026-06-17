@@ -80,6 +80,8 @@ async def l1_score(
     pipeline_params: dict[str, Any] | None = None,
     improvement_threshold: float = 0.01,
     improvement_significance: float = 0.10,
+    round_significance_gate: bool = False,
+    online_reorder: bool = True,
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
     pobb_config: PoBBConfig,
@@ -117,6 +119,7 @@ async def l1_score(
         round_num=round_num,
         decisions=decisions,
         l1_diversity=yield_stats.l1_yield,
+        online_reorder=online_reorder,
     )
 
     aborted_ids = {cs.candidate_id for cs in candidate_scores if not is_leader_eligible(cs)}
@@ -249,7 +252,7 @@ async def l1_score(
     delta_ok = best_acc > best_matched_origin_acc + improvement_threshold
     n_min = pobb_config.n_min
     n_ok = base["total"] >= n_min
-    sig_ok = improvement_significance >= 1.0 or (
+    sig_ok = not round_significance_gate or (
         p_value is not None and p_value < improvement_significance
     )
     improved = delta_ok and n_ok and sig_ok

@@ -37,6 +37,14 @@ DEFAULT_CONNECTOR = "termnorm"
 """Only registered connector today (per root CLAUDE.md); operator-editable."""
 
 
+def _default_mechanisms() -> dict[str, Any]:
+    """Stock mechanism toggles (all groups, default values). Deferred import keeps
+    the config module off this module's import path."""
+    from promptpotter.application.config import MechanismConfig
+
+    return MechanismConfig().model_dump(mode="json")
+
+
 def closed_answer_format(labels: Sequence[str]) -> str:
     """Canonical ``answer_format`` value for a closed label set: every label,
     pipe-joined, so the prompt can emit any of them and the answer_space gate
@@ -144,6 +152,12 @@ class DraftCampaign:
     # floor. Operator-editable in the pipeline-config control panel; drives both
     # the wire ``optimizer_locks.forbidden_axes`` and the committed campaign.json.
     lock_model: bool = True
+    # The pluggable orchestration mechanism toggles
+    # (``optimization.mechanisms`` — sorting/selection + early-abort groups).
+    # Nested ``{group: {toggle: bool}}`` shape; seeded with the stock defaults,
+    # operator-editable in the new-campaign form, and materialized verbatim into
+    # the committed ``campaign.json``. The campaign half, like ``max_rounds``.
+    mechanisms: dict[str, Any] = field(default_factory=_default_mechanisms)
     # The target library a ``candidate_source`` pipeline ranks each query against —
     # the "4th required input" the operator drops in the ingest UI when a node type
     # raises the dependency (see ``PipelineDependency``). Empty until dropped; on
@@ -188,6 +202,7 @@ class DraftCampaign:
             },
             "origin_prompt_fields": dict(self.origin_prompt_fields),
             "lock_model": self.lock_model,
+            "mechanisms": dict(self.mechanisms),
             # Count, not the full list — a library can run to tens of thousands of
             # entries; the UI needs only "is it fulfilled, and how big". The
             # per-dependency ``fulfilled`` flag rides ``optimizer_locks``' sibling

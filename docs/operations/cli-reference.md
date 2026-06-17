@@ -133,22 +133,6 @@ After an interrupted run, check for orphan processes (`tasklist | findstr python
 
 ---
 
-## Zero-signal sample filtering
-
-Off by default. Queries with variance 0 (always-hit or always-miss) across at least one observation are physically moved from `datasets/{name}.json::items` into `datasets/{name}.json::excluded` after each round.
-
-Enable via `optimization.zero_signal_filter_enabled: true` in `campaign.json`.
-
-```bash
-# Inspect what's been excluded
-cat .promptpotter/projects/{backend_id}/datasets/{name}.json \
-  | jq '.excluded | map({query: .item.query, hit_rate, observations, reason})'
-```
-
-Restoration is manual — move entries from `excluded` back into `items`.
-
----
-
 ## Environment
 
 `.env` file (see `.env.example`) carries API keys. The optimizer's provider + model are install-global in `datasets/_optimizer/pipeline.json` (per optimizer node) — no per-campaign or env-var default. (Target/scoring model is per-dataset in the pipeline overlay.)

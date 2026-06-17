@@ -202,6 +202,9 @@ def draft_from_dataset(
             "connector": connector,
             "scoring_composite": scoring,
             "max_rounds": max_rounds,
+            # Preserve the dataset's own mechanism toggles so reusing an Origin
+            # carries its sorting/early-abort config instead of resetting to stock.
+            "mechanisms": cc.optimization.mechanisms.model_dump(mode="json"),
             "pipeline_overlay": pipeline_overlay,
             "origin_prompt_fields": origin_prompt_fields,
             # Preserve the dataset's own pipeline (full Research+Match, llm_only, …)

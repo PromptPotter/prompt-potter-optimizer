@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.optimization.pobb.elimination.classification import (
     classify_result,
     extract_warning_types,
+    is_deprecated,
 )
 from promptpotter.application.optimization.pobb.seeding import pobb_rng
-from promptpotter.application.scoring.metrics import count_degraded_samples
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.validators import StopRule
@@ -63,14 +63,17 @@ class DegradationCheck:
 
     name = "degradation"
 
-    def __init__(self, threshold: float = 0.4, min_samples: int = 3) -> None:
+    def __init__(
+        self, threshold: float = 0.4, min_samples: int = 3, *, fatal_fastpath: bool = True
+    ) -> None:
         self.threshold = threshold
         self.min_samples = min_samples
+        self.fatal_fastpath = fatal_fastpath
 
     def check(
         self, results: list[QueryMeasurement], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
-        if results:
+        if self.fatal_fastpath and results:
             classification = classify_result(results[-1])
             fatal = classification.dominant_fatal
             if fatal is not None:
@@ -92,7 +95,12 @@ class DegradationCheck:
         n = len(results)
         if n < self.min_samples:
             return None
-        degraded = count_degraded_samples(results)
+        # Count only genuinely-deprecated samples (fatal + infra/truncation) toward
+        # elimination — NOT advisory transients. A non-fatal advisory warning (e.g.
+        # web_search:low_document_count, which fires whenever fewer than max_sites docs
+        # are gathered) must not eliminate a candidate that is otherwise scoring well;
+        # classification.py is explicit that low-document-count is not a deprecation.
+        degraded = sum(1 for r in results if is_deprecated(r))
         rate = degraded / n
         if rate < self.threshold:
             return None
@@ -131,10 +139,13 @@ class PoBBConfig:
 
     n_min: int = 6
     epsilon: float = POBB_DEFAULT_EPSILON
-    lock_in: float = (
-        1.0  # 1.0 disables leader lock-in; OptimizationConfig.pobb_lock_in is the runtime value
-    )
+    lock_in: float = 0.95  # threshold only; leader_lock_in owns on/off
     lock_in_n_min: int = 8
+    # Mechanism toggles (OptimizationConfig.mechanisms.elimination.*). Defaults
+    # preserve today's behavior: ε + dominance on, lock-in off.
+    epsilon_elimination: bool = True
+    deterministic_dominance: bool = True
+    leader_lock_in: bool = False
 
 
 class PoBBCheck:
@@ -157,6 +168,9 @@ class PoBBCheck:
         self.epsilon = config.epsilon
         self.lock_in = config.lock_in
         self.lock_in_n_min = config.lock_in_n_min
+        self.epsilon_elimination = config.epsilon_elimination
+        self.deterministic_dominance = config.deterministic_dominance
+        self.leader_lock_in = config.leader_lock_in
         self.n_samples = n_samples
         self.round_num = int(round_num)
         self.priors_by_sample: dict[str, dict[str, float]] = {}
@@ -268,9 +282,10 @@ class PoBBCheck:
         scores = [float(r.get("fitness", 0.0)) for r in results]
 
         # Deterministic dominance: abort if cand_max_final_hits < seed_total_hits.
-        dominance_signal = self._dominance_check(scores, candidate_idx, n_total_candidates)
-        if dominance_signal is not None:
-            return dominance_signal
+        if self.deterministic_dominance:
+            dominance_signal = self._dominance_check(scores, candidate_idx, n_total_candidates)
+            if dominance_signal is not None:
+                return dominance_signal
 
         # Exclude priors with sample-set gaps rather than 0-fill.
         paired_priors: dict[str, list[float]] = {}
@@ -312,7 +327,7 @@ class PoBBCheck:
             self._on_snapshot(snap)
 
         # Leader lock-in: stop measuring when P(cand > every prior) ≥ lock_in.
-        if self.lock_in < 1.0 and n >= self.lock_in_n_min and p_best_current >= self.lock_in:
+        if self.leader_lock_in and n >= self.lock_in_n_min and p_best_current >= self.lock_in:
             return _leader_locked(
                 self.name,
                 {
@@ -330,7 +345,7 @@ class PoBBCheck:
                 n_total_candidates,
             )
 
-        if not pobb_should_stop(p_best_current, self.epsilon):
+        if not self.epsilon_elimination or not pobb_should_stop(p_best_current, self.epsilon):
             return None
 
         return _eliminate(
@@ -405,7 +420,12 @@ def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:
     opt = config.optimization
     checks: list[StopRule] = []
     if opt.degradation_threshold > 0:
-        checks.append(DegradationCheck(threshold=opt.degradation_threshold))
+        checks.append(
+            DegradationCheck(
+                threshold=opt.degradation_threshold,
+                fatal_fastpath=opt.mechanisms.elimination.degradation_fatal_fastpath,
+            )
+        )
     return checks
 
 

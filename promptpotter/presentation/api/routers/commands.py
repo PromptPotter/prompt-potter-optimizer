@@ -209,6 +209,10 @@ class _EditDraftPatch(BaseModel):
     # Whether the optimizer is barred from mutating model/provider (the
     # forbidden_axes_strict knob). The pipeline-config control panel toggles it.
     lock_model: bool | None = None
+    # Mechanism toggles (optimization.mechanisms — sorting/selection + early-abort
+    # groups). Nested {group:{toggle:bool}}; the editor sends the FULL object (like
+    # origin_prompt_fields), validated against MechanismConfig before storing.
+    mechanisms: dict[str, Any] | None = None
     # Audit marker stamped when an agent simulates the check-in node (authors the
     # origin decomposition by hand instead of spending the LLM call) — see
     # `DraftCampaign.simulated_checkin`. Free dict `{by, model, at}`; lands in the
@@ -306,6 +310,15 @@ async def edit_draft_campaign(
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val
+
+    # Mechanism toggles: validate the full object against the config model (rejects
+    # unknown groups/toggles, normalizes), then store the dumped shape.
+    if patch.mechanisms is not None:
+        from promptpotter.application.config import MechanismConfig
+
+        changes["mechanisms"] = MechanismConfig.model_validate(patch.mechanisms).model_dump(
+            mode="json"
+        )
 
     # The task framing IS gated — an operator edit CONFIRMS it, which is what
     # opens the origin-readiness gate for a field the resolver left PROPOSED or

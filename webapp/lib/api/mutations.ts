@@ -307,6 +307,11 @@ export interface DraftCampaignWire {
   // (the `forbidden_axes_strict` knob). Default `true` (locked). Toggled in the
   // pipeline-config control panel; drives `optimizer_locks.forbidden_axes`.
   lock_model: boolean;
+  // Pluggable orchestration mechanism toggles (optimization.mechanisms —
+  // sorting/selection + early-abort groups). Nested {group:{toggle:bool}};
+  // editable in the new-campaign form, materialized into the committed
+  // campaign.json. Seeded with the stock defaults.
+  mechanisms: Record<string, Record<string, boolean>>;
   // Number of entries in the dropped candidate library (0 = none yet). The full
   // list isn't sent — a library can run to tens of thousands of entries; the UI
   // needs only fulfilled-ness + size.
@@ -545,6 +550,9 @@ export interface DraftPatch {
   origin_prompt_fields?: Record<string, unknown>;
   // Toggle the campaign-wide model/provider lock (forbidden_axes_strict).
   lock_model?: boolean;
+  // Mechanism toggles (optimization.mechanisms). The editor sends the FULL
+  // nested object (like origin_prompt_fields), not a sparse patch.
+  mechanisms?: Record<string, Record<string, boolean>>;
 }
 
 export async function postEditDraftCampaign(

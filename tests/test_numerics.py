@@ -1156,7 +1156,8 @@ def test_pobb_dominance_aborts_when_catch_up_impossible():
 def test_pobb_locks_in_dominant_leader():
     """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED."""
     check = PoBBCheck(
-        PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8), n_samples=20
+        PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8, leader_lock_in=True),
+        n_samples=20,
     )
     check.register_completed(_measurements([0.0] * 20), candidate_id="weak_prior", sp=_DUMMY_SP)
     check.set_current("strong_current")

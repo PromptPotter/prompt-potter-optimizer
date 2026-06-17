@@ -286,3 +286,18 @@
 .origin-gate-verdict dd{margin:0;font-family:var(--font-mono);color:var(--color-text)}
 .origin-gate-reasons{margin:0 0 8px;padding-left:18px;font-size:12px;color:var(--color-text-secondary);line-height:1.5}
 .origin-gate-err{margin:8px 0 0;font-size:12px;color:var(--color-danger,#c0392b)}
+
+/* Mechanisms panel — read-only view of the campaign's pluggable orchestration
+   toggles (campaign.json::optimization.mechanisms). One CardFrame per group;
+   each row pairs the toggle label with an ON/OFF badge (state = colour + text,
+   never colour alone). "•" on the badge marks a non-default value. */
+.mech-empty{margin:0;padding:8px 4px;font-size:12px;color:var(--color-text-tertiary)}
+.mech-groups{display:flex;flex-direction:column;gap:12px}
+.mech-card-title{font-size:13px;font-weight:600}
+.mech-group-desc{margin:0 0 10px;font-size:12px;line-height:1.5;color:var(--color-text-tertiary)}
+.mech-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.mech-row{border-top:0.5px solid var(--color-border-tertiary);padding-top:10px}
+.mech-row:first-child{border-top:0;padding-top:0}
+.mech-row-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.mech-row-label{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.mech-row-desc{margin:4px 0 0;font-size:12px;line-height:1.5;color:var(--color-text-secondary)}

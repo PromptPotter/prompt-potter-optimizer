@@ -10,6 +10,7 @@ import { RoundTabsStrip } from "@/components/dashboard/samples/RoundTabsStrip";
 import { NowTriad } from "./NowTriad";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
+import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 
 // The Dashboard tab's arrangement, owned here rather than inline in the shell:
 // AppShell stays a thin tab-router + provider stack. Every section reads its
@@ -55,6 +56,16 @@ export function DashboardTab() {
       >
         <DashSpine>
           <LiveStateCard />
+        </DashSpine>
+      </Lane>
+      <Lane
+        id="mechanisms"
+        title="Mechanisms"
+        subtitle="Pluggable sorting + early-abort toggles (campaign.json)"
+        defaultOpen={false}
+      >
+        <DashSpine>
+          <MechanismsPanel />
         </DashSpine>
       </Lane>
     </div>

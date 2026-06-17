@@ -7,6 +7,7 @@ import { originReadiness } from "@/lib/origin-readiness";
 import { cx } from "@/lib/cx";
 import { NumberField } from "@/components/forms/NumberField";
 import { SlugField } from "@/components/forms/SlugField";
+import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
 import { PipelineSetupSection } from "./PipelineSetupSection";
 import { PipelineDependencies } from "./PipelineDependencies";
@@ -262,6 +263,13 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
             onApply={(max_rounds) => flow.applyPatch({ max_rounds })}
           />
           <SlugField slug={draft.slug} onApply={(slug) => flow.applyPatch({ slug })} />
+          {/* Pluggable orchestration mechanisms — sorting/selection + early-abort
+              toggles, the same surface the dashboard renders read-only. Editable
+              here at authoring time; each flip patches the draft's campaign.json. */}
+          <MechanismsPanel
+            mechanisms={draft.mechanisms}
+            onChange={(mechanisms) => flow.applyPatch({ mechanisms })}
+          />
         </div>
       </details>
 
