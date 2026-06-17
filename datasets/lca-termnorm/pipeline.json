@@ -57,6 +57,11 @@
       "node_role": "enricher",
       "description": "Searches the web for contextual information about the input query. Retrieved content provides the primary raw context that entity_profiling uses to generate structured profiles \u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u20ac\udc9d the quality of web results directly determines profiling quality.",
       "config": {
+        "strategy": "snippets",
+        "scrape_budget": 20,
+        "extract_pdf": true,
+        "pdf_max_pages": 10,
+        "pdf_max_bytes": 5000000,
         "max_sites": 7,
         "num_results": 20,
         "content_char_limit": 800,
@@ -144,18 +149,27 @@
       "optimizer": {
         "display_tag": "webS",
         "param_keys": [
+          "strategy",
           "max_sites",
           "num_results",
           "content_char_limit",
           "query_prefix",
           "query_suffix"
         ],
+        "param_allowed_values": {
+          "strategy": [
+            "snippets",
+            "scrape",
+            "hybrid"
+          ]
+        },
         "param_descriptions": {
+          "strategy": "How the single Brave query becomes evidence: 'snippets' (Brave's returned text - instant, never hangs, fewer LLM tokens), 'scrape' (full-page fetch under scrape_budget - deepest evidence, slower), 'hybrid' (scrape with per-source snippet fallback). Swept on ground truth to pick most-efficiently-true.",
           "query_prefix": "Text prepended to the input query before web search \u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u20ac\udc9d controls search focus, domain targeting, and terminology framing (e.g. 'LCA database' narrows to domain)",
           "query_suffix": "Text appended to the input query before web search \u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u20ac\udc9d adds qualifiers, constraints, or context keywords (e.g. 'material composition' adds specificity)",
           "num_results": "Number of search engine results to request",
-          "max_sites": "Maximum number of web pages to fetch and extract content from",
-          "content_char_limit": "Maximum characters of content to extract per web page"
+          "max_sites": "Maximum number of evidence sources kept (scraped pages or snippets)",
+          "content_char_limit": "Maximum characters of content kept per evidence source"
         },
         "observation_name": "web_search",
         "observation_mappings": [
@@ -166,6 +180,10 @@
           {
             "pipeline_key": "web_search_status",
             "output_field": "status"
+          },
+          {
+            "pipeline_key": "web_cost",
+            "output_field": "cost"
           }
         ],
         "langfuse_type": "tool"

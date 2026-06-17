@@ -258,6 +258,27 @@ not stale drift. The `.get`/`except` defensiveness at `scoring_context.py:70` / 
 / `l1_layout.py:120` / `backend.py:59` / `connectors/termnorm.py:259` are legit external-input /
 JSON-parse boundary guards (or already tracked in the 2026-06-12 holds), not contract-key fallbacks.
 
+### A backend fix isn't observable without clearing a cache (2026-06-17)
+
+Surfaced landing the two TermNorm fixes (cp1252→utf-8 file I/O; `token_matcher.py` length-bias —
+git log). A co-owned backend change is NOT re-exercised by a fresh PP run, because two caches both
+key on the *query/searchpoint*, never on backend code/revision:
+
+- **PP measurement cache is backend-version-blind.** Origin/round scoring replays cached per-sample
+  measurements keyed on the PP-side searchpoint only (`application/scoring/` `score_search_point` →
+  `archive/{measurements,dataset_runs}/`). A backend fix replays the stale (buggy) result — every
+  sample shows `📖`/`0.0s` (`presentation/views/live/display.py:169`); observed live as origin C0
+  scoring 15/20 cached after the matcher fix. **Action:** fold the connector revision-pin
+  (`connectors/protocol.py::Connector.{expected_revision,version_check}`, already exists) into the
+  measurement cache key, OR a `--fresh` flag on `new`/`resume`. **Blocker:** key-vs-flag decision.
+  Workaround: clear the dataset's `archive/{measurements,dataset_runs}/` before re-running.
+
+- **TermNorm `match_database` feedback-loop** (`…/backend-api/services/match_database.py`) — rebuilt
+  from past langfuse traces, so it learns prior (incl. buggy) predictions; `cache_lookup`/`fuzzy_matching`
+  (both `short_circuit: true`) can replay a learned target before `token_matching` runs. **Action:**
+  confirm the live `/matches` path short-circuits only on `verified` aliases. **Blocker:** cross-repo;
+  trace the short-circuit in `api/research_pipeline.py`.
+
 ### Considered, not debt (don't re-open)
 
 - **`RunCallbacks` ↔ `emit_*`** — two writer APIs, but `RunCallbacks._phase_ctx: ViewContext` is owned write-then-read cross-event state; folding it into an ambient ContextVar is a downgrade. The "which do I use" rule is in [`developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1.

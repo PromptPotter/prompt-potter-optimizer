@@ -3,6 +3,7 @@
     "max_token_candidates": [10, 30, 50]
   },
   "web_search": {
+    "strategy": ["snippets", "scrape", "hybrid"],
     "query_prefix": [
       "ecoinvent",
       "ecoinvent LCA database material name",

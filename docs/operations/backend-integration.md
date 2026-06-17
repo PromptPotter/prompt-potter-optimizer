@@ -29,6 +29,23 @@ The client talks to each backend over HTTP(S) with optional bearer-token auth. F
 
 A node emits `diagnostics.warnings[]`; PromptPotter counts them, synthesizes a `RuntimeFailure` on the offending candidate, and L2 steers L1 away next round (persistent pattern → L3 replans). To wire a new node: emit the warning and set `degradation_threshold` in campaign config (0 disables). Routing strategy + anomaly detector are optional (default routes to L2). Mechanics: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
+## Web-search strategy — a swept axis with a cost signal
+
+TermNorm's `web_search` node gathers the evidence `entity_profiling` turns into a profile.
+It exposes a `strategy` parameter (`snippets` / `scrape` / `hybrid`) as an optimization axis
+(`/pipeline` → `web_search.optimizer.param_keys` + `param_allowed_values`). All three issue
+exactly **one** metered Brave query per match, so sweeping `strategy` holds search cost
+fixed and varies only evidence depth, latency, and LLM token cost. Sweep it on the
+LCA ground-truth set and read the winner off accuracy vs the per-match cost block.
+
+Each `/matches` response (and a langfuse `web_search` observation) now carries `web_cost`:
+`{strategy, brave_queries, scrape_attempts, scrape_ok, scrape_failed, evidence_chars}`.
+`brave_queries` is the metered cost (==1 on a live search, 0 when skipped/precomputed) and
+is the free-tier ceiling; `evidence_chars` + `scrape_failed` are the efficiency/reliability
+signal to weigh against accuracy. The status/sources/warning-`kind` contract is unchanged —
+existing display and self-healing keep working. Backend rationale:
+`TermNorm-excel/backend-api/docs/WEB_SEARCH_STRATEGY.md`.
+
 ## PromptPotter's own REST API
 
 | Endpoint | Description |
