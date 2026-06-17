@@ -37,6 +37,7 @@ class EscalationRule:
 
 
 # perfect_accuracy preempts so a perfect-fit round terminates instead of firing L2;
+# l1_mandatory_breach preempts patience — a dropped backend placeholder is structural, heal L2 now;
 # l2_axis_yield_drought preempts patience when AxisIndex shows no productive axes;
 # l1_patience=0 collapses "fire L2 every round" via the l1_to_l2 fall-through.
 DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
@@ -46,6 +47,13 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
         fire=NextAction.STOP_PERFECT,
         priority=100,
         reason="composite_fitness >= 1.0",
+    ),
+    EscalationRule(
+        name="l1_mandatory_breach",
+        when=lambda s: s.l1_mandatory_breach,
+        fire=NextAction.FIRE_L2,
+        priority=70,
+        reason="L1 dropped a mandatory backend placeholder -> immediate L2 re-frame (patience 0)",
     ),
     EscalationRule(
         name="l2_axis_yield_drought",

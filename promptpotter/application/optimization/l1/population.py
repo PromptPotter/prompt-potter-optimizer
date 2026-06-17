@@ -11,6 +11,7 @@ from typing import Any
 
 from promptpotter.application.optimization.validators.l1_strict import (
     L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
+    L1_PROMPT_PLACEHOLDERS_INTACT,
     L1_SCHEMA_COMPLIANCE,
 )
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
@@ -73,23 +74,33 @@ def parse_population(
     for cp in proposals:
         pipeline_params_override = cp.pipeline_params_override or None
         osp = cp.osp
-        if schema and pipeline_params_override:
-            outcome = L1_SCHEMA_COMPLIANCE.run(
-                pipeline_params_override,
-                pipeline_schema=schema,
-                forbidden_axes_strict=forbidden_axes_strict,
-            )
+        if schema:
             failures: list[ValidationFailure] = []
-            if outcome is not None:
-                failures.extend(outcome.evidence["failures"])
-            # Re-propose check: rejects (param, value) already in
-            # opt_sp.memory.wounds.runtime_failures; runs even when schema-compliance passes.
-            rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
-                pipeline_params_override,
+            if pipeline_params_override:
+                outcome = L1_SCHEMA_COMPLIANCE.run(
+                    pipeline_params_override,
+                    pipeline_schema=schema,
+                    forbidden_axes_strict=forbidden_axes_strict,
+                )
+                if outcome is not None:
+                    failures.extend(outcome.evidence["failures"])
+                # Re-propose check: rejects (param, value) already in
+                # opt_sp.memory.wounds.runtime_failures; runs even when schema-compliance passes.
+                rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
+                    pipeline_params_override,
+                    opt_sp=osp,
+                )
+                if rf_outcome is not None:
+                    failures.extend(rf_outcome.evidence["failures"])
+            # Mandatory backend placeholders intact in the evolved prompt — runs even when
+            # the mutation is prompt-fields-only (the exact case that drops {{combined_text}}).
+            ph_outcome = L1_PROMPT_PLACEHOLDERS_INTACT.run(
+                {},
                 opt_sp=osp,
+                pipeline_schema=schema,
             )
-            if rf_outcome is not None:
-                failures.extend(rf_outcome.evidence["failures"])
+            if ph_outcome is not None:
+                failures.extend(ph_outcome.evidence["failures"])
             if failures:
                 osp.memory.wounds.validation_failures = failures
                 for vf in failures:

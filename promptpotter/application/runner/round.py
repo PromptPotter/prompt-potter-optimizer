@@ -12,6 +12,9 @@ from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle, build_round_payload
 from promptpotter.application.optimization.escalation import NextAction, escalate_l2
+from promptpotter.application.optimization.validators.l1_strict import (
+    DROPPED_MANDATORY_PLACEHOLDER,
+)
 from promptpotter.application.output import (
     write_hard_samples_artifacts,
     write_log_md,
@@ -259,11 +262,19 @@ async def post_round(
     State machine observes outcome (CONTINUE / FIRE_L2 / STOP_*), then closes the round and dispatches.
     Probe rounds bypass observation and call ``close_round`` directly."""
     axes_with_positive_yield = count_positive_yield_axes(cycle)
+    # A dropped mandatory backend placeholder is structural, not a stall — heal L2 now
+    # (patience 0) instead of burning l1_patience rounds while L1 re-drops it.
+    l1_mandatory_breach = any(
+        vf.reason == DROPPED_MANDATORY_PLACEHOLDER
+        for sc in round_result.candidate_scores
+        for vf in sc.validation_failures
+    )
     event = cycle.escalation.observe_round(
         improved=round_result.improved,
         current_accuracy=cycle.tracking.current_accuracy,
         l1_patience=config.optimization.l1_patience,
         axes_with_positive_yield=axes_with_positive_yield,
+        l1_mandatory_breach=l1_mandatory_breach,
     )
 
     await close_round(cycle, round_result, round_payload, round_num, session, cb)

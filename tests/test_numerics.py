@@ -795,6 +795,38 @@ def test_parse_population_attaches_forbidden_axis_failure_to_osp():
     assert failures[0].axis == "llm_only.model"
 
 
+def test_parse_population_flags_dropped_mandatory_placeholder():
+    """A candidate whose evolved prompt drops {{combined_text}} is invalid (synthetic-0), never a
+    real winner — the gap that let an evidence-free program out-score the evidence-fed origin.
+    The intact sibling stays clean. Guards a wrong score: the drop is silent without this."""
+    from promptpotter.application.optimization.l1.population import parse_population
+    from promptpotter.domain.pipeline_schema import NodePromptInfo
+
+    schema = PipelineSchema(
+        name="test",
+        available_models=["openai/gpt-oss-120b"],
+        nodes=[
+            PipelineNode(
+                name="entity_profiling",
+                prompt_info=NodePromptInfo(template_variables=["combined_text"]),
+            )
+        ],
+    )
+    parent = _parent()
+    dropped = CandidateProposal(osp=parent.mutate(problem_description="Profile the entity."))
+    intact = CandidateProposal(
+        osp=parent.mutate(problem_description="Profile using {{combined_text}}.")
+    )
+
+    osp_list, _ = parse_population([dropped, intact], pipeline_params=None, schema=schema)
+
+    dropped_failures = osp_list[0].memory.wounds.validation_failures
+    assert len(dropped_failures) == 1
+    assert dropped_failures[0].reason == "dropped_mandatory_placeholder"
+    assert dropped_failures[0].axis == "entity_profiling.prompt"
+    assert osp_list[1].memory.wounds.validation_failures == []
+
+
 # ===========================================================================
 # 7. L2 output validators (fire + quiet)
 # ===========================================================================

@@ -31,6 +31,9 @@ class EscalationInputs:
     l1_patience: int
     # None until AxisIndex is initialised; runner populates from `cycle.axes.with_positive_yield()`.
     axes_with_positive_yield: int | None = None
+    # A candidate this round dropped a mandatory backend placeholder (e.g. {{combined_text}}).
+    # Structural breakage → immediate L2 re-frame, bypassing l1_patience (the "patience 0" path).
+    l1_mandatory_breach: bool = False
 
 
 def decide_escalation(

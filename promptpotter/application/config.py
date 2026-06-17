@@ -583,6 +583,22 @@ def resolve_pipeline_config_params(
     return pipeline_params
 
 
+def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:
+    """Declared `{{vars}}` the backend injects by literal substitution but the rendered prompt drops.
+
+    A prompt-bearing node declares the `{{name}}` placeholders the backend fills
+    (query / research evidence / output-schema). If the rendered prompt omits one,
+    that injection silently no-ops and the model never sees it. The 8-field
+    decomposition names (`PROMPT_STRING_FIELDS`) are excluded — some nodes declare
+    THOSE as template_variables, but `render()` assembles them; they are never
+    `{{substituted}}`. The SINGLE definition of "required placeholder", shared by
+    the mint-time setup check and the in-loop L1 candidate guard.
+    """
+    return [
+        v for v in declared if v not in PROMPT_STRING_FIELDS and "{{" + v + "}}" not in rendered
+    ]
+
+
 def configure_and_apply_pipeline(
     session: Session,
     campaign_config: CampaignConfig,
@@ -659,11 +675,7 @@ def configure_and_apply_pipeline(
             # `render()` ASSEMBLES them — they are never `{{substituted}}`.
             pinfo = prompt_info_by_node.get(pnode)
             declared = pinfo.template_variables if pinfo else []
-            missing = [
-                v
-                for v in declared
-                if v not in PROMPT_STRING_FIELDS and "{{" + v + "}}" not in rendered
-            ]
+            missing = missing_template_vars(rendered, declared)
             if missing:
                 raise ValueError(
                     f"Dataset {dataset_name!r} prompt for node {pnode!r} is missing required "

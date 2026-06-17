@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from promptpotter.application.config import missing_template_vars
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.escalation_signals import ValidationFailure
@@ -34,7 +35,9 @@ from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "DROPPED_MANDATORY_PLACEHOLDER",
     "L1_CONFIG_NOT_IN_RUNTIME_FAILURES",
+    "L1_PROMPT_PLACEHOLDERS_INTACT",
     "L1_SCHEMA_COMPLIANCE",
     "L1YieldStats",
     "build_l1_output_schema",
@@ -42,6 +45,12 @@ __all__ = [
     "filter_pipeline_params_override",
     "validate_overrides",
 ]
+
+# A dropped mandatory backend placeholder is structural, not a tunable miss: the round
+# loop reads this reason off the candidate reports to fire L2 immediately (patience 0),
+# rather than burning l1_patience rounds re-dropping it. Single-sourced so the producer
+# (the validator below) and the consumer (`runner/round.py`) never drift.
+DROPPED_MANDATORY_PLACEHOLDER = "dropped_mandatory_placeholder"
 
 
 def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
@@ -343,6 +352,57 @@ def _check_l1_config_in_runtime_failures(
 L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
     id="l1_config_not_in_runtime_failures",
     check=_check_l1_config_in_runtime_failures,
+)
+
+
+def _check_l1_prompt_placeholders_intact(
+    source_output: Any,
+    *,
+    opt_sp: OptSearchPoint | None = None,
+    pipeline_schema: PipelineSchema | None = None,
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """Reject an L1 candidate whose evolved prompt drops a mandatory backend placeholder.
+
+    The optimizer's evolved prompt lands on exactly ONE node — ``prompt_node_names()[0]``,
+    the node ``OptSearchPoint.to_job_search_point`` injects ``osp.render()`` into. The other
+    prompt-bearing nodes keep their fixed starting prompt and are never touched by L1, so this
+    checks that one node only. If a mutation drops one of its declared ``{{vars}}`` (e.g.
+    ``{{combined_text}}`` / ``{{format_string}}`` carrying web_search evidence into
+    entity_profiling), the backend injects nothing there and the evidence-free program would
+    otherwise score as a valid winner. Mint guards this at setup
+    (``configure_and_apply_pipeline``); this is its in-loop twin, same ``missing_template_vars``.
+    """
+    if opt_sp is None or pipeline_schema is None:
+        return None
+    prompt_nodes = pipeline_schema.prompt_node_names()
+    if not prompt_nodes:
+        return None
+    node = pipeline_schema.get_node(prompt_nodes[0])
+    if node is None or node.prompt_info is None:
+        return None
+    declared = node.prompt_info.template_variables
+    missing = missing_template_vars(opt_sp.render(), declared) if declared else []
+    if not missing:
+        return None
+    return ValidatorOutcome(
+        validator_id=L1_PROMPT_PLACEHOLDERS_INTACT.id,
+        evidence={
+            "failures": [
+                ValidationFailure(
+                    axis=f"{prompt_nodes[0]}.prompt",
+                    value="dropped:" + ",".join(missing),
+                    allowed=list(declared),
+                    reason=DROPPED_MANDATORY_PLACEHOLDER,
+                )
+            ]
+        },
+    )
+
+
+L1_PROMPT_PLACEHOLDERS_INTACT: LLMOutputValidator = LLMOutputValidator(
+    id="l1_prompt_placeholders_intact",
+    check=_check_l1_prompt_placeholders_intact,
 )
 
 
