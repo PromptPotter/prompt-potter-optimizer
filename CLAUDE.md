@@ -47,7 +47,7 @@ python -m uvicorn promptpotter.main:app --port 8001          # read-only API + w
 
 `new` and `resume` are the loop-mint verbs; lifecycle (`archive`/`delete`/`unarchive`/`reset`) + diagnostic (`verify`/`compare`/`sweep`) verbs also exist. Reads happen by opening files (no read CLI). `.env` with `GROQ_API_KEY` (or OPENAI/ANTHROPIC/OPENROUTER) required; provider is per-campaign in `campaign.json::optimizer_llm.provider`. **Before any commit:** `python -m ruff format promptpotter/ tests/ && python -m ruff check promptpotter/ tests/` — CI fails on format drift. CLI flags, identity/cycle/campaign identity, fork lineage → [`docs/operations/`](docs/operations/) + [`persistence-and-state.md`](docs/operations/persistence-and-state.md).
 
-The user is the operator. **The project file tree IS the dashboard**, plus a read-only webapp served at the root (Next.js at `webapp/`) polling the active cycle's `dashboard.json` every 2 s — used with the file tree, not in place of it. Onboarding: install → restart VS Code → `/potter-run`.
+The user is the operator. **The project file tree IS the dashboard**, plus a read-only webapp served at the root (Next.js at `webapp/`) polling the active cycle's `dashboard.json` every 2 s — used with the file tree, not in place of it. Onboarding: install → restart VS Code → `/potter-run`. The live terminal readout of the **most recent** run (per-sample HIT/MISS, SP tables, round summaries) is mirrored, ANSI-stripped, to the gitignored **`.goldmine/latest.log`** — read it instead of asking the operator to paste console output (`LiveDisplay._write`; captures the display stream, not `logging`-level warnings).
 
 ## Conventions
 

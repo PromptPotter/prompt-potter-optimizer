@@ -347,7 +347,7 @@ class LiveDashboardView(DerivedView):
             round_result = payload.get("round_result")
             l1_stall = int(payload.get("l1_stall_count") or 0)
             if round_result is not None:
-                self._absorb_round_complete(round_result.accuracy, l1_stall)
+                self._absorb_round_complete(round_result.cumulative_accuracy, l1_stall)
                 if self._recorder is not None:
                     self._recorder.set_l1_score(self._l1_score_block(round_result))
                 # Append round summary; re-firing the same round (replay / sweep) replaces in place.
@@ -654,10 +654,20 @@ class LiveDashboardView(DerivedView):
     def _update_current_acc(self, scores: dict[str, Any]) -> None:
         self.state.current_acc = round(scores.get("accuracy", 0.0), 4)
 
-    def _absorb_round_complete(self, accuracy: float, l1_stall_count: int) -> None:
+    def _absorb_round_complete(self, cumulative_accuracy: float, l1_stall_count: int) -> None:
+        """Settle the headline ``current_acc``/``best`` to the incumbent's **cumulative** accuracy
+        (``RoundResult.cumulative_accuracy`` — the incumbent rescored over every sample probed so
+        far), the same honest full-population figure the console GENERATE header shows. The
+        per-round winner's ``round_result.accuracy`` is a hard-first *subset* score used for
+        election; surfacing it as the headline overstated progress (e.g. 47% subset vs 28% full).
+        During scoring ``current_acc`` still ticks the in-flight candidate via ``_update_current_acc``;
+        this is the round-boundary settle.
+        """
         s = self.state
-        if accuracy > s.best:
-            s.best = round(accuracy, 4)
+        acc = round(cumulative_accuracy, 4)
+        s.current_acc = acc
+        if acc > s.best:
+            s.best = acc
         s.patience = f"{l1_stall_count}/{self.patience_max}"
 
     # -- Round-state mutations (snapshot-record fan-out) ----------------------

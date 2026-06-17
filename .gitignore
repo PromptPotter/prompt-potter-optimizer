@@ -80,6 +80,10 @@ data/
 # Linting cache
 .ruff_cache/
 
+# Claude's goldmine capture — rolling mirror of the last campaign's live stdout
+# (most-recent-only) + active-work scratch. latest.log is already caught by *.log.
+.goldmine/
+
 # Local dev tools
 .claude/*
 !.claude/skills/

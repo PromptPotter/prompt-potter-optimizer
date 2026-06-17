@@ -65,3 +65,12 @@ Markdown writes go only to documented paths. Anything emitted to stdout
 must also be findable as a file someone (or something) can open later
 — per root CLAUDE.md "everything material lives on disk, in
 human-readable form."
+
+Concretely: `LiveDisplay._write` (`views/live/display.py`) is the single stdout
+funnel for the live run readout, and it mirrors every line — ANSI-stripped — to the
+gitignored **`.goldmine/latest.log`**, truncated per run (most-recent-only) and
+best-effort (a filesystem error disables the mirror, never aborts the campaign). This
+is the "findable on disk" guarantee for the terminal stream, so a headless reader can
+open the last run instead of relying on a captured console. Caveat: it carries the
+**display** stream only — `logging`-level warnings route through Python `logging`, not
+`_write`, so full parity would need a sibling logging `FileHandler`.

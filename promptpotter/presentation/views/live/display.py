@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.views import AnyView, InitExitView
@@ -58,6 +60,27 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
 
 
+# Rolling mirror of the live stdout stream to a gitignored, most-recent-only file, so a
+# headless reader (or a returning operator) can open the last run's full readout — satisfies
+# the presentation "everything emitted to stdout is findable on disk" constraint. Truncated
+# per run in ``__init__``; ANSI-stripped per line. Captures the LiveDisplay stream only —
+# ``logging``-level warnings route through Python logging, not ``_write``.
+_GOLDMINE_PATH = Path(".goldmine/latest.log")
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _open_goldmine() -> Path | None:
+    """Truncate the rolling goldmine capture for this run; ``None`` if the filesystem rejects
+    it — capture is best-effort observability and must never abort a costly campaign run.
+    """
+    try:
+        _GOLDMINE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _GOLDMINE_PATH.write_text("", encoding="utf-8")
+    except OSError:
+        return None
+    return _GOLDMINE_PATH
+
+
 class LiveDisplay(DerivedView):
     """Live ``RunCallbacks`` adapter — CLI + notebook share this one class."""
 
@@ -83,9 +106,16 @@ class LiveDisplay(DerivedView):
         self._round_started_at: float | None = None
         self._pobb_printed_for: str = ""
         self._pending_calls: dict[str, int] = {}
+        self._goldmine = _open_goldmine()
 
     def _write(self, line: str) -> None:
         print(line, flush=True)
+        if self._goldmine is not None:
+            try:
+                with self._goldmine.open("a", encoding="utf-8") as f:
+                    f.write(_ANSI_RE.sub("", line) + "\n")
+            except OSError:
+                self._goldmine = None  # stop retrying; never break the run for a dev mirror
 
     @property
     def origin_acc(self) -> float:

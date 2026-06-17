@@ -25,11 +25,17 @@ from promptpotter.domain.results import CritiqueReadout
     "diagnostics",
     kind=InjectionKind.DERIVED,
     description="Layer-agnostic round readout: STATUS header + RoundDiagnostics body.",
-    char_cap=1500,
+    char_cap=2000,
 )
 def _r_diagnostics(b: InjectionBundle) -> str:
     """Round readout: plain STATUS (cycle counters, renders even pre-R1) + fenced RoundDiagnostics
     body (wrapped because it echoes raw queries/GTs/warnings).
+
+    Section order is **actionability-first**: the per-sample failure detail (SAMPLE DIAGNOSTICS,
+    NEAR MISSES, MISSED OPPORTUNITIES) — the only content that names *which* queries failed and how
+    — renders before the aggregate distributions, and the historical TRAJECTORY/EVOLUTION narrative
+    renders last. The render façade truncates by blind tail-cut at `char_cap`, so whatever is least
+    actionable must sit last to be the first dropped when a round runs over budget.
     """
     sections: list[str] = []
     cs = b.cycle_slice
@@ -50,21 +56,39 @@ def _r_diagnostics(b: InjectionBundle) -> str:
         return "\n\n".join(sections)
     parts: list[str] = []
 
-    # Skip TRAJECTORY + EVOLUTION at R1 — "too few rounds to classify" is dead weight.
-    if len(d.evolution_rows) > 1:
-        line = f"TRAJECTORY: {d.trajectory}"
-        if d.trajectory_description:
-            line += f" — {d.trajectory_description}"
-        parts.append(line)
-        tbl = ["EVOLUTION (last rounds):", "  round  acc      Δ       degraded"]
-        for row in d.evolution_rows[-5:]:
-            tbl.append(
-                f"  {row.round:>5}  {row.accuracy:>6.1%}  {row.delta:>+6.1%}  {row.degraded:>5}"
-            )
-        parts.append("\n".join(tbl))
-
     if d.anomalies:
         parts.append("ANOMALIES:\n  " + "\n  ".join(d.anomalies))
+
+    miss_samples = [s for s in d.samples if not s.hit][:SAMPLE_RENDER_CAP]
+    if miss_samples:
+        s_lines = [f"SAMPLE DIAGNOSTICS ({len(miss_samples)}/{len(d.samples)} misses shown):"]
+        for s in miss_samples:
+            rank_str = f"r={s.rank}" if s.rank is not None else "no rank"
+            extras = []
+            if s.gt_in_source is not None:
+                extras.append(f"gt_in_source={s.gt_in_source}")
+            if s.gt_in_ranked is not None:
+                extras.append(f"gt_in_ranked={s.gt_in_ranked}")
+            extra_str = f" | {', '.join(extras)}" if extras else ""
+            s_lines.append(
+                f"  MISS [{s.terminated_at}] {s.query[:70]} → {s.predicted[:60]}"
+                f" (GT: {s.ground_truth[:60]}, {rank_str}{extra_str})"
+            )
+        parts.append("\n".join(s_lines))
+
+    if d.near_misses:
+        nm_lines = [f"NEAR MISSES ({len(d.near_misses)} — GT in candidates but not r=1):"]
+        for nm in d.near_misses[:NEAR_MISS_RENDER_CAP]:
+            nm_lines.append(
+                f"  [r={nm.rank}] {nm.query} → predicted: {nm.predicted} (GT: {nm.ground_truth})"
+            )
+        parts.append("\n".join(nm_lines))
+
+    if d.cross_candidate_diff:
+        parts.append(
+            "MISSED OPPORTUNITIES (queries other candidates solved but winner missed):\n"
+            + "\n".join(d.cross_candidate_diff)
+        )
 
     if d.n_valid:
         rb = d.rank_buckets
@@ -97,45 +121,28 @@ def _r_diagnostics(b: InjectionBundle) -> str:
             )
         parts.append("\n".join(td_lines))
 
-    if d.near_misses:
-        nm_lines = [f"NEAR MISSES ({len(d.near_misses)} — GT in candidates but not r=1):"]
-        for nm in d.near_misses[:NEAR_MISS_RENDER_CAP]:
-            nm_lines.append(
-                f"  [r={nm.rank}] {nm.query} → predicted: {nm.predicted} (GT: {nm.ground_truth})"
-            )
-        parts.append("\n".join(nm_lines))
-
-    if d.cross_candidate_diff:
-        parts.append(
-            "MISSED OPPORTUNITIES (queries other candidates solved but winner missed):\n"
-            + "\n".join(d.cross_candidate_diff)
-        )
-
     if d.l1_diversity != 1.0:
         parts.append(f"POPULATION: diversity={d.l1_diversity:.2f}")
-
-    miss_samples = [s for s in d.samples if not s.hit][:SAMPLE_RENDER_CAP]
-    if miss_samples:
-        s_lines = [f"SAMPLE DIAGNOSTICS ({len(miss_samples)}/{len(d.samples)} misses shown):"]
-        for s in miss_samples:
-            rank_str = f"r={s.rank}" if s.rank is not None else "no rank"
-            extras = []
-            if s.gt_in_source is not None:
-                extras.append(f"gt_in_source={s.gt_in_source}")
-            if s.gt_in_ranked is not None:
-                extras.append(f"gt_in_ranked={s.gt_in_ranked}")
-            extra_str = f" | {', '.join(extras)}" if extras else ""
-            s_lines.append(
-                f"  MISS [{s.terminated_at}] {s.query[:70]} → {s.predicted[:60]}"
-                f" (GT: {s.ground_truth[:60]}, {rank_str}{extra_str})"
-            )
-        parts.append("\n".join(s_lines))
 
     if (po := d.probe_outcome) is not None:
         parts.append(
             f"PROBE OUTCOME: axis={po.axis_tested} subset={po.target_subset_size} "
             f"hit_rate={po.hit_rate:.0%} delta={po.delta_vs_full:+.1%}"
         )
+
+    # TRAJECTORY + EVOLUTION last (least actionable: historical narrative, first to be tail-cut).
+    # Skipped at R1 — "too few rounds to classify" is dead weight.
+    if len(d.evolution_rows) > 1:
+        line = f"TRAJECTORY: {d.trajectory}"
+        if d.trajectory_description:
+            line += f" — {d.trajectory_description}"
+        parts.append(line)
+        tbl = ["EVOLUTION (last rounds):", "  round  acc      Δ       degraded"]
+        for row in d.evolution_rows[-5:]:
+            tbl.append(
+                f"  {row.round:>5}  {row.accuracy:>6.1%}  {row.delta:>+6.1%}  {row.degraded:>5}"
+            )
+        parts.append("\n".join(tbl))
 
     if parts:
         sections.append(fence_untrusted("\n\n".join(parts)))
