@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from promptpotter.application.mask import (
@@ -32,6 +34,10 @@ from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.base import read_json_optional
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.routers.campaigns._conditional import (
+    client_seen_at_or_after,
+    http_date,
+)
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
@@ -275,16 +281,35 @@ def _mask_overlay(
     return divergences, result.divergent
 
 
+def _lineage_mtime(cycle_dirs: list[Path]) -> float | None:
+    """Newest mtime across the campaign's lineage inputs — each cycle's
+    ``index.json`` (the round list + fork facts) plus its ``rounds/`` dir (an
+    atomic round-file swap renames into it, bumping the dir mtime). Drives the
+    lineage poll's ``If-Modified-Since`` validator. ``None`` when nothing is on
+    disk yet."""
+    newest: float | None = None
+    for cdir in cycle_dirs:
+        for p in (cdir / "index.json", cdir / "rounds"):
+            try:
+                m = p.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            if newest is None or m > newest:
+                newest = m
+    return newest
+
+
 @campaigns_router.get(
     "/campaigns/{campaign_id}/lineage",
     response_model=CampaignLineageResponse,
 )
 async def get_campaign_lineage(
+    request: Request,
     store: StoreDep,
     campaign_id: str,
     lens: str | None = None,
     samples: str | None = None,
-) -> CampaignLineageResponse:
+) -> Response:
     """Aggregated lineage for the whole campaign.
 
     One pass over every cycle in the campaign — reads each index.json
@@ -307,6 +332,21 @@ async def get_campaign_lineage(
     enum_entries = [
         e for e in store.campaigns.enumerate_cycles() if e["campaign_id"] == campaign_id
     ]
+
+    # Conditional fast-path — only on the UNMASKED poll. A masked body depends on
+    # `lens`/`samples`, which `If-Modified-Since` can't capture, so those always
+    # recompute; the 2 s webapp poll never carries a lens.
+    mtime_epoch = _lineage_mtime(
+        [cycle_dir_for(store.base_dir, campaign_id, e["cycle_id"]) for e in enum_entries]
+    )
+    headers = {"Last-Modified": http_date(mtime_epoch)} if mtime_epoch is not None else {}
+    if (
+        lens is None
+        and samples is None
+        and mtime_epoch is not None
+        and client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch)
+    ):
+        return Response(status_code=304, headers=headers)
 
     out_cycles: list[CampaignLineageCycle] = []
     for entry in sorted(enum_entries, key=lambda e: e["cycle_id"]):
@@ -426,9 +466,10 @@ async def get_campaign_lineage(
     divergences, divergent = (
         _mask_overlay(store, campaign_id, lens, sample_ids) if (lens or sample_ids) else ([], [])
     )
-    return CampaignLineageResponse(
+    response = CampaignLineageResponse(
         campaign_id=campaign_id,
         cycles=out_cycles,
         divergences=divergences,
         divergent=divergent,
     )
+    return JSONResponse(response.model_dump(mode="json"), headers=headers)

@@ -8,8 +8,6 @@ fork's chart shows the fork's trajectory, not the session root's.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
-from email.utils import format_datetime, parsedate_to_datetime
 from typing import Any, Literal
 
 from fastapi import Request, Response
@@ -19,6 +17,10 @@ from pydantic import BaseModel, Field
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.routers.campaigns._conditional import (
+    client_seen_at_or_after,
+    http_date,
+)
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
 
@@ -152,25 +154,6 @@ async def get_round(
     return round_data
 
 
-def _http_date(epoch_seconds: float) -> str:
-    """Format an mtime as an HTTP-date (RFC 7231 §7.1.1.1). Second resolution."""
-    return format_datetime(datetime.fromtimestamp(int(epoch_seconds), tz=UTC), usegmt=True)
-
-
-def _client_seen_at_or_after(if_modified_since: str | None, mtime_epoch: float) -> bool:
-    """Return True iff the client's `If-Modified-Since` covers the current mtime.
-    Malformed header → False (serve full body)."""
-    if not if_modified_since:
-        return False
-    try:
-        client_dt = parsedate_to_datetime(if_modified_since)
-    except (TypeError, ValueError):
-        return False
-    if client_dt is None:
-        return False
-    return int(client_dt.timestamp()) >= int(mtime_epoch)
-
-
 @campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
 async def get_cycle_dashboard(
     request: Request, store: StoreDep, campaign_id: str, cycle_id: str
@@ -196,8 +179,8 @@ async def get_cycle_dashboard(
         # dir's mtime so polling clients still get cheap 304s while waiting.
         try:
             mtime_epoch = cycle_path.stat().st_mtime
-            headers = {"Last-Modified": _http_date(mtime_epoch)}
-            if _client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
+            headers = {"Last-Modified": http_date(mtime_epoch)}
+            if client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
                 return Response(status_code=304, headers=headers)
         except FileNotFoundError:
             headers = {}
@@ -210,8 +193,8 @@ async def get_cycle_dashboard(
         return JSONResponse(warming, headers=headers)
 
     mtime_epoch = path.stat().st_mtime
-    headers = {"Last-Modified": _http_date(mtime_epoch)}
-    if _client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
+    headers = {"Last-Modified": http_date(mtime_epoch)}
+    if client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
         return Response(status_code=304, headers=headers)
 
     dashboard: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
