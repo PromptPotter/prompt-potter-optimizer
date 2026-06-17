@@ -1,8 +1,9 @@
 """Campaign lineage — every cycle in a campaign + each cycle's rounds with
 candidates + the parent-round where each fork was cut.
 
-One round-trip from the webapp; per-cycle index.json reads are batched
-server-side. Backs the cross-cycle search-point cladogram in the dashboard.
+One round-trip from the webapp; per cycle, ``index.json`` gives the fork/topology
+facts and ``dashboard.json`` gives the live round state (completed rounds + the
+in-flight one). Backs the cross-cycle search-point cladogram in the dashboard.
 """
 
 from __future__ import annotations
@@ -126,40 +127,107 @@ class CampaignLineageResponse(BaseModel):
     )
 
 
-def _extract_candidates(scoreboard: list[Any]) -> list[CampaignLineageCandidate]:
+def _summary_candidates(cands: list[Any]) -> list[CampaignLineageCandidate]:
+    """Map ``dashboard.json::rounds[].candidates`` (``RoundSummaryCandidate``
+    shape) to lineage candidates. List order is the round's display order — the
+    webapp re-derives the ``C{r}.{n}`` label from position and ignores the server
+    ``rank``, so ``rank`` rides position (``RoundSummaryCandidate`` has no rank
+    field of its own)."""
     out: list[CampaignLineageCandidate] = []
-    for c in scoreboard:
+    for pos, c in enumerate(cands, start=1):
         if not isinstance(c, dict):
             continue
+        acc = c.get("accuracy")
         out.append(
             CampaignLineageCandidate(
                 candidate_id=str(c.get("candidate_id") or ""),
                 label=str(c.get("label") or ""),
-                accuracy=(
-                    float(c["accuracy"]) if isinstance(c.get("accuracy"), int | float) else None
-                ),
-                rank=(int(c["rank"]) if isinstance(c.get("rank"), int) else None),
+                accuracy=float(acc) if isinstance(acc, int | float) else None,
+                rank=pos,
                 is_winner=bool(c.get("is_winner", False)),
             )
         )
     return out
 
 
-def _round_scoreboard(cycle_dir: Path, round_n: int) -> list[Any]:
-    """Per-round candidate scoreboard.
+def _inflight_candidates(l1_score: dict[str, Any]) -> list[CampaignLineageCandidate]:
+    """Map the in-flight ``current_round.nodes.l1_score.output.candidates`` to
+    pending lineage candidates. candidate_id + winner are assigned at round close,
+    so mid-round they render as pending nodes (empty id ⇒ the webapp derives a live
+    id from position); accuracy fills in live as each candidate is scored."""
+    out_block = l1_score.get("output")
+    cands = out_block.get("candidates") if isinstance(out_block, dict) else None
+    out: list[CampaignLineageCandidate] = []
+    for pos, c in enumerate(cands or [], start=1):
+        if not isinstance(c, dict):
+            continue
+        stats = c.get("stats")
+        acc = stats.get("accuracy") if isinstance(stats, dict) else None
+        out.append(
+            CampaignLineageCandidate(
+                candidate_id="",
+                label=str(c.get("label") or ""),
+                accuracy=float(acc) if isinstance(acc, int | float) else None,
+                rank=pos,
+                is_winner=False,
+            )
+        )
+    return out
 
-    ``index.json::rounds[]`` carries only the round-level summary (accuracy,
-    hits, total) — the per-candidate scoreboard lives in the audit file
-    ``rounds/round_NNNN.json::scoreboard`` (``AuditTrailView`` output). The
-    cladogram's expanded candidate fan reads from there, so a non-live cycle
-    (one not overridden by ``dashboard.json``) still shows its candidates.
+
+def _rounds_from_dashboard(cycle_dir: Path) -> list[CampaignLineageRound]:
+    """Every round for a cycle from its live ``dashboard.json`` — the single
+    round-state projection (``LiveDashboardView``).
+
+    Completed rounds ride ``rounds[]`` (the full per-candidate scoreboard);
+    the in-flight round rides ``current_round`` and is appended as a pending
+    round the instant the first candidate is seeded — so the tree shows a round
+    *in progress*, not only completed ones. Round progress has ONE owner: no
+    read of ``index.json::rounds`` or the audit scoreboard here. (Topology —
+    parent / fork / sibling_kind — still rides ``index.json`` in the caller;
+    that's write-once identity, not updating state.)
     """
-    rf = read_json_optional(cycle_dir / "rounds" / f"round_{round_n:04d}.json")
-    if isinstance(rf, dict):
-        sb = rf.get("scoreboard")
-        if isinstance(sb, list):
-            return sb
-    return []
+    dash = read_json_optional(cycle_dir / "dashboard.json")
+    if not isinstance(dash, dict):
+        return []
+    out: list[CampaignLineageRound] = []
+    completed: set[int] = set()
+    rounds_raw = dash.get("rounds")
+    if isinstance(rounds_raw, list):
+        for r in rounds_raw:
+            if not isinstance(r, dict):
+                continue
+            rn = r.get("round")
+            if not isinstance(rn, int):
+                continue
+            completed.add(rn)
+            _rc = r.get("candidates")
+            raw_cands: list[Any] = _rc if isinstance(_rc, list) else []
+            winner = next(
+                (c for c in raw_cands if isinstance(c, dict) and c.get("is_winner")), None
+            )
+            acc = r.get("accuracy")
+            out.append(
+                CampaignLineageRound(
+                    round=rn,
+                    label=str(winner.get("changes_description") or "") if winner else "",
+                    accuracy=float(acc) if isinstance(acc, int | float) else None,
+                    candidates=_summary_candidates(raw_cands),
+                )
+            )
+    cur = dash.get("current_round")
+    if isinstance(cur, dict):
+        crn = cur.get("round")
+        nodes = cur.get("nodes")
+        l1_score = nodes.get("l1_score") if isinstance(nodes, dict) else None
+        if isinstance(crn, int) and crn not in completed and isinstance(l1_score, dict):
+            inflight = _inflight_candidates(l1_score)
+            if inflight:
+                out.append(
+                    CampaignLineageRound(round=crn, label="", accuracy=None, candidates=inflight)
+                )
+    out.sort(key=lambda r: r.round)
+    return out
 
 
 def _fork_from_round_from_ledger(parent_dir: Path, child_cycle_id: str) -> int | None:
@@ -283,13 +351,14 @@ def _mask_overlay(
 
 def _lineage_mtime(cycle_dirs: list[Path]) -> float | None:
     """Newest mtime across the campaign's lineage inputs — each cycle's
-    ``index.json`` (the round list + fork facts) plus its ``rounds/`` dir (an
-    atomic round-file swap renames into it, bumping the dir mtime). Drives the
-    lineage poll's ``If-Modified-Since`` validator. ``None`` when nothing is on
-    disk yet."""
+    ``index.json`` (fork/topology facts) plus its ``dashboard.json`` (the live
+    round state the tree now renders, bumped each round-state write). Drives the
+    lineage poll's ``If-Modified-Since`` validator: dashboard.json bumping mid-
+    round is exactly what makes the poll re-fetch an in-progress round. ``None``
+    when nothing is on disk yet."""
     newest: float | None = None
     for cdir in cycle_dirs:
-        for p in (cdir / "index.json", cdir / "rounds"):
+        for p in (cdir / "index.json", cdir / "dashboard.json"):
             try:
                 m = p.stat().st_mtime
             except FileNotFoundError:
@@ -312,10 +381,10 @@ async def get_campaign_lineage(
 ) -> Response:
     """Aggregated lineage for the whole campaign.
 
-    One pass over every cycle in the campaign — reads each index.json
-    (which already carries the per-round scoreboard) and supplements with
-    a ledger scan for fork-cut rounds when the index doesn't have them.
-    The tree is built from each cycle's ``parent_cycle_id``.
+    One pass over every cycle in the campaign — ``index.json`` for the
+    fork/topology facts (supplemented by a ledger scan for fork-cut rounds when
+    the index doesn't carry them) and ``dashboard.json`` for the round state
+    (completed + in-flight). The tree is built from each cycle's ``parent_cycle_id``.
 
     An optional **lens** selects a divergence overlay. ``lens=score:<formula>`` = an
     alternative scoring formula (where that criterion would have forked the record);
@@ -404,34 +473,12 @@ async def get_campaign_lineage(
             else None
         )
 
-        rounds_raw = index.get("rounds")
-        rounds_out: list[CampaignLineageRound] = []
-        if isinstance(rounds_raw, list):
-            for r in rounds_raw:
-                if not isinstance(r, dict):
-                    continue
-                rn = r.get("round")
-                if not isinstance(rn, int):
-                    continue
-                # Candidates come from the round audit file; fall back to any
-                # index-side scoreboard (none today, but future-proof).
-                scoreboard = _round_scoreboard(cdir, rn)
-                if not scoreboard and isinstance(r.get("scoreboard"), list):
-                    scoreboard = r["scoreboard"]
-                rounds_out.append(
-                    CampaignLineageRound(
-                        round=rn,
-                        label=str(r.get("label") or ""),
-                        accuracy=(
-                            float(r["accuracy"])
-                            if isinstance(r.get("accuracy"), int | float)
-                            else None
-                        ),
-                        candidates=_extract_candidates(scoreboard),
-                    )
-                )
-
-        rounds_out = _filter_post_divergence_rounds(rounds_out, trigger, from_round)
+        # Round progress reads from the single live projection (dashboard.json),
+        # NOT index.json::rounds — so a round in progress shows the instant its
+        # first candidate is seeded, on the same cadence the chart updates.
+        rounds_out = _filter_post_divergence_rounds(
+            _rounds_from_dashboard(cdir), trigger, from_round
+        )
         col_offset = (
             from_round
             if trigger == _OPERATOR_RESTART_TRIGGER and isinstance(from_round, int)

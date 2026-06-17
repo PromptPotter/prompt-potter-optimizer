@@ -388,14 +388,16 @@ class LiveDashboardView(DerivedView):
             sid = payload.get("sample_id")
             self.state.current_sample_id = int(sid) if sid is not None else None
             self._set_state("scoring")
-            self._schedule_persist()
         elif ev == "sample_scored":
             result = payload.get("result") or {}
             self._update_sample_markers(ci, ct, qi, qt)
             self._absorb_sample_scored(result, last_in_candidate=(qi + 1 >= qt))
             self._buffer.append_sample(ci, ct, qi, qt, result)
-            self._schedule_persist()
         elif ev == "candidate_started":
+            # Seed the candidate (samples empty, scores None) so the lineage
+            # draws the round's path the instant a candidate is known — it
+            # renders as a pending node (null accuracy) until sample_scored
+            # fills it in. The tail flush below persists the seed immediately.
             self._buffer.seed_candidate(
                 ci,
                 ct,
@@ -403,17 +405,10 @@ class LiveDashboardView(DerivedView):
                 payload.get("pp_override"),
                 payload.get("prompt_fields"),
             )
-            # Persist the bare seed now (samples empty, scores None) so the
-            # lineage draws the round's path the instant a candidate is known —
-            # the round is certain, it's only waiting on the first sample. The
-            # candidate renders as a pending node (null accuracy) until
-            # sample_scored fills it in.
-            self._schedule_persist()
         elif ev == "candidate_scored":
             scores = payload.get("scores") or {}
             self._update_current_acc(scores)
             self._buffer.set_candidate_scores(ci, ct, scores)
-            # flushed by next sample_scored or by round_complete.
         elif ev == "p_best_update":
             current_id = payload.get("current_id") or ""
             n_samples = int(payload.get("n_samples") or 0)
@@ -422,12 +417,10 @@ class LiveDashboardView(DerivedView):
             # Mirror the latest snapshot into the shared core so LiveDisplay sees
             # the same round-wide P(best) state.
             apply_p_best_update(self._core, current_id, n_samples, p_best)
-            self._schedule_persist()
         elif ev == "sample_order_preview":
             order_raw = payload.get("sample_order")
             if isinstance(order_raw, list):
                 self.state.hard_sample_order = [int(sid) for sid in order_raw]
-                self._schedule_persist()
         elif ev == "pobb_backfill":
             self._append_backfill(
                 int(record.round or 0),
@@ -436,7 +429,12 @@ class LiveDashboardView(DerivedView):
                 int(payload.get("sample_id") or 0),
                 [str(p) for p in (payload.get("prior_ids") or [])],
             )
-            self._schedule_persist()
+        # One debounced flush for EVERY snapshot event. Each branch mutates live
+        # state, so the cadence is uniform and no branch can forget to flush —
+        # candidate_scored previously did, leaving a finished candidate's scores
+        # (and the last/eliminated candidate of a round) unwritten until the next
+        # event or round-complete. That gap was the intermittent "didn't update".
+        self._schedule_persist()
 
     # -- Scalar mutations -----------------------------------------------------
 

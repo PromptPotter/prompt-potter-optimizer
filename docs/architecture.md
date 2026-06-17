@@ -335,6 +335,29 @@ someone (or something) can open. Constraint, not feature: forbids the
 lazy alternative (stdout-only logging, in-memory-only cross-round
 state) without adding complexity.
 
+**Read surfaces form exactly two clusters — split by cadence, not by
+reader — over a third internal one.** The split is physical in the
+cycle-dir layout: (1) **Live** — `dashboard.json`, the one churning file
+carrying now-state; (2) **Settled** — the rest of the cycle-dir top level
+(`index.json` = lean per-round digest + topology, `rounds/round_NNNN.json`
+= deep audit, `log.md` / `review.md` / `hard_samples.json`), written at
+boundaries and stable to read. Everything under **`.runtime/`** (the
+`events.jsonl` ledger SoT, projection caches, PoBB streams, control flags)
+is the third, **internal** cluster — machinery, not a read-out. The
+live/settled divide is **cadence, not audience**: both the webapp *and* a
+human read across both clusters — the webapp polls `dashboard.json` live
+yet opens `index.json` / round files on drill-in, and a human can tail
+`dashboard.json`. So **the data the two read clusters share is by design,
+NOT redundancy to collapse** — `index.json::rounds` (settled) and
+`dashboard.json::rounds` (live) are the same facts at two cadences for two
+reading modes, exactly the multi-projection read model the single-writer
+ledger fans out to. When a *consumer* reads the wrong cadence (a live view
+reading the settled file, or vice-versa), **repoint the consumer** — never
+retire the other surface. A projection is dead only when **no** reader, the
+human file-tree included, consults it; "the webapp no longer needs it" is
+not "no one needs it." This is the read-side corollary of the single-writer
+ledger: many readers, two read cadences, one source.
+
 **The file tree is read-out, not write-in.** `dashboard.json`,
 `campaign.json`, `index.json`, `round_NNNN.json`, the ledger — all are
 projections written by sole-writer subscribers under the single-writer

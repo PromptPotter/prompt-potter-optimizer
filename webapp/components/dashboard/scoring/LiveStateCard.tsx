@@ -91,7 +91,7 @@ export function LiveStateCard() {
     <CardFrame
       className="live-state-card"
       headingTag="h2"
-      title="Live state"
+      title="2ndary-relevant-info"
       actions={
         <span style={{ fontSize: 11, color: "var(--color-text-tertiary)", fontWeight: 400 }}>
           all dashboard.json fields

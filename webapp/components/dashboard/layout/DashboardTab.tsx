@@ -50,7 +50,7 @@ export function DashboardTab() {
       </DashSpine>
       <Lane
         id="livestate"
-        title="Live state"
+        title="2ndary-relevant-info"
         subtitle="Raw dashboard.json + trend + score frequency"
         defaultOpen
       >
