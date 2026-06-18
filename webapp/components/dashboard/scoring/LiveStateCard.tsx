@@ -141,12 +141,13 @@ export function LiveStateCard() {
   );
 }
 
+// Mirrors the firm Python `BackfillLogEntry` (extra="forbid", all required).
 interface BackfillEntry {
-  round?: number;
-  candidate_idx?: number;
-  candidate_total?: number;
-  sample_id?: number;
-  prior_ids?: string[];
+  round: number;
+  candidate_idx: number;
+  candidate_total: number;
+  sample_id: number;
+  prior_ids: string[];
 }
 
 function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
@@ -166,11 +167,7 @@ function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
       </div>
       <div className="payload-block" style={{ fontSize: 11, lineHeight: 1.5 }}>
         {log.slice().reverse().map((e, i) => {
-          const round = e.round ?? "?";
-          const cidx = e.candidate_idx ?? 0;
-          const ctot = e.candidate_total ?? 0;
-          const sid = e.sample_id ?? 0;
-          const priors = e.prior_ids ?? [];
+          const { round, candidate_idx: cidx, candidate_total: ctot, sample_id: sid, prior_ids: priors } = e;
           return (
             <div key={i} style={{ marginBottom: 2 }}>
               <span style={{ color: "var(--color-text-tertiary)" }}>

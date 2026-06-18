@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
 
 
-def _infer_escalation_layer(prev_fields: dict[str, Any], next_fields: dict[str, Any]) -> str:
+def _infer_escalation_layer(prev: OptSearchPoint, nxt: OptSearchPoint) -> str:
     """Classify the transition by which piece of optimizer state changed.
 
     Deterministic, inside-this-file rule (no import from optimization/):
@@ -27,12 +27,15 @@ def _infer_escalation_layer(prev_fields: dict[str, Any], next_fields: dict[str, 
       - ``l1_overrides`` or
         ``task_context`` changed               → L2
       - otherwise                              → L1
+
+    Reads off the rehydrated OSP because ``task_context`` / ``l1_overrides``
+    live under ``memory:`` in the serialized shape, not at the top level.
     """
-    if prev_fields.get("plan", "") != next_fields.get("plan", ""):
+    if prev.plan != nxt.plan:
         return "L3"
-    if prev_fields.get("l1_overrides", {}) != next_fields.get("l1_overrides", {}):
+    if prev.memory.l1_overrides != nxt.memory.l1_overrides:
         return "L2"
-    if prev_fields.get("task_context", {}) != next_fields.get("task_context", {}):
+    if prev.memory.task_context != nxt.memory.task_context:
         return "L2"
     return "L1"
 
@@ -45,34 +48,32 @@ def _build_row(
     cycle_id: str,
     prev_round: dict[str, Any],
     next_round: dict[str, Any],
-) -> dict[str, Any] | None:
-    prev_fields = prev_round.get("prompt_fields") or {}
-    next_fields = next_round.get("prompt_fields") or {}
-    if not prev_fields or not next_fields:
-        return None
-
+) -> dict[str, Any]:
+    prev_fields = prev_round["prompt_fields"]
+    next_fields = next_round["prompt_fields"]
     prev_osp = _rehydrate(prev_fields)
     next_osp = _rehydrate(next_fields)
 
-    prev_round_num = int(prev_round.get("round", 0))
-    score_delta = float(next_round.get("accuracy", 0.0)) - float(prev_round.get("accuracy", 0.0))
+    prev_round_num = int(prev_round["round"])
+    prev_accuracy = float(prev_round["accuracy"])
+    score_delta = float(next_round["accuracy"]) - prev_accuracy
 
     round_context = {
         "opt_search_point": prev_fields,
         "critique": prev_round.get("critique") or {},
-        "task_context": prev_fields.get("task_context", {}),
-        "l1_overrides": prev_fields.get("l1_overrides", {}),
-        "prev_accuracy": float(prev_round.get("accuracy", 0.0)),
+        "task_context": prev_osp.memory.task_context.to_dict(),
+        "l1_overrides": dict(prev_osp.memory.l1_overrides),
+        "prev_accuracy": prev_accuracy,
     }
 
     return {
         "query": f"{cycle_id}:round_{prev_round_num}",
-        "ground_truth": next_fields.get("changes_description") or next_round.get("label", ""),
+        "ground_truth": next_osp.lineage.changes_description or next_round["label"],
         "round_context": round_context,
         "score_delta": score_delta,
         "prev_prompt": prev_osp.render(),
         "next_prompt": next_osp.render(),
-        "escalation_layer": _infer_escalation_layer(prev_fields, next_fields),
+        "escalation_layer": _infer_escalation_layer(prev_osp, next_osp),
     }
 
 
@@ -122,8 +123,6 @@ def load_potter_traces(
                 rounds.append(detail)
 
         for prev_round, next_round in pairwise(rounds):
-            row = _build_row(cycle_id, prev_round, next_round)
-            if row is not None:
-                rows.append(row)
+            rows.append(_build_row(cycle_id, prev_round, next_round))
 
     return rows

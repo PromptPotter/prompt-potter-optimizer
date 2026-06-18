@@ -17,7 +17,7 @@ import { fetchDashboardConditional } from "./api";
 import { useAuthGate } from "./auth-context";
 import { resolveRunPhase } from "./run-phase";
 import { ageTextSeconds } from "./format";
-import type { RoundSummary } from "./api/types";
+import type { RoundSummary, SpendRollup } from "./api/types";
 import type { SampleOrderStep } from "./types/round";
 import { usePoll } from "./hooks/usePoll";
 
@@ -67,6 +67,10 @@ export interface DashboardSnapshot {
   rounds?: RoundSummary[];
   evaluators?: unknown[];
   scoring?: unknown;
+  // Two-bucket spend rollup. Always present in a real dashboard.json
+  // (`LiveDashboardState.spend` has a default_factory); absent only on the
+  // `warming_up` placeholder — hence optional here, firm once present.
+  spend?: SpendRollup;
   // Set on ``sample_started``, cleared on ``sample_scored``. The dataset
   // table pulses the row whose ``sample_id`` matches; ``null`` between
   // samples (no row pulses).

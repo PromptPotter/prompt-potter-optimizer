@@ -63,18 +63,19 @@ logger = logging.getLogger(__name__)
 
 
 def round_summary(round_data: dict[str, Any]) -> dict[str, Any]:
-    """Projection of round detail into the ``index.json::rounds`` shape."""
-    round_num = round_data.get("round", 0)
+    """Projection of round detail into the ``index.json::rounds`` shape.
+
+    Both writers — the scored ``_build_round_payload`` and the sparse
+    ``generation_only`` sweep dict — guarantee every key read here, so they're
+    read directly (a missing key is a corrupt round file, not a default case)."""
     return {
-        "round_id": round_data.get("round_id", f"round_{round_num}"),
-        "round": round_num,
-        "label": round_data.get("label", ""),
-        "prompt_fields_id": round_data.get("prompt_fields_id", ""),
-        "accuracy": round_data.get("accuracy", 0.0),
-        "hits": round_data.get("hits", 0),
-        "total": round_data.get("total", 0),
-        "improved": round_data.get("improved", False),
-        "created_at": round_data.get("created_at", ""),
+        "round_id": round_data["round_id"],
+        "round": round_data["round"],
+        "label": round_data["label"],
+        "accuracy": round_data["accuracy"],
+        "hits": round_data["hits"],
+        "total": round_data["total"],
+        "improved": round_data["improved"],
     }
 
 
@@ -829,7 +830,7 @@ class CampaignStore(EntityStore):
         """Persist a round detail file and update the cycle index."""
         round_id = round_data["round_id"]
         validate_path_component(round_id)
-        round_num = round_data.get("round", 0)
+        round_num = round_data["round"]
 
         detail_path = self._rounds_dir(campaign_id, cycle_id) / f"round_{round_num:04d}.json"
         write_json(detail_path, round_data)

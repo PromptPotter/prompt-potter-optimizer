@@ -52,7 +52,7 @@ def _candidates(round_file: dict[str, Any], samples: frozenset[int] | None) -> l
     # was written. A sample-set mask filters the rows to the selected subset first, so
     # those same evaluators (accuracy especially) re-score on the subset and a What-If
     # formula reshapes the election there.
-    all_rows = round_file.get("all_candidate_results") or {}
+    all_rows = round_file["all_candidate_results"]
     out: list[MaskCandidate] = []
     for cs in round_file.get("candidate_scores", []):
         if not isinstance(cs, dict) or not cs.get("candidate_id"):

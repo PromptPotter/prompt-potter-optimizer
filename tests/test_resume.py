@@ -132,7 +132,11 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
         {
             "round_id": "round_1",
             "round": 1,
+            "label": "C1.1",
             "accuracy": 0.4,
+            "hits": 4,
+            "total": 10,
+            "improved": True,
             "candidate_scores": [
                 {"candidate_id": "c1", "prompt_fields": prompt, "accuracy": 0.2},
             ],

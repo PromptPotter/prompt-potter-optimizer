@@ -58,7 +58,7 @@ def compute_round_diagnostics(
     accuracy vs. the pre-probe full-set best.
     """
     ranked_item_keys = ranked_item_keys_from_schema(pipeline_schema)
-    results = round_result.results or []
+    results = round_result.results
 
     rank_buckets, top_k, near_misses, nm_queries, n_valid = _rank_analysis(
         results, ranked_item_keys
@@ -93,7 +93,7 @@ def compute_round_diagnostics(
         plateau_count=plateau_count,
         anomalies=anomalies,
         cross_candidate_diff=diff_lines,
-        l1_diversity=float(round_result.l1_yield or 1.0),
+        l1_diversity=float(round_result.l1_yield),
         samples=samples,
         probe_outcome=probe_outcome,
     )
@@ -208,7 +208,7 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], int, list
                 accuracy=r.accuracy,
                 delta=delta,
                 degraded=r.degraded_samples,
-                n_candidates=len(r.candidate_scores or ()),
+                n_candidates=len(r.candidate_scores),
                 changed_axes=changed_axes,
             )
         )
@@ -286,9 +286,9 @@ def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
     rather than a single concatenated string. Empty when fewer than two
     candidates ran or the winner solved everything.
     """
-    winner_results = round_result.results or []
-    all_results = round_result.all_candidate_results or {}
-    candidate_scores = round_result.candidate_scores or []
+    winner_results = round_result.results
+    all_results = round_result.all_candidate_results
+    candidate_scores = round_result.candidate_scores
     if not winner_results or len(all_results) < 2:
         return []
 

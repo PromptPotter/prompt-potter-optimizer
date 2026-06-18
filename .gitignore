@@ -93,6 +93,7 @@ data/
 !.claude/skills/potter-dev/
 !.claude/skills/potter-debt-sweep/
 !.claude/hooks/
+.claude/hooks/doc_drift_ratio.py
 tools
 .playwright-cli/
 

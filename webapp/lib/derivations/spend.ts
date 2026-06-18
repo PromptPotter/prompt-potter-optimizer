@@ -9,13 +9,6 @@
 
 import type { DashboardSnapshot } from "@/lib/poll";
 
-interface SpendBucket {
-  used_usd?: number;
-  input_tokens?: number;
-  output_tokens?: number;
-  rate_known?: boolean;
-}
-
 export interface SpendView {
   backendUsd: number;
   loopUsd: number;
@@ -38,21 +31,17 @@ export interface SpendView {
 }
 
 export function readSpend(dash: DashboardSnapshot | null): SpendView {
-  const block = (dash as Record<string, unknown> | null)?.spend as
-    | {
-        backend?: SpendBucket;
-        loop?: SpendBucket;
-        total_used_usd?: number;
-      }
-    | undefined;
-  const backend = block?.backend ?? {};
-  const loop = block?.loop ?? {};
-  const backendUsd = typeof backend.used_usd === "number" ? backend.used_usd : 0;
-  const loopUsd = typeof loop.used_usd === "number" ? loop.used_usd : 0;
-  const totalUsd =
-    typeof block?.total_used_usd === "number" ? block.total_used_usd : backendUsd + loopUsd;
-  const backendTokens = (backend.input_tokens ?? 0) + (backend.output_tokens ?? 0);
-  const loopTokens = (loop.input_tokens ?? 0) + (loop.output_tokens ?? 0);
+  // `spend` is firm once present (SpendRollup); only the block itself is
+  // optional, absent on a null/warming-up snapshot. Each bucket + its fields
+  // are guaranteed by the Python model, so they're read directly.
+  const block = dash?.spend;
+  const backend = block?.backend;
+  const loop = block?.loop;
+  const backendUsd = backend?.used_usd ?? 0;
+  const loopUsd = loop?.used_usd ?? 0;
+  const totalUsd = block?.total_used_usd ?? backendUsd + loopUsd;
+  const backendTokens = backend ? backend.input_tokens + backend.output_tokens : 0;
+  const loopTokens = loop ? loop.input_tokens + loop.output_tokens : 0;
   // The caps live in `run_limits` (written at INIT + re-emitted by forks), not
   // in the `spend` rollup — `spend` only carries what's been *used*.
   const limits = dash?.run_limits;
@@ -63,7 +52,7 @@ export function readSpend(dash: DashboardSnapshot | null): SpendView {
     usedUsd: totalUsd > 0 ? totalUsd : null,
     budgetUsd: typeof limits?.spend_budget_usd === "number" ? limits.spend_budget_usd : null,
     budgetTokens: typeof limits?.token_budget === "number" ? limits.token_budget : null,
-    rateKnown: !!(backend.rate_known || loop.rate_known),
+    rateKnown: Boolean(backend?.rate_known || loop?.rate_known),
     backendTokens,
     loopTokens,
     totalTokens: backendTokens + loopTokens,

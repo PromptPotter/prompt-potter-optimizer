@@ -83,13 +83,11 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
         key: `R${r.round}.${i}`,
         round: r.round,
         idx: i,
-        // Fallback mirrors LineageTree's prior local id rule so any
-        // selection persisted across the d183dcdb cutover still resolves.
-        candidate_id: c.candidate_id || liveCandidateId(r.round, i),
+        candidate_id: c.candidate_id,
         label: candidateLabel(r.round, i),
         accuracy: c.accuracy,
         composite: c.composite_fitness,
-        evaluators: c.evaluators ?? {},
+        evaluators: c.evaluators,
         is_winner: c.is_winner,
         n_samples: c.scored_samples,
         n_expected: c.expected_samples,
