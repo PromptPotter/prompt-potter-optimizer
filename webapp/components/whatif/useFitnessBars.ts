@@ -7,20 +7,13 @@
 
 import { useMemo } from "react";
 import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
-import { type Row } from "./meta";
-import { accuracyOverSampleSet, correctedFromEvaluators } from "./fitness-bars";
-import {
-  historicalSamplesFor,
-  liveSamplesFor,
-} from "@/lib/derivations";
+import { accuracyOverSampleSet } from "./fitness-bars";
+import { samplesForRow } from "@/lib/derivations";
 import type { BarSlot } from "./FitnessChart";
 import type { DiagnosticRunRecord } from "@/lib/api";
 import type { DashboardSnapshot, RoundFileDoc } from "@/lib/poll";
 
 export function useFitnessBars(
-  selected: Set<string>,
-  rows: Row[],
-  weights: Readonly<Record<string, number>>,
   diagByLabel: Map<string, DiagnosticRunRecord>,
   // Fixed-sample-set mode: when non-null, every bar's accuracy is recomputed
   // over exactly these sample ids (∩ the samples that candidate ran), so all
@@ -29,6 +22,12 @@ export function useFitnessBars(
   sampleSet: number[] | null,
   chartedDocs: ReadonlyMap<number, RoundFileDoc | null>,
   dash: DashboardSnapshot | null,
+  // The What-If bar value, served by the backend under the active `score:` lens
+  // (the lineage overlay's `lensValueByCandidate`) — NOT recomputed here (R-36).
+  // Keyed `{cycle_id}::{candidate_id}`; `cycleId` scopes the lookup to the bars'
+  // own cycle. Empty map / absent key ⇒ null (no What-If lens, or unscorable).
+  whatifByCandidate: ReadonlyMap<string, number>,
+  cycleId: string | null,
 ): BarSlot[] {
   const { all: candidates } = useRoundCandidates();
   return useMemo(() => {
@@ -39,15 +38,13 @@ export function useFitnessBars(
     return candidates.map<BarSlot>((row) => {
       const diag = diagByLabel.get(row.label);
       const composite = row.composite;
-      // Origin (round 0) has no per-evaluator breakdown — the what-if column
-      // has no meaningful value, so leave it null when evaluators are empty
-      // and the chart skips painting a stub bar. Otherwise always the weighted
-      // recompute, so a slider nudge moves the bar (no composite short-circuit).
-      const hasEvaluators = Object.keys(row.evaluators).length > 0;
+      // What-If value comes from the served lens projection (one backend scoring
+      // operation over the candidate's stored evaluator namespace), looked up by the
+      // same candidate identity the bars and the lineage tree share. null when no
+      // `score:` lens is active or the candidate is unscorable under it — including
+      // origin (round 0), whose namespace can't satisfy an evaluator formula.
       const whatif =
-        !hasEvaluators && composite == null
-          ? null
-          : correctedFromEvaluators(row.evaluators, selected, rows, weights);
+        cycleId == null ? null : (whatifByCandidate.get(`${cycleId}::${row.candidate_id}`) ?? null);
 
       if (sliceIds) {
         // Recompute accuracy over the chosen sample subset from this
@@ -55,10 +52,7 @@ export function useFitnessBars(
         // merged. Composite / what-if are per-round aggregates that can't be
         // re-sliced per sample, so they're suppressed in this mode: the chart
         // shows the sliced accuracy alone, honestly.
-        const samples =
-          row.source === "inflight"
-            ? liveSamplesFor(dash, row.round, row.candidate_id)
-            : historicalSamplesFor(chartedDocs.get(row.round) ?? null, row.round, row.candidate_id);
+        const samples = samplesForRow(row, dash, chartedDocs.get(row.round) ?? null);
         const sliced = accuracyOverSampleSet(samples, sliceIds);
         return {
           key: row.key,
@@ -112,5 +106,5 @@ export function useFitnessBars(
           : undefined,
       };
     });
-  }, [candidates, selected, rows, weights, diagByLabel, sampleSet, chartedDocs, dash]);
+  }, [candidates, diagByLabel, sampleSet, chartedDocs, dash, whatifByCandidate, cycleId]);
 }

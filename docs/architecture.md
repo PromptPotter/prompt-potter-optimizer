@@ -569,6 +569,25 @@ the PR description.
   (`application/scoring/search_point_scorer.py:115`) — sole scoring
   ingress. Sibling to `CycleEventLog.append` and `INJECTIONS`. Don't
   add a second scoring entry path "for convenience."
+- **Composite-fitness resolution chain** — fitness is formula-relative
+  and mode-relative (`measured` subset vs `all`; see root CLAUDE.md
+  § Fitness), and it is produced + resolved at three single-writer choke
+  points. `compute_composite_fitness`
+  (`application/scoring/metrics.py`) is the sole writer of
+  `composite_fitness`; with no active per-round formula it degrades to
+  accuracy **at compute time** via `_default_round_scorer`
+  (`application/scoring/formula/round_scorer.py`), so the served field is
+  never a sentinel — the only manufactured value is a real `0.0` for a
+  validation-failed candidate. `display_fitness` (`domain/rendering.py`)
+  is the **one** canonical resolved value every display + ranking site
+  reads — `composite_fitness` when present (the honest `0.0` is kept),
+  accuracy only on genuine `None`; `round_winner_key` is its
+  argmax-over-candidates form. Alternative formulas (what-if, the
+  `score:<formula>` lens, replay) never recompute in the consumer — they
+  re-project from the stored evaluator namespace via
+  `value_with_mask_applied` (`metrics.py`) and are **served** (R-36). Don't
+  add a second composite-or-accuracy resolution; route through
+  `display_fitness`.
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape
   compatibility (the Tracing bucket's foundation collapses).

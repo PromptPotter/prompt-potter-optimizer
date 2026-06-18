@@ -5,6 +5,7 @@ composite_fitness block from ``shared.composite``."""
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from promptpotter.application.views.view_models import (
     AnyView,
@@ -22,6 +23,7 @@ from promptpotter.application.views.view_models import (
     RoundCompleteView,
     RoundStartView,
 )
+from promptpotter.domain.rendering import display_fitness
 from promptpotter.presentation.views.display import (
     BOLD,
     CYAN,
@@ -110,7 +112,7 @@ def _render_candidates_generated(v: CandidatesGeneratedView) -> str:
 
 def _render_round_complete(v: RoundCompleteView) -> str:
     out: list[str] = []
-    score_dicts = [
+    score_dicts: list[dict[str, Any]] = [
         {
             "label": s.label,
             "accuracy": s.accuracy,
@@ -133,7 +135,10 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             f"{s['label']}={s['accuracy']:.1%}{' (aborted)' if s['escalation_aborted'] else ''}"
             for s in sorted(
                 score_dicts,
-                key=lambda s: (s.get("composite_fitness") or s["accuracy"], s["accuracy"]),
+                key=lambda s: (
+                    display_fitness(s.get("composite_fitness"), s["accuracy"]),
+                    s["accuracy"],
+                ),
                 reverse=True,
             )
         ]

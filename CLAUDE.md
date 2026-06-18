@@ -16,6 +16,21 @@ These are distinct and constantly conflated. Keep them straight:
 
 The line: **origin is the complete start specification; check-in is the resolver+gate that produces a complete one; round 0 / C0 is its measurement, downstream and separate.** Loop seam: `docs/architecture.md` §0.5; `docs/specs/roadmap.md § Origin check-in`.
 
+## Fitness — always relative to a scoring formula
+
+A candidate's fitness is not one fixed number — it depends on the scoring formula you measure it under, so always ask "under which formula?". Two values appear in the data:
+
+- `composite_fitness` — the score under the formula the run actually used (the **active** formula).
+- `accuracy` — the plain correctness rate, independent of any formula. When no active formula is set, fitness falls back to this; that is all `composite_fitness || accuracy` means.
+
+A fitness number is also relative to **which samples it was measured over**: a round may score only a measured subset rather than the whole dataset, so comparing two numbers means checking the **mode** — `measured` (the samples that round actually ran) versus `all` (the full dataset) — alongside the formula.
+
+The same candidate gets scored under a different formula depending on what the operator is doing: the **active** formula the run used; a **what-if** preview when they re-weight the evaluators; a **lens** that re-projects the lineage under an alternative criterion to show where rankings diverge (`lineage-overlay`); or a **replay** that re-scores the whole cycle under a new config.
+
+Per-sample difficulty is its own view, not a fitness formula: the **hard-sample sorter** (`application/intelligence/hard_sample_sorter.py`) ranks samples on two axes — how hard each sample is and how able each candidate is — and feeds the hard-samples table.
+
+All of these compute scores, so they all belong to the backend. The backend serves the active fitness; any alternative formula, mode, or sort is also computed and served by the backend, never recomputed in the webapp. Depth: `docs/architecture.md` §0.5.
+
 ## STOP — no backward compatibility, ever
 
 Zero released versions, zero stale on-disk data — nothing to be compatible with. **This is the rule that gets ignored most often.**

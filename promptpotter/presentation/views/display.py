@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.rendering import display_fitness
+
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
@@ -232,7 +234,7 @@ def _scoreboard(
 
     ranked = sorted(
         scored,
-        key=lambda s: (s.get("composite_fitness", s["accuracy"]), s["accuracy"]),
+        key=lambda s: (display_fitness(s.get("composite_fitness"), s["accuracy"]), s["accuracy"]),
         reverse=True,
     )
     w = 78
@@ -261,7 +263,7 @@ def _scoreboard(
             winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:
             winner_mark = ""
-        comp_val = s.get("composite_fitness") if s.get("composite_fitness") is not None else acc
+        comp_val = display_fitness(s.get("composite_fitness"), acc)
         comp_part = f"   {comp_val:>8.4f}"
         row = f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}{comp_part}   {delta_str:>7s}{winner_mark}"
         lines.append(f"  {_box_line(row, width=w)}")

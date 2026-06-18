@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import {
   WHATIF_INLINE_META,
   buildRows,
@@ -23,6 +23,7 @@ import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
 import { useChartedRoundDocs } from "@/lib/hooks/useChartedRoundDocs";
+import { roundHasCandidates, sortedRounds } from "@/lib/derivations";
 import { useWorkspace } from "@/lib/workspace";
 import { useFitnessBars } from "./useFitnessBars";
 import { SampleSetControl } from "./SampleSetControl";
@@ -86,10 +87,10 @@ export function FitnessPanel() {
   // of truth for historical bars. The projection accumulates these at
   // `round:display` so the chart never has to stitch live + finalized
   // round-file fetches.
-  const history: RoundSummary[] = useMemo(
-    () => (dash?.rounds ?? []).slice().sort((a, b) => a.round - b.round),
-    [dash?.rounds],
-  );
+  // Key on `dash?.rounds` (the only slice `sortedRounds` reads), not on `dash`,
+  // so unrelated per-poll dash mutations don't re-sort (render-cost guard).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const history: RoundSummary[] = useMemo(() => sortedRounds(dash), [dash?.rounds]);
 
   // ── 2b. Diagnostic-run records — one per `python -m promptpotter verify`
   // invocation, persisted at archive/diagnostic_runs/*.json. Fetched per
@@ -193,20 +194,15 @@ export function FitnessPanel() {
   // Render-phase seed: when the cycle binds applicable evaluators for the
   // first time (or the cycle changes), seed `selected` from the formula's
   // inActive set so the operator opens to "what's actually scored" as the
-  // default. Local `seededHere` is the canonical render-phase reset guard
-  // (see `webapp/CLAUDE.md::State reset on prop change` and the precedent
-  // at `AccountModal.tsx:56-62`): it fires the seed once per cycle. The
-  // render loop is held off upstream — `inflightCandidates` is a stable
+  // default. `seededForCycle` (the store flag read as `seeded`) is the single
+  // guard: it fires the seed once per cycle and — unlike a component-local flag
+  // — persists across the New Job ↔ View Results remount, so a tab swap doesn't
+  // re-seed. The store write below flips `seeded` true on the next render
+  // (`useSyncExternalStore`, tear-free), so the guard converges after one fire.
+  // The render loop is held off upstream — `inflightCandidates` is a stable
   // ref, so the Set chain feeding this condition doesn't churn every render.
   // Bail when `cycleId == null` (no active campaign yet).
-  const [seededHere, setSeededHere] = useState<string | null>(null);
-  if (
-    cycleId &&
-    seededHere !== cycleId &&
-    viewApplicable.size > 0 &&
-    !seeded
-  ) {
-    setSeededHere(cycleId);
+  if (cycleId && viewApplicable.size > 0 && !seeded) {
     const seed = new Set<string>();
     for (const r of rows) {
       if (r.applicable && inActive.has(r.displayName)) seed.add(r.displayName);
@@ -249,7 +245,7 @@ export function FitnessPanel() {
   // the per-(candidate, sample) hit matrix from each charted round's file —
   // fetched only while a set is active, so the default chart stays dash-only.
   const chartedRounds = useMemo(
-    () => history.filter((h) => h.candidates.length > 0).map((h) => h.round),
+    () => history.filter(roundHasCandidates).map((h) => h.round),
     [history],
   );
   const chartedDocs = useChartedRoundDocs(
@@ -264,22 +260,23 @@ export function FitnessPanel() {
   // picks + trajectory drill all live in `SampleSetControl`.
   const sampleUniverse = useMemo(() => measuredUniverse(history), [history]);
 
+  // The shared served overlay — its `lensValueByCandidate` is the What-If bar value
+  // (R-36, never recomputed here), and its divergence facts drive the boundary below.
+  const overlay = useLineageOverlay();
   const bars = useFitnessBars(
-    selected,
-    rows,
-    weights,
     diagByLabel,
     sampleSet,
     chartedDocs,
     dash,
+    overlay.lensValueByCandidate,
+    cycleId,
   );
 
   // Mask divergence boundary → the bar index where the active lens first parts
-  // ways with the realized record. We read the shared served overlay (R-36, never
-  // recomputed here); we map its earliest divergent round for THIS cycle to the
-  // first bar at/after it, and the chart draws a red divider at that bar's left
-  // edge. null whenever no mask is active or nothing diverges.
-  const overlay = useLineageOverlay();
+  // ways with the realized record. We read the shared served overlay; we map its
+  // earliest divergent round for THIS cycle to the first bar at/after it, and the
+  // chart draws a red divider at that bar's left edge. null whenever no mask is
+  // active or nothing diverges.
   const divergenceBoundary = useMemo(() => {
     if (!overlay.maskActive) return null;
     const { points, subtree } = divergenceRoundsFor(overlay, cycleId);

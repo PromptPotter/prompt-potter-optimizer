@@ -20,15 +20,25 @@ from promptpotter.domain.results import CritiqueReadout
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
 # --------------------------------------------------------------------------- #
-# round_winner_key — composite-first, accuracy-tiebreak (was l1/score/winner)  #
+# display_fitness + round_winner_key — the one composite-or-accuracy resolution #
 # --------------------------------------------------------------------------- #
+
+
+def display_fitness(composite_fitness: float | None, accuracy: float) -> float:
+    """The canonical fitness value shown to / ranked-by the operator: the active-formula
+    `composite_fitness` when present (a real `0.0` — e.g. a validation-failed candidate — is
+    an honest score and is kept), degrading to plain `accuracy` only on genuine absence
+    (`None`, i.e. no active formula). One resolution of the composite-or-accuracy rule that
+    every display + ranking site routes through, so an `or` can never mask the honest 0.
+    """
+    return composite_fitness if composite_fitness is not None else accuracy
 
 
 def round_winner_key(composite_fitness: float | None, accuracy: float) -> tuple[float, float]:
     """Composite-first, accuracy-tiebreak. Shared between live `l1_score` + post-hoc
     `pick_round_winner` so the SCOREBOARD `*` and the in-round winner never drift apart.
     """
-    return (composite_fitness if composite_fitness is not None else accuracy, accuracy)
+    return (display_fitness(composite_fitness, accuracy), accuracy)
 
 
 # --------------------------------------------------------------------------- #

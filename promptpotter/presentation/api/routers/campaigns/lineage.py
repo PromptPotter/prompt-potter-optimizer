@@ -23,6 +23,7 @@ from promptpotter.application.mask import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.scoring.formula import compile_round_scorer
+from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import (
     UNATTRIBUTED_OPERATOR,
@@ -30,6 +31,7 @@ from promptpotter.domain.run_records import (
     ResumeCheckpointKind,
     ResumeCheckpointRecord,
 )
+from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.base import read_json_optional
@@ -54,6 +56,13 @@ class CampaignLineageCandidate(BaseModel):
     accuracy: float | None = Field(default=None, description="Per-candidate accuracy")
     rank: int | None = Field(default=None, description="Final rank within the round")
     is_winner: bool = Field(default=False, description="True for the round's elected winner")
+    lens_value: float | None = Field(
+        default=None,
+        description="This candidate's fitness under the request's `score:` lens formula, "
+        "recomputed from its stored evaluator namespace via the single scoring operation "
+        "(the same one the mask divergence rides). Null without a `score:` lens, or when the "
+        "candidate's namespace can't satisfy the formula.",
+    )
 
 
 class CampaignLineageRound(BaseModel):
@@ -127,7 +136,20 @@ class CampaignLineageResponse(BaseModel):
     )
 
 
-def _summary_candidates(cands: list[Any]) -> list[CampaignLineageCandidate]:
+def _lens_value(evaluators: Any, criterion: RoundScorer | None) -> float | None:
+    """A candidate's fitness under the request's ``score:`` lens — its stored evaluator
+    namespace under the lens formula, through ``value_with_mask_applied`` (the single
+    scoring operation the mask divergence also rides, so the served bar value and the
+    served divergence agree by construction — R-36). ``None`` when there is no ``score:``
+    lens (``criterion is None``) or the candidate carries no namespace."""
+    if criterion is None or not isinstance(evaluators, dict):
+        return None
+    return value_with_mask_applied(evaluators, criterion)
+
+
+def _summary_candidates(
+    cands: list[Any], criterion: RoundScorer | None
+) -> list[CampaignLineageCandidate]:
     """Map ``dashboard.json::rounds[].candidates`` (``RoundSummaryCandidate``
     shape) to lineage candidates. List order is the round's display order — the
     webapp re-derives the ``C{r}.{n}`` label from position and ignores the server
@@ -145,16 +167,19 @@ def _summary_candidates(cands: list[Any]) -> list[CampaignLineageCandidate]:
                 accuracy=float(acc) if isinstance(acc, int | float) else None,
                 rank=pos,
                 is_winner=bool(c.get("is_winner", False)),
+                lens_value=_lens_value(c.get("evaluators"), criterion),
             )
         )
     return out
 
 
-def _inflight_candidates(l1_score: dict[str, Any]) -> list[CampaignLineageCandidate]:
+def _inflight_candidates(
+    l1_score: dict[str, Any], criterion: RoundScorer | None
+) -> list[CampaignLineageCandidate]:
     """Map the in-flight ``current_round.nodes.l1_score.output.candidates`` to
     pending lineage candidates. candidate_id + winner are assigned at round close,
     so mid-round they render as pending nodes (empty id ⇒ the webapp derives a live
-    id from position); accuracy fills in live as each candidate is scored."""
+    id from position); accuracy + lens value fill in live as each candidate is scored."""
     out_block = l1_score.get("output")
     cands = out_block.get("candidates") if isinstance(out_block, dict) else None
     out: list[CampaignLineageCandidate] = []
@@ -163,6 +188,7 @@ def _inflight_candidates(l1_score: dict[str, Any]) -> list[CampaignLineageCandid
             continue
         stats = c.get("stats")
         acc = stats.get("accuracy") if isinstance(stats, dict) else None
+        evaluators = stats.get("evaluators") if isinstance(stats, dict) else None
         out.append(
             CampaignLineageCandidate(
                 candidate_id="",
@@ -170,12 +196,15 @@ def _inflight_candidates(l1_score: dict[str, Any]) -> list[CampaignLineageCandid
                 accuracy=float(acc) if isinstance(acc, int | float) else None,
                 rank=pos,
                 is_winner=False,
+                lens_value=_lens_value(evaluators, criterion),
             )
         )
     return out
 
 
-def _rounds_from_dashboard(cycle_dir: Path) -> list[CampaignLineageRound]:
+def _rounds_from_dashboard(
+    cycle_dir: Path, criterion: RoundScorer | None
+) -> list[CampaignLineageRound]:
     """Every round for a cycle from its live ``dashboard.json`` — the single
     round-state projection (``LiveDashboardView``).
 
@@ -212,7 +241,7 @@ def _rounds_from_dashboard(cycle_dir: Path) -> list[CampaignLineageRound]:
                     round=rn,
                     label=str(winner.get("changes_description") or "") if winner else "",
                     accuracy=float(acc) if isinstance(acc, int | float) else None,
-                    candidates=_summary_candidates(raw_cands),
+                    candidates=_summary_candidates(raw_cands, criterion),
                 )
             )
     cur = dash.get("current_round")
@@ -221,7 +250,7 @@ def _rounds_from_dashboard(cycle_dir: Path) -> list[CampaignLineageRound]:
         nodes = cur.get("nodes")
         l1_score = nodes.get("l1_score") if isinstance(nodes, dict) else None
         if isinstance(crn, int) and crn not in completed and isinstance(l1_score, dict):
-            inflight = _inflight_candidates(l1_score)
+            inflight = _inflight_candidates(l1_score, criterion)
             if inflight:
                 out.append(
                     CampaignLineageRound(round=crn, label="", accuracy=None, candidates=inflight)
@@ -417,6 +446,19 @@ async def get_campaign_lineage(
     ):
         return Response(status_code=304, headers=headers)
 
+    # A ``score:`` lens makes each candidate's fitness under that formula a served fact
+    # (``lens_value``): compile the scorer once here and thread it into the round builders,
+    # which apply the single scoring operation per candidate. None for no lens / an
+    # ``abort:`` lens (no per-candidate value to project) — leaving the unmasked body
+    # byte-identical. The mask overlay below compiles the same formula for the divergence
+    # verdict; both ride one ``value_with_mask_applied``, so the bar and the tree agree.
+    score_criterion: RoundScorer | None = None
+    if lens and lens.startswith("score:"):
+        try:
+            score_criterion = compile_round_scorer(lens.removeprefix("score:"))
+        except (ValueError, SyntaxError) as exc:
+            raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
+
     out_cycles: list[CampaignLineageCycle] = []
     for entry in sorted(enum_entries, key=lambda e: e["cycle_id"]):
         cid = entry["cycle_id"]
@@ -477,7 +519,7 @@ async def get_campaign_lineage(
         # NOT index.json::rounds — so a round in progress shows the instant its
         # first candidate is seeded, on the same cadence the chart updates.
         rounds_out = _filter_post_divergence_rounds(
-            _rounds_from_dashboard(cdir), trigger, from_round
+            _rounds_from_dashboard(cdir, score_criterion), trigger, from_round
         )
         col_offset = (
             from_round

@@ -51,6 +51,7 @@ from promptpotter.application.scoring.formula.matchers import (
 from promptpotter.application.scoring.metrics import (
     compute_composite_fitness,
     matched_origin_stats,
+    value_with_mask_applied,
 )
 from promptpotter.domain.pipeline_schema import (
     NodeType,
@@ -58,6 +59,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
+from promptpotter.domain.rendering import display_fitness
 from promptpotter.domain.sample import Sample
 
 # ===========================================================================
@@ -347,6 +349,27 @@ def test_matched_origin_stats_restricts_to_candidate_subset():
     assert full["accuracy"] == pytest.approx(0.5)
 
 
+def test_value_with_mask_applied_reproduces_the_retired_client_whatif_math():
+    """The served What-If bar value must equal what the deleted client weighted-sum
+    (``correctedFromEvaluators``) produced for the same formula — else retiring the
+    TS recompute silently shifts every What-If bar. The webapp's ``formulaFromWeights``
+    emits ``w * t`` terms with each "low"-direction evaluator flipped to ``(1 - t)``;
+    feeding that exact criterion through the one scoring operation must hand-check.
+
+    Also the self-consistency leg: the realizing criterion reproduces the stored value,
+    and a criterion naming an absent evaluator is unscorable (None, not fabricated)."""
+    evaluators = {"accuracy": 0.8, "latency_norm": 0.2}
+    # `formulaFromWeights({accuracy: high, latency_norm: low}, {0.7, 0.3})`:
+    #   0.7 * accuracy + 0.3 * (1 - latency_norm) = 0.56 + 0.24 = 0.80
+    assert value_with_mask_applied(
+        evaluators, "0.7 * accuracy + 0.3 * (1 - latency_norm)"
+    ) == pytest.approx(0.80)
+    # Realizing criterion (plain accuracy) reproduces the stored accuracy exactly.
+    assert value_with_mask_applied(evaluators, "accuracy") == pytest.approx(0.8)
+    # A formula naming an evaluator this candidate lacks is unscorable, not faked.
+    assert value_with_mask_applied(evaluators, "source_recall") is None
+
+
 def _mask_cand(cid: str, acc: float, **kw: object) -> MaskCandidate:
     return MaskCandidate(candidate_id=cid, evaluators={"accuracy": acc}, accuracy=acc, **kw)  # type: ignore[arg-type]
 
@@ -437,6 +460,15 @@ def test_composite_fitness_zeroed_on_validation_failure():
         [_eval_result(score=1.0)], _single_node_schema(), opt_sp=fake_opt_sp
     )
     assert scored["composite_fitness"] == 0.0
+
+
+def test_display_fitness_keeps_honest_zero_degrades_only_on_absence():
+    """The one composite-or-accuracy resolution: a real 0.0 (validation-failed candidate)
+    is an honest score and must survive — degrading it to accuracy would mask the failure on
+    the trend/sparkline. Only genuine absence (``None`` → no active formula) falls back."""
+    assert display_fitness(0.0, 0.7) == 0.0  # honest 0 kept, NOT masked by accuracy
+    assert display_fitness(None, 0.7) == 0.7  # no formula → plain accuracy
+    assert display_fitness(0.85, 0.7) == 0.85  # active-formula value used as-is
 
 
 def test_prompt_compactness_penalizes_verbose_prompt():

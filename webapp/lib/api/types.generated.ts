@@ -403,6 +403,11 @@ export interface CampaignLineageCandidate {
   rank: number | null;
   /** True for the round's elected winner */
   is_winner: boolean;
+  /** This candidate's fitness under the request's `score:` lens formula, recomputed
+   * from its stored evaluator namespace via the single scoring operation (the
+   * same one the mask divergence rides). Null without a `score:` lens, or
+   * when the candidate's namespace can't satisfy the formula. */
+  lens_value: number | null;
 }
 
 export interface CampaignLineageRound {

@@ -5,7 +5,7 @@ import { cx } from "@/lib/cx";
 import { type DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { runPhaseLabel } from "@/lib/run-phase";
-import { headlineStats } from "@/lib/derivations";
+import { headlineStats, fitnessTrend } from "@/lib/derivations";
 import { fmtSecs, fmtPct0 } from "@/lib/format";
 
 // Single-line, frameless run summary. Everything the operator scans in
@@ -57,20 +57,11 @@ export const TopStrip = memo(function TopStrip() {
   // Sparkline: running-best composite over rounds, read from the
   // dashboard's per-round summary block.
   const spark = useMemo(() => {
-    const pts: { round: number; composite: number }[] = [];
-    for (const r of dash?.rounds ?? []) {
-      pts.push({ round: r.round, composite: r.composite_fitness || r.accuracy });
-    }
-    pts.sort((a, b) => a.round - b.round);
-    if (pts.length < 2) return null;
+    const { points, best: ys } = fitnessTrend(dash?.rounds);
+    if (points.length < 2) return null;
     const W = 120;
     const H = 26;
-    let runningBest = 0;
-    const ys = pts.map((p) => {
-      runningBest = Math.max(runningBest, p.composite);
-      return runningBest;
-    });
-    const xs = pts.map((_, i) => (i / (pts.length - 1)) * W);
+    const xs = points.map((_, i) => (i / (points.length - 1)) * W);
     const maxY = Math.max(...ys, 0.01);
     const toY = (v: number) => H - 2 - (v / maxY) * (H - 4);
     const path = xs.map((x, i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${toY(ys[i]).toFixed(1)}`).join("");

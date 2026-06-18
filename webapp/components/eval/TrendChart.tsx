@@ -9,35 +9,20 @@ import {
   useThemeVersion,
 } from "@/lib/theme";
 import { CardFrame } from "@/components/ui";
-import { degradedRoundNotices } from "@/lib/derivations";
+import { degradedRoundNotices, fitnessTrend } from "@/lib/derivations";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 
 ensureChartRegistered();
-
-interface Point {
-  round: number;
-  composite: number;
-}
 
 export const TrendChart = memo(function TrendChart() {
   const { dash } = useDashboard();
   // Subscribe to theme so a flip re-runs this component and pulls fresh
   // getCss() values into the chart data/options below.
   useThemeVersion();
-  const points: Point[] = useMemo(() => {
-    const out: Point[] = [];
-    for (const r of dash?.rounds ?? []) {
-      out.push({ round: r.round, composite: r.composite_fitness || r.accuracy });
-    }
-    out.sort((a, b) => a.round - b.round);
-    return out;
-  }, [dash?.rounds]);
-
-  let runningBest = 0;
-  const bestData = points.map((p) => {
-    runningBest = Math.max(runningBest, p.composite);
-    return runningBest;
-  });
+  const { points, best: bestData } = useMemo(
+    () => fitnessTrend(dash?.rounds),
+    [dash?.rounds],
+  );
   const curData = points.map((p) => p.composite);
   const labels = points.map((p) => String(p.round));
   // Quiet amber notices for rounds the backend graded `degraded` — the webapp

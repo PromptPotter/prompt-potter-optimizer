@@ -15,6 +15,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCampaignLineage } from "@/lib/api";
 import type { CampaignLineageResponse, LineageDivergence } from "@/lib/api/types";
+import { liveCandidateId } from "@/lib/candidate-label";
 import { useFitnessState } from "@/components/whatif/fitness-store";
 import { formulaFromWeights } from "@/components/whatif/fitness-bars";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -45,6 +46,11 @@ export interface LineageOverlay {
   // Marker nodes → one-step alternative candidate; the dimmed counterfactual subtree.
   divergenceByKey: ReadonlyMap<string, string | null>;
   divergentKeys: ReadonlySet<string>;
+  // Each candidate's fitness under the active `score:` lens — served, never recomputed
+  // here (R-36). Key `{cycle_id}::{candidate_id|liveId}`, the SAME candidate identity the
+  // lineage tree and fitness bars resolve by. Empty without a `score:` lens (e.g. What-If
+  // closed), so a consumer reads null and falls back to its default series.
+  lensValueByCandidate: ReadonlyMap<string, number>;
 }
 
 const LineageOverlayContext = createContext<LineageOverlay | null>(null);
@@ -149,6 +155,24 @@ export function LineageOverlayProvider({
     return m;
   }, [data]);
   const divergentKeys = useMemo(() => new Set(data?.divergent ?? []), [data]);
+  // Served per-candidate lens value → lookup keyed by `{cycle_id}::{candidate_id|liveId}`.
+  // Candidate identity is resolved EXACTLY as the tree (useLineage) and the bars
+  // (round-candidates) resolve it — real id, else the position-derived live id — so all
+  // three surfaces key one candidate one way. Only non-null values land (a candidate the
+  // formula can't score is absent, read as null downstream).
+  const lensValueByCandidate = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const cyc of data?.cycles ?? []) {
+      for (const r of cyc.rounds) {
+        r.candidates.forEach((cand, i) => {
+          if (cand.lens_value == null) return;
+          const id = cand.candidate_id || liveCandidateId(r.round, i);
+          m.set(`${cyc.cycle_id}::${id}`, cand.lens_value);
+        });
+      }
+    }
+    return m;
+  }, [data]);
   // "Active" (red tag) only when the served overlay actually carries a divergence —
   // NOT merely because a lens/chip is requested.
   const maskActive = divergenceByKey.size > 0 || divergentKeys.size > 0;
@@ -171,8 +195,18 @@ export function LineageOverlayProvider({
       whatifActive: showWhatIf,
       divergenceByKey,
       divergentKeys,
+      lensValueByCandidate,
     }),
-    [data, lens, maskActive, maskLabel, showWhatIf, divergenceByKey, divergentKeys],
+    [
+      data,
+      lens,
+      maskActive,
+      maskLabel,
+      showWhatIf,
+      divergenceByKey,
+      divergentKeys,
+      lensValueByCandidate,
+    ],
   );
 
   return (

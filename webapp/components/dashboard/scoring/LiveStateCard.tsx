@@ -1,5 +1,6 @@
 import type { DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
+import { headlineStats } from "@/lib/derivations";
 import { fmtNum, fmtClock } from "@/lib/format";
 import { CardFrame } from "@/components/ui";
 import { FreqChart } from "@/components/eval/FreqChart";
@@ -58,12 +59,14 @@ export function LiveStateCard() {
   const items: [string, unknown][] = [];
   const seen = new Set(SHOWN_ELSEWHERE);
   if (dash) {
-    const round0 = dash.rounds?.find((r) => r.round === 0);
-    const originAcc = round0?.accuracy;
-    if (typeof originAcc === "number") {
-      items.push(["origin_acc", originAcc]);
+    // Origin accuracy rides the headline SSOT (consistent finite-guard); round0
+    // is still read locally for origin_samples.
+    const { origin } = headlineStats(dash);
+    if (origin != null) {
+      items.push(["origin_acc", origin]);
       seen.add("origin_acc");
     }
+    const round0 = dash.rounds?.find((r) => r.round === 0);
     const originSamples = round0?.candidates?.[0]?.scored_samples;
     if (typeof originSamples === "number") {
       items.push(["origin_samples", originSamples]);
