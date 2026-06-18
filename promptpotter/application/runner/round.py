@@ -28,8 +28,10 @@ from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.results import (
     RoundResult,
     ScoredCandidate,
-    assemble_prior_healths,
     candidate_label,
+)
+from promptpotter.domain.results_health import (
+    assemble_prior_healths,
     compute_node_failure_rates,
     compute_round_health,
     evidence_starved_node,

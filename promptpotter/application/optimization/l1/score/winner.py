@@ -125,6 +125,13 @@ async def l1_score(
         schema,
         forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
     )
+    # Resolve the winner's merged pipeline_params by identity, not position: `scored`
+    # below is filtered (drops no-result / leader-ineligible candidates), so its index
+    # no longer aligns with this full-population list. Keyed lookup is filter-proof.
+    params_by_id = {
+        ind.lineage.id: pp
+        for ind, pp in zip(osp_population, effective_pipeline_params, strict=True)
+    }
     decisions: list[ResumeCheckpointRecord] = []
     (
         all_candidate_results,
@@ -318,8 +325,8 @@ async def l1_score(
             **best_osp.prompt_field_dict(),
             "lineage": best_osp.lineage.model_dump(),
         },
-        pipeline_params=effective_pipeline_params[winner_idx]
-        if winner_idx is not None
+        pipeline_params=params_by_id.get(winner_id, pipeline_params)
+        if winner_id
         else pipeline_params,
         results=best_results,
         all_candidate_results=dict(all_candidate_results),

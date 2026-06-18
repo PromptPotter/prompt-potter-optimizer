@@ -160,9 +160,8 @@ def draft_pipeline_dependencies(draft: DraftCampaign) -> tuple[PipelineDependenc
     Scoped to the active steps (operator override, else the connector default) so a
     dependency surfaces only when a node that needs it actually runs — TermNorm's
     ``llm_only`` default raises none; selecting the full pipeline (with
-    ``token_matching``) raises ``candidate_library``. Mirrors the live
-    :meth:`PipelineSchema.required_dependencies` via the shared
-    :func:`dependencies_from_node_types`."""
+    ``token_matching``) raises ``candidate_library``. Shares the live
+    :func:`dependencies_from_node_types` mapping."""
     connector = connectors.get(draft.connector)
     active = set(draft.pipeline_steps or connector.default_pipeline)
     node_types = {n: t for n, t in connector.node_types.items() if n in active}

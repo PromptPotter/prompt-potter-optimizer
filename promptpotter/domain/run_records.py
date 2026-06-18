@@ -50,7 +50,7 @@ class ResumeCheckpointKind(enum.StrEnum):
 
 
 class DecisionRecord(TypedDict):
-    """Wire shape of one recorded decision as it rides ``RoundPayload.decisions``.
+    """Wire shape of one recorded decision as it rides ``RoundResult.decisions``.
 
     The serialized projection of :meth:`ResumeCheckpointRecord.to_dict` — read by
     the divergence-replay walker (``resume_and_fork/replayers.py``). ``kind`` is the

@@ -16,15 +16,16 @@ import functools
 import hashlib
 import json
 import logging
-from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.infrastructure.store.paths import REPO_ROOT
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "OPTIMIZER_PIPELINE_PATH",
     "combined_optimizer_prompt_hash",
     "compute_optimizer_prompt_hashes",
     "get_optimizer_schema",
@@ -32,8 +33,7 @@ __all__ = [
     "load_optimizer_prompt",
 ]
 
-_REPO_ROOT = Path(__file__).resolve().parents[5]
-_PIPELINE_PATH = _REPO_ROOT / "datasets" / "_optimizer" / "pipeline.json"
+OPTIMIZER_PIPELINE_PATH = REPO_ROOT / "datasets" / "_optimizer" / "pipeline.json"
 
 
 @functools.lru_cache(maxsize=1)
@@ -46,7 +46,7 @@ def _load_optimizer_manifest() -> dict[str, Any]:
     and the bodies live in the top-level ``resolved_schemas`` /
     ``resolved_prompts`` registries.
     """
-    manifest: dict[str, Any] = json.loads(_PIPELINE_PATH.read_text(encoding="utf-8"))
+    manifest: dict[str, Any] = json.loads(OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
     return manifest
 
 

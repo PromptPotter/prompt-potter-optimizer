@@ -5,7 +5,6 @@ PromptPotter Optimizer API — main FastAPI application entry point.
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -22,6 +21,7 @@ from promptpotter.infrastructure.identity import (
     build_identity_bundle,
     default_identity_paths,
 )
+from promptpotter.infrastructure.store.paths import REPO_ROOT
 from promptpotter.presentation import api
 from promptpotter.presentation.api.middleware import install_oidc_middleware
 from promptpotter.shared.clock import utcnow_iso
@@ -177,7 +177,7 @@ app.include_router(api.auth_router, prefix="/api/v1")
 # is a catch-all and MUST stay the last route registered — every API router
 # plus FastAPI's auto /docs + /openapi.json are matched first by Starlette's
 # in-order resolution. `html=True` serves out/index.html at `/`.
-WEBAPP_DIR = Path(__file__).resolve().parents[1] / "webapp" / "out"
+WEBAPP_DIR = REPO_ROOT / "webapp" / "out"
 if WEBAPP_DIR.exists():
     app.mount("/", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
 

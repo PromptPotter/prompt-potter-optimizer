@@ -57,6 +57,7 @@ from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store.paths import REPO_ROOT
 from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
 
 logger = logging.getLogger(__name__)
@@ -163,7 +164,7 @@ async def mint_campaign_command(
     # a crashed version-and-repoint can leave a campaign pointing at a name whose
     # data has already moved to `-vN`. Cheap no-op when nothing's pending.
     recover_pending_replacements(stores=stores)
-    dataset_root = resolve_dataset_config_dir(stores, _repo_root(), dataset_name)
+    dataset_root = resolve_dataset_config_dir(stores, REPO_ROOT, dataset_name)
     if not dataset_root.is_dir():
         raise LaunchError(f"dataset not found: {dataset_name!r} (no {dataset_root}/)")
 
@@ -456,7 +457,7 @@ async def start_run_command(
     if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
         raise LaunchError(f"campaign not found or not owned: {campaign_id}")
 
-    dataset_root = resolve_dataset_config_dir(stores, _repo_root(), campaign.dataset_name)
+    dataset_root = resolve_dataset_config_dir(stores, REPO_ROOT, campaign.dataset_name)
     backend_type = _read_backend_type_from_dataset(dataset_root, campaign.dataset_name)
     dataset_name = campaign.dataset_name
 
@@ -492,7 +493,7 @@ async def start_run_command(
         )
 
         file_config = read_campaign_config_file(
-            resolve_dataset_config_dir(stores, _repo_root(), dataset_name) / "campaign.json"
+            resolve_dataset_config_dir(stores, REPO_ROOT, dataset_name) / "campaign.json"
         )
         profile = session.store.backends.load_connector_profile(session.backend_id) or {}
         campaign_config = load_campaign_config({**profile, **file_config})
@@ -602,11 +603,6 @@ async def _run_in_background(
             status="failed",
             stop_reason=f"{type(exc).__name__}: {exc}",
         )
-
-
-def _repo_root() -> Path:
-    """Resolve the repo root from this module's location (parent of ``datasets/``)."""
-    return Path(__file__).resolve().parents[3]
 
 
 def _read_backend_type_from_dataset(dataset_root: Path, dataset_name: str) -> str:

@@ -1451,7 +1451,7 @@ def test_classify_sample_failure_attributes_the_warning_bearing_node(
     (no PromptPotter code taxonomy; unknown/missing kind is SKIPPED, never structural),
     and the causing node follows the WARNING, so silent-collateral failed nodes can't
     outvote the node that actually broke."""
-    from promptpotter.domain.results import classify_sample_failure
+    from promptpotter.domain.results_health import classify_sample_failure
 
     assert classify_sample_failure(statuses, warnings) == (kind, node)
 
@@ -1461,7 +1461,7 @@ def test_compute_round_health_names_the_structural_cause_not_collateral():
     (collateral, no warning) while entity_profiling carries the structural warning.
     The verdict must name entity_profiling as ``dominant_node`` — the prior
     tally-by-failed-status picked web_search by 12-12 tie + insertion order."""
-    from promptpotter.domain.results import compute_round_health
+    from promptpotter.domain.results_health import compute_round_health
 
     def _struct_fail() -> dict:
         return {
@@ -1508,7 +1508,7 @@ def test_evidence_starved_round_grades_critical_without_auto_halting():
     (the only one) must stay blind to ``evidence_starved`` — the stop authority
     belongs to the intelligent tiers, not this backend-coupled signal (R-48)."""
     from promptpotter.application.runner.termination import backend_unreachable_tripped
-    from promptpotter.domain.results import compute_round_health
+    from promptpotter.domain.results_health import compute_round_health
 
     def _web_starved() -> dict:
         return {
@@ -1568,7 +1568,7 @@ def test_degradation_health_is_context_aware(
 ):
     """The verdict grades the SAME degradation differently by track record, and only a
     ``critical`` grade carries an operator-facing suggested action (never auto-stops)."""
-    from promptpotter.domain.results import compute_degradation_health
+    from promptpotter.domain.results_health import compute_degradation_health
 
     h = compute_degradation_health(
         hits=hits,
@@ -1593,8 +1593,8 @@ def test_origin_verdict_is_first_in_the_l1_track_record():
     assembly must take the origin from ``origin_health`` and drop that round-0 entry
     (no double-count) plus the round being closed. End-to-end: an origin that graded
     ``critical`` makes a degrading L1 round see ≥3 consecutive → ``persistent``."""
-    from promptpotter.domain.results import (
-        RoundResult,
+    from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.results_health import (
         assemble_prior_healths,
         compute_degradation_health,
         compute_round_health,
@@ -1649,7 +1649,10 @@ def test_ungraded_prior_round_is_transparent_to_the_track_record():
     clean round nor breaks the consecutive-degraded chain. A probe interleaved in a
     ``degraded → probe → degraded`` run must still reach the ``persistent`` critical;
     the probe's ``None`` must not fake a clean prior that suppresses ``untested``."""
-    from promptpotter.domain.results import compute_degradation_health, compute_round_health
+    from promptpotter.domain.results_health import (
+        compute_degradation_health,
+        compute_round_health,
+    )
 
     degraded = compute_degradation_health(
         hits=15,
@@ -1675,7 +1678,7 @@ def test_ungraded_prior_round_is_transparent_to_the_track_record():
 
 def test_degradation_health_none_when_unmeasured():
     """Zero samples ⇒ no verdict (None), not a fabricated healthy grade."""
-    from promptpotter.domain.results import compute_degradation_health
+    from promptpotter.domain.results_health import compute_degradation_health
 
     assert (
         compute_degradation_health(

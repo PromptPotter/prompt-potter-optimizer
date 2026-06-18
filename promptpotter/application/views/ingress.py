@@ -50,17 +50,13 @@ from promptpotter.domain.rendering import (
     round_winner_key,
 )
 from promptpotter.domain.results import ScoredCandidate
-from promptpotter.shared.statistics import min_detectable_effect
+from promptpotter.shared import truncate
 
 __all__ = [
     "from_phase_event",
     "pick_round_winner",
     "score_entry_from_dict",
 ]
-
-
-def _truncate(s: str, max_len: int) -> str:
-    return s if len(s) <= max_len else s[: max_len - 3] + "..."
 
 
 # --- per-phase typed builders (live; with ctx side effects) ---------------
@@ -110,7 +106,6 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
         n_variants=opt.n_variants,
         sp_budget_ttest=sample,
         dataset_size=len(dataset),
-        mde=min_detectable_effect(sample),
         model=optimizer_model(),
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
@@ -134,10 +129,8 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
     ctx.composite_fitness_formula = full
     ctx.composite_fitness_formula_short = short
 
-    overlays: dict[str, str] = {}
     for field_name, value in cycle.opt_sp.prompt_field_dict().items():
         if value:
-            overlays[field_name] = str(value)
             ctx.original_sp_flat[field_name] = str(value)
 
     return InitExitView(
@@ -150,7 +143,6 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
         cached_rounds_count=len(cycle.rounds),
         task_context_keys=len(cycle.opt_sp.memory.task_context),
         l2_round=cycle.escalation.l2_round,
-        prompt_field_overlays=overlays,
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
         origin_composite_fitness=ctx.origin_composite_fitness or 0.0,
@@ -161,7 +153,7 @@ def _l1_generate_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
     # Header renders before candidates exist — describes parent SP, not the
     # round's mutation mode (sp_diff table emits that next render).
     preview = (d.get("prompt_preview") or "").replace("\n", " ").strip()
-    preview = "(empty)" if not preview else _truncate(preview, 50)
+    preview = "(empty)" if not preview else truncate(preview, 50, "...")
 
     new_flat = flatten_sp_summary(d.get("pipeline_params"))
     for field_name, value in (d.get("parent_prompt_fields") or {}).items():
@@ -300,7 +292,6 @@ def _refine_enter(d: dict[str, Any], ctx: ViewContext) -> L2RefineEnterView:
         current_acc=d.get("current_accuracy", 0.0),
         best_acc=d.get("best_accuracy", 0.0),
         l1_overrides={k: str(v) for k, v in params.items()},
-        n_params=len(params),
     )
 
 
@@ -335,13 +326,13 @@ def _plan_enter(d: dict[str, Any], ctx: ViewContext) -> PlanEnterView:
     return PlanEnterView(
         l3_round=d.get("l3_round", "?"),
         l2_stall_count=d.get("l2_stall_count", "?"),
-        current_plan_preview=_truncate(d.get("current_plan_preview", "") or "", 55),
+        current_plan_preview=truncate(d.get("current_plan_preview", "") or "", 55, "..."),
     )
 
 
 def _plan_exit(d: dict[str, Any], ctx: ViewContext) -> PlanExitView:
     return PlanExitView(
-        new_plan_preview=_truncate(d.get("new_plan_preview", "") or "", 55),
+        new_plan_preview=truncate(d.get("new_plan_preview", "") or "", 55, "..."),
         changes_description=d.get("changes_description", ""),
     )
 

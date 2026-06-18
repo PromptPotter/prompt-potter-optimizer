@@ -164,7 +164,8 @@ def _diag_ranker(
         scores = []
         for c in candidates[:2]:
             if isinstance(c, dict):
-                scores.append(float(c.get("score") or c.get("similarity") or 0.0))
+                raw = c["score"] if "score" in c else c.get("similarity", 0.0)
+                scores.append(float(raw if raw is not None else 0.0))
             elif isinstance(c, (list, tuple)) and len(c) >= 2:
                 scores.append(float(c[1]))
         if len(scores) == 2:

@@ -263,7 +263,6 @@ class Cycle:
     axes: AxisIndex | None = None
     escalation: EscalationFSM = field(default_factory=EscalationFSM)
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
-    state_version: int = 1
     last_rasch_posterior: Any = None
     archive_observations: list[Observation] = field(default_factory=list)
     # Stashed by L2/L3 rebase emission; runner.entry resolves it post-finalize

@@ -26,7 +26,7 @@ from promptpotter.application.optimization.dispatch.hub.injections.registry impo
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, L1Layout
 from promptpotter.domain.opt_search_point import PromptTemplate
-from promptpotter.domain.results import compute_node_failure_rates
+from promptpotter.domain.results_health import compute_node_failure_rates
 from promptpotter.infrastructure.llm.models import emit_round_warning
 
 if TYPE_CHECKING:

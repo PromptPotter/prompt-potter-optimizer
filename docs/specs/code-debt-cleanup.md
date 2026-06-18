@@ -234,9 +234,7 @@ Dead-field / single-caller-indirection sweep. Code fixes **shipped** in `debt-sw
 ### Untracked-debt sweep (2026-06-15) — holds after verification
 
 Five-lens audit. The tree came back near-clean (recent sweeps drained the
-dead-symbol backlog); the safe set that shipped this run — `_truncate`/`_truncate_raw`
-collapse into `shared/text.py::truncate_ellipsis` + dead `vanilla webapp/index.html:NNNN`
-breadcrumb-comment strips — is in git log. One genuine new hold:
+dead-symbol backlog; the shipped safe set is in git log). One genuine new hold:
 
 **Tier 5 — webapp CSS cascade-order drift (operator call: reordering changes the cascade).**
 - `webapp/app/styles/index.css:34-40` — `foundation/reduced-motion.css` is imported at line 34,

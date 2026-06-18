@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import KeysView
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.domain.sample import Sample
@@ -18,9 +18,7 @@ class SampleRecord:
     query: str
     sample_id: int
     hit_rate: float
-    n_measurements: int
     variance: float
-    dominant_failure_mode: str = ""
 
 
 @dataclass
@@ -30,7 +28,6 @@ class FailureCluster:
     failure_mode: str
     sample_count: int
     fraction: float
-    example_queries: list[str] = field(default_factory=list)
 
 
 class SampleIndex:
@@ -178,9 +175,7 @@ class SampleIndex:
                     query=query,
                     sample_id=sid,
                     hit_rate=round(hit_rate, 4),
-                    n_measurements=len(hits),
                     variance=round(variance, 4),
-                    dominant_failure_mode=self._dominant_failure_mode(sid),
                 )
             )
         self._cache_records = records
@@ -258,13 +253,11 @@ class SampleIndex:
         total = sum(len(xs) for xs in mode_samples.values())
         clusters = []
         for mode, sids in sorted(mode_samples.items(), key=lambda x: -len(x[1])):
-            example_queries = [self._samples[sid].query for sid in sids[:3] if sid in self._samples]
             clusters.append(
                 FailureCluster(
                     failure_mode=mode,
                     sample_count=len(sids),
                     fraction=len(sids) / total if total else 0.0,
-                    example_queries=example_queries,
                 )
             )
         return clusters[:max_clusters]
@@ -283,10 +276,6 @@ class SampleIndex:
 
     def mark_seen(self, run_id: str) -> None:
         self._seen_runs.add(run_id)
-
-    def _dominant_failure_mode(self, sample_id: int) -> str:
-        modes = self._failure_modes.get(sample_id, [])
-        return Counter(modes).most_common(1)[0][0] if modes else ""
 
 
 __all__ = ["FailureCluster", "SampleIndex", "SampleRecord"]

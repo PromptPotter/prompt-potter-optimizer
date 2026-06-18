@@ -20,7 +20,8 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     signal,
 )
 from promptpotter.domain.escalation_signals import ExplorationBudget
-from promptpotter.domain.results import EVIDENCE_STARVED_RATE, CritiqueReadout
+from promptpotter.domain.results import CritiqueReadout
+from promptpotter.domain.results_health import EVIDENCE_STARVED_RATE
 
 
 @signal(

@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import (
@@ -26,6 +25,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
+from promptpotter.infrastructure.store.paths import REPO_ROOT
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
@@ -112,7 +112,7 @@ async def init_services_cli(
     from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if _VERBOSE else "cli")
-    project_root = Path(__file__).resolve().parents[4]
+    project_root = REPO_ROOT
     return await init_services(
         backend_url=backend_url,
         backend_id=backend_id,

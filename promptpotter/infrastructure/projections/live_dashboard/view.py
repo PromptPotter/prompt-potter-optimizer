@@ -460,17 +460,9 @@ class LiveDashboardView(DerivedView):
                     self.short_formula_template = short
         elif phase == CampaignPhase.INIT and event.event == "exit":
             config = data["config"]
-            # ``env`` and ``state`` are runtime-only keys stripped by
-            # ``RunCallbacks.on_phase`` before the record is persisted/streamed
-            # (the live ``Cycle``/``Session`` hold the BackendStore the JSON
-            # serializer can't walk). Origin accuracy + sample count ride the
-            # typed view instead (read by attribute — see ``apply_phase``).
-            if view is not None:
-                # Origin accuracy now rides round 0 in ``rounds[]`` (emitted via the
-                # standard ``close_round`` path) — no separate origin block. Only the
-                # scoring-formula stamp is read off the INIT:exit view here.
-                s.composite_fitness_formula = getattr(view, "composite_fitness_formula", None)
-                self.short_formula_template = getattr(view, "composite_fitness_formula_short", None)
+            # The scoring formula is stamped once at INIT:enter (guarded, above) —
+            # origin accuracy now rides round 0 in ``rounds[]`` via the standard
+            # ``close_round`` path, so INIT:exit only carries the run-limit surface.
             opt = config.optimization
             self.patience_max = opt.l1_patience
             s.patience = f"0/{self.patience_max}"

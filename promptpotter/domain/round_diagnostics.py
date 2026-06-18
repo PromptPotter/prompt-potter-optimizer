@@ -36,7 +36,6 @@ class EvolutionRow:
     delta: float
     degraded: int
     n_candidates: int
-    changed_axes: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -79,7 +78,6 @@ class RoundDiagnostics:
     rank_buckets: dict[str, int] = field(default_factory=dict)
     top_k_accuracy: dict[int, float] = field(default_factory=dict)
     near_misses: list[NearMiss] = field(default_factory=list)
-    near_miss_queries: frozenset[str] = field(default_factory=frozenset)
     n_valid: int = 0
 
     # Pipeline shape this round
@@ -91,7 +89,6 @@ class RoundDiagnostics:
     evolution_rows: list[EvolutionRow] = field(default_factory=list)
     trajectory: TrajectoryClass = "healthy"
     trajectory_description: str = ""
-    plateau_count: int = 0
     anomalies: list[str] = field(default_factory=list)
 
     # Population this round

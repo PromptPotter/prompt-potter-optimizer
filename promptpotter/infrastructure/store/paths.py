@@ -21,9 +21,12 @@ from typing import Literal
 
 from promptpotter.infrastructure.store.base import validate_path_component
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_PROJECTS_ROOT = _REPO_ROOT / ".promptpotter" / "projects"
-DEFAULT_DATASETS_ROOT = _REPO_ROOT / "datasets"
+# The install root (parent of ``datasets/`` + ``.promptpotter/``). The ONE
+# anchor — every other module imports this instead of recomputing its own
+# depth-specific ``Path(__file__).parents[N]`` (which silently breaks on a move).
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_PROJECTS_ROOT = REPO_ROOT / ".promptpotter" / "projects"
+DEFAULT_DATASETS_ROOT = REPO_ROOT / "datasets"
 
 
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag|sweep)_")
@@ -95,6 +98,7 @@ def session_dir_for(tenant_root: Path, session_id: str) -> Path:
 __all__ = [
     "DEFAULT_DATASETS_ROOT",
     "DEFAULT_PROJECTS_ROOT",
+    "REPO_ROOT",
     "campaign_root_dir_for",
     "cycle_dir_for",
     "root_cycle_id",

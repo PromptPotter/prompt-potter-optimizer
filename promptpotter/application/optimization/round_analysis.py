@@ -60,11 +60,9 @@ def compute_round_diagnostics(
     ranked_item_keys = ranked_item_keys_from_schema(pipeline_schema)
     results = round_result.results
 
-    rank_buckets, top_k, near_misses, nm_queries, n_valid = _rank_analysis(
-        results, ranked_item_keys
-    )
+    rank_buckets, top_k, near_misses, n_valid = _rank_analysis(results, ranked_item_keys)
     termination_dist, error_rate, warning_rate = _pipeline_health(results)
-    evolution_rows, plateau_count, anomalies = _evolution(rounds_history)
+    evolution_rows, anomalies = _evolution(rounds_history)
     trajectory, trajectory_desc = _trajectory(rounds_history)
     diff_lines = _cross_candidate_diff(round_result)
     samples = _sample_diagnostics(results, ranked_item_keys, pipeline_schema)
@@ -82,7 +80,6 @@ def compute_round_diagnostics(
         rank_buckets=rank_buckets,
         top_k_accuracy=top_k,
         near_misses=near_misses,
-        near_miss_queries=frozenset(nm_queries),
         n_valid=n_valid,
         termination_dist=termination_dist,
         error_rate=error_rate,
@@ -90,7 +87,6 @@ def compute_round_diagnostics(
         evolution_rows=evolution_rows,
         trajectory=trajectory,
         trajectory_description=trajectory_desc,
-        plateau_count=plateau_count,
         anomalies=anomalies,
         cross_candidate_diff=diff_lines,
         l1_diversity=float(round_result.l1_yield),
@@ -106,7 +102,7 @@ def compute_round_diagnostics(
 
 def _rank_analysis(
     results: list[dict[str, Any]], ranked_item_keys: list[str] | None
-) -> tuple[dict[str, int], dict[int, float], list[NearMiss], set[str], int]:
+) -> tuple[dict[str, int], dict[int, float], list[NearMiss], int]:
     """Where did ground truth land in each sample's ranked-item list?"""
     keys = ranked_item_keys or None
     rank_map: dict[int, int | None] = {
@@ -136,8 +132,6 @@ def _rank_analysis(
             buckets["11-20"] += 1
         else:
             buckets["not_found"] += 1
-    nm_queries = {nm.query for nm in near_misses}
-
     n_valid = sum(1 for r in results if not is_error_result(r))
     top_k: dict[int, float] = {}
     if n_valid:
@@ -145,7 +139,7 @@ def _rank_analysis(
             in_top_k = sum(1 for rank in rank_map.values() if rank is not None and rank <= k)
             top_k[k] = in_top_k / n_valid
 
-    return buckets, top_k, near_misses, nm_queries, n_valid
+    return buckets, top_k, near_misses, n_valid
 
 
 def _pipeline_health(results: list[dict[str, Any]]) -> tuple[dict[str, int], float, float]:
@@ -179,29 +173,20 @@ def _warning_str(w: object) -> str:
     return str(w)
 
 
-def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], int, list[str]]:
+def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]]:
     """Per-round evolution rows + plateau detection.
 
     Plateau anomaly fires when ≥ ``_PLATEAU_FLAG_THRESHOLD`` consecutive
     deltas fall under :data:`_PLATEAU_DELTA`.
     """
     if not rounds:
-        return [], 0, []
+        return [], []
     rows: list[EvolutionRow] = []
     plateau_run = 0
     max_plateau = 0
     prev_acc: float | None = None
-    prev_pp: dict[str, Any] | None = None
     for r in rounds:
         delta = (r.accuracy - prev_acc) if prev_acc is not None else 0.0
-        changed_axes: list[str] = []
-        cur_pp = r.pipeline_params or {}
-        if prev_pp is not None:
-            changed_axes = sorted(
-                k
-                for k in set(prev_pp) | set(cur_pp)
-                if prev_pp.get(k) != cur_pp.get(k) and k != "steps"
-            )
         rows.append(
             EvolutionRow(
                 round=r.round,
@@ -209,13 +194,11 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], int, list
                 delta=delta,
                 degraded=r.degraded_samples,
                 n_candidates=len(r.candidate_scores),
-                changed_axes=changed_axes,
             )
         )
         plateau_run = plateau_run + 1 if abs(delta) < _PLATEAU_DELTA else 0
         max_plateau = max(max_plateau, plateau_run)
         prev_acc = r.accuracy
-        prev_pp = cur_pp
 
     anomalies: list[str] = []
     if max_plateau >= _PLATEAU_FLAG_THRESHOLD:
@@ -223,7 +206,7 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], int, list
             f"[MEDIUM] plateau_signal: {max_plateau} consecutive rounds with "
             f"<{_PLATEAU_DELTA:.0%} improvement."
         )
-    return rows, max_plateau, anomalies
+    return rows, anomalies
 
 
 def _trajectory(rounds: list[RoundResult]) -> tuple[TrajectoryClass, str]:

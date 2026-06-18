@@ -147,30 +147,47 @@ def _lens_value(evaluators: Any, criterion: RoundScorer | None) -> float | None:
     return value_with_mask_applied(evaluators, criterion)
 
 
+def _to_lineage_candidate(
+    *,
+    pos: int,
+    candidate_id: str,
+    label: str,
+    accuracy: Any,
+    is_winner: bool,
+    evaluators: Any,
+    criterion: RoundScorer | None,
+) -> CampaignLineageCandidate:
+    """Build one lineage row — the shared construction behind the completed-round
+    and in-flight mappers. ``rank`` rides ``pos`` (the webapp re-derives the
+    ``C{r}.{n}`` label from position); ``accuracy`` is float-coerced or ``None``."""
+    return CampaignLineageCandidate(
+        candidate_id=candidate_id,
+        label=label,
+        accuracy=float(accuracy) if isinstance(accuracy, int | float) else None,
+        rank=pos,
+        is_winner=is_winner,
+        lens_value=_lens_value(evaluators, criterion),
+    )
+
+
 def _summary_candidates(
     cands: list[Any], criterion: RoundScorer | None
 ) -> list[CampaignLineageCandidate]:
     """Map ``dashboard.json::rounds[].candidates`` (``RoundSummaryCandidate``
-    shape) to lineage candidates. List order is the round's display order — the
-    webapp re-derives the ``C{r}.{n}`` label from position and ignores the server
-    ``rank``, so ``rank`` rides position (``RoundSummaryCandidate`` has no rank
-    field of its own)."""
-    out: list[CampaignLineageCandidate] = []
-    for pos, c in enumerate(cands, start=1):
-        if not isinstance(c, dict):
-            continue
-        acc = c.get("accuracy")
-        out.append(
-            CampaignLineageCandidate(
-                candidate_id=str(c.get("candidate_id") or ""),
-                label=str(c.get("label") or ""),
-                accuracy=float(acc) if isinstance(acc, int | float) else None,
-                rank=pos,
-                is_winner=bool(c.get("is_winner", False)),
-                lens_value=_lens_value(c.get("evaluators"), criterion),
-            )
+    shape) to lineage candidates. List order is the round's display order."""
+    return [
+        _to_lineage_candidate(
+            pos=pos,
+            candidate_id=str(c.get("candidate_id") or ""),
+            label=str(c.get("label") or ""),
+            accuracy=c.get("accuracy"),
+            is_winner=bool(c.get("is_winner", False)),
+            evaluators=c.get("evaluators"),
+            criterion=criterion,
         )
-    return out
+        for pos, c in enumerate(cands, start=1)
+        if isinstance(c, dict)
+    ]
 
 
 def _inflight_candidates(
@@ -186,17 +203,17 @@ def _inflight_candidates(
     for pos, c in enumerate(cands or [], start=1):
         if not isinstance(c, dict):
             continue
-        stats = c.get("stats")
-        acc = stats.get("accuracy") if isinstance(stats, dict) else None
-        evaluators = stats.get("evaluators") if isinstance(stats, dict) else None
+        raw_stats = c.get("stats")
+        stats = raw_stats if isinstance(raw_stats, dict) else {}
         out.append(
-            CampaignLineageCandidate(
+            _to_lineage_candidate(
+                pos=pos,
                 candidate_id="",
                 label=str(c.get("label") or ""),
-                accuracy=float(acc) if isinstance(acc, int | float) else None,
-                rank=pos,
+                accuracy=stats.get("accuracy"),
                 is_winner=False,
-                lens_value=_lens_value(evaluators, criterion),
+                evaluators=stats.get("evaluators"),
+                criterion=criterion,
             )
         )
     return out

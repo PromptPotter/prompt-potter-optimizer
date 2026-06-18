@@ -92,7 +92,6 @@ class InitEnterView:
     n_variants: int = 0
     sp_budget_ttest: int = 0
     dataset_size: int = 0
-    mde: float = 0.0
     model: str = ""
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
@@ -120,7 +119,6 @@ class InitExitView:
     cached_rounds_count: int = 0
     task_context_keys: int = 0
     l2_round: int = 0
-    prompt_field_overlays: dict[str, str] = field(default_factory=dict)
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
     origin_composite_fitness: float = 0.0
@@ -236,7 +234,6 @@ class L2RefineEnterView:
     current_acc: float
     best_acc: float
     l1_overrides: dict[str, str]
-    n_params: int
 
 
 @dataclass(frozen=True)

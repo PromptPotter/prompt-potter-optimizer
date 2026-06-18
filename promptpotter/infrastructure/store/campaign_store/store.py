@@ -673,6 +673,27 @@ class CampaignStore(EntityStore):
     # Fork-sibling ``index.json`` writers — rebase / diag / sweep
     # ------------------------------------------------------------------
 
+    def _write_fresh_sibling(
+        self,
+        campaign_id: str,
+        parent_cycle_id: str,
+        new_cycle_id: str,
+        kind: str,
+        *,
+        forked_at: str,
+        **blob_kwargs: Any,
+    ) -> Path:
+        """Read parent index → fresh sibling blob → write child index. The shared
+        body behind the diag / operator / sweep fork writers (numbering restarts at
+        round 1; no parent-round inheritance — that's ``save_rebase_fork``'s job)."""
+        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
+        blob = fresh_sibling_index_blob(
+            parent_index, parent_cycle_id, kind, forked_at, **blob_kwargs
+        )
+        path = self._index_path(campaign_id, new_cycle_id)
+        write_json(path, blob)
+        return path
+
     def save_diag_fork(
         self,
         campaign_id: str,
@@ -681,11 +702,9 @@ class CampaignStore(EntityStore):
         *,
         forked_at: str,
     ) -> Path:
-        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
-        blob = fresh_sibling_index_blob(parent_index, parent_cycle_id, "diag", forked_at)
-        path = self._index_path(campaign_id, new_cycle_id)
-        write_json(path, blob)
-        return path
+        return self._write_fresh_sibling(
+            campaign_id, parent_cycle_id, new_cycle_id, "diag", forked_at=forked_at
+        )
 
     def save_rebase_fork(
         self,
@@ -754,11 +773,9 @@ class CampaignStore(EntityStore):
         fork-block writer in ``_mint_fork``; the steered seed rides
         ``.overrides/seed.json`` (its own read-once home).
         """
-        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
-        blob = fresh_sibling_index_blob(parent_index, parent_cycle_id, "fork", forked_at)
-        path = self._index_path(campaign_id, new_cycle_id)
-        write_json(path, blob)
-        return path
+        return self._write_fresh_sibling(
+            campaign_id, parent_cycle_id, new_cycle_id, "fork", forked_at=forked_at
+        )
 
     def save_sweep_fork(
         self,
@@ -769,17 +786,14 @@ class CampaignStore(EntityStore):
         sweep_batch_id: str,
         forked_at: str,
     ) -> Path:
-        parent_index = read_json_optional(self._index_path(campaign_id, parent_cycle_id)) or {}
-        blob = fresh_sibling_index_blob(
-            parent_index,
+        return self._write_fresh_sibling(
+            campaign_id,
             parent_cycle_id,
+            new_cycle_id,
             "sweep",
-            forked_at,
+            forked_at=forked_at,
             sweep_batch_id=sweep_batch_id,
         )
-        path = self._index_path(campaign_id, new_cycle_id)
-        write_json(path, blob)
-        return path
 
     def copy_parent_rounds_and_candidates(
         self,

@@ -289,12 +289,6 @@ class PipelineSchema(BaseModel):
         """``pipeline_data`` keys written by all nodes' observation mappings."""
         return self._observation_keys
 
-    def required_dependencies(self) -> tuple[PipelineDependency, ...]:
-        """The categorical inputs this pipeline needs, read off its node types
-        (:func:`dependencies_from_node_types`) — the authoritative live view that
-        mirrors the connector's ingest-time declaration."""
-        return dependencies_from_node_types({n.name: n.node_type for n in self.nodes})
-
     def to_pipeline_params(self) -> dict[str, Any]:
         """``{"steps": [...]}`` sparse scaffold — backend merges per-node config defaults.
 

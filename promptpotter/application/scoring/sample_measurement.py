@@ -377,9 +377,12 @@ async def measure_sample(
             for node_name, entry in step_tokens.items():
                 in_tok = entry["input"]
                 out_tok = entry["output"]
-                if in_tok == 0 and out_tok == 0:
-                    continue
                 cost_usd = entry.get("cost_usd")
+                # Skip a wholly-empty step, but never one that still carries a
+                # fixed/per-call cost (spend is the headline) — that would silently
+                # drop billed cost from the canonical ledger.
+                if in_tok == 0 and out_tok == 0 and not cost_usd:
+                    continue
                 raw_dur = step_timings.get(node_name)
                 duration_s: float
                 duration_s = float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0
