@@ -132,16 +132,13 @@ def fmt_query_result(
             f"cache had pipeline warnings → reran{detail}",
         )
     elif r.get("samplescan_resolved"):
-        cfg = r.get("samplescan_config") or {}
-        n = cfg.get("n_candidates", "?")
-        thr = cfg.get("resolved_threshold", "?")
         line = _append_annotation(
             line,
             _ann_indent,
             YELLOW,
             "\U0001f52c",
-            f"cache had warnings + rerun still degraded → resampled {n} fresh calls "
-            f"(threshold {thr}); result accepted",
+            "cache had warnings + rerun still degraded → re-measured fresh on "
+            "pipeline defaults; result accepted",
         )
     elif r.get("switched_out"):
         line = _append_annotation(

@@ -1,5 +1,6 @@
-"""Round-winner selection. `l1_score` scores via `score_population`, backfills opt_sp-aware
-composite, elects by `round_winner_key`, produces `RoundResult`.
+"""Round-winner selection. `l1_score` scores via `score_population`, adds the matched-origin
+floor, elects by `round_winner_key`, produces `RoundResult`. Composite + evaluators are
+opt_sp-aware from the scoring gateway (no recompute here).
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ from promptpotter.application.optimization.validators.l1_strict import L1YieldSt
 from promptpotter.application.origin import rescore_origin
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
-    compute_composite_fitness,
     count_degraded_samples,
     matched_origin_stats,
 )
@@ -190,19 +190,15 @@ async def l1_score(
     # An under-probed candidate can't win the round: a subset thinner than the elimination floor is
     # too noisy to trust over a fully-probed incumbent. Clamp to the dataset so a tiny set stays electable.
     coverage_floor = min(pobb_config.n_min, len(dataset))
-    # `score_population` runs per-sample with `opt_sp=None` (target layer can't see OSP), so
-    # opt_sp-aware evaluators (prompt_compactness) collapse to vacuous fallback. Backfill the
-    # opt_sp-aware composite + evaluators here before selecting the winner.
+    # The opt_sp-aware composite + evaluators are computed ONCE in the scoring gateway
+    # (`score_search_point` received each candidate's OSP) and ride on its `ScoredCandidate`.
+    # Here we only add the matched-origin floor (origin restricted to the candidate's samples)
+    # and elect — selection ranks on per-sample fitness LCB, never on composite.
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(candidate_scores)}
     for idx, ind in enumerate(scored):
         cand_results = all_candidate_results[ind.lineage.id]
-        s = compute_composite_fitness(
-            cand_results,
-            schema,
-            opt_sp=ind,
-            round_scorer=session.scoring.round_scorer,
-            l1_diversity=yield_stats.l1_yield,
-        )
+        cs_idx = cs_by_id.get(ind.lineage.id)
+        cs = candidate_scores[cs_idx] if cs_idx is not None else None
         # PoBB-locked candidates may have only run q8/20 — comparing their 8-sample accuracy to
         # origin's full-set rate punishes early-stop. Restrict origin to the candidate's measured set.
         matched = matched_origin_stats(
@@ -211,14 +207,9 @@ async def l1_score(
             schema,
             round_scorer=session.scoring.round_scorer,
         )
-        cs_idx = cs_by_id.get(ind.lineage.id)
-        if cs_idx is not None:
-            # ``compute_composite_fitness`` already injected ``l1_diversity`` (same
-            # ``yield_stats.l1_yield``) into its returned ``evaluators`` — read it back, don't re-stuff.
-            candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
+        if cs is not None and cs_idx is not None:
+            candidate_scores[cs_idx] = cs.model_copy(
                 update={
-                    "composite_fitness": s["composite_fitness"],
-                    "evaluators": s.get("evaluators") or {},
                     "matched_origin_accuracy": matched["accuracy"],
                     "matched_origin_hits": matched["hits"],
                     "matched_origin_composite": matched["composite_fitness"],
@@ -228,7 +219,7 @@ async def l1_score(
         # never ran would "beat" a phantom 0.0 floor (the matched empty-set bug: round 1
         # showed improved=True on 0 hits). The incumbent is re-scored on this round's subset
         # upstream (`rescore_origin`), so this is the safety net for any partial-coverage gap.
-        if matched["total"] == 0:
+        if matched["total"] == 0 or cs is None:
             continue
         cand_base = _compute_accuracy(cand_results)
         if cand_base["total"] < coverage_floor:
@@ -242,12 +233,12 @@ async def l1_score(
         rank = (lcb, cand_base["total"])
         if rank > best_rank:
             best_rank = rank
-            best_acc = s["accuracy"]
-            best_comp = s["composite_fitness"]
+            best_acc = cs.accuracy
+            best_comp = cs.composite_fitness
             best_osp = ind
             best_results = list(cand_results)
             best_label = ind.lineage.changes_description or ind.lineage.id[:12]
-            best_scores = dict(s.get("evaluators") or {})
+            best_scores = dict(cs.evaluators or {})
             best_matched_origin_acc = matched["accuracy"]
             best_matched_origin_hits = matched["hits"]
             best_matched_origin_composite = matched["composite_fitness"]

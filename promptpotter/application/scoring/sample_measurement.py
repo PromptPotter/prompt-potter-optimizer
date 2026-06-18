@@ -36,12 +36,6 @@ walks this in order; first step that returns a non-degraded result wins."""
 RERUN_TRIGGER_COUNT: int = 3
 """Number of degradation sightings (cached + historical) before rerunning."""
 
-SAMPLESCAN_CANDIDATES: int = 3
-"""Number of fresh probes during the samplescan step."""
-
-SAMPLESCAN_THRESHOLD: float = 0.5
-"""Minimum probe-clean fraction to accept a samplescan result."""
-
 SAMPLESWITCH_MIN_DEGRADATION_RATE: float = 0.5
 """Historical degradation rate at which sampleswitch short-circuits to the
 cached deprecated answer instead of re-evaluating."""
@@ -540,8 +534,7 @@ async def execute_stale_data_protocol(
     """Walk the stale data load protocol ladder for a degraded cached query.
 
     Hyperparameters are module-level constants
-    (``RERUN_TRIGGER_COUNT``, ``SAMPLESCAN_CANDIDATES``,
-    ``SAMPLESCAN_THRESHOLD``, ``SAMPLESWITCH_MIN_DEGRADATION_RATE``).
+    (``RERUN_TRIGGER_COUNT``, ``SAMPLESWITCH_MIN_DEGRADATION_RATE``).
 
     Observation counts come from ``axes.sample_index`` (degradation
     tables ingested from the measurement archive at round boundaries). Within a round
@@ -590,10 +583,6 @@ async def execute_stale_data_protocol(
             )
             result = dict(await measure_sample(sample, session, pipeline_params=probe_params))
             result["samplescan_resolved"] = True
-            result["samplescan_config"] = {
-                "n_candidates": SAMPLESCAN_CANDIDATES,
-                "resolved_threshold": SAMPLESCAN_THRESHOLD,
-            }
             if not has_pipeline_warnings(result):
                 return result, "samplescan"
 

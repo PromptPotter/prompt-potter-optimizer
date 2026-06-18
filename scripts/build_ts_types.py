@@ -24,13 +24,6 @@ from promptpotter.domain.results import (
     RoundSummaryCandidate,
 )
 from promptpotter.infrastructure.projections.live_dashboard.state import (
-    BackendWarning,
-    BackfillLogEntry,
-    DashboardError,
-    InFlightCall,
-    LiveDashboardState,
-    LoopWarning,
-    RunLimits,
     SpendBucket,
     SpendRollup,
 )
@@ -75,16 +68,12 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     DegradationHealth,
     RoundSummary,
     DiagnosticRunRecord,
-    # --- live dashboard state ---
+    # --- spend rollup (the only live-dashboard sub-shapes the webapp reads
+    # strictly; the rest of dashboard.json is consumed loosely via the webapp's
+    # own DashboardSnapshot, so LiveDashboardState + its other nested types are
+    # not generated) ---
     SpendBucket,
     SpendRollup,
-    BackendWarning,
-    LoopWarning,
-    BackfillLogEntry,
-    InFlightCall,
-    DashboardError,
-    RunLimits,
-    LiveDashboardState,
     # --- datasets router ---
     DatasetItem,
     DatasetPreviewResponse,

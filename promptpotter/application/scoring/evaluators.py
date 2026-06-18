@@ -19,6 +19,12 @@ Scope = Literal["per_sample", "per_round"]
 DataType = Literal["NUMERIC", "BOOLEAN"]
 
 
+# Cost/latency yardsticks for the cost-shaped evaluators. Intentionally fixed
+# module constants, NOT per-campaign knobs: these normalize cross-dataset cost
+# terms onto one comparable [0,1] scale, so a dataset with long prompts SHOULD
+# read a lower compactness — that's the signal, not a miscalibration. Make them
+# tunable only if a real per-dataset need appears (then they move to
+# campaign.json::scoring); until then, one yardstick keeps comparisons honest.
 LATENCY_BUDGET_MS = 10_000.0  # ≥ budget → 0.0, 0 → 1.0
 PROMPT_BUDGET_CHARS = 4_000  # ≈ 1000 tokens; soft linear ceiling
 OUTPUT_TOKEN_BUDGET = 12_000  # generation-cost soft ceiling; ≥ budget → 0.0
@@ -244,7 +250,7 @@ def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
     n = len(schema.active_steps)
     if n <= 1:
         return 1.0
-    worst = 12
+    worst = 12  # node-count yardstick, same intentionally-fixed rationale as the budgets above
     return max(0.0, 1.0 - (n - 1) / (worst - 1))
 
 

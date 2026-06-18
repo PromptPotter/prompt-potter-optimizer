@@ -120,6 +120,7 @@ async def score_search_point(
     n_total_candidates: int = 1,
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
+    opt_sp: Any = None,
     next_sample: Callable[[dict[int, bool]], int | None] | None = None,
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
     force_fresh: bool = False,
@@ -133,6 +134,12 @@ async def score_search_point(
     escape hatch for exactly that: re-score an origin after fixing the connector
     and see the new result. Fresh measurements still persist to the archive
     normally, overwriting the stale rows.
+
+    ``opt_sp`` is the candidate's ``OptSearchPoint``; threading it makes the
+    composite the gateway computes (and archives) opt_sp-aware — so the archived
+    composite matches the round-file one for any formula weighting an opt_sp-aware
+    evaluator (e.g. ``prompt_compactness``). ``None`` (origin / PoBB backfill) keeps
+    those evaluators on their vacuous fallback.
 
     Per-sample callbacks ``on_sample_scored`` and ``on_sample_starting`` are
     **required keywords without a default** — every call site must declare its
@@ -235,6 +242,7 @@ async def score_search_point(
         scores = compute_composite_fitness(
             merged,
             pipeline_schema,
+            opt_sp=opt_sp,
             round_scorer=session.scoring.round_scorer,
             l1_diversity=l1_diversity,
         )
@@ -284,6 +292,7 @@ async def score_search_point(
     scores = compute_composite_fitness(
         results,
         pipeline_schema,
+        opt_sp=opt_sp,
         round_scorer=session.scoring.round_scorer,
         l1_diversity=l1_diversity,
     )

@@ -120,6 +120,7 @@ async def score_one_candidate(
         n_total_candidates=n_total,
         axes=cycle.axes,
         l1_diversity=l1_diversity,
+        opt_sp=osp_c,
         next_sample=next_sample,
         on_sample_pre_check=_catch_priors_up,
     )

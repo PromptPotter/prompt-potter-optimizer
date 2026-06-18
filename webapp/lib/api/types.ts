@@ -8,7 +8,6 @@
 
 export type {
   ActiveSessionResponse,
-  BackendWarning,
   CampaignLineageCandidate,
   CampaignLineageCycle,
   CampaignLineageResponse,
@@ -27,9 +26,7 @@ export type {
   FileContentResponse,
   FileEntry,
   FilesResponse,
-  InFlightCall,
   LineageDivergence,
-  LiveDashboardState,
   MeasurementDot,
   MeasurementSeriesResponse,
   NodeConfigParam,

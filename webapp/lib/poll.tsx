@@ -67,8 +67,8 @@ export interface DashboardSnapshot {
   rounds?: RoundSummary[];
   evaluators?: unknown[];
   scoring?: unknown;
-  // Two-bucket spend rollup. Always present in a real dashboard.json
-  // (`LiveDashboardState.spend` has a default_factory); absent only on the
+  // Two-bucket spend rollup. Always present in a real dashboard.json (the Python
+  // LiveDashboardState.spend has a default_factory); absent only on the
   // `warming_up` placeholder — hence optional here, firm once present.
   spend?: SpendRollup;
   // Set on ``sample_started``, cleared on ``sample_scored``. The dataset
