@@ -102,7 +102,10 @@ def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
     def compute(*, results: list[QueryMeasurement], opt_sp: Any = None, **_: Any) -> float:
         if not results or opt_sp is None:
             return 0.0
-        events = getattr(opt_sp, spec.attr, None) or []
+        # The four wound channels live on ``opt_sp.memory.wounds`` (not the OSP
+        # top level, which is ``extra="forbid"``); reading the top level always
+        # missed, so every self-heal rate silently computed 0.0.
+        events = getattr(opt_sp.memory.wounds, spec.attr)
         return min(len(events) / len(results), 1.0)
 
     return Evaluator(

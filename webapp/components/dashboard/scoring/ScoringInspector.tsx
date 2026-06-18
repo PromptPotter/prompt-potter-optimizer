@@ -4,15 +4,22 @@ import { useRoundSource } from "@/lib/hooks/useRoundSource";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { fmtPct1 } from "@/lib/format";
-import type { ScoreboardEntry, SelectedCandidate } from "@/lib/types";
+import type { CandidateRow, ScoreboardEntry, SelectedCandidate } from "@/lib/types";
 import { liveCandidate } from "@/lib/poll";
+import { samplesForRow } from "@/lib/derivations";
+import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
 import { Dialog } from "@/components/ui";
 import { SteerForkPanel } from "@/components/dashboard/control/SteerForkPanel";
+import { SampleRowItem } from "@/components/dashboard/samples/SampleRowItem";
 
 interface Props {
   selected: SelectedCandidate | null;
   onClose: () => void;
 }
+
+// Cap rendered rows so a long round can't unbound the inspector's DOM —
+// mirrors RoundSamplesBody's PER_GROUP_CAP.
+const SAMPLE_CAP = 250;
 
 export function ScoringInspector({ selected, onClose }: Props) {
   const { dash } = useDashboard();
@@ -41,6 +48,25 @@ export function ScoringInspector({ selected, onClose }: Props) {
     const e = scoreboard?.find((c) => (c.candidate_id ?? "") === selected.candidate_id);
     return e ? { composite: e.composite, hits: e.hits, total: e.total } : null;
   }, [selected, isLive, dash, doc]);
+
+  // The per-sample stream for *just this* searchpoint — the same rows the
+  // round-wide Samples table shows, sliced to the selected candidate. The
+  // CandidateRow carries the `source` tag, so `samplesForRow` routes live vs
+  // historical the same way RoundSamplesView does (no merge, no second reader).
+  const { byRound } = useRoundCandidates();
+  const samples = useMemo(() => {
+    if (!selected) return [];
+    const row: CandidateRow | undefined = (byRound.get(selected.round) ?? []).find(
+      (c) => c.candidate_id === selected.candidate_id,
+    );
+    if (!row) return [];
+    return samplesForRow(row, dash, doc);
+  }, [selected, byRound, dash, doc]);
+
+  const tally = useMemo(() => {
+    const hits = samples.reduce((n, s) => n + (s.status === "HIT" ? 1 : 0), 0);
+    return { hits, misses: samples.length - hits };
+  }, [samples]);
 
   if (!selected) return null;
 
@@ -91,6 +117,27 @@ export function ScoringInspector({ selected, onClose }: Props) {
           </div>
         )}
       </div>
+      {samples.length > 0 && (
+        <div className="inspector-samples">
+          <div className="rsv-group-head" aria-hidden>
+            <span className="rsv-cand-label">{selected.label} · samples</span>
+            <span className="rsv-tally">
+              <span className="tag-hit">HIT {tally.hits}</span>
+              <span className="tag-miss">MISS {tally.misses}</span>
+            </span>
+          </div>
+          <div className="rsv-rows">
+            {samples.slice(0, SAMPLE_CAP).map((s) => (
+              <SampleRowItem key={s.key} row={s} />
+            ))}
+            {samples.length > SAMPLE_CAP && (
+              <div className="rsv-empty-row">
+                +{samples.length - SAMPLE_CAP} more (rendering capped at {SAMPLE_CAP}).
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <div className="inspector-actions">
         <button
           type="button"

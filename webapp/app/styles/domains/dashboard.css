@@ -171,6 +171,11 @@
    the whole spine; the border reset matches the old in-triad card framing. */
 .inspector-row{max-height:520px;overflow:auto;margin-bottom:14px}
 .inspector-row .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
+/* Per-searchpoint sample stream — the round-wide Samples table sliced to the
+   selected candidate. Reuses the `.rsv-*` row styling; scrolls on its own so a
+   long round doesn't push the composite/hits summary out of view. */
+.inspector-samples{margin-top:12px;border-top:0.5px solid var(--color-border-tertiary);font-family:var(--font-mono);font-size:12px;line-height:1.5}
+.inspector-samples .rsv-rows{max-height:clamp(200px,32vh,420px);overflow-y:auto}
 
 /* What-If open — fitness card takes the full first line (flex-basis:100%, set
    above), so lineage wraps to its own row beneath it. The chart frame stays at

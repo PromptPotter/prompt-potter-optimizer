@@ -453,7 +453,12 @@ def test_mask_abort_verdict_rides_the_same_fold():
 def test_composite_fitness_zeroed_on_validation_failure():
     fake_opt_sp = SimpleNamespace(
         memory=SimpleNamespace(
-            wounds=SimpleNamespace(validation_failures=[object()], runtime_failures=[])
+            wounds=SimpleNamespace(
+                validation_failures=[object()],
+                runtime_failures=[],
+                l2_guard_breaches=[],
+                l3_guard_breaches=[],
+            )
         )
     )
     scored = compute_composite_fitness(

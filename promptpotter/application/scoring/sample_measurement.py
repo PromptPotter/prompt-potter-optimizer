@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 import httpx
 
@@ -128,11 +128,23 @@ _INFRA_KEYS: frozenset[str] = frozenset(
 )
 
 
+class StepTokenUsage(TypedDict):
+    """Per-LLM-node ``step_tokens`` entry. ``cost_usd``/``model`` are forwarded
+    from the backend wire only when the provider surfaced them (TermNorm
+    ``record_step_tokens``); absent on estimated-fallback entries."""
+
+    input: int
+    output: int
+    estimated: bool
+    cost_usd: NotRequired[float]
+    model: NotRequired[str]
+
+
 def _compute_step_tokens(
     resp_data: dict[str, Any],
     pipeline_schema: Any,
     wire_params: dict[str, Any],
-) -> dict[str, dict[str, int | bool]]:
+) -> dict[str, StepTokenUsage]:
     """Collect per-LLM-node token counts from the backend response.
 
     Seeds from ``resp_data["step_tokens"]`` when the backend provides it
@@ -142,17 +154,27 @@ def _compute_step_tokens(
 
     Returns an empty dict when the schema carries no LLM nodes.
     """
-    out: dict[str, dict[str, int | bool]] = {}
+    out: dict[str, StepTokenUsage] = {}
 
     raw = resp_data.get("step_tokens")
     if isinstance(raw, dict):
         for node_name, entry in raw.items():
             if isinstance(entry, dict):
-                out[node_name] = {
+                seeded: StepTokenUsage = {
                     "input": int(entry.get("input", 0)),
                     "output": int(entry.get("output", 0)),
                     "estimated": False,
                 }
+                # Forward per-node cost/model when the backend surfaced them
+                # (provider returned USD; upstream model id) — the dashboard
+                # prefers these over its bundled rate table + provider slug.
+                cost = entry.get("cost_usd")
+                if isinstance(cost, (int, float)):
+                    seeded["cost_usd"] = float(cost)
+                wire_model = entry.get("model")
+                if isinstance(wire_model, str):
+                    seeded["model"] = wire_model
+                out[node_name] = seeded
 
     for node in pipeline_schema.nodes:
         if not node.is_llm or node.name in out:
@@ -359,18 +381,15 @@ async def measure_sample(
             fallback_model = data.get("llm_provider")
             step_timings = data.get("step_timings") or {}
             for node_name, entry in step_tokens.items():
-                in_tok = int(entry["input"])
-                out_tok = int(entry["output"])
+                in_tok = entry["input"]
+                out_tok = entry["output"]
                 if in_tok == 0 and out_tok == 0:
                     continue
-                raw_cost = entry.get("cost_usd") if isinstance(entry, dict) else None
-                cost_usd: float | None
-                cost_usd = float(raw_cost) if isinstance(raw_cost, (int, float)) else None
+                cost_usd = entry.get("cost_usd")
                 raw_dur = step_timings.get(node_name)
                 duration_s: float
                 duration_s = float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0
-                raw_model = entry.get("model") if isinstance(entry, dict) else None
-                node_model = str(raw_model) if isinstance(raw_model, str) else None
+                node_model = entry.get("model")
                 emit_token_usage(
                     node=str(node_name),
                     kind="backend",
