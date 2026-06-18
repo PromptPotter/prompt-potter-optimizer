@@ -74,7 +74,7 @@ def _materialize_cached(
     scorer_formula: str | None,
 ) -> QueryMeasurement:
     """Mark prior as cached + rescored; warn on hit/no-hit drift unless explained by bold-strip."""
-    archived_hit = item.get("hit") if "hit" in item else None
+    archived_hit = item.get("hit")
     r: dict[str, Any] = {**item, "cached": True}
     pd = r.get("pipeline_data")
     if isinstance(pd, dict):
@@ -386,7 +386,7 @@ async def run_query_loop(
             # the posterior since the queue mechanism is about *capability*,
             # not infrastructure; PoBB and DegradationCheck already
             # gate elimination on the error class itself.
-            latest_hit: bool = bool(state.results[-1].get("hit")) if state.results else False
+            latest_hit: bool = bool(state.results[-1].get("hit"))
             scored_outcomes[sid] = latest_hit
             i += 1
     except (KeyboardInterrupt, asyncio.CancelledError):

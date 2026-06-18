@@ -359,8 +359,8 @@ async def measure_sample(
             fallback_model = data.get("llm_provider")
             step_timings = data.get("step_timings") or {}
             for node_name, entry in step_tokens.items():
-                in_tok = int(entry.get("input", 0) or 0)
-                out_tok = int(entry.get("output", 0) or 0)
+                in_tok = int(entry["input"])
+                out_tok = int(entry["output"])
                 if in_tok == 0 and out_tok == 0:
                     continue
                 raw_cost = entry.get("cost_usd") if isinstance(entry, dict) else None

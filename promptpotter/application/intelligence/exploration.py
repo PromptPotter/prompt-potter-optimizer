@@ -248,7 +248,7 @@ def select_round_subset(
     if posterior.theta:
         leader_id = max(posterior.theta, key=lambda cid: posterior.theta[cid])
         leader_theta = posterior.theta[leader_id]
-        leader_var = posterior.theta_se.get(leader_id, posterior.sigma_theta) ** 2
+        leader_var = posterior.theta_se[leader_id] ** 2
     else:
         leader_theta, leader_var = 0.0, posterior.sigma_theta**2
     ranked = expected_order(

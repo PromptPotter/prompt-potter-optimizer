@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.rendering import display_fitness
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from promptpotter.application.views.view_models import ScoreEntry
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
@@ -210,31 +213,30 @@ def _pp_val(v: object) -> str:
 
 
 def _scoreboard(
-    candidate_scores: list[dict[str, Any]],
+    candidate_scores: Sequence[ScoreEntry],
     winner_label: str,
     origin_accuracy: float,
 ) -> str:
     """Format ranked candidate scoreboard as a box with 95% CI.
 
-    ``candidate_scores`` items: {candidate_id, accuracy, composite_fitness?, ci_lo, ci_hi,
-    matched_origin_accuracy?}. When a row carries ``matched_origin_accuracy`` (PoBB-locked
-    candidates only ran a subset), the Δ column compares against origin on that
-    same subset; otherwise the full-set ``origin_accuracy`` fallback applies.
-    Returns multi-line string ready to print.
+    Reads the frozen ``ScoreEntry`` rows directly. When a row carries a non-zero
+    ``matched_origin_accuracy`` (PoBB-locked candidates only ran a subset), the Δ
+    column compares against origin on that same subset; otherwise the full-set
+    ``origin_accuracy`` fallback applies. Returns multi-line string ready to print.
     """
     # Filter synthetic-zeroed variants (no_op / duplicate) — they did not
     # burn an LLM call and ranking them as 0.0% delta distorts the verdict.
     scored = [
         s
         for s in candidate_scores
-        if s.get("invalid_reason") not in ("no_op_variant", "duplicate_variant")
+        if s.invalid_reason not in ("no_op_variant", "duplicate_variant")
     ]
     if not scored:
         return ""
 
     ranked = sorted(
         scored,
-        key=lambda s: (display_fitness(s.get("composite_fitness"), s["accuracy"]), s["accuracy"]),
+        key=lambda s: (display_fitness(s.composite_fitness, s.accuracy), s.accuracy),
         reverse=True,
     )
     w = 78
@@ -245,25 +247,25 @@ def _scoreboard(
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
 
     for i, s in enumerate(ranked, 1):
-        label = (s.get("label") or "")[:8]
-        acc = s["accuracy"]
-        ci_str = fmt_ci(s.get("ci_lo", 0.0), s.get("ci_hi", 0.0))
-        # Per-row matched-pair origin: when present, compares this candidate's
+        label = (s.label or "")[:8]
+        acc = s.accuracy
+        ci_str = fmt_ci(s.ci_lo, s.ci_hi)
+        # Per-row matched-pair origin: a non-zero value compares this candidate's
         # accuracy against origin on the *same samples this candidate ran*
         # (PoBB-locked rows). Falls back to the full-set origin for rows the
         # winner-selection loop never backfilled (escalation-aborted /
-        # fatal-degradation candidates not in ``scored``).
-        row_origin = float(s.get("matched_origin_accuracy", origin_accuracy) or origin_accuracy)
+        # fatal-degradation candidates not in ``scored``), which carry 0.0.
+        row_origin = s.matched_origin_accuracy or origin_accuracy
         delta = acc - row_origin
         delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"
-        aborted = s.get("escalation_aborted", False)
+        aborted = s.escalation_aborted
         if aborted:
             winner_mark = f"  {YELLOW}(aborted){RESET}"
         elif label == winner_label:
             winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:
             winner_mark = ""
-        comp_val = display_fitness(s.get("composite_fitness"), acc)
+        comp_val = display_fitness(s.composite_fitness, acc)
         comp_part = f"   {comp_val:>8.4f}"
         row = f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}{comp_part}   {delta_str:>7s}{winner_mark}"
         lines.append(f"  {_box_line(row, width=w)}")

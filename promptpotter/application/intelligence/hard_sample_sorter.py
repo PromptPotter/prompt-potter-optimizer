@@ -60,7 +60,7 @@ def _pick_score_under_prior(
     """
     var_theta = sigma_theta * sigma_theta
     return {
-        sid: pick_value(seed_mu, var_theta, seed_mu, seed_var, d, delta_se.get(sid, 0.0))
+        sid: pick_value(seed_mu, var_theta, seed_mu, seed_var, d, delta_se[sid])
         for sid, d in delta.items()
     }
 
@@ -72,7 +72,7 @@ def _resolve_candidate_order(
     """Y-axis: desc θ_c; tie → desc mean hit rate; final tie → cid lex ascending."""
     return sorted(
         posterior.theta.keys(),
-        key=lambda cid: (-posterior.theta[cid], -hit_rates.get(cid, 0.0), cid),
+        key=lambda cid: (-posterior.theta[cid], -hit_rates[cid], cid),
     )
 
 
@@ -83,7 +83,7 @@ def _resolve_sample_order(
     """X-axis: desc δ_s (hardest left); tie → desc miss rate; final tie → sid asc."""
     return sorted(
         posterior.delta.keys(),
-        key=lambda sid: (-posterior.delta[sid], -miss_rates.get(sid, 0.0), sid),
+        key=lambda sid: (-posterior.delta[sid], -miss_rates[sid], sid),
     )
 
 
@@ -154,7 +154,7 @@ def build_hard_samples_artifact_from_observations(
     if posterior.theta:
         best_cid = max(posterior.theta, key=lambda cid: posterior.theta[cid])
         seed_mu = posterior.theta[best_cid]
-        seed_var = posterior.theta_se.get(best_cid, posterior.sigma_theta) ** 2
+        seed_var = posterior.theta_se[best_cid] ** 2
     else:
         seed_mu, seed_var = 0.0, posterior.sigma_theta**2
     pick_score_map = _pick_score_under_prior(
@@ -196,15 +196,15 @@ def build_hard_samples_artifact_from_observations(
         "sigma_delta": float(posterior.sigma_delta),
         "mu_delta": float(posterior.mu_delta),
         "theta": {cid: float(posterior.theta[cid]) for cid in candidate_order},
-        "theta_se": {cid: float(posterior.theta_se.get(cid, 0.0)) for cid in candidate_order},
+        "theta_se": {cid: float(posterior.theta_se[cid]) for cid in candidate_order},
         # JSON object keys must be strings — consumers cast back to int.
         "delta": {str(sid): float(posterior.delta[sid]) for sid in sample_order},
-        "delta_se": {str(sid): float(posterior.delta_se.get(sid, 0.0)) for sid in sample_order},
+        "delta_se": {str(sid): float(posterior.delta_se[sid]) for sid in sample_order},
         "n_obs_per_candidate": {
-            cid: int(posterior.n_obs_per_candidate.get(cid, 0)) for cid in candidate_order
+            cid: int(posterior.n_obs_per_candidate[cid]) for cid in candidate_order
         },
         "n_obs_per_sample": {
-            str(sid): int(posterior.n_obs_per_sample.get(sid, 0)) for sid in sample_order
+            str(sid): int(posterior.n_obs_per_sample[sid]) for sid in sample_order
         },
     }
 
@@ -225,7 +225,7 @@ def build_hard_samples_artifact_from_observations(
         "sample_order": sample_order,
         "rasch": rasch_view,
         "pick_score": {
-            "per_sample": {str(sid): float(pick_score_map.get(sid, 0.0)) for sid in sample_order},
+            "per_sample": {str(sid): float(pick_score_map[sid]) for sid in sample_order},
             "sample_order": [int(sid) for sid in pick_order],
         },
         "cells": cells,

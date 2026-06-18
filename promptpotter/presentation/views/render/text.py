@@ -5,7 +5,6 @@ composite_fitness block from ``shared.composite``."""
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from promptpotter.application.views.view_models import (
     AnyView,
@@ -112,33 +111,15 @@ def _render_candidates_generated(v: CandidatesGeneratedView) -> str:
 
 def _render_round_complete(v: RoundCompleteView) -> str:
     out: list[str] = []
-    score_dicts: list[dict[str, Any]] = [
-        {
-            "label": s.label,
-            "accuracy": s.accuracy,
-            "composite_fitness": s.composite_fitness,
-            "hits": s.hits,
-            "total": s.total,
-            "ci_lo": s.ci_lo,
-            "ci_hi": s.ci_hi,
-            "escalation_aborted": s.escalation_aborted,
-            "invalid_reason": s.invalid_reason,
-            "matched_origin_accuracy": s.matched_origin_accuracy,
-        }
-        for s in v.scores
-    ]
-    if len(score_dicts) > 3:
-        if board := _scoreboard(score_dicts, v.winner_label, v.origin_acc):
+    if len(v.scores) > 3:
+        if board := _scoreboard(v.scores, v.winner_label, v.origin_acc):
             out.append(board)
-    elif score_dicts:
+    elif v.scores:
         parts = [
-            f"{s['label']}={s['accuracy']:.1%}{' (aborted)' if s['escalation_aborted'] else ''}"
+            f"{s.label}={s.accuracy:.1%}{' (aborted)' if s.escalation_aborted else ''}"
             for s in sorted(
-                score_dicts,
-                key=lambda s: (
-                    display_fitness(s.get("composite_fitness"), s["accuracy"]),
-                    s["accuracy"],
-                ),
+                v.scores,
+                key=lambda s: (display_fitness(s.composite_fitness, s.accuracy), s.accuracy),
                 reverse=True,
             )
         ]
@@ -159,7 +140,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
     # When the winner ran the full set, ``matched_origin_accuracy == origin_acc``
     # and the displayed value is unchanged. PoBB-locked winners get a fair
     # subset origin floor instead of being compared against origin's full 20.
-    matched_origin = v.matched_origin_accuracy or v.origin_acc
+    matched_origin = v.matched_origin_accuracy
 
     if v.improved:
         sig_tag = f"  {fmt_pvalue(v.p_value)}" if v.p_value is not None else ""

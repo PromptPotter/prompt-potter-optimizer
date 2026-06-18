@@ -70,19 +70,13 @@ def _build_scoring_error_signal(
     # Skip rows whose error is the abort-reason padding — those are synthetic
     # markers inserted after the cascade to bring results up to dataset length,
     # not the real backend failure that triggered it.
-    real_errors = [
-        r for r in results if is_error_result(r) and str(r.get("error") or "") != stop_reason
-    ]
+    real_errors = [r for r in results if is_error_result(r) and str(r["error"]) != stop_reason]
     warning_types: dict[str, int] = {}
     for r in real_errors:
         key = str(error_category(r) or "unknown")
         warning_types[key] = warning_types.get(key, 0) + 1
-    last_error = ""
-    for r in reversed(real_errors):
-        err = r.get("error")
-        if err:
-            last_error = str(err)
-            break
+    # Every ``real_error`` is an error row, so ``error`` is present + non-empty.
+    last_error = str(real_errors[-1]["error"]) if real_errors else ""
     dominant = last_error or stop_reason or "scoring_error"
     return EscalationSignal(
         check_name="scoring_error_abort",
