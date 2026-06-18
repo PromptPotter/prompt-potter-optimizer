@@ -7,7 +7,7 @@
 
 import { liveL1InputCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
 import { candidateLabel } from "@/lib/candidate-label";
-import type { CandidateSearchPoint } from "./candidateSearchPoint";
+import { searchPoint, type CandidateSearchPoint } from "./candidateSearchPoint";
 import type { ConnectorView } from "@/lib/types";
 import type { DraftCampaignWire } from "@/lib/api";
 
@@ -34,10 +34,7 @@ export function liveInFlightSearchPoint(
     if (Number(c.idx ?? -1) > Number(latest.idx ?? -1)) latest = c;
   }
   return {
-    point: {
-      origin_prompt_fields: latest.prompt_fields ?? {},
-      pipeline_overlay: latest.pp_override ?? {},
-    },
+    point: searchPoint(latest.prompt_fields, latest.pp_override),
     label: latest.label || candidateLabel(roundOf(dash), latest.idx),
   };
 }
@@ -57,10 +54,7 @@ export function resolveSearchPoint({
 }): ResolvedSearchPoint {
   if (draft) {
     return {
-      point: {
-        origin_prompt_fields: draft.origin_prompt_fields ?? {},
-        pipeline_overlay: draft.pipeline_overlay ?? {},
-      },
+      point: searchPoint(draft.origin_prompt_fields, draft.pipeline_overlay),
       mode: "draft",
       label: "draft — setup",
     };
@@ -72,7 +66,7 @@ export function resolveSearchPoint({
     }
   }
   return {
-    point: { origin_prompt_fields: cv.originPromptFields ?? {}, pipeline_overlay: {} },
+    point: searchPoint(cv.originPromptFields, {}),
     mode: "origin",
     label: cv.isLive ? "read-only — running" : "read-only",
   };

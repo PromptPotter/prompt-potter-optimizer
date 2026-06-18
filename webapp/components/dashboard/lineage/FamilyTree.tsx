@@ -9,6 +9,7 @@ import { Forest } from "./Forest";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { useLineage } from "./useLineage";
+import { useLineageOverlay } from "@/lib/lineage-overlay";
 
 // The lineage card — presentational. All data, expand state, and the cleanup
 // mutation live in useLineage; this renders the card chrome, the fixed-height
@@ -31,14 +32,10 @@ export const FamilyTree = memo(function FamilyTree() {
     isInheritedSibling,
     parentId,
     cleanup,
-    lens,
-    setLens,
-    maskActive,
-    maskLabel,
-    whatifActive,
-    divergenceByKey,
-    divergentKeys,
   } = useLineage({ campaignId, cycleId });
+  // Lens/mask overlay read straight from its provider — the same single source
+  // Forest and the fitness panel render, not laundered through useLineage.
+  const { lens, setLens, maskActive, maskLabel, whatifActive } = useLineageOverlay();
 
   return (
     <CardFrame
@@ -133,8 +130,6 @@ export const FamilyTree = memo(function FamilyTree() {
                 expanded={expanded}
                 onLaneActivate={onLaneActivate}
                 onSelectCycle={onSelectCycle}
-                divergenceByKey={divergenceByKey}
-                divergentKeys={divergentKeys}
                 sessionLabel={
                   multiSession ? `Session ${sessionIndexOf(f.rootId)}` : null
                 }

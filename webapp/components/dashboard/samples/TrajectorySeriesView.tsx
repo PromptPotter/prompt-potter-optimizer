@@ -10,9 +10,11 @@ import { useRoundFile } from "@/lib/hooks/useRoundFile";
 import { useSelection } from "@/lib/SelectionContext";
 import { useWorkspace } from "@/lib/workspace";
 import {
+  classifyCell,
   historicalTimeline,
   orderAtStep,
   seedFromOrder,
+  type CellKind,
   type SelectMode,
   type StepOrder,
   cumulativeEverSeen,
@@ -32,6 +34,14 @@ import {
   SQ_LOST,
   SQ_NEW,
 } from "./trajectoryStyles";
+
+// Cell kind → swatch (presentation half; `classifyCell` owns the predicate).
+const CELL_STYLE: Record<Exclude<CellKind, "absent">, CSSProperties> = {
+  new: SQ_NEW,
+  gained: SQ_GAINED,
+  lost: SQ_LOST,
+  kept: SQ_KEPT,
+};
 
 interface HoverState {
   round: number;
@@ -109,28 +119,24 @@ export function SeriesView({
               <span style={ROW_LABEL}>R{r.round}</span>
               <span style={{ display: "flex", gap: 3 }}>
                 {columns.map((sid) => {
-                  const p = pos.get(sid);
-                  if (p === undefined) {
+                  const kind = classifyCell(sid, pos, prev, everPrev);
+                  if (kind === "absent") {
                     return <span key={sid} style={SQ_ABSENT}>·</span>;
                   }
+                  const p = pos.get(sid)!;
                   const pp = prev?.get(sid);
-                  let style: CSSProperties;
-                  let titleNote = "kept position";
-                  if (!everPrev.has(sid)) {
-                    style = SQ_NEW;
-                    titleNote = "newly added";
-                  } else if (pp === undefined) {
-                    style = SQ_NEW;
-                    titleNote = "re-added";
-                  } else if (p < pp) {
-                    style = SQ_GAINED;
-                    titleNote = `gained: pos ${pp} → ${p}`;
-                  } else if (p > pp) {
-                    style = SQ_LOST;
-                    titleNote = `lost: pos ${pp} → ${p}`;
-                  } else {
-                    style = SQ_KEPT;
-                  }
+                  const style = CELL_STYLE[kind];
+                  // "new" covers first-appearance + re-add (split here by everPrev).
+                  const titleNote =
+                    kind === "new"
+                      ? everPrev.has(sid)
+                        ? "re-added"
+                        : "newly added"
+                      : kind === "gained"
+                        ? `gained: pos ${pp} → ${p}`
+                        : kind === "lost"
+                          ? `lost: pos ${pp} → ${p}`
+                          : "kept position";
                   const isHovered = hover?.round === r.round && hover?.sampleId === sid;
                   return (
                     <span

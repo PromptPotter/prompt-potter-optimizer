@@ -5,9 +5,9 @@
 // RoundSamplesView mounts a single renderer.
 //
 // CLAUDE.md rule: live vs historical never merge. These functions are
-// deliberately separate, with no fallback chain between them — the
-// component picks one based on whether `selection.round` matches the
-// live in-flight round.
+// deliberately separate, with no fallback chain between them — `samplesForRow`
+// SELECTS one based on the row's `source` tag (never merges), so every consumer
+// (FitnessPanel's bars, RoundSamplesView's groups) routes the same way.
 
 import {
   liveCandidate,
@@ -15,7 +15,7 @@ import {
   type RoundFileDoc,
 } from "@/lib/poll";
 import { parseSampleLine } from "@/lib/sample-line";
-import type { SampleRow } from "@/lib/types";
+import type { CandidateRow, SampleRow } from "@/lib/types";
 
 // Live-mode samples for one candidate in the in-flight round. Reads
 // from `dashboard.json::current_round.nodes.l1_score.output.candidates`
@@ -127,4 +127,18 @@ export function historicalSamplesFor(
       has_error: s.error != null && s.error !== "",
     };
   });
+}
+
+// The one source switch: an in-flight row reads from `dash`; a historical row
+// reads from its round file `doc`. Selects, never merges (the no-stitch rule).
+// The caller resolves the doc for the row's round (a per-round map entry, or the
+// single loaded round file) and hands it in.
+export function samplesForRow(
+  row: CandidateRow,
+  dash: DashboardSnapshot | null,
+  doc: RoundFileDoc | null,
+): SampleRow[] {
+  return row.source === "inflight"
+    ? liveSamplesFor(dash, row.round, row.candidate_id)
+    : historicalSamplesFor(doc, row.round, row.candidate_id);
 }

@@ -6,11 +6,8 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
-import {
-  roundCandidatesByRound,
-  historicalSamplesFor,
-  liveSamplesFor,
-} from "@/lib/derivations";
+import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
+import { samplesForRow } from "@/lib/derivations";
 import type { CandidateRow, SampleRow } from "@/lib/types";
 import { RoundSamplesBody, type StatusFilter } from "./RoundSamplesBody";
 import { RoundSamplesEmptyState } from "./RoundSamplesEmptyState";
@@ -40,9 +37,10 @@ export function RoundSamplesView() {
   const [candFilter, setCandFilter] = useState<string>("all");
 
   // Candidate list for this round — single source of truth shared with
-  // LineageTree and FitnessPanel. Round 0 is the origin (one candidate, "C0")
-  // and shows its per-sample stream from round_0000.json like any round.
-  const byRound = useMemo(() => roundCandidatesByRound(dash), [dash]);
+  // LineageTree and FitnessPanel via the spine hook. Round 0 is the origin (one
+  // candidate, "C0") and shows its per-sample stream from round_0000.json like
+  // any round.
+  const { byRound } = useRoundCandidates();
   const candidates: CandidateRow[] = useMemo(() => {
     if (effectiveRound == null) return [];
     return byRound.get(effectiveRound) ?? [];
@@ -57,9 +55,11 @@ export function RoundSamplesView() {
     if (effectiveRound == null) return [];
     const out: { candidate: CandidateRow; samples: SampleRow[] }[] = [];
     for (const c of candidates) {
-      const raw = isLiveView
-        ? liveSamplesFor(dash, effectiveRound, c.candidate_id)
-        : historicalSamplesFor(roundDoc, effectiveRound, c.candidate_id);
+      // `samplesForRow` selects live vs historical off the row's own `source`
+      // tag (the spine sets it) — same routing FitnessPanel's bars use, never a
+      // merge. `roundDoc` is null on the live round (the fetch is idled), and
+      // an in-flight row reads `dash`, so the source is unambiguous.
+      const raw = samplesForRow(c, dash, roundDoc);
       const filtered = raw.filter((s) => {
         if (statusFilter === "all") return true;
         if (statusFilter === "hit") return s.status === "HIT";
@@ -71,7 +71,7 @@ export function RoundSamplesView() {
       return out.filter((g) => g.candidate.candidate_id === candFilter);
     }
     return out;
-  }, [candidates, candFilter, statusFilter, isLiveView, dash, roundDoc, effectiveRound]);
+  }, [candidates, candFilter, statusFilter, dash, roundDoc, effectiveRound]);
 
   const totalRows = useMemo(
     () => groups.reduce((n, g) => n + g.samples.length, 0),

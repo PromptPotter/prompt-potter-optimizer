@@ -24,7 +24,41 @@ import {
   type DashboardSnapshot,
 } from "@/lib/poll";
 import { computeAccuracyFromSamples } from "@/lib/sample-line";
-import type { CandidateRow, RoundCandidates } from "@/lib/types";
+import type { CandidateRow, RoundCandidates, RoundSummary } from "@/lib/types";
+
+// A `rounds[]` row is chartable/selectable only if it carries scored candidates.
+// When a round closes mid-L2/L3 — no `l1_score` ever fired — the round-display
+// projection materializes a row with an empty `candidates[]`. Such a row is real
+// history but has no fitness data, so it must NOT be advertised as a completed
+// round, plotted, or fallen back to as `lastCompleted` (else the FitnessPanel
+// resolves no bars and the round-scoped surfaces blank/hang on it). The single
+// predicate every round-row consumer (`roundCandidates`, `availableRounds`) shares.
+export function roundHasCandidates(r: RoundSummary): boolean {
+  return r.candidates.length > 0;
+}
+
+// `dash.rounds[]` ascending by round (round 0 = origin). The one place this
+// sort lives — every surface that walks history in order rides this instead of
+// re-spelling `(dash?.rounds ?? []).slice().sort(...)` (FitnessPanel, the axis
+// derivation, the spine below).
+export function sortedRounds(dash: DashboardSnapshot | null): RoundSummary[] {
+  return (dash?.rounds ?? []).slice().sort((a, b) => a.round - b.round);
+}
+
+// The set of round numbers that have *closed into history with real fitness
+// data* — present in `dash.rounds[]` AND carrying scored candidates. This is
+// the single definition of "this round is no longer live"; every liveness gate
+// (the round axis, the in-flight spine branch, the round-file source guard)
+// reads it so they cannot disagree. An empty L2/L3-terminal round is NOT here
+// (no candidates), so it never masks the in-flight round nor misroutes the
+// source guard to a not-yet-written round file.
+export function closedRoundNumbers(dash: DashboardSnapshot | null): Set<number> {
+  const closed = new Set<number>();
+  for (const r of dash?.rounds ?? []) {
+    if (roundHasCandidates(r)) closed.add(r.round);
+  }
+  return closed;
+}
 
 // All candidate rows for the dashboard, in display order:
 //   1. Completed rounds from `dash.rounds[]`, ascending by round (round 0
@@ -39,16 +73,11 @@ import type { CandidateRow, RoundCandidates } from "@/lib/types";
 export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] {
   const out: CandidateRow[] = [];
 
-  const historicalRounds = new Set<number>();
-  const history = (dash?.rounds ?? []).slice().sort((a, b) => a.round - b.round);
-  for (const r of history) {
-    // Skip empty historical entries. When a round closes mid-L2/L3 — no
-    // l1_score ever fired — the round-display projection materializes a
-    // `rounds[]` row with no candidates. Adding it to `historicalRounds`
-    // would suppress the in-flight L1_SCORE branch for the same round
-    // number, even though there's no historical data to double-count.
-    if (r.candidates.length === 0) continue;
-    historicalRounds.add(r.round);
+  for (const r of sortedRounds(dash)) {
+    // Skip empty historical entries (L2/L3-terminal rounds) — they carry no
+    // fitness data and `closedRoundNumbers` already excludes them, so the
+    // in-flight L1_SCORE branch below isn't suppressed for that round number.
+    if (!roundHasCandidates(r)) continue;
     r.candidates.forEach((c, i) => {
       out.push({
         key: `R${r.round}.${i}`,
@@ -70,7 +99,7 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
   }
 
   const liveRound = roundOf(dash);
-  if (liveRound != null && !historicalRounds.has(liveRound)) {
+  if (liveRound != null && !closedRoundNumbers(dash).has(liveRound)) {
     for (const c of liveL1Candidates(dash)) {
       const i = Number(c.idx);
       if (!Number.isFinite(i) || i < 0) continue;
@@ -103,15 +132,13 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
   return out;
 }
 
-// Round-grouped view of the same list. Used by surfaces that scope
-// their render to a single round (RoundSamplesView, the round-tabs
-// strip's per-tab candidate count). Round 0 holds the origin row
-// when it exists.
-export function roundCandidatesByRound(
-  dash: DashboardSnapshot | null,
-): RoundCandidates {
+// Round-grouped view of an already-computed candidate list. Pure regrouping —
+// takes the rows so the caller (`useRoundCandidates`) computes the spine once
+// per snapshot and groups the same array, rather than running the full merge
+// twice. Round 0 holds the origin row when it exists.
+export function groupByRound(rows: CandidateRow[]): RoundCandidates {
   const map: RoundCandidates = new Map();
-  for (const row of roundCandidates(dash)) {
+  for (const row of rows) {
     const bucket = map.get(row.round);
     if (bucket) bucket.push(row);
     else map.set(row.round, [row]);

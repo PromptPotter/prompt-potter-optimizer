@@ -15,8 +15,8 @@
 // (the no-stitch rule in `webapp/CLAUDE.md` "Display-data sources").
 //
 // Peers: `useRoundFile` (raw fetch, now only reached through here for live-
-// aware callers), `roundCandidatesByRound` (the live/historical *candidate*
-// derivation this hook's callers branch on).
+// aware callers), `useRoundCandidates` (the live/historical *candidate*
+// spine this hook's callers branch on).
 
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 import { useRoundFile, type UseRoundFileState } from "@/lib/hooks/useRoundFile";
@@ -41,7 +41,12 @@ export function useRoundSource(
   // next-round prep). Equality alone would then misroute a closed round to the
   // in-flight projection — which by then holds the *next* round's partial prep,
   // not the closed round's data. The `closed` check is the half topology can't
-  // see (mirrors `round-axis.ts`).
+  // see. NOTE this asks a DIFFERENT question than `round-axis`/the candidate
+  // spine (which gate on `closedRoundNumbers` — closed *with fitness data*):
+  // here "closed" = "the round file is on disk", and `AuditTrailView` writes
+  // `round_N.json` at every round boundary, including an empty L2/L3-terminal
+  // round. So this stays an unfiltered presence check over `dash.rounds[]` —
+  // an empty closed round is still historical (read its file, not live `dash`).
   const closed = (dash?.rounds ?? []).some((r) => r.round === round);
   const isLive = round != null && round === liveRound && !closed;
   // Idle the round-file fetch on the live round — its file doesn't exist

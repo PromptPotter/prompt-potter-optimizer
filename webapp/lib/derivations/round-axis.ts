@@ -11,6 +11,7 @@
 // round to advertise, regardless of topology. Both pill surfaces ride this
 // so they cannot disagree about whether a round is live.
 
+import { closedRoundNumbers } from "./round-candidates";
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 import type { RoundAxis } from "@/lib/types";
 
@@ -18,15 +19,14 @@ export function availableRounds(
   dash: DashboardSnapshot | null,
   isLive: boolean,
 ): RoundAxis {
-  const completed = (dash?.rounds ?? [])
-    .map((r) => r.round)
-    .slice()
-    .sort((a, b) => a - b);
+  // `closedRoundNumbers` already excludes empty L2/L3-terminal rows — they carry
+  // no fitness data and must not be advertised as completed/selectable rounds
+  // (else `useEffectiveRound` falls back to one as `lastCompleted` and the
+  // round-scoped surfaces blank/hang).
+  const closed = closedRoundNumbers(dash);
+  const completed = [...closed].sort((a, b) => a - b);
   const liveRound = roundOf(dash);
-  const completedSet = new Set(completed);
   const live =
-    isLive && liveRound != null && !completedSet.has(liveRound)
-      ? liveRound
-      : null;
+    isLive && liveRound != null && !closed.has(liveRound) ? liveRound : null;
   return { completed, live };
 }

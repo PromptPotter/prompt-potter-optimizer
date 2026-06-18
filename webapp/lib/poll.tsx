@@ -202,16 +202,17 @@ export function liveL1InputCandidates(
   return l1?.input?.candidates ?? NO_INPUT_CANDIDATES;
 }
 
-// Match a selection's `candidate_id` back to its live output-candidate slot.
-// Read peer of `liveCandidateId` (which mints the slot's id): construction and
-// match ride one rule so a selection can't resolve on one surface and miss on
-// another. null when no in-flight candidate carries that id.
-export function liveCandidate(
-  dash: DashboardSnapshot | null,
+// Match a selection's `candidate_id` back to a live candidate slot. Read peer of
+// `liveCandidateId` (which mints the id): construction and match ride one rule —
+// the same idx guard on both sides — so a selection can't resolve on the output
+// half and miss on the input half. null when no in-flight candidate carries the
+// id (a malformed idx is skipped, never stringified to `r{round}_undefined`).
+function matchLiveCandidate<T extends { idx?: number }>(
+  candidates: readonly T[],
   round: number | null,
   candidateId: string,
-): LiveCandidate | null {
-  for (const c of liveL1Candidates(dash)) {
+): T | null {
+  for (const c of candidates) {
     const i = Number(c.idx);
     if (!Number.isFinite(i) || i < 0) continue;
     if (liveCandidateId(round, i) === candidateId) return c;
@@ -219,18 +220,22 @@ export function liveCandidate(
   return null;
 }
 
-// Input-side peer of `liveCandidate` — the seed-able prompt_fields / pp_override
-// slot for steer-fork seeding from a still-in-flight candidate.
-export function liveInputCandidate(
+// Output-candidate slot (the scored half).
+export const liveCandidate = (
   dash: DashboardSnapshot | null,
   round: number | null,
   candidateId: string,
-): LiveInputCandidate | null {
-  for (const c of liveL1InputCandidates(dash)) {
-    if (liveCandidateId(round, c.idx) === candidateId) return c;
-  }
-  return null;
-}
+): LiveCandidate | null =>
+  matchLiveCandidate(liveL1Candidates(dash), round, candidateId);
+
+// Input-candidate slot — the seed-able prompt_fields / pp_override half, for
+// steer-fork seeding from a still-in-flight candidate.
+export const liveInputCandidate = (
+  dash: DashboardSnapshot | null,
+  round: number | null,
+  candidateId: string,
+): LiveInputCandidate | null =>
+  matchLiveCandidate(liveL1InputCandidates(dash), round, candidateId);
 
 // Shape-agnostic round-file document. Deep audit consumers (FreqChart,
 // ScoringInspector, OptimizerNodeDetail) fetch one of these lazily via

@@ -26,6 +26,20 @@ export interface CandidateSearchPoint {
   pipeline_overlay: Record<string, unknown>;
 }
 
+// The one projection every searchpoint source funnels through: prompt fields +
+// node-config overlay → the normalized seed shape, each defaulting to `{}`. The
+// only thing that varies across sources (round file, live input candidate,
+// draft, origin) is which raw field carries the overlay; the mapping is here.
+export function searchPoint(
+  promptFields: Record<string, unknown> | null | undefined,
+  overlay: Record<string, unknown> | null | undefined,
+): CandidateSearchPoint {
+  return {
+    origin_prompt_fields: promptFields ?? {},
+    pipeline_overlay: overlay ?? {},
+  };
+}
+
 interface RawScoredCandidate {
   candidate_id?: string;
   prompt_fields?: Record<string, unknown>;
@@ -50,10 +64,7 @@ export function candidateSearchPoint(
       (c as RawScoredCandidate).candidate_id === candidateId,
   );
   if (!entry) return null;
-  return {
-    origin_prompt_fields: entry.prompt_fields ?? {},
-    pipeline_overlay: entry.pipeline_params_override ?? {},
-  };
+  return searchPoint(entry.prompt_fields, entry.pipeline_params_override);
 }
 
 // Live peer of `candidateSearchPoint`: for a candidate in the *in-flight*
@@ -71,8 +82,5 @@ export function liveCandidateSearchPoint(
   if (liveRound == null) return null;
   const entry = liveInputCandidate(dash, liveRound, candidateId);
   if (!entry) return null;
-  return {
-    origin_prompt_fields: entry.prompt_fields ?? {},
-    pipeline_overlay: entry.pp_override ?? {},
-  };
+  return searchPoint(entry.prompt_fields, entry.pp_override);
 }

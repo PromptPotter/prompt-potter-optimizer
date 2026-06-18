@@ -83,16 +83,6 @@ export interface Lineage {
   isInheritedSibling: boolean;
   parentId: string | null;
   cleanup: LineageCleanup;
-  // Preset lens (dropdown) + the served divergence overlay any active mask produced.
-  lens: string;
-  setLens: (lens: string) => void;
-  // A mask is driving the lineage (red tag) + its label; whether the What-If card
-  // is the active master (so the preset dropdown is overridden/disabled).
-  maskActive: boolean;
-  maskLabel: string;
-  whatifActive: boolean;
-  divergenceByKey: ReadonlyMap<string, string | null>;
-  divergentKeys: ReadonlySet<string>;
 }
 
 export function useLineage({
@@ -102,11 +92,11 @@ export function useLineage({
   campaignId: string | null;
   cycleId: string | null;
 }): Lineage {
-  // Shared campaign fetch + mask/lens overlay — the single source both this card
-  // and the fitness panel render (R-36). Backend-owned projection; the webapp
-  // renders served flags, never recomputes.
-  const { data, lens, setLens, maskActive, maskLabel, whatifActive, divergenceByKey, divergentKeys } =
-    useLineageOverlay();
+  // Shared campaign lineage from the single fetch both this card and the fitness
+  // panel render (R-36). The mask/lens overlay fields (lens, divergence, …) are
+  // NOT re-exposed here — `FamilyTree` and `Forest` read them straight from
+  // `useLineageOverlay()`, so this hook owns only the tree/expand/cleanup state.
+  const { data } = useLineageOverlay();
 
   // Independent per-cycle expand state — one unified tree where every cycle
   // opens its intra-cycle candidate cladogram in place, any number at once.
@@ -247,12 +237,5 @@ export function useLineage({
     isInheritedSibling,
     parentId,
     cleanup,
-    lens,
-    setLens,
-    maskActive,
-    maskLabel,
-    whatifActive,
-    divergenceByKey,
-    divergentKeys,
   };
 }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { loadCycleFixture } from "@/lib/test-utils/fixtures";
-import { roundCandidates } from "../round-candidates";
+import {
+  closedRoundNumbers,
+  groupByRound,
+  roundCandidates,
+} from "../round-candidates";
+import { availableRounds } from "../round-axis";
 
 describe("roundCandidates — l2_terminal fixture", () => {
   // Reproduces the operator's justlogic__ca6d4d/cycle_2451d3cf6ebc exit
@@ -66,5 +71,36 @@ describe("roundCandidates — l2_terminal fixture", () => {
     // with no spurious round-5 placeholder slot.
     const round5 = rows.filter((r) => r.round === 5);
     expect(round5).toHaveLength(0);
+  });
+
+  it("availableRounds excludes the empty L2-terminal round 5 from completed", () => {
+    // The other half of the fix: the empty round-5 stub must not be
+    // advertised as a completed round, or `useEffectiveRound` falls back
+    // to it as `lastCompleted` and the round-scoped surfaces blank/hang on
+    // a round with no fitness data. Terminal cycle ⇒ isLive false.
+    const axis = availableRounds(dash, false);
+    expect(axis.completed).toEqual([0, 1, 2, 3, 4]);
+    expect(axis.live).toBeNull();
+  });
+
+  it("closedRoundNumbers is the shared 'closed with fitness data' set — excludes the empty round 5", () => {
+    // Single definition behind both `availableRounds.completed` and the
+    // candidate spine's in-flight suppression. An empty L2/L3-terminal round
+    // carries no fitness data, so it is NOT closed here (it must not mask the
+    // in-flight branch nor advertise as a selectable round). Distinct from
+    // `useRoundSource`'s on-disk presence check, which DOES include it.
+    expect(closedRoundNumbers(dash)).toEqual(new Set([0, 1, 2, 3, 4]));
+  });
+
+  it("groupByRound buckets the same spine rows without recomputing the merge", () => {
+    const byRound = groupByRound(rows);
+    // Every emitted row lands under its round; the empty round 5 has no bucket.
+    expect([...byRound.keys()].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+    expect(byRound.get(0)?.map((r) => r.key)).toEqual(["R0.0"]);
+    expect(byRound.get(1)?.map((r) => r.key)).toEqual(["R1.0", "R1.1"]);
+    expect(byRound.get(5)).toBeUndefined();
+    // Same total as the flat spine — pure regrouping, no rows added or dropped.
+    const grouped = [...byRound.values()].reduce((n, b) => n + b.length, 0);
+    expect(grouped).toBe(rows.length);
   });
 });

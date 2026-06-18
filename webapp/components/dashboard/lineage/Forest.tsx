@@ -4,6 +4,7 @@ import { fmtPct0 } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { shortFamilyTail } from "@/lib/ids";
 import { useSelection } from "@/lib/SelectionContext";
+import { useLineageOverlay } from "@/lib/lineage-overlay";
 import {
   CAND_STUB,
   COL_W,
@@ -101,8 +102,6 @@ export function Forest({
   expanded,
   onLaneActivate,
   onSelectCycle,
-  divergenceByKey,
-  divergentKeys,
   sessionLabel,
 }: {
   tree: CycleNode;
@@ -117,15 +116,15 @@ export function Forest({
   // Navigate the dashboard to a cycle — fired when a candidate in a non-selected
   // lane is clicked (the inspector/samples follow the searchpoint).
   onSelectCycle: (campaignId: string, cycleId: string) => void;
-  // Served scoring-mask overlay, keyed by `{cycle_id}::r{round}`. divergenceByKey:
-  // a divergence node → the one-step alternative candidate id (or null = origin
-  // would hold). divergentKeys: the dimmed counterfactual subtree. Both empty
-  // when no lens is active. Rendered, never recomputed (R-36).
-  divergenceByKey: ReadonlyMap<string, string | null>;
-  divergentKeys: ReadonlySet<string>;
   sessionLabel: string | null;
 }) {
   const { candidate, setSelectionForCandidate } = useSelection();
+  // Served scoring-mask overlay, read straight from its provider (the single
+  // source the fitness panel + lineage card share), keyed by `{cycle_id}::r{round}`.
+  // `divergenceByKey`: a divergence node → the one-step alternative candidate id
+  // (or null = origin would hold). `divergentKeys`: the dimmed counterfactual
+  // subtree. Both empty when no lens is active. Rendered, never recomputed (R-36).
+  const { divergenceByKey, divergentKeys } = useLineageOverlay();
   const nodeKey = (cid: string, round: number): string => `${cid}::r${round}`;
   // Layout is pure + the inputs are content-stabilized upstream, so this memo
   // re-runs only on a real shape change (new round / candidate / winner flip /

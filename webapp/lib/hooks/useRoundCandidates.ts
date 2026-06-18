@@ -1,14 +1,13 @@
 "use client";
-// The candidate-spine hook. Wraps `roundCandidates` /
-// `roundCandidatesByRound` so the same memoized list backs every
-// surface that lists or selects candidates (FitnessPanel, LineageTree,
-// RoundSamplesView, RoundTabsStrip). Components don't import the
-// derivation directly — they ask this hook, which guarantees the
-// computation runs once per `dash` snapshot.
+// The candidate-spine hook. Computes `roundCandidates` once and groups it
+// (`groupByRound`) so the same memoized list backs every surface that lists or
+// selects candidates (FitnessPanel, LineageTree, RoundSamplesView,
+// RoundTabsStrip). Components don't import the derivation directly — they ask
+// this hook, which guarantees the spine merge runs once per `dash` snapshot.
 
 import { useMemo } from "react";
 import { useCycleStream } from "@/lib/poll";
-import { roundCandidates, roundCandidatesByRound } from "@/lib/derivations";
+import { roundCandidates, groupByRound } from "@/lib/derivations";
 import type { CandidateRow, RoundCandidates } from "@/lib/types";
 
 export interface RoundCandidatesHookState {
@@ -18,8 +17,8 @@ export interface RoundCandidatesHookState {
 
 export function useRoundCandidates(): RoundCandidatesHookState {
   const { dash } = useCycleStream();
-  return useMemo(
-    () => ({ all: roundCandidates(dash), byRound: roundCandidatesByRound(dash) }),
-    [dash],
-  );
+  return useMemo(() => {
+    const all = roundCandidates(dash);
+    return { all, byRound: groupByRound(all) };
+  }, [dash]);
 }
