@@ -70,7 +70,6 @@ Scorer = Callable[[dict[str, Any]], float]
 RoundScorer = Callable[[dict[str, float]], float]
 
 DEFAULT_SCORER_ID = "default_hit"
-EMPTY_SCORER_ID = "none"
 
 
 class ScoringSpec(NamedTuple):
@@ -83,7 +82,6 @@ class ScoringSpec(NamedTuple):
 
 __all__ = [
     "DEFAULT_SCORER_ID",
-    "EMPTY_SCORER_ID",
     "PipelineData",
     "QueryMeasurement",
     "RoundScorer",

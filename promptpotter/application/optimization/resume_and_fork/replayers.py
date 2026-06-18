@@ -181,7 +181,7 @@ def _replay_elimination_cut(
     if snap is None:
         return False
     candidate_id, snapshot = snap
-    fresh = float(snapshot.get(candidate_id, 1.0))
+    fresh = float(snapshot[candidate_id])
     eps = float(inputs_ref["epsilon"])
     recorded = inputs_ref.get("recorded_p_best")
     if recorded is not None and abs(fresh - float(recorded)) < _POBB_REPLAY_TOLERANCE:
@@ -200,7 +200,7 @@ def _replay_leader_lock_in(
         return False
     candidate_id, snapshot = snap
     # Paired PoBB: ``cid → min`` is the lock-in metric; no separate leader guard.
-    fresh = float(snapshot.get(candidate_id, 0.0))
+    fresh = float(snapshot[candidate_id])
     threshold = float(inputs_ref["lock_in"])
     recorded = inputs_ref.get("recorded_p_best")
     if recorded is not None and abs(fresh - float(recorded)) < _POBB_REPLAY_TOLERANCE:

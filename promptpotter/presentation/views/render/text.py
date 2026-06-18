@@ -229,10 +229,8 @@ def _render_l2_refine_exit(v: L2RefineExitView) -> str:
     if v.changes_description:
         out.append(f"    {v.changes_description}")
     if v.warned_samples:
-        warning_tag = f" ({v.top_warning})" if v.top_warning else ""
         out.append(
-            f"    {YELLOW}⚠ {v.warned_samples} samples with recurring "
-            f"pipeline warnings{warning_tag}{RESET}"
+            f"    {YELLOW}⚠ {v.warned_samples} samples with recurring pipeline warnings{RESET}"
         )
 
     if v.l2_prompt:

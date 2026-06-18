@@ -15,12 +15,7 @@ from typing import Any
 # negligible up to ~280 billion items.
 HASH_TRUNCATE = 24
 
-__all__ = ["HASH_TRUNCATE", "content_hash", "qg_pair"]
-
-
-def qg_pair(d: Any) -> tuple[str, str]:
-    """Extract (query, ground_truth) from a Sample."""
-    return d.query, d.ground_truth
+__all__ = ["HASH_TRUNCATE", "content_hash"]
 
 
 def content_hash(
@@ -37,7 +32,7 @@ def content_hash(
     ``pipeline_params`` is included when non-empty so that different
     pipeline configurations produce distinct hashes.
     """
-    pairs = sorted(qg_pair(d) for d in dataset)
+    pairs = sorted((d.query, d.ground_truth) for d in dataset)
     blob_dict: dict[str, Any] = {
         "prompt": rendered_prompt,
         "pairs": pairs,

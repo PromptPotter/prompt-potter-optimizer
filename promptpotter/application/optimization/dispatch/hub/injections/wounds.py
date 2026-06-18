@@ -29,13 +29,13 @@ def _rf_matches_current_config(
     superseded overlay (e.g. yesterday's provider/model) becomes stale evidence that mis-steers
     L2's framing. Compares on PARAM_FORBIDDEN_KEYS (provider, model).
     """
-    node = (rf.dominant_warning or "").split(":", 1)[0]
+    node = rf.dominant_warning.split(":", 1)[0]
     if not node:
         return True
     current = pipeline_params.get(node)
     if not isinstance(current, dict):
         return False
-    observed = rf.observed_config or {}
+    observed = rf.observed_config
     return all(observed.get(k) == current.get(k) for k in PARAM_FORBIDDEN_KEYS if k in observed)
 
 
@@ -46,7 +46,7 @@ def _validation_block(b: InjectionBundle) -> str:
         return ""
     sec = ["L1 VALIDATION FAILURES (last round produced invalid variants):"]
     for vf in failures:
-        allowed_str = ", ".join((vf.allowed or [])[:5])
+        allowed_str = ", ".join(vf.allowed[:5])
         sec.append(
             f"  axis={vf.axis} value={vf.value!r} reason={vf.reason}"
             + (f" allowed=[{allowed_str}]" if allowed_str else "")
@@ -139,9 +139,9 @@ def _r_guard_breaches(b: InjectionBundle) -> str:
 def _format_runtime_failure_lines(rf: Any) -> list[str]:
     """Two-line render of one RuntimeFailure — for single-entry groups (multi-entry compresses)."""
     rate_pct = round(float(rf.degraded_rate) * 100)
-    cfg_parts = [f"{k}={v}" for k, v in (rf.observed_config or {}).items() if k != "prompt"]
+    cfg_parts = [f"{k}={v}" for k, v in rf.observed_config.items() if k != "prompt"]
     cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
-    label = (rf.candidate_label or "")[:60]
+    label = rf.candidate_label[:60]
     owner = rf.owner.value
     head = (
         f"    [owner={owner}] {label} — {rate_pct}% degraded on {rf.total_scored}, dom={rf.dominant_warning}"
@@ -158,9 +158,9 @@ def _format_runtime_failure_group(rfs: list[Any]) -> list[str]:
     """
     clusters: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for rf in rfs:
-        cfg = rf.observed_config or {}
+        cfg = rf.observed_config
         key = (
-            rf.dominant_warning or "",
+            rf.dominant_warning,
             str(cfg.get("provider", "")),
             str(cfg.get("model", "")),
         )
@@ -176,7 +176,7 @@ def _format_runtime_failure_group(rfs: list[Any]) -> list[str]:
         out.append(f"    [owner={owner}] x{len(group)} — dom={warning}, model={backend}")
         varied: dict[str, set[str]] = defaultdict(set)
         for rf in group:
-            for k, v in (rf.observed_config or {}).items():
+            for k, v in rf.observed_config.items():
                 if k in ("provider", "model", "prompt"):
                     continue
                 varied[k].add(str(v))

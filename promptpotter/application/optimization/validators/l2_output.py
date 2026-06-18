@@ -30,6 +30,12 @@ DUPLICATE_INSERT_LINE_THRESHOLD = 3
 PARAPHRASE_REPEAT_JACCARD_THRESHOLD = 0.5
 
 
+def _attr_or_key(entry: Any, name: str) -> Any:
+    """Read ``name`` off a pydantic obj or a plain dict — L2 proposals ride both
+    shapes (typed when freshly parsed, dict on disk-replay)."""
+    return getattr(entry, name, None) or (entry.get(name) if isinstance(entry, dict) else None)
+
+
 def _check_task_context_verbatim_repeat(
     source_output: Mapping[str, Any],
     *,
@@ -204,9 +210,7 @@ def _check_supplemental_rule_dup_id(
     seen: set[str] = set()
     dups: list[str] = []
     for entry in proposed:
-        rid = getattr(entry, "rule_id", None) or (
-            entry.get("rule_id") if isinstance(entry, dict) else None
-        )
+        rid = _attr_or_key(entry, "rule_id")
         if not rid:
             continue
         if rid in seen:
@@ -242,10 +246,7 @@ def _check_situational_example_dangling_trigger(
     # opt_sp if L2 didn't propose this fire).
     rules_proposed = source_output.get("l1_supplemental_rules_proposed")
     if isinstance(rules_proposed, list) and rules_proposed:
-        rule_ids = {
-            getattr(r, "rule_id", None) or (r.get("rule_id") if isinstance(r, dict) else None)
-            for r in rules_proposed
-        }
+        rule_ids = {_attr_or_key(r, "rule_id") for r in rules_proposed}
     elif opt_sp is not None:
         rule_ids = {r.rule_id for r in opt_sp.memory.l1_supplemental_rules}
     else:
@@ -253,9 +254,7 @@ def _check_situational_example_dangling_trigger(
     allowed: set[str] = set(_AUTO_TRIGGER_IDS) | {r for r in rule_ids if r}
     dangling: list[str] = []
     for entry in proposed:
-        tid = getattr(entry, "trigger_id", None) or (
-            entry.get("trigger_id") if isinstance(entry, dict) else None
-        )
+        tid = _attr_or_key(entry, "trigger_id")
         if tid and tid not in allowed:
             dangling.append(tid)
     if not dangling:
@@ -286,12 +285,8 @@ def _check_supplemental_rule_duplicates_auto_trigger(
         return None
     offenders: list[tuple[str, str, float]] = []
     for entry in proposed:
-        body = getattr(entry, "body", None) or (
-            entry.get("body") if isinstance(entry, dict) else None
-        )
-        rid = getattr(entry, "rule_id", None) or (
-            entry.get("rule_id") if isinstance(entry, dict) else None
-        )
+        body = _attr_or_key(entry, "body")
+        rid = _attr_or_key(entry, "rule_id")
         if not body or not rid:
             continue
         for auto_id, auto_body in AUTO_RULES.items():

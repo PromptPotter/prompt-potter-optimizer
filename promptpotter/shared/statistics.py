@@ -144,14 +144,6 @@ def pobb_should_stop(p_best: float, epsilon: float) -> bool:
 # --- Paired-difference posterior — cand-vs-prior on shared sample set ---
 
 
-def _paired_diff_posterior(diffs: list[float]) -> tuple[float, float]:
-    """Normal posterior (mean, se) on the mean paired difference.
-
-    SE floored at ``1/(4n)`` — same Beta-Binomial bound as ``_normal_posterior``.
-    """
-    return _normal_posterior(diffs)
-
-
 def paired_better_probabilities(
     candidate_scores: list[float],
     paired_priors: dict[str, list[float]],
@@ -191,7 +183,7 @@ def paired_better_probabilities(
                 f"{len(prior_scores)} scores; candidate has {n_cand}"
             )
         diffs = [c - p for c, p in zip(candidate_scores, prior_scores, strict=True)]
-        mean_d, se_d = _paired_diff_posterior(diffs)
+        mean_d, se_d = _normal_posterior(diffs)
         z = gen.standard_normal(n_samples)
         draws = mean_d + se_d * z
         out[prior_id] = float((draws > 0.0).mean())
@@ -215,7 +207,7 @@ def paired_diff_posterior(
             f"paired_diff_posterior: prior has {len(prior_scores)} scores; candidate has {n}"
         )
     diffs = [c - p for c, p in zip(candidate_scores, prior_scores, strict=True)]
-    mean_d, se_d = _paired_diff_posterior(diffs)
+    mean_d, se_d = _normal_posterior(diffs)
     return (mean_d, se_d, n)
 
 

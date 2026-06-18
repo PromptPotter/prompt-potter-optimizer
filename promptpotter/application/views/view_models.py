@@ -246,7 +246,6 @@ class L2RefineExitView:
     action: str
     changes_description: str
     warned_samples: int
-    top_warning: str
     l2_prompt: str
     l2_response_json: Any | None
 

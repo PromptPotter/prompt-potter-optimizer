@@ -221,8 +221,8 @@ def validate_overrides(
         if not isinstance(node_params, dict):
             continue
         node = pipeline_schema.get_node(node_name)
-        node_allowed = (node.param_allowed_values if node else None) or {}
-        node_types = (node.param_types if node else None) or {}
+        node_allowed = node.param_allowed_values if node else {}
+        node_types = node.param_types if node else {}
         for param, value in node_params.items():
             if param in SCHEMA_OWNED_FIELDS or (
                 forbidden_axes_strict and param in PARAM_FORBIDDEN_KEYS

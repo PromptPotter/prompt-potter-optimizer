@@ -87,7 +87,7 @@ async def load_or_build_task_context(
     if not task_description:
         return TaskDecomposition()
     result = await decompose_prompt_fields(task_description)
-    tc_dict = dict(result.get("task_context") or {})
+    tc_dict = dict(result["task_context"])
     tc_dict["raw_description"] = task_description
     task_context = TaskDecomposition.from_dict(tc_dict)
     write_json(dataset_config_dir / "task_context.json", task_context.to_dict())

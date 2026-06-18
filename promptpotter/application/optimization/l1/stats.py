@@ -97,15 +97,11 @@ def _first_round_at_threshold(rounds: list[dict[str, Any]], threshold: float) ->
     return None
 
 
-def _round_yield_rate(round_dict: dict[str, Any]) -> float:
-    """Variants beating parent / variants generated — pulled off the round_data."""
-    return float(round_dict.get("l1_yield") or 0.0)
-
-
 def _mean_yield_rate(rounds: list[dict[str, Any]]) -> float:
+    """Mean of per-round l1_yield (variants beating parent / variants generated)."""
     if not rounds:
         return 0.0
-    return sum(_round_yield_rate(r) for r in rounds) / len(rounds)
+    return sum(float(r.get("l1_yield") or 0.0) for r in rounds) / len(rounds)
 
 
 def _top_lifts(rounds: list[dict[str, Any]], origin_composite_fitness: float) -> list[float]:

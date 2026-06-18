@@ -37,8 +37,8 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
         node = schema.get_node(node_name)
         if not node or not params:
             continue
-        descs = node.param_descriptions or {}
-        enums = node.param_allowed_values or {}
+        descs = node.param_descriptions
+        enums = node.param_allowed_values
         bits: list[str] = []
         for p in sorted(params):
             allowed = enums.get(p) or (available_models if p == "model" else None)

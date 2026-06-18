@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel, field_validator
 
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import content_hash
 
 if TYPE_CHECKING:
@@ -84,31 +83,6 @@ class JobSearchPoint(SearchPoint):
             dataset,
             self.pipeline_params,
         )
-
-    def derive(self, **changes: Any) -> JobSearchPoint:
-        """New JobSearchPoint with modifications. Re-renders prompt on prompt_fields change."""
-        new_pp = changes.get("pipeline_params", self.pipeline_params)
-        new_pf = self.prompt_fields
-
-        if "prompt_fields" in changes:
-            new_pf = {**(self.prompt_fields or {}), **changes["prompt_fields"]}
-            sections = [v for f in PROMPT_STRING_FIELDS if (v := new_pf.get(f))]
-            if block := new_pf.get("few_shot_block"):
-                sections.append(block)
-            rendered = "\n\n".join(sections)
-            new_pp = dict(new_pp or {})
-            for node_name, node_cfg in new_pp.items():
-                if isinstance(node_cfg, dict) and "prompt" in node_cfg:
-                    new_pp[node_name] = {**node_cfg, "prompt": rendered}
-                    break
-            else:
-                if rendered:
-                    raise ValueError(
-                        "Cannot inject rendered prompt: no node with a 'prompt' key "
-                        "found in pipeline_params."
-                    )
-
-        return JobSearchPoint(pipeline_params=new_pp, prompt_fields=new_pf)
 
 
 # ---------------------------------------------------------------------------

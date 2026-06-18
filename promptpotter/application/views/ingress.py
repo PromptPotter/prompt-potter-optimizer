@@ -69,14 +69,14 @@ def _truncate(s: str, max_len: int) -> str:
 def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     config = d["config"]
     dataset = d["dataset"]
-    session = d.get("env")
-    schema = session.pipeline_schema if session is not None else None
+    session = d["env"]
+    schema = session.pipeline_schema
     opt = config.optimization
     sample = config.sp_budget_ttest
 
     ctx.max_rounds = opt.max_rounds or 0
     ctx.patience = opt.l1_patience
-    origin_pp = session.pipeline_params if session is not None else None
+    origin_pp = session.pipeline_params
     if not origin_pp and schema is not None:
         origin_pp = schema.to_pipeline_params()
     ctx.original_sp_flat = flatten_sp_summary(origin_pp)
@@ -90,11 +90,7 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     # Resolve the per-round composite formula at INIT.enter so the live
     # dashboard can stamp it before origin scoring fires (matches _init_exit
     # priority: explicit campaign override > schema default > None).
-    explicit = (
-        session.scoring.scorer_round_formula
-        if session is not None and getattr(session, "scoring", None) is not None
-        else None
-    )
+    explicit = session.scoring.scorer_round_formula
     if explicit:
         full, short = explicit, None
     elif schema is None:
@@ -191,7 +187,7 @@ def _l1_generate_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
 
 
 def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGeneratedView:
-    candidates_meta = d.get("candidates", [])
+    candidates_meta = d["candidates"]
     parent = ctx.current_sp_flat
     columns: list[tuple[str, dict[str, str]]] = [
         ("Start", dict(ctx.original_sp_flat)),
@@ -199,15 +195,15 @@ def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGenerate
     ]
     clone_labels: list[str] = []
     for c in candidates_meta:
-        label = c.get("label") or "C?"
+        label = c["label"]
         flat = build_candidate_flat(parent, c)
         if flat == parent:
             clone_labels.append(label)
         columns.append((label, flat))
 
-    l1_yield = float(d.get("l1_yield", 1.0))
-    n_no_op = int(d.get("l1_n_no_op", 0))
-    n_dup = int(d.get("l1_n_duplicate", 0))
+    l1_yield = float(d["l1_yield"])
+    n_no_op = int(d["l1_n_no_op"])
+    n_dup = int(d["l1_n_duplicate"])
     sp_diff = SpDiffView(
         columns=tuple(columns),
         node_param_keys=ctx.node_param_keys,
@@ -218,9 +214,9 @@ def _l1_generate_exit(d: dict[str, Any], ctx: ViewContext) -> CandidatesGenerate
         l1_n_duplicate=n_dup,
     )
     return CandidatesGeneratedView(
-        n_candidates=d.get("n_candidates", 0),
-        source="disk" if d.get("loaded_from_disk") else "llm",
-        n_scoring_samples=d.get("n_scoring_samples", 0),
+        n_candidates=d["n_candidates"],
+        source="disk" if d["loaded_from_disk"] else "llm",
+        n_scoring_samples=d["n_scoring_samples"],
         l1_yield=l1_yield,
         l1_n_no_op=n_no_op,
         l1_n_duplicate=n_dup,
@@ -238,8 +234,8 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     else:
         winner_label, winner_hits, winner_total = "?", 0, 0
 
-    w_acc = float(d.get("winner_accuracy", 0.0))
-    improved = bool(d.get("improved", False))
+    w_acc = float(d["winner_accuracy"])
+    improved = bool(d["improved"])
     origin_acc = ctx.origin_accuracy
     # Matched-pair origin (winner-measured samples); fallback ``origin_acc``
     # for round 0 / pre-gate events. Δ uses this so operator-visible Δ
@@ -260,7 +256,7 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         winner_label=winner_label,
         winner_accuracy=w_acc,
         winner_composite_fitness=d.get("winner_composite_fitness"),
-        winner_evaluators=dict(d.get("winner_evaluators") or {}),
+        winner_evaluators=dict(d["winner_evaluators"]),
         winner_hits=winner_hits,
         winner_total=winner_total,
         improved=improved,
@@ -315,7 +311,6 @@ def _refine_exit(d: dict[str, Any], ctx: ViewContext) -> L2RefineExitView:
         action=d.get("action", "continue"),
         changes_description=d.get("changes_description", ""),
         warned_samples=d.get("warned_samples", 0),
-        top_warning=d.get("top_warning", ""),
         l2_prompt=d.get("l2_prompt", "") or "",
         l2_response_json=d.get("l2_response"),
     )

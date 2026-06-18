@@ -218,7 +218,7 @@ def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
     sa = (crit.get("suggested_axes") if crit else None) or []
     if any(a in PARAM_SCOPE_KEYS for a in sa):
         triggers.append("continuous_envelope")
-    key_challenges = b.opt_sp.memory.task_context.key_challenges or ""
+    key_challenges = b.opt_sp.memory.task_context.key_challenges
     if "targeting L1 axis" in key_challenges:
         triggers.append("chain_bind")
     if b.opt_sp.memory.wounds.l2_guard_breaches:

@@ -46,8 +46,8 @@ class CandidateRunResult:
     cannot mutate it directly because the OSP is shared with other paths."""
 
     outcome: CandidateOutcome
+    report: ScoredCandidate
     results: list[QueryMeasurement] = field(default_factory=list)
-    report: ScoredCandidate = None  # type: ignore[assignment]
     runtime_failure: RuntimeFailure | None = None
     escalation_signal: EscalationSignal | None = None
 

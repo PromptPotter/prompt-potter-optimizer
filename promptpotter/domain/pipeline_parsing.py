@@ -258,7 +258,6 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         step_kwargs: dict[str, Any] = {
             "name": name,
             "wire_type": node.get("type", ""),
-            "display_tag": opt.get("display_tag", ""),
             "short_circuit": node.get("short_circuit", False),
             "node_type": node.get("node_role", ""),
             "param_keys": pk,

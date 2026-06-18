@@ -148,7 +148,7 @@ def build_score_report(
         pipeline_params_override=pipeline_params_override,
         prompt_fields=osp.prompt_field_dict(),
         accuracy=score_summary["accuracy"],
-        composite_fitness=score_summary.get("composite_fitness", score_summary["accuracy"]),
+        composite_fitness=score_summary["composite_fitness"],
         hits=score_summary["hits"],
         total=score_summary["total"],
         evaluators=evaluators,
