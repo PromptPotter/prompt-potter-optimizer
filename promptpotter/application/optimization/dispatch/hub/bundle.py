@@ -92,6 +92,10 @@ class CycleSlice:
     l2_stall_count: int
     l3_round: int
     l3_stall_count: int
+    # `tight`/`normal`/`wide`, widening with `l1_stall_count` — the value the
+    # escalation_panel renders and l1_generate's rules cite. Computed once in
+    # `build_bundle` via `domain.escalation_signals.exploration_budget`.
+    exploration_budget: str
     pipeline_params: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 

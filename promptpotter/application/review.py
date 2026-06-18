@@ -19,6 +19,7 @@ from promptpotter.application.optimization.validators.l1_behavior import (
     run_all_checks,
 )
 from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
+from promptpotter.domain.escalation_signals import exploration_budget
 
 __all__ = ["render_review_md"]
 
@@ -30,6 +31,7 @@ def render_review_md(
     round_audits: list[dict[str, Any] | None] | None = None,
     context_object: list[str] | None = None,
     param_unlock_round: int = 3,
+    l1_patience: int,
 ) -> str:
     """Render ``review.md`` from index + rounds + per-round audit dicts."""
     audits = list(round_audits or [None] * len(rounds))
@@ -38,7 +40,7 @@ def render_review_md(
     ctx_items = [c for c in (context_object or []) if isinstance(c, str) and c.strip()]
 
     behavior_per_round, l2_behavior_per_round = _compute_behavior_per_round(
-        rounds, audits, ctx_items, param_unlock_round
+        rounds, audits, ctx_items, param_unlock_round, l1_patience
     )
     final = index.get("final") or {}
     origin_composite_fitness = float(final.get("origin_composite_fitness") or 0.0)
@@ -105,19 +107,28 @@ def _compute_behavior_per_round(
     audits: list[dict[str, Any] | None],
     context_object: list[str],
     param_unlock_round: int,
+    l1_patience: int,
 ) -> tuple[list[list[CheckResult]], list[list[CheckResult]]]:
     """Per-round L1 + L2 behaviour-check results (same length as ``rounds``).
     L2 returns ``[]`` for rounds where L2 didn't fire — absent fire ≠ conformance failure."""
     l1_out: list[list[CheckResult]] = []
     l2_out: list[list[CheckResult]] = []
     prior_audits: list[dict[str, Any]] = []
+    # Stall depth entering each round, reconstructed from the persisted ``improved``
+    # flags (the round file doesn't carry the live l1_stall_count). Same recurrence as
+    # ``EscalationFSM.observe_round``: reset to 0 on improvement, else +1. Read BEFORE
+    # the update so each round's exploration_budget matches what its L1 generation saw.
+    stall = 0
     for i, round_data in enumerate(rounds):
+        round_num = int(round_data.get("round") or i)
+        budget = exploration_budget(stall, l1_patience).value if round_num >= 1 else None
         audit = audits[i] if i < len(audits) else None
+        if round_num >= 1:
+            stall = 0 if round_data.get("improved") else stall + 1
         if audit is None:
             l1_out.append([])
             l2_out.append([])
             continue
-        round_num = int(round_data.get("round") or i)
         peaked_raw = round_data.get("axis_memory_peaked") or []
         peaked_axes = frozenset(str(a) for a in peaked_raw if isinstance(a, str))
         ctx = ValidatorContext(
@@ -126,6 +137,7 @@ def _compute_behavior_per_round(
             opt_search_point=dict(round_data.get("opt_search_point") or {}),
             context_object=context_object,
             param_unlock_round=param_unlock_round,
+            exploration_budget=budget,
             peaked_axes=peaked_axes,
         )
         l1_out.append(run_all_checks(audit, ctx))

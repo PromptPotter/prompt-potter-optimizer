@@ -12,6 +12,8 @@ from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle, build_round_payload
 from promptpotter.application.optimization.escalation import NextAction, escalate_l2
+from promptpotter.application.optimization.l1.critique import run_l1_critique
+from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
 from promptpotter.application.optimization.validators.l1_strict import (
     DROPPED_MANDATORY_PLACEHOLDER,
 )
@@ -31,6 +33,7 @@ from promptpotter.domain.results import (
     compute_round_health,
 )
 from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
+from promptpotter.infrastructure.tracing import observed_node
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -104,6 +107,32 @@ async def emit_origin_round(
         cumulative_total=base["total"],
         cumulative_accuracy=tr.origin_accuracy,
     )
+    # Seed round 1's L1 with a critique over the origin's misses. The loop runs
+    # critique only at round end (``l1/execute.py``), so without this seed round 1
+    # opens blind — it never sees the per-sample failure pattern (here: predicted
+    # material vs ground-truth process) and falls back to surface-axis guesses.
+    # Sweep/diag forks inherit round 0 and never call this path, so the seed is
+    # automatically off there (round 1 stays bit-identical across cheap forks).
+    if results:
+        round_result.diagnostics = compute_round_diagnostics(
+            round_result,
+            [round_result],
+            session.pipeline_schema,
+        )
+        with graceful("Origin critique failed; round 1 proceeds without seeded feedback"):
+            async with observed_node(
+                "l1_critique_r0",
+                "llm/meta",
+                obs=session.state.obs,
+                campaign_id=session.state.tracing_campaign_id,
+                round_num=0,
+            ):
+                critique_result = await run_l1_critique(
+                    cycle, round_result, round_num=0, ledger=session.state.ledger
+                )
+            round_result.critique = critique_result
+            cycle.origin_critique = critique_result
+
     round_payload = build_round_payload(round_result, 0, osp)
     await close_round(cycle, round_result, round_payload, 0, session, cb)
 

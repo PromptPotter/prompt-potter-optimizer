@@ -467,5 +467,6 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
             rounds,
             round_audits=round_audits,
             context_object=context_object,
+            l1_patience=cycle.config.optimization.l1_patience,
         )
         write_text(cycle_dir / "review.md", content)

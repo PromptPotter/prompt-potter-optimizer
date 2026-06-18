@@ -23,6 +23,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     RoundDigest,
 )
 from promptpotter.application.optimization.dispatch.hub.injections.registry import INJECTIONS
+from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, L1Layout
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.infrastructure.llm.models import emit_round_warning
@@ -172,6 +173,13 @@ def build_bundle(
         latest_round = cycle.rounds[-1]
     latest_diag = latest_round.diagnostics if latest_round else None
     latest_crit = latest_round.critique if latest_round else None
+    # Round 1 has no prior L1 round (origin stays out of ``cycle.rounds``): seed L1
+    # with the origin critique so it opens on the real material-vs-process failure
+    # signal rather than the round-1 "no critique" path. ``origin_critique`` is None
+    # while the origin critique is itself being generated (latest_round passed
+    # explicitly there) — so this is a no-op on that call, not a feedback loop.
+    if latest_crit is None and not cycle.rounds:
+        latest_crit = cycle.origin_critique
     round_num = latest_round.round + 1 if latest_round else 1
 
     current_sp = cycle.tracking.current_sp
@@ -186,6 +194,9 @@ def build_bundle(
         l2_stall_count=cycle.escalation.l2_stall_count,
         l3_round=cycle.escalation.l3_round,
         l3_stall_count=cycle.escalation.l3_stall_count,
+        exploration_budget=exploration_budget(
+            cycle.escalation.l1_stall_count, cycle.config.optimization.l1_patience
+        ).value,
         pipeline_params=dict(current_pp) if current_pp else {},
     )
 

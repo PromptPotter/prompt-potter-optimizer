@@ -18,7 +18,29 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     fence_untrusted,
     signal,
 )
+from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.results import CritiqueReadout
+
+
+@signal(
+    "escalation_panel",
+    kind=InjectionKind.DERIVED,
+    description="L1 stall depth + exploration_budget — gates the stall_exploration citation and PEAKED-axis rebut.",
+    char_cap=400,
+)
+def _r_escalation_panel(b: InjectionBundle) -> str:
+    """The exploration-budget signal l1_generate's supplemental rules cite. Widens
+    TIGHT→NORMAL→WIDE with L1 stall depth; WIDE is what legitimizes a stall_exploration
+    citation and mutating a PEAKED axis without a sibling_yield rebut."""
+    cs = b.cycle_slice
+    budget = cs.exploration_budget
+    guidance = {
+        ExplorationBudget.TIGHT: "exploit the parent — stall_exploration citations are rejected",
+        ExplorationBudget.NORMAL: "stalling — stall_exploration citations are permitted",
+        ExplorationBudget.WIDE: "explore freely — a PEAKED axis may be mutated with an "
+        "exploration_budget=wide rebut",
+    }[ExplorationBudget(budget)]
+    return f"ESCALATION: exploration_budget={budget} (L1 stall: {cs.l1_stall_count} rounds) — {guidance}"
 
 
 @signal(

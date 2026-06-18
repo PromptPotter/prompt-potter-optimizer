@@ -16,6 +16,7 @@ from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
+    CritiqueReadout,
     DegradationHealth,
     RoundOrigin,
     RoundResult,
@@ -248,6 +249,12 @@ class Cycle:
     # degraded counting). ``close_round`` folds this in for L1 rounds; on resume,
     # ``replay_priors`` repopulates it from the persisted round-0 file.
     origin_health: DegradationHealth | None = None
+    # Critique generated over round 0 (origin) so round 1's L1 opens on the real
+    # per-sample failure signal instead of flying blind (the loop runs critique at
+    # round end, so without this seed round 1 has no prior critique). Same lifecycle
+    # as ``origin_health``: stashed at origin close, lives outside the 1-indexed
+    # ``cycle.rounds`` trajectory, rebuilt by ``replay_priors`` from the round-0 file.
+    origin_critique: CritiqueReadout | None = None
     tracking: CycleRoundState = field(default_factory=CycleRoundState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
     # L2 inter-round bridge: probe_next_round set on action="probe_round" (consumed next round); last_l2_axis labels the probe.
@@ -337,6 +344,7 @@ class Cycle:
             rr = RoundResult.model_validate(round_data)
             if rr.round == 0:
                 self.origin_health = rr.health
+                self.origin_critique = rr.critique
                 origin_results = list(rr.results or [])
             else:
                 self.rounds.append(rr)
