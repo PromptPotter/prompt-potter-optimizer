@@ -38,6 +38,8 @@ class EscalationRule:
 
 # perfect_accuracy preempts so a perfect-fit round terminates instead of firing L2;
 # l1_mandatory_breach preempts patience — a dropped backend placeholder is structural, heal L2 now;
+# l1_evidence_starved preempts patience — a node starved across ~all samples is accumulated
+#   evidence of a systemic fault no L1 param move can fix; bring L2 in to diagnose (it never stops);
 # l2_axis_yield_drought preempts patience when AxisIndex shows no productive axes;
 # l1_patience=0 collapses "fire L2 every round" via the l1_to_l2 fall-through.
 DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
@@ -54,6 +56,14 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
         fire=NextAction.FIRE_L2,
         priority=70,
         reason="L1 dropped a mandatory backend placeholder -> immediate L2 re-frame (patience 0)",
+    ),
+    EscalationRule(
+        name="l1_evidence_starved",
+        when=lambda s: s.evidence_starved,
+        fire=NextAction.FIRE_L2,
+        priority=65,
+        reason="round is evidence-starved (a node failed across ~all samples) -> L2 to diagnose; "
+        "L2 self-heals or requests human action (it never stops here)",
     ),
     EscalationRule(
         name="l2_axis_yield_drought",

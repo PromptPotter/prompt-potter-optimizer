@@ -177,14 +177,15 @@ def _r_rebase_capability(b: InjectionBundle) -> str:
 
 
 _TERMINATE_CAPABILITY_TEXT = (
-    "TERMINATE PROPOSAL (rare — stop the whole cycle). If the round is failing for a reason "
-    "NO framing refinement or replan can fix — most often an evidence node that failed across "
-    "the round (see PIPELINE NODE FAILURES / EVIDENCE STARVED above: an enricher whose backend "
-    "quota or rate-limit is exhausted, so the measurement itself is unreliable) — do not keep "
-    'spending rounds. Emit terminate_proposal = {"reason": "<1-2 sentences naming the dead node '
-    'and what the operator must fix>"}. The cycle halts; the operator fixes the backend and '
-    "resumes. Default: omit. Use ONLY for an unrecoverable upstream/backend fault, never for a "
-    "hard task or a stalled-but-healthy search (rewind or keep refining for those)."
+    "TERMINATE PROPOSAL — stop the whole cycle. If the EVIDENCE STARVED panel above names a node "
+    "that failed across ~all of this round's samples (an enricher whose backend quota or "
+    "rate-limit is exhausted, so the measurement itself is unreliable), TERMINATE NOW — do NOT "
+    "attempt a task_context refinement first: no framing nudge recovers a starved backend, and "
+    'another round just burns spend on noise. Emit terminate_proposal = {"reason": "<1-2 sentences '
+    'naming the dead node and what the operator must fix>"}; the cycle halts, the operator fixes '
+    "the backend and resumes. For every OTHER fault terminate is rare — default omit; use it ONLY "
+    "for an unrecoverable upstream/backend fault, never for a hard task or a stalled-but-healthy "
+    "search (rewind or keep refining for those)."
 )
 
 

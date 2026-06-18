@@ -11,6 +11,8 @@ L2 is one entry in the unified dispatch hub — same `LayerStrategy` shape as L3
 1. Improved best fitness → escalation counters reset.
 2. Otherwise `l1_stall_count++`. When it hits `l1_patience`, L2 fires.
 
+Three preemptors fire L2 *before* patience (rules in `escalation/rules.py`): `l1_mandatory_breach` (a dropped mandatory placeholder), `l2_axis_yield_drought` (no axis yields above noise), and `l1_evidence_starved` (a node failed across ~all of a round's samples — `evidence_starved_node` ≥ `EVIDENCE_STARVED_RATE`). The last is the self-heal-vs-HITL fork: a starved round is routed to L2 not to chase it, but so L2 can read the `evidence_health` panel and either refine or **terminate** (see Outputs → `terminate_proposal`). Deterministic rules only route; they never diagnose or stop (R-48).
+
 Trigger gate: `escalation.escalate_l2`; the decision is recorded as `ResumeCheckpointKind.L2_ESCALATION_TRIGGER` so resume can replay it.
 
 ## Inputs — via the hub
@@ -28,11 +30,13 @@ One injection is L2-only: `l1_signal_catalogue` — the menu of names L2 may put
   "axis_targeted": "...",
   "l1_layout": {"persona": [...], "task_intent": [...], ...},
   "l1_overrides": {...},
-  "rationale": "..."
+  "rationale": "...",
+  "fork_proposal": null,
+  "terminate_proposal": {"reason": "..."} | null
 }
 ```
 
-All fields are optional. Missing fields leave the corresponding OSP state untouched. The primary lever is `task_context` — broadcast to L1, L1_CRITIQUE, L2, L3 next round.
+All fields are optional. Missing fields leave the corresponding OSP state untouched. The primary lever is `task_context` — broadcast to L1, L1_CRITIQUE, L2, L3 next round. `terminate_proposal` is the HITL exit: on evidence-starvation L2 emits it with an operator-actionable reason (the dead node + what to fix) and the cycle halts (`StopReason.ABORT`); the operator fixes the backend and resumes. Both control outputs are gated by their `OptimizationConfig` capability bit — see [`../../promptpotter/application/optimization/CLAUDE.md` § L2/L3 layer-control channel](../../promptpotter/application/optimization/CLAUDE.md).
 
 `_parse_l2` (`escalation/firing/executor.py`) constructs a `TransitionResult`:
 

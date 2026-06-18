@@ -122,6 +122,7 @@ class EscalationFSM:
         l1_patience: int,
         axes_with_positive_yield: int | None = None,
         l1_mandatory_breach: bool = False,
+        evidence_starved: bool = False,
     ) -> EscalationEvent:
         """L1 round outcome — bumps stall, delegates the routing to `decide_escalation`."""
         from promptpotter.application.optimization.escalation.decide import (
@@ -137,6 +138,7 @@ class EscalationFSM:
             l1_patience=l1_patience,
             axes_with_positive_yield=axes_with_positive_yield,
             l1_mandatory_breach=l1_mandatory_breach,
+            evidence_starved=evidence_starved,
         )
         return decide_escalation(inputs)
 

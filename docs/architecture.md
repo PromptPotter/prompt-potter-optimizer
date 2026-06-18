@@ -92,19 +92,22 @@ Two architectural commitments shape every bucket on this page:
 
 Repeat until goal hit, `max_rounds`, or escalation chooses to stop.
 
-**Escalation (two layers, both lazy).** L2 (`l2_context`) fires when L1
-stalls (or, opt-in, on the `l2_axis_yield_drought` rule when L1
-stops producing axis-novel candidates) — refines `task_context`, the
-framing dict that every prompt reads. L3 (`l3_plan`) fires when L2
-stalls — rewrites the strategic plan. Higher layers constrain lower
-ones; they don't replace them. Both can also end the cycle — the
-escalation rules stop on goal reached or infinite stall, and a layer
-may emit a `terminate_proposal` to stop on a fault no framing or plan
-move can fix (the LLM-emitted stop; e.g. an evidence-starved node).
-Deterministic firing decisions live in **one** function:
-`decide_escalation(EscalationInputs)`, called once per round,
-returning the next action via priority-sorted first-match-wins
-escalation rules.
+**Escalation (two layers, both lazy) — self-healing with a HITL escape
+hatch.** L2 (`l2_context`) fires when L1 stalls — or preemptively on
+`l2_axis_yield_drought` (no axis-novel candidates) or
+`l1_evidence_starved` (a node failed across ~all samples) — and refines
+`task_context`, the framing dict every prompt reads. L3 (`l3_plan`)
+fires when L2 stalls — rewrites the strategic plan. Higher layers
+constrain lower ones, never replace them. The split is deliberate: a
+*healthy* round is L1-critique's job (analyse, mutate); a *systemic
+fault* (evidence-starvation) routes to L2, which either self-heals or —
+on a fault no prompt move can fix (a rate-limited enricher) — emits
+`terminate_proposal`, the LLM-emitted HITL stop that halts with a
+human-action request (the operator banner carries the verbatim backend
+reason; the operator fixes it and `resume`s). Deterministic rules stay
+*weak*: they route, never diagnose or stop. Firing lives in **one**
+function: `decide_escalation(EscalationInputs)` — priority-sorted
+first-match-wins, once per round.
 
 **Errors heal upward, tolerantly.** Default assumption: any single
 failed measurement (validation failure on L1 output, runtime failure

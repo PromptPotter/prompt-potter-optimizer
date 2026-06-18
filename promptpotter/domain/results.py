@@ -38,9 +38,11 @@ __all__ = [
     "assemble_prior_healths",
     "candidate_label",
     "classify_sample_failure",
+    "collect_node_warnings",
     "compute_degradation_health",
     "compute_node_failure_rates",
     "compute_round_health",
+    "evidence_starved_node",
     "is_round_winner",
 ]
 
@@ -81,9 +83,13 @@ correct in isolation, but a flood of the SAME enricher's transients across a rou
 is systemic — the enricher is starved (e.g. Brave quota exhausted), the round is
 noise, and no prompt change recovers it. 0.40 catches the observed campaign where
 an evidence node failed ~48% of one round while the dashboard read ``healthy`` and
-the loop ground on. Detection only — this NEVER stops the loop (R-48); it is
-surfaced (Tier 5 band) and injected into the critique (Tier 1), and the stop is
-left to the intelligent tiers (L2/L3 ``terminate_proposal``, the skill, operator)."""
+the loop ground on. **Routes, never stops (R-48):** this grade is a *weak preemptor*
+— ``evidence_starved_node`` feeds the ``l1_evidence_starved`` escalation rule, which
+fires L2 (bypassing l1_patience so the loop doesn't grind more dead rounds) but never
+itself stops. L2 reads the evidence, then self-heals (refine ``task_context``) or, when
+the fault is unfixable by any prompt move, emits ``terminate_proposal`` — the HITL exit
+that halts carrying the human-action request (the operator banner supplies the verbatim
+reason). The stop authority stays with the LLM tier, not a deterministic tripwire."""
 
 
 class EliminationContext(TypedDict, total=False):
@@ -500,9 +506,26 @@ class DegradationHealth(BaseModel):
     prior_clean_rounds: int
     dominant_node: str | None = None
     node_failure_rates: dict[str, float] = Field(default_factory=dict)
+    # Verbatim upstream reasons per node ("[code] message"), harvested from the
+    # connector's StepWarnings — the evidence behind the verdict, connector-agnostic.
+    node_warnings: dict[str, list[str]] = Field(default_factory=dict)
     ci_lo: float
     ci_hi: float
     suggested_action: str | None = None
+
+
+def evidence_starved_node(rates: dict[str, float]) -> str | None:
+    """The single node at/above :data:`EVIDENCE_STARVED_RATE` (worst first), or ``None``.
+
+    The ONE definition of "evidence-starved" — read by both the degradation grade
+    (:func:`compute_degradation_health`) and the L2 router (the ``l1_evidence_starved``
+    escalation rule, via ``runner/round.py::post_round``), so the verdict the operator
+    sees and the routing the loop takes can never disagree."""
+    return max(
+        (n for n in rates if rates[n] >= EVIDENCE_STARVED_RATE),
+        key=lambda n: rates[n],
+        default=None,
+    )
 
 
 def compute_degradation_health(
@@ -516,6 +539,7 @@ def compute_degradation_health(
     dominant_node: str | None = None,
     unreachable_count: int = 0,
     node_failure_rates: dict[str, float] | None = None,
+    node_warnings: dict[str, list[str]] | None = None,
 ) -> DegradationHealth | None:
     """Grade a round's degradation health from its winner's per-sample outcomes
     plus the cycle's track record. Returns ``None`` when nothing was measured
@@ -535,9 +559,10 @@ def compute_degradation_health(
         noise on a proven pipeline), OR an untested origin with a wide CI.
       * **healthy** — otherwise.
 
-    ``evidence_starved`` is detection only — it grades the round and names the
-    starved node, but NEVER stops the loop (R-48); the stop is left to the
-    intelligent tiers that read this verdict."""
+    ``evidence_starved`` grades the round and names the starved node; it *routes* to
+    L2 (via the ``l1_evidence_starved`` escalation rule) but NEVER stops the loop
+    (R-48). L2 reads this verdict, then self-heals or emits ``terminate_proposal`` —
+    the stop authority stays with the intelligent tier, never this deterministic grade."""
     if total <= 0:
         return None
     from promptpotter.shared.statistics import wilson_ci
@@ -552,11 +577,7 @@ def compute_degradation_health(
     # starved node's per-sample failures are usually ``transient``, so structural
     # attribution misses it). When it fires it OWNS ``dominant_node``.
     rates = node_failure_rates or {}
-    starved_node = max(
-        (n for n in rates if rates[n] >= EVIDENCE_STARVED_RATE),
-        key=lambda n: rates[n],
-        default=None,
-    )
+    starved_node = evidence_starved_node(rates)
 
     reasons: list[str] = []
     # Backend-down outranks every other verdict: an unreachable backend isn't a
@@ -579,6 +600,18 @@ def compute_degradation_health(
     else:
         grade = "healthy"
 
+    nw = node_warnings or {}
+
+    def _reported_by(node: str | None) -> str:
+        """The verbatim upstream reason(s) the node raised — the actual evidence
+        behind the verdict, so a generic 'enricher starved' is grounded in the
+        connector's real message ('Brave Search HTTP 429: …') and works the same
+        for any node a third party wires in. Empty when the node was silent."""
+        msgs = nw.get(node or "", [])
+        if not msgs:
+            return ""
+        return f" Reported by {node}: «{'; '.join(msgs[:2])}»."
+
     suggested_action: str | None = None
     if grade == "critical":
         where = f"{dominant_node} " if dominant_node else ""
@@ -592,19 +625,21 @@ def compute_degradation_health(
             pct = round(rates.get(dominant_node or "", 0.0) * 100)
             suggested_action = (
                 f"{where}produced no evidence on {pct}% of samples — the enricher is "
-                "starved (e.g. quota / rate-limit exhausted), not a prompt fault; fix the "
-                "backend (restore quota) and `resume` — don't burn rounds chasing it."
+                f"starved (e.g. quota / rate-limit exhausted), not a prompt fault.{_reported_by(dominant_node)} "
+                "Fix the backend (restore quota) and `resume` — don't burn rounds chasing it."
             )
         elif "persistent" in reasons:
             suggested_action = (
                 f"{consecutive_degraded_rounds} consecutive degraded rounds — "
-                "likely a persistent pipeline problem; consider aborting and fixing config."
+                f"likely a persistent pipeline problem.{_reported_by(dominant_node)} "
+                "Consider aborting and fixing config."
             )
         else:
             pct = round(structural_rate * 100)
             suggested_action = (
                 f"{where}failing structurally on {pct}% of samples — likely a config/schema "
-                "fault, not noise; consider aborting, fixing config, and re-minting."
+                f"fault, not noise.{_reported_by(dominant_node)} "
+                "Consider aborting, fixing config, and re-minting."
             )
 
     return DegradationHealth(
@@ -618,6 +653,7 @@ def compute_degradation_health(
         prior_clean_rounds=prior_clean_rounds,
         dominant_node=dominant_node,
         node_failure_rates={n: round(rt, 6) for n, rt in rates.items()},
+        node_warnings={n: list(v) for n, v in nw.items()},
         ci_lo=ci_lo,
         ci_hi=ci_hi,
         suggested_action=suggested_action,
@@ -674,6 +710,32 @@ def compute_node_failure_rates(results: list[dict[str, Any]], total: int) -> dic
     return {n: c / total for n, c in counts.items()}
 
 
+def collect_node_warnings(results: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Distinct upstream warning reasons per node, harvested from each sample's
+    ``pipeline_data.diagnostics.warnings`` — the verbatim ``[code] message`` the
+    connector's :class:`StepWarning` carried (e.g. a backend web-search node
+    forwarding ``Brave Search HTTP 429: …``). Deduped by ``(step, code)`` so a
+    flood of identical failures collapses to one line. This is the evidence behind
+    the degradation verdict and is connector-agnostic — whatever message a node
+    raises shows up, so someone wiring a brand-new node/API sees its real error,
+    not a hardcoded guess. ``message`` clipped to keep the banner readable."""
+    seen: dict[str, dict[str, str]] = {}
+    for r in results or []:
+        warnings = ((r.get("pipeline_data") or {}).get("diagnostics") or {}).get("warnings") or []
+        for w in warnings:
+            if w.get("kind") not in ("structural", "transient"):
+                continue
+            step = str(w.get("step") or "")
+            if not step:
+                continue
+            by_code = seen.setdefault(step, {})
+            code = str(w.get("code") or "unknown")
+            if code not in by_code:
+                msg = str(w.get("message") or "").strip()
+                by_code[code] = (f"[{code}] {msg}" if msg else f"[{code}]")[:200]
+    return {step: list(by_code.values()) for step, by_code in seen.items()}
+
+
 def compute_round_health(
     *,
     hits: int,
@@ -721,6 +783,9 @@ def compute_round_health(
     # separate aggregate over the raw statuses/warnings — same pure helper the critique
     # panel reads, so the grade and the surface never diverge.
     node_failure_rates = compute_node_failure_rates(results, total)
+    # The verbatim reasons behind those rates — forwarded into the verdict so the
+    # operator-facing banner names the connector's real error, not a generic guess.
+    node_warnings = collect_node_warnings(results)
 
     # An ungraded prior (``None`` — a probe round, or a round that measured zero
     # samples) is TRANSPARENT to the track record: it is not a clean round (so it
@@ -750,6 +815,7 @@ def compute_round_health(
         dominant_node=dominant,
         unreachable_count=unreachable,
         node_failure_rates=node_failure_rates,
+        node_warnings=node_warnings,
     )
 
 

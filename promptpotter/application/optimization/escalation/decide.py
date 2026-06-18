@@ -34,6 +34,10 @@ class EscalationInputs:
     # A candidate this round dropped a mandatory backend placeholder (e.g. {{combined_text}}).
     # Structural breakage → immediate L2 re-frame, bypassing l1_patience (the "patience 0" path).
     l1_mandatory_breach: bool = False
+    # A node failed across ~all of the round's samples (evidence-starvation — accumulated, not
+    # one fluke). A weak preemptor brings L2 in to diagnose; L2 self-heals or requests human
+    # action. It NEVER stops the loop here — the stop authority stays with the LLM tier (R-48).
+    evidence_starved: bool = False
 
 
 def decide_escalation(

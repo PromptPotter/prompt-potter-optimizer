@@ -30,7 +30,9 @@ from promptpotter.domain.results import (
     ScoredCandidate,
     assemble_prior_healths,
     candidate_label,
+    compute_node_failure_rates,
     compute_round_health,
+    evidence_starved_node,
 )
 from promptpotter.domain.run_records import PhaseRecord, ResumeCheckpointRecord
 from promptpotter.infrastructure.tracing import observed_node
@@ -298,12 +300,20 @@ async def post_round(
         for sc in round_result.candidate_scores
         for vf in sc.validation_failures
     )
+    # Evidence-starvation router input, derived from the SAME helper the degradation grade
+    # reads (``evidence_starved_node``) so routing and verdict can't diverge. Health itself
+    # isn't stamped until ``close_round`` (below), so we read the rates directly here.
+    evidence_starved = (
+        evidence_starved_node(compute_node_failure_rates(round_result.results, round_result.total))
+        is not None
+    )
     event = cycle.escalation.observe_round(
         improved=round_result.improved,
         current_accuracy=cycle.tracking.current_accuracy,
         l1_patience=config.optimization.l1_patience,
         axes_with_positive_yield=axes_with_positive_yield,
         l1_mandatory_breach=l1_mandatory_breach,
+        evidence_starved=evidence_starved,
     )
 
     await close_round(cycle, round_result, round_payload, round_num, session, cb)
