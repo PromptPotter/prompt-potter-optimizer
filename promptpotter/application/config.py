@@ -83,6 +83,7 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "origin_gate"): "policy",
     ("optimization", "forbidden_axes_strict"): "policy",
     ("optimization", "rebase_capability"): "policy",
+    ("optimization", "terminate_capability"): "policy",
     ("optimization", "exploration"): "policy",  # entire subtree
     ("optimization", "mechanisms"): "policy",  # entire subtree — every toggle, now and future
 }
@@ -344,6 +345,24 @@ class OptimizationConfig(BaseModel):
             "that need a fixed-trajectory baseline without the rebase prompt "
             "text distorting the input. The schema field itself is invariant "
             "(default None) so on-disk audit shape doesn't drift between modes."
+        ),
+    )
+
+    terminate_capability: bool = Field(
+        True,
+        description=(
+            "L2/L3 terminate_proposal emission. When True, the "
+            "``terminate_capability`` injection renders the stop-the-cycle "
+            "instruction into L2 + L3 prompts; an emitted terminate_proposal "
+            "raises ``StopReason.ABORT`` and the cycle finalizes HALTED on the "
+            "current cycle_id (no fork). The intended user is an unrecoverable "
+            "upstream fault — e.g. an evidence-starved enricher (backend quota "
+            "exhausted) — that no framing refinement or replan can fix. When "
+            "False, the injection renders empty — L2/L3 prompts contain no "
+            "terminate guidance and the LLM never emits one. Flip to ``false`` "
+            "for an ablation run whose input distribution must match a "
+            "no-terminate baseline. The schema field is invariant (default "
+            "None) so on-disk audit shape doesn't drift between modes."
         ),
     )
 

@@ -1491,6 +1491,56 @@ def test_compute_round_health_names_the_structural_cause_not_collateral():
     assert "web_search" not in (h.suggested_action or "")
 
 
+def test_evidence_starved_round_grades_critical_without_auto_halting():
+    """The lca-bom-termnorm failure mode: web_search dies mid-run (Brave quota), so
+    half the round's samples carry a per-sample ``transient`` web_search warning —
+    each defensible alone (a rate-limit IS recoverable) but a flood of the SAME
+    enricher's failures is systemic at the round level. The OLD verdict graded this
+    ``degraded`` (transient noise) and the loop ground on; the round-level per-node
+    rate must lift it to ``critical``/``evidence_starved`` and name web_search.
+
+    AND it must NEVER auto-halt: the deterministic health→StopReason tripwire
+    (the only one) must stay blind to ``evidence_starved`` — the stop authority
+    belongs to the intelligent tiers, not this backend-coupled signal (R-48)."""
+    from promptpotter.application.runner.termination import backend_unreachable_tripped
+    from promptpotter.domain.results import compute_round_health
+
+    def _web_starved() -> dict:
+        return {
+            "hit": False,
+            "pipeline_data": {
+                "diagnostics": {
+                    "step_statuses": {"web_search": "degraded", "entity_profiling": "degraded"},
+                    "warnings": [
+                        {
+                            "step": "web_search",
+                            "code": "no_results",
+                            "message": "No web evidence — Brave rate limit exceeded",
+                            "kind": "transient",
+                        }
+                    ],
+                }
+            },
+        }
+
+    def _clean_hit() -> dict:
+        return {
+            "hit": True,
+            "pipeline_data": {"diagnostics": {"step_statuses": {"web_search": "success"}}},
+        }
+
+    results = [_web_starved() for _ in range(10)] + [_clean_hit() for _ in range(10)]
+    h = compute_round_health(hits=10, total=20, results=results, prior_healths=[])
+    assert h is not None
+    assert h.grade == "critical"
+    assert h.reasons == ["evidence_starved"]
+    assert h.dominant_node == "web_search"
+    assert h.node_failure_rates.get("web_search") == 0.5
+    assert h.suggested_action and "web_search" in h.suggested_action
+    # The deterministic tripwire must NOT consume this signal — no auto-halt (R-48).
+    assert backend_unreachable_tripped(h) is None
+
+
 @pytest.mark.parametrize(
     ("hits", "total", "structural", "transient", "prior_clean", "consec", "grade", "reasons"),
     [

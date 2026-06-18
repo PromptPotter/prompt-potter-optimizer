@@ -39,6 +39,7 @@ __all__ = [
     "candidate_label",
     "classify_sample_failure",
     "compute_degradation_health",
+    "compute_node_failure_rates",
     "compute_round_health",
     "is_round_winner",
 ]
@@ -69,6 +70,20 @@ structural node fault, an unreachable backend carries NO ``diagnostics.warnings`
 was the blind spot that let a dead-backend round grade ``healthy`` and the loop
 grind zero-accuracy rounds against a corpse. This is not an optimization signal:
 the operator must restart the backend and ``resume``."""
+
+EVIDENCE_STARVED_RATE: float = 0.40
+"""Fraction of a round's samples for which a SINGLE pipeline node failed (hard
+``failed`` status OR a failure warning — structural *or* transient) at/above which
+the round is graded ``critical`` with reason ``evidence_starved`` and that node
+becomes the ``dominant_node``. This is the ROUND-level aggregate PP owns: a
+per-sample ``transient`` (a rate-limited search IS recoverable for one sample) is
+correct in isolation, but a flood of the SAME enricher's transients across a round
+is systemic — the enricher is starved (e.g. Brave quota exhausted), the round is
+noise, and no prompt change recovers it. 0.40 catches the observed campaign where
+an evidence node failed ~48% of one round while the dashboard read ``healthy`` and
+the loop ground on. Detection only — this NEVER stops the loop (R-48); it is
+surfaced (Tier 5 band) and injected into the critique (Tier 1), and the stop is
+left to the intelligent tiers (L2/L3 ``terminate_proposal``, the skill, operator)."""
 
 
 class EliminationContext(TypedDict, total=False):
@@ -484,6 +499,7 @@ class DegradationHealth(BaseModel):
     consecutive_degraded_rounds: int
     prior_clean_rounds: int
     dominant_node: str | None = None
+    node_failure_rates: dict[str, float] = Field(default_factory=dict)
     ci_lo: float
     ci_hi: float
     suggested_action: str | None = None
@@ -499,6 +515,7 @@ def compute_degradation_health(
     consecutive_degraded_rounds: int,
     dominant_node: str | None = None,
     unreachable_count: int = 0,
+    node_failure_rates: dict[str, float] | None = None,
 ) -> DegradationHealth | None:
     """Grade a round's degradation health from its winner's per-sample outcomes
     plus the cycle's track record. Returns ``None`` when nothing was measured
@@ -508,12 +525,19 @@ def compute_degradation_health(
       * **critical** — the backend was unreachable for ≥
         :data:`BACKEND_UNREACHABLE_RATE` of samples (down, not a pipeline fault),
         OR structural failures dominate (``structural`` rate ≥
-        :data:`STRUCTURAL_FLAG_RATE`), OR *any* structural failure at an untested
+        :data:`STRUCTURAL_FLAG_RATE`), OR a single node was *evidence-starved*
+        (failure rate ≥ :data:`EVIDENCE_STARVED_RATE` — a flood of one enricher's
+        failures, systemic at the round level even when each sample's failure is a
+        recoverable ``transient``), OR *any* structural failure at an untested
         config (no clean round precedes this one), OR ≥
         :data:`CONSECUTIVE_DEGRADED_CRITICAL` consecutive degraded rounds.
       * **degraded** — degraded fraction ≥ :data:`DEGRADED_RATE_FLAG` (transient /
         noise on a proven pipeline), OR an untested origin with a wide CI.
-      * **healthy** — otherwise."""
+      * **healthy** — otherwise.
+
+    ``evidence_starved`` is detection only — it grades the round and names the
+    starved node, but NEVER stops the loop (R-48); the stop is left to the
+    intelligent tiers that read this verdict."""
     if total <= 0:
         return None
     from promptpotter.shared.statistics import wilson_ci
@@ -523,6 +547,17 @@ def compute_degradation_health(
     degraded_rate = (structural_count + transient_count) / total
     untested = prior_clean_rounds == 0
 
+    # The most-failed enricher at/above the starvation threshold — the systemic
+    # round-level signal, distinct from the structural ``dominant_node`` (the
+    # starved node's per-sample failures are usually ``transient``, so structural
+    # attribution misses it). When it fires it OWNS ``dominant_node``.
+    rates = node_failure_rates or {}
+    starved_node = max(
+        (n for n in rates if rates[n] >= EVIDENCE_STARVED_RATE),
+        key=lambda n: rates[n],
+        default=None,
+    )
+
     reasons: list[str] = []
     # Backend-down outranks every other verdict: an unreachable backend isn't a
     # pipeline problem the optimizer can move, it's a halt-and-restart condition.
@@ -530,6 +565,9 @@ def compute_degradation_health(
         grade, reasons = "critical", ["backend_unreachable"]
     elif structural_rate >= STRUCTURAL_FLAG_RATE:
         grade, reasons = "critical", ["structural"]
+    elif starved_node is not None:
+        grade, reasons = "critical", ["evidence_starved"]
+        dominant_node = starved_node
     elif untested and structural_count > 0:
         grade, reasons = "critical", ["structural_untested"]
     elif consecutive_degraded_rounds >= CONSECUTIVE_DEGRADED_CRITICAL:
@@ -549,6 +587,13 @@ def compute_degradation_health(
             suggested_action = (
                 f"backend unreachable on {pct}% of samples — it is down or overloaded, "
                 "not a pipeline fault; restart the backend and `resume`."
+            )
+        elif "evidence_starved" in reasons:
+            pct = round(rates.get(dominant_node or "", 0.0) * 100)
+            suggested_action = (
+                f"{where}produced no evidence on {pct}% of samples — the enricher is "
+                "starved (e.g. quota / rate-limit exhausted), not a prompt fault; fix the "
+                "backend (restore quota) and `resume` — don't burn rounds chasing it."
             )
         elif "persistent" in reasons:
             suggested_action = (
@@ -572,6 +617,7 @@ def compute_degradation_health(
         consecutive_degraded_rounds=consecutive_degraded_rounds,
         prior_clean_rounds=prior_clean_rounds,
         dominant_node=dominant_node,
+        node_failure_rates={n: round(rt, 6) for n, rt in rates.items()},
         ci_lo=ci_lo,
         ci_hi=ci_hi,
         suggested_action=suggested_action,
@@ -596,6 +642,36 @@ def assemble_prior_healths(
         prior.append(origin_health)
     prior.extend(r.health for r in rounds if r.round not in (0, round_num))
     return prior
+
+
+def compute_node_failure_rates(results: list[dict[str, Any]], total: int) -> dict[str, float]:
+    """Per-NODE round-level failure rate: the fraction of a round's samples in which
+    each node failed (hard ``failed`` status OR a failure warning of either kind).
+
+    Distinct from :func:`classify_sample_failure`, which attributes ONE node per sample:
+    a node failing *transiently* across many samples (e.g. an enricher whose search
+    quota is exhausted) surfaces here as a high rate even though each sample's failure
+    is individually recoverable. That round-level rate is the ``evidence_starved`` signal
+    (R-48) — both :func:`compute_degradation_health` (the grade) and the L1-critique panel
+    read THIS helper, so the verdict and the surface never diverge. Backend-down samples
+    carry no diagnostics, so they contribute nothing; the denominator is still ``total``.
+    Counts each failed node at most once per sample, so the value is a fraction-of-samples."""
+    if total <= 0:
+        return {}
+    counts: dict[str, int] = {}
+    for r in results or []:
+        diag = (r.get("pipeline_data") or {}).get("diagnostics") or {}
+        statuses = diag.get("step_statuses") or {}
+        warnings = diag.get("warnings") or []
+        failed_nodes: set[str] = {n for n, st in statuses.items() if st == "failed"}
+        for w in warnings:
+            if w.get("kind") in ("structural", "transient"):
+                wn = str(w.get("step") or "") or None
+                if wn is not None:
+                    failed_nodes.add(wn)
+        for n in failed_nodes:
+            counts[n] = counts.get(n, 0) + 1
+    return {n: c / total for n, c in counts.items()}
 
 
 def compute_round_health(
@@ -641,6 +717,10 @@ def compute_round_health(
     dominant = (
         max(structural_nodes, key=lambda k: structural_nodes[k]) if structural_nodes else None
     )
+    # Per-node round-level failure rate (the systemic evidence-starvation signal) is a
+    # separate aggregate over the raw statuses/warnings — same pure helper the critique
+    # panel reads, so the grade and the surface never diverge.
+    node_failure_rates = compute_node_failure_rates(results, total)
 
     # An ungraded prior (``None`` — a probe round, or a round that measured zero
     # samples) is TRANSPARENT to the track record: it is not a clean round (so it
@@ -669,6 +749,7 @@ def compute_round_health(
         consecutive_degraded_rounds=consecutive,
         dominant_node=dominant,
         unreachable_count=unreachable,
+        node_failure_rates=node_failure_rates,
     )
 
 

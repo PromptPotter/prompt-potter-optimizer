@@ -26,6 +26,7 @@ from promptpotter.application.optimization.dispatch.hub.injections.registry impo
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, L1Layout
 from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.results import compute_node_failure_rates
 from promptpotter.infrastructure.llm.models import emit_round_warning
 
 if TYPE_CHECKING:
@@ -211,12 +212,18 @@ def build_bundle(
         digest=RoundDigest(
             diagnostics=latest_diag,
             critique=latest_crit,
+            node_failure_rates=(
+                compute_node_failure_rates(latest_round.results, latest_round.total)
+                if latest_round
+                else {}
+            ),
         ),
         axes=cycle.axes,
         origin_per_sample=origin_per_sample,
         trajectory_misses=trajectory_misses,
         forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
         rebase_capability=cycle.config.optimization.rebase_capability,
+        terminate_capability=cycle.config.optimization.terminate_capability,
     )
 
 

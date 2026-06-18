@@ -232,6 +232,31 @@ class ForkProposal(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Terminate proposal — emitted by L2 or L3 to STOP the cycle when the failure
+# is unrecoverable through any framing/plan move (e.g. a starved evidence node).
+# ---------------------------------------------------------------------------
+
+
+class TerminateProposal(BaseModel):
+    """L2/L3-emitted decision to terminate the cycle — the intelligent-tier
+    counterpart to the deterministic stop conditions.
+
+    Mirrors :class:`ForkProposal` (a layer-emitted control output), but instead of
+    rewinding it ends the run: the layer has judged the fault unrecoverable through
+    any framing refinement or replan (the canonical first user is an evidence-starved
+    enricher — a node failing across the round because its backend quota is exhausted —
+    which no prompt change can fix). When set, ``_run_transition`` raises
+    ``StopLoop(StopReason.ABORT)`` after adopting the layer's output; the cycle finalizes
+    HALTED on the current cycle_id. ``reason`` carries the operator-facing specifics
+    ("L2: web_search dead 2 rounds, no framing recovers it — fix the backend + resume").
+    A deterministic rule cannot judge "is this recoverable?"; the LLM tier can (R-48)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = ""
+
+
+# ---------------------------------------------------------------------------
 # l2_context — refine task framing + optional layout/runtime knobs.
 # ---------------------------------------------------------------------------
 
@@ -269,6 +294,7 @@ class L2ContextOutput(BaseModel):
     l1_situational_examples: list[L1SituationalExample] = Field(default_factory=list, max_length=4)
     rationale: str = ""
     fork_proposal: ForkProposal | None = None
+    terminate_proposal: TerminateProposal | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +311,7 @@ class L3PlanOutput(BaseModel):
     note: str = ""
     rationale: str = ""
     fork_proposal: ForkProposal | None = None
+    terminate_proposal: TerminateProposal | None = None
 
 
 # ---------------------------------------------------------------------------

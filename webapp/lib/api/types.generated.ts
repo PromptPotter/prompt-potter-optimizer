@@ -26,6 +26,7 @@ export interface DegradationHealth {
   consecutive_degraded_rounds: number;
   prior_clean_rounds: number;
   dominant_node: string | null;
+  node_failure_rates: Record<string, number>;
   ci_lo: number;
   ci_hi: number;
   suggested_action: string | null;

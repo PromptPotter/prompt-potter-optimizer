@@ -12,6 +12,7 @@ from typing import Any
 from promptpotter.application.optimization.dispatch.hub.bundle import (
     INTRACTABLE_SAMPLES_RENDER_CAP,
     NEAR_MISS_RENDER_CAP,
+    NODE_FAILURE_RENDER_CAP,
     SAMPLE_RENDER_CAP,
     InjectionBundle,
     InjectionKind,
@@ -19,7 +20,7 @@ from promptpotter.application.optimization.dispatch.hub.bundle import (
     signal,
 )
 from promptpotter.domain.escalation_signals import ExplorationBudget
-from promptpotter.domain.results import CritiqueReadout
+from promptpotter.domain.results import EVIDENCE_STARVED_RATE, CritiqueReadout
 
 
 @signal(
@@ -41,6 +42,41 @@ def _r_escalation_panel(b: InjectionBundle) -> str:
         "exploration_budget=wide rebut",
     }[ExplorationBudget(budget)]
     return f"ESCALATION: exploration_budget={budget} (L1 stall: {cs.l1_stall_count} rounds) — {guidance}"
+
+
+@signal(
+    "evidence_health",
+    kind=InjectionKind.DERIVED,
+    description="Round-level per-node failure rates; flags an evidence-starved enricher (a node "
+    "failing across the round) so the critique names the dead node instead of chasing a param.",
+    char_cap=500,
+)
+def _r_evidence_health(b: InjectionBundle) -> str:
+    """Surface the round-level node-failure rates (``compute_node_failure_rates``) so the
+    critique reads which node is failing and how badly. A node failing on ≥
+    ``EVIDENCE_STARVED_RATE`` of samples is *evidence-starved* — an upstream/backend fault
+    (e.g. search quota exhausted) the optimizer cannot fix by mutating a param. The critique
+    names the dead node rather than chasing an unrelated axis, and the degradation grade
+    (which reads the SAME helper) lifts the round to ``critical`` so the intelligent tiers
+    can stop. Empty when no node failed this round (the common, healthy case)."""
+    rates = b.digest.node_failure_rates
+    if not rates:
+        return ""
+    ranked = sorted(rates.items(), key=lambda kv: kv[1], reverse=True)
+    lines = [
+        f"  {node}: failed on {rate:.0%} of samples"
+        for node, rate in ranked[:NODE_FAILURE_RENDER_CAP]
+    ]
+    body = "PIPELINE NODE FAILURES (round-level):\n" + "\n".join(lines)
+    worst_node, worst_rate = ranked[0]
+    if worst_rate >= EVIDENCE_STARVED_RATE:
+        body += (
+            f"\nEVIDENCE STARVED — '{worst_node}' failed on {worst_rate:.0%} of samples this "
+            "round. That is an upstream/backend fault (e.g. quota / rate-limit exhausted), NOT a "
+            "prompt problem L1 can fix. Do not propose a param change to chase it: name the dead "
+            "node in priority_fix and flag that this round's measurement is unreliable."
+        )
+    return body
 
 
 @signal(

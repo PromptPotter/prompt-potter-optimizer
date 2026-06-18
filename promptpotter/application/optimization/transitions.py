@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from promptpotter.application.optimization.dispatch.schemas import (
     ForkProposal,
     OptimizerAction,
+    TerminateProposal,
 )
 from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.opt_search_point import (
@@ -63,6 +64,7 @@ class TransitionResult:
     l2_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     fork_proposal: ForkProposal | None = None
+    terminate_proposal: TerminateProposal | None = None
     debug_prompt: str = ""
     debug_response: dict[str, Any] | None = None
 

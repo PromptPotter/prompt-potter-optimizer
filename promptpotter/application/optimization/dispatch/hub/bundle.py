@@ -29,6 +29,9 @@ AXES_ENUM_PREVIEW = 4
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
 FAILURE_WARNING_PREVIEW = 1
+# Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
+# plus a couple of collateral nodes, never a full pipeline dump.
+NODE_FAILURE_RENDER_CAP = 3
 # Two pointers suffice to signal a cluster (~110 chars each); larger campaigns can't bloat L1.
 INTRACTABLE_SAMPLES_RENDER_CAP = 2
 # L2-authored framing strings; overrun is healed (truncated + warned), not raised.
@@ -101,11 +104,16 @@ class CycleSlice:
 
 @dataclass(frozen=True)
 class RoundDigest:
-    """Post-scoring readouts: ``diagnostics`` (deterministic) + ``critique`` (L1_CRITIQUE LLM dict).
+    """Post-scoring readouts: ``diagnostics`` (deterministic) + ``critique`` (L1_CRITIQUE LLM dict)
+    + ``node_failure_rates`` (per-node round-level failure rate, the evidence-starvation signal).
     Failure renderers (validation/runtime/l2/l3 breaches) read ``bundle.opt_sp`` instead — failures accumulate across rounds."""
 
     diagnostics: RoundDiagnostics | None
     critique: CritiqueReadout | None
+    # Per-node round-level failure rate from ``compute_node_failure_rates`` over the
+    # just-closed round's results — the same aggregate the degradation grade reads
+    # (it's computed BEFORE ``health`` is stamped, so the critique can't read the grade).
+    node_failure_rates: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -126,6 +134,9 @@ class InjectionBundle:
     # Mirrors OptimizationConfig.rebase_capability; gates the rebase_capability
     # injection so L2/L3 prompts are bit-for-bit identical to a no-rebase ablation run.
     rebase_capability: bool = True
+    # Mirrors OptimizationConfig.terminate_capability; gates the terminate_capability
+    # injection so L2/L3 prompts are bit-for-bit identical to a no-terminate ablation run.
+    terminate_capability: bool = True
 
 
 Renderer = Callable[[InjectionBundle], str]
@@ -171,6 +182,7 @@ __all__ = [
     "FAILURE_WARNING_PREVIEW",
     "INTRACTABLE_SAMPLES_RENDER_CAP",
     "NEAR_MISS_RENDER_CAP",
+    "NODE_FAILURE_RENDER_CAP",
     "RUNTIME_FAILURE_RECENCY_WINDOW",
     "SAMPLE_RENDER_CAP",
     "TASK_CONTEXT_VALUE_CAP",

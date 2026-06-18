@@ -120,6 +120,7 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> Tran
         l1_situational_examples=new_examples,
         l2_guard_breaches=failures,
         fork_proposal=raw.fork_proposal,
+        terminate_proposal=raw.terminate_proposal,
         debug_prompt=prompt,
         debug_response=raw.model_dump(),
     )
@@ -199,6 +200,8 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
     }
     if result.fork_proposal is not None:
         payload["fork_proposal"] = result.fork_proposal.model_dump()
+    if result.terminate_proposal is not None:
+        payload["terminate_proposal"] = result.terminate_proposal.model_dump()
     return payload
 
 
@@ -237,6 +240,7 @@ def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> Transit
         l3_note=raw.note,
         l3_guard_breaches=failures,
         fork_proposal=raw.fork_proposal,
+        terminate_proposal=raw.terminate_proposal,
         debug_prompt=prompt,
         debug_response=raw.model_dump(),
     )
@@ -273,6 +277,8 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
     }
     if result.fork_proposal is not None:
         payload["fork_proposal"] = result.fork_proposal.model_dump()
+    if result.terminate_proposal is not None:
+        payload["terminate_proposal"] = result.terminate_proposal.model_dump()
     return payload
 
 
@@ -379,6 +385,19 @@ async def _run_transition(
         round=round_num,
         **transition.exit_payload_fn(cycle, result),
     )
+
+    # Terminate outranks rebase: an unrecoverable-fault judgment ("stop") is more final
+    # than a rewind ("try again from earlier"). Both ride the same post-apply seam as
+    # fork_proposal, so the layer's normal output is fully adopted and the exit-phase event
+    # (which carries ``terminate_proposal`` to the ledger) is emitted before the raise. Reuses
+    # the existing HALTED-class StopReason.ABORT — no new stop reason, no sidecar (R-48/R-09).
+    if result.terminate_proposal is not None:
+        logger.info(
+            "%s emitted terminate_proposal — cycle will exit HALTED (ABORT): %s",
+            transition.layer_id,
+            result.terminate_proposal.reason or "unrecoverable fault",
+        )
+        raise StopLoop(StopReason.ABORT)
 
     if result.fork_proposal is not None:
         _stash_rebase_request(cycle, transition.layer_id, result.fork_proposal, round_num)

@@ -97,10 +97,13 @@ stalls (or, opt-in, on the `l2_axis_yield_drought` rule when L1
 stops producing axis-novel candidates) — refines `task_context`, the
 framing dict that every prompt reads. L3 (`l3_plan`) fires when L2
 stalls — rewrites the strategic plan. Higher layers constrain lower
-ones; they don't replace them. Both can also terminate the loop (goal
-reached or infinite stall). Firing decisions live in **one**
-function: `decide_escalation(EscalationInputs)`, called once per
-round, returning the next action via priority-sorted first-match-wins
+ones; they don't replace them. Both can also end the cycle — the
+escalation rules stop on goal reached or infinite stall, and a layer
+may emit a `terminate_proposal` to stop on a fault no framing or plan
+move can fix (the LLM-emitted stop; e.g. an evidence-starved node).
+Deterministic firing decisions live in **one** function:
+`decide_escalation(EscalationInputs)`, called once per round,
+returning the next action via priority-sorted first-match-wins
 escalation rules.
 
 **Errors heal upward, tolerantly.** Default assumption: any single

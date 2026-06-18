@@ -176,6 +176,37 @@ def _r_rebase_capability(b: InjectionBundle) -> str:
     return _REBASE_CAPABILITY_TEXT
 
 
+_TERMINATE_CAPABILITY_TEXT = (
+    "TERMINATE PROPOSAL (rare — stop the whole cycle). If the round is failing for a reason "
+    "NO framing refinement or replan can fix — most often an evidence node that failed across "
+    "the round (see PIPELINE NODE FAILURES / EVIDENCE STARVED above: an enricher whose backend "
+    "quota or rate-limit is exhausted, so the measurement itself is unreliable) — do not keep "
+    'spending rounds. Emit terminate_proposal = {"reason": "<1-2 sentences naming the dead node '
+    'and what the operator must fix>"}. The cycle halts; the operator fixes the backend and '
+    "resumes. Default: omit. Use ONLY for an unrecoverable upstream/backend fault, never for a "
+    "hard task or a stalled-but-healthy search (rewind or keep refining for those)."
+)
+
+
+@signal(
+    "terminate_capability",
+    kind=InjectionKind.DIRECTIVE,
+    description=(
+        "Conditional terminate_proposal instruction (renders into L2 + L3 prompts). "
+        "Empty when ``OptimizationConfig.terminate_capability`` is off — keeps the "
+        "prompt body bit-for-bit identical to an ablation run without it."
+    ),
+    char_cap=None,
+)
+def _r_terminate_capability(b: InjectionBundle) -> str:
+    """Render the terminate_proposal instruction, gated by
+    ``OptimizationConfig.terminate_capability``. Off ⇒ empty string so the L2/L3
+    prompt body is bit-for-bit identical to a no-terminate ablation run (R-48)."""
+    if not b.terminate_capability:
+        return ""
+    return _TERMINATE_CAPABILITY_TEXT
+
+
 def _detect_auto_triggers(b: InjectionBundle) -> list[str]:
     """Walk auto-trigger conditions in fixed order — also the render order in L1's prompt."""
     triggers: list[str] = []
