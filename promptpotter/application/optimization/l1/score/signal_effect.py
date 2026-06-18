@@ -27,13 +27,12 @@ class CandidateOutcome(StrEnum):
     """How ``score_one_candidate`` exited. Caller fires the report unconditionally
     and uses the tag to decide whether to break the loop or continue.
 
-    SCORED is the default exit. SKIPPED_VALIDATION / REPLAYED_FROM_CACHE are
-    early returns from paths 1 and 2; both still produce a report. LEADER_LOCKED
-    tags a candidate whose posterior cleared ``lock_in`` (per-candidate stop —
-    the outer loop continues). ESCALATED signals the caller to break."""
+    SCORED is the default exit. SKIPPED_VALIDATION is an early return from
+    path 1; it still produces a report. LEADER_LOCKED tags a candidate whose
+    posterior cleared ``lock_in`` (per-candidate stop — the outer loop
+    continues). ESCALATED signals the caller to break."""
 
     SKIPPED_VALIDATION = "skipped_validation"
-    REPLAYED_FROM_CACHE = "replayed_from_cache"
     SCORED = "scored"
     LEADER_LOCKED = "leader_locked"
     ESCALATED = "escalated"

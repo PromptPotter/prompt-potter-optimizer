@@ -652,7 +652,7 @@ def configure_and_apply_pipeline(
     if filtered and campaign_config.optimizer_narrowing:
         filtered = filtered.narrow(campaign_config.optimizer_narrowing)
 
-    dataset_name = campaign_config.dataset_name or (session.dataset_name or "")
+    dataset_name = campaign_config.dataset_name or session.dataset_name or ""
     dataset_dir = session.dataset_config_dir
 
     # The dataset→effective node-config merge (sparse `{steps}` base + dataset overlay +

@@ -31,7 +31,7 @@ campaigns/justlogic__a1b2c3/        # one Campaign
 
 Forks land flat under `cycles/`. The tree is reconstructed from `parent_cycle_id` metadata, not directory nesting. `dashboard.json` is per-cycle — every cycle owns its own, stamped with its own `cycle_id`.
 
-**`unit_kind` (webapp sidebar label):** `session` (root, `resume`-extended) · `divergent_resume` (a `resume --fork-on-divergence` branch) · `user_fork` (HITL fork / diagnostic / sweep, all one kind) · `l3_fork` (reserved for L3 auto-forking, not emitted yet).
+**`unit_kind` (webapp sidebar label):** `session` (root, `resume`-extended) · `divergent_resume` (a `resume --fork-on-divergence` branch) · `user_fork` (HITL fork / diagnostic / sweep, all one kind) · `auto_rebase` (an automatic L2/L3-rebase branch; fork trigger `l2_rebase` / `l3_rebase`).
 
 ## Three callers, one primitive
 

@@ -27,6 +27,7 @@ export interface DegradationHealth {
   prior_clean_rounds: number;
   dominant_node: string | null;
   node_failure_rates: Record<string, number>;
+  node_warnings: Record<string, string[]>;
   ci_lo: number;
   ci_hi: number;
   suggested_action: string | null;
@@ -278,7 +279,7 @@ export interface CycleListEntry {
   dataset_name: string;
   backend_id: string;
   sibling_kind: 'root' | 'fork' | 'diag' | 'sweep';
-  unit_kind: 'session' | 'divergent_resume' | 'user_fork' | 'l3_fork';
+  unit_kind: 'session' | 'divergent_resume' | 'user_fork' | 'auto_rebase';
   is_root: boolean;
   status: string;
   /** The single run-state value (RunPhase) — running / paused / stopping / detached
@@ -456,23 +457,6 @@ export interface CampaignLineageResponse {
   divergences: LineageDivergence[];
   /** Node keys of the counterfactual subtree to render dimmed. */
   divergent: string[];
-}
-
-export interface PerQueryRow {
-  query: string;
-  sample_id: number;
-  n_measurements: number;
-  n_unique_configs: number;
-  mean_fitness: number | null;
-  hit_rate: number;
-  last_seen: string;
-}
-
-export interface LeverageResponse {
-  n_runs: number;
-  n_measurements: number;
-  n_unique_queries: number;
-  per_query: PerQueryRow[];
 }
 
 /** One page of diagnostic-run records, newest first. */

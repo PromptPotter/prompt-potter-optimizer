@@ -16,7 +16,7 @@ export const UNIT_KIND_LABEL: Record<UnitKind, string> = {
   session: "Session",
   divergent_resume: "divergent resume",
   user_fork: "user fork",
-  l3_fork: "L3 fork",
+  auto_rebase: "auto rebase",
 };
 
 // Campaign row name — the operator label when set, else the dataset name

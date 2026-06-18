@@ -6,7 +6,7 @@ or talks to a network without going through one of these seams.
 
 ## Persistence — one ingress, two projections
 
-**Sole ingress:** per-cycle `CycleEventLog` (`ledger.py`, `events.jsonl`).
+**Sole ingress:** per-cycle `CycleEventLog` (`ledger.py`, `.runtime/ledger.jsonl`).
 Forks via `CycleEventLog.inherit_from(parent, offset)`. The writer-side API
 above the ledger is `RunCallbacks` (`application/run_observers.py`) — a
 typed event constructor over `CycleEventLog.append`. Orchestration uses

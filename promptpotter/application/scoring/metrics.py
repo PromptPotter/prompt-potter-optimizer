@@ -2,8 +2,8 @@
 
 Driven by the evaluator registry in ``application/scoring/evaluators.py``.
 The per-round composite_fitness is whatever the dataset's per-round scoring formula
-resolves to; when no formula is set, the default formula reproduces the
-pre-migration 4-bundle weighted sum.
+resolves to; when no formula is set, the default formula is plain ``accuracy``
+(``default_per_round_formula``).
 
 Pure computation — no I/O, no backend dependencies.
 """
@@ -232,8 +232,8 @@ def compute_composite_fitness(
     - ``round_scorer`` can be a compiled callable (via
       ``domain.scoring.compile_round_scorer``), a formula string, or
       ``None``. ``None`` uses the default formula produced by
-      ``default_per_round_formula(schema)`` — reproduces the pre-migration
-      4-bundle weighted sum on schemas that ship with recall nodes.
+      ``default_per_round_formula(schema)`` — plain ``accuracy``
+      (no latency/recall/self-heal blend; degradation is gated separately).
     - ``opt_sp`` is an optional ``OptSearchPoint``; when provided, its
       ``memory.validation_failures`` forces composite_fitness to 0.0 (structurally
       invalid candidates), and ``memory.runtime_failures`` feeds the

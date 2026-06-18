@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
-    "aggregate_per_query",
     "find_by_prefix",
     "list_runs",
     "load_run",
@@ -195,89 +194,6 @@ def reusable_results(
 def resolve_aliases(stores: Stores, backend_id: str, rp_hash: str) -> set[str]:
     """All ``rendered_prompt_hash`` values equivalent to *rp_hash* (including itself)."""
     return stores.archive.resolve_aliases(backend_id, rp_hash)
-
-
-def aggregate_per_query(
-    stores: Stores,
-    backend_id: str,
-    *,
-    dataset_name: str | None = None,
-    include_unknown: bool = True,
-) -> dict[str, Any]:
-    """Per-query roll-up across the archive (the "your data accumulates" view).
-
-    Returns ``{n_runs, n_measurements, n_unique_queries, per_query: [...]}``
-    where rows carry ``{query, sample_id, n_measurements, n_unique_configs,
-    mean_fitness, hit_rate, last_seen}``, sorted by ``n_measurements`` desc.
-    Groups by query text (unique per dataset), so cross-dataset pooling is
-    structurally avoided even at default scope."""
-    by_query: dict[str, dict[str, Any]] = {}
-    seen_run_ids: set[str] = set()
-    total_measurements = 0
-    for entry in stores.archive.list_all(
-        backend_id, dataset_name=dataset_name, include_unknown=include_unknown
-    ):
-        run_id = entry["run_id"]
-        if run_id in seen_run_ids:
-            continue
-        detail = stores.archive.load_by_id(backend_id, run_id)
-        if detail is None:
-            continue
-        seen_run_ids.add(run_id)
-        content_hash = detail.get("content_hash", "")
-        created_at = detail.get("created_at", "")
-        for item in detail.get("measurements", []):
-            query = item.get("query", "")
-            if not query:
-                continue
-            total_measurements += 1
-            bucket = by_query.setdefault(
-                query,
-                {
-                    "query": query,
-                    "sample_id": item.get("sample_id", -1),
-                    "n_measurements": 0,
-                    "fitness_sum": 0.0,
-                    "fitness_count": 0,
-                    "hit_count": 0,
-                    "configs": set(),
-                    "last_seen": "",
-                },
-            )
-            bucket["n_measurements"] += 1
-            fitness = item.get("fitness")
-            if isinstance(fitness, int | float):
-                bucket["fitness_sum"] += float(fitness)
-                bucket["fitness_count"] += 1
-            if item.get("hit"):
-                bucket["hit_count"] += 1
-            if content_hash:
-                bucket["configs"].add(content_hash)
-            if created_at > bucket["last_seen"]:
-                bucket["last_seen"] = created_at
-
-    per_query: list[dict[str, Any]] = []
-    for bucket in by_query.values():
-        n = bucket["n_measurements"]
-        fc = bucket["fitness_count"]
-        per_query.append(
-            {
-                "query": bucket["query"],
-                "sample_id": bucket["sample_id"],
-                "n_measurements": n,
-                "n_unique_configs": len(bucket["configs"]),
-                "mean_fitness": (bucket["fitness_sum"] / fc) if fc > 0 else None,
-                "hit_rate": (bucket["hit_count"] / n) if n > 0 else 0.0,
-                "last_seen": bucket["last_seen"],
-            }
-        )
-    per_query.sort(key=lambda r: r["n_measurements"], reverse=True)
-    return {
-        "n_runs": len(seen_run_ids),
-        "n_measurements": total_measurements,
-        "n_unique_queries": len(by_query),
-        "per_query": per_query,
-    }
 
 
 # -- writes -------------------------------------------------------------------

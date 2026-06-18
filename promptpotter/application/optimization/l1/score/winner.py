@@ -213,11 +213,12 @@ async def l1_score(
         )
         cs_idx = cs_by_id.get(ind.lineage.id)
         if cs_idx is not None:
-            evaluators = {**(s.get("evaluators") or {}), "l1_diversity": yield_stats.l1_yield}
+            # ``compute_composite_fitness`` already injected ``l1_diversity`` (same
+            # ``yield_stats.l1_yield``) into its returned ``evaluators`` — read it back, don't re-stuff.
             candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
                 update={
                     "composite_fitness": s["composite_fitness"],
-                    "evaluators": evaluators,
+                    "evaluators": s.get("evaluators") or {},
                     "matched_origin_accuracy": matched["accuracy"],
                     "matched_origin_hits": matched["hits"],
                     "matched_origin_composite": matched["composite_fitness"],

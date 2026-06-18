@@ -56,7 +56,7 @@ def _resolved_key(family: str, version: Any) -> str:
 
 @functools.lru_cache(maxsize=1)
 def get_optimizer_schema() -> PipelineSchema:
-    """Load optimizer_pipeline.json as PipelineSchema (cached).
+    """Load datasets/_optimizer/pipeline.json as PipelineSchema (cached).
 
     Follows the same pipeline-schema convention as a backend: each node's
     structured output schema is referenced via ``config.schema_family`` /

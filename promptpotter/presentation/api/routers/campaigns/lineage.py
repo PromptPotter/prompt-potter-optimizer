@@ -266,7 +266,7 @@ def _fork_from_round_from_ledger(parent_dir: Path, child_cycle_id: str) -> int |
     value. Returns None if the parent's ledger is missing or the record
     isn't there.
     """
-    if not (parent_dir / "events.jsonl").is_file():
+    if not (parent_dir / ".runtime" / "ledger.jsonl").is_file():
         return None
     try:
         ledger = CycleEventLog.open(CycleDir(parent_dir))

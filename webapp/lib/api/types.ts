@@ -56,7 +56,7 @@ export type SiblingKind = "root" | "fork" | "diag" | "sweep";
 // badges by, derived server-side from (sibling_kind, fork trigger).
 // `session` = the root run (resume extends it); `divergent_resume` = a
 // fork-on-divergence branch; `user_fork` = any operator-initiated branch
-// (HITL fork, diagnostic, sweep); `l3_fork` = reserved for L3
-// auto-forking (not emitted yet).
-export type UnitKind = "session" | "divergent_resume" | "user_fork" | "l3_fork";
+// (HITL fork, diagnostic, sweep); `auto_rebase` = an automatic layer-driven
+// rebase branch (an L2/L3 `fork_proposal`, fork trigger `l2_rebase`/`l3_rebase`).
+export type UnitKind = "session" | "divergent_resume" | "user_fork" | "auto_rebase";
 

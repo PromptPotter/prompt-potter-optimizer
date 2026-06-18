@@ -194,10 +194,6 @@ async def run_round_loop(
                 await close_round(cycle, round_result, round_payload, round_num, session, cb)
                 if backend_unreachable_tripped(round_result.health) is not None:
                     return StopReason.BACKEND_UNREACHABLE, None
-                if signal.routes_to_optimizer:
-                    await escalate_or_stop(cycle, config, session, round_num, cb)
-                elif signal.is_abort:
-                    raise StopLoop(StopReason.ABORT)
                 if session.state.cycle_id:
                     session.store.campaigns.delete_round_candidates(
                         session.campaign_id,

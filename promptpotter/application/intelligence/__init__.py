@@ -6,11 +6,10 @@ derivation off measurements. **Layer rule: MUST NOT import from
 ``optimization``** (fails loud at import).
 
 CONCEPT MAP (by module):
-* **indexes** (:mod:`.indexes` package) — the three incremental-refresh
+* **indexes** (:mod:`.indexes` package) — the two incremental-refresh
   views sharing a ``_seen_runs`` cursor: :class:`SampleIndex` (per-sample
-  state, hits/flips/failure modes), ``ConfigIndex`` (config → run-ids cache),
-  :class:`AxisIndex` (axis-keyed ``digest()`` of param impact / patterns).
-  Only ``AxisIndex`` + ``SampleIndex`` are re-exported here.
+  state, hits/flips/failure modes) and :class:`AxisIndex` (axis-keyed
+  ``digest()`` of param impact / patterns). Both are re-exported here.
 * **adaptive_queue_mechanism** — 1PL Rasch CAT primitives;
   ``pick_value = decision_information_gain + delta_learning_gain``.
 * **exploration** — Rasch IRT fit + per-round scoring-subset selection

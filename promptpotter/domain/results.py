@@ -178,7 +178,6 @@ class ScoredCandidate(BaseModel):
     scored_samples: int = 0
     expected_samples: int = 0
     invalid: bool = False
-    resumed_from_cache: bool = False
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
     elimination_context: EliminationContext = Field(default_factory=EliminationContext)
@@ -258,8 +257,7 @@ class RoundMetadata(BaseModel):
     matched_origin_accuracy: float = 0.0
     matched_origin_hits: int = 0
     matched_origin_composite: float = 0.0
-    # Per-sample best-so-far across rounds; dashboard renders "current best on N measured" without walking priors.
-    cumulative_total: int = 0
+    # Per-sample best-so-far accuracy across rounds; dashboard renders "current best" without walking priors.
     cumulative_accuracy: float = 0.0
 
 

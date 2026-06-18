@@ -2,7 +2,7 @@
 
 Two views: by sample (`measurements_for_sample`) and by config (`measurements_for_config`).
 Cache reuse → positional prefix-exact; discovery → `_matches_subset`. Sole source of truth —
-derived views (AxisIndex, ConfigIndex) refresh from `list_all`, not a parallel stream.
+derived views (AxisIndex, SampleIndex) refresh from `list_all`, not a parallel stream.
 """
 
 from __future__ import annotations

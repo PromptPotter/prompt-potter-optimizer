@@ -161,7 +161,9 @@ def auto_mint_session(
     validate_path_component(target_hash)
     session_id = mint_session_id()
     now = datetime.now(UTC)
-    dataset_name = session.dataset_name or campaign_config.dataset_name or ""
+    # Precedence matches configure_and_apply_pipeline: the persisted campaign
+    # snapshot is authoritative, the live session is the fallback.
+    dataset_name = campaign_config.dataset_name or session.dataset_name or ""
     optimizer_hash = combined_optimizer_prompt_hash()
     campaign_id = mint_campaign_id(dataset_name)
     root_cycle = cycle_id

@@ -17,7 +17,7 @@ Trigger gate: `escalation.escalate_l2`; the decision is recorded as `ResumeCheck
 
 ## Inputs — via the hub
 
-L2's prompt template (`l2_context/1` in `optimizer_pipeline.json`) carries `{{plan}}`, `{{l3_to_l2_note}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{runtime_failures}}`, `{{critique}}`, `{{l1_overrides}}`, `{{task_context}}`, `{{l1_signal_catalogue}}`. `LayerStrategy.build_prompt_vars` calls `DispatchHub.fill_fixed(template, bundle)` to resolve all of them in one pass. No L2-only surface object exists — L2 is just one consumer of the global `INJECTIONS` registry. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
+L2's prompt template (`l2_context/1` in `datasets/_optimizer/pipeline.json`) carries `{{plan}}`, `{{l3_to_l2_note}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{runtime_failures}}`, `{{critique}}`, `{{l1_overrides}}`, `{{task_context}}`, `{{l1_signal_catalogue}}`. `LayerStrategy.build_prompt_vars` calls `DispatchHub.fill_fixed(template, bundle)` to resolve all of them in one pass. No L2-only surface object exists — L2 is just one consumer of the global `INJECTIONS` registry. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
 
 One injection is L2-only: `l1_signal_catalogue` — the menu of names L2 may put in `l1_layout`. Absent from `L1_POSSIBLE` so L2 cannot accidentally inject its own catalogue into L1.
 
@@ -86,7 +86,7 @@ The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome
 - L2 trigger gate: `promptpotter/application/optimization/escalation/firing/executor.py::escalate_l2`
 - `_parse_l2`, `_apply_l2`, `escalate_l2`: `escalation/firing/executor.py` (trigger gates in `escalation/decide.py`)
 - `TransitionResult`: `promptpotter/application/optimization/transitions.py`
-- L2 prompt template: `optimizer_pipeline.json::resolved_prompts['l2_context/1']`
+- L2 prompt template: `datasets/_optimizer/pipeline.json::resolved_prompts['l2_context/1']`
 - OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `task_context`, `l1_layout`, `l1_overrides`, `l2_guard_breaches`
 - Layout validators: `promptpotter/domain/l1_layout.py::validate_l1_layout`
 - Task-context verbatim-repeat: `promptpotter/application/optimization/validators/l2_output.py::L2_TASK_CONTEXT_VERBATIM_REPEAT`

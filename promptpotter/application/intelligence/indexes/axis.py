@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.intelligence.indexes.index_config import ConfigIndex
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.scoring import Scorer
@@ -131,10 +130,8 @@ class AxisIndex:
     def __init__(
         self,
         sample_index: SampleIndex | None = None,
-        config_index: ConfigIndex | None = None,
     ) -> None:
         self.sample_index: SampleIndex = sample_index or SampleIndex()
-        self.config_index: ConfigIndex = config_index or ConfigIndex()
         self._axis_values: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list),
         )
@@ -347,7 +344,6 @@ class AxisIndex:
                 rescore_results(detail.get("measurements") or [], scorer, scorer_id, scorer_formula)
             self.sample_index.ingest_run(detail)
             self.sample_index.mark_seen(run_id)
-            self.config_index.ingest_run(detail)
             added += 1
 
         # Track touched axes to invalidate exactly those impact-cache slots.

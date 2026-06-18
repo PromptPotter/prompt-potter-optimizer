@@ -106,7 +106,6 @@ async def emit_origin_round(
         candidates_scored=1,
         candidate_scores=[sc],
         deprecated=base["deprecated"],
-        cumulative_total=base["total"],
         cumulative_accuracy=tr.origin_accuracy,
     )
     # Seed round 1's L1 with a critique over the origin's misses. The loop runs

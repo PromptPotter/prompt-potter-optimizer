@@ -65,7 +65,7 @@ def promptpotter_wire_adapter(
     ```
 
     Each per-node dict overrides template fields on the inner cycle's
-    ``optimizer_pipeline.json`` for that run. Non-dict values are dropped
+    ``datasets/_optimizer/pipeline.json`` for that run. Non-dict values are dropped
     with a debug log — the contract is "every key is a per-node config
     dict" (matching the TermNorm convention).
     """

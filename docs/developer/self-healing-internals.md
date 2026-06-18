@@ -96,7 +96,7 @@ The runtime block inside `_r_l1_wounds()` partitions into NEW (this round) vs AC
 
 `escalate_l2` (`application/optimization/cycle.py`) checks `esc.l2.stall_count >= opt.l2_patience`. When stalled, L3 fires (subject to its own `l3_patience`).
 
-L3's prompt (`optimizer_pipeline.json::resolved_prompts['l3_plan/1']`) reads:
+L3's prompt (`datasets/_optimizer/pipeline.json::resolved_prompts['l3_plan/1']`) reads:
 
 - `{{l1_wounds}}` — accumulated `RuntimeFailure` trail (+ validation block) rendered by `_r_l1_wounds()`.
 - `{{guard_breaches}}` — Wound 4 evidence (L2 + L3 post-parse breaches) rendered by `_r_guard_breaches()`.

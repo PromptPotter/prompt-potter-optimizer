@@ -91,7 +91,7 @@ is the single ingress for every pipeline.json. **Two non-negotiables:**
    ignores it absent. The "TermNorm doesn't supply X so PromptPotter
    assumes Y" pattern is what makes a second connector painful.
 2. **Same parser, same shape, every time.** A backend's pipeline.json
-   and PromptPotter's own `optimizer_pipeline.json` MUST round-trip
+   and PromptPotter's own `datasets/_optimizer/pipeline.json` MUST round-trip
    through `parse_pipeline_response()` identically. The parity test
    pins this — if you add a special-case field to one, the test
    fails until both files agree.
@@ -134,7 +134,7 @@ A minimal one — the GSM8K single-LLM-node pipeline — at
 }
 ```
 
-## `optimizer_pipeline.json` parity
+## `datasets/_optimizer/pipeline.json` parity
 
 PromptPotter's own meta-prompt pipeline at
 `datasets/_optimizer/pipeline.json` uses
@@ -157,7 +157,7 @@ M12 L4 self-optimization closure (see
 [`docs/specs/roadmap.md`](../specs/roadmap.md)
 + [`docs/specs/roadmap.md`](../specs/roadmap.md)).
 
-The parity fails loud — if `optimizer_pipeline.json` ever drifts from a
+The parity fails loud — if `datasets/_optimizer/pipeline.json` ever drifts from a
 backend pipeline's shape (parallel registries, ad-hoc keys, special-case
 fields), the shared parser rejects it at load. No standing test (the
 structural/contract suite was cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).

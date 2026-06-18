@@ -34,10 +34,9 @@ class PoBBStreamView(DerivedView):
 
     File path: ``.runtime/streams/round_NNNN_p_best.jsonl`` under the cycle's
     audit dir. Each line is a JSON object with ``round``, ``sample_idx``,
-    ``current_id``, ``p_best`` (cid → prob), ``p_best_delta`` (cid → delta
-    vs previous query), and ``stopped`` (cids whose p_best fell below ε
-    on this query — currently encoded as the singleton ``[current_id]``
-    when applicable; future: full set when leader-only stopping arrives).
+    ``current_id``, ``n_samples``, ``p_best`` (cid → prob), ``p_best_delta``
+    (cid → delta vs previous query), and ``paired_breakdown`` (prior cid →
+    {mean_d, se_d, n_paired, p_better}).
     """
 
     def __init__(self, streams_dir: Path) -> None:

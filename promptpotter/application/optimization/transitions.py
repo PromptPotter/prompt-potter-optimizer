@@ -80,8 +80,8 @@ ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
 class LayerStrategy:
     """Static per-layer spec for one escalation layer (L2 or L3).
 
-    Pure data read by ``executor._run_transition``; ``L2``/``L3`` instances
-    live in ``firing/l{2,3}_driver.py`` next to their callables.
+    Pure data read by ``executor._run_transition``; the ``L2``/``L3`` instances
+    and their parse/apply/enter/exit callables live in ``escalation/firing/executor.py``.
     """
 
     layer_id: Literal["L2", "L3"]

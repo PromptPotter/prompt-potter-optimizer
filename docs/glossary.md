@@ -56,8 +56,6 @@ implementation site lands, or rename to a term already on the list.
   `application/intelligence/indexes/axis.py`.
 - **SampleIndex** — per-sample state (hits/misses across cycles).
   `application/intelligence/indexes/sample.py`.
-- **ConfigIndex** — per-pipeline-config rollup for de-duplication and
-  effect-size estimation. `application/intelligence/indexes/config.py`.
 
 ## Hierarchy — workspace / dataset / campaign / session / unit
 
@@ -131,7 +129,7 @@ The persisted world is a four-entity containment hierarchy
   root run; `resume` extends it), `divergent_resume` (a `resume
   --fork-on-divergence` branch), `user_fork` (any operator-initiated
   branch — HITL fork, diagnostic, sweep, folded into one kind),
-  `l3_fork` (reserved for L3 auto-forking; not emitted yet).
+  `auto_rebase` (an automatic L2/L3-rebase branch; fork trigger `l2_rebase` / `l3_rebase`).
 - **Data scope** — `campaign | dataset | workspace`: the three named
   scopes the Workspace datastore is queried at — one campaign's
   cycles (across every session), every campaign for one dataset, or

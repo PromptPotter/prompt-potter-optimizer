@@ -81,7 +81,7 @@ async def score_population(
         backfill sentinel — the display layer prefixes the row so the operator sees the LLM spend.
         `degradation_checks=None` blocks recursive PoBB on backfill measurements.
         """
-        best_full_results, _best_full_scores, _from_cache, _signal = await score_search_point(
+        best_full_results, _best_full_scores, _signal = await score_search_point(
             sp,
             samples,
             cycle.session,

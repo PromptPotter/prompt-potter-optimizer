@@ -26,7 +26,7 @@ def content_hash(
     """Content-addressed hash for measurement deduplication.
 
     ``sha256(rendered_prompt + sorted_query_gt_pairs
-    + pipeline_params)[:16]``
+    + pipeline_params)[:HASH_TRUNCATE]``
 
     Order of dataset samples does not affect the hash.
     ``pipeline_params`` is included when non-empty so that different

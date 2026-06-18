@@ -78,7 +78,7 @@ async def rescore_origin(
     schema = session.pipeline_schema
     tr = cycle.tracking
     assert tr.current_sp is not None
-    results, _scores, _cached, _signal = await score_search_point(
+    results, _scores, _signal = await score_search_point(
         tr.current_sp,
         scoring_set,
         session,
@@ -390,7 +390,7 @@ async def establish_campaign_origin(
         prompt_node_names=(
             session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
         ),
-        dataset_dir=getattr(session, "dataset_config_dir", None),
+        dataset_dir=session.dataset_config_dir,
         seed=seed,
     )
     inherited = try_inherit_fork_origin(session, seed, resolved_origin=resolved_origin)
@@ -494,7 +494,7 @@ async def prepare_scoring_context(
         emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
 
     try:
-        origin_results, scores, _cached, _ = await score_search_point(
+        origin_results, scores, _ = await score_search_point(
             sp,
             scoring_set,
             session,

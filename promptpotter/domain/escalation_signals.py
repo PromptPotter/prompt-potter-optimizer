@@ -10,13 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class EscalationTarget(enum.StrEnum):
-    """Where an escalation check directs the feedback cycle."""
+    """What a per-candidate PoBB check decides about the candidate in flight."""
 
-    L2 = "l2"
-    L3 = "l3"
     ELIMINATE_CANDIDATE = "eliminate_candidate"
     LEADER_LOCKED = "leader_locked"
-    ABORT_CAMPAIGN = "abort_campaign"
 
 
 class ExplorationBudget(enum.StrEnum):
@@ -85,15 +82,6 @@ class EscalationSignal:
     @property
     def is_leader_lock(self) -> bool:
         return self.target is EscalationTarget.LEADER_LOCKED
-
-    @property
-    def routes_to_optimizer(self) -> bool:
-        """True iff the cycle layer should escalate to L2/L3 self-healing."""
-        return self.target in (EscalationTarget.L2, EscalationTarget.L3)
-
-    @property
-    def is_abort(self) -> bool:
-        return self.target is EscalationTarget.ABORT_CAMPAIGN
 
 
 class ValidationFailure(BaseModel):

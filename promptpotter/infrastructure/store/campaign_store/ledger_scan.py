@@ -1,4 +1,4 @@
-"""Pure ledger scan — read ``events.jsonl`` for the highest closed round; no subscribers fire."""
+"""Pure ledger scan — read the per-cycle ledger for the highest closed round; no subscribers fire."""
 
 from __future__ import annotations
 

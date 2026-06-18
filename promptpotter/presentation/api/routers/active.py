@@ -130,7 +130,7 @@ class CycleListEntry(BaseModel):
     backend_id: str = ""
     sibling_kind: Literal["root", "fork", "diag", "sweep"]
     # Operator-facing unit kind — see _unit_kind() in campaign_store/cycles.py.
-    unit_kind: Literal["session", "divergent_resume", "user_fork", "l3_fork"]
+    unit_kind: Literal["session", "divergent_resume", "user_fork", "auto_rebase"]
     is_root: bool
     # Precise terminal reason (StopReason value) once finished, else "active"
     # ("unreadable" for a malformed index). The display label + outcome derive
@@ -218,7 +218,7 @@ async def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> Mac
 
 @active_router.get("/optimizer-pipeline", tags=["Optimizer"])
 async def get_optimizer_pipeline() -> dict[str, Any]:
-    """Bundled ``optimizer_pipeline.json`` — nodes + pipelines + ``view`` topology for the webapp workflow."""
+    """Bundled ``datasets/_optimizer/pipeline.json`` — nodes + pipelines + ``view`` topology for the webapp workflow."""
     pipeline: dict[str, Any] = json.loads(_OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
     return pipeline
 

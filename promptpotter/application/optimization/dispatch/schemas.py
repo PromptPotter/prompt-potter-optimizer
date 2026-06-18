@@ -1,6 +1,6 @@
 """Pydantic response models for every optimizer LLM node.
 
-One Pydantic model per node in ``optimizer_pipeline.json::nodes``. These are
+One Pydantic model per node in ``datasets/_optimizer/pipeline.json::nodes``. These are
 the source of truth for what each ``l1_generate`` / ``l1_critique`` /
 ``l2_context`` / ``l3_plan`` / ``checkin`` LLM call is allowed to
 return. The provider validates server-side via the JSON Schema emitted by
@@ -8,7 +8,7 @@ return. The provider validates server-side via the JSON Schema emitted by
 ``response.choices[0].message.parsed`` — no hand-rolled regex repair on
 the hot path.
 
-The JSON Schemas embedded in ``optimizer_pipeline.json::resolved_schemas``
+The JSON Schemas embedded in ``datasets/_optimizer/pipeline.json::resolved_schemas``
 are a regenerated export of these models (run
 ``scripts/build_optimizer_schemas.py`` after editing a model). Pydantic is
 the SoT; the JSON file is for any non-Python consumer (Langfuse, webapp).

@@ -1,7 +1,7 @@
 """CycleEventLog — append-only spine for facts about a campaign cycle.
 
-Every fact is appended as a typed ``CycleRecord`` to one ``events.jsonl``
-per cycle. Projections (live dashboard, audit trail, archive, langfuse)
+Every fact is appended as a typed ``CycleRecord`` to one
+``.runtime/ledger.jsonl`` per cycle. Projections (live dashboard, audit trail, archive, langfuse)
 subscribe and rebuild views deterministically — they never write on
 their own initiative.
 
@@ -29,7 +29,7 @@ _RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(CycleRecord)
 
 
 class CycleEventLog:
-    """Append-only ``events.jsonl`` plus an in-memory subscriber list.
+    """Append-only ``.runtime/ledger.jsonl`` plus an in-memory subscriber list.
 
     One ledger per cycle. The on-disk file is the source of truth;
     subscribers are a runtime convenience for live projections.

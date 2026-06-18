@@ -468,7 +468,7 @@ async def escalate_l2(
     tracing_campaign_id: str = "",
 ) -> StopReason | None:
     """Run the L2/L3 patience cascade + L3 force-trigger heal on L2 validator failures.
-    Called from `FIRE_L2` dispatch and the mid-round DegradationCheck path.
+    Called via `escalate_or_stop` (`runner/round.py`) on the `FIRE_L2` decision.
     """
     opt = config.optimization
     esc = cycle.escalation

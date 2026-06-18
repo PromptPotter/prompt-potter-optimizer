@@ -35,7 +35,7 @@ The actual "run an inner cycle" path is the follow-up — see
   `extract_experiment` (currently 4 GSM8K-small seeded tasks)
 - `task_description.md` — outer L1 framing
 - `prompts/` — outer meta-prompt overrides (none yet; outer cycle uses
-  `optimizer_pipeline.json` defaults)
+  `datasets/_optimizer/pipeline.json` defaults)
 
 ## Run
 

@@ -60,8 +60,8 @@ Two architectural commitments shape every bucket on this page:
   the frozen target spec being measured (prompt + pipeline params,
   content-hashed). `OptSearchPoint` is the optimizer's own working
   state (lineage, memory, escalation history) that projects into a
-  `JobSearchPoint` for scoring. PromptPotter itself runs on an
-  `optimizer_pipeline.json` — same shape as a target backend's
+  `JobSearchPoint` for scoring. PromptPotter itself runs on a
+  `datasets/_optimizer/pipeline.json` — same shape as a target backend's
   `pipeline.json` — so accumulated `OptSearchPoint` data is the
   dataset for **optimizing the optimizer**.
 
@@ -211,8 +211,8 @@ server-side from `(sibling_kind, fork_trigger)`, used by the webapp
 sidebar: `session` (a session root run — `resume` extends it),
 `divergent_resume` (a `resume --fork-on-divergence` branch),
 `user_fork` (any operator-initiated branch — HITL fork, diagnostic,
-sweep — these three fold into one kind), `l3_fork` (reserved for L3
-auto-forking; not emitted yet).
+sweep — these three fold into one kind), `auto_rebase` (an automatic
+L2/L3-rebase branch; fork trigger `l2_rebase` / `l3_rebase`).
 
 **Three data scopes — campaign / dataset / workspace.** The
 Workspace datastore is queryable at three named, consistently-used
@@ -597,7 +597,7 @@ the PR description.
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape
   compatibility (the Tracing bucket's foundation collapses).
-- **`optimizer_pipeline.json`** — the self-optimization claim in §0
+- **`datasets/_optimizer/pipeline.json`** — the self-optimization claim in §0
   depends on this file having the same shape as a backend
   `pipeline.json`. Drift (special-case fields, parallel registries)
   invalidates the claim.

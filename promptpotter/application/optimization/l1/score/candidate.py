@@ -108,7 +108,7 @@ async def score_one_candidate(
         if fresh:
             callbacks.on_pobb_backfill(round_num, idx, n_total, sample.id, fresh)
 
-    results, scores, from_cache, signal = await score_search_point(
+    results, scores, signal = await score_search_point(
         candidate_sp,
         dataset,
         cycle.session,
@@ -124,25 +124,7 @@ async def score_one_candidate(
         on_sample_pre_check=_catch_priors_up,
     )
 
-    # Path 2 — full-run cache replay.
-    if from_cache:
-        elim_check.register_completed(results, candidate_id=osp_c.lineage.id, sp=candidate_sp)
-        return CandidateRunResult(
-            outcome=CandidateOutcome.REPLAYED_FROM_CACHE,
-            results=results,
-            report=build_score_report(
-                osp_c,
-                pipeline_params_override,
-                scores,
-                results,
-                dataset,
-                label=label,
-                resumed_from_cache=True,
-                l1_diversity=l1_diversity,
-            ),
-        )
-
-    # Path 3 — scored. Snapshot priors BEFORE eval registers this candidate.
+    # Path 2 — scored. Snapshot priors BEFORE eval registers this candidate.
     priors_at_test = list(elim_check.prior_ids)
     effect = decode_signal_effect(
         signal,

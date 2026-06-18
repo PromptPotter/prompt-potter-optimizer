@@ -17,7 +17,7 @@ intelligence; intelligence does not depend on either.
 |---|---|
 | `bootstrap/` | `init_services` + `init_optimization_loop` — wiring stores, LLM clients, connectors → `Session`; preflight; cycle bootstrap; observability + scoring setup. Pipeline-discovery view fetched at bootstrap time lives here. |
 | `optimization/` | The L1/L2/L3 loop primitives: `Cycle` state, candidate generation, critique, validation, transitions, PoBB elimination, `dispatch_hub` injection routing. Curated subpackages `escalation/` (state + decide + rules + firing) and `resume_and_fork/` (decisions + replayers + fork siblings + resume entry). |
-| `intelligence/` | Materialized views over the MeasurementArchive: `AxisIndex` (axis-keyed digest), `SampleIndex` (per-sample state), `ConfigIndex`, Rasch exploration, hard-sample sorter + archive. Shared by scan and loop. |
+| `intelligence/` | Materialized views over the MeasurementArchive: `AxisIndex` (axis-keyed digest), `SampleIndex` (per-sample state), Rasch exploration, hard-sample sorter + archive. Shared by scan and loop. |
 | `scoring/` | The `score_search_point()` gateway plus formula compilation, evaluators, sample measurement, composite-fitness metrics. Per CLAUDE.md: gateway is canonical; everything else is implementation detail. |
 | `sweep/` | Sweep-mode siblings — cheap A/B for L1 candidates ahead of full promotion. |
 | `output/` | Operator-facing artifact writers (`write_log_md`, `write_review_md`, `write_hard_samples_artifacts`) + disk-side view reconstruction (`from_disk_round`, `from_disk_log`). Computes artifacts and writes disk (orchestration), so it lives here — not in `presentation/`. Renders through `application/views` (`to_markdown` + typed view models). |

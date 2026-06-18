@@ -123,7 +123,7 @@ async def score_search_point(
     next_sample: Callable[[dict[int, bool]], int | None] | None = None,
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
     force_fresh: bool = False,
-) -> tuple[list[QueryMeasurement], dict[str, Any], bool, EscalationSignal | None]:
+) -> tuple[list[QueryMeasurement], dict[str, Any], EscalationSignal | None]:
     """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe).
 
     ``force_fresh`` skips the measurement-archive reuse and measures every sample
@@ -308,4 +308,4 @@ async def score_search_point(
                 )
             )
 
-    return results, scores, False, escalation_signal
+    return results, scores, escalation_signal

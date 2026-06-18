@@ -141,13 +141,13 @@ def _rmtree_robust(path: Path) -> None:
 
 
 def _unit_kind(sibling_kind: str, fork_trigger: str | None) -> str:
-    """Sidebar unit kind ∈ {``session``, ``divergent_resume``, ``user_fork``, ``l3_fork``}."""
+    """Sidebar unit kind ∈ {``session``, ``divergent_resume``, ``user_fork``, ``auto_rebase``}."""
     if sibling_kind == "root":
         return "session"
     if fork_trigger == "scoring_divergence":
         return "divergent_resume"
-    if fork_trigger and fork_trigger.startswith("l3"):
-        return "l3_fork"
+    if fork_trigger in ("l2_rebase", "l3_rebase"):
+        return "auto_rebase"
     return "user_fork"
 
 

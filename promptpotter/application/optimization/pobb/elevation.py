@@ -318,7 +318,7 @@ async def elevate_to_decisive(
             # above. The required-keyword guardrail on ``score_search_point``
             # forces this site to declare its intent explicitly so the
             # silence is documented, not accidental.
-            results, _scores, _flag, _esc = await score_search_point(
+            results, _scores, _esc = await score_search_point(
                 arms[chosen],
                 [sample],
                 session,

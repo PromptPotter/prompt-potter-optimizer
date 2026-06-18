@@ -67,10 +67,6 @@ from promptpotter.presentation.api.routers.datasets import (
     MeasurementSeriesResponse,
     SampleSeries,
 )
-from promptpotter.presentation.api.routers.measurements import (
-    LeverageResponse,
-    PerQueryRow,
-)
 from promptpotter.presentation.api.routers.verify import DiagnosticRunListResponse
 
 EXPORTED_MODELS: list[type[BaseModel]] = [
@@ -118,9 +114,6 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     CampaignLineageCycle,
     LineageDivergence,
     CampaignLineageResponse,
-    # --- measurements router ---
-    PerQueryRow,
-    LeverageResponse,
     # --- verify router ---
     DiagnosticRunListResponse,
 ]

@@ -100,7 +100,6 @@ def build_round_payload(
         "matched_origin_accuracy": rr.matched_origin_accuracy,
         "matched_origin_hits": rr.matched_origin_hits,
         "matched_origin_composite": rr.matched_origin_composite,
-        "cumulative_total": rr.cumulative_total,
         "cumulative_accuracy": rr.cumulative_accuracy,
         "scoreboard": _build_scoreboard(rr.candidate_scores, rr.label),
         "prompt_fields": rr.prompt_fields,
@@ -460,7 +459,6 @@ class Cycle:
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
 
-        rr.cumulative_total = len(tr.current_results)
         rr.cumulative_accuracy = tr.current_accuracy
 
         return build_round_payload(rr, round_num, self.opt_sp)

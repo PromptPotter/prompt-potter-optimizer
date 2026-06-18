@@ -120,7 +120,7 @@ It's the **bridge between optimizer and target system**. Everything above it gen
 
 ## 4. Cross-run memory
 
-`archive/` is the database. `MeasurementArchive` is the only gateway. Three in-memory views (`SampleIndex`, `ConfigIndex`, `AxisIndex`) are rebuilt from disk on every `refresh()` and never persisted.
+`archive/` is the database. `MeasurementArchive` is the only gateway. Two in-memory views (`SampleIndex`, `AxisIndex`) are rebuilt from disk on every `refresh()` and never persisted.
 
 ```
 ON DISK (the database)                IN MEMORY (rebuilt from disk)
