@@ -385,6 +385,12 @@ class CampaignStore:
             "best_round_id": None,
             "origin_accuracy": 0.0,
             "rounds": [],
+            # Babysat marker: flips True the moment an operator manually
+            # intervenes (today: skip-searchpoint), so the cycle is permanently
+            # distinguishable from a pure/reproducible run. `interventions` is the
+            # append-only audit trail of those gestures.
+            "human_intervened": False,
+            "interventions": [],
         }
         data = {**defaults, **existing, **metadata}
         data["updated_at"] = now
@@ -405,6 +411,33 @@ class CampaignStore:
         for key in remove:
             data.pop(key, None)
         data.update(updates)
+        data["updated_at"] = utcnow_iso()
+        write_json(path, data)
+
+    def mark_human_intervened(
+        self,
+        campaign_id: str,
+        cycle_id: str,
+        *,
+        kind: str,
+        at: str,
+        round: int | None = None,
+        candidate: str | None = None,
+    ) -> None:
+        """Mark the cycle babysat and append one entry to its intervention log.
+
+        Written the moment the operator intervenes (e.g. skip-searchpoint), not at
+        teardown — a still-running babysat cycle must already be distinguishable
+        from a pure/reproducible one. Idempotent on the boolean; the log grows by
+        one per gesture. Tolerates an index minted before this field existed."""
+        path = self._index_path(campaign_id, cycle_id)
+        data = read_json(path)
+        data["human_intervened"] = True
+        log = data.get("interventions")
+        if not isinstance(log, list):
+            log = []
+        log.append({"kind": kind, "at": at, "round": round, "candidate": candidate})
+        data["interventions"] = log
         data["updated_at"] = utcnow_iso()
         write_json(path, data)
 
@@ -607,6 +640,7 @@ class CampaignStore:
                         "n_rounds": 0,
                         "created_at": "",
                         "updated_at": "",
+                        "human_intervened": False,
                     }
                 )
                 continue
@@ -633,6 +667,7 @@ class CampaignStore:
                     "n_rounds": data.get("n_rounds", 0),
                     "created_at": data.get("created_at", ""),
                     "updated_at": data.get("updated_at", ""),
+                    "human_intervened": bool(data.get("human_intervened", False)),
                 }
             )
         # Backfill dataset_name onto siblings from their campaign manifest.

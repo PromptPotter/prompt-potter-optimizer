@@ -274,20 +274,28 @@ async def score_search_point(
     escalation_signal = batch.escalation_signal
 
     if not batch.completed and not escalation_signal:
-        # Graceful/force stop — partial state is already on disk via
-        # per-fresh-sample persist; just unwind.
-        if batch.stop_reason in {"graceful", "force"}:
+        if batch.stop_reason == "skip":
+            # Operator early-abort of THIS searchpoint. The partial is already on
+            # disk; accept it as a normal partial score (escalation_signal stays
+            # None) and fall through to compute fitness over what was scored —
+            # identical in shape to a PoBB early-abort. The round continues to the
+            # next candidate; the cycle is NOT unwound.
+            pass
+        elif batch.stop_reason in {"graceful", "force"}:
+            # Graceful/force stop — partial state is already on disk via
+            # per-fresh-sample persist; just unwind.
             raise KeyboardInterrupt()
-        # Per-candidate scoring-error abort (consecutive 5xx, client 4xx,
-        # pipeline ERROR). Synthesize a candidate-scoped escalation so the
-        # caller can attach a RuntimeFailure and continue with the
-        # next candidate — never kill the round.
-        escalation_signal = _build_scoring_error_signal(
-            results=results,
-            stop_reason=batch.stop_reason or "",
-            candidate_idx=candidate_idx,
-            n_total_candidates=n_total_candidates,
-        )
+        else:
+            # Per-candidate scoring-error abort (consecutive 5xx, client 4xx,
+            # pipeline ERROR). Synthesize a candidate-scoped escalation so the
+            # caller can attach a RuntimeFailure and continue with the
+            # next candidate — never kill the round.
+            escalation_signal = _build_scoring_error_signal(
+                results=results,
+                stop_reason=batch.stop_reason or "",
+                candidate_idx=candidate_idx,
+                n_total_candidates=n_total_candidates,
+            )
 
     scores = compute_composite_fitness(
         results,
@@ -296,6 +304,10 @@ async def score_search_point(
         round_scorer=session.scoring.round_scorer,
         l1_diversity=l1_diversity,
     )
+    if batch.stop_reason == "skip":
+        # Mark the partial as an operator early-abort so the candidate report and
+        # measurement record carry the provenance (the cycle is babysat).
+        scores["partial_reason"] = "skip"
 
     _save_run(results, scores)
     if store and backend_id:

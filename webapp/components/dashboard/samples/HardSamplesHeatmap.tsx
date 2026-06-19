@@ -10,7 +10,6 @@ import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
-import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
 import { OriginGateModal } from "@/components/dashboard/control/OriginGateModal";
 import { type MeasurementDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
@@ -184,7 +183,6 @@ export function HardSamplesHeatmap({
           rounds={dash?.rounds ?? []}
           onToggle={() => setBankExpanded((e) => !e)}
         />
-        <RunControlButton />
         <OriginGateModal />
       </div>
       {(bankExpanded || heatExpanded) && (

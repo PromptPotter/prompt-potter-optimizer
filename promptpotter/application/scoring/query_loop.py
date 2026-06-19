@@ -60,7 +60,9 @@ class QueryLoopResult:
 
     results: list[QueryMeasurement]
     completed: bool = True
-    stop_reason: str | None = None  # "graceful" | "force" | "escalation" | abort reason
+    # "graceful" | "force" (both unwind the cycle) | "skip" (operator early-abort:
+    # accept partial, cycle continues) | "escalation" | abort reason
+    stop_reason: str | None = None
     escalation_signal: EscalationSignal | None = None
 
 
@@ -330,6 +332,21 @@ async def run_query_loop(
             if sid is None:
                 break
             sample = by_id[sid]
+            # Operator skip checkpoint — checked first so a one-shot skip never
+            # falls through to the sticky stop path. Cut the remaining samples of
+            # THIS searchpoint, consume the flag (so only this one is cut), and
+            # return a partial; the gateway accepts it as a normal partial score
+            # and the cycle continues to the next candidate. Not a stop: no
+            # STOPPING phase, no cycle unwind.
+            if session.skip_check and session.skip_check():
+                if session.skip_consume:
+                    session.skip_consume()
+                logger.info(
+                    "Operator skip after query %d/%d; accepting partial searchpoint.",
+                    len(state.results),
+                    len(dataset),
+                )
+                return QueryLoopResult(state.results, completed=False, stop_reason="skip")
             # Mid-searchpoint pause/stop checkpoint. Sits between samples — every
             # already-scored result is on disk (persist_fresh ran per fresh
             # sample), so pausing here finishes the current sample then blocks,

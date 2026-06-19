@@ -164,6 +164,19 @@ export async function postResumeCycle(
   return _postCommand("resume-cycle", { campaign_id: campaignId, cycle_id: cycleId });
 }
 
+// Operator early-abort of the searchpoint scoring right now: writes a one-shot
+// `.runtime/skip.flag`; the loop cuts the remaining samples of the in-flight
+// searchpoint, accepts the partial score, and the cycle CONTINUES to the next
+// candidate (NOT a stop). The operator analog of automatic PoBB elimination.
+// A manual skip marks the cycle `human_intervened` (babysat). Cycle-scoped per
+// `m12-api-openapi.yaml::skipSearchpoint`.
+export async function postSkipSearchpoint(
+  campaignId: string,
+  cycleId: string,
+): Promise<CommandAcceptedBody> {
+  return _postCommand("skip-searchpoint", { campaign_id: campaignId, cycle_id: cycleId });
+}
+
 // Raise or lower a running cycle's USD and/or token spend cap mid-flight. Writes
 // `.runtime/spend_cap.json` ({max_usd, max_tokens}); the round loop's BudgetGate
 // re-reads it every clean round — `0` on a ceiling halts at the next round

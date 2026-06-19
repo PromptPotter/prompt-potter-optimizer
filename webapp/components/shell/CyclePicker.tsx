@@ -22,7 +22,10 @@ import { fmtPct0 } from "@/lib/format";
 function optionText(c: CycleListEntry): string {
   // run_phase while live (running/paused/stopping/detached); the precise terminal
   // reason (from `status`) once finished — one label, via the single helper.
-  return `${unitDisplayName(c)} · best ${fmtPct0(c.best_accuracy)} · ${runPhaseLabel(c.run_phase, c.status)}`;
+  // `✎ babysat` flags a human-intervened (operator-skipped) cycle — a native
+  // <option> can't host a badge, so it rides the label text.
+  const babysat = c.human_intervened ? " · ✎ babysat" : "";
+  return `${unitDisplayName(c)} · best ${fmtPct0(c.best_accuracy)} · ${runPhaseLabel(c.run_phase, c.status)}${babysat}`;
 }
 
 // The live badge subscribes to the 2 s dashboard.json poll on its own. Kept

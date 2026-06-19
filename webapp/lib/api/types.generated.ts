@@ -13,6 +13,7 @@ export interface RoundSummaryCandidate {
   is_winner: boolean;
   evaluators: Record<string, number>;
   changes_description: string;
+  partial_reason: string;
 }
 
 /** Backend-computed, context-aware degradation verdict for a round (origin */
@@ -192,6 +193,10 @@ export interface CycleListEntry {
   n_rounds: number;
   created_at: string;
   updated_at: string;
+  /** True once an operator manually intervened (e.g. skip-searchpoint); the cycle
+   * is babysat and no longer purely reproducible. Drives the 'babysat' badge;
+   * orthogonal to run_phase. */
+  human_intervened: boolean;
 }
 
 export interface CyclesResponse {

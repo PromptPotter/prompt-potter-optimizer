@@ -37,6 +37,7 @@ class CycleSummary(BaseModel):
     origin_accuracy: float | None = None
     created_at: str = ""
     updated_at: str = ""
+    human_intervened: bool = False
 
 
 class CampaignCyclesResponse(BaseModel):
@@ -74,6 +75,7 @@ async def list_campaign_cycles(store: StoreDep, campaign_id: str) -> CampaignCyc
             best_accuracy=e["best_accuracy"],
             created_at=e["created_at"],
             updated_at=e["updated_at"],
+            human_intervened=e.get("human_intervened", False),
         )
         for e in store.campaigns.enumerate_cycles()
         if e["campaign_id"] == campaign_id

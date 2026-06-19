@@ -34,7 +34,7 @@ def is_stop_requested(runtime_dir: Path) -> bool:
 
 
 def clear_run_control_flags(runtime_dir: Path) -> None:
-    """Drop any consumed ``stop.flag`` / ``pause.flag`` left by a prior run.
+    """Drop any consumed ``stop.flag`` / ``pause.flag`` / ``skip.flag`` left by a prior run.
 
     A fresh launch through the runner seam IS the operator's intent to run, so it
     supersedes prior run-control intent. The flags are one-shot requests, not
@@ -43,6 +43,7 @@ def clear_run_control_flags(runtime_dir: Path) -> None:
     poll (a stopped cycle could never be resumed). Idempotent."""
     (runtime_dir / "stop.flag").unlink(missing_ok=True)
     (runtime_dir / "pause.flag").unlink(missing_ok=True)
+    (runtime_dir / "skip.flag").unlink(missing_ok=True)
 
 
 def read_spend_cap(runtime_dir: Path) -> float | None:

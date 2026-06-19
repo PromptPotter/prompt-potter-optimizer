@@ -155,6 +155,7 @@ def build_score_report(
         elimination_stopped=elimination_stopped,
         scored_samples=len(query_results),
         expected_samples=len(dataset),
+        partial_reason=str(score_summary.get("partial_reason", "")),
         invalid=invalid,
         validation_failures=list(osp.memory.wounds.validation_failures),
         runtime_failures=[new_runtime_failure] if new_runtime_failure else [],

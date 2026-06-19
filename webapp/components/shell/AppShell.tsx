@@ -17,6 +17,7 @@ import { DashboardTab } from "@/components/dashboard/layout/DashboardTab";
 import { SelectionProvider } from "@/lib/SelectionContext";
 import { LineageOverlayProvider } from "@/lib/lineage-overlay";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
+import { RemoteBar } from "@/components/shell/RemoteBar";
 
 // The non-landing surfaces load on demand, not on first paint. The operator
 // lands on the dashboard tab; Chat / Files / Verify (and the markdown renderer
@@ -269,6 +270,10 @@ function AppShellInner() {
           <VerifyPane />
         )}
       </main>
+      {/* Global remote — a bottom-fixed hovering pill, present on every tab while
+          a cycle is live (play/pause/stop/skip + round/spend + babysat tag).
+          Self-sources identity + live state; renders null when idle/terminal. */}
+      <RemoteBar />
       {/* Mounted only while open so its chunk (+ ingest wizard deps) stays off
           first paint — IngestPane already hard-returns null when closed, so
           gating the mount is behaviour-identical. */}

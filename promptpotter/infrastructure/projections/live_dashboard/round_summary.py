@@ -69,6 +69,7 @@ def build_round_summary(rr: RoundResult) -> RoundSummary:
                 is_winner=is_round_winner(c.changes_description, winner_label),
                 evaluators=dict(c.evaluators),
                 changes_description=c.changes_description,
+                partial_reason=c.partial_reason,
             )
         )
     selection = _measurement_order(rr.all_candidate_results or {})

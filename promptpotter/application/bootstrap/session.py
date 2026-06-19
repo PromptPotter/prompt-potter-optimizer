@@ -95,6 +95,13 @@ class Session:
     # blocks at round boundaries until the flag clears. `stop_check` always
     # wins — stop-during-pause exits the wait loop cleanly.
     pause_check: Callable[[], bool] | None = None
+    # `skip_check` returns True while a one-shot `.runtime/skip.flag` is present
+    # (operator early-abort of the searchpoint scoring now). Unlike stop/pause it
+    # does NOT end or hold the cycle — the per-sample checkpoint accepts the
+    # partial and continues. `skip_consume` removes the flag the instant it fires
+    # so exactly one searchpoint is cut, not the whole round.
+    skip_check: Callable[[], bool] | None = None
+    skip_consume: Callable[[], None] | None = None
 
 
 def new_session_state(

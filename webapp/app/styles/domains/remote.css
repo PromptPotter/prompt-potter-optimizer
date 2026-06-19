@@ -1,0 +1,66 @@
+/* Remote bar — the global bottom-fixed hovering pill (components/shell/RemoteBar.tsx).
+   Present on every tab while a cycle is live: run-phase, play/pause (the reused
+   .run-ctl), Skip, Stop, concise round/spend, and the babysat tag. Floats over
+   content (position:fixed) — a remote control, not a layout band. */
+.remote-bar{
+  position:fixed;
+  left:50%;
+  bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  transform:translateX(-50%);
+  z-index:50;
+  display:inline-flex;
+  align-items:center;
+  gap:12px;
+  max-width:calc(100vw - 24px);
+  padding:7px 14px;
+  border:1px solid var(--color-border-secondary,var(--color-border-tertiary));
+  border-radius:999px;
+  background:var(--color-background-secondary);
+  box-shadow:0 6px 24px rgba(0,0,0,.28);
+  font-size:12px;
+  color:var(--color-text-secondary,var(--color-text-tertiary));
+}
+
+/* Run-phase chip + status dot. The dot colour pairs with the label (never
+   colour-alone) so the phase reads without relying on hue. */
+.remote-phase{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--color-text-primary,inherit)}
+.remote-dot{width:8px;height:8px;border-radius:50%;background:var(--color-text-tertiary)}
+.remote-phase-running .remote-dot{background:var(--color-success)}
+.remote-phase-paused .remote-dot{background:var(--color-warn)}
+.remote-phase-stopping .remote-dot{background:var(--color-danger)}
+.remote-phase-gate .remote-dot{background:var(--color-accent)}
+
+/* Skip / Stop — bordered pills matching the .run-ctl register (state by icon
+   colour, quiet border that lifts to accent on hover). */
+.remote-btn{
+  display:inline-flex;align-items:center;gap:5px;
+  height:24px;padding:0 10px;
+  border:1px solid var(--color-border-tertiary);
+  border-radius:6px;
+  background:var(--color-background-secondary);
+  color:var(--color-text-secondary,inherit);
+  font-size:12px;cursor:pointer;
+  transition:border-color .12s,color .12s,background .12s;
+}
+.remote-btn:hover:not(:disabled){border-color:var(--color-accent)}
+.remote-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.remote-btn:disabled{opacity:.45;cursor:not-allowed}
+.remote-skip{color:var(--color-warn)}
+.remote-stop{color:var(--color-danger)}
+.remote-btn-label{font-weight:600}
+
+/* Concise status — round + spend, tabular so it doesn't jitter as it ticks. */
+.remote-status{display:inline-flex;align-items:center;gap:8px;font-variant-numeric:tabular-nums;color:var(--color-text-tertiary)}
+.remote-round{font-weight:600;color:var(--color-text-secondary,inherit)}
+
+/* Babysat tag — this cycle was human-steered (a skip), no longer purely
+   reproducible. Icon + word, never colour alone. */
+.remote-babysat{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:var(--color-background-tertiary,var(--color-background-secondary));color:var(--color-warn);font-weight:600}
+
+.remote-err{color:var(--color-danger);max-width:200px}
+
+/* On narrow widths drop the button word labels + spend to keep the pill compact. */
+@media (max-width:640px){
+  .remote-bar{gap:8px;padding:6px 10px}
+  .remote-btn-label,.remote-spend{display:none}
+}

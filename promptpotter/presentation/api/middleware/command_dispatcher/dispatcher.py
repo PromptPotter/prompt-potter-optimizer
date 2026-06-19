@@ -88,6 +88,7 @@ _LIFECYCLE_STATUS: dict[LifecycleKind, str] = {
 CycleScopedKind = Literal[
     "fork-cycle",
     "stop-cycle",
+    "skip-searchpoint",
     "delete-cycle",
     "cleanup-empty-cycles",
     "pause-cycle",
@@ -404,6 +405,8 @@ class CommandDispatcher:
             return _apply_fork
         if kind == "stop-cycle":
             return lambda: self._apply_stop_cycle(campaign_id, cycle_id)
+        if kind == "skip-searchpoint":
+            return lambda: self._apply_skip_searchpoint(campaign_id, cycle_id)
         if kind == "cleanup-empty-cycles":
             return lambda: self._apply_cleanup_empty(campaign_id, cycle_id)
         if kind == "pause-cycle":
@@ -520,6 +523,20 @@ class CommandDispatcher:
         runtime_dir.mkdir(parents=True, exist_ok=True)
         flag = runtime_dir / "stop.flag"
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
+
+    def _apply_skip_searchpoint(self, campaign_id: str, cycle_id: str) -> None:
+        """Write a one-shot ``.runtime/skip.flag``; ``Session.skip_check`` polls it at
+        the next per-sample checkpoint, accepts the partial searchpoint, consumes the
+        flag, and the cycle keeps running. A manual skip is a human intervention — the
+        cycle is marked ``human_intervened`` (no longer purely reproducible)."""
+        cycle_dir = self._store.campaigns.cycle_dir(campaign_id, cycle_id)
+        runtime_dir = cycle_dir / ".runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        flag = runtime_dir / "skip.flag"
+        flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
+        self._store.campaigns.mark_human_intervened(
+            campaign_id, cycle_id, kind="skip", at=utcnow_iso()
+        )
 
     def _apply_pause_cycle(self, campaign_id: str, cycle_id: str) -> None:
         """Write ``.runtime/pause.flag``; ``Session.pause_check`` polls at

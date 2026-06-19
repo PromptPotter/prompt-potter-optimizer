@@ -141,6 +141,10 @@ class CycleListEntry(BaseModel):
     n_rounds: int = 0
     created_at: str = ""
     updated_at: str = ""
+    human_intervened: bool = Field(
+        default=False,
+        description="True once an operator manually intervened (e.g. skip-searchpoint); the cycle is babysat and no longer purely reproducible. Drives the 'babysat' badge; orthogonal to run_phase.",
+    )
 
 
 class CyclesResponse(BaseModel):

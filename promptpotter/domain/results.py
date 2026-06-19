@@ -122,6 +122,11 @@ class ScoredCandidate(BaseModel):
     elimination_stopped: bool = False
     scored_samples: int = 0
     expected_samples: int = 0
+    # Why a partial subset was scored (``scored_samples < expected_samples``):
+    # "" (full / not partial) | "pobb" (automatic elimination) | "skip" (operator
+    # early-abort — marks the cycle ``human_intervened``). Distinct from the
+    # ``elimination_stopped``/``escalation_aborted`` outcome booleans.
+    partial_reason: str = ""
     invalid: bool = False
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
@@ -346,6 +351,7 @@ class RoundSummaryCandidate(BaseModel):
     is_winner: bool
     evaluators: dict[str, float] = Field(default_factory=dict)
     changes_description: str = ""
+    partial_reason: str = ""  # "" | "pobb" | "skip" — see ScoredCandidate.partial_reason
 
 
 class WarningDict(TypedDict):

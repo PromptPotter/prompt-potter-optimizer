@@ -80,6 +80,7 @@ _CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(
     {
         "fork-cycle",
         "stop-cycle",
+        "skip-searchpoint",
         "delete-cycle",
         "cleanup-empty-cycles",
         "pause-cycle",

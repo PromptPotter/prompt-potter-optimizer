@@ -215,6 +215,41 @@ paths:
         '409': { $ref: '#/components/responses/VersionConflict' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/skip-searchpoint:
+    post:
+      operationId: skipSearchpoint
+      summary: Write `.runtime/skip.flag`; the runner cuts the searchpoint scoring now and continues.
+      description: |
+        Operator-driven early-abort of the searchpoint currently being scored:
+        the runner stops measuring its remaining samples, accepts the partial
+        score, and the cycle CONTINUES to the next candidate / round (it does
+        NOT stop). The operator analog of automatic PoBB candidate elimination.
+        Single-shot — the flag is consumed at the next per-sample checkpoint, so
+        exactly one searchpoint is cut per issue. A manual skip marks the cycle
+        `human_intervened` (no longer purely reproducible).
+      tags: [cycle-control]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: skip-searchpoint }
+                    payload: { $ref: '#/components/schemas/SkipSearchpointPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/step-cycle:
     post:
       operationId: stepCycle
@@ -1605,6 +1640,9 @@ components:
                 cycle with `StopReason.ORIGIN_GATE`.
 
     StopCyclePayload:
+      $ref: '#/components/schemas/CycleRef'
+
+    SkipSearchpointPayload:
       $ref: '#/components/schemas/CycleRef'
 
     StepCyclePayload:

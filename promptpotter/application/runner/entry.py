@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import traceback
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -304,8 +305,13 @@ async def run_optimization(
             # version bound once and went stale across forks).
             if session.state.cycle_id:
                 runtime_dir = cycle_dir_for_probe / ".runtime"
+                skip_flag = runtime_dir / "skip.flag"
                 session.stop_check = (runtime_dir / "stop.flag").is_file
                 session.pause_check = (runtime_dir / "pause.flag").is_file
+                # Skip is one-shot: poll the flag, then the loop deletes it the
+                # instant it fires so exactly one searchpoint is cut.
+                session.skip_check = skip_flag.is_file
+                session.skip_consume = partial(skip_flag.unlink, missing_ok=True)
             stop_reason, cycle_error = await run_round_loop(
                 cycle,
                 dataset,
