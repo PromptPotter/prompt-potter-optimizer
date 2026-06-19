@@ -222,7 +222,11 @@ End to end:
     owns the **one** `/lineage` fetch + the lens selection; both surfaces read it via
     `useLineageOverlay()`. No widget publishes to a module global from a render effect
     (the prior `mask-store.ts` singleton is **deleted**) — one fetch, one source,
-    rendered, never recomputed ([R-36]).
+    rendered, never recomputed ([R-36]). The same fetch carries the **per-candidate**
+    served values: `lens_value` (fitness under a `score:` lens) and `sample_set_accuracy`
+    / `sample_set_n` (scorer-faithful accuracy + count over a `samples=` subset, for the
+    fixed-sample-set bars). Closed candidates read these; the in-flight round has no round
+    file yet, so its bars live-slice `dash` HIT/MISS (binary — there is no continuous live fitness to be faithful to).
 
 **Then — validate the fold with a second real consumer.** The next mask (the
 abort-ablation, below) is a *different verdict* riding the *same* `find_divergences`

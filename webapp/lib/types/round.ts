@@ -45,7 +45,6 @@ export interface SampleOrderStep {
 // historical samples view.
 export interface RawResultRow {
   sample_id?: number;
-  score?: number;
   error?: unknown;
   predicted?: string;
   ground_truth?: string;

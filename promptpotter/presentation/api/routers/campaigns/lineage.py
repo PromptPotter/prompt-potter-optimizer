@@ -22,6 +22,7 @@ from promptpotter.application.mask import (
     make_scoring_verdict,
 )
 from promptpotter.application.mask.load import load_mask_record
+from promptpotter.application.mask.record import MaskRecord
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import CycleDir
@@ -62,6 +63,19 @@ class CampaignLineageCandidate(BaseModel):
         "recomputed from its stored evaluator namespace via the single scoring operation "
         "(the same one the mask divergence rides). Null without a `score:` lens, or when the "
         "candidate's namespace can't satisfy the formula.",
+    )
+    sample_set_accuracy: float | None = Field(
+        default=None,
+        description="Scorer-faithful accuracy over the request's `samples=` subset, re-scored "
+        "server-side from this candidate's per-sample rows (the same `materialize_row_derivable` "
+        "the mask divergence rides). Null without a `samples=` mask, or when the candidate never "
+        "ran any selected sample.",
+    )
+    sample_set_n: int | None = Field(
+        default=None,
+        description="How many of the `samples=` subset this candidate actually ran (the honest "
+        "'n of N' — older candidates that skipped some chosen samples read a smaller n). Null "
+        "without a `samples=` mask.",
     )
 
 
@@ -364,25 +378,17 @@ def _parse_samples(samples: str | None) -> frozenset[int] | None:
 
 
 def _mask_overlay(
-    store: StoreDep,
-    campaign_id: str,
-    lens: str | None,
-    samples: frozenset[int] | None,
+    record: MaskRecord, lens: str | None
 ) -> tuple[list[LineageDivergence], list[str]]:
-    """Run the chosen lens over the realized record → served divergence overlay.
+    """Fold the chosen lens over the pre-loaded record → served divergence overlay.
 
-    Read-only: loads the record, folds the selected verdict, returns the markers +
-    the dimmed subtree. *samples* (the sample-set mask) re-scores accuracy over the
-    subset at load time; it composes with a ``score:`` lens (a What-If formula
-    reweighting the subset accuracy) and is ignored for an ``abort:`` lens (which reads
-    the recorded firing log, not evaluators). An evaluator absent from an older round's
-    stored namespace is resolved once, inside ``value_with_mask_applied`` — that
+    Read-only: folds the selected verdict, returns the markers + the dimmed subtree. The
+    caller loads the record (once, so a ``samples=`` mask's subset re-score is reused for the
+    per-candidate ``sample_set_accuracy`` decoration too). An evaluator absent from an older
+    round's stored namespace is resolved once, inside ``value_with_mask_applied`` — that
     candidate is skipped, the tree unaffected; no second backstop here.
     """
-    verdict = _resolve_verdict(lens)
-    is_abort = bool(lens and lens.startswith("abort:"))
-    record_samples = samples if not is_abort else None
-    result = find_divergences(load_mask_record(store, campaign_id, record_samples), verdict)
+    result = find_divergences(record, _resolve_verdict(lens))
     divergences = [
         LineageDivergence(
             node_key=d.node_key,
@@ -393,6 +399,41 @@ def _mask_overlay(
         for d in result.divergences
     ]
     return divergences, result.divergent
+
+
+def _subset_accuracy_map(record: MaskRecord) -> dict[tuple[str, str], tuple[float | None, int]]:
+    """Per-candidate subset accuracy + scored-sample count from a ``samples=``-masked record,
+    keyed ``(cycle_id, candidate_id)``. The webapp's fixed-sample-set bars read these served
+    values instead of recomputing hits/n from per-round files. Accuracy is ``None`` when the
+    candidate ran zero selected samples (a blank slot, not a fabricated 0%)."""
+    out: dict[tuple[str, str], tuple[float | None, int]] = {}
+    for cyc in record.cycles:
+        for rnd in cyc.rounds:
+            for cand in rnd.candidates:
+                acc = cand.accuracy if cand.n_scored > 0 else None
+                out[(cyc.cycle_id, cand.candidate_id)] = (acc, cand.n_scored)
+    return out
+
+
+def _decorate_sample_set(
+    cycle: CampaignLineageCycle, subset: dict[tuple[str, str], tuple[float | None, int]]
+) -> CampaignLineageCycle:
+    """Stamp each candidate's served ``sample_set_accuracy``/``sample_set_n`` from the
+    subset-scored record (joined by ``candidate_id``). In-flight candidates carry no id and
+    aren't in the record yet, so they pass through null — the slice view shows closed rounds."""
+
+    def _stamp(cand: CampaignLineageCandidate) -> CampaignLineageCandidate:
+        entry = subset.get((cycle.cycle_id, cand.candidate_id))
+        if entry is None:
+            return cand
+        acc, n = entry
+        return cand.model_copy(update={"sample_set_accuracy": acc, "sample_set_n": n})
+
+    new_rounds = [
+        rnd.model_copy(update={"candidates": [_stamp(c) for c in rnd.candidates]})
+        for rnd in cycle.rounds
+    ]
+    return cycle.model_copy(update={"rounds": new_rounds})
 
 
 def _lineage_mtime(cycle_dirs: list[Path]) -> float | None:
@@ -569,9 +610,19 @@ async def get_campaign_lineage(
         )
 
     sample_ids = _parse_samples(samples)
-    divergences, divergent = (
-        _mask_overlay(store, campaign_id, lens, sample_ids) if (lens or sample_ids) else ([], [])
-    )
+    divergences: list[LineageDivergence] = []
+    divergent: list[str] = []
+    if lens or sample_ids:
+        # Load the realized record once. A ``samples=`` mask re-scores accuracy over the
+        # subset at load time; an ``abort:`` lens reads the firing log, not evaluators, so
+        # it loads the full set. The same record feeds both the divergence fold and the
+        # per-candidate ``sample_set_accuracy`` decoration — one read, no double-score.
+        is_abort = bool(lens and lens.startswith("abort:"))
+        record = load_mask_record(store, campaign_id, sample_ids if not is_abort else None)
+        divergences, divergent = _mask_overlay(record, lens)
+        if sample_ids and not is_abort:
+            subset = _subset_accuracy_map(record)
+            out_cycles = [_decorate_sample_set(c, subset) for c in out_cycles]
     response = CampaignLineageResponse(
         campaign_id=campaign_id,
         cycles=out_cycles,

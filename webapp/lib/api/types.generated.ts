@@ -311,6 +311,15 @@ export interface CampaignLineageCandidate {
    * same one the mask divergence rides). Null without a `score:` lens, or
    * when the candidate's namespace can't satisfy the formula. */
   lens_value: number | null;
+  /** Scorer-faithful accuracy over the request's `samples=` subset, re-scored
+   * server-side from this candidate's per-sample rows (the same
+   * `materialize_row_derivable` the mask divergence rides). Null without a
+   * `samples=` mask, or when the candidate never ran any selected sample. */
+  sample_set_accuracy: number | null;
+  /** How many of the `samples=` subset this candidate actually ran (the honest 'n
+   * of N' — older candidates that skipped some chosen samples read a smaller
+   * n). Null without a `samples=` mask. */
+  sample_set_n: number | null;
 }
 
 export interface CampaignLineageRound {

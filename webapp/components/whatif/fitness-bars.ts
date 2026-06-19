@@ -44,22 +44,13 @@ export function formulaFromWeights(
   return terms.join(" + ");
 }
 
-// Accuracy of one candidate restricted to a fixed sample-id set — the
-// "fixed sample set" fitness mode. Counts only the samples the candidate was
-// actually measured on (the intersection of `sampleSet` with its per-sample
-// rows), so older candidates that never ran some of the chosen samples read an
-// honest smaller `n` rather than a fabricated 0. `accuracy` is null when the
-// intersection is empty (the chart renders a blank slot, not a 0%).
-//
-// KNOWN LIMITATION (binary-only): `SampleRow` carries only `status` (HIT/MISS),
-// so this is `hits/n` — exact for a binary scorer, but it diverges from the
-// scorer-faithful subset accuracy (mean of continuous per-sample `fitness`, what
-// `materialize_row_derivable` computes server-side) for any partial-credit /
-// reciprocal-rank scorer. The webapp can't close that here — the per-sample
-// fitness isn't in the row. The R-36-clean fix is to serve a per-candidate
-// sample-set-accuracy map off the `samples=` mask lens (the lineage endpoint
-// already re-scores it; it just isn't surfaced per candidate). That is the parked
-// mask write-side lane — see docs/specs/code-debt-cleanup.md.
+// Accuracy of one candidate restricted to a fixed sample-id set — the "fixed
+// sample set" fitness mode, IN-FLIGHT ONLY. Closed candidates read the served
+// scorer-faithful value (`sampleSetByCandidate`, off the lineage `samples=` lens);
+// this binary `hits/n` is the live fallback for the in-flight round, which has no
+// round file yet and exposes only HIT/MISS per sample (no continuous fitness to be
+// faithful to). Counts only the samples the candidate ran (∩ `sampleSet`), so an
+// honest smaller `n`, not a fabricated 0; `accuracy` is null on an empty intersection.
 export function accuracyOverSampleSet(
   samples: SampleRow[],
   sampleSet: Set<number>,

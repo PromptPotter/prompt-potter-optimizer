@@ -37,6 +37,15 @@ def _trim(text: str, n: int) -> str:
     return t if len(t) <= n else t[: n - 1] + "…"
 
 
+def _partial_hit_rate(samples: list[dict[str, Any]]) -> float | None:
+    """Running hit-rate over scored-so-far samples (hits/total), or None when none scored.
+    Bridges the gap before a candidate's final ``accuracy`` lands so the dashboard shows
+    in-flight progress; matches the hit-rate the webapp used to recompute from sample lines."""
+    if not samples:
+        return None
+    return sum(1 for s in samples if s.get("hit")) / len(samples)
+
+
 def fmt_sample_line(s: dict[str, Any]) -> str:
     """One compact line per query for the in-flight ``l1_score`` samples list.
     Keeps the live dashboard scannable instead of bloating with full ~2 kB
@@ -109,8 +118,15 @@ def build_l1_score_block(
             }
         )
         cand_evaluators = dict(scores.get("evaluators") or {})
+        samples = cand.get("samples") or []
+        final_accuracy = scores.get("accuracy")
         stats: dict[str, Any] = {
-            "accuracy": scores.get("accuracy"),
+            # Final accuracy is null until a candidate fully scores; fall back to the
+            # running hit-rate over scored-so-far samples so the figure is never null
+            # mid-scoring (consumers read it, never recompute from sample lines).
+            "accuracy": final_accuracy
+            if final_accuracy is not None
+            else _partial_hit_rate(samples),
             "composite_fitness": scores.get("composite_fitness"),
             "composite_fitness_formula": active_formula,
             # Per-candidate value-inlined short formula. The legend for short
@@ -124,7 +140,6 @@ def build_l1_score_block(
             "invalid": scores.get("invalid", False),
             "validation_failures": scores.get("validation_failures") or [],
         }
-        samples = cand.get("samples") or []
         output_candidates.append(
             {
                 "idx": idx,

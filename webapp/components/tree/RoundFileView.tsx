@@ -21,9 +21,6 @@ interface ResultRow {
   predicted?: string;
   ground_truth?: string;
   hit?: boolean;
-  fitness?: number;
-  score?: number;
-  error?: unknown;
   cached?: boolean;
 }
 
@@ -45,17 +42,6 @@ interface Props {
   raw: string;
 }
 
-function isHit(r: ResultRow): boolean {
-  if (typeof r.hit === "boolean") return r.hit;
-  if (typeof r.fitness === "number") return r.fitness >= 0.5;
-  if (typeof r.score === "number") return r.score >= 0.5;
-  if (r.error) return false;
-  if (r.predicted && r.ground_truth) {
-    return String(r.predicted).includes(String(r.ground_truth).replace("#### ", "").trim());
-  }
-  return false;
-}
-
 function pct(n: number | undefined): string {
   if (typeof n !== "number" || !isFinite(n)) return "—";
   return `${(n * 100).toFixed(1)}%`;
@@ -70,7 +56,7 @@ export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const results = doc.results ?? [];
   const scoreboard = doc.scoreboard ?? [];
-  const hits = doc.hits ?? results.filter(isHit).length;
+  const hits = doc.hits ?? results.filter((r) => r.hit).length;
   const total = doc.total ?? results.length;
 
   return (
@@ -143,7 +129,7 @@ export function RoundFileView({ doc, raw }: Props) {
               </thead>
               <tbody>
                 {results.map((r, i) => {
-                  const hit = isHit(r);
+                  const hit = r.hit ?? false;
                   const id = r.sample_id ?? r.id ?? i;
                   return (
                     <tr key={String(id)}>

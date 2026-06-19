@@ -17,20 +17,17 @@ import type { RawResultRow } from "@/lib/types";
 
 ensureChartRegistered();
 
-// Local alias kept to the fields FreqChart actually buckets. Same
-// shape, narrower view — the chart never touches sample_id / hit / fitness.
-type ResultRow = Pick<RawResultRow, "score" | "error" | "predicted" | "ground_truth">;
+// Local alias kept to the one field FreqChart buckets: the per-sample
+// `fitness` the backend always serves (error rows floored to 0.0 by
+// `rescore_results`). Narrower view of the served row.
+type ResultRow = Pick<RawResultRow, "fitness">;
 
 const LABELS = ["0", "", "", "", "", "", "", "", "", "1"];
 
 function bucketScores(results: ResultRow[]): number[] {
   const buckets = new Array<number>(10).fill(0);
   results.forEach((r) => {
-    const score = typeof r.score === "number"
-      ? r.score
-      : (r.error
-        ? 0
-        : (r.ground_truth && r.predicted && String(r.predicted).includes(String(r.ground_truth).replace("#### ", "").trim()) ? 1 : 0));
+    const score = typeof r.fitness === "number" ? r.fitness : 0;
     const idx = Math.min(9, Math.max(0, Math.floor(score * 9.999)));
     buckets[idx] += 1;
   });
@@ -39,15 +36,15 @@ function bucketScores(results: ResultRow[]): number[] {
 
 // Parse the live sample lines from in-flight candidates into pseudo-results
 // so the chart can bucket per-sample HIT/MISS without waiting for round
-// completion.
+// completion. Live lines carry only HIT/MISS → 1.0 / 0.0 fitness.
 function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
   const out: ResultRow[] = [];
   for (const c of liveL1Candidates(dash)) {
     for (const raw of c.samples ?? []) {
       if (typeof raw !== "string") continue;
       const p = parseSampleLine(raw);
-      if (p.status === "HIT") out.push({ score: 1 });
-      else if (p.status === "MISS") out.push({ score: 0 });
+      if (p.status === "HIT") out.push({ fitness: 1 });
+      else if (p.status === "MISS") out.push({ fitness: 0 });
     }
   }
   return out;

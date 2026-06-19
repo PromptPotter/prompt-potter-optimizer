@@ -43,6 +43,10 @@ class MaskCandidate(BaseModel):
     candidate_id: str
     evaluators: dict[str, float] = Field(default_factory=dict)
     accuracy: float = 0.0
+    # How many samples this candidate was actually scored on — the full measured set,
+    # or the intersection with the sample-set mask. Lets a subset re-score serve an
+    # honest "n of N" (a candidate that never ran some chosen samples reads a smaller n).
+    n_scored: int = 0
     is_winner: bool = False
     is_eligible: bool = True
     # Which PoBB abort contributor cut this candidate's measurement early, if any:

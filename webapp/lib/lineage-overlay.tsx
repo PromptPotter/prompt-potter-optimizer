@@ -51,6 +51,10 @@ export interface LineageOverlay {
   // lineage tree and fitness bars resolve by. Empty without a `score:` lens (e.g. What-If
   // closed), so a consumer reads null and falls back to its default series.
   lensValueByCandidate: ReadonlyMap<string, number>;
+  // Each closed candidate's scorer-faithful accuracy over the active `samples=` subset +
+  // the count it ran — served (R-36), keyed the same way. Empty without a `samples=` mask.
+  // In-flight candidates aren't here (no round file yet); the bars live-slice those.
+  sampleSetByCandidate: ReadonlyMap<string, { accuracy: number | null; n: number }>;
 }
 
 const LineageOverlayContext = createContext<LineageOverlay | null>(null);
@@ -173,6 +177,25 @@ export function LineageOverlayProvider({
     }
     return m;
   }, [data]);
+  // Served per-candidate sample-set accuracy → lookup, same identity key. `sample_set_n`
+  // is non-null exactly when a `samples=` mask was applied (0 = ran none of the chosen set,
+  // accuracy null), so it's the presence guard; absence ⇒ no mask, consumer falls back.
+  const sampleSetByCandidate = useMemo(() => {
+    const m = new Map<string, { accuracy: number | null; n: number }>();
+    for (const cyc of data?.cycles ?? []) {
+      for (const r of cyc.rounds) {
+        r.candidates.forEach((cand, i) => {
+          if (cand.sample_set_n == null) return;
+          const id = cand.candidate_id || liveCandidateId(r.round, i);
+          m.set(`${cyc.cycle_id}::${id}`, {
+            accuracy: cand.sample_set_accuracy,
+            n: cand.sample_set_n,
+          });
+        });
+      }
+    }
+    return m;
+  }, [data]);
   // "Active" (red tag) only when the served overlay actually carries a divergence —
   // NOT merely because a lens/chip is requested.
   const maskActive = divergenceByKey.size > 0 || divergentKeys.size > 0;
@@ -196,6 +219,7 @@ export function LineageOverlayProvider({
       divergenceByKey,
       divergentKeys,
       lensValueByCandidate,
+      sampleSetByCandidate,
     }),
     [
       data,
@@ -206,6 +230,7 @@ export function LineageOverlayProvider({
       divergenceByKey,
       divergentKeys,
       lensValueByCandidate,
+      sampleSetByCandidate,
     ],
   );
 

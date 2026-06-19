@@ -65,7 +65,7 @@ def _candidates(round_file: dict[str, Any], samples: frozenset[int] | None) -> l
                 # Never ran any selected sample → unscorable on this set. Empty
                 # evaluators make the verdict + winner-threading skip it uniformly,
                 # exactly like a candidate with no stored values.
-                out.append(_mask_candidate(sc, {}, 0.0, winners))
+                out.append(_mask_candidate(sc, {}, 0.0, 0, winners))
                 continue
         evaluators = dict(sc.evaluators)
         accuracy = sc.accuracy
@@ -75,17 +75,22 @@ def _candidates(round_file: dict[str, Any], samples: frozenset[int] | None) -> l
         if evaluators and rows:
             evaluators.update(materialize_row_derivable(rows))
             accuracy = evaluators["accuracy"]
-        out.append(_mask_candidate(sc, evaluators, accuracy, winners))
+        out.append(_mask_candidate(sc, evaluators, accuracy, len(rows), winners))
     return out
 
 
 def _mask_candidate(
-    sc: ScoredCandidate, evaluators: dict[str, float], accuracy: float, winners: set[str]
+    sc: ScoredCandidate,
+    evaluators: dict[str, float],
+    accuracy: float,
+    n_scored: int,
+    winners: set[str],
 ) -> MaskCandidate:
     return MaskCandidate(
         candidate_id=sc.candidate_id,
         evaluators=evaluators,
         accuracy=accuracy,
+        n_scored=n_scored,
         is_winner=sc.candidate_id in winners,
         is_eligible=_mask_eligible(sc),
         abort=_abort_contributor(sc),

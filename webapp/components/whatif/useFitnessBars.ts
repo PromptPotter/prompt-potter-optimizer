@@ -11,16 +11,16 @@ import { accuracyOverSampleSet } from "./fitness-bars";
 import { samplesForRow } from "@/lib/derivations";
 import type { BarSlot } from "./FitnessChart";
 import type { DiagnosticRunRecord } from "@/lib/api";
-import type { DashboardSnapshot, RoundFileDoc } from "@/lib/poll";
+import type { DashboardSnapshot } from "@/lib/poll";
 
 export function useFitnessBars(
   diagByLabel: Map<string, DiagnosticRunRecord>,
-  // Fixed-sample-set mode: when non-null, every bar's accuracy is recomputed
-  // over exactly these sample ids (∩ the samples that candidate ran), so all
-  // candidates compare on one basis. `chartedDocs` supplies the per-candidate
-  // hit matrix for closed rounds; `dash` for the in-flight round.
+  // Fixed-sample-set mode: when non-null, every bar's accuracy is over exactly these
+  // sample ids (∩ the samples that candidate ran), so all candidates compare on one
+  // basis. Closed candidates read the served scorer-faithful value
+  // (`sampleSetByCandidate`); the in-flight round (no round file yet) live-slices `dash`.
   sampleSet: number[] | null,
-  chartedDocs: ReadonlyMap<number, RoundFileDoc | null>,
+  sampleSetByCandidate: ReadonlyMap<string, { accuracy: number | null; n: number }>,
   dash: DashboardSnapshot | null,
   // The What-If bar value, served by the backend under the active `score:` lens
   // (the lineage overlay's `lensValueByCandidate`) — NOT recomputed here (R-36).
@@ -47,13 +47,18 @@ export function useFitnessBars(
         cycleId == null ? null : (whatifByCandidate.get(`${cycleId}::${row.candidate_id}`) ?? null);
 
       if (sliceIds) {
-        // Recompute accuracy over the chosen sample subset from this
-        // candidate's per-sample hits — live (in-flight) vs historical, never
-        // merged. Composite / what-if are per-round aggregates that can't be
-        // re-sliced per sample, so they're suppressed in this mode: the chart
-        // shows the sliced accuracy alone, honestly.
-        const samples = samplesForRow(row, dash, chartedDocs.get(row.round) ?? null);
-        const sliced = accuracyOverSampleSet(samples, sliceIds);
+        // Accuracy over the chosen sample subset, candidate-by-candidate (never
+        // merged across rounds). Closed candidates read the served scorer-faithful
+        // value (the lineage `samples=` lens already re-scored it); the in-flight
+        // round has no round file yet, so it live-slices the dash HIT/MISS lines.
+        // Composite / what-if are per-round aggregates that can't be re-sliced per
+        // sample, so they're suppressed here — the chart shows sliced accuracy alone.
+        const served =
+          cycleId != null && row.source === "history"
+            ? sampleSetByCandidate.get(`${cycleId}::${row.candidate_id}`)
+            : undefined;
+        const sliced =
+          served ?? accuracyOverSampleSet(samplesForRow(row, dash, null), sliceIds);
         return {
           key: row.key,
           label: row.label,
@@ -106,5 +111,5 @@ export function useFitnessBars(
           : undefined,
       };
     });
-  }, [candidates, diagByLabel, sampleSet, chartedDocs, dash, whatifByCandidate, cycleId]);
+  }, [candidates, diagByLabel, sampleSet, sampleSetByCandidate, dash, whatifByCandidate, cycleId]);
 }

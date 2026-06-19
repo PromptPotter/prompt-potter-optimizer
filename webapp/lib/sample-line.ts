@@ -39,29 +39,3 @@ export function parseSampleLine(line: string): ParsedSample {
     query: m[8],
   };
 }
-
-// Running accuracy over a candidate's sample list — handles both the
-// compact string lines (parsed) and object samples (`{ hit }`). Returns
-// hits / total, or null when nothing has been scored yet.
-export function computeAccuracyFromSamples(
-  samples: readonly (string | { hit?: boolean })[] | undefined,
-): number | null {
-  if (!samples || samples.length === 0) return null;
-  let hits = 0;
-  let total = 0;
-  for (const raw of samples) {
-    if (typeof raw === "string") {
-      const p = parseSampleLine(raw);
-      if (p.status === "HIT") {
-        hits += 1;
-        total += 1;
-      } else if (p.status === "MISS") {
-        total += 1;
-      }
-    } else if (raw && typeof raw.hit === "boolean") {
-      if (raw.hit) hits += 1;
-      total += 1;
-    }
-  }
-  return total > 0 ? hits / total : null;
-}

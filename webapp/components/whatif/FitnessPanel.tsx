@@ -22,8 +22,7 @@ import { FitnessFormulaEditor } from "./FitnessFormulaEditor";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useFetch } from "@/lib/hooks/useFetch";
-import { useChartedRoundDocs } from "@/lib/hooks/useChartedRoundDocs";
-import { roundHasCandidates, sortedRounds } from "@/lib/derivations";
+import { sortedRounds } from "@/lib/derivations";
 import { useWorkspace } from "@/lib/workspace";
 import { useFitnessBars } from "./useFitnessBars";
 import { SampleSetControl } from "./SampleSetControl";
@@ -241,19 +240,6 @@ export function FitnessPanel() {
   // labels) comes from `useRoundCandidates` — the same source
   // LineageTree reads. With one derivation the two surfaces cannot
   // disagree on count, labels, or selection target.
-  // Fixed-sample-set mode (driven by the Sample-trajectory "Steps" view) needs
-  // the per-(candidate, sample) hit matrix from each charted round's file —
-  // fetched only while a set is active, so the default chart stays dash-only.
-  const chartedRounds = useMemo(
-    () => history.filter(roundHasCandidates).map((h) => h.round),
-    [history],
-  );
-  const chartedDocs = useChartedRoundDocs(
-    campaignId,
-    cycleId,
-    chartedRounds,
-    sampleSet != null,
-  );
 
   // The measured-sample universe the bars can be sliced over — used to seed the
   // set when the operator first turns the mode on. The chip strip + per-round
@@ -266,7 +252,7 @@ export function FitnessPanel() {
   const bars = useFitnessBars(
     diagByLabel,
     sampleSet,
-    chartedDocs,
+    overlay.sampleSetByCandidate,
     dash,
     overlay.lensValueByCandidate,
     cycleId,

@@ -23,7 +23,6 @@ import {
   roundOf,
   type DashboardSnapshot,
 } from "@/lib/poll";
-import { computeAccuracyFromSamples } from "@/lib/sample-line";
 import type { CandidateRow, RoundCandidates, RoundSummary } from "@/lib/types";
 
 // A `rounds[]` row is chartable/selectable only if it carries scored candidates.
@@ -102,10 +101,11 @@ export function roundCandidates(dash: DashboardSnapshot | null): CandidateRow[] 
       const i = Number(c.idx);
       if (!Number.isFinite(i) || i < 0) continue;
       const evaluators = c.stats?.evaluators ?? {};
+      // Served verbatim: the projection fills `accuracy` with the running
+      // hit-rate over scored-so-far samples until the final figure lands,
+      // so this is never null mid-scoring (no client recompute).
       const accuracy =
-        typeof c.stats?.accuracy === "number"
-          ? c.stats.accuracy
-          : computeAccuracyFromSamples(c.samples);
+        typeof c.stats?.accuracy === "number" ? c.stats.accuracy : null;
       const composite =
         typeof c.stats?.composite_fitness === "number"
           ? c.stats.composite_fitness
