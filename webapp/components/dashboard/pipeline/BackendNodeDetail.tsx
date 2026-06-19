@@ -57,7 +57,7 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   const overlayBase = (draft?.pipeline_overlay ?? {}) as Record<string, unknown>;
   const params = cv.nodeConfigSchema?.[node.id] ?? [];
   const modelTunable = params.find((p) => p.kind === "model")?.optimizer_tunable ?? false;
-  const lockModel = draft ? draft.lock_model : !modelTunable;
+  const lockModel = draft ? draft.optimization_overrides.lock_model : !modelTunable;
 
   return (
     <NodeSurface

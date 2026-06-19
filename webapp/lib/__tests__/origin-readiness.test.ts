@@ -15,7 +15,20 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     n_samples: 42,
     connector: "termnorm",
     scoring_composite: "exact_match",
-    max_rounds: 5,
+    optimization_overrides: {
+      max_rounds: 5,
+      lock_model: true,
+      mechanisms: {
+        selection: { per_round_resubset: true, online_reorder: true },
+        elimination: {
+          epsilon_elimination: true,
+          deterministic_dominance: true,
+          degradation_fatal_fastpath: true,
+          leader_lock_in: false,
+          round_significance_gate: false,
+        },
+      },
+    },
     raw_task_description: "",
     pipeline_overlay: {},
     headers: ["input", "gt"],
@@ -29,17 +42,6 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
       task_description: "unset",
     },
     origin_prompt_fields: {},
-    lock_model: true,
-    mechanisms: {
-      selection: { per_round_resubset: true, online_reorder: true },
-      elimination: {
-        epsilon_elimination: true,
-        deterministic_dominance: true,
-        degradation_fatal_fastpath: true,
-        leader_lock_in: false,
-        round_significance_gate: false,
-      },
-    },
     candidate_library_size: 0,
     created_at: "2026-05-30T00:00:00Z",
     updated_at: "2026-05-30T00:00:00Z",
@@ -111,7 +113,9 @@ describe("questionPatch / questionOptions (resolver answer-back loop)", () => {
     expect(questionPatch("task_description", "map codes")).toEqual({
       raw_task_description: "map codes",
     });
-    expect(questionPatch("max_rounds", "8")).toEqual({ max_rounds: 8 });
+    expect(questionPatch("max_rounds", "8")).toEqual({
+      optimization_overrides: { max_rounds: 8 },
+    });
   });
 
   it("rejects un-applicable answers so the caller skips them", () => {

@@ -257,18 +257,22 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         <div className="new-campaign-optional-body">
           <NumberField
             label="Max rounds"
-            value={draft.max_rounds}
+            value={draft.optimization_overrides.max_rounds}
             min={1}
             max={100}
-            onApply={(max_rounds) => flow.applyPatch({ max_rounds })}
+            onApply={(max_rounds) =>
+              flow.applyPatch({ optimization_overrides: { max_rounds } })
+            }
           />
           <SlugField slug={draft.slug} onApply={(slug) => flow.applyPatch({ slug })} />
           {/* Pluggable orchestration mechanisms — sorting/selection + early-abort
               toggles, the same surface the dashboard renders read-only. Editable
               here at authoring time; each flip patches the draft's campaign.json. */}
           <MechanismsPanel
-            mechanisms={draft.mechanisms}
-            onChange={(mechanisms) => flow.applyPatch({ mechanisms })}
+            mechanisms={draft.optimization_overrides.mechanisms}
+            onChange={(mechanisms) =>
+              flow.applyPatch({ optimization_overrides: { mechanisms } })
+            }
           />
         </div>
       </details>

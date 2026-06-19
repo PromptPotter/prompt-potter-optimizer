@@ -44,7 +44,7 @@ function coerce(kind: string, raw: string): unknown {
 // `param_keys` = the open (unlocked) non-model params — the optimizer's tunable
 // subset for this node; `param_allowed_values` narrows an open enum only when it
 // is a strict subset of its options; `config` carries changed origin values
-// (incl. the chosen model). `lock_model` rides the top-level patch field.
+// (incl. the chosen model). `lock_model` rides the `optimization_overrides` patch.
 export function nodeOverlayPatch(
   base: Record<string, unknown>,
   lockModel: boolean,
@@ -75,5 +75,5 @@ export function nodeOverlayPatch(
     optimizer: { param_keys: paramKeys, param_allowed_values: allowedValues },
     ...(Object.keys(config).length > 0 ? { config: { ...prevConfig, ...config } } : {}),
   };
-  return { lock_model: lockModel, pipeline_overlay: overlay };
+  return { optimization_overrides: { lock_model: lockModel }, pipeline_overlay: overlay };
 }

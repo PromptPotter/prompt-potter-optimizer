@@ -21,7 +21,7 @@ describe("nodeOverlayPatch", () => {
     const opt = (patch.pipeline_overlay!.web_search as Record<string, unknown>)
       .optimizer as Record<string, unknown>;
     expect(opt.param_keys).toEqual(["max_sites"]);
-    expect(patch.lock_model).toBe(true);
+    expect(patch.optimization_overrides).toEqual({ lock_model: true });
   });
 
   it("locks a node to [] when every param is locked", () => {

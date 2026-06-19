@@ -29,20 +29,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
+from promptpotter.application.config import MechanismConfig
 from promptpotter.domain.identity import TenantId, safe_name
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.shared.clock import utcnow_iso
 
 DEFAULT_CONNECTOR = "termnorm"
 """Only registered connector today (per root CLAUDE.md); operator-editable."""
-
-
-def _default_mechanisms() -> dict[str, Any]:
-    """Stock mechanism toggles (all groups, default values). Deferred import keeps
-    the config module off this module's import path."""
-    from promptpotter.application.config import MechanismConfig
-
-    return MechanismConfig().model_dump(mode="json")
 
 
 def closed_answer_format(labels: Sequence[str]) -> str:
@@ -63,6 +58,39 @@ PREVIEW_ROWS = 10
 """Sample-preview head size returned alongside every mutation response."""
 
 
+class OptimizationOverrides(BaseModel):
+    """The campaign-config knobs a new-campaign draft carries, as one validated
+    object — collapses what were three hand-threaded fields (``max_rounds`` /
+    ``lock_model`` / ``mechanisms``) so a new knob is one field here, not six
+    plumbing sites (draft → wire → edit-patch → webapp → OpenAPI). Operator-facing
+    (UI) vocabulary; the commit builder maps ``lock_model`` → the committed
+    ``campaign.json::optimization.forbidden_axes_strict``. The ``max_rounds`` bound
+    gates the operator EDIT path; the trusted internal ``draft_from_dataset`` path
+    builds the dict directly (a reused dataset's config may carry a higher ceiling)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_rounds: int = Field(
+        DEFAULT_MAX_ROUNDS, ge=1, le=100, description="Round ceiling for the campaign."
+    )
+    lock_model: bool = Field(
+        True,
+        description="Bar the optimizer from mutating model/provider campaign-wide "
+        "(commits as ``forbidden_axes_strict``).",
+    )
+    mechanisms: MechanismConfig = Field(
+        default_factory=MechanismConfig,
+        description="Pluggable orchestration mechanism toggles "
+        "(sorting/selection + early-abort groups).",
+    )
+
+
+def _default_optimization_overrides() -> dict[str, Any]:
+    """Stock campaign-config knobs (all defaults), as the JSON-shaped dict the
+    draft stores and the wire emits."""
+    return OptimizationOverrides().model_dump(mode="json")
+
+
 @dataclass(frozen=True, slots=True)
 class DraftCampaign:
     """Server-held canonical state for an in-progress ingest. Frozen — mutate via :meth:`patch`.
@@ -70,9 +98,9 @@ class DraftCampaign:
     **It fuses two things on purpose.** The *dataset* half (``slug``,
     ``raw_task_description``, ``pipeline_overlay``, ``origin_prompt_fields``, the
     column mapping) materializes into the four dataset files; the *campaign-config*
-    half (``connector``, ``scoring_composite``, ``max_rounds``, ``optimizer_*``,
-    ``lock_model``) materializes into the sibling ``campaign.json``. The fusion
-    is correct for the one-form ingest UX — the operator fills both in one pass.
+    half (``connector``, ``scoring_composite``, ``optimization_overrides``)
+    materializes into the sibling ``campaign.json``. The fusion is correct for the
+    one-form ingest UX — the operator fills both in one pass.
 
     **The ``slug`` freezes at commit.** Before commit it's a mutable, operator-
     editable name; the moment :func:`~promptpotter.application.jobs.launcher.commit_draft_to_dataset`
@@ -89,7 +117,6 @@ class DraftCampaign:
     sample_preview: tuple[dict[str, str], ...]
     connector: str
     scoring_composite: str
-    max_rounds: int
     raw_task_description: str
     pipeline_overlay: dict[str, Any]
     created_at: str
@@ -147,17 +174,13 @@ class DraftCampaign:
     # existing dataset PRESERVES its pipeline through display + commit instead of
     # silently resetting to the connector default (the llm_only-on-reuse bug).
     pipeline_steps: list[str] = field(default_factory=list)
-    # Whether the optimizer is barred from mutating model/provider campaign-wide
-    # (the ``forbidden_axes_strict`` knob). Default locked — the conservative
-    # floor. Operator-editable in the pipeline-config control panel; drives both
-    # the wire ``optimizer_locks.forbidden_axes`` and the committed campaign.json.
-    lock_model: bool = True
-    # The pluggable orchestration mechanism toggles
-    # (``optimization.mechanisms`` — sorting/selection + early-abort groups).
-    # Nested ``{group: {toggle: bool}}`` shape; seeded with the stock defaults,
-    # operator-editable in the new-campaign form, and materialized verbatim into
-    # the committed ``campaign.json``. The campaign half, like ``max_rounds``.
-    mechanisms: dict[str, Any] = field(default_factory=_default_mechanisms)
+    # The campaign-config knobs, as one :class:`OptimizationOverrides`-shaped dict
+    # (``max_rounds`` / ``lock_model`` / ``mechanisms``). Seeded with the stock
+    # defaults, operator-editable in the new-campaign form, and materialized into
+    # the committed ``campaign.json::optimization`` (``lock_model`` →
+    # ``forbidden_axes_strict``). One object so a new knob is one field on
+    # :class:`OptimizationOverrides`, not a fresh thread through every surface.
+    optimization_overrides: dict[str, Any] = field(default_factory=_default_optimization_overrides)
     # The target library a ``candidate_source`` pipeline ranks each query against —
     # the "4th required input" the operator drops in the ingest UI when a node type
     # raises the dependency (see ``PipelineDependency``). Empty until dropped; on
@@ -191,7 +214,7 @@ class DraftCampaign:
             "n_samples": self.n_samples,
             "connector": self.connector,
             "scoring_composite": self.scoring_composite,
-            "max_rounds": self.max_rounds,
+            "optimization_overrides": dict(self.optimization_overrides),
             "raw_task_description": self.raw_task_description,
             "pipeline_overlay": dict(self.pipeline_overlay),
             "headers": list(self.headers),
@@ -201,8 +224,6 @@ class DraftCampaign:
                 field_name: prov.value for field_name, prov in self.field_provenance.items()
             },
             "origin_prompt_fields": dict(self.origin_prompt_fields),
-            "lock_model": self.lock_model,
-            "mechanisms": dict(self.mechanisms),
             # Count, not the full list — a library can run to tens of thousands of
             # entries; the UI needs only "is it fulfilled, and how big". The
             # per-dependency ``fulfilled`` flag rides ``optimizer_locks``' sibling
@@ -340,7 +361,6 @@ class DraftCampaignRegistry:
             sample_preview=tuple(dict(row) for row in sample_preview[:PREVIEW_ROWS]),
             connector=DEFAULT_CONNECTOR,
             scoring_composite=DEFAULT_SCORING_COMPOSITE,
-            max_rounds=DEFAULT_MAX_ROUNDS,
             raw_task_description="",
             pipeline_overlay={},
             headers=tuple(headers),
@@ -467,6 +487,7 @@ __all__ = [
     "PREVIEW_ROWS",
     "DraftCampaign",
     "DraftCampaignRegistry",
+    "OptimizationOverrides",
     "dataset_source_of",
     "default_slug_from_filename",
 ]

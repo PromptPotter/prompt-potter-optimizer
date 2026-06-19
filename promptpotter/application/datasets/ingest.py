@@ -30,6 +30,7 @@ from promptpotter.application.datasets.draft_campaign import (
     PREVIEW_ROWS,
     DraftCampaign,
     DraftCampaignRegistry,
+    OptimizationOverrides,
     default_slug_from_filename,
 )
 from promptpotter.application.datasets.loaders import resolve_dataset_items
@@ -201,10 +202,17 @@ def draft_from_dataset(
             "raw_task_description": task,
             "connector": connector,
             "scoring_composite": scoring,
-            "max_rounds": max_rounds,
-            # Preserve the dataset's own mechanism toggles so reusing an Origin
-            # carries its sorting/early-abort config instead of resetting to stock.
-            "mechanisms": cc.optimization.mechanisms.model_dump(mode="json"),
+            # The campaign-config knobs as one object. Preserve the dataset's round
+            # ceiling + its own mechanism toggles (sorting/early-abort) so reusing an
+            # Origin carries its config instead of resetting to stock; lock_model
+            # keeps the stock default. Built off the default dump (not validated)
+            # so a dataset's higher ceiling passes through — the 1-100 bound gates
+            # only the operator edit path.
+            "optimization_overrides": {
+                **OptimizationOverrides().model_dump(mode="json"),
+                "max_rounds": max_rounds,
+                "mechanisms": cc.optimization.mechanisms.model_dump(mode="json"),
+            },
             "pipeline_overlay": pipeline_overlay,
             "origin_prompt_fields": origin_prompt_fields,
             # Preserve the dataset's own pipeline (full Research+Match, llm_only, …)

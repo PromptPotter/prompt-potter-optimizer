@@ -43,6 +43,7 @@ from promptpotter.application.datasets.dataset_replace import (
     NothingToReplaceError,
     version_and_repoint,
 )
+from promptpotter.application.datasets.draft_campaign import OptimizationOverrides
 from promptpotter.application.datasets.origin_readiness import resolution_block
 from promptpotter.application.jobs import JobRegistry
 from promptpotter.application.jobs.launcher import (
@@ -193,7 +194,6 @@ class _EditDraftPatch(BaseModel):
     )
     connector: str | None = Field(default=None, min_length=1, max_length=64)
     scoring_composite: str | None = Field(default=None, min_length=1, max_length=64)
-    max_rounds: int | None = Field(default=None, ge=1, le=100)
     raw_task_description: str | None = Field(default=None, max_length=16384)
     pipeline_overlay: dict[str, Any] | None = None
     # The active pipeline step list (e.g. ["llm_only"] vs the full
@@ -206,13 +206,11 @@ class _EditDraftPatch(BaseModel):
     # shape: the six string fields + optional few_shot_examples). Replaces the
     # draft's origin_prompt_fields wholesale — the editor sends the full object.
     origin_prompt_fields: dict[str, Any] | None = None
-    # Whether the optimizer is barred from mutating model/provider (the
-    # forbidden_axes_strict knob). The pipeline-config control panel toggles it.
-    lock_model: bool | None = None
-    # Mechanism toggles (optimization.mechanisms — sorting/selection + early-abort
-    # groups). Nested {group:{toggle:bool}}; the editor sends the FULL object (like
-    # origin_prompt_fields), validated against MechanismConfig before storing.
-    mechanisms: dict[str, Any] | None = None
+    # The campaign-config knobs (max_rounds / lock_model / mechanisms) as one
+    # object. Shallow-merged onto the draft's current overrides then validated
+    # against OptimizationOverrides — so the editor can send one knob (e.g.
+    # {"max_rounds": 8}) or several, and a nested `mechanisms` replaces wholesale.
+    optimization_overrides: dict[str, Any] | None = None
     # Audit marker stamped when an agent simulates the check-in node (authors the
     # origin decomposition by hand instead of spending the LLM call) — see
     # `DraftCampaign.simulated_checkin`. Free dict `{by, model, at}`; lands in the
@@ -301,22 +299,21 @@ async def edit_draft_campaign(
     for patch_val, draft_attr in (
         (patch.connector, "connector"),
         (patch.scoring_composite, "scoring_composite"),
-        (patch.max_rounds, "max_rounds"),
         (patch.pipeline_overlay, "pipeline_overlay"),
         (patch.origin_prompt_fields, "origin_prompt_fields"),
-        (patch.lock_model, "lock_model"),
         (patch.simulated_checkin, "simulated_checkin"),
         (patch.pipeline_steps, "pipeline_steps"),
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val
 
-    # Mechanism toggles: validate the full object against the config model (rejects
-    # unknown groups/toggles, normalizes), then store the dumped shape.
-    if patch.mechanisms is not None:
-        from promptpotter.application.config import MechanismConfig
-
-        changes["mechanisms"] = MechanismConfig.model_validate(patch.mechanisms).model_dump(
+    # Campaign-config knobs: shallow-merge the patched keys onto the draft's
+    # current overrides (so one knob can change without resetting the rest), then
+    # validate the result against OptimizationOverrides (rejects unknown keys /
+    # out-of-range max_rounds / malformed mechanisms) and store the dumped shape.
+    if patch.optimization_overrides is not None:
+        merged = {**draft.optimization_overrides, **patch.optimization_overrides}
+        changes["optimization_overrides"] = OptimizationOverrides.model_validate(merged).model_dump(
             mode="json"
         )
 

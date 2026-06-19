@@ -122,7 +122,9 @@ export function questionPatch(field: string, answer: string): DraftPatch | null 
       return { scoring_composite: value };
     case ORIGIN_KEY.maxRounds: {
       const n = Number(value);
-      return Number.isInteger(n) && n >= 1 && n <= 100 ? { max_rounds: n } : null;
+      return Number.isInteger(n) && n >= 1 && n <= 100
+        ? { optimization_overrides: { max_rounds: n } }
+        : null;
     }
     default:
       return null; // backend.node_config + unknown fields aren't string-applicable here
@@ -171,7 +173,8 @@ export function plainLanguageRecap(draft: DraftCampaignWire): string {
   const target = draft.column_ground_truth || "the target";
   const scorer = SCORER_LABELS[draft.scoring_composite] ?? draft.scoring_composite;
   const connector = CONNECTOR_LABELS[draft.connector] ?? draft.connector;
-  const rounds = draft.max_rounds === 1 ? "1 round" : `up to ${draft.max_rounds} rounds`;
+  const maxRounds = draft.optimization_overrides.max_rounds;
+  const rounds = maxRounds === 1 ? "1 round" : `up to ${maxRounds} rounds`;
 
   const title = shortTaskTitle(draft.raw_task_description);
   const lead = title

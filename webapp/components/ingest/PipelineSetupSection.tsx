@@ -111,7 +111,7 @@ function PipelineSetupInner({
               node={llmNodeId}
               params={cv.nodeConfigSchema![llmNodeId]}
               overlayBase={(draft.pipeline_overlay ?? {}) as Record<string, unknown>}
-              lockModel={draft.lock_model}
+              lockModel={draft.optimization_overrides.lock_model}
               onApply={onApply}
             />
           ) : null}

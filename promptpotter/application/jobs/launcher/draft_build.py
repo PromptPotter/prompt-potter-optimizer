@@ -128,7 +128,7 @@ def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
     :func:`merge_pipeline_overlay`.
     """
     connector = connectors.get(draft.connector)
-    forbidden_strict = draft.lock_model
+    forbidden_strict = draft.optimization_overrides["lock_model"]
     # The active pipeline is the permission surface — the optimizer can only move
     # nodes that actually run. Scope the per-node locks to it so the panel shows
     # only the dataset's real nodes (not every node the backend has registered,
@@ -207,14 +207,15 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     leave the fields empty get the schema defaults.
     """
     connector = connectors.get(draft.connector)
-    optimization: dict[str, Any] = {"max_rounds": draft.max_rounds}
+    overrides = draft.optimization_overrides
+    optimization: dict[str, Any] = {"max_rounds": overrides["max_rounds"]}
     optimization.update(dict(connector.default_optimization))
     # The operator's model-lock choice overrides the connector default —
     # mirrors derive_optimizer_locks so the committed campaign matches the panel.
-    optimization["forbidden_axes_strict"] = draft.lock_model
+    optimization["forbidden_axes_strict"] = overrides["lock_model"]
     # The operator's mechanism-toggle choices ride straight onto the committed
     # campaign.json (sorting/selection + early-abort groups), like max_rounds.
-    optimization["mechanisms"] = dict(draft.mechanisms)
+    optimization["mechanisms"] = dict(overrides["mechanisms"])
     return {
         "campaign_config": {
             "dataset_name": draft.slug,

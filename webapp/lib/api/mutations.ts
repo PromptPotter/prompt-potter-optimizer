@@ -277,6 +277,21 @@ export interface PipelineDependencyWire {
   fulfilled: boolean;
 }
 
+// The campaign-config knobs a draft carries, as one object — materialized into
+// the committed campaign.json::optimization block. Operator-facing names;
+// `lock_model` commits as `forbidden_axes_strict`. A new knob is one property
+// here, not a fresh field threaded through every surface.
+export interface OptimizationOverridesWire {
+  // Round ceiling (1–100). Smart-default 5 (the M10 prompt-iteration default).
+  max_rounds: number;
+  // Whether the optimizer is barred from changing model/provider campaign-wide.
+  // Default true (locked); toggled in the pipeline-config control panel.
+  lock_model: boolean;
+  // Pluggable orchestration mechanism toggles (sorting/selection + early-abort
+  // groups). Nested {group:{toggle:bool}}; seeded with the stock defaults.
+  mechanisms: Record<string, Record<string, boolean>>;
+}
+
 export interface DraftCampaignWire {
   draft_id: string;
   slug: string;
@@ -284,7 +299,8 @@ export interface DraftCampaignWire {
   n_samples: number;
   connector: string;
   scoring_composite: string;
-  max_rounds: number;
+  // The campaign-config knobs (round ceiling, model lock, mechanism toggles).
+  optimization_overrides: OptimizationOverridesWire;
   raw_task_description: string;
   pipeline_overlay: Record<string, unknown>;
   // Header-agnostic ingest (A3 origin-resolution gate). `headers` are the
@@ -303,15 +319,6 @@ export interface DraftCampaignWire {
   // check-in decomposition or an authored dataset's prompt; operator-editable
   // before commit. Empty `{}` until the check-in fills it.
   origin_prompt_fields: Record<string, unknown>;
-  // Whether the optimizer is barred from changing model/provider campaign-wide
-  // (the `forbidden_axes_strict` knob). Default `true` (locked). Toggled in the
-  // pipeline-config control panel; drives `optimizer_locks.forbidden_axes`.
-  lock_model: boolean;
-  // Pluggable orchestration mechanism toggles (optimization.mechanisms —
-  // sorting/selection + early-abort groups). Nested {group:{toggle:bool}};
-  // editable in the new-campaign form, materialized into the committed
-  // campaign.json. Seeded with the stock defaults.
-  mechanisms: Record<string, Record<string, boolean>>;
   // Number of entries in the dropped candidate library (0 = none yet). The full
   // list isn't sent — a library can run to tens of thousands of entries; the UI
   // needs only fulfilled-ness + size.
@@ -534,7 +541,6 @@ export interface DraftPatch {
   slug?: string;
   connector?: string;
   scoring_composite?: string;
-  max_rounds?: number;
   raw_task_description?: string;
   pipeline_overlay?: Record<string, unknown>;
   // The active pipeline step list — the setup-panel mode toggle writes it
@@ -548,11 +554,10 @@ export interface DraftPatch {
   // Replace the origin prompt wholesale (PromptTemplate field shape). The
   // editor sends the full object, not a sparse field patch.
   origin_prompt_fields?: Record<string, unknown>;
-  // Toggle the campaign-wide model/provider lock (forbidden_axes_strict).
-  lock_model?: boolean;
-  // Mechanism toggles (optimization.mechanisms). The editor sends the FULL
-  // nested object (like origin_prompt_fields), not a sparse patch.
-  mechanisms?: Record<string, Record<string, boolean>>;
+  // The campaign-config knobs (max_rounds / lock_model / mechanisms). Sent keys
+  // are shallow-merged onto the draft's current overrides server-side — send one
+  // knob or several; a nested `mechanisms` replaces wholesale.
+  optimization_overrides?: Partial<OptimizationOverridesWire>;
 }
 
 export async function postEditDraftCampaign(
