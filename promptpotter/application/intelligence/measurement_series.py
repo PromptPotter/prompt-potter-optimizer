@@ -6,10 +6,10 @@ Errored items dropped to match the Rasch / heatmap observation set.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.store import cycle_dir_for
+from promptpotter.infrastructure.store.base import read_json_tolerant
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
@@ -37,9 +37,8 @@ def cycle_measurement_series(
     if not rounds_dir.is_dir():
         return out
     for round_path in sorted(rounds_dir.glob("round_*.json")):
-        try:
-            doc = json.loads(round_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        doc = read_json_tolerant(round_path)
+        if not isinstance(doc, dict):
             continue
         round_no = doc.get("round")
         if not isinstance(round_no, int):

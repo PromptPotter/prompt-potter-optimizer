@@ -10,9 +10,10 @@ of: resolve ids → resolve resume state → construct.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
+
+from promptpotter.infrastructure.store.base import read_json_tolerant
 
 
 def _max_round_on_disk(rounds_dir: Path) -> int:
@@ -52,12 +53,8 @@ def resolve_resume_state(
     confirm. The stale ``round`` pointer is self-healed in the same pass — both
     signals depend on ``disk_round``.
     """
-    prior_state = seed_dir / "dashboard.json"
-    if not prior_state.exists():
-        return None
-    try:
-        resume_from: dict[str, Any] = json.loads(prior_state.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    resume_from = read_json_tolerant(seed_dir / "dashboard.json")
+    if not isinstance(resume_from, dict):
         return None
 
     disk_round = _max_round_on_disk(active_cycle_dir / "rounds")

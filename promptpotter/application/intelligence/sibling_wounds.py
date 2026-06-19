@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.escalation_signals import RuntimeFailure
+from promptpotter.infrastructure.store.base import read_json_tolerant
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
@@ -53,24 +54,16 @@ def gather_sibling_runtime_failures(
     for sibling in sibling_dirs:
         if exclude_cycle_id and sibling.name == exclude_cycle_id:
             continue
-        idx_path = sibling / "index.json"
-        if not idx_path.is_file():
-            continue
-        try:
-            idx = json.loads(idx_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        idx = read_json_tolerant(sibling / "index.json")
+        if not isinstance(idx, dict):
             continue
         if idx.get("stop_reason") not in _FINISHED_STOP_REASONS:
             continue
         n_rounds = int(idx.get("n_rounds") or 0)
         if n_rounds <= 0:
             continue
-        last_round_path = sibling / "rounds" / f"round_{n_rounds:04d}.json"
-        if not last_round_path.is_file():
-            continue
-        try:
-            round_data = json.loads(last_round_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        round_data = read_json_tolerant(sibling / "rounds" / f"round_{n_rounds:04d}.json")
+        if not isinstance(round_data, dict):
             continue
         osp = round_data.get("opt_search_point") or {}
         wounds = osp.get("wounds") or {}

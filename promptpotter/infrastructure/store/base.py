@@ -114,6 +114,20 @@ def read_json_optional(path: Path) -> Any | None:
         return None
 
 
+def read_json_tolerant(path: Path, default: Any = None) -> Any:
+    """Read JSON from *path*, returning *default* if it is missing OR corrupt.
+
+    The corruption-tolerant peer of :func:`read_json_optional` (which catches only a
+    missing file): a truncated / half-written JSON file returns *default* instead of
+    raising. Use for best-effort reads of caches, pointers, and prior-state snapshots
+    where a damaged file should degrade to "not there", not crash the caller.
+    """
+    try:
+        return read_json(path)
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
 def read_text_optional(path: Path, default: str = "") -> str:
     """Read text from *path*, returning ``default`` if it does not exist."""
     try:

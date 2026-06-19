@@ -23,7 +23,6 @@ typed at the CLI prompt. The runner polls that file (mirroring ``pause_gate``);
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import queue
 import sys
@@ -34,6 +33,7 @@ from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import OriginGateMode, origin_gate_tripped
 from promptpotter.domain.phases import RunPhase, StopReason
+from promptpotter.infrastructure.store.base import read_json_tolerant
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
@@ -185,12 +185,7 @@ def _decision_path(session: Session):  # type: ignore[no-untyped-def]
 
 def _read_decision_file(path) -> GateDecision | None:  # type: ignore[no-untyped-def]
     """Read a decision from the flag file; ``None`` if absent or malformed."""
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    data = read_json_tolerant(path)
     decision = data.get("decision") if isinstance(data, dict) else None
     return decision if decision in _DECISIONS else None
 

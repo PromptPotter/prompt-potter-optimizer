@@ -43,7 +43,7 @@ from promptpotter.application.views import (
 )
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
-from promptpotter.infrastructure.store.base import write_json, write_text
+from promptpotter.infrastructure.store.base import read_json_tolerant, write_json, write_text
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -429,15 +429,11 @@ def _load_sibling_indices(
     for cycle_dir in sorted(cycles_dir.iterdir()):
         if not cycle_dir.is_dir() or cycle_dir.name == exclude:
             continue
-        idx = cycle_dir / "index.json"
-        if not idx.is_file():
+        blob = read_json_tolerant(cycle_dir / "index.json")
+        if not isinstance(blob, dict):
             continue
-        try:
-            blob = json.loads(idx.read_text(encoding="utf-8"))
-            blob["cycle_id"] = cycle_dir.name
-            out.append(blob)
-        except (OSError, json.JSONDecodeError):
-            continue
+        blob["cycle_id"] = cycle_dir.name
+        out.append(blob)
     return out or None
 
 

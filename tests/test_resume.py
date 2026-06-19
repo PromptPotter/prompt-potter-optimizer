@@ -60,24 +60,35 @@ def test_rescore_results_accumulates_and_projects_active() -> None:
 
 
 def test_round_winner_replay_uses_rescored_origin() -> None:
-    """Uniform rescaling preserves the recorded winner — the replayer must
-    derive its threshold from the rescored origin, not the stale one."""
+    """Uniform rescaling preserves the recorded winner. The replay re-elects via the canonical
+    paired-LCB rule (shared with the live scorer) against the RESCORED origin: c1's +0.5 lift over
+    six paired samples confidently clears the floor, c2's negative lift does not — so the replay
+    re-derives c1 and flags no divergence, while the stale ``current_best_accuracy_at_record`` (and
+    the old raw-mean threshold) are never consulted."""
+
+    def _s(sid: int, fitness: float) -> dict:
+        return {**_r(fitness), "sample_id": sid}
+
     round_data = {
         "round": 0,
         "all_candidate_results": {
-            "c1": [_r(0.5), _r(0.5)],
-            "c2": [_r(0.1), _r(0.1)],
+            "c1": [_s(i, 0.9) for i in range(6)],
+            "c2": [_s(i, 0.1) for i in range(6)],
         },
         "decisions": [
             {
                 "kind": "round_winner",
-                "inputs_ref": {"candidate_ids": ["c1", "c2"], "round_num": 0},
+                "inputs_ref": {
+                    "candidate_ids": ["c1", "c2"],
+                    "round_num": 0,
+                    "coverage_floor": 4,
+                },
                 "outcome": "c1",
-                "data": {"current_best_accuracy_at_record": 0.8},  # stale, must be ignored
+                "data": {"current_best_accuracy_at_record": 0.8},  # stale, never read
             }
         ],
     }
-    assert replay_decisions(round_data, origin_results=[_r(0.4), _r(0.4)]) is None
+    assert replay_decisions(round_data, origin_results=[_s(i, 0.4) for i in range(6)]) is None
 
 
 def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:

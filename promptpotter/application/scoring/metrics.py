@@ -24,6 +24,7 @@ from promptpotter.application.scoring.formula import compile_round_scorer, extra
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
+from promptpotter.shared.statistics import paired_diff_posterior
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import (
@@ -38,10 +39,13 @@ __all__ = [
     "all_evaluators",
     "compute_composite_fitness",
     "count_degraded_samples",
+    "elect_round_winner",
     "extract_sample_diagnostics",
     "find_rank",
     "has_pipeline_warnings",
     "matched_origin_stats",
+    "paired_delta_lcb",
+    "paired_fitness",
     "value_with_mask_applied",
 ]
 
@@ -318,6 +322,84 @@ def matched_origin_stats(
         "total": base["total"],
         "composite_fitness": composite["composite_fitness"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Round-winner election — the paired-fitness ranking shared by the live scorer
+# (``l1_score``) and the resume divergence replayer. ONE rule, two callers: a
+# resumed run can never re-elect a different winner under an unchanged scorer.
+# ---------------------------------------------------------------------------
+
+
+def paired_fitness(
+    candidate_results: list[QueryMeasurement],
+    origin_results: list[QueryMeasurement],
+) -> tuple[list[float], list[float]]:
+    """Per-sample reciprocal-rank fitness for the candidate and origin on the SAME samples,
+    aligned by ``sample_id``. The matched pairs the round-significance test runs on — origin's
+    fitness restricted to whatever subset the online picker scored the candidate on. A degraded
+    sample with no recorded fitness contributes 0 (the score it earned), not a dropped pair.
+    """
+    origin_by_sid = {
+        r.get("sample_id"): float(r.get("fitness", 0.0) or 0.0) for r in origin_results
+    }
+    cand_fit: list[float] = []
+    origin_fit: list[float] = []
+    for r in candidate_results:
+        sid = r.get("sample_id")
+        if sid in origin_by_sid:
+            cand_fit.append(float(r.get("fitness", 0.0) or 0.0))
+            origin_fit.append(origin_by_sid[sid])
+    return cand_fit, origin_fit
+
+
+def paired_delta_lcb(
+    candidate_results: list[QueryMeasurement],
+    origin_results: list[QueryMeasurement],
+) -> tuple[float, float]:
+    """One-sigma lower-confidence bound of the candidate's per-sample fitness lift over the
+    matched origin — the same paired posterior PoBB elimination runs. Returns ``(mean, lcb)``
+    with ``lcb = mean - se``: an under-probed candidate has a wide posterior (large ``se``), so
+    at equal mean it ranks below a fully-probed one — a lucky 6-sample run can't outrank a
+    full-20 candidate on a thin subset mean.
+    """
+    cand_fit, origin_fit = paired_fitness(candidate_results, origin_results)
+    if not cand_fit:
+        return 0.0, 0.0
+    mean_d, se_d, _ = paired_diff_posterior(cand_fit, origin_fit)
+    return mean_d, mean_d - se_d
+
+
+def elect_round_winner(
+    candidate_ids: list[str],
+    results_by_id: Mapping[str, list[QueryMeasurement]],
+    origin_results: list[QueryMeasurement],
+    coverage_floor: int,
+) -> str:
+    """Elect the round winner: rank candidates by paired-fitness LCB vs the matched origin
+    (origin paired by ``sample_id``), tie-broken toward higher coverage. Origin is the floor at
+    rank ``(0.0, 0)`` — only a candidate confidently above origin (``lcb > 0``) with at least
+    ``coverage_floor`` measured samples can win. Returns ``""`` when none clears the floor.
+
+    A candidate with no samples in common with origin (empty pairing) cannot win — it would
+    otherwise "beat" a phantom 0.0 floor on samples the incumbent never ran.
+    """
+    best_rank: tuple[float, int] = (0.0, 0)
+    winner_id = ""
+    for cid in candidate_ids:
+        cand_results = list(results_by_id.get(cid) or [])
+        base = _compute_accuracy(cand_results)
+        if base["total"] < coverage_floor:
+            continue
+        cand_fit, _ = paired_fitness(cand_results, origin_results)
+        if not cand_fit:
+            continue
+        _, lcb = paired_delta_lcb(cand_results, origin_results)
+        rank = (lcb, base["total"])
+        if rank > best_rank:
+            best_rank = rank
+            winner_id = cid
+    return winner_id
 
 
 def value_with_mask_applied(

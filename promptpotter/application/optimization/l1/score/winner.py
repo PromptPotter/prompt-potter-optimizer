@@ -20,7 +20,9 @@ from promptpotter.application.origin import rescore_origin
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
     count_degraded_samples,
+    elect_round_winner,
     matched_origin_stats,
+    paired_fitness,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.rendering import round_winner_key as round_winner_key
@@ -39,28 +41,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
 
 
-def _paired_fitness(
-    candidate_results: list[QueryMeasurement],
-    origin_results: list[QueryMeasurement],
-) -> tuple[list[float], list[float]]:
-    """Per-sample reciprocal-rank fitness for the candidate and origin on the SAME samples,
-    aligned by ``sample_id``. The matched pairs the round-significance test runs on — origin's
-    fitness restricted to whatever subset the online picker scored the candidate on. A degraded
-    sample with no recorded fitness contributes 0 (the score it earned), not a dropped pair.
-    """
-    origin_by_sid = {
-        r.get("sample_id"): float(r.get("fitness", 0.0) or 0.0) for r in origin_results
-    }
-    cand_fit: list[float] = []
-    origin_fit: list[float] = []
-    for r in candidate_results:
-        sid = r.get("sample_id")
-        if sid in origin_by_sid:
-            cand_fit.append(float(r.get("fitness", 0.0) or 0.0))
-            origin_fit.append(origin_by_sid[sid])
-    return cand_fit, origin_fit
-
-
 def is_leader_eligible(cs: ScoredCandidate) -> bool:
     """Eligibility for round-leader election. Disqualifies (a) escalation-aborted-without-PoBB
     (mid-run failure outside measured-comparison), (b) degradation/scoring_error_abort
@@ -77,23 +57,6 @@ def is_leader_eligible(cs: ScoredCandidate) -> bool:
     # P(best) and epsilon; a loss is p_best < epsilon with the lead NOT locked. Honoring it stops
     # a PoBB-eliminated candidate (p_best below epsilon on a thin subset) from winning the round.
     return not (ec and not ec["leader_locked"] and ec["p_best"] < ec["epsilon"])
-
-
-def _paired_delta_lcb(
-    candidate_results: list[QueryMeasurement],
-    origin_results: list[QueryMeasurement],
-) -> tuple[float, float]:
-    """One-sigma lower-confidence bound of the candidate's per-sample fitness lift over the
-    matched origin — the same paired posterior PoBB elimination runs. Returns ``(mean, lcb)``
-    with ``lcb = mean - se``: an under-probed candidate has a wide posterior (large ``se``), so
-    at equal mean it ranks below a fully-probed one — a lucky 6-sample run can't outrank a
-    full-20 candidate on a thin subset mean.
-    """
-    cand_fit, origin_fit = _paired_fitness(candidate_results, origin_results)
-    if not cand_fit:
-        return 0.0, 0.0
-    mean_d, se_d, _ = paired_diff_posterior(cand_fit, origin_fit)
-    return mean_d, mean_d - se_d
 
 
 async def l1_score(
@@ -189,23 +152,24 @@ async def l1_score(
     # Elect by confident improvement over MATCHED origin (origin on the candidate's own measured
     # samples), NOT raw accuracy vs origin's full-set rate. The online picker scores each candidate
     # on a different hard-first subset, so origin's full-set accuracy (inflated by the easy samples
-    # the candidate never ran) is the wrong comparison floor. Ranking is the paired-fitness LCB vs
-    # matched origin (the posterior PoBB eliminates on), tie-broken toward higher coverage; origin is
-    # the floor at rank (0.0, 0), so only a candidate confidently above origin (lcb > 0) can win.
-    best_rank: tuple[float, int] = (0.0, 0)
-    winner_idx: int | None = None
-    # An under-probed candidate can't win the round: a subset thinner than the elimination floor is
-    # too noisy to trust over a fully-probed incumbent. Clamp to the dataset so a tiny set stays electable.
+    # the candidate never ran) is the wrong comparison floor. ``elect_round_winner`` ranks the
+    # paired-fitness LCB vs matched origin, tie-broken toward higher coverage — the ONE election
+    # rule, shared with the resume divergence replayer so a resumed run re-elects the same winner.
+    #
+    # An under-probed candidate can't win: a subset thinner than the elimination floor is too noisy
+    # to trust over a fully-probed incumbent. Clamp to the dataset so a tiny set stays electable.
     coverage_floor = min(pobb_config.n_min, len(dataset))
     # The opt_sp-aware composite + evaluators are computed ONCE in the scoring gateway
     # (`score_search_point` received each candidate's OSP) and ride on its `ScoredCandidate`.
-    # Here we only add the matched-origin floor (origin restricted to the candidate's samples)
-    # and elect — selection ranks on per-sample fitness LCB, never on composite.
+    # Here we only add the matched-origin floor (origin restricted to the candidate's samples).
     cs_by_id = {cs.candidate_id: i for i, cs in enumerate(candidate_scores)}
-    for idx, ind in enumerate(scored):
-        cand_results = all_candidate_results[ind.lineage.id]
+    matched_by_id: dict[str, dict[str, Any]] = {}
+    electable: list[str] = []
+    for ind in scored:
         cs_idx = cs_by_id.get(ind.lineage.id)
-        cs = candidate_scores[cs_idx] if cs_idx is not None else None
+        if cs_idx is None:
+            continue
+        cand_results = all_candidate_results[ind.lineage.id]
         # PoBB-locked candidates may have only run q8/20 — comparing their 8-sample accuracy to
         # origin's full-set rate punishes early-stop. Restrict origin to the candidate's measured set.
         matched = matched_origin_stats(
@@ -214,64 +178,58 @@ async def l1_score(
             schema,
             round_scorer=session.scoring.round_scorer,
         )
-        if cs is not None and cs_idx is not None:
-            candidate_scores[cs_idx] = cs.model_copy(
-                update={
-                    "matched_origin_accuracy": matched["accuracy"],
-                    "matched_origin_hits": matched["hits"],
-                    "matched_origin_composite": matched["composite_fitness"],
-                }
-            )
-        # No origin-floor overlap ⇒ no comparison. A candidate scored on samples the incumbent
-        # never ran would "beat" a phantom 0.0 floor (the matched empty-set bug: round 1
-        # showed improved=True on 0 hits). The incumbent is re-scored on this round's subset
-        # upstream (`rescore_origin`), so this is the safety net for any partial-coverage gap.
-        if matched["total"] == 0 or cs is None:
-            continue
-        cand_base = _compute_accuracy(cand_results)
-        if cand_base["total"] < coverage_floor:
-            continue
-        # Running max of the paired-fitness LCB vs matched origin, tie-broken toward higher
-        # coverage. A candidate wins the round only when it confidently clears origin on its own
-        # measured samples — not on a lucky subset mean.
-        _, lcb = _paired_delta_lcb(
-            cand_results, list(cast("list[QueryMeasurement]", origin.results))
+        matched_by_id[ind.lineage.id] = matched
+        candidate_scores[cs_idx] = candidate_scores[cs_idx].model_copy(
+            update={
+                "matched_origin_accuracy": matched["accuracy"],
+                "matched_origin_hits": matched["hits"],
+                "matched_origin_composite": matched["composite_fitness"],
+            }
         )
-        rank = (lcb, cand_base["total"])
-        if rank > best_rank:
-            best_rank = rank
-            best_acc = cs.accuracy
-            best_comp = cs.composite_fitness
-            best_osp = ind
-            best_results = list(cand_results)
-            best_label = ind.lineage.changes_description or ind.lineage.id[:12]
-            best_scores = dict(cs.evaluators or {})
-            best_matched_origin_acc = matched["accuracy"]
-            best_matched_origin_hits = matched["hits"]
-            best_matched_origin_composite = matched["composite_fitness"]
-            winner_idx = idx
+        electable.append(ind.lineage.id)
 
-    winner_id = scored[winner_idx].lineage.id if winner_idx is not None and scored else ""
+    # ``coverage_floor`` is persisted so the replayer applies the same electability floor — without
+    # it a resumed run could elect a thin candidate the live path rejected, manufacturing divergence.
+    winner_id = elect_round_winner(
+        electable,
+        all_candidate_results,
+        list(cast("list[QueryMeasurement]", origin.results)),
+        coverage_floor,
+    )
     record_decision(
         decisions,
         ResumeCheckpointKind.ROUND_WINNER,
         {
-            "candidate_ids": [ind.lineage.id for ind in scored],
+            "candidate_ids": electable,
             "round_num": round_num,
+            "coverage_floor": coverage_floor,
         },
         winner_id,
         data={"current_best_accuracy_at_record": origin.accuracy},
         round=round_num,
     )
+    if winner_id:
+        winner_ind = next(ind for ind in scored if ind.lineage.id == winner_id)
+        winner_cs = candidate_scores[cs_by_id[winner_id]]
+        matched = matched_by_id[winner_id]
+        best_acc = winner_cs.accuracy
+        best_comp = winner_cs.composite_fitness
+        best_osp = winner_ind
+        best_results = list(all_candidate_results[winner_id])
+        best_label = winner_ind.lineage.changes_description or winner_ind.lineage.id[:12]
+        best_scores = dict(winner_cs.evaluators or {})
+        best_matched_origin_acc = matched["accuracy"]
+        best_matched_origin_hits = matched["hits"]
+        best_matched_origin_composite = matched["composite_fitness"]
 
     base = _compute_accuracy(best_results)
     p_value: float | None = None
-    if base["total"] > 0 and winner_idx is not None:
+    if base["total"] > 0 and winner_id:
         # Significance on the per-sample reciprocal-rank FITNESS (the chosen decision metric),
         # not binary hits: a candidate that lifts ground-truth's rank without yet landing it at
         # rank 1 is real improvement on the smooth signal, and a binary-hit test is blind to it.
         # One-sided paired-difference posterior — the same machinery PoBB elimination runs.
-        cand_fit, origin_fit = _paired_fitness(
+        cand_fit, origin_fit = paired_fitness(
             best_results, list(cast("list[QueryMeasurement]", origin.results))
         )
         if cand_fit:

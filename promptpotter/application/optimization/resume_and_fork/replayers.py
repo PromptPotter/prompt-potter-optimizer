@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from promptpotter.application.optimization.pobb.seeding import pobb_rng
 from promptpotter.application.optimization.resume_and_fork.decisions import (
@@ -18,10 +18,14 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     GatingMode,
     ResumeCheckpointKind,
 )
+from promptpotter.application.scoring.metrics import elect_round_winner
 from promptpotter.shared.statistics import (
     paired_better_probabilities,
     pobb_should_stop,
 )
+
+if TYPE_CHECKING:
+    from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
     "REPLAYERS",
@@ -109,19 +113,21 @@ def _mean_score(results: list[dict[str, Any]]) -> float:
 def _replay_round_winner(
     ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
 ) -> str:
-    """Re-derive round winner from rescored per-candidate results; beat-threshold derived, not read."""
+    """Re-derive the round winner under the canonical paired-LCB election — the SAME
+    ``elect_round_winner`` the live scorer ran (``l1/score/winner.py``), not a parallel rule. An
+    unchanged scorer therefore re-elects the recorded winner exactly; only a genuine scorer change
+    can diverge. ``coverage_floor`` rides the recorded inputs (defaulting to 0 for pre-floor
+    records — most permissive, so it never rejects a candidate the live path kept).
+    """
     all_results: dict[str, list[dict[str, Any]]] = ctx.round_data.get("all_candidate_results") or {}
-    if ctx.prior_rounds:
-        best_acc = _mean_score(list(ctx.prior_rounds[-1].get("results") or []))
-    else:
-        best_acc = _mean_score(list(ctx.origin_results))
-    winner_id = ""
-    for cid in inputs_ref.get("candidate_ids") or []:
-        acc = _mean_score(all_results.get(cid) or [])
-        if acc > best_acc:
-            best_acc = acc
-            winner_id = cid
-    return winner_id
+    candidate_ids = [str(c) for c in (inputs_ref.get("candidate_ids") or [])]
+    coverage_floor = int(inputs_ref.get("coverage_floor", 0))
+    return elect_round_winner(
+        candidate_ids,
+        cast("dict[str, list[QueryMeasurement]]", all_results),
+        cast("list[QueryMeasurement]", ctx.origin_results),
+        coverage_floor,
+    )
 
 
 def _pobb_replay_snapshot(

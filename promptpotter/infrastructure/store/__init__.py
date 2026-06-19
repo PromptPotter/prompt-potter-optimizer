@@ -31,14 +31,17 @@ tenant's active session.
 
 from __future__ import annotations
 
-import json
 import uuid
 from pathlib import Path
 
 from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.backend_store import BackendStore
-from promptpotter.infrastructure.store.base import validate_path_component, write_json
+from promptpotter.infrastructure.store.base import (
+    read_json_tolerant,
+    validate_path_component,
+    write_json,
+)
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
@@ -114,12 +117,8 @@ def read_active_pointer(
 
     Returns ``("", "", "")`` when the pointer is missing or unreadable.
     """
-    path = _active_pointer_path(tenant_id, projects_root)
-    if not path.exists():
-        return "", "", ""
-    try:
-        ptr = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    ptr = read_json_tolerant(_active_pointer_path(tenant_id, projects_root))
+    if not isinstance(ptr, dict):
         return "", "", ""
     return (
         ptr.get("session_id", ""),
@@ -144,11 +143,8 @@ def walk_cycle_lineage(tenant_root: Path, campaign_id: str, cycle_id: str) -> li
     current = cycle_id
     while True:
         idx_path = cycle_dir_for(tenant_root, campaign_id, current) / "index.json"
-        if not idx_path.exists():
-            break
-        try:
-            data = json.loads(idx_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        data = read_json_tolerant(idx_path)
+        if not isinstance(data, dict):
             break
         parent = data.get("parent_cycle_id")
         if not parent:

@@ -16,11 +16,11 @@ cycle whose producer vanished without a terminal record).
 
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 
 from promptpotter.domain.phases import RunPhase
+from promptpotter.infrastructure.store.base import read_json_tolerant
 
 
 def is_paused(runtime_dir: Path) -> bool:
@@ -47,13 +47,8 @@ def clear_run_control_flags(runtime_dir: Path) -> None:
 
 def read_spend_cap(runtime_dir: Path) -> float | None:
     """Live USD cap from ``spend_cap.json::max_usd``; ``None`` when absent/unreadable."""
-    path = runtime_dir / "spend_cap.json"
-    if not path.is_file():
-        return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8")).get("max_usd")
-    except (OSError, json.JSONDecodeError):
-        return None
+    data = read_json_tolerant(runtime_dir / "spend_cap.json")
+    value = data.get("max_usd") if isinstance(data, dict) else None
     return float(value) if isinstance(value, int | float) else None
 
 

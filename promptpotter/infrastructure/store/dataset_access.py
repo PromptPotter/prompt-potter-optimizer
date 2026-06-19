@@ -20,10 +20,10 @@ standing test (see ``tests/CLAUDE.md``).
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from promptpotter.infrastructure.store.base import read_json_tolerant
 from promptpotter.infrastructure.store.paths import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import BENCHMARKS_READ_CAP
@@ -152,12 +152,8 @@ def _read_title(dataset_dir: Path) -> str | None:
 
 def _read_n_samples(dataset_dir: Path) -> int:
     """``cache.json::row_count`` (falls back to ``items`` length); ``0`` when unmaterialized."""
-    cache = dataset_dir / "cache.json"
-    if not cache.is_file():
-        return 0
-    try:
-        raw = json.loads(cache.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    raw = read_json_tolerant(dataset_dir / "cache.json")
+    if not isinstance(raw, dict):
         return 0
     row_count = raw.get("row_count")
     if isinstance(row_count, int):
