@@ -136,11 +136,6 @@ def posterior_best_probabilities(
     return {cid: float(probs[i]) for i, cid in enumerate(cand_ids)}
 
 
-def pobb_should_stop(p_best: float, epsilon: float) -> bool:
-    """Trivial threshold check — kept as a named function for call-site clarity."""
-    return p_best < epsilon
-
-
 # --- Paired-difference posterior — cand-vs-prior on shared sample set ---
 
 
@@ -215,7 +210,6 @@ __all__ = [
     "min_detectable_effect",
     "paired_better_probabilities",
     "paired_diff_posterior",
-    "pobb_should_stop",
     "posterior_best_probabilities",
     "proportion_test",
     "wilson_ci",

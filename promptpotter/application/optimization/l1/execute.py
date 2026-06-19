@@ -114,8 +114,6 @@ async def execute_round(
             scoring_set,
             pipeline_params=cycle.tracking.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
-            improvement_significance=opt.improvement_significance,
-            round_significance_gate=opt.mechanisms.elimination.round_significance_gate,
             online_reorder=opt.mechanisms.selection.online_reorder,
             callbacks=callbacks,
             degradation_checks=degradation_checks,

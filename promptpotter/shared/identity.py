@@ -57,36 +57,20 @@ def _admin_caps_from_env() -> frozenset[str]:
     return frozenset()
 
 
-def default_identity(tenant_id: str = "default") -> IdentityContext:
-    """Stage-0 single-operator identity. ``--tenant`` CLI flag overrides ``tenant_id``.
+def default_identity(tenant_id: str = "default", user_id: str = "default") -> IdentityContext:
+    """Stage-0 single-operator identity factory.
 
-    ``PROMPTPOTTER_ADMIN=1`` in the environment augments the returned
-    identity's capabilities with :data:`BENCHMARKS_READ_CAP`. Stage 1 (M12
-    OIDC client) replaces this factory at the resolver seam
+    Auth-off CLI / local dev: ``--tenant`` overrides ``tenant_id``. A *registered*
+    operator (one who has signed in once, recorded in the default-claim marker)
+    passes ``user_id == tenant_id == their uid`` so a terminal run lands in the
+    same single workspace the authenticated web reads (one tenant per operator).
+    ``PROMPTPOTTER_ADMIN=1`` augments capabilities with :data:`BENCHMARKS_READ_CAP`.
+    Stage 1 (M12 OIDC client) replaces this factory at the resolver seam
     (`presentation/api/deps.py::resolve_identity`); no other call site changes.
     """
     return IdentityContext(
-        user_id=UserId("default"),
+        user_id=UserId(safe_name(user_id)),
         tenant_id=TenantId(safe_name(tenant_id)),
-        issuer=None,
-        claims={},
-        capabilities=_admin_caps_from_env(),
-    )
-
-
-def identity_for_user(user_id: str) -> IdentityContext:
-    """Stage-0 identity for a *registered* operator — tenant == user.
-
-    Once a developer has signed in once, the default-tenant claim marker
-    records their ``user_id``; the CLI resolves to *this* identity instead of
-    anonymous ``default`` so a terminal run lands in the same single workspace
-    the authenticated web reads (one tenant per registered operator). Same
-    admin-capability rule as :func:`default_identity`.
-    """
-    safe = safe_name(user_id)
-    return IdentityContext(
-        user_id=UserId(safe),
-        tenant_id=TenantId(safe),
         issuer=None,
         claims={},
         capabilities=_admin_caps_from_env(),

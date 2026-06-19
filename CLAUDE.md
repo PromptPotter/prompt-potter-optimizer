@@ -44,6 +44,15 @@ The codebase is mature: the remaining wins are low-value-but-they-all-count cons
 When a fix would compensate for something an upstream layer should already have made true, the fix belongs upstream — not at the site where the symptom shows up. Name the structural cause and propose the upstream fix <em>before</em> touching the visible surface. The operator can still pick the patch, but they pick it knowingly. Default to root, not to symptom.
 </root-fix>
 
+<surface-ledger>
+**The AI blind spot this guards against:** told to "simplify", an AI reaches for *additive-but-safe* moves — extract a helper, fold two copies into a `shared/` util, split a big file — each of which adds a module + an import line per call site, so the **total grows** while every commit says "refactor". The genuinely shrinking moves (delete a mechanism, re-inline a single-use module, drop a dead knob) are riskier, so they get skipped. Four rules counter the drift:
+
+1. **Lower the ledger.** Run `python -m promptpotter.diagnostics.complexity_ledger`. A simplification/unification pass MUST move the total **down**; a pass that raises it is a *feature* and needs a feature justification, not a "refactor" label. `tests/test_complexity_ledger.py` ratchets this — it fails CI if any dimension rises.
+2. **Subtract a concept, don't relocate one.** Every simplification commit removes ≥1 *named* thing (module, class, public symbol, config field, code path). Moving code between files counts as zero.
+3. **Extraction threshold.** A shared helper is justified only at **≥3 call sites** AND when it removes a concept. ≤2 callers → inline. (The subtractive counterpart to the pre-flight "Reuse before adding" gate.)
+4. **Finish line.** The ledger baseline in the ratchet test *is* the target. When a deletion lowers it, lower the baseline to lock the win. When no dimension can fall further without losing a load-bearing concept, the unification phase is **done** — stop.
+</surface-ledger>
+
 - **Never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask).
 
 ## Commands

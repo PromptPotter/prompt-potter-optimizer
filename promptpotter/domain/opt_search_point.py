@@ -28,7 +28,10 @@ class FewShotExample(BaseModel):
 
 
 class PromptTemplate(SearchPoint):
-    """The 8-field prompt decomposition scheme — shared by job + optimizer prompts."""
+    """The prompt scheme shared by job + optimizer prompts: the six ``render()``
+    decomposition fields (``PROMPT_STRING_FIELDS``) plus ``few_shot_examples`` and
+    ``plan`` (handled separately — few-shot appended by ``render()``, ``plan``
+    injected via its own signal)."""
 
     persona: str = ""
     task_intent: str = ""

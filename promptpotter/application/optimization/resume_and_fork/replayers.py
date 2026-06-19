@@ -19,10 +19,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointKind,
 )
 from promptpotter.application.scoring.metrics import elect_round_winner
-from promptpotter.shared.statistics import (
-    paired_better_probabilities,
-    pobb_should_stop,
-)
+from promptpotter.shared.statistics import paired_better_probabilities
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
@@ -191,8 +188,8 @@ def _replay_elimination_cut(
     eps = float(inputs_ref["epsilon"])
     recorded = inputs_ref.get("recorded_p_best")
     if recorded is not None and abs(fresh - float(recorded)) < _POBB_REPLAY_TOLERANCE:
-        return pobb_should_stop(float(recorded), eps)
-    return pobb_should_stop(fresh, eps)
+        return float(recorded) < eps
+    return fresh < eps
 
 
 def _replay_leader_lock_in(

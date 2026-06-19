@@ -19,7 +19,6 @@ from promptpotter.domain.validators import StopRule
 from promptpotter.shared.statistics import (
     paired_better_probabilities,
     paired_diff_posterior,
-    pobb_should_stop,
 )
 
 if TYPE_CHECKING:
@@ -345,7 +344,7 @@ class PoBBCheck:
                 n_total_candidates,
             )
 
-        if not self.epsilon_elimination or not pobb_should_stop(p_best_current, self.epsilon):
+        if not self.epsilon_elimination or p_best_current >= self.epsilon:
             return None
 
         return _eliminate(

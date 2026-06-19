@@ -51,17 +51,6 @@ class ExplorationConfig(BaseModel):
             "cross-cycle evidence."
         ),
     )
-    heatmap_show_archive_candidates: bool = Field(
-        False,
-        description=(
-            "When `seed_heatmap_from_archive` is on: include archive candidate "
-            "IDs (content_hash[:12]) on the heatmap Y-axis alongside this "
-            "cycle's cand_NNN. Off → Y-axis filtered to current cycle only; "
-            "archive candidates still contribute to the joint Rasch fit but "
-            "stay hidden from display. Ignored when `seed_heatmap_from_archive` "
-            "is off."
-        ),
-    )
 
 
 class SelectionMechanisms(BaseModel):
@@ -133,15 +122,6 @@ class EliminationMechanisms(BaseModel):
             "early; a leader measures its full budget."
         ),
     )
-    round_significance_gate: bool = Field(
-        False,
-        description=(
-            "Require statistical significance to promote a round: the challenger "
-            "must beat origin by `improvement_threshold` AND yield "
-            "p < `improvement_significance`. Off (default) → promote on observed "
-            "lift alone. Turn on for ablation runs that need significance."
-        ),
-    )
 
 
 class MechanismConfig(BaseModel):
@@ -194,14 +174,6 @@ class OptimizationConfig(BaseModel):
         description="Samples-floor for lock-in — a leader can only lock in after at "
         "least this many measurements. Applies only when "
         "`mechanisms.elimination.leader_lock_in` is on.",
-    )
-
-    improvement_significance: float = Field(
-        0.10,
-        description="One-sided proportion-test threshold for the round-significance "
-        "gate — the challenger must yield p < this to promote. Applies only when "
-        "`mechanisms.elimination.round_significance_gate` is on (that bool owns the "
-        "on/off); this is purely the threshold. Smaller = stricter.",
     )
 
     spend_budget_usd: float | None = Field(
@@ -484,7 +456,7 @@ def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:
 
     A prompt-bearing node declares the `{{name}}` placeholders the backend fills
     (query / research evidence / output-schema). If the rendered prompt omits one,
-    that injection silently no-ops and the model never sees it. The 8-field
+    that injection silently no-ops and the model never sees it. The six-field
     decomposition names (`PROMPT_STRING_FIELDS`) are excluded — some nodes declare
     THOSE as template_variables, but `render()` assembles them; they are never
     `{{substituted}}`. The SINGLE definition of "required placeholder", shared by
@@ -566,7 +538,7 @@ def configure_and_apply_pipeline(
             # prompt omits one, that injection silently no-ops and the model never sees
             # it — the bug that made entity_profiling emit term-not-JSON → NO_RESULT.
             # Fail loud at setup, before a single degraded backend call. Exclude the
-            # 8-field decomposition names (PROMPT_STRING_FIELDS): some nodes (e.g. the
+            # six-field decomposition names (PROMPT_STRING_FIELDS): some nodes (e.g. the
             # promptpotter-self L4 connector) declare THOSE as template_variables, but
             # `render()` ASSEMBLES them — they are never `{{substituted}}`.
             pinfo = prompt_info_by_node.get(pnode)

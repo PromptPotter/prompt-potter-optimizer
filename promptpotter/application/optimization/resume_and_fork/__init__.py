@@ -25,9 +25,9 @@ CONCEPT MAP (by module):
   active scorer, returning the first :class:`Divergence`. Pure over
   :class:`ReplayContext`; MUST NOT touch the live ``Cycle`` or ledger.
 * **fork_siblings** (:mod:`.fork_siblings`) — :func:`_mint_fork`, the unified
-  fork-mint primitive dispatching on :class:`ForkTrigger` (``ForkResult``).
-* **operator_fork** (:mod:`.operator_fork`) — :func:`mint_operator_fork`, the
-  control-plane seam that builds a ``ForkSpec`` and delegates to ``_mint_fork``.
+  fork-mint primitive dispatching on :class:`ForkTrigger` (``ForkResult``), plus
+  :func:`mint_operator_fork`, the control-plane seam that builds a ``ForkSpec``
+  and delegates to it.
 
 Out-of-bounds: replayers MUST NOT touch the live ``Cycle`` or write
 to the ledger; a new ``REPLAYED`` kind requires a registered
@@ -49,8 +49,6 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,
     _mint_fork,
-)
-from promptpotter.application.optimization.resume_and_fork.operator_fork import (
     mint_operator_fork,
 )
 from promptpotter.application.optimization.resume_and_fork.replayers import (

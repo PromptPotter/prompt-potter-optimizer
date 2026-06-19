@@ -13,7 +13,7 @@ All :class:`ForkTrigger` variants wired:
 * ``OPERATOR_STEERED`` — operator fork from the lineage/control panel
   (``fork_from_round=0``, ``_fork_`` id), carrying an edited-searchpoint
   ``CycleSeed`` written to ``.overrides/seed.json``. Application entry:
-  ``operator_fork.py::mint_operator_fork``.
+  :func:`mint_operator_fork` (below).
 
 A fork is a new *cycle* inside the **same campaign** — all cycles land
 flat under ``campaigns/{campaign_id}/cycles/``.
@@ -34,7 +34,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
 )
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.identity import TenantId
-from promptpotter.domain.run_records import ForkSpec, ForkTrigger
+from promptpotter.domain.run_records import UNATTRIBUTED_OPERATOR, ForkSpec, ForkTrigger
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import (
     read_active_pointer,
@@ -45,11 +45,12 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.store import CampaignStore
+    from promptpotter.domain.run_records import CycleSeed
+    from promptpotter.infrastructure.store import CampaignStore, Stores
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ForkResult", "_mint_fork", "cleanup_stub_fork_if_empty"]
+__all__ = ["ForkResult", "_mint_fork", "cleanup_stub_fork_if_empty", "mint_operator_fork"]
 
 
 class ForkResult(NamedTuple):
@@ -332,3 +333,45 @@ def cleanup_stub_fork_if_empty(
     elif deleted:
         logger.info("Stub fork cleaned up: %s (parent=%s)", cycle_id, parent_cycle_id)
     return deleted, reason
+
+
+def mint_operator_fork(
+    *,
+    stores: Stores,
+    campaign_id: str,
+    cycle_id: str,
+    from_round: int,
+    from_candidate_id: str,
+    seed: CycleSeed,
+    steered_by: str,
+) -> str:
+    """The operator-initiated fork entry — the control-plane seam
+    (``CommandDispatcher``, fork-cycle) calls this. Builds the typed
+    :class:`ForkSpec` and delegates to :func:`_mint_fork`; there is no parallel
+    fork-creation path.
+
+    Every operator fork is ``operator_steered``: a clean offshoot (fresh ledger,
+    numbering restarts at round 1) carrying *seed* (the chosen searchpoint's
+    evolved prompt + config + reconciled run limits — recorded, not forbidden:
+    operators may act, we record it), persisted to ``.overrides/seed.json`` and
+    re-scored as the fork's origin at bootstrap.
+    """
+    parent_index = stores.campaigns.load(campaign_id, cycle_id) or {}
+    spec = ForkSpec(
+        trigger=ForkTrigger.OPERATOR_STEERED,
+        reason=f"operator-steered fork from {cycle_id}",
+        issued_by=steered_by or UNATTRIBUTED_OPERATOR,
+        from_round=from_round,
+        from_candidate_id=from_candidate_id or None,
+        seed=seed,
+    )
+    return _mint_fork(
+        stores.campaigns,
+        campaign_id,
+        stores.tenant_id,
+        str(parent_index.get("parent_session_id", "")),
+        cycle_id,
+        0,
+        spec,
+        projects_root=stores.projects_root,
+    )

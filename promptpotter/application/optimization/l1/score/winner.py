@@ -66,8 +66,6 @@ async def l1_score(
     *,
     pipeline_params: dict[str, Any] | None = None,
     improvement_threshold: float = 0.01,
-    improvement_significance: float = 0.10,
-    round_significance_gate: bool = False,
     online_reorder: bool = True,
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
@@ -225,6 +223,7 @@ async def l1_score(
     base = _compute_accuracy(best_results)
     p_value: float | None = None
     if base["total"] > 0 and winner_id:
+        # Recorded diagnostic (shown in the round view); does not gate promotion.
         # Significance on the per-sample reciprocal-rank FITNESS (the chosen decision metric),
         # not binary hits: a candidate that lifts ground-truth's rank without yet landing it at
         # rank 1 is real improvement on the smooth signal, and a binary-hit test is blind to it.
@@ -244,24 +243,18 @@ async def l1_score(
     delta_ok = best_acc > best_matched_origin_acc + improvement_threshold
     n_min = pobb_config.n_min
     n_ok = base["total"] >= n_min
-    sig_ok = not round_significance_gate or (
-        p_value is not None and p_value < improvement_significance
-    )
     # Anchor the promotion verdict to the FROZEN round-0 origin (C0), not just the current
     # incumbent's matched floor. The incumbent re-anchors to whatever won last round, so each
     # promotion lowers the bar; requiring the winner to also clear C0 stops the lineage from
     # decaying below where it started while still stamping `improved=True`.
     c0_floor = cycle.tracking.origin_accuracy
     c0_ok = best_acc >= c0_floor
-    improved = delta_ok and n_ok and sig_ok and c0_ok
+    improved = delta_ok and n_ok and c0_ok
     improved_reason: str | None = None
     if delta_ok and not improved:
         reasons: list[str] = []
         if not n_ok:
             reasons.append(f"n={base['total']} < elimination_n_min={n_min}")
-        if not sig_ok:
-            p_repr = f"{p_value:.3f}" if p_value is not None else "None"
-            reasons.append(f"p={p_repr} >= {improvement_significance:.2f}")
         if not c0_ok:
             reasons.append(f"acc={best_acc:.3f} < origin_c0={c0_floor:.3f}")
         improved_reason = "; ".join(reasons)

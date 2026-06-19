@@ -59,7 +59,6 @@ _FIELD_SCOPES: dict[tuple[str, ...], Literal["policy", "data"]] = {
     ("optimization", "pobb_epsilon"): "policy",
     ("optimization", "pobb_lock_in"): "policy",
     ("optimization", "pobb_lock_in_n_min"): "policy",
-    ("optimization", "improvement_significance"): "policy",
     ("optimization", "spend_budget_usd"): "policy",
     ("optimization", "token_budget"): "policy",
     ("optimization", "origin_gate"): "policy",

@@ -129,10 +129,11 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
     )
 
     exp_cfg = cycle.config.optimization.exploration
-    if not exp_cfg.heatmap_show_archive_candidates:
-        live_cids = {cid for rr in cycle.rounds for cid in rr.all_candidate_results}
-        if live_cids:
-            campaign_artifact = _filter_artifact_to_live_candidates(campaign_artifact, live_cids)
+    # Archive candidates contribute to the joint Rasch fit but stay off the
+    # heatmap Y-axis — it's filtered to this cycle's own cand_NNN.
+    live_cids = {cid for rr in cycle.rounds for cid in rr.all_candidate_results}
+    if live_cids:
+        campaign_artifact = _filter_artifact_to_live_candidates(campaign_artifact, live_cids)
 
     with graceful("cycle hard_samples.json write failed"):
         write_json(cycle_dir / "hard_samples.json", cycle_artifact)

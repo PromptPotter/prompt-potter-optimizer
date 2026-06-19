@@ -427,18 +427,25 @@ site (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`) is
 wrapped. Events serialize to local JSONL under
 `langfuse/events.jsonl` (verified path:
 `infrastructure/tracing/file_sink.py:67`) — no Langfuse instance, no
-MLflow server, no external dependency required. When Langfuse
-credentials are present in `.env`, the same events also stream to
-Langfuse cloud. **MLflow** is a peer optional sink, **off by
-default** — wired via `infrastructure/tracing/mlflow_sink.py`,
-gated on `settings.MLFLOW_ENABLED`. The integration is dormant
-unless an operator flips the flag; the import path stays alive so
-enabling it requires no code change. The Langfuse schema is the
-**orientation point**: even with no external sink wired, events
-conform to it, so importing later (or swapping in a different
-backend) is configuration, not refactoring. Tracing is fan-out
-only — the optimizer never reads it, so it can never become
-load-bearing for the loop.
+MLflow server, no external dependency required.
+
+**A nexus to the operator's existing observability stack — a core
+capability, not a stub.** Many teams already run an observability
+instance; PromptPotter drops straight into it. When **Langfuse cloud**
+credentials are present in `.env`, the same events also stream there —
+point PromptPotter at an existing cloud project and it becomes the
+optimizer's trace store, zero schema work. **MLflow** is the on-machine
+peer: an operator already running a local MLflow server flips
+`settings.MLFLOW_ENABLED` and per-round runs land there (wired via
+`infrastructure/tracing/mlflow_sink.py`). Both are **directly
+supported, off by default** — if a team already has the infra, hooking
+it up is a *drop-in upgrade* (flip a flag / add `.env` creds), never a
+code change, which is exactly why both sink paths stay import-alive even
+while dormant. The Langfuse schema is the **orientation point**: even
+with no external sink wired, events conform to it, so importing later
+(or swapping in a different backend) is configuration, not refactoring.
+Tracing is fan-out only — the optimizer never reads it, so it can never
+become load-bearing for the loop.
 
 **Measurement archive (the actual database).** Beyond the per-cycle
 ledger, a cross-cycle persistence layer lives at
@@ -604,10 +611,12 @@ the PR description.
 
 §0.5 is binary: surface is either load-bearing (named above, can't
 be cut) or it isn't. **Items needing a load-bearing-or-drop
-decision** (`refresh_tenant_leaderboards()`, `/datasets/{name}/preview`,
-MLflow sink) live in m10-cleanup §1's audit deliverables, not in
+decision** (`refresh_tenant_leaderboards()`, `/datasets/{name}/preview`)
+live in m10-cleanup §1's audit deliverables, not in
 this list. §1 either promotes them into the load-bearing list above
-(in a follow-up PR) or §4 drops them.
+(in a follow-up PR) or §4 drops them. (The MLflow + Langfuse sinks are
+**resolved as kept** — the observability-nexus drop-in is a core
+capability, not an audit candidate; see the Tracing paragraph above.)
 
 When in doubt about an item already in the list above: file a
 one-line "kept because" note in the PR rather than cutting silently.

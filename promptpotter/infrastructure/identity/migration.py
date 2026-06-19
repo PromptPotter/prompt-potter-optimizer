@@ -77,12 +77,12 @@ def registered_or_default_identity(explicit_tenant: str | None = None) -> Identi
     authenticated web reads; otherwise anonymous ``default``.
     """
     from promptpotter.infrastructure.identity.paths import default_identity_paths
-    from promptpotter.shared.identity import default_identity, identity_for_user
+    from promptpotter.shared.identity import default_identity
 
     if explicit_tenant:
         return default_identity(tenant_id=explicit_tenant)
     uid = registered_user_id(default_identity_paths().default_claim_marker)
-    return identity_for_user(uid) if uid else default_identity()
+    return default_identity(tenant_id=uid, user_id=uid) if uid else default_identity()
 
 
 def registered_user_id(marker_path: Path) -> str | None:
