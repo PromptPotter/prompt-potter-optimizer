@@ -7,7 +7,6 @@ after every mutation so CLI-interrupted resumes produce one continuous trace.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
@@ -36,6 +35,7 @@ from promptpotter.infrastructure.tracing.events import (
     RoundEnd,
     RoundStart,
     RoundWinnerChosen,
+    dataset_item_id,
 )
 from promptpotter.infrastructure.tracing.file_sink import FileSink
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
@@ -246,9 +246,7 @@ class ObservabilityBridge:
                 continue
             seen.add(query)
             items.append((query, ground_truth))
-            query_to_item_id[query] = hashlib.sha256(
-                f"{dataset_name}:{query}".encode(),
-            ).hexdigest()[:16]
+            query_to_item_id[query] = dataset_item_id(dataset_name, query)
 
         self.emit(DatasetRegistered(dataset_name=dataset_name, items=tuple(items)))
         return query_to_item_id

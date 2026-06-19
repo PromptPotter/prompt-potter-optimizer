@@ -389,7 +389,12 @@ class Cycle:
                 tr.best_composite_fitness = cum_comp
                 tr.best_accuracy = cum_acc
                 tr.best_round = rr.round
-                tr.best_sp = self.opt_sp.to_job_search_point(
+                # Build best_sp from THIS round's prompts, not self.opt_sp (pinned to the last
+                # prior above) — else a resumed best≠last cycle pairs best params with last text.
+                best_osp = self.opt_sp.model_copy(
+                    update={f: rr.prompt_fields.get(f, "") for f in PROMPT_STRING_FIELDS}
+                )
+                tr.best_sp = best_osp.to_job_search_point(
                     base_pipeline_params=(rr.pipeline_params or last_pp), schema=schema
                 )
         tr.current_results = acc_cum

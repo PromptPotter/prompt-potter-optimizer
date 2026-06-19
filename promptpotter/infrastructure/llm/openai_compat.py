@@ -173,6 +173,11 @@ class OpenAICompatibleClient(LLMClientBase):
                 result.usage["total_tokens"] = (
                     result.usage["prompt_tokens"] + result.usage["completion_tokens"]
                 )
+                # Reconcile the rolling-window reservation with the ACTUAL two-round-trip
+                # total, not the cheap chars//4 estimate — else the TPM self-throttle
+                # under-counts on exactly the heaviest (repaired) calls. Mirrors line ~204.
+                if reservation is not None:
+                    reservation.close(result.usage["total_tokens"])
                 return result
             response, content, validation_err = result
             if validation_err is not None:

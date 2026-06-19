@@ -7,7 +7,6 @@ fork's chart shows the fork's trajectory, not the session root's.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Literal
 
 from fastapi import Request, Response
@@ -15,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.store import cycle_dir_for
+from promptpotter.infrastructure.store.base import read_json
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
@@ -197,7 +197,7 @@ async def get_cycle_dashboard(
     if client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
         return Response(status_code=304, headers=headers)
 
-    dashboard: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    dashboard: dict[str, Any] = read_json(path)
     # ``run_phase`` rides dashboard.json itself (declared by the runner, projected
     # by LiveDashboardView) — the webapp reads it straight off the 2 s poll, so a
     # paused run reads "paused" with no separate /runstate round-trip. The spend

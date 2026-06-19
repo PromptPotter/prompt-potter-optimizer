@@ -361,7 +361,10 @@ async def run_optimization(
                 best_accuracy=cycle.tracking.best_accuracy,
                 best_round=cycle.tracking.best_round,
                 origin_accuracy=origin.origin_acc,
-                winner_prompt_fields=cycle.opt_sp.prompt_field_dict() if best_sp else {},
+                # Both read from best_sp (the BEST round's frozen point) so prompt fields and
+                # pipeline_params describe the SAME round. cycle.opt_sp is overwritten each round by
+                # absorb_round, so reading prompts off it pairs the best params with the last round's text.
+                winner_prompt_fields=(best_sp.prompt_fields or {}) if best_sp else {},
                 winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
                 stop_reason=stop_reason,
                 started_at=started_at,
@@ -509,6 +512,10 @@ def _finalize_run(
             "prompt_hashes": compute_optimizer_prompt_hashes(),
             "origin_composite_fitness": (rounds[0].matched_origin_composite if rounds else 0.0),
             "mode": "sweep" if sweep else "full",
+            # The winner artifact, serialized for the disk readers: log.md's FinalWinnerView
+            # (writers.py) and compare/elevate (pobb/elevation.py) both fetch these from `final`.
+            "winner_prompt_fields": cycle_result.winner_prompt_fields,
+            "winner_pipeline_params": cycle_result.winner_pipeline_params,
         }
         session.store.campaigns.mark_finished(
             session.campaign_id,

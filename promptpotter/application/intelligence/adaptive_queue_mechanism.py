@@ -20,6 +20,8 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 
+from promptpotter.shared import sigmoid
+
 __all__ = [
     "decision_information_gain",
     "delta_learning_gain",
@@ -33,14 +35,6 @@ __all__ = [
 
 # Probit scale for ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))``.
 _PROBIT_SCALE = math.pi / 8.0
-
-
-def _sigmoid(x: float) -> float:
-    """Numerically-stable sigmoid (no SciPy dependency)."""
-    if x >= 0:
-        return 1.0 / (1.0 + math.exp(-x))
-    ex = math.exp(x)
-    return ex / (1.0 + ex)
 
 
 def _normal_cdf(x: float) -> float:
@@ -64,7 +58,7 @@ def marginal_hit_probability(
 ) -> float:
     """Probit-marginalized hit probability ``E[σ(θ_c − δ_s)] ≈ σ((μ_c − δ_s) / √(1 + π·(var_c + se_δ_s²)/8))``."""
     v = var_c + se_delta_s * se_delta_s
-    return _sigmoid((mu_c - delta_s) / math.sqrt(1.0 + _PROBIT_SCALE * v))
+    return sigmoid((mu_c - delta_s) / math.sqrt(1.0 + _PROBIT_SCALE * v))
 
 
 def update_theta_posterior(
@@ -84,7 +78,7 @@ def update_theta_posterior(
     ``se_delta_s → 0`` this is the plain 1PL Laplace update. Variance floored at ``1e-6``.
     """
     scale = math.sqrt(1.0 + _PROBIT_SCALE * se_delta_s * se_delta_s)
-    p = _sigmoid((mu - delta_s) / scale)
+    p = sigmoid((mu - delta_s) / scale)
     score = ((1.0 if hit else 0.0) - p) / scale
     info = 1.0 / var + p * (1.0 - p) / (scale * scale)
     new_var = max(1.0 / info, 1e-6)
@@ -126,7 +120,7 @@ def decision_information_gain(
     # Probit ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))`` over joint (candidate, sample) variance.
     m = mu_c - delta_s
     v = var_c + se_delta_s * se_delta_s
-    p_bar = _sigmoid(m / math.sqrt(1.0 + _PROBIT_SCALE * v))
+    p_bar = sigmoid(m / math.sqrt(1.0 + _PROBIT_SCALE * v))
     return _binary_entropy(p0) - (
         p_bar * _binary_entropy(p_hit) + (1.0 - p_bar) * _binary_entropy(p_miss)
     )

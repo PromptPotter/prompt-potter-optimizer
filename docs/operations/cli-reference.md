@@ -84,7 +84,7 @@ While `resume` runs, the live in-flight round mirrors into the active cycle's ow
 |---|---|
 | `--from <round>` | Rewind the active cycle to after round N before resuming |
 | `--no-check` | On resume, rescore but skip the decision-replay halt |
-| `--fork-on-divergence` | On *data-affecting* config divergence (scoring, pipeline_overrides, exclude_nodes, dataset_name), mint a sibling cycle (with `parent_cycle_id`) and re-run the divergent round under the current scorer. Policy-only edits (PoBB knobs, patience, thresholds, n_variants, exploration) continue in-place — no fork, the flag is a no-op. See `CampaignConfig.classify_diff_against` for the field-by-field split. |
+| `--fork-on-divergence` | On *data-affecting* config divergence (scoring, pipeline_overrides, exclude_nodes, dataset_name), mint a sibling cycle (with `parent_cycle_id`) and re-run the divergent round under the current scorer. Policy-only edits (PoBB knobs, patience, thresholds, n_variants, exploration) continue in-place — no fork, the flag is a no-op. See `classify_config_diff` (`application/config_diff.py`) for the field-by-field split. |
 | `--rewind <round>` | Fork a sibling cycle at round N (parent preserved intact). Contrast with `--from N` which rewinds in place. |
 | `--rewind-reason <text>` | Operator note recorded on the fork; ignored unless `--rewind ROUND` is set. |
 | `--diag` | Diagnostic mode (see `new --diag`). On a previously-completed diag cycle, branches off a counted sibling. |

@@ -7,7 +7,6 @@ via ``CampaignStore``.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import uuid
 from pathlib import Path
@@ -35,6 +34,7 @@ from promptpotter.infrastructure.tracing.events import (
     RoundEnd,
     RoundStart,
     RoundWinnerChosen,
+    dataset_item_id,
     generate_observation_id,
 )
 from promptpotter.shared.clock import utcnow_iso
@@ -194,9 +194,7 @@ class FileSink:
             if not query or query in seen:
                 continue
             seen.add(query)
-            item_id = hashlib.sha256(
-                f"{event.dataset_name}:{query}".encode(),
-            ).hexdigest()[:16]
+            item_id = dataset_item_id(event.dataset_name, query)
             item_data = {
                 "id": item_id,
                 "dataset_name": event.dataset_name,

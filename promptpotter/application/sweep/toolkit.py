@@ -22,7 +22,7 @@ from promptpotter.application.optimization.dispatch.llm_call import (
 from promptpotter.application.optimization.dispatch.llm_call import prompts as _opt_prompts
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.sample import Sample
-from promptpotter.infrastructure.store.base import read_json_optional, write_json
+from promptpotter.infrastructure.store.base import read_json, read_json_optional, write_json
 from promptpotter.shared.clock import utcnow_iso
 
 logger = logging.getLogger(__name__)
@@ -152,7 +152,7 @@ def current_optimizer_prompt_hash(node: str = "l1_generate") -> str:
 
 def load_prompt_template_from_path(path: Path) -> PromptTemplate:
     """Load an 8-field `PromptTemplate` JSON — sweep variant of `l1_generate`/`l2_context`."""
-    body = json.loads(path.read_text(encoding="utf-8"))
+    body = read_json(path)
     return PromptTemplate(**body)
 
 

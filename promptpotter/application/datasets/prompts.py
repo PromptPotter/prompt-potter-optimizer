@@ -11,12 +11,11 @@ load through the same code."""
 from __future__ import annotations
 
 import functools
-import json
 from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.opt_search_point import PromptTemplate
-from promptpotter.infrastructure.store.base import read_json_optional
+from promptpotter.infrastructure.store.base import read_json, read_json_optional
 
 
 def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:
@@ -77,7 +76,7 @@ def load_dataset_prompt(dataset_dir: Path, name: str = "default") -> PromptTempl
         raise FileNotFoundError(
             f"Dataset prompt not found: {path}. Create it under the dataset's prompts/ dir."
         )
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = read_json(path)
     return PromptTemplate(**data)
 
 

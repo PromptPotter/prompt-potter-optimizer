@@ -11,6 +11,7 @@ Each event is self-contained; sinks own the id mappings.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -21,6 +22,16 @@ def generate_observation_id() -> str:
     prefix = datetime.now(UTC).strftime("%y%m%d%H%M%S")
     suffix = uuid.uuid4().hex[: 32 - len(prefix)]
     return f"{prefix}{suffix}"
+
+
+def dataset_item_id(dataset_name: str, query: str) -> str:
+    """Content-addressed Langfuse item id for a ``(dataset, query)`` pair.
+
+    The file sink and the cloud bridge both key items by this id; it MUST be
+    byte-identical across them or the two register mismatched ids for the same
+    pair — so it lives here, not duplicated at each sink.
+    """
+    return hashlib.sha256(f"{dataset_name}:{query}".encode()).hexdigest()[:16]
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,5 +297,6 @@ __all__ = [
     "RoundEnd",
     "RoundStart",
     "RoundWinnerChosen",
+    "dataset_item_id",
     "generate_observation_id",
 ]

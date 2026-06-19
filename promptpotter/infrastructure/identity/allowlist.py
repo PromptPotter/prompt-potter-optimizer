@@ -35,6 +35,13 @@ class AllowlistDecision:
     reason: str
 
 
+def _norm_email(email: str) -> str:
+    """Canonical email form: stripped + lowercased. The ONE normalizer, so the
+    membership test and the stored form can never drift apart. Non-raising;
+    ``_normalize`` wraps it for the mutators that require non-empty."""
+    return email.strip().lower()
+
+
 def check_allowlist(path: Path, email: str | None) -> AllowlistDecision:
     """Allowlist gate. Missing file → allow; empty list → deny; otherwise membership."""
     if not path.is_file():
@@ -50,12 +57,12 @@ def check_allowlist(path: Path, email: str | None) -> AllowlistDecision:
     emails_raw = data.get("emails") if isinstance(data, dict) else None
     if not isinstance(emails_raw, list):
         return AllowlistDecision(allowed=False, reason="allowlist_invalid")
-    permitted = {str(e).strip().lower() for e in emails_raw if isinstance(e, str)}
+    permitted = {_norm_email(e) for e in emails_raw if isinstance(e, str)}
     if not permitted:
         return AllowlistDecision(allowed=False, reason="allowlist_empty")
     if not email:
         return AllowlistDecision(allowed=False, reason="email_missing_from_claims")
-    if email.strip().lower() in permitted:
+    if _norm_email(email) in permitted:
         return AllowlistDecision(allowed=True, reason="email_permitted")
     return AllowlistDecision(allowed=False, reason="email_not_permitted")
 
@@ -89,7 +96,7 @@ def _load_emails(path: Path) -> list[str]:
     emails_raw = data.get("emails") if isinstance(data, dict) else None
     if not isinstance(emails_raw, list):
         return []
-    return sorted({str(e).strip().lower() for e in emails_raw if isinstance(e, str) and e.strip()})
+    return sorted({_norm_email(e) for e in emails_raw if isinstance(e, str) and e.strip()})
 
 
 def _write_emails(path: Path, emails: list[str]) -> None:
@@ -115,7 +122,7 @@ def _append_audit(
 
 
 def _normalize(email: str) -> str:
-    normalized = email.strip().lower()
+    normalized = _norm_email(email)
     if not normalized:
         raise ValueError("email must be non-empty")
     return normalized

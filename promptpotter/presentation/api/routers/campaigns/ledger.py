@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from fastapi import Query
@@ -12,6 +11,7 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import Stores, campaign_root_dir_for, cycle_dir_for
+from promptpotter.infrastructure.store.base import read_json
 from promptpotter.presentation.api.deps import StoreDep, read_text_or_404
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
@@ -119,7 +119,7 @@ async def get_cycle_hard_samples(
     path = cycle_dir / "hard_samples.json"
     if not path.is_file():
         raise NotFoundError("hard_samples.json not present (cycle has no rounds yet)")
-    artifact: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    artifact: dict[str, Any] = read_json(path)
     return artifact
 
 

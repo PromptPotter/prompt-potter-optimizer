@@ -4,7 +4,7 @@ Flags: ``--from N`` (rewind), ``--fork-on-divergence`` (sibling on replay
 disagree), ``--no-check`` (silent), ``--diag`` (diag-sibling BFS).
 
 Drift detection compares the stored ``campaign.json::root_content_hash``
-to a freshly computed hash; ``classify_diff_against`` flags the diff as
+to a freshly computed hash; ``classify_config_diff`` flags the diff as
 policy-only (safe to resume) or data-affecting (recommends fork or fresh ``new``)."""
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def _prepare_cycle_for_resume(
     TTY pivot offered when ``pivot_prompt=True``, sweep callers pass False).
 
     Second check: optimizer-prompt drift halts resume with a pointer to ``new``."""
-    from promptpotter.application.config import DiffScope
+    from promptpotter.application.config_diff import DiffScope, classify_config_diff
     from promptpotter.application.optimization.dispatch.llm_call import (
         combined_optimizer_prompt_hash,
     )
@@ -93,7 +93,7 @@ def _prepare_cycle_for_resume(
         )
     elif campaign.root_content_hash == current_hash:
         print(f"config: unchanged (content hash {current_hash})")
-    elif (drift := campaign_config.classify_diff_against(campaign.config))[0] is DiffScope.NONE:
+    elif (drift := classify_config_diff(campaign_config, campaign.config))[0] is DiffScope.NONE:
         # Hash differs but the config is byte-identical — an identity-formula change
         # (the old config-blind hash vs the new config-aware one), NOT an operator edit.
         # Re-stamp the fingerprint and resume in place; the stored cycle_id (read from

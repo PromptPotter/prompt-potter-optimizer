@@ -25,6 +25,7 @@ from typing import Any
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.config import load_campaign_config as validate_campaign_config
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
+from promptpotter.infrastructure.store.base import read_json_optional
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,9 +94,7 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
     task_description = task_path.read_text(encoding="utf-8").strip() if task_path.is_file() else ""
 
     pipeline_path = dataset_dir / "pipeline.json"
-    pipeline: dict[str, Any] = (
-        json.loads(pipeline_path.read_text(encoding="utf-8")) if pipeline_path.is_file() else {}
-    )
+    pipeline: dict[str, Any] = read_json_optional(pipeline_path) or {}
     backend_type = str(pipeline.get("backend_type") or "").lower()
     pipeline_nodes = dict(pipeline.get("nodes") or {})
     active_steps = [str(s) for s in (pipeline.get("pipelines") or {}).get("default") or []]

@@ -12,7 +12,6 @@ wire contract; ``presentation/api/routers/commands.py`` for the dispatch shell).
 
 from __future__ import annotations
 
-import json
 from typing import Any, Literal
 
 from fastapi import APIRouter
@@ -26,6 +25,7 @@ from promptpotter.infrastructure.store import (
     cycle_dir_for,
     read_active_pointer,
 )
+from promptpotter.infrastructure.store.base import read_json
 from promptpotter.presentation.api.deps import IdentityDep, JobRegistryDep, StoreDep
 from promptpotter.shared.errors import NotFoundError
 
@@ -110,7 +110,7 @@ async def get_live_state(store: StoreDep) -> dict[str, Any]:
             "is_paused": paused,
             "current_spend_cap_usd": current_spend_cap_usd,
         }
-    state: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    state: dict[str, Any] = read_json(path)
     state["is_paused"] = paused
     state["current_spend_cap_usd"] = current_spend_cap_usd
     return state
@@ -217,7 +217,7 @@ async def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> Mac
 @active_router.get("/optimizer-pipeline", tags=["Optimizer"])
 async def get_optimizer_pipeline() -> dict[str, Any]:
     """Bundled ``datasets/_optimizer/pipeline.json`` — nodes + pipelines + ``view`` topology for the webapp workflow."""
-    pipeline: dict[str, Any] = json.loads(OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
+    pipeline: dict[str, Any] = read_json(OPTIMIZER_PIPELINE_PATH)
     return pipeline
 
 

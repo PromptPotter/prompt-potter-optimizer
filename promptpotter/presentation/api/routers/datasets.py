@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -41,6 +40,7 @@ from promptpotter.infrastructure.store import (
 from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
+from promptpotter.infrastructure.store.base import read_json
 from promptpotter.presentation.api.deps import StoreDep, get_draft_registry
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -315,7 +315,7 @@ def _load_dataset_cache(dataset_dir: Path) -> tuple[dict[str, Any], dict[int, di
     cache_path = dataset_dir / "cache.json"
     if not cache_path.is_file():
         raise NotFoundError(f"Dataset '{dataset_dir.name}' not found")
-    raw = json.loads(cache_path.read_text(encoding="utf-8"))
+    raw = read_json(cache_path)
     sample_lookup: dict[int, dict[str, Any]] = {}
     for item in raw["items"]:
         sid = int(item["sample_id"] if "sample_id" in item else item["id"])
@@ -348,7 +348,7 @@ def _resolve_scope_artifact(
         path = cycle_dir / "hard_samples.json"
         if not path.is_file():
             return {}
-        cycle_artifact: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        cycle_artifact: dict[str, Any] = read_json(path)
         return cycle_artifact
     if scope == "campaign":
         if not campaign_id:
@@ -359,7 +359,7 @@ def _resolve_scope_artifact(
         path = campaign_dir / "hard_samples.json"
         if not path.is_file():
             return {}
-        campaign_artifact: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        campaign_artifact: dict[str, Any] = read_json(path)
         return campaign_artifact
     # `dataset` — always per-dataset (cross-dataset pooling is meaningless).
     return build_archive_hard_samples_artifact(
@@ -538,7 +538,7 @@ async def get_dataset_preview(
     split_test: int | None = None
     campaign_path = dataset_dir / "campaign.json"
     if campaign_path.is_file():
-        cc = json.loads(campaign_path.read_text(encoding="utf-8"))
+        cc = read_json(campaign_path)
         declared = (cc.get("campaign_config") or {}).get("dataset_split")
         if isinstance(declared, dict):
             split_train = declared.get("train")
@@ -690,7 +690,7 @@ async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineRes
     pipeline_path = dataset_dir / "pipeline.json"
     if not pipeline_path.is_file():
         raise NotFoundError(f"Dataset '{name}' has no pipeline.json")
-    raw = json.loads(pipeline_path.read_text(encoding="utf-8"))
+    raw = read_json(pipeline_path)
     # `parse_pipeline_response` strips lone surrogates at parse time so the
     # rendered model is already wire-safe (some overlays carry escape
     # sequences pointing at lone low surrogates that crash UTF-8 encode).
@@ -703,7 +703,7 @@ async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineRes
     forbidden_strict = True
     campaign_path = dataset_dir / "campaign.json"
     if campaign_path.is_file():
-        craw = json.loads(campaign_path.read_text(encoding="utf-8"))
+        craw = read_json(campaign_path)
         cfg = load_campaign_config(craw.get("campaign_config", craw))
         forbidden_strict = cfg.optimization.forbidden_axes_strict
         # Apply the dataset's default search-space narrowing so the setup editor

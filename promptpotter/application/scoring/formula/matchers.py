@@ -8,13 +8,13 @@ answer next to the raw model output.
 
 from __future__ import annotations
 
-import math
 import re
 from collections.abc import Callable
 from typing import Any
 
 from promptpotter.domain.rendering import DISPLAY_EXTRACTORS as DISPLAY_EXTRACTORS
 from promptpotter.domain.rendering import extract_display_answer as extract_display_answer
+from promptpotter.shared import sigmoid
 
 GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
 """Matches the GSM8K answer-field format ``#### N``. Shared with the
@@ -101,15 +101,6 @@ def _hockeystick(x: float, threshold: float, slope: float = 1.0) -> float:
     return max(0.0, (float(x) - float(threshold)) * float(slope))
 
 
-def _sigmoid(x: float) -> float:
-    x = float(x)
-    if x >= 0:
-        z = math.exp(-x)
-        return 1.0 / (1.0 + z)
-    z = math.exp(x)
-    return z / (1.0 + z)
-
-
 def _smoothstep(x: float, edge0: float, edge1: float) -> float:
     e0 = float(edge0)
     e1 = float(edge1)
@@ -126,7 +117,7 @@ SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "exact_match": _exact_match,
     "relu": _relu,
     "hockeystick": _hockeystick,
-    "sigmoid": _sigmoid,
+    "sigmoid": sigmoid,
     "smoothstep": _smoothstep,
 }
 
