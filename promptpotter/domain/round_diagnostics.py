@@ -94,7 +94,6 @@ class RoundDiagnostics:
     # Population this round
     cross_candidate_diff: list[str] = field(default_factory=list)
     l1_diversity: float = 1.0
-    cache_share: float = 0.0
 
     # Per-sample (used by L2 for tactical reasoning over actionable misses)
     samples: list[SampleDiag] = field(default_factory=list)

@@ -117,7 +117,12 @@ class OpenAICompatibleClient(LLMClientBase):
 
         result = await self._one_attempt(client, request_params, response_model, response_schema)
         if isinstance(result, LLMResponse):
-            return result  # Groq json_validate_failed salvage — already typed.
+            # Groq json_validate_failed salvage — already typed. Reconcile the
+            # reservation with the salvage's real token count (mirrors the repair +
+            # normal exits) so the TPM window doesn't keep the cheap chars//4 estimate.
+            if reservation is not None:
+                reservation.close(result.usage["total_tokens"])
+            return result
         response, content, validation_err = result
         schema_repair_attempts = 0
         # The failed first attempt still burned tokens; carry them so the returned usage

@@ -391,7 +391,9 @@ async def run_optimization(
                 resumed_from_round=session.state.resumed_from_round,
                 error=cycle_error,
             )
-        _finalize_run(session, observers, cycle_result, sweep=sweep)
+        langfuse_trace_id = _finalize_run(session, observers, cycle_result, sweep=sweep)
+        if langfuse_trace_id is not None:
+            cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
 
         # Stub-fork cleanup: if this run forked during init but never completed a round, delete the
         # empty dir so interrupts between fork-mint and round-1 don't accumulate stubs.
@@ -473,8 +475,12 @@ def _finalize_run(
     cycle_result: CycleResult,
     *,
     sweep: bool = False,
-) -> None:
-    """Mark cycle finished, fold summary into index.json::final, render log.md, drain projections."""
+) -> str | None:
+    """Mark cycle finished, fold summary into index.json::final, render log.md, drain projections.
+
+    Returns the Langfuse trace id from the terminal ``end_campaign`` emit (``None`` when
+    no tracing bridge is active) so the caller can stamp it onto the returned ``CycleResult``.
+    """
     stop_reason = cycle_result.stop_reason
     is_interrupted = stop_reason == StopReason.INTERRUPTED
     is_crashed = stop_reason == StopReason.CRASHED
@@ -547,14 +553,16 @@ def _finalize_run(
     observers.drain_all()
 
     obs = session.state.obs
+    langfuse_trace_id: str | None = None
     if obs:
-        obs.end_campaign(
+        langfuse_trace_id = obs.end_campaign(
             session.state.tracing_campaign_id,
             best_accuracy=cycle_result.best_accuracy,
             n_rounds=cycle_result.n_rounds,
             stop_reason=stop_reason,
             best_round=cycle_result.best_round,
         )
+    return langfuse_trace_id
 
 
 __all__ = ["run_optimization"]

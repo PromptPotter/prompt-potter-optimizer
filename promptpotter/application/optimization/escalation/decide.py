@@ -7,15 +7,11 @@ State mutation (stall counter bump) lives in `EscalationFSM.observe_round`; this
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.escalation.state import (
     EscalationEvent,
     NextAction,
 )
-
-if TYPE_CHECKING:
-    from promptpotter.application.optimization.escalation.rules import EscalationRule
 
 __all__ = ["EscalationEvent", "EscalationInputs", "NextAction", "decide_escalation"]
 
@@ -40,20 +36,17 @@ class EscalationInputs:
     evidence_starved: bool = False
 
 
-def decide_escalation(
-    inputs: EscalationInputs,
-    rules: list[EscalationRule] | None = None,
-) -> EscalationEvent:
+def decide_escalation(inputs: EscalationInputs) -> EscalationEvent:
     """Sort by priority (desc), return the first matching rule's event."""
     from promptpotter.application.optimization.escalation.rules import (
         DEFAULT_ESCALATION_RULES,
     )
 
-    active = rules if rules is not None else DEFAULT_ESCALATION_RULES
-    for rule in sorted(active, key=lambda r: -r.priority):
+    for rule in sorted(DEFAULT_ESCALATION_RULES, key=lambda r: -r.priority):
         if rule.when(inputs):
             return EscalationEvent(next_action=rule.fire)
     raise RuntimeError(
-        f"No escalation rule matched observe_round inputs (rules={[r.name for r in active]}); "
+        "No escalation rule matched observe_round inputs "
+        f"(rules={[r.name for r in DEFAULT_ESCALATION_RULES]}); "
         "the rule set must include a fall-through with priority < all conditional rules."
     )
