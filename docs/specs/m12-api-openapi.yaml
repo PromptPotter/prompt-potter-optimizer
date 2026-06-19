@@ -1075,12 +1075,16 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '422':
           description: |
-            Either `payload_invalid` (malformed envelope) or
-            `origin_incomplete` — the deterministic origin-readiness checklist
-            still has gaps (the column mapping unset/unconfirmed, an empty
-            `task_description`, or any config knob still `proposed`).
-            `details.gaps` lists each blocking field as `{field, reason, hint}`.
-            The draft is preserved; the operator resolves the gaps (via
+            `payload_invalid` (malformed envelope), `origin_incomplete`, or
+            `pipeline_config_invalid`. `origin_incomplete` — the deterministic
+            origin-readiness checklist still has gaps (the column mapping
+            unset/unconfirmed, an empty `task_description`, or any config knob
+            still `proposed`); `details.gaps` lists each blocking field as
+            `{field, reason, hint}`. `pipeline_config_invalid` — the resolved
+            pipeline config can't produce a runnable cycle (a prompt-bearing
+            node's rendered prompt omits a required `{{template var}}`, or an
+            LLM node has no owned `model`); the message names the node + fix.
+            The draft is preserved; the operator resolves it (via
             `resolve-origin` or `edit-draft-campaign`) and retries.
           content:
             application/json:
@@ -1517,7 +1521,7 @@ components:
             specifics: `version_conflict` (409), `idempotency_key_missing` (400),
             `command_kind_unknown` (404), `slug_collision` (409),
             `machine_busy` (409), `backend_unreachable` (503),
-            `ingest_failed` / `origin_incomplete`
+            `ingest_failed` / `origin_incomplete` / `pipeline_config_invalid`
             (422). Generic families: `bad_request` (400), `unauthenticated`
             (401), `capability_denied` (403), `not_found` (404), `too_large`
             (413), `request_invalid` (422), `service_unavailable` (503),
@@ -1536,6 +1540,7 @@ components:
             - backend_unreachable
             - ingest_failed
             - origin_incomplete
+            - pipeline_config_invalid
             - nothing_to_replace
             - resolver_failed
             - backend_sync_failed

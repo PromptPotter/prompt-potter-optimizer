@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON, PROMPT_STRING_FIELDS
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -545,13 +546,14 @@ def configure_and_apply_pipeline(
             declared = pinfo.template_variables if pinfo else []
             missing = missing_template_vars(rendered, declared)
             if missing:
-                raise ValueError(
+                raise PayloadInvalidError(
                     f"Dataset {dataset_name!r} prompt for node {pnode!r} is missing required "
                     f"template variables {missing} — the backend injects these by literal "
                     f"{{{{name}}}} substitution, so without them the query / research / output "
                     f"schema never reach the model. Add the placeholders to "
                     f"datasets/{dataset_name}/prompts/[{pnode}|default].json "
-                    f"(node declares: {declared})."
+                    f"(node declares: {declared}).",
+                    code="pipeline_config_invalid",
                 )
             # Starting prompt lands on the sparse wire payload, on top of the merged
             # config above — never on `current_config`.
@@ -569,10 +571,11 @@ def configure_and_apply_pipeline(
         for name in active:
             node_obj = filtered.get_node(name)
             if node_obj and node_obj.is_llm and not pipeline_params.get(name, {}).get("model"):
-                raise ValueError(
+                raise PayloadInvalidError(
                     f"dataset {dataset_name!r}: LLM node {name!r} has no owned model. "
                     f"Declare it in the dataset's pipeline.json::nodes.{name}.config.model "
-                    f"— the dataset owns its task model, never the backend default."
+                    f"— the dataset owns its task model, never the backend default.",
+                    code="pipeline_config_invalid",
                 )
 
     if filtered is not None:

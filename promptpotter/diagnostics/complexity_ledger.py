@@ -85,7 +85,7 @@ def compute_ledger() -> dict[str, int]:
     from promptpotter.application.optimization.dispatch.hub.injections.registry import (
         INJECTIONS,
     )
-    from promptpotter.application.optimization.escalation.rules import (
+    from promptpotter.application.optimization.escalation import (
         DEFAULT_ESCALATION_RULES,
     )
     from promptpotter.config import settings as settings_mod
