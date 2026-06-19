@@ -93,9 +93,16 @@ def identity_for_user(user_id: str) -> IdentityContext:
     )
 
 
+def claim_email(identity: IdentityContext) -> str | None:
+    """Best-effort read of the OIDC ``email`` claim — ``None`` when absent/non-string."""
+    raw = identity.claims.get("email")
+    return raw if isinstance(raw, str) else None
+
+
 __all__ = [
     "BENCHMARKS_READ_CAP",
     "PROMPTPOTTER_ADMIN_ENV",
     "IdentityContext",
+    "claim_email",
     "default_identity",
 ]

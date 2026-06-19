@@ -24,11 +24,6 @@ shape was the old bloat source; readiness buckets replaced it (2026-06-19).
 ## Ready — no blocker, pick up cold
 
 - **Campaign-from-origin Phase 2 — additive consumer layer** (backend mint seam shipped: `POST /commands/mint-campaign {origin_override}` already starts a fresh campaign from a chosen prior origin). Remaining: a `GET /origins` derived read over `list_campaigns()` (dedup by `Campaign.root_content_hash`; 3-hop to `session_state.origin_prompt_fields` for the payload) + the New-Campaign / `IngestPane` origin picker that POSTs it. (Forward-feature-ish — tracked in CHANGELOG 0.8.3 as "Origin-picker UI"; kept here until it lands.)
-- `application/datasets/loaders.py::load_dataset()` — exported but zero in-repo callers. Verify no operator notebook/external script imports it, then delete.
-- `infrastructure/store/entity_store.py` CRUD base (`save`/`load`/`update`/`_entity_path`/`_entity_dir`/`_subdir`) — never called through the base class (subclasses hit the store layer directly). Confirm via grep, then delete the methods or collapse the hierarchy.
-- `domain/pipeline_schema.py::NodePromptInfo.family` / `.description` — populated at `pipeline_parsing.py` from `GET /pipeline`, never read after construction (`.template_variables` is the only field read); not serialized to any wire boundary. Drop both fields + their population. Verify no external reader first.
-- `application/jobs/launcher/core.py::_claim_email` ↔ `presentation/api/routers/auth.py::_claim_email` — logically identical (differ only in param name + docstring). Extract to a shared identity util; crosses presentation↔application, so pick the shared home deliberately.
-- `application/output/writers.py` `_load_p_best_trajectory` + `_fork_summary_from_index` (only caller `from_disk_log`) + `_load_sibling_indices` (only caller `_render_campaign_log_md`); `application/intelligence/indexes/axis.py::_collect()` (only caller `axis.digest()`) — single-caller helpers, no dedicated test. Inline **only if** the caller is in another file — intra-file `_private` decomposition is not debt (verify before touching).
 - `webapp` `forkReconcileDefaults` / `LimitReconcile` — freeze spend/round "remaining" via `useState(() => …)` at mount while the parent keeps polling, so a long edit session shows mount-time values. Latent staleness seam, intentional (avoids clobbering typed values) but undocumented. Add a one-line comment affirming the snapshot is deliberate, or recompute-on-reopen.
 
 ## Blocked — named blocker
@@ -72,6 +67,7 @@ shape was the old bloat source; readiness buckets replaced it (2026-06-19).
 - **`RunCallbacks` ↔ `emit_*`** — two writer APIs by design; the "which do I use" rule is in [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) §1.
 - **`from_disk_round` / `from_disk_log`** — not a roundtrip shim; foreign fork-siblings + historical cycles have no live ledger, so on-disk `round_NNNN.json` is the only source.
 - **`measurement_archive.py` `.get(…, default)` at `save()`** — looks dead (the production writer always sets the keys) but `save()` has direct test-fixture callers with partial dicts; live boundary guards.
+- **`writers.py` `_load_p_best_trajectory` / `_fork_summary_from_index` / `_load_sibling_indices`, `axis.py::_collect`** — single-caller, but the caller is in the SAME file in every case; intra-file `_private` decomposition is not inter-file indirection. (Verified 2026-06-19.)
 
 ## Audit guidance — what to hunt for
 

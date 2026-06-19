@@ -47,11 +47,11 @@ from promptpotter.infrastructure.identity.google import (
 from promptpotter.infrastructure.identity.migration import maybe_claim_default
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
-from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.presentation.api.deps import IdentityDep, StoreDep
 from promptpotter.presentation.api.middleware import SESSION_COOKIE_NAME
 from promptpotter.shared.errors import NotFoundError, ServiceUnavailableError
+from promptpotter.shared.identity import claim_email
 
 logger = logging.getLogger(__name__)
 
@@ -373,7 +373,7 @@ async def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
     user = store.users.get_or_create(
         user_id=str(store.identity.user_id),
         tenant_id=str(store.identity.tenant_id),
-        email=_claim_email(store),
+        email=claim_email(store.identity),
     )
     job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
     if job_registry is None:
@@ -415,7 +415,7 @@ async def get_user_settings(store: StoreDep) -> UserSettings:
     user = store.users.get_or_create(
         user_id=str(store.identity.user_id),
         tenant_id=str(store.identity.tenant_id),
-        email=_claim_email(store),
+        email=claim_email(store.identity),
     )
     return UserSettings(demo_mode_enabled=user.demo_mode_enabled)
 
@@ -428,7 +428,7 @@ async def patch_user_settings(body: UserSettings, store: StoreDep) -> UserSettin
     user = store.users.get_or_create(
         user_id=str(store.identity.user_id),
         tenant_id=str(store.identity.tenant_id),
-        email=_claim_email(store),
+        email=claim_email(store.identity),
     )
     store.users.save(user.model_copy(update={"demo_mode_enabled": body.demo_mode_enabled}))
     return UserSettings(demo_mode_enabled=body.demo_mode_enabled)
@@ -533,11 +533,6 @@ def _provider_from_model(model: str) -> str:
     if ":" in model:  # e.g. "groq:openai/gpt-oss-120b"
         return model.split(":", 1)[0]
     return "unknown"
-
-
-def _claim_email(store: Stores) -> str | None:
-    raw = store.identity.claims.get("email")
-    return raw if isinstance(raw, str) else None
 
 
 __all__ = [

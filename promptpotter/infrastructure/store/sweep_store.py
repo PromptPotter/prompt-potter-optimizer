@@ -2,7 +2,7 @@
 
 Batch-level (not cycle-level): one ``index.json`` + ``summary.md`` spans many
 sweep-fork cycles (which live flat under ``cycles/``). Keyed by
-``(campaign_id, batch_id)`` — not an ``EntityStore``.
+``(campaign_id, batch_id)``.
 """
 
 from __future__ import annotations

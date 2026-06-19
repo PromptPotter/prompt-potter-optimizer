@@ -137,15 +137,12 @@ class NodeOutputSchema(BaseModel):
 
 class NodePromptInfo(BaseModel):
     """Describes the prompt a node accepts — its presence marks the node as
-    prompt-bearing (the injection point for the candidate prompt); its fields
-    name the prompt family + template variables. The input-side companion to
-    :class:`NodeOutputSchema`."""
+    prompt-bearing (the injection point for the candidate prompt) and names the
+    template variables. The input-side companion to :class:`NodeOutputSchema`."""
 
     model_config = {"frozen": True}
 
-    family: str = ""
     template_variables: list[str] = Field(default_factory=list)
-    description: str = ""
 
 
 class PipelineViewNode(BaseModel):

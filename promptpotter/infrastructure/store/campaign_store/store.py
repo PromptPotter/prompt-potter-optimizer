@@ -40,7 +40,6 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.base import (
-    EntityStore,
     read_json,
     read_json_optional,
     validate_path_component,
@@ -151,7 +150,7 @@ def _unit_kind(sibling_kind: str, fork_trigger: str | None) -> str:
     return "user_fork"
 
 
-class CampaignStore(EntityStore):
+class CampaignStore:
     """Campaign + cycle artifacts under ``campaigns/{campaign_id}/``.
 
     One class over the whole tree: manifest CRUD, per-cycle ``index.json``
@@ -160,7 +159,7 @@ class CampaignStore(EntityStore):
     """
 
     def __init__(self, base_dir: Path):
-        super().__init__(base_dir, "campaigns")
+        self._base_dir = base_dir
 
     # ------------------------------------------------------------------
     # Path resolution + cross-cutting reads

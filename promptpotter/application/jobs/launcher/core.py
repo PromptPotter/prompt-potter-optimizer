@@ -59,6 +59,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.paths import REPO_ROOT
 from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
+from promptpotter.shared.identity import claim_email
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,7 @@ async def mint_campaign_command(
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
         tenant_id=str(stores.identity.tenant_id),
-        email=_claim_email(stores),
+        email=claim_email(stores.identity),
     )
     # Per-user gates first (count the caller's PRIOR runs), then the atomic
     # global slot. Reserve writes a pending reservation before any ``await``, so
@@ -470,7 +471,7 @@ async def start_run_command(
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id),
         tenant_id=str(stores.identity.tenant_id),
-        email=_claim_email(stores),
+        email=claim_email(stores.identity),
     )
     # Per-user gates first, then the atomic global slot (ids are known up front,
     # so the reservation carries them directly). See ``mint_campaign_command``.
@@ -628,12 +629,6 @@ def _read_backend_type_from_dataset(dataset_root: Path, dataset_name: str) -> st
     if not isinstance(bt, str) or not bt:
         raise LaunchError(f"dataset {dataset_name!r} pipeline.json is missing 'backend_type'")
     return bt.lower()
-
-
-def _claim_email(stores: Stores) -> str | None:
-    """Best-effort read of the OIDC email claim off ``IdentityContext.claims``."""
-    raw = stores.identity.claims.get("email")
-    return raw if isinstance(raw, str) else None
 
 
 __all__ = [

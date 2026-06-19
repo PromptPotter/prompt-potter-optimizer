@@ -149,41 +149,7 @@ def append_jsonl(path: Path, item: dict[str, Any]) -> Path:
     return path
 
 
-class EntityStore:
-    """Generic JSON entity store: ``{backend_id}/{subdir}/{entity_id}.json``.
-
-    Subclasses set *subdir* and may add domain-specific methods.
-    """
-
-    def __init__(self, base_dir: Path, subdir: str):
-        self._base_dir = base_dir
-        self._subdir = subdir
-
-    def _entity_dir(self, backend_id: str) -> Path:
-        validate_path_component(backend_id)
-        return self._base_dir / backend_id / self._subdir
-
-    def _entity_path(self, backend_id: str, entity_id: str) -> Path:
-        validate_path_component(entity_id)
-        return self._entity_dir(backend_id) / f"{entity_id}.json"
-
-    def save(self, backend_id: str, entity_id: str, data: dict[str, Any]) -> Path:
-        path = self._entity_path(backend_id, entity_id)
-        write_json(path, data)
-        return path
-
-    def load(self, backend_id: str, entity_id: str) -> dict[str, Any] | None:
-        return read_json_optional(self._entity_path(backend_id, entity_id))
-
-    def update(self, backend_id: str, entity_id: str, updates: dict[str, Any]) -> None:
-        path = self._entity_path(backend_id, entity_id)
-        data = read_json(path)
-        data.update(updates)
-        write_json(path, data)
-
-
 __all__ = [
-    "EntityStore",
     "append_jsonl",
     "ensure_parent_dir",
     "read_json",

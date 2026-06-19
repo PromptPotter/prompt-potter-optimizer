@@ -129,9 +129,7 @@ def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
 def _parse_resolved_prompt(resolved: dict[str, Any]) -> NodePromptInfo:
     """Convert a resolved prompt dict from the enriched response."""
     return NodePromptInfo(
-        family=resolved.get("family", ""),
         template_variables=resolved.get("template_variables", []),
-        description=resolved.get("description", ""),
     )
 
 

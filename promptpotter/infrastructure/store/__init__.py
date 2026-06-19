@@ -9,7 +9,7 @@ CONCEPT MAP (re-exported surface; import from each leaf for internals):
   :class:`DiagnosticRunStore`, :class:`TenantDatasetStore`, :class:`UserStore`
   (+ ``User``).
 * **base** (:mod:`.base`) — shared I/O (``write_json`` / ``read_json``,
-  ``validate_path_component``) + :class:`EntityStore`, the leaf-store base.
+  ``validate_path_component``).
 * **paths** (:mod:`.paths`) — pure campaign/cycle dir builders + cycle-id
   parsing (``cycle_dir_for``, ``root_cycle_id``, ``sibling_kind``, …).
 * **dataset_access** — identity-aware dataset read gateway

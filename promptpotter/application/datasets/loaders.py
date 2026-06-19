@@ -349,17 +349,6 @@ DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
 extra non-Sample fields and is direct-import only, not registry-routed."""
 
 
-def load_dataset(name: str, **kwargs: Any) -> list[Sample]:
-    """Load a dataset by name from the registry.
-
-    Raises :class:`KeyError` for unknown dataset names.
-    """
-    loader = DATASET_LOADERS.get(name)
-    if loader is None:
-        raise KeyError(f"Unknown dataset {name!r}. Available: {sorted(DATASET_LOADERS)}")
-    return loader(**kwargs)
-
-
 def resolve_dataset_items(
     stores: Stores,
     dataset_name: str,
