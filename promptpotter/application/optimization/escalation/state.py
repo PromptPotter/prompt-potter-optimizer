@@ -41,7 +41,6 @@ class EscalationEvent:
     """Escalation-observation outcome."""
 
     next_action: NextAction
-    reason: str
 
     @property
     def stop_reason(self) -> StopReason | None:
@@ -157,25 +156,16 @@ class EscalationFSM:
             self._l2_stall_count = 0 if l2_improved else self._l2_stall_count + 1
 
         if l2_patience is None or self._l2_stall_count < l2_patience:
-            return EscalationEvent(
-                next_action=NextAction.FIRE_L2,
-                reason=f"L2 stall {self._l2_stall_count}/{l2_patience}",
-            )
+            return EscalationEvent(next_action=NextAction.FIRE_L2)
 
         if self._l3_round > 0:
             l3_improved = current_composite_fitness > self._l3_best_composite_fitness_at_entry
             self._l3_stall_count = 0 if l3_improved else self._l3_stall_count + 1
 
         if l3_patience is None or self._l3_stall_count < l3_patience:
-            return EscalationEvent(
-                next_action=NextAction.FIRE_L3,
-                reason=f"L2 patience -> L3 stall {self._l3_stall_count}/{l3_patience}",
-            )
+            return EscalationEvent(next_action=NextAction.FIRE_L3)
 
-        return EscalationEvent(
-            next_action=NextAction.STOP_L3_PATIENCE,
-            reason="L3 patience exhausted",
-        )
+        return EscalationEvent(next_action=NextAction.STOP_L3_PATIENCE)
 
     # ---- Post-fire bookkeepers ----
 

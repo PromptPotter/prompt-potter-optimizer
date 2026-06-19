@@ -170,10 +170,6 @@ class EventStreamView:
         return self._cycle_id
 
     @property
-    def cycle_dir(self) -> Path:
-        return self._cycle_dir
-
-    @property
     def next_offset(self) -> int:
         """Highest offset broadcast + 1. Subscribers attach at this offset."""
         return self._next_offset

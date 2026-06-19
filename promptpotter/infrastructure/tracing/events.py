@@ -186,7 +186,6 @@ class RoundEnd:
     candidate_scores: list[dict[str, Any]]
     next_action: str = ""
     model: str = ""
-    temperature: float = 0.0
     n_variants: int = 0
     optimizer_templates: list[str] | None = None
     evaluators: dict[str, float] = field(default_factory=dict)

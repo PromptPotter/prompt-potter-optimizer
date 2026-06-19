@@ -100,8 +100,12 @@ re-gate — do not open a PR with a red gate. A fix that can't pass the gate bec
 ## Phase 6 — Reconcile the backlog
 
 In `docs/specs/code-debt-cleanup.md`: strip every item that shipped (git log is the
-history layer — do not leave a done-log), and **add** the held + medium findings with
-the file's required shape (file+line · why · action · blockers). Augment in place; never restructure (R-27).
+history layer — do not leave a done-log), and **add** the held + medium findings as
+one-line entries under the **Ready** (no blocker) or **Blocked** (name the blocker)
+bucket, in the file's required shape (file:symbol · why · action · blocker). Do NOT
+open a new dated section — the chronological sweep-log shape was retired 2026-06-19 for
+readiness buckets. Re-confirm any stale-looking existing entry against the code before
+trusting it (entries decay); fix or drop a wrong one as part of the sweep.
 
 ## Phase 7 — Append to the rolling PR
 

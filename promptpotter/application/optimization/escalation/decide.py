@@ -52,10 +52,7 @@ def decide_escalation(
     active = rules if rules is not None else DEFAULT_ESCALATION_RULES
     for rule in sorted(active, key=lambda r: -r.priority):
         if rule.when(inputs):
-            return EscalationEvent(
-                next_action=rule.fire,
-                reason=rule.format_reason(inputs),
-            )
+            return EscalationEvent(next_action=rule.fire)
     raise RuntimeError(
         f"No escalation rule matched observe_round inputs (rules={[r.name for r in active]}); "
         "the rule set must include a fall-through with priority < all conditional rules."

@@ -43,7 +43,6 @@ class MLflowSink:
 
         params: dict[str, str] = {
             "round": str(event.round_num),
-            "temperature": str(event.temperature),
         }
         if event.model:
             params["model"] = event.model
