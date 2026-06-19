@@ -10,6 +10,7 @@ Deliberately small: forward direction lives in one roadmap; the rest are living 
 | [code-debt-cleanup.md](code-debt-cleanup.md) | Living debt backlog — open items only; `git log` is the history layer. |
 | [verdict-resolution.md](verdict-resolution.md) | The single statistical model behind the live adaptive queue + the persisted `hard_samples_*.json` ranking. |
 | [frontend-surface-contract.md](frontend-surface-contract.md) | Per-control webapp behavior per auth/data state + 5 invariants; every user-facing PR is measured against it. |
+| [chat-foundation.md](chat-foundation.md) | The chat-first front door (Lane C1): thread model, `ProjectionEnvelope → ActivityItem` translator, copilot decision buttons (existing verbs), campaign-scoped persistence, reusable-template seam. |
 | [m12-api-openapi.yaml](m12-api-openapi.yaml) · [m12-events-asyncapi.yaml](m12-events-asyncapi.yaml) | **Control-plane contracts** (verified by review + schema lint; no standing test — the structural/contract suite was cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)): the closed inbound command set + outbound event set. Declare schema here *before* a handler lands. |
 
 Permanent constitutions live in [`docs/adr/`](../adr/): [0001 control-plane](../adr/0001-m12-control-plane.md) · [0002 identity](../adr/0002-identity-foundation.md) · [0003 spend/tenancy](../adr/0003-spend-and-tenancy.md) · [0004 operator-admin channels](../adr/0004-operator-admin-channels.md).

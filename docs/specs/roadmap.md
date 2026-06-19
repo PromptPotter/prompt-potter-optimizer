@@ -34,7 +34,7 @@ state-sync P1–P4 shipped 2026-05-30 (per-cycle `dashboard.json`, `GET /api/v1/
 
 | # | Item | Status |
 |---|---|---|
-| C1 | **Chat write-path** — wire the inert `ChatPane` to the shipped control-plane verbs; query state via `/api/v1/sessions/active/live-state` (∴ after P3) | unblocked (see § Ingest + chat-first web) |
+| C1 | **Chat-first front door** — replace the inert `ChatPane` with the real thread: copilot + activity stream + decision buttons (existing verbs); query state via `/api/v1/sessions/active/live-state` (∴ after P3) | unblocked — full design [`chat-foundation.md`](chat-foundation.md) |
 | C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § Connectors + L4) |
 | C3 | L4 closure — inner-cycle dispatch + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation (connector registered) | pending (see § Connectors + L4) |
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
@@ -69,6 +69,10 @@ Messy CSVs ingest without hidden defaults or a literal-column requirement: an LL
 - **CLI fold:** `new <name|file>` dispatches on `Path(arg).is_file()`; the file branch shares `ingest.py::ingest_draft` + `launcher.py::commit_draft_to_dataset`; enabler is `resolve_dataset_config_dir` on `Session.dataset_config_dir`.
 
 ### Ingest + chat-first web — partially shipped (Ingest Slice 1 done; ChatPane still inert)
+> **Chat-first front door** (thread model, activity-stream translator, copilot decision
+> buttons, campaign-scoped persistence) has its own contract: [`chat-foundation.md`](chat-foundation.md).
+> This note keeps only the ingest / draft-campaign detail.
+
 Four nouns map to OIDC: Install=`iss`, User=`sub` (`user_id=f"{iss}:{sub}"`, SCIM 2.0 Core names verbatim), Project=`tenant_id` claim (today's `datasets/{name}/`), Campaign=cycle 1:1.
 - **The committed artifact is a Dataset, not a campaign:** 4 content-hashed files at `projects/{tenant}/datasets/{slug}/` (`cache.json` rows, `pipeline.json` overlay, `task_description.md`, `prompts/default.json`) compose into `JobSearchPoint.content_hash`; the sibling `campaign.json` is NOT in the hash. Identical datasets → identical `cycle_{target_hash[:12]}` + shared `archive/measurements/` (free cross-tenant pooling).
 - **Draft-campaign object:** `DraftCampaign` negotiates both the Dataset and campaign config; smart defaults `connector=termnorm`/`exact_match`/`max_rounds=5`; model + `reasoning_effort` resolved from the dataset-reasoning-matrix at *commit*, not pinned on the draft. Chat + panel are two views over one server-side draft, synced via `edit-draft-campaign` + SSE `DraftUpdatedRecord` (declare in asyncapi before the handler).

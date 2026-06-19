@@ -19,25 +19,11 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 >
 > **Five ways to run it:** 1) `/potter-run` Claude Code skill · 2) CLI · 3) Python / Jupyter notebook · 4) REST API · 5) WebApp (localhost)
 
-## First run
+## Chat-first
 
-**System requirements**
+The front door is a chat. You talk to the Potter, watch it work inline as it runs — what it's scoring, the calls it's making, how each round landed — and it hands you a button whenever a decision is yours. PromptPotter also ships as a **canonical chat-app template**: the chat core (thread model + live activity stream + transport) is built to be kept, with the optimizer-specific panes deletable, so you can build your own chat app on top. Design: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
 
-- **Python 3.13+** with `pip`.
-- **`.env` with an LLM provider key** at the repo root — one of `GROQ_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY`.
-- **TermNorm backend** running locally for backends that need it — clone the sibling repo (`TermNorm-excel/backend-api`) and run its `start-server-py-LLMs.bat`. Datasets like `llm_only` and `bbeh` don't require it; pipeline-driven datasets do.
-- Recommended: **VS Code + Claude Code** for the `/potter-run` skill experience.
-
-**Three-command path**
-
-```bash
-pip install -e ".[all]"
-python -m promptpotter new <dataset>     # e.g. llm_only or bbeh
-python -m uvicorn promptpotter.main:app --port 8001
-# Open http://localhost:8001/
-```
-
-The first command installs dependencies. The second mints a campaign and starts the optimization loop in your terminal. The third (in a separate terminal) serves the read-only dashboard webapp. Full walkthrough: [`docs/manual/`](docs/manual/README.md).
+Install → first run → reading output is the [`docs/manual/`](docs/manual/README.md) walkthrough.
 
 ## Why PromptPotter?
 

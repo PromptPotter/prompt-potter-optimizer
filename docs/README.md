@@ -4,6 +4,8 @@ PromptPotter tunes prompts and pipeline configs against a labelled dataset. The 
 
 **New here? → [`manual/`](manual/README.md).** Numbered chapters: install → first run → reading output → troubleshooting.
 
+**Chat-first.** The front door is a chat: you talk to the Potter, it shows its work inline as it runs — what it's scoring, which call it's making, how each round landed — and it raises a button when a decision is yours to make. This repository also doubles as a **canonical chat-app template**: keep the chat core (thread model + activity stream + transport) and delete the panes you don't need to build your own app on top. Design contract: [`specs/chat-foundation.md`](specs/chat-foundation.md).
+
 | Folder | Purpose |
 |--------|---------|
 | [![manual/](https://img.shields.io/badge/manual%2F-red?style=for-the-badge)](manual/README.md) | User walkthrough |

@@ -6,6 +6,8 @@
 
 PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. **Orchestration is the product — backends are pluggable and read-only.** Node tunables ride a per-call overlay (`datasets/{name}/pipeline.json::nodes.{name}.config`);
 
+The **front door is a chat** — a human-in-the-loop copilot: the operator converses, the Potter posts its activity inline, and decisions surface as buttons that fire existing control-plane verbs. The chat core is built as a **reusable template** (keep it, delete the optimizer panes). Contract: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
+
 ## Origin & check-in — the two words that confuse
 
 These are distinct and constantly conflated. Keep them straight:

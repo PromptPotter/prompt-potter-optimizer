@@ -99,20 +99,21 @@ drifted `Field(description=…)` on LLM-facing schemas; INFO/WARN logging nobody
 surfaces; error-raising style diverging by layer (generic `Exception` vs bare
 `raise` vs `HTTPException` for the same failure class — M-sized standardization).
 
-## M13+ intentional UI placeholders
+## Intentional UI placeholders
 
 UI affordances the product *intentionally* ships disabled today — they preview
-the M13+ chat-first UX + config-edit + analytics-search surfaces. **Not**
-scaffolding; not in scope for any "hide non-functional controls" sweep.
+the chat-first front door (Lane **C1**, [`chat-foundation.md`](chat-foundation.md)) + the
+config-edit + analytics-search surfaces. **Not** scaffolding; not in scope for any "hide
+non-functional controls" sweep.
 
 | Placeholder | File | Future surface |
 |---|---|---|
-| Topbar search input (disabled) | `webapp/components/shell/Topbar.tsx` | M13+ analytics search |
-| ChatPane attach + textarea + send (disabled) | `webapp/components/chat/ChatPane.tsx` | M13+ chat-first operator UX |
-| ChatPane thinking / web-search / code-exec toggles (locked) | `webapp/components/chat/ChatPane.tsx` | M13+ chat-first feature toggles |
-| AccountModal "Update profile" (disabled) | `webapp/components/account/AccountModal.tsx` | M13+ profile editing |
-| AccountModal "Remove account" (disabled) | `webapp/components/account/AccountModal.tsx` | M13+ multi-provider account mgmt |
-| AccountModal "+ Connect account" (alerts, no-ops) | `webapp/components/account/AccountModal.tsx` | M13+ multi-provider account linking |
+| Topbar search input (disabled) | `webapp/components/shell/Topbar.tsx` | analytics search (C4-adjacent) |
+| ChatPane attach + textarea + send (disabled) | `webapp/components/chat/ChatPane.tsx` | **C1** chat-first front door ([`chat-foundation.md`](chat-foundation.md)) |
+| ChatPane thinking / web-search / code-exec toggles (locked) | `webapp/components/chat/ChatPane.tsx` | assistant tool-use — deferred past **C1** (asyncapi-first; [`chat-foundation.md`](chat-foundation.md) §7) |
+| AccountModal "Update profile" (disabled) | `webapp/components/account/AccountModal.tsx` | profile editing |
+| AccountModal "Remove account" (disabled) | `webapp/components/account/AccountModal.tsx` | multi-provider account mgmt |
+| AccountModal "+ Connect account" (alerts, no-ops) | `webapp/components/account/AccountModal.tsx` | multi-provider account linking |
 
 **Rule:** cleanup touching these must distinguish *intentional placeholder* from
 *scaffolding*. Milestone-reference text inside them is OK (exempt from the "no
