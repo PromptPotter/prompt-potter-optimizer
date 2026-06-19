@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.scoring.evaluators import (
     Evaluator,
     all_evaluators,
+    compute_accuracy,
     default_per_round_formula,
     materialize_round_values,
 )
@@ -78,7 +79,8 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     total = len(valid)
     hits = sum(1 for r in valid if r.get("hit"))
     errors = sum(1 for r in valid if is_error_result(r))
-    accuracy = sum(r.get("fitness", 0.0) for r in valid) / total if total else 0.0
+    # Single source for the mean-fitness-over-non-deprecated formula.
+    accuracy = compute_accuracy(results=results)
     return {
         "hits": hits,
         "total": total,

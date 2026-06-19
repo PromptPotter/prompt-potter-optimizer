@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from promptpotter.infrastructure.store import cycle_dir_for
 from promptpotter.infrastructure.store.base import read_json
 from promptpotter.infrastructure.store.paths import sibling_kind
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import StoreDep, warming_payload
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_seen_at_or_after,
     http_date,
@@ -173,34 +173,24 @@ async def get_cycle_dashboard(
     """
     cycle_path = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     path = cycle_path / "dashboard.json"
+    present = path.is_file()
 
-    if not path.is_file():
-        # Fresh-campaign warming_up shape. Last-Modified rides the cycle
-        # dir's mtime so polling clients still get cheap 304s while waiting.
-        try:
-            mtime_epoch = cycle_path.stat().st_mtime
-            headers = {"Last-Modified": http_date(mtime_epoch)}
-            if client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
-                return Response(status_code=304, headers=headers)
-        except FileNotFoundError:
-            headers = {}
-        warming: dict[str, Any] = {
-            "warming_up": True,
-            "campaign_id": campaign_id,
-            "cycle_id": cycle_id,
-            "phase_hint": "origin",
-        }
-        return JSONResponse(warming, headers=headers)
+    # Conditional-GET once, before reading the body: Last-Modified rides the
+    # dashboard mtime when present, else the cycle dir's mtime (so polling
+    # clients still get cheap 304s while a fresh campaign warms up). The read
+    # only happens after the 304 check passes — keeps the 2 s poll cheap.
+    try:
+        mtime_epoch = (path if present else cycle_path).stat().st_mtime
+        headers = {"Last-Modified": http_date(mtime_epoch)}
+        if client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
+            return Response(status_code=304, headers=headers)
+    except FileNotFoundError:
+        headers = {}
 
-    mtime_epoch = path.stat().st_mtime
-    headers = {"Last-Modified": http_date(mtime_epoch)}
-    if client_seen_at_or_after(request.headers.get("if-modified-since"), mtime_epoch):
-        return Response(status_code=304, headers=headers)
-
-    dashboard: dict[str, Any] = read_json(path)
     # ``run_phase`` rides dashboard.json itself (declared by the runner, projected
     # by LiveDashboardView) — the webapp reads it straight off the 2 s poll, so a
     # paused run reads "paused" with no separate /runstate round-trip. The spend
     # cap rides ``dashboard.json::spend.budget_usd`` already; the deleted
     # /runstate endpoint's ``spend_cap_usd`` was unused.
-    return JSONResponse(dashboard, headers=headers)
+    body: dict[str, Any] = read_json(path) if present else warming_payload(campaign_id, cycle_id)
+    return JSONResponse(body, headers=headers)

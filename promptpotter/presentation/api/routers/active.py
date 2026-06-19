@@ -26,7 +26,12 @@ from promptpotter.infrastructure.store import (
     read_active_pointer,
 )
 from promptpotter.infrastructure.store.base import read_json
-from promptpotter.presentation.api.deps import IdentityDep, JobRegistryDep, StoreDep
+from promptpotter.presentation.api.deps import (
+    IdentityDep,
+    JobRegistryDep,
+    StoreDep,
+    warming_payload,
+)
 from promptpotter.shared.errors import NotFoundError
 
 active_router = APIRouter()
@@ -100,17 +105,11 @@ async def get_live_state(store: StoreDep) -> dict[str, Any]:
     current_spend_cap_usd = read_spend_cap(runtime_dir)
 
     path = cycle_path / "dashboard.json"
-    if not path.is_file():
-        return {
-            "warming_up": True,
-            "session_id": session_id,
-            "campaign_id": campaign_id,
-            "cycle_id": cycle_id,
-            "phase_hint": "origin",
-            "is_paused": paused,
-            "current_spend_cap_usd": current_spend_cap_usd,
-        }
-    state: dict[str, Any] = read_json(path)
+    if path.is_file():
+        state: dict[str, Any] = read_json(path)
+    else:
+        state = warming_payload(campaign_id, cycle_id)
+        state["session_id"] = session_id
     state["is_paused"] = paused
     state["current_spend_cap_usd"] = current_spend_cap_usd
     return state

@@ -4,7 +4,7 @@ Each check is a pure ``(round_dict, ctx) -> CheckResult`` function with no
 I/O. ``round_dict`` is one ``.runtime/cache/rounds/round_NNNN.json`` payload as
 written by ``AuditTrailView.flush``; ``ctx`` carries the per-round
 context the check needs (prior rounds, OSP at round-start, the three
-``context_object`` items, the ``param_unlock_round`` knob).
+``context_object`` items).
 
 Adding a new check is one function plus one entry in ``CHECK_REGISTRY``.
 The registry is the single source of truth so ``review.md`` and the
@@ -21,6 +21,12 @@ from typing import Any
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import EVIDENCE_GROUNDING_FIELDS
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
+
+# Rounds before this one keep param-scope locked so prompt-field exploration
+# settles first (see ``_check_param_scope_discipline``). Fixed policy, not a
+# per-round knob — derived signals (stall depth, mutation history) drive the
+# rest of the loop, but this floor stays constant.
+PARAM_UNLOCK_ROUND = 3
 
 __all__ = [
     "CHECK_REGISTRY",
@@ -75,7 +81,6 @@ class ValidatorContext:
     prior_rounds: list[dict[str, Any]] = field(default_factory=list)
     opt_search_point: dict[str, Any] = field(default_factory=dict)
     context_object: list[str] = field(default_factory=list)
-    param_unlock_round: int = 3
     exploration_budget: str | None = None
     # Axes the round-start AxisIndex flagged as ``peaked``. Used by
     # ``evidence_grounding_present`` to reject variants that cite
@@ -163,13 +168,13 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
     if not variants:
         return CheckResult("param_scope_discipline", True, "no variants emitted")
 
-    early = ctx.round_num < ctx.param_unlock_round
+    early = ctx.round_num < PARAM_UNLOCK_ROUND
     stale_field = _stale_prompt_field(ctx)
     if not early and stale_field is None:
         return CheckResult(
             "param_scope_discipline",
             True,
-            f"unlocked: round ≥ {ctx.param_unlock_round} and no stale prompt field",
+            f"unlocked: round ≥ {PARAM_UNLOCK_ROUND} and no stale prompt field",
         )
 
     offenders: list[str] = []
@@ -179,7 +184,7 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
             offenders.append(str(v.get("variant_name") or "?"))
     if offenders:
         reason = (
-            f"round < {ctx.param_unlock_round}"
+            f"round < {PARAM_UNLOCK_ROUND}"
             if early
             else f"prompt field {stale_field!r} unchanged for ≥2 rounds"
         )

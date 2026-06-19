@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, Request
 
@@ -100,6 +100,21 @@ def get_cycle_dir_or_404(campaign_id: str, cycle_id: str, store: Stores) -> Path
     return cycle_dir
 
 
+def warming_payload(campaign_id: str, cycle_id: str) -> dict[str, Any]:
+    """The canonical ``warming_up`` dashboard shape — served at 200 (not 404)
+    before a fresh campaign flushes its first ``dashboard.json`` snapshot, so
+    the webapp renders an "initialising" placeholder instead of appearing
+    offline. One contract for both dashboard routes; callers layer their own
+    extras (the active route's runtime flags) on top.
+    """
+    return {
+        "warming_up": True,
+        "campaign_id": campaign_id,
+        "cycle_id": cycle_id,
+        "phase_hint": "origin",
+    }
+
+
 def get_draft_registry(request: Request) -> DraftCampaignRegistry:
     """Pull the draft-campaign registry off ``app.state``; missing is a programmer error."""
     registry: DraftCampaignRegistry | None = getattr(request.app.state, "draft_campaigns", None)
@@ -135,4 +150,5 @@ __all__ = [
     "get_job_registry",
     "read_text_or_404",
     "resolve_identity",
+    "warming_payload",
 ]

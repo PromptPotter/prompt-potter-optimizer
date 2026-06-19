@@ -30,7 +30,6 @@ def render_review_md(
     *,
     round_audits: list[dict[str, Any] | None] | None = None,
     context_object: list[str] | None = None,
-    param_unlock_round: int = 3,
     l1_patience: int,
 ) -> str:
     """Render ``review.md`` from index + rounds + per-round audit dicts."""
@@ -40,7 +39,7 @@ def render_review_md(
     ctx_items = [c for c in (context_object or []) if isinstance(c, str) and c.strip()]
 
     behavior_per_round, l2_behavior_per_round = _compute_behavior_per_round(
-        rounds, audits, ctx_items, param_unlock_round, l1_patience
+        rounds, audits, ctx_items, l1_patience
     )
     final = index.get("final") or {}
     origin_composite_fitness = float(final.get("origin_composite_fitness") or 0.0)
@@ -106,7 +105,6 @@ def _compute_behavior_per_round(
     rounds: list[dict[str, Any]],
     audits: list[dict[str, Any] | None],
     context_object: list[str],
-    param_unlock_round: int,
     l1_patience: int,
 ) -> tuple[list[list[CheckResult]], list[list[CheckResult]]]:
     """Per-round L1 + L2 behaviour-check results (same length as ``rounds``).
@@ -136,7 +134,6 @@ def _compute_behavior_per_round(
             prior_rounds=list(prior_audits),
             opt_search_point=dict(round_data.get("opt_search_point") or {}),
             context_object=context_object,
-            param_unlock_round=param_unlock_round,
             exploration_budget=budget,
             peaked_axes=peaked_axes,
         )

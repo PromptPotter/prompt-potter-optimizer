@@ -165,10 +165,6 @@ class Connector:
     an origin). Empty mapping means "no seed; the backend schema stands."
     Draft ``pipeline_overlay`` (operator edits) layers on top of this."""
 
-    def to_dict(self) -> dict[str, Any]:
-        """Identity projection — ``name`` only; callables are not JSON-able."""
-        return {"name": self.name}
-
 
 __all__ = [
     "BackendUnreachableError",

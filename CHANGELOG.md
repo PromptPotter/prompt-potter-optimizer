@@ -13,7 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Origin-picker UI** — campaign-from-origin Phase 2: a `GET /origins` derived read + a New-Campaign / ingest origin picker (the backend mint seam already ships).
 - **Dashboard L2/L3-terminal loading bug** — fitness bars vanish + panel hangs when a cycle's last phase was L2/L3.
 - **UI-polish pass** over the lineage / fitness / samples surfaces (empty states, mobile, copy).
-- **Code-hygiene tail** — `ConfigIndex`, `param_unlock_round`, `to_dict`, the inert `display_tag` write, `EMPTY_SCORER_ID`.
+- **Code-hygiene tail** — dead `Connector.to_dict`, `param_unlock_round` collapsed to a constant, `_compute_accuracy` deduped onto `compute_accuracy`, the two warming-up dashboard routes folded onto one `warming_payload` contract.
 - **`*_override → *_updates`** L1 delta-key rename (live-round-gated).
 
 ## [0.8.2] — 2026-06-11
