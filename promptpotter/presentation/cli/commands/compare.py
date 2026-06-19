@@ -7,6 +7,7 @@ import logging
 
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
+    bind_session_identity,
     get_verbose,
     init_services_cli,
 )
@@ -27,9 +28,7 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
 
     ctx = load_session(args)
     session = await init_services_cli(**ctx.init_params)
-    session.session_id = ctx.session_id
-    session.campaign_id = ctx.campaign_id
-    session.state.cycle_id = ctx.cycle_id
+    bind_session_identity(session, ctx)
 
     campaign_config = ctx.campaign_config
     configure_and_apply_pipeline(

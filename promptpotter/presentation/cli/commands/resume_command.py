@@ -17,6 +17,7 @@ from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
     CommandResult,
+    bind_session_identity,
     campaign_result_human,
     confirm_tty,
     get_verbose,
@@ -453,9 +454,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
         )
         return await cmd_new(new_args)
 
-    session.session_id = ctx.session_id
-    session.campaign_id = ctx.campaign_id
-    session.state.cycle_id = ctx.cycle_id
+    bind_session_identity(session, ctx)
 
     _maybe_fork_diag_sibling(args, ctx, session)
     _maybe_fork_operator_rewind(args, ctx, session)

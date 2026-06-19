@@ -112,8 +112,6 @@ Five-lens verification audit. Tiers 1–2 dead-code/hidden-default deletes + all
 - `domain/pipeline_schema.py:70-71` `NodePromptInfo.family` / `NodePromptInfo.description` — populated from the backend's `GET /pipeline resolved_prompts` JSON at `pipeline_parsing.py:132-134`; never accessed by any Python code after construction (only `.template_variables` is read, at `config.py:554`); `NodePromptInfo` is not serialized to any API, round file, or webapp wire boundary. **Action:** drop both fields + their population sites in `pipeline_parsing.py`. **Blocker:** confirm no external script/notebook reads them.
 
 **Tier 3 — near-duplicate seams (multi-file; new helper needed before deleting copies).**
-- `presentation/api/routers/campaigns/ledger.py` (`:116` bare; `:73` now wrapped in the local `_open_cycle_ledger_or_404`), `campaigns/files.py:104`, `routers/datasets.py:345` — `cycle_dir = cycle_dir_for(...); if not cycle_dir.exists(): raise NotFoundError(...)` repeated across these routers. `deps.py` already has `get_backend_or_404` / `read_text_or_404` as the seam. **Action:** add `get_cycle_dir_or_404(store, campaign_id, cycle_id)` to `deps.py`; replace the sites (incl. folding `_open_cycle_ledger_or_404`). **Blocker:** none.
-- `presentation/cli/commands/compare.py:30-32` (and `sweep/_common.py:133-135`, `new.py:543-545`, `resume_command.py:456-458`) — identical 3-line block `session.session_id = ctx.session_id; session.campaign_id = ctx.campaign_id; session.state.cycle_id = ctx.cycle_id` repeated across 4 CLI command modules. **Action:** extract `bind_session_identity(session, ctx)` in `commands/_shared.py`; replace all four sites. **Blocker:** none.
 - `presentation/api/routers/active.py:104-118` + `campaigns/cycles.py:191-223` — both resolve the per-cycle dir, read `dashboard.json`, and on absence emit the same `warming_up` payload; only extras differ (runtime flags / `If-Modified-Since`). **Action:** extract shared read-or-warming-up dashboard helper. **Blocker:** medium; verify all callers after extraction.
 
 **Tier 3 — webapp R-36 (backend projection needed; same blocker as existing Lane C8 items).**
@@ -132,15 +130,11 @@ Five-lens audit. What stayed:
 
 **Tier 2 holds — dead defensiveness (verified writer, but save() has direct-call test paths):**
 - `application/optimization/validators/l2_output.py:237-239,279-280,289-291,325-330` — dual-arm dict-fallback (`getattr(entry, "rule_id", None) or (entry.get("rule_id") if isinstance(entry, dict) else None)`) on `L1SupplementalRule`/`L1SituationalExample` entries; the dict-arm appears dead because `_parse_l2` always passes typed model objects. **Blocker:** trace ALL callers of `run_l2_output_validators` to confirm no direct-dict invocation exists (safety-critical validator path).
-- `application/optimization/dispatch/hub/facade.py:148` `getattr(template, slot) or ""` — dead `or ""`; `PromptTemplate` slot fields are `str = ""`, never None. Action: drop ` or ""`. (medium, cosmetic)
-- `application/scoring/evaluators.py:194` `node.current_config or {}` — dead `or {}`; `current_config: dict = Field(default_factory=dict)`, never None. Action: `node.current_config`. (medium, cosmetic)
-- `application/views/ingress.py:305` `l2_prompt=d.get("l2_prompt", "") or ""` — double-default; key is always set by `executor.py:197` `_l2_exit()`. Action: `d["l2_prompt"]`. (medium)
 
 **Tier 5 structural holds — single-caller indirections, no tests, inline candidates:**
 - `application/output/writers.py` `_load_p_best_trajectory` + `_fork_summary_from_index` (each called only by `from_disk_log`) + `_load_sibling_indices` (called only by `_render_campaign_log_md`) — single-caller helpers, no dedicated test. Inline into caller. Blocker: none.
 - `application/intelligence/indexes/axis.py::_collect()` (called only by `axis.digest()`) — 1–3 line helper, no dedicated test. Inline. Blocker: none.
 - `application/jobs/launcher/core.py::_claim_email()` — duplicates `presentation/api/routers/auth.py::_claim_email` (logically identical; differs only in param name + docstring). Extract to `shared/` or a common identity utility. Blocker: none.
-- `application/jobs/launcher/core.py` — identical 3-line origin-readiness guard at two call sites (`commit_draft_to_dataset` / `mint_campaign_from_draft_command`). Extract to `_assert_origin_ready(draft)`. Blocker: none.
 
 ### Benchmarks: dev-surface-only, hidden from the distributed end-user app (2026-06-11)
 

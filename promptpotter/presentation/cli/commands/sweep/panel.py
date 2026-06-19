@@ -11,6 +11,7 @@ from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
     CommandResult,
     get_verbose,
+    identity_from_args,
 )
 from promptpotter.presentation.cli.commands.sweep._common import (
     _panel_stats_from_round,
@@ -62,10 +63,9 @@ async def _fork_and_bind(
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.optimization.resume_and_fork import _mint_fork
     from promptpotter.domain.run_records import ForkSpec, ForkTrigger
-    from promptpotter.infrastructure.identity import registered_or_default_identity
     from promptpotter.infrastructure.store import build_stores
 
-    identity = registered_or_default_identity(getattr(args, "tenant", None))
+    identity = identity_from_args(args)
     tenant_id = identity.tenant_id
     store = build_stores(identity)
     source_file = variant.path.name if variant.path else f"current-{variant.label or 'unset'}.json"
@@ -352,9 +352,7 @@ async def _cmd_sweep_round2(args: argparse.Namespace) -> CommandResult:
     from promptpotter.infrastructure.store import build_stores
 
     if getattr(args, "from_sweep", None):
-        from promptpotter.infrastructure.identity import registered_or_default_identity
-
-        stores = build_stores(registered_or_default_identity(getattr(args, "tenant", None)))
+        stores = build_stores(identity_from_args(args))
         prior = find_sweep_results(stores.base_dir, sweep_id=args.from_sweep, verb="round1")
         if not prior:
             return CommandResult(

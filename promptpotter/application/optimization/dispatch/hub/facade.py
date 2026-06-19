@@ -145,7 +145,7 @@ class DispatchHub:
 
         update: dict[str, str] = {}
         for slot in L1_LAYOUT_SLOTS:
-            static = getattr(template, slot) or ""
+            static = getattr(template, slot)
             non_empty = [text for p in layout.slot(slot) if (text := rendered[p])]
             if non_empty:
                 joined = "\n\n".join(non_empty)

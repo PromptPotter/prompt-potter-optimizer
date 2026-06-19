@@ -33,7 +33,6 @@ from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchem
 from promptpotter.infrastructure.store import (
     DatasetAccessError,
     campaign_root_dir_for,
-    cycle_dir_for,
     list_readable_datasets,
     readable_dataset_dir,
 )
@@ -41,7 +40,7 @@ from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
 from promptpotter.infrastructure.store.base import read_json
-from promptpotter.presentation.api.deps import StoreDep, get_draft_registry
+from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404, get_draft_registry
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
@@ -342,9 +341,7 @@ def _resolve_scope_artifact(
     if scope == "cycle":
         if not campaign_id or not cycle_id:
             raise BadRequestError("scope=cycle requires campaign_id and cycle_id")
-        cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
-        if not cycle_dir.exists():
-            raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
+        cycle_dir = get_cycle_dir_or_404(campaign_id, cycle_id, store)
         path = cycle_dir / "hard_samples.json"
         if not path.is_file():
             return {}

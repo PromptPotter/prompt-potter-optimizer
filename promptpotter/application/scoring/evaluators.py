@@ -191,7 +191,7 @@ _LIMIT_KEY_SUFFIXES = ("max_sites", "num_results", "max_token_candidates", "max_
 def _limit_nodes(schema: PipelineSchema) -> list[tuple[PipelineNode, str, int]]:
     out: list[tuple[PipelineNode, str, int]] = []
     for node in schema.nodes:
-        cfg = node.current_config or {}
+        cfg = node.current_config
         for key in cfg:
             if not any(key == s or key.endswith(s) for s in _LIMIT_KEY_SUFFIXES):
                 continue

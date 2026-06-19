@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.presentation.cli.commands._shared import CommandResult
+from promptpotter.presentation.cli.commands._shared import CommandResult, identity_from_args
 
 
 async def _cmd_sweep_rank(args: argparse.Namespace) -> CommandResult:
     """Read sweep results from disk and print a sorted table. Pure
     read — no optimize call, no LLM spend."""
     from promptpotter.application.sweep import find_sweep_results, rank_sweep_results
-    from promptpotter.infrastructure.identity import registered_or_default_identity
     from promptpotter.infrastructure.store import build_stores
 
-    stores = build_stores(registered_or_default_identity(getattr(args, "tenant", None)))
+    stores = build_stores(identity_from_args(args))
     results = find_sweep_results(
         stores.base_dir,
         dataset=args.dataset,

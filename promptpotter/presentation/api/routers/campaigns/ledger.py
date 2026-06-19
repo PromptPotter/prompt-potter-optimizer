@@ -12,7 +12,7 @@ from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpoi
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import Stores, campaign_root_dir_for, cycle_dir_for
 from promptpotter.infrastructure.store.base import read_json
-from promptpotter.presentation.api.deps import StoreDep, read_text_or_404
+from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404, read_text_or_404
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
 
@@ -70,10 +70,7 @@ class LogMdResponse(BaseModel):
 
 def _open_cycle_ledger_or_404(campaign_id: str, cycle_id: str, store: Stores) -> CycleEventLog:
     """Open the per-cycle ledger; 404 if the cycle dir doesn't exist."""
-    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
-    if not cycle_dir.exists():
-        raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
-    return CycleEventLog.open(CycleDir(cycle_dir))
+    return CycleEventLog.open(CycleDir(get_cycle_dir_or_404(campaign_id, cycle_id, store)))
 
 
 def _record_to_envelope(record: Any, offset: int) -> CycleRecordEnvelope:
@@ -113,9 +110,7 @@ async def get_cycle_hard_samples(
     dataset-scoped heatmaps are served elsewhere (campaign dir artifact /
     archive snapshot via the datasets router).
     """
-    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
-    if not cycle_dir.exists():
-        raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
+    cycle_dir = get_cycle_dir_or_404(campaign_id, cycle_id, store)
     path = cycle_dir / "hard_samples.json"
     if not path.is_file():
         raise NotFoundError("hard_samples.json not present (cycle has no rounds yet)")

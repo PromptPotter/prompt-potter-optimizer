@@ -30,6 +30,7 @@ from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
+    from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -146,6 +147,15 @@ def identity_from_args(args: Any) -> IdentityContext:
     return registered_or_default_identity(getattr(args, "tenant", None))
 
 
+def bind_session_identity(session: Session, ctx: SessionCtx) -> None:
+    """Stamp a resumed/loaded session's identity (session/campaign/cycle id) onto
+    the freshly-initialized :class:`Session` — the shared bind every cycle-scoped
+    CLI command runs after :func:`init_services_cli`."""
+    session.session_id = ctx.session_id
+    session.campaign_id = ctx.campaign_id
+    session.state.cycle_id = ctx.cycle_id
+
+
 def _build_divergence_hint() -> str:
     """Derive the divergence-checked-kinds list from the RESUME_CHECKPOINT_GATING table.
 
@@ -214,6 +224,7 @@ def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
 
 __all__ = [
     "CommandResult",
+    "bind_session_identity",
     "campaign_result_human",
     "confirm_tty",
     "get_verbose",

@@ -12,7 +12,7 @@ from fastapi import Query
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.store import campaign_root_dir_for, cycle_dir_for
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import StoreDep, get_cycle_dir_or_404
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError, ContentTooLargeError, NotFoundError
 
@@ -101,10 +101,8 @@ def _classify_suffix(suffix: str) -> Literal["json", "markdown", "log", "text"] 
 )
 async def list_cycle_files(store: StoreDep, campaign_id: str, cycle_id: str) -> FilesResponse:
     """Recursive file tree for the cycle dir + campaign-level artifacts."""
-    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+    cycle_dir = get_cycle_dir_or_404(campaign_id, cycle_id, store)
     campaign_dir = campaign_root_dir_for(store.base_dir, campaign_id)
-    if not cycle_dir.exists():
-        raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
 
     entries: list[FileEntry] = []
     for f in _walk_files(cycle_dir):

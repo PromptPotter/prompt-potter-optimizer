@@ -302,7 +302,7 @@ def _refine_exit(d: dict[str, Any], ctx: ViewContext) -> L2RefineExitView:
         action=d.get("action", "continue"),
         changes_description=d.get("changes_description", ""),
         warned_samples=d.get("warned_samples", 0),
-        l2_prompt=d.get("l2_prompt", "") or "",
+        l2_prompt=d["l2_prompt"],
         l2_response_json=d.get("l2_response"),
     )
 

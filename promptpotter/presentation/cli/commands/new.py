@@ -15,6 +15,7 @@ from promptpotter.application.jobs.mint import prepare_fresh_cycle
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
+    bind_session_identity,
     campaign_result_human,
     get_verbose,
     identity_from_args,
@@ -540,9 +541,7 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
 
     ctx = load_session(args)
     campaign_config = ctx.campaign_config
-    session.session_id = ctx.session_id
-    session.campaign_id = ctx.campaign_id
-    session.state.cycle_id = ctx.cycle_id
+    bind_session_identity(session, ctx)
 
     logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))

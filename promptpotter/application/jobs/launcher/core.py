@@ -99,6 +99,17 @@ class OriginIncompleteError(PayloadInvalidError):
         )
 
 
+def _assert_origin_ready(draft: DraftCampaign) -> None:
+    """Run the deterministic origin gate; raise 422 with the open gaps if incomplete.
+
+    The one gate both mint paths run BEFORE anything irreversible — the checklist,
+    not the operator, decides a false-ready never reaches mint.
+    """
+    readiness = origin_readiness(draft)
+    if not readiness.complete:
+        raise OriginIncompleteError(readiness.gaps)
+
+
 async def _run_preflight(backend_type: str, backend_url: str) -> None:
     """Resolve the connector and run its reachability probe.
 
@@ -300,11 +311,8 @@ async def commit_draft_to_dataset(
     if normalized is not draft:
         draft = draft_registry.update(normalized)
 
-    # Deterministic origin gate BEFORE anything irreversible. A false-ready
-    # never reaches mint — the checklist, not the operator, decides.
-    readiness = origin_readiness(draft)
-    if not readiness.complete:
-        raise OriginIncompleteError(readiness.gaps)
+    # Deterministic origin gate BEFORE anything irreversible.
+    _assert_origin_ready(draft)
 
     # Preflight BEFORE commit_draft so a backend-down failure preserves the
     # draft — the operator can fix the backend and retry without re-uploading.
@@ -389,9 +397,7 @@ async def mint_campaign_from_draft_command(
     canonical = dataset_source_of(draft.source_file)
     if canonical is not None:
         # Existing dataset — gate, then mint against it; never materialize a clone.
-        readiness = origin_readiness(draft)
-        if not readiness.complete:
-            raise OriginIncompleteError(readiness.gaps)
+        _assert_origin_ready(draft)
         await _run_preflight(draft.connector, backend_url)
         # The derived path skips commit_draft_to_dataset (the dataset already
         # exists), so persist a built/dropped candidate library through the SAME

@@ -13,7 +13,7 @@ from promptpotter.application.jobs import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
-from promptpotter.infrastructure.store import Stores, build_stores
+from promptpotter.infrastructure.store import Stores, build_stores, cycle_dir_for
 from promptpotter.shared.errors import NotFoundError, ServiceUnavailableError, UnauthorizedError
 from promptpotter.shared.identity import IdentityContext
 
@@ -88,6 +88,18 @@ def read_text_or_404(path: Path, label: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def get_cycle_dir_or_404(campaign_id: str, cycle_id: str, store: Stores) -> Path:
+    """Resolve the per-cycle dir or raise 404 if it doesn't exist.
+
+    The shared seam for the routers that read under a cycle dir — folds the
+    repeated ``cycle_dir_for(...)`` + ``exists()`` + ``NotFoundError`` block.
+    """
+    cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
+    if not cycle_dir.exists():
+        raise NotFoundError(f"Cycle '{campaign_id}/{cycle_id}' not found")
+    return cycle_dir
+
+
 def get_draft_registry(request: Request) -> DraftCampaignRegistry:
     """Pull the draft-campaign registry off ``app.state``; missing is a programmer error."""
     registry: DraftCampaignRegistry | None = getattr(request.app.state, "draft_campaigns", None)
@@ -118,6 +130,7 @@ __all__ = [
     "StoreDep",
     "build_stores_from_identity",
     "get_backend_or_404",
+    "get_cycle_dir_or_404",
     "get_draft_registry",
     "get_job_registry",
     "read_text_or_404",

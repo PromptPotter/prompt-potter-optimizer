@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.presentation.cli.commands._shared import (
+    bind_session_identity,
     init_services_cli,
     log_startup_summary,
 )
@@ -130,9 +131,7 @@ async def _setup_sweep_cycle(
     pipeline_params = _prepare_cycle_for_resume(
         args, ctx, session, campaign_config, train_data, pivot_prompt=False
     )
-    session.session_id = ctx.session_id
-    session.campaign_id = ctx.campaign_id
-    session.state.cycle_id = ctx.cycle_id
+    bind_session_identity(session, ctx)
 
     log_startup_summary(
         session,
