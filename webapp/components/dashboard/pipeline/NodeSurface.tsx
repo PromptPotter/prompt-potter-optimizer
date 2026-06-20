@@ -1,4 +1,5 @@
 "use client";
+import type { ReactNode } from "react";
 import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
 import type { PipelineViewNode } from "@/components/workflow";
@@ -33,6 +34,7 @@ export function NodeSurface({
   title,
   mode,
   lockModel,
+  toggle,
   readOnly,
   flat,
   onClose,
@@ -55,6 +57,9 @@ export function NodeSurface({
   title?: string;
   mode: ConfigMode;
   lockModel?: boolean;
+  // Optional control rendered inside the card, between the role line and the
+  // config body (the OBSERVE origin/live/historical selector).
+  toggle?: ReactNode;
   readOnly?: boolean;
   flat?: boolean;
   onClose?: () => void;
@@ -82,6 +87,7 @@ export function NodeSurface({
 
   const body = (
     <>
+      {toggle}
       <NodeConfigEditor
         mode={mode}
         schema={schema}
