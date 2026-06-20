@@ -7,8 +7,9 @@ readable; the core module imports these.
 
 * ``_build_origin_pipeline_json`` / ``_build_default_campaign_json`` /
   ``_build_task_context`` — the committed dataset's ``pipeline.json`` overlay,
-  ``campaign.json`` sibling, and ``task_context.json`` framing.
-* ``merge_pipeline_overlay`` — connector node-config seed + operator edits.
+  ``campaign.json`` sibling, and ``task_context.json`` framing. The seed⊕overlay
+  node merge they build on is ``draft_campaign.merge_pipeline_overlay`` (its
+  conceptual owner — shared with the origin readiness model gate).
 * ``split_overlay`` — split a reused-dataset overlay into its two
   campaign-config homes (``pipeline_overrides`` + ``optimizer_narrowing``).
 * ``derive_optimizer_locks`` / ``draft_pipeline_dependencies`` /
@@ -17,12 +18,13 @@ readable; the core module imports these.
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.datasets.draft_campaign import DraftCampaign
-from promptpotter.connectors.protocol import Connector
+from promptpotter.application.datasets.draft_campaign import (
+    DraftCampaign,
+    merge_pipeline_overlay,
+)
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
     NodeSearchNarrowing,
@@ -62,26 +64,6 @@ def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     if nodes:
         pipeline["nodes"] = nodes
     return pipeline
-
-
-def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
-    """Connector node-config seed (e.g. TermNorm's reasoning clamp) underneath,
-    operator draft edits on top — the effective ``pipeline.json::nodes`` block.
-
-    Sub-blocks (``config`` / ``optimizer``) shallow-merge per node so an operator
-    override narrows the seed rather than replacing the whole node. Shared by the
-    committed pipeline.json builder and the wire-side optimizer-locks block so
-    the two never drift.
-    """
-    nodes: dict[str, Any] = copy.deepcopy(dict(connector.default_node_config))
-    for node_name, node_overlay in (draft.pipeline_overlay or {}).items():
-        dst = nodes.setdefault(node_name, {})
-        for key, val in node_overlay.items():
-            if isinstance(val, dict) and isinstance(dst.get(key), dict):
-                dst[key].update(val)
-            else:
-                dst[key] = val
-    return nodes
 
 
 def split_overlay(

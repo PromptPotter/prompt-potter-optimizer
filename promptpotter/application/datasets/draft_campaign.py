@@ -23,11 +23,12 @@ Storage:
 
 from __future__ import annotations
 
+import copy
 import threading
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +36,9 @@ from promptpotter.application.config import MechanismConfig
 from promptpotter.domain.identity import TenantId, safe_name
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.shared.clock import utcnow_iso
+
+if TYPE_CHECKING:
+    from promptpotter.connectors.protocol import Connector
 
 DEFAULT_CONNECTOR = "termnorm"
 """Only registered connector today (per root CLAUDE.md); operator-editable."""
@@ -316,6 +320,29 @@ class DraftCampaign:
         return self.patch(field_provenance=merged, **(values or {}))
 
 
+def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
+    """The draft's effective ``pipeline.json::nodes`` block: connector node-config
+    seed (e.g. TermNorm's reasoning clamp + owned model) underneath, operator draft
+    edits on top.
+
+    Sub-blocks (``config`` / ``optimizer``) shallow-merge per node so an operator
+    override narrows the seed rather than replacing the whole node. The one place
+    the draft's resolved node config is computed — shared by the committed
+    pipeline.json builder (``draft_build``), the wire-side optimizer-locks block,
+    and the origin readiness model gate — so the three never drift. Pure; the
+    ``connector`` is passed in (this module stays connector-registry-free, like
+    :meth:`DraftCampaign.to_wire`)."""
+    nodes: dict[str, Any] = copy.deepcopy(dict(connector.default_node_config))
+    for node_name, node_overlay in (draft.pipeline_overlay or {}).items():
+        dst = nodes.setdefault(node_name, {})
+        for key, val in node_overlay.items():
+            if isinstance(val, dict) and isinstance(dst.get(key), dict):
+                dst[key].update(val)
+            else:
+                dst[key] = val
+    return nodes
+
+
 @dataclass
 class DraftCampaignRegistry:
     """Thread-safe in-memory registry keyed by ``(tenant_id, draft_id)``.
@@ -490,4 +517,5 @@ __all__ = [
     "OptimizationOverrides",
     "dataset_source_of",
     "default_slug_from_filename",
+    "merge_pipeline_overlay",
 ]

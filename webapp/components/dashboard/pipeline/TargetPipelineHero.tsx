@@ -3,7 +3,9 @@ import type { PipelineView, PipelineViewNode } from "@/components/workflow";
 import type { NodeConfigParam } from "@/lib/api";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { useConnector } from "@/lib/hooks/useConnector";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useSelection } from "@/lib/SelectionContext";
+import { liveObserveConfig } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 
 // The backend target LLM is being called throughout L1 scoring (and origin).
@@ -18,15 +20,37 @@ const BACKEND_ACTIVE_PHASES = new Set([
   "between_candidates",
 ]);
 
-// The node's configured model from the dataset overlay (the `model` param in the
-// node-config schema). This is what to show when live — the live `current_round.
-// nodes` map only ever carries OPTIMIZER node calls, never the backend target.
+// The node's static origin model from the dataset overlay (the `model` param in
+// the node-config schema) — the fallback when no live searchpoint is resolved.
+// The live `current_round.nodes` map only ever carries OPTIMIZER node calls,
+// never the backend target, so the running model comes from the in-flight
+// candidate's served `resolved_pipeline_params` (see `liveModelResolver`).
 function configuredModel(
   nodeId: string,
   nodeConfigSchema: Record<string, NodeConfigParam[]> | null,
 ): string | null {
   const m = nodeConfigSchema?.[nodeId]?.find((p) => p.key === "model")?.value;
   return typeof m === "string" && m ? m : null;
+}
+
+// Per-node model the chip shows when the backend is live: the in-flight
+// candidate's server-resolved model, falling back to the static origin model.
+// One resolver, built once in the hero and threaded to both chip layouts so
+// 1-node and N-node datasets read the same source.
+type LiveModelFor = (nodeId: string) => string | null;
+
+function liveModelResolver(
+  liveCfg: { config: Record<string, unknown> } | null,
+  nodeConfigSchema: Record<string, NodeConfigParam[]> | null,
+): LiveModelFor {
+  return (nodeId) => {
+    const nodeCfg = liveCfg?.config?.[nodeId];
+    const m =
+      nodeCfg && typeof nodeCfg === "object"
+        ? (nodeCfg as Record<string, unknown>).model
+        : null;
+    return typeof m === "string" && m ? m : configuredModel(nodeId, nodeConfigSchema);
+  };
 }
 
 interface Props {
@@ -105,18 +129,18 @@ function interiorNodes(view: PipelineView): PipelineViewNode[] {
 // multi-node strip writes).
 function SingleNodeChip({
   node,
-  nodeConfigSchema,
+  liveModelFor,
   phase,
   isLive,
 }: {
   node: PipelineViewNode;
-  nodeConfigSchema: Record<string, NodeConfigParam[]> | null;
+  liveModelFor: LiveModelFor;
   phase: string | null;
   isLive: boolean;
 }) {
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
   const active = isLive && BACKEND_ACTIVE_PHASES.has(phase ?? "");
-  const model = active ? (configuredModel(node.id, nodeConfigSchema) ?? "running") : "idle";
+  const model = active ? (liveModelFor(node.id) ?? "running") : "idle";
   const isSelected = selected === node.id;
   return (
     <button
@@ -143,13 +167,13 @@ function SingleNodeChip({
 function MultiNodeStrip({
   view,
   connector,
-  nodeConfigSchema,
+  liveModelFor,
   phase,
   isLive,
 }: {
   view: PipelineView;
   connector: string | null;
-  nodeConfigSchema: Record<string, NodeConfigParam[]> | null;
+  liveModelFor: LiveModelFor;
   phase: string | null;
   isLive: boolean;
 }) {
@@ -196,7 +220,7 @@ function MultiNodeStrip({
           const isSelected = selected === n.id;
           const isLlm = n.kind === "llm";
           const active = isLlm && isLive && BACKEND_ACTIVE_PHASES.has(phase ?? "");
-          const model = active ? (configuredModel(n.id, nodeConfigSchema) ?? "running") : null;
+          const model = active ? (liveModelFor(n.id) ?? "running") : null;
           const cxPos = cxFor(i);
           const dotCls = cx(
             "node",
@@ -250,8 +274,14 @@ function MultiNodeStrip({
 
 export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
   const cv = useConnector();
+  const { dash } = useDashboard();
   const interior = cv.view ? interiorNodes(cv.view) : [];
   const isSingle = interior.length <= 1;
+  // The running searchpoint's resolved model when live; static origin otherwise.
+  const liveModelFor = liveModelResolver(
+    cv.isLive ? liveObserveConfig(dash) : null,
+    cv.nodeConfigSchema,
+  );
 
   return (
     <div className="wf-hero-flow">
@@ -274,7 +304,7 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
       {isSingle ? (
         <SingleNodeChip
           node={interior[0] ?? { id: "llm", label: "LLM", kind: "llm" }}
-          nodeConfigSchema={cv.nodeConfigSchema}
+          liveModelFor={liveModelFor}
           phase={cv.phase}
           isLive={cv.isLive}
         />
@@ -282,7 +312,7 @@ export function TargetPipelineHero({ samplesOpen, onToggle }: Props) {
         <MultiNodeStrip
           view={cv.view!}
           connector={cv.connector}
-          nodeConfigSchema={cv.nodeConfigSchema}
+          liveModelFor={liveModelFor}
           phase={cv.phase}
           isLive={cv.isLive}
         />

@@ -114,6 +114,13 @@ class ScoredCandidate(BaseModel):
     total: int
     evaluators: dict[str, float] = Field(default_factory=dict)
     pipeline_params_override: dict[str, Any] | None = None
+    # The fully-resolved per-node config this candidate's searchpoint executes —
+    # origin floor ⊕ this candidate's delta, config-only (model/provider/
+    # reasoning_effort/temperature + ``steps``; the prompt rides ``prompt_fields``).
+    # Served so the OBSERVE view reads the effective config verbatim and never
+    # re-merges client-side. Distinct from the sparse ``pipeline_params_override``
+    # above (the fork transport) — two data classes, not a stitch.
+    resolved_pipeline_params: dict[str, Any] | None = None
     # The candidate's evolved prompt (``OptSearchPoint.prompt_field_dict()`` shape).
     # Paired with ``pipeline_params_override`` this is the full searchpoint an
     # operator selects to seed an operator-steered fork (read side, Decision F).

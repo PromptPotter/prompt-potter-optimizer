@@ -404,6 +404,7 @@ class LiveDashboardView(DerivedView):
                 payload.get("changes_description") or "",
                 payload.get("pp_override"),
                 payload.get("prompt_fields"),
+                payload.get("resolved_pipeline_params"),
             )
         elif ev == "candidate_scored":
             scores = payload.get("scores") or {}

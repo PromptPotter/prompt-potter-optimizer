@@ -26,7 +26,6 @@ from promptpotter.application.jobs.launcher.draft_build import (
     derive_optimizer_locks,
     draft_pipeline_dependencies,
     draft_wire_with_locks,
-    merge_pipeline_overlay,
     split_overlay,
 )
 
@@ -37,7 +36,6 @@ __all__ = [
     "derive_optimizer_locks",
     "draft_pipeline_dependencies",
     "draft_wire_with_locks",
-    "merge_pipeline_overlay",
     "mint_campaign_command",
     "mint_campaign_from_draft_command",
     "persist_origin_candidate_library",

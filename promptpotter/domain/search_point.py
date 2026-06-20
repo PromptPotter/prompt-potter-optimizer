@@ -59,6 +59,24 @@ class JobSearchPoint(SearchPoint):
                 return str(node_config["prompt"])
         return ""
 
+    @property
+    def config_params(self) -> dict[str, Any] | None:
+        """``pipeline_params`` minus the per-node rendered-prompt injection — the
+        config-only resolved view (``{node: {model, provider, reasoning_effort,
+        temperature, …}}`` + ``steps``). The inverse of ``to_job_search_point``'s
+        prompt injection: the rendered prompt rides ``prompt_fields`` / ``render()``,
+        so the served resolved config never duplicates it on disk. Sole writer of
+        the strip — the observe view reads this verbatim, never re-merges."""
+        pp = self.pipeline_params
+        if pp is None:
+            return None
+        return {
+            node: (
+                {k: v for k, v in cfg.items() if k != "prompt"} if isinstance(cfg, dict) else cfg
+            )
+            for node, cfg in pp.items()
+        }
+
     def sp_hash(self, pipeline_schema: PipelineSchema | None = None) -> str:
         """SearchPoint identity hash; falls back to flat ``pipeline_params`` hash without schema.
 

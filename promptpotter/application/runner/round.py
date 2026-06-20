@@ -83,6 +83,7 @@ async def emit_origin_round(
         hits=base["hits"],
         total=base["total"],
         prompt_fields=prompt_fields,
+        resolved_pipeline_params=(tr.current_sp.config_params if tr.current_sp else None),
         scored_samples=base["total"],
         expected_samples=base["total"],
         matched_origin_accuracy=tr.origin_accuracy,

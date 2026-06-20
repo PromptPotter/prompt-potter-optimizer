@@ -197,12 +197,20 @@ async def score_population(
 
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
+        # Single merge site: build the candidate's frozen searchpoint once and
+        # share it with both consumers — the in-flight dashboard seed (resolved
+        # config-only) and ``score_one_candidate`` (scoring + round-file report).
+        candidate_sp = osp_c.to_job_search_point(
+            base_pipeline_params=effective_pipeline_params[idx],
+            schema=cycle.session.pipeline_schema,
+        )
         callbacks.on_candidate_started(
             idx,
             n,
             osp_c.lineage.changes_description or "",
             pipeline_params_override,
             osp_c.prompt_field_dict(),
+            candidate_sp.config_params,
         )
         # Bind PoBBCheck so this candidate's per-sample snapshot rides the telemetry stream tagged.
         elim_check.set_current(
@@ -280,6 +288,7 @@ async def score_population(
         cr_result = await score_one_candidate(
             idx=idx,
             osp_c=osp_c,
+            candidate_sp=candidate_sp,
             pipeline_params_override=pipeline_params_override,
             cycle=cycle,
             dataset=dataset,

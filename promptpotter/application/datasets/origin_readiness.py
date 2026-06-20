@@ -19,10 +19,17 @@ state — not config that has a sane default:
   committed prompt. Code owns this (``with_closed_answer_format`` writes the
   labels into ``answer_format``), so it's a safety that passes — kept because it
   is the real post-condition that a closed-label campaign can emit each label.
+* **Node model** — every active node configured as an LLM call (its connector-
+  merged ``config`` block carries an LLM-call axis) must own a ``model``. The one
+  config axis that IS gated, because a missing model has no sane default — the
+  dataset owns its task model, and the absence crashes at mint rather than
+  defaulting. Model-only (provider is connector-derivable). See
+  :func:`_check_node_models`.
 
-Config (connector, scorer, round cap, optimizer provider/model, backend node
-overlay) is NOT gated: each carries a sane default the operator edits in the
-optional Advanced block. A default is not a hidden gap — it's a default.
+Other config (connector, scorer, round cap, optimizer provider/model, the rest of
+the backend node overlay) is NOT gated: each carries a sane default the operator
+edits in the optional Advanced block. A default is not a hidden gap — it's a
+default.
 """
 
 from __future__ import annotations
@@ -32,8 +39,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.application.datasets.draft_campaign import DraftCampaign
+from promptpotter import connectors
+from promptpotter.application.datasets.draft_campaign import (
+    DraftCampaign,
+    merge_pipeline_overlay,
+)
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, PARAM_SCOPE_KEYS
+
+# A node's resolved ``config`` block is an LLM call iff it carries any of these
+# axes — model/provider + the per-call tunables. Such a node must own a model
+# (see :func:`_check_node_models`).
+_LLM_CALL_KEYS: frozenset[str] = PARAM_FORBIDDEN_KEYS | PARAM_SCOPE_KEYS
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +105,7 @@ def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
     )
 
     _check_answer_space(draft, gaps=gaps)
+    _check_node_models(draft, gaps=gaps)
 
     return OriginReadiness(complete=not gaps, gaps=tuple(gaps))
 
@@ -181,6 +199,44 @@ def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
             ),
         )
     )
+
+
+def _check_node_models(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
+    """Every active node configured as an LLM call must own a ``model`` before mint.
+
+    The dataset owns its task model (``application/CLAUDE.md § Backend overlay``);
+    a missing one crashes loudly at mint (``config.py`` LLM-node model check). Pre-
+    mint the backend schema (``is_llm``) isn't available, so this reasons over the
+    connector-merged config instead: a node whose resolved ``config`` block carries
+    any LLM-call axis (model/provider/reasoning_effort/…) but no non-empty ``model``
+    is the exact pre-crash state — surfaced here as a check-in nudge, model-only
+    (provider is derivable / connector-defaulted). CANDIDATE_SOURCE and other
+    non-LLM nodes carry no such block and are not flagged; an LLM node with no seed
+    config at all (rarer) the mint crash still backstops. Connector lookup is an
+    in-memory registry read (no I/O); an unregistered connector is left for the
+    commit path to reject."""
+    try:
+        connector = connectors.get(draft.connector)
+    except KeyError:
+        return
+    active = set(draft.pipeline_steps or connector.default_pipeline)
+    merged = merge_pipeline_overlay(draft, connector)
+    for node_name in sorted(active):
+        block = merged.get(node_name)
+        config = block.get("config") if isinstance(block, dict) else None
+        if not isinstance(config, dict) or not (_LLM_CALL_KEYS & config.keys()):
+            continue
+        if not config.get("model"):
+            gaps.append(
+                FieldGap(
+                    field=f"node.{node_name}.model",
+                    reason="unset",
+                    hint=(
+                        f"Set the model for LLM node {node_name!r} in "
+                        f"backend.node_config — the dataset owns its task model."
+                    ),
+                )
+            )
 
 
 def field_values(draft: DraftCampaign) -> dict[str, Any]:

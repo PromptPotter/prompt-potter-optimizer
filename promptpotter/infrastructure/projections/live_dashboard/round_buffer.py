@@ -63,6 +63,7 @@ class RoundBuffer:
         changes_description: str,
         pp_override: dict[str, Any] | None,
         prompt_fields: dict[str, Any] | None,
+        resolved_pipeline_params: dict[str, Any] | None,
     ) -> None:
         """Seed a slot so CURRENT shows labelled pending rows before scoring lands.
 
@@ -70,12 +71,15 @@ class RoundBuffer:
         searchpoint (``OptSearchPoint.prompt_field_dict()`` + pipeline delta) —
         the seed-able half the steer panel forks from. Surfacing them live makes
         an in-flight candidate steerable without its (not-yet-written) round file.
+        ``resolved_pipeline_params`` is the config-only resolved config the
+        OBSERVE view reads live (the in-flight peer of the round-file field).
         """
         entry = self.slot(idx, total)
         entry["total"] = total
         entry["changes_description"] = changes_description or ""
         entry["pp_override"] = pp_override
         entry["prompt_fields"] = prompt_fields
+        entry["resolved_pipeline_params"] = resolved_pipeline_params
 
     def append_sample(
         self,

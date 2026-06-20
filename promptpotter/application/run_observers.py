@@ -144,11 +144,14 @@ class RunCallbacks:
         changes_description: str,
         pp_override: dict[str, Any] | None,
         prompt_fields: dict[str, Any],
+        resolved_pipeline_params: dict[str, Any] | None,
     ) -> None:
         # `prompt_fields` + `pp_override` are the candidate's evolved searchpoint
         # (the seed-able half), surfaced live so the steer panel can fork from a
         # still-in-flight candidate without the round file — the in-flight peer
-        # of round_NNNN.json::candidate_scores.
+        # of round_NNNN.json::candidate_scores. `resolved_pipeline_params` is the
+        # config-only resolved config the OBSERVE view reads (the in-flight peer
+        # of ScoredCandidate.resolved_pipeline_params).
         self._snapshot(
             "candidate_started",
             idx,
@@ -157,6 +160,7 @@ class RunCallbacks:
                 "changes_description": changes_description,
                 "pp_override": pp_override,
                 "prompt_fields": prompt_fields,
+                "resolved_pipeline_params": resolved_pipeline_params,
             },
         )
 

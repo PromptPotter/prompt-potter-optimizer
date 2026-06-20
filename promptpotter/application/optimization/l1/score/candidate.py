@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.search_point import JobSearchPoint
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ async def score_one_candidate(
     *,
     idx: int,
     osp_c: OptSearchPoint,
+    candidate_sp: JobSearchPoint,
     pipeline_params_override: dict[str, Any] | None,
     cycle: Cycle,
     dataset: list[Sample],
@@ -79,8 +81,14 @@ async def score_one_candidate(
     / LEADER_LOCK_IN decisions on ``decisions``.
 
     ``candidate_scores`` is read for prior_label resolution (already-scored
-    candidates only — caller appends the current report after this returns)."""
+    candidates only — caller appends the current report after this returns).
+
+    ``candidate_sp`` is built once by the caller (``score_population``) and shared
+    with the in-flight dashboard seed, so the origin⊕delta merge happens at a
+    single site; ``config_params`` strips the rendered prompt for the served
+    resolved config."""
     label = candidate_label(round_num, idx)
+    resolved_pipeline_params = candidate_sp.config_params
 
     # Path 1 — validation-skip synthetic-0.
     if osp_c.memory.wounds.validation_failures:
@@ -94,14 +102,11 @@ async def score_one_candidate(
                 [],
                 dataset,
                 label=label,
+                resolved_pipeline_params=resolved_pipeline_params,
                 invalid=True,
                 l1_diversity=l1_diversity,
             ),
         )
-
-    candidate_sp = osp_c.to_job_search_point(
-        base_pipeline_params=effective_pipeline_params, schema=cycle.session.pipeline_schema
-    )
 
     async def _catch_priors_up(sample: Sample) -> None:
         fresh = await elim_check.backfill_for_sample(sample)
@@ -149,6 +154,7 @@ async def score_one_candidate(
         results,
         dataset,
         label=label,
+        resolved_pipeline_params=resolved_pipeline_params,
         aborted=effect.aborted,
         elimination_stopped=effect.elimination_stopped,
         elimination_context=effect.elim_context,

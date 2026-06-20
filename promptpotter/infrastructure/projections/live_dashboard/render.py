@@ -115,6 +115,9 @@ def build_l1_score_block(
                 # Live peer of round_NNNN.json::candidate_scores[].prompt_fields
                 # — `liveCandidateSearchPoint` reads it for steer-fork seeding.
                 "prompt_fields": cand.get("prompt_fields"),
+                # Config-only resolved config the OBSERVE view reads live — the
+                # in-flight peer of round_NNNN.json::candidate_scores[].resolved_pipeline_params.
+                "resolved_pipeline_params": cand.get("resolved_pipeline_params"),
             }
         )
         # Mid-scoring the final ``scores`` are empty; fall back to the scorer's

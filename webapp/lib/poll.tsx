@@ -167,6 +167,10 @@ export interface LiveInputCandidate {
   changes_description?: string;
   pp_override?: Record<string, unknown> | null;
   prompt_fields?: Record<string, unknown>;
+  // Server-resolved, config-only effective params (`{node:{param:value}, steps}`),
+  // prompt stripped. The in-flight peer of round_NNNN.json::candidate_scores[].
+  // resolved_pipeline_params — read by `liveObserveConfig` for the OBSERVE view.
+  resolved_pipeline_params?: Record<string, unknown> | null;
 }
 
 export interface L1ScoreOutput {
