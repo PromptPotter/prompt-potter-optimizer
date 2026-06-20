@@ -417,6 +417,10 @@ async def mint_campaign_from_draft_command(
             # Persist the reused-dataset draft's lock/allow + origin-floor edits on
             # the per-campaign snapshot (the shared dataset stays immutable).
             pipeline_overlay=draft.pipeline_overlay,
+            # A "reuse an origin" draft seeds C0 from the chosen origin's exact
+            # prompt fields (campaign_origin lineage) instead of the dataset's
+            # authored prompt; empty marker → plain dataset mint (origin lineage).
+            origin_override=draft.origin_prompt_fields if draft.reused_origin_id else None,
             backend_url=backend_url,
         )
         draft_registry.discard(draft.draft_id, tenant_id=stores.identity.tenant_id)

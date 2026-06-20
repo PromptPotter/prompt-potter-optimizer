@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   IngestApiError,
   postDraftFromDataset,
+  postDraftFromOrigin,
   postEditDraftCampaign,
   postIngestDataset,
   postMintCampaignFromDraft,
@@ -141,6 +142,30 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       pushError(e);
     }
     pushAi(recap);
+    // Happy path: the check-in confirmed every gated field (columns + framing)
+    // and asked nothing back — mint straight through, skipping the review
+    // surface. The server gate stays authoritative (it also checks answer-space
+    // and per-node model, which the client can't see from the wire), so a
+    // rejected auto-mint falls through to the review panel below rather than
+    // dead-ending on the error.
+    if (
+      resolution !== null &&
+      resolution.next_action.questions.length === 0 &&
+      originReadiness(resolved).complete
+    ) {
+      setMinting(true);
+      try {
+        const r = await postMintCampaignFromDraft(resolved.draft_id);
+        pushAi("Setup confirmed — campaign started.");
+        setPhase({ stage: "idle" });
+        onMint({ campaignId: r.campaign_id, cycleId: r.cycle_id });
+        return;
+      } catch (e) {
+        pushError(e);
+      } finally {
+        setMinting(false);
+      }
+    }
     setPhase({ stage: "ready", draft: resolved, resolution });
   };
 
@@ -224,10 +249,12 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const pickDataset = (entry: DatasetIndexEntry) =>
     void draftFrom(entry.name, `Use dataset “${entry.title || entry.name}”`);
 
-  // Reuse a dataset's committed origin: open the draft (which carries the
-  // committed origin fields + pipeline config) straight into the editable ready
-  // panel — NO check-in LLM. The operator modifies if wanted and Starts, which
-  // mints from the draft. Skips the checkin node; the graph enters at l1_generate.
+  // Reuse an origin: open it straight into the editable ready panel — NO
+  // check-in LLM. A campaign-backed origin reproduces that origin's EXACT prompt
+  // fields (and stamps `campaign_origin` lineage on mint) via `draft-from-origin`;
+  // a prepared origin IS its dataset's current config, so the dataset-draft path
+  // already reproduces it. The operator modifies if wanted and Starts, which mints
+  // from the draft. Skips the checkin node; the graph enters at l1_generate.
   const openOrigin = async (entry: OriginEntry) => {
     if (busy) return;
     setMessages((m) => [
@@ -237,15 +264,15 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     setPhase({ stage: "uploading" });
     let draft: DraftCampaignWire;
     try {
-      // P1: open the origin's dataset committed config. Exact per-origin prompt/
-      // config reproduction (origin_override) is the start-from-origin phase.
-      draft = await postDraftFromDataset(entry.dataset_name);
+      draft = entry.prepared
+        ? await postDraftFromDataset(entry.dataset_name)
+        : await postDraftFromOrigin(entry.origin_id);
     } catch (e) {
       setPhase({ stage: "idle" });
       pushError(e);
       return;
     }
-    pushAi("Opened the committed origin — edit anything below, then Start.");
+    pushAi("Opened the origin — edit anything below, then Start.");
     setPhase({ stage: "ready", draft, resolution: null });
   };
 

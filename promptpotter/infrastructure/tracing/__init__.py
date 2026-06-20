@@ -40,7 +40,10 @@ from promptpotter.infrastructure.tracing.events import (
     RoundWinnerChosen,
 )
 from promptpotter.infrastructure.tracing.file_sink import FileSink
-from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
+from promptpotter.infrastructure.tracing.langfuse_client import (
+    LangfuseLogger,
+    langfuse_trace_url,
+)
 from promptpotter.infrastructure.tracing.langfuse_sink import LangfuseSink
 from promptpotter.infrastructure.tracing.mlflow_sink import MLflowSink
 from promptpotter.infrastructure.tracing.replay import (
@@ -81,6 +84,7 @@ __all__ = [
     "RoundWinnerChosen",
     "classify_run_origin",
     "extract_pipeline_nodes",
+    "langfuse_trace_url",
     "observed_node",
     "push_all_runs",
     "sync_langfuse_runs",

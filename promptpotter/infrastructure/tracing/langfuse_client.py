@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 FLUSH_TIMEOUT_SEC: float = 5.0
 
 
+def langfuse_trace_url(trace_id: str | None) -> str | None:
+    """The operator-facing deep link for a trace id, or ``None`` when there's
+    no id. Single source of the URL shape so the notebook box and the dashboard
+    surface never drift; ``{host}/trace/{id}`` redirects to the owning project."""
+    if not trace_id:
+        return None
+    return f"{settings.LANGFUSE_HOST.rstrip('/')}/trace/{trace_id}"
+
+
 class LangfuseLogger:
     """Langfuse SDK wrapper. Disabled if credentials are missing."""
 
@@ -450,4 +459,4 @@ class LangfuseLogger:
             )
 
 
-__all__ = ["LangfuseLogger"]
+__all__ = ["LangfuseLogger", "langfuse_trace_url"]

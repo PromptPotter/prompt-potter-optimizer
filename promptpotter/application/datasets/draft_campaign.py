@@ -193,6 +193,13 @@ class DraftCampaign:
     # surfaced-and-droppable dependency, not a hard mint block (the answers already
     # in the data are a degenerate-but-runnable pool).
     candidate_library: tuple[str, ...] = ()
+    # Set when this draft was opened by reusing a prior origin (the picker's
+    # "Reuse an origin" path) — the chosen origin's content id. When non-empty,
+    # ``mint_campaign_from_draft_command`` passes ``origin_prompt_fields`` as the
+    # ``origin_override`` seed, so C0 resolves via the ``seed`` branch and stamps
+    # the ``campaign_origin`` lineage ("minted from a chosen prior origin"). Empty
+    # for a fresh upload / plain dataset open (lineage stays ``origin``).
+    reused_origin_id: str = ""
 
     def to_wire(self) -> dict[str, Any]:
         """Wire shape matching the OpenAPI ``DraftCampaign`` schema.

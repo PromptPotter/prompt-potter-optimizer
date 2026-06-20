@@ -615,17 +615,16 @@ class CommandDispatcher:
                 "job registry not initialised", code="job_registry_unavailable"
             )
         dataset_name = str(payload.get("dataset_name", ""))
-        raw_origin = payload.get("origin_override")
-        origin_override = raw_origin if isinstance(raw_origin, dict) else None
-        # Quota (429) / Launch (422) / BackendUnreachable (503) are PotterErrors —
-        # the central catch in _record_and_apply maps them. No per-applier arm.
+        # Campaign-from-origin rides the DRAFT path (mint-campaign-from-draft +
+        # the draft's reused_origin_id), not this workspace verb — so no
+        # origin_override here. Quota (429) / Launch (422) / BackendUnreachable
+        # (503) are PotterErrors the central catch in _record_and_apply maps.
         await mint_campaign_command(
             stores=self._store,
             dataset_name=dataset_name,
             job_registry=self._job_registry,
             halt_at_accuracy=_optional_float(payload.get("halt_at_accuracy")),
             spend_budget_usd=_optional_float(payload.get("spend_budget_usd")),
-            origin_override=origin_override,
         )
 
     async def _apply_start_run(

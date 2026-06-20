@@ -119,12 +119,13 @@ def build_campaign_emitter(
     resumed_from_round: int | None = None,
     recorder: Any | None = None,
     seed_from_cycle_id: str | None = None,
+    langfuse_trace_url: str | None = None,
 ) -> Any:
     """Live dashboard projection from session + config (shared by CLI + runner).
 
     ``seed_from_cycle_id`` (set when building a fork's dashboard) names the
     parent cycle to seed prior trajectory from; ``None`` seeds from the cycle's
-    own dir.
+    own dir. ``langfuse_trace_url`` is the set-once operator deep link.
     """
     from promptpotter.infrastructure.projections import LiveDashboardView
 
@@ -137,6 +138,7 @@ def build_campaign_emitter(
         l1_patience=opt.l1_patience,
         n_variants=opt.n_variants,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
+        langfuse_trace_url=langfuse_trace_url,
         resumed_from_round=resumed_from_round,
         recorder=recorder,
         seed_from_cycle_id=seed_from_cycle_id,

@@ -33,6 +33,7 @@ from promptpotter.config.settings import (
     DEFAULT_EXPERIMENT_ID,
 )
 from promptpotter.domain.results import CycleResult
+from promptpotter.infrastructure.tracing import langfuse_trace_url
 from promptpotter.presentation.views.display import (
     BOLD,
     GREEN,
@@ -126,8 +127,8 @@ def render_completion(
         fields.append(f"Cycle ID     {result.cycle_id}")
     if result.session_id:
         fields.append(f"Session      {result.session_id}")
-    if result.langfuse_trace_id:
-        fields.append(f"Langfuse     {result.langfuse_trace_id}")
+    if trace_url := langfuse_trace_url(result.langfuse_trace_id):
+        fields.append(f"Langfuse     {trace_url}")
 
     out = ["", _dbox_block(title, *fields)]
 

@@ -198,6 +198,12 @@ class LiveDashboardState(BaseModel):
     cycle_id: str
     session_id: str
 
+    # Operator-facing deep link to this cycle's Langfuse trace, composed once
+    # (set at construction from the obs bridge's trace id). None when Langfuse
+    # is disabled. The webapp can't compose it — LANGFUSE_HOST is backend-only —
+    # so it ships pre-built; this is the live-run path to the full nested trace.
+    langfuse_trace_url: str | None = None
+
     # Operator-visible state name + transition timestamp.
     state: str = "init"
     state_since: str

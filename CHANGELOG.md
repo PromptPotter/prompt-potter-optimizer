@@ -6,11 +6,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Reuse-an-origin, end-to-end.** The New-Campaign picker reproduces a chosen prior origin's *exact* prompt fields and starts a fresh campaign from it (`campaign_origin` lineage) — via a new `POST /origins/{id}/draft` that prefills a draft, committed through the existing mint-from-draft path. Retires the dead workspace-mint `origin_override` branch (the HTTP route had been stripping it).
+- **Clickable Langfuse trace link.** When Langfuse is enabled, `dashboard.json` (rendered in the webapp TopStrip) and the notebook result box surface a deep link to the cycle's full nested trace — one click from a low-scoring round to its prompts/candidates/spans.
+
+### Changed
+
+- **Ingest auto-mints on a clean check-in.** When the origin check-in confirms every gated field and asks nothing back, the campaign starts without the manual review step; the review panel still appears whenever any gap or resolver question remains.
+
 ### Planned for 0.8.3 (~2 weeks)
 
 > Low-hanging fruit pulled ahead of the broad-launch milestones (BYO per-user keys, state-sync) — UI emphasis. To refine; shipped items will accrue under the usual sections below as they land.
 
-- **Origin-picker UI** — campaign-from-origin Phase 2: a `GET /origins` derived read + a New-Campaign / ingest origin picker (the backend mint seam already ships).
 - **Dashboard L2/L3-terminal loading bug** — fitness bars vanish + panel hangs when a cycle's last phase was L2/L3.
 - **UI-polish pass** over the lineage / fitness / samples surfaces (empty states, mobile, copy).
 - **Code-hygiene tail** — dead `Connector.to_dict`, `param_unlock_round` collapsed to a constant, `_compute_accuracy` deduped onto `compute_accuracy`, the two warming-up dashboard routes folded onto one `warming_payload` contract.

@@ -1796,18 +1796,13 @@ components:
           minLength: 1
           maxLength: 64
           pattern: '^[a-z][a-z0-9_-]*$'
-          description: 'Dataset under `datasets/{dataset_name}/` to mint a campaign for.'
-        origin_override:
-          type: object
-          additionalProperties: { type: string }
           description: |
-            Campaign-from-origin — a chosen prior origin's prompt fields
-            (`PromptTemplate.prompt_field_dict()` shape) to seed C0 from
-            instead of the dataset's authored origin. Omit for the authored
-            origin. The mint writes the matching `CycleSeed` to
-            `.overrides/seed.json`; the runner resolves the same origin at
-            bootstrap (one seam with operator-steered fork). Sourced from
-            `GET /origins`.
+            Dataset under `datasets/{dataset_name}/` to mint a campaign for.
+            Campaign-from-origin (reuse a chosen prior origin) rides the DRAFT
+            path instead — `POST /origins/{origin_id}/draft` prefills a draft
+            with the origin's exact prompt fields, then `mint-campaign-from-draft`
+            seeds C0 (`campaign_origin` lineage). This verb mints the dataset's
+            own authored origin only.
 
     StartRunPayload:
       allOf:

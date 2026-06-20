@@ -23,7 +23,6 @@ shape was the old bloat source; readiness buckets replaced it (2026-06-19).
 
 ## Ready — no blocker, pick up cold
 
-- **Campaign-from-origin Phase 2 — additive consumer layer** (backend mint seam shipped: `POST /commands/mint-campaign {origin_override}` already starts a fresh campaign from a chosen prior origin). Remaining: a `GET /origins` derived read over `list_campaigns()` (dedup by `Campaign.root_content_hash`; 3-hop to `session_state.origin_prompt_fields` for the payload) + the New-Campaign / `IngestPane` origin picker that POSTs it. (Forward-feature-ish — tracked in CHANGELOG 0.8.3 as "Origin-picker UI"; kept here until it lands.)
 - `webapp` `forkReconcileDefaults` / `LimitReconcile` — freeze spend/round "remaining" via `useState(() => …)` at mount while the parent keeps polling, so a long edit session shows mount-time values. Latent staleness seam, intentional (avoids clobbering typed values) but undocumented. Add a one-line comment affirming the snapshot is deliberate, or recompute-on-reopen.
 - **JSON-read sweep** — ~36 hand-rolled `json.loads(path.read_text())` across ~24 files (mostly `presentation/api/routers/*`) → route through the existing `read_json` / `read_json_tolerant` (`store/base.py`); drops redundant `.exists()` guards + try/except. Mechanical line-shaving (rides an existing channel, no new concept) — fold per-file in small commits.
 

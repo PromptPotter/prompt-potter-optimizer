@@ -19,6 +19,8 @@ h1{font-size:26px;font-weight:600;line-height:1.2}
 .topstrip-round{font-weight:600;color:var(--color-text-primary)}
 .topstrip-qps{color:var(--color-text-tertiary)}
 .topstrip-counter-val{font-size:13px;color:var(--color-text-primary);font-family:var(--font-mono);font-weight:500}
+.topstrip-trace{font-size:11px;color:var(--color-accent);text-decoration:none;font-weight:600}
+.topstrip-trace:hover{text-decoration:underline}
 .phase-tag{font-size:10px;color:var(--color-success);background:var(--color-success-bg);border:0.5px solid var(--color-success-border);padding:0 5px;border-radius:3px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
 .phase-tag.is-error{color:var(--color-danger);background:var(--color-danger-bg);border-color:var(--color-danger-border)}
 .phase-tag.is-warn{color:var(--color-warn);background:var(--color-warn-bg);border-color:var(--color-warn-border)}

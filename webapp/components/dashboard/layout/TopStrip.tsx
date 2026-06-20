@@ -120,6 +120,20 @@ export const TopStrip = memo(function TopStrip() {
         <span className="topstrip-label">Last</span>
         <span className="topstrip-counter-val">{fmtSecs(lastQuery)}</span>
       </span>
+      {dash?.langfuse_trace_url && (
+        <>
+          <span className="topstrip-sep" aria-hidden="true" />
+          <a
+            className="topstrip-trace"
+            href={dash.langfuse_trace_url}
+            target="_blank"
+            rel="noreferrer"
+            title="Open this cycle's full nested trace in Langfuse"
+          >
+            Trace ↗
+          </a>
+        </>
+      )}
     </div>
   );
 });

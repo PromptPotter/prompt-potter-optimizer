@@ -33,6 +33,9 @@ export interface DashboardSnapshot {
   campaign_id?: string;
   cycle_id?: string;
   session_id?: string;
+  // Operator deep link to this cycle's Langfuse trace, pre-composed backend-side
+  // (LANGFUSE_HOST is server-only). Null/absent when Langfuse is disabled.
+  langfuse_trace_url?: string | null;
   // Fine-grained activity (origin / scoring / l1_generate / between_samples / …)
   // plus the terminal "stopped". Lifted to `phase` for transient gating.
   state?: string;

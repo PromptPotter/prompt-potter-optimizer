@@ -31,6 +31,7 @@ from promptpotter.infrastructure.projections import (
     LiveDashboardView,
     PoBBStreamView,
 )
+from promptpotter.infrastructure.tracing import langfuse_trace_url
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -382,6 +383,14 @@ def build_run_observers(
     pobb = PoBBStreamView.from_cycle_dir(cycle_dir)
 
     ledger = CycleEventLog.open(cycle_dir)
+    # The trace id is created at CampaignStart (during bootstrap, before this),
+    # so it's already on the obs bridge — hand it to the dashboard as a set-once
+    # identity stamp (like session_id), not a tracing-stream read (fan-out-only
+    # stays intact). None when Langfuse is disabled.
+    obs = session.state.obs
+    trace_url = (
+        langfuse_trace_url(obs.get_langfuse_trace_id(session.state.cycle_id)) if obs else None
+    )
     if fork is None:
         dashboard = build_campaign_emitter(
             session,
@@ -389,6 +398,7 @@ def build_run_observers(
             origin_accuracy=origin_accuracy,
             resumed_from_round=resumed_from_round,
             recorder=audit,
+            langfuse_trace_url=trace_url,
         )
     else:
         dashboard = build_campaign_emitter(
@@ -398,6 +408,7 @@ def build_run_observers(
             resumed_from_round=resumed_from_round,
             recorder=audit,
             seed_from_cycle_id=fork.parent_cycle_id,
+            langfuse_trace_url=trace_url,
         )
         parent_dir = CycleDir(
             session.store.campaigns.cycle_dir(session.campaign_id, fork.parent_cycle_id)

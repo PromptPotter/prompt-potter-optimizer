@@ -524,6 +524,21 @@ export async function postDraftFromDataset(name: string): Promise<DraftCampaignW
   return (await r.json()) as DraftCampaignWire;
 }
 
+// Reuse a campaign-backed origin: the server builds a DraftCampaign prefilled
+// with that origin's EXACT prompt fields (the root-cycle seed when it was itself
+// minted from an origin, else the dataset's authored prompt) and marks it so
+// committing mints with `campaign_origin` lineage. Unlike `postDraftFromDataset`
+// (which opens the dataset's CURRENT committed config) this reproduces the chosen
+// origin's prompt verbatim. No campaign exists until `postMintCampaignFromDraft`.
+export async function postDraftFromOrigin(originId: string): Promise<DraftCampaignWire> {
+  const r = await fetch(`${API}/origins/${encodeURIComponent(originId)}/draft`, {
+    method: "POST",
+    cache: "no-store",
+  });
+  if (!r.ok) await _throwApiError(r);
+  return (await r.json()) as DraftCampaignWire;
+}
+
 // Version-and-repoint an existing dataset so its name frees for new data —
 // the "Replace" collision choice. Data-safe: the old data + every prior
 // campaign's results are preserved under `{slug}-vN` (never overwritten); the

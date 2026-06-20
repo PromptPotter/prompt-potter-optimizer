@@ -18,21 +18,26 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from promptpotter.application.config import load_campaign_config, resolve_pipeline_config_params
 from promptpotter.application.datasets import resolve_dataset_items
+from promptpotter.application.datasets.csv_ingest import IngestError
+from promptpotter.application.datasets.ingest import draft_from_dataset
 from promptpotter.application.datasets.prompts import has_dataset_prompts
+from promptpotter.application.jobs.launcher import draft_wire_with_locks
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner import build_origin_cycle_id
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.sample import Sample
-from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store import DatasetAccessError, Stores, readable_dataset_dir
 from promptpotter.infrastructure.store.dataset_access import list_readable_datasets
-from promptpotter.presentation.api.deps import StoreDep
+from promptpotter.presentation.api.deps import StoreDep, get_draft_registry
+from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
 logger = logging.getLogger(__name__)
 
@@ -197,3 +202,60 @@ async def list_origins(store: StoreDep) -> OriginListResponse:
     return OriginListResponse(
         origins=[*prepared, *campaign_backed], total=len(prepared) + len(campaign_backed)
     )
+
+
+def _campaign_for_origin(store: Stores, origin_id: str) -> Campaign | None:
+    """The canonical (earliest) active campaign whose origin identity is ``origin_id``.
+
+    Mirrors :func:`_campaign_backed_origins`' grouping key (``root_content_hash``,
+    or ``campaign_id`` for a blank-hash legacy manifest). ``None`` for a *prepared*
+    origin id (no campaign yet) — those reuse the dataset-draft path, not this one.
+    """
+    matches = [
+        c
+        for c in store.campaigns.list_campaigns(None, lifecycle="active", owner_user_id=None)
+        if (c.root_content_hash or c.campaign_id) == origin_id
+    ]
+    return min(matches, key=lambda c: c.created_at) if matches else None
+
+
+@origins_router.post("/{origin_id}/draft")
+async def draft_from_origin(origin_id: str, request: Request, store: StoreDep) -> dict[str, Any]:
+    """Open a chosen prior origin as a prefilled :class:`DraftCampaign` — the
+    picker's "Reuse an origin" path for a campaign-backed origin.
+
+    Resolves the origin's EXACT prompt fields: a campaign that was itself minted
+    from an origin carries those fields on its root-cycle seed, so reuse them
+    verbatim; a normally-minted campaign has no seed and ``draft_from_dataset``
+    already loaded the dataset's authored prompt. The draft is marked
+    ``reused_origin_id`` so committing it (``mint-campaign-from-draft``) seeds C0
+    via ``origin_override`` and stamps the ``campaign_origin`` lineage. Like
+    ``/datasets/{name}/draft`` this is NOT a Control-remote command — no
+    ``CommandRecord`` lands until the operator commits.
+    """
+    match = _campaign_for_origin(store, origin_id)
+    if match is None:
+        raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
+    registry = get_draft_registry(request)
+    try:
+        dataset_dir = readable_dataset_dir(store, match.dataset_name)
+    except DatasetAccessError as exc:
+        raise NotFoundError(f"Dataset '{match.dataset_name}' not found") from exc
+    try:
+        draft = draft_from_dataset(
+            stores=store,
+            registry=registry,
+            dataset_dir=dataset_dir,
+            dataset_name=match.dataset_name,
+        )
+    except IngestError as exc:
+        raise PayloadInvalidError(
+            exc.message, code="ingest_failed", details={"reason": exc.reason}
+        ) from None
+    seed = store.campaigns.read_cycle_seed(match.campaign_id, match.root_cycle_id)
+    changes: dict[str, Any] = {"reused_origin_id": origin_id}
+    if seed is not None and seed.origin_prompt_fields:
+        changes["origin_prompt_fields"] = dict(seed.origin_prompt_fields)
+    draft = draft.patch(**changes)
+    registry.update(draft)
+    return draft_wire_with_locks(draft)
