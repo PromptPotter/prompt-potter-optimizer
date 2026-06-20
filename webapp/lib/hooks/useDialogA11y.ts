@@ -18,6 +18,15 @@ const FOCUSABLE =
 export function useDialogA11y(open: boolean, onClose: () => void) {
   const cardRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  // Hold the latest onClose in a ref so the effect depends only on `open`.
+  // Call sites pass an inline arrow, so onClose changes identity on every
+  // parent render — and modals mounted under a 2 s-polling subtree re-render
+  // every poll. Depending on onClose would tear down + re-run the focus trap
+  // each poll, yanking the caret out of any input the operator is typing in.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -27,7 +36,7 @@ export function useDialogA11y(open: boolean, onClose: () => void) {
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab" || !card) return;
@@ -51,7 +60,7 @@ export function useDialogA11y(open: boolean, onClose: () => void) {
       document.removeEventListener("keydown", onKey);
       restoreRef.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return cardRef;
 }

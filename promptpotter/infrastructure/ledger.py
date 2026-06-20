@@ -15,7 +15,7 @@ import logging
 from collections.abc import Iterator
 from pathlib import Path
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from promptpotter.domain.cycle_paths import CycleDir, Projection, WorkspaceDir
 from promptpotter.domain.run_records import CycleRecord
@@ -119,7 +119,19 @@ class CycleEventLog:
                 if not line:
                     continue
                 if produced >= since:
-                    yield _RECORD_ADAPTER.validate_json(line)
+                    try:
+                        yield _RECORD_ADAPTER.validate_json(line)
+                    except (ValidationError, ValueError):
+                        # A torn final line (append is not crash-atomic, ll. 87-88)
+                        # or a version-skewed record. Skip-and-continue the way the
+                        # sibling readers do (ledger_scan.py, event_stream/tail.py) —
+                        # the ledger is the SoT, so one bad line must not abort the
+                        # whole read and blind every projection rebuild / fork lookup.
+                        logger.warning(
+                            "skipping unparseable ledger line at offset %d in %s",
+                            produced,
+                            self._path,
+                        )
                 produced += 1
 
     def inherit_from(self, parent: CycleEventLog, offset: int) -> None:

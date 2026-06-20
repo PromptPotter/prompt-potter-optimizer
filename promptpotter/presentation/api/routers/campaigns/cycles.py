@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from promptpotter.infrastructure.store import cycle_dir_for
-from promptpotter.infrastructure.store.base import read_json
+from promptpotter.infrastructure.store.base import read_json_tolerant
 from promptpotter.infrastructure.store.paths import sibling_kind
 from promptpotter.presentation.api.deps import StoreDep, warming_payload
 from promptpotter.presentation.api.routers.campaigns._conditional import (
@@ -59,7 +59,7 @@ class CycleDetailResponse(CycleSummary):
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/cycles", response_model=CampaignCyclesResponse)
-async def list_campaign_cycles(store: StoreDep, campaign_id: str) -> CampaignCyclesResponse:
+def list_campaign_cycles(store: StoreDep, campaign_id: str) -> CampaignCyclesResponse:
     """Every cycle in one campaign's lineage tree."""
     if store.campaigns.load_campaign(campaign_id) is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
@@ -110,7 +110,7 @@ def _round_summaries(index: dict[str, Any]) -> list[CycleRoundEntry]:
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}", response_model=CycleDetailResponse
 )
-async def get_cycle(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleDetailResponse:
+def get_cycle(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleDetailResponse:
     """One cycle's ``index.json`` detail with round summaries."""
     index = store.campaigns.load(campaign_id, cycle_id)
     if index is None:
@@ -146,9 +146,7 @@ async def get_cycle(store: StoreDep, campaign_id: str, cycle_id: str) -> CycleDe
     "/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
     response_model=dict[str, Any],
 )
-async def get_round(
-    store: StoreDep, campaign_id: str, cycle_id: str, round_num: int
-) -> dict[str, Any]:
+def get_round(store: StoreDep, campaign_id: str, cycle_id: str, round_num: int) -> dict[str, Any]:
     """Full round detail for one round of one cycle."""
     round_data = store.campaigns.load_round_file(campaign_id, cycle_id, round_num)
     if round_data is None:
@@ -157,7 +155,7 @@ async def get_round(
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")
-async def get_cycle_dashboard(
+def get_cycle_dashboard(
     request: Request, store: StoreDep, campaign_id: str, cycle_id: str
 ) -> Response:
     """Live telemetry for the viewed cycle — ``cycles/{cycle_id}/dashboard.json``.
@@ -194,5 +192,12 @@ async def get_cycle_dashboard(
     # paused run reads "paused" with no separate /runstate round-trip. The spend
     # cap rides ``dashboard.json::spend.budget_usd`` already; the deleted
     # /runstate endpoint's ``spend_cap_usd`` was unused.
-    body: dict[str, Any] = read_json(path) if present else warming_payload(campaign_id, cycle_id)
+    body = read_json_tolerant(path) if present else None
+    if body is None:
+        # Missing OR corrupt (half-written / truncated): degrade to the warming
+        # placeholder rather than 500 on the 2 s poll. A present-but-unreadable
+        # file carries a reason so the panel can say so, matching the SSE tail.
+        body = warming_payload(campaign_id, cycle_id)
+        if present:
+            body["reason"] = "dashboard_unreadable"
     return JSONResponse(body, headers=headers)

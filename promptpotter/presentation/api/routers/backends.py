@@ -56,7 +56,7 @@ class BackendHealthResponse(BaseModel):
 
 
 @backends_router.get("", response_model=list[BackendResponse])
-async def list_backends(store: StoreDep) -> list[BackendResponse]:
+def list_backends(store: StoreDep) -> list[BackendResponse]:
     """List all registered backends."""
     return [
         BackendResponse(
@@ -71,7 +71,7 @@ async def list_backends(store: StoreDep) -> list[BackendResponse]:
 
 
 @backends_router.get("/{backend_id}", response_model=BackendResponse)
-async def get_backend(backend_id: str, store: StoreDep) -> BackendResponse:
+def get_backend(backend_id: str, store: StoreDep) -> BackendResponse:
     """Get backend details."""
     b = get_backend_or_404(backend_id, store)
     return BackendResponse(
@@ -84,7 +84,7 @@ async def get_backend(backend_id: str, store: StoreDep) -> BackendResponse:
 
 
 @backends_router.get("/{backend_id}/experiments")
-async def list_experiments(backend_id: str, store: StoreDep) -> dict[str, Any]:
+def list_experiments(backend_id: str, store: StoreDep) -> dict[str, Any]:
     """List synced experiments (from local store, native format)."""
     get_backend_or_404(backend_id, store)
 
@@ -103,7 +103,7 @@ async def list_experiments(backend_id: str, store: StoreDep) -> dict[str, Any]:
 
 
 @backends_router.get("/{backend_id}/experiments/{experiment_id}")
-async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep) -> dict[str, Any]:
+def get_experiment(backend_id: str, experiment_id: str, store: StoreDep) -> dict[str, Any]:
     """Get a synced experiment in native backend format."""
     get_backend_or_404(backend_id, store)
     data: dict[str, Any] | None = store.backends.load_sync(

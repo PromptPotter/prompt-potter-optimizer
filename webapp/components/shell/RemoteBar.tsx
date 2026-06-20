@@ -108,6 +108,14 @@ export function RemoteBar() {
             {spend.budget_usd != null ? ` / $${spend.budget_usd.toFixed(2)}` : ""}
           </span>
         ) : null}
+        {spend && spend.backend.unpriced_tokens + spend.loop.unpriced_tokens > 0 ? (
+          <span
+            className="remote-spend-warn"
+            title="USD cost couldn't be resolved for some calls (e.g. Groq returns no wire cost and the model isn't in the rate table). The $ figure undercounts real spend and the USD cap can't see it — the token cap is the backstop."
+          >
+            <span aria-hidden="true">⚠</span> USD cap inactive
+          </span>
+        ) : null}
       </span>
       {babysat ? (
         <span

@@ -84,7 +84,7 @@ class DatasetIndexResponse(BaseModel):
 
 
 @datasets_router.get("", response_model=DatasetIndexResponse)
-async def list_datasets(store: StoreDep) -> DatasetIndexResponse:
+def list_datasets(store: StoreDep) -> DatasetIndexResponse:
     """Every dataset this identity may read — tenant Origins, demo origins (while
     demo mode is on), and install benchmarks (only with ``datasets.benchmarks.read``).
 
@@ -231,7 +231,7 @@ class _BuildLibraryBody(BaseModel):
 
 
 @datasets_router.post("/draft/candidate-library/from-column")
-async def build_candidate_library_from_column(
+def build_candidate_library_from_column(
     request: Request, store: StoreDep, body: _BuildLibraryBody
 ) -> dict[str, Any]:
     """Build a draft's candidate library from the distinct values of one of its own
@@ -266,9 +266,7 @@ async def build_candidate_library_from_column(
 
 
 @datasets_router.post("/{name}/draft")
-async def draft_from_existing_dataset(
-    name: str, request: Request, store: StoreDep
-) -> dict[str, Any]:
+def draft_from_existing_dataset(name: str, request: Request, store: StoreDep) -> dict[str, Any]:
     """Build a server-held :class:`DraftCampaign` from an authored dataset's files.
 
     The direct path behind "open this dataset in the ingest panel" — a demo /
@@ -435,7 +433,7 @@ class DatasetPreviewResponse(BaseModel):
 
 
 @datasets_router.get("/{name}/preview", response_model=DatasetPreviewResponse)
-async def get_dataset_preview(
+def get_dataset_preview(
     name: str,
     store: StoreDep,
     backend_id: str = Query(default="local"),
@@ -573,7 +571,7 @@ class MeasurementSeriesResponse(BaseModel):
     "/{name}/measurement-series",
     response_model=MeasurementSeriesResponse,
 )
-async def get_dataset_measurement_series(
+def get_dataset_measurement_series(
     name: str,
     store: StoreDep,
     backend_id: str = Query(default="local"),
@@ -676,7 +674,7 @@ class DatasetPipelineResponse(BaseModel):
 
 
 @datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
-async def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
+def get_dataset_pipeline(name: str, store: StoreDep) -> DatasetPipelineResponse:
     """Return the dataset overlay's parsed pipeline schema, graph view, per-node
     config + output schema, and origin prompt.
 

@@ -70,6 +70,7 @@ export interface SpendBucket {
   output_tokens: number;
   rate_known: boolean;
   model: string | null;
+  unpriced_tokens: number;
 }
 
 /** ``state.spend`` — two-bucket spend rollup + total. */

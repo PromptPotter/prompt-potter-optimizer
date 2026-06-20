@@ -203,7 +203,14 @@ async def run_optimization(
     if seed is not None and seed.pipeline_overlay:
         merged = dict(session.pipeline_params or {})
         for node, cfg in seed.pipeline_overlay.items():
-            merged[node] = {**merged.get(node, {}), **cfg}
+            base = merged.get(node)
+            if isinstance(base, dict) and isinstance(cfg, dict):
+                merged[node] = {**base, **cfg}
+            else:
+                # A non-dict value (e.g. the reserved top-level ``steps`` list)
+                # can't be spread — assign it directly rather than crash the
+                # per-node merge with a TypeError.
+                merged[node] = cfg
         session.pipeline_params = merged
     if seed is not None:
         # Reconcile the seed's run limits (rounds / spend / patience / epsilon)

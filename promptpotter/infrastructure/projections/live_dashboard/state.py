@@ -63,6 +63,10 @@ class SpendBucket(BaseModel):
     output_tokens: int = 0
     rate_known: bool = False
     model: str | None = None
+    # Tokens billed under this bucket whose USD cost couldn't be resolved (no wire
+    # cost AND no rate on file). >0 means the USD cap is blind to real spend here —
+    # the dashboard surfaces a "USD cap inactive" warning; the token cap backstops.
+    unpriced_tokens: int = 0
 
 
 class SpendRollup(BaseModel):

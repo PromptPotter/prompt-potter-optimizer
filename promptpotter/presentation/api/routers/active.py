@@ -25,7 +25,7 @@ from promptpotter.infrastructure.store import (
     cycle_dir_for,
     read_active_pointer,
 )
-from promptpotter.infrastructure.store.base import read_json
+from promptpotter.infrastructure.store.base import read_json, read_json_tolerant
 from promptpotter.presentation.api.deps import (
     IdentityDep,
     JobRegistryDep,
@@ -45,7 +45,7 @@ class ActiveSessionResponse(BaseModel):
 
 
 @active_router.get("/sessions/active", response_model=ActiveSessionResponse, tags=["Sessions"])
-async def get_active_session(store: StoreDep) -> ActiveSessionResponse:
+def get_active_session(store: StoreDep) -> ActiveSessionResponse:
     """Return the caller-tenant's active-session pointer; 404 when none exists.
 
     Pointers are per-tenant on disk; the API never reads another tenant's
@@ -66,7 +66,7 @@ async def get_active_session(store: StoreDep) -> ActiveSessionResponse:
 
 
 @active_router.get("/sessions/active/live-state", tags=["Sessions"])
-async def get_live_state(store: StoreDep) -> dict[str, Any]:
+def get_live_state(store: StoreDep) -> dict[str, Any]:
     """Live state of the caller-tenant's **active** session — the stable
     surface every new web panel / chat state-read codes against.
 
@@ -105,9 +105,9 @@ async def get_live_state(store: StoreDep) -> dict[str, Any]:
     current_spend_cap_usd = read_spend_cap(runtime_dir)
 
     path = cycle_path / "dashboard.json"
-    if path.is_file():
-        state: dict[str, Any] = read_json(path)
-    else:
+    state: dict[str, Any] | None = read_json_tolerant(path) if path.is_file() else None
+    if state is None:
+        # Missing OR corrupt: degrade to the warming placeholder, never 500.
         state = warming_payload(campaign_id, cycle_id)
         state["session_id"] = session_id
     state["is_paused"] = paused
@@ -159,7 +159,7 @@ class CyclesResponse(BaseModel):
 
 
 @active_router.get("/cycles", response_model=CyclesResponse, tags=["Cycles"])
-async def get_cycles(store: StoreDep) -> CyclesResponse:
+def get_cycles(store: StoreDep) -> CyclesResponse:
     """Every cycle on disk for the tenant + active pointer (one round-trip for the picker)."""
     _, active_cmp, active_cid = read_active_pointer(
         store.tenant_id, projects_root=store.projects_root
@@ -218,7 +218,7 @@ async def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> Mac
 
 
 @active_router.get("/optimizer-pipeline", tags=["Optimizer"])
-async def get_optimizer_pipeline() -> dict[str, Any]:
+def get_optimizer_pipeline() -> dict[str, Any]:
     """Bundled ``datasets/_optimizer/pipeline.json`` — nodes + pipelines + ``view`` topology for the webapp workflow."""
     pipeline: dict[str, Any] = read_json(OPTIMIZER_PIPELINE_PATH)
     return pipeline

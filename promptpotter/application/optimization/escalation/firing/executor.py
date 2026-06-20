@@ -400,8 +400,19 @@ async def _run_transition(
         raise StopLoop(StopReason.ABORT)
 
     if result.fork_proposal is not None:
-        _stash_rebase_request(cycle, transition.layer_id, result.fork_proposal, round_num)
-        raise StopLoop(StopReason.REBASED)
+        if int(result.fork_proposal.round_offset) >= 0:
+            # round_offset MUST be negative (a rewind); 0/positive would mint a
+            # phantom fork at the current/future round. The autonomous L2/L3 path
+            # has no schema-level guard (operator `--rewind` does) — reject the
+            # malformed proposal here: log and continue, never fork.
+            logger.warning(
+                "%s fork_proposal ignored: round_offset must be negative, got %d",
+                transition.layer_id,
+                result.fork_proposal.round_offset,
+            )
+        else:
+            _stash_rebase_request(cycle, transition.layer_id, result.fork_proposal, round_num)
+            raise StopLoop(StopReason.REBASED)
 
 
 def _stash_rebase_request(cycle: Cycle, layer_id: str, proposal: Any, round_num: int) -> None:

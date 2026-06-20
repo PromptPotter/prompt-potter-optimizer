@@ -154,6 +154,7 @@ __all__ = [
     "ensure_parent_dir",
     "read_json",
     "read_json_optional",
+    "read_json_tolerant",
     "read_text_optional",
     "validate_path_component",
     "write_json",

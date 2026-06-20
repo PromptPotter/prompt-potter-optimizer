@@ -99,7 +99,7 @@ def _classify_suffix(suffix: str) -> Literal["json", "markdown", "log", "text"] 
     "/campaigns/{campaign_id}/cycles/{cycle_id}/files",
     response_model=FilesResponse,
 )
-async def list_cycle_files(store: StoreDep, campaign_id: str, cycle_id: str) -> FilesResponse:
+def list_cycle_files(store: StoreDep, campaign_id: str, cycle_id: str) -> FilesResponse:
     """Recursive file tree for the cycle dir + campaign-level artifacts."""
     cycle_dir = get_cycle_dir_or_404(campaign_id, cycle_id, store)
     campaign_dir = campaign_root_dir_for(store.base_dir, campaign_id)
@@ -136,7 +136,7 @@ async def list_cycle_files(store: StoreDep, campaign_id: str, cycle_id: str) -> 
     "/campaigns/{campaign_id}/cycles/{cycle_id}/file",
     response_model=FileContentResponse,
 )
-async def get_cycle_file(
+def get_cycle_file(
     store: StoreDep,
     campaign_id: str,
     cycle_id: str,

@@ -162,16 +162,24 @@ export function BackendNodeDetail({ draft, onClose, onPromptApply }: Props) {
   };
   // Auto-follow the operator's selection (a selected candidate → its searchpoint);
   // else the live in-flight candidate while running; else the last completed
-  // searchpoint (historical); else origin.
-  const auto: ObserveState = selCand
-    ? selCand.round >= 1
+  // searchpoint (historical); else origin. A selected candidate in the STILL-LIVE
+  // round has no round file yet (it's written at round close), so its historical
+  // config is unavailable — fall to the live searchpoint, never origin (which would
+  // wrongly show the dataset floor instead of the candidate actually running).
+  const noSelection: ObserveState = avail.live
+    ? "live"
+    : avail.historical
       ? "historical"
-      : "origin"
-    : avail.live
-      ? "live"
+      : "origin";
+  const auto: ObserveState = !selCand
+    ? noSelection
+    : selCand.round < 1
+      ? "origin"
       : avail.historical
         ? "historical"
-        : "origin";
+        : avail.live
+          ? "live"
+          : "origin";
   const state: ObserveState = pref && avail[pref] ? pref : avail[auto] ? auto : "origin";
   const fallbackOrigin: ObserveConfig = {
     promptFields: cv.originPromptFields ?? {},

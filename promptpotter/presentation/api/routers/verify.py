@@ -25,7 +25,7 @@ class DiagnosticRunListResponse(BaseModel):
 
 
 @verify_router.get("/diagnostic-runs", response_model=DiagnosticRunListResponse)
-async def list_diagnostic_runs(
+def list_diagnostic_runs(
     store: StoreDep,
     dataset: str | None = Query(default=None, description="Filter to one dataset."),
 ) -> DiagnosticRunListResponse:

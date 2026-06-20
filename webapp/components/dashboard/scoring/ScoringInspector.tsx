@@ -73,7 +73,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
   return (
     <section className="scoring-inspector" aria-label="Scoring inspector">
       <div className="inspector-head">
-        <span>Scoring · R{selected.round}.{selected.candidate_id}</span>
+        <span>Scoring · {selected.label}</span>
         <button
           type="button"
           className="inspector-close"
@@ -154,7 +154,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
       {steerOpen && (
         <Dialog
           open
-          title={`Steer & fork · R${selected.round}.${selected.candidate_id}`}
+          title={`Steer & fork · ${selected.label}`}
           onClose={() => setSteerOpen(false)}
         >
           <SteerForkPanel

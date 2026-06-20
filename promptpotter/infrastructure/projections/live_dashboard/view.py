@@ -553,6 +553,11 @@ class LiveDashboardView(DerivedView):
         if usd is not None:
             bucket.used_usd = round(bucket.used_usd + usd, 6)
             bucket.rate_known = True
+        elif in_tok or out_tok:
+            # Real tokens billed but no resolvable cost (provider returned no wire
+            # cost AND the model isn't in the rate table) — the USD cap can't see
+            # this spend. Track it so the dashboard flags the cap as inactive.
+            bucket.unpriced_tokens += in_tok + out_tok
         spend.total_used_usd = round(spend.backend.used_usd + spend.loop.used_usd, 6)
         self._schedule_persist()
 

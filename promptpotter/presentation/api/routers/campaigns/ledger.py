@@ -82,7 +82,7 @@ def _record_to_envelope(record: Any, offset: int) -> CycleRecordEnvelope:
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/log_md", response_model=LogMdResponse)
-async def get_campaign_log_md(store: StoreDep, campaign_id: str) -> LogMdResponse:
+def get_campaign_log_md(store: StoreDep, campaign_id: str) -> LogMdResponse:
     """Campaign digest — ``campaigns/{campaign_id}/log.md`` in a typed envelope."""
     campaign_dir = campaign_root_dir_for(store.base_dir, campaign_id)
     text = read_text_or_404(campaign_dir / "log.md", "log.md")
@@ -93,7 +93,7 @@ async def get_campaign_log_md(store: StoreDep, campaign_id: str) -> LogMdRespons
     "/campaigns/{campaign_id}/cycles/{cycle_id}/log_md",
     response_model=LogMdResponse,
 )
-async def get_cycle_log_md(store: StoreDep, campaign_id: str, cycle_id: str) -> LogMdResponse:
+def get_cycle_log_md(store: StoreDep, campaign_id: str, cycle_id: str) -> LogMdResponse:
     """Pre-rendered per-cycle ``log.md`` — markdown source in a typed envelope."""
     cycle_dir = cycle_dir_for(store.base_dir, campaign_id, cycle_id)
     text = read_text_or_404(cycle_dir / "log.md", "log.md")
@@ -101,9 +101,7 @@ async def get_cycle_log_md(store: StoreDep, campaign_id: str, cycle_id: str) -> 
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/hard_samples")
-async def get_cycle_hard_samples(
-    store: StoreDep, campaign_id: str, cycle_id: str
-) -> dict[str, Any]:
+def get_cycle_hard_samples(store: StoreDep, campaign_id: str, cycle_id: str) -> dict[str, Any]:
     """Cycle-scoped hard-sample artifact — ``cycles/{cycle_id}/hard_samples.json``.
 
     The Rasch fit over this cycle's rounds only. Campaign-scoped and
@@ -122,7 +120,7 @@ async def get_cycle_hard_samples(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/ledger",
     response_model=LedgerSliceResponse,
 )
-async def get_cycle_ledger(
+def get_cycle_ledger(
     store: StoreDep,
     campaign_id: str,
     cycle_id: str,
@@ -155,9 +153,7 @@ async def get_cycle_ledger(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/decisions",
     response_model=DecisionsResponse,
 )
-async def get_cycle_decisions(
-    store: StoreDep, campaign_id: str, cycle_id: str
-) -> DecisionsResponse:
+def get_cycle_decisions(store: StoreDep, campaign_id: str, cycle_id: str) -> DecisionsResponse:
     """All ResumeCheckpointRecord records from the cycle's ledger, in append order.
 
     Filtered view over ``GET /ledger`` for the common gating-event use
@@ -186,7 +182,7 @@ async def get_cycle_decisions(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/forks",
     response_model=ForksResponse,
 )
-async def get_cycle_forks(store: StoreDep, campaign_id: str, cycle_id: str) -> ForksResponse:
+def get_cycle_forks(store: StoreDep, campaign_id: str, cycle_id: str) -> ForksResponse:
     """Sibling forks minted from this cycle, derived from FORK_CUT records.
 
     Each fork's metadata comes from a single ``ResumeCheckpointRecord(kind=FORK_CUT)``

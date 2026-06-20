@@ -244,9 +244,17 @@ def lookup_rate(model: str | None) -> tuple[float, float] | None:
     if suffix_matches:
         suffix_matches.sort()
         return rates[suffix_matches[0][1]]
-    for key, rate in rates.items():
-        if key in needle or needle.endswith(key) or key in normalised or normalised.endswith(key):
-            return rate
+    # Last resort: any registered key that's a substring/suffix of the needle.
+    # Prefer the LONGEST (most-specific) match so a short key like "gpt-4" can't
+    # shadow "gpt-4o-mini" — and so the result is independent of dict order.
+    fuzzy = [
+        (len(key), key)
+        for key in rates
+        if key in needle or needle.endswith(key) or key in normalised or normalised.endswith(key)
+    ]
+    if fuzzy:
+        fuzzy.sort()
+        return rates[fuzzy[-1][1]]
     return None
 
 

@@ -175,7 +175,7 @@ _LIFECYCLE_FILTERS = ("active", "archived", "deleted", "all")
 
 
 @campaigns_router.get("/campaigns", response_model=CampaignListResponse)
-async def list_campaigns(
+def list_campaigns(
     store: StoreDep,
     dataset: str | None = Query(default=None, description="Filter to one dataset"),
     lifecycle: str = Query(
@@ -210,7 +210,7 @@ async def list_campaigns(
 
 
 @campaigns_router.get("/campaigns/{campaign_id}", response_model=CampaignDetailResponse)
-async def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
+def get_campaign(store: StoreDep, campaign_id: str) -> CampaignDetailResponse:
     """Campaign manifest detail + its session forest. 404 on cross-user reads."""
     campaign = store.campaigns.load_campaign(campaign_id)
     # Cross-user reads return 404 (not 403) — existence leakage is itself a

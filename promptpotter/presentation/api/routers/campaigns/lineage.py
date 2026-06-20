@@ -419,7 +419,7 @@ def _lineage_mtime(cycle_dirs: list[Path]) -> float | None:
     "/campaigns/{campaign_id}/lineage",
     response_model=CampaignLineageResponse,
 )
-async def get_campaign_lineage(
+def get_campaign_lineage(
     request: Request,
     store: StoreDep,
     campaign_id: str,

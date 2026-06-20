@@ -559,6 +559,14 @@ async def _run_in_background(
 ) -> None:
     """Asyncio task body — drives the run, updates registry on transitions."""
     from promptpotter.application.run_observers import build_run_observers
+    from promptpotter.infrastructure.llm.models import set_cycle_ledger
+
+    # asyncio.create_task copies the CURRENT context, where the dispatcher has the
+    # command ledger bound to _CYCLE_LEDGER. Clear it so any emit before
+    # build_run_observers binds the real cycle ledger no-ops instead of misfiling
+    # onto the command/workspace ledger. No reset — this task's context is its own
+    # and dies with it.
+    set_cycle_ledger(None)
 
     job_registry.mark_started(job_id)
     try:

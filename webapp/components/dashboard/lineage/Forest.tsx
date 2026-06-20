@@ -300,13 +300,12 @@ export function Forest({
             .map((n) => {
               const cycleSelected = n.cycleId === cycleId;
               const layoutEntry = laneByCycle.get(n.cycleId);
-              const rowLabelText = (() => {
-                if (!n.isLastInLane || !layoutEntry) return null;
-                const cyc = layoutEntry.cycle;
-                return cyc.sibling_kind === "root"
-                  ? cyc.dataset_name || cyc.cycle_id
-                  : shortFamilyTail(cyc.cycle_id);
-              })();
+              const cycName = layoutEntry
+                ? layoutEntry.cycle.sibling_kind === "root"
+                  ? layoutEntry.cycle.dataset_name || layoutEntry.cycle.cycle_id
+                  : shortFamilyTail(layoutEntry.cycle.cycle_id)
+                : n.cycleId;
+              const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
               const key = nodeKey(n.cycleId, n.round);
               const isDivergence = divergenceByKey.has(key);
               const isDivergent = divergentKeys.has(key);
@@ -319,7 +318,16 @@ export function Forest({
                     isDivergent && "mask-divergent",
                     isDivergence && "mask-divergence",
                   )}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Expand ${cycName}`}
                   onClick={() => onLaneActivate(n.cycleId)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onLaneActivate(n.cycleId);
+                    }
+                  }}
                   style={{ cursor: "pointer" }}
                 >
                   <circle

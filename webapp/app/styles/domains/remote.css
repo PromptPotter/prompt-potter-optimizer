@@ -57,6 +57,11 @@
    reproducible. Icon + word, never colour alone. */
 .remote-babysat{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:var(--color-background-tertiary,var(--color-background-secondary));color:var(--color-warn);font-weight:600}
 
+/* Unpriced-spend warning — some calls had no resolvable USD cost (e.g. Groq
+   returns no wire cost), so the $ figure undercounts and the USD cap is blind.
+   Icon + word, never colour alone. */
+.remote-spend-warn{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:var(--color-background-tertiary,var(--color-background-secondary));color:var(--color-warn);font-weight:600}
+
 .remote-err{color:var(--color-danger);max-width:200px}
 
 /* On narrow widths drop the button word labels + spend to keep the pill compact. */

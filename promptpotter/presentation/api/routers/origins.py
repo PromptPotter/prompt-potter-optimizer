@@ -186,7 +186,7 @@ def _prepared_origins(store: Stores, campaign_ids: set[str]) -> list[OriginEntry
 
 
 @origins_router.get("", response_model=OriginListResponse)
-async def list_origins(store: StoreDep) -> OriginListResponse:
+def list_origins(store: StoreDep) -> OriginListResponse:
     """Every runnable origin in the caller's tenant — campaign-backed + prepared, newest first.
 
     Tenant-scoped (like the dashboard's ``/cycles``), NOT owner-filtered: a
@@ -220,7 +220,7 @@ def _campaign_for_origin(store: Stores, origin_id: str) -> Campaign | None:
 
 
 @origins_router.post("/{origin_id}/draft")
-async def draft_from_origin(origin_id: str, request: Request, store: StoreDep) -> dict[str, Any]:
+def draft_from_origin(origin_id: str, request: Request, store: StoreDep) -> dict[str, Any]:
     """Open a chosen prior origin as a prefilled :class:`DraftCampaign` — the
     picker's "Reuse an origin" path for a campaign-backed origin.
 

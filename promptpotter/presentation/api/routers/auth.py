@@ -28,7 +28,6 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from promptpotter.application.jobs import JobRegistry
-from promptpotter.application.jobs.quota import effective_spend_cap_usd
 from promptpotter.application.jobs.spend import (
     iter_user_token_usage,
     record_cost_usd,
@@ -362,13 +361,13 @@ _N_BUCKETS = 30
 
 
 @auth_router.get("/quota-status", response_model=QuotaStatus)
-async def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
+def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
     """Live quota snapshot for the Security pane.
 
     Today's spend sums ``TokenUsageRecord`` cost from the canonical ledger since
-    UTC midnight (via ``effective_spend_cap_usd`` when a cap is set, else
-    ``sum_user_spend`` directly); concurrent + daily counts ride the
-    `JobRegistry`.
+    UTC midnight via ``sum_user_spend`` — uncapped, so an over-budget day shows
+    the true overage rather than clamping the display to the cap; concurrent +
+    daily counts ride the `JobRegistry`.
     """
     user = store.users.get_or_create(
         user_id=str(store.identity.user_id),
@@ -383,21 +382,12 @@ async def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
     running = job_registry.list_running(user_id=user.user_id)
     today = job_registry.list_created_today(user_id=user.user_id)
 
-    # The composer subtracts daily-spent from `daily_cap`; reuse it to
-    # avoid duplicating the dashboard-walk logic, then derive used = cap - remaining.
-    if user.spend_budget_usd_daily is not None:
-        remaining = effective_spend_cap_usd(
-            requested_cap_usd=user.spend_budget_usd_daily,
-            user=user,
-            stores=store,
-        )
-        spent = max(0.0, user.spend_budget_usd_daily - float(remaining or 0.0))
-    else:
-        # No daily cap → still surface today's spend from the ledger (same source
-        # the cap path uses via effective_spend_cap_usd → sum_user_spend).
-        spent = sum_user_spend(
-            store=store, since=start_of_utc_day(), until=datetime.now(UTC).timestamp()
-        )
+    # Real spend today straight from the ledger — uncapped on purpose, so an
+    # over-budget day reports the true overage instead of clamping to the cap
+    # (the cap itself rides `spend_budget_usd_daily` below).
+    spent = sum_user_spend(
+        store=store, since=start_of_utc_day(), until=datetime.now(UTC).timestamp()
+    )
 
     return QuotaStatus(
         spend_used_today_usd=round(spent, 6),
@@ -410,7 +400,7 @@ async def quota_status(request: Request, store: StoreDep) -> QuotaStatus:
 
 
 @auth_router.get("/user-settings", response_model=UserSettings)
-async def get_user_settings(store: StoreDep) -> UserSettings:
+def get_user_settings(store: StoreDep) -> UserSettings:
     """Read the current user's preferences (Account → Preferences)."""
     user = store.users.get_or_create(
         user_id=str(store.identity.user_id),
@@ -421,7 +411,7 @@ async def get_user_settings(store: StoreDep) -> UserSettings:
 
 
 @auth_router.patch("/user-settings", response_model=UserSettings)
-async def patch_user_settings(body: UserSettings, store: StoreDep) -> UserSettings:
+def patch_user_settings(body: UserSettings, store: StoreDep) -> UserSettings:
     """Persist a preference change. A user-account mutation (not a campaign
     command), so it rides the auth router alongside session writes rather than
     the ``/commands`` highway."""
@@ -435,7 +425,7 @@ async def patch_user_settings(body: UserSettings, store: StoreDep) -> UserSettin
 
 
 @auth_router.get("/activity", response_model=ActivityResponse)
-async def activity(
+def activity(
     store: StoreDep,
     window: Annotated[str, Query(pattern=r"^(15m|30m|1h|3h|1d|2d|1w|1mo|1y)$")] = "1d",
     group_by: Annotated[str, Query(pattern=r"^(model|api_key)$")] = "model",
