@@ -1,7 +1,10 @@
 /* Chat / New-Job pane — wf-hero pipeline, chat panel, settings card.
    Lifted from vanilla webapp/index.html (chat-content section). */
 .chat-content{padding:0 0 20px;display:flex;flex-direction:column}
-.chat-job-bar{align-self:stretch;padding:6px 20px 8px;border-bottom:1px solid var(--color-border-tertiary)}
+/* The job-bar is nested inside `.wf-hero` as the anchor's header band — negative
+   margins pull it to the hero's outer edge so it reads as one block with the
+   pipeline below it, not a separate strip stacked above. */
+.chat-job-bar{margin:-24px -16px 16px;padding:10px 16px;border-bottom:1px solid var(--color-border-tertiary)}
 /* Wrapping flex row: grid icon + picker, then the content-sized toggle. When
    they can't share a line the toggle wraps below, left-aligned. Chips ride
    normal flow (no absolute centring) so the wrap is plain flex. */
@@ -336,3 +339,41 @@
 /* Coming-soon marker on locked feature rows — muted, not accent, so it reads
    "later" rather than "new" (frontend-surface-contract.md § I3). */
 .soon-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.08em;padding:1px 6px;border-radius:4px;background:var(--color-border-tertiary);color:var(--color-text-tertiary);margin-left:8px;text-transform:uppercase;vertical-align:middle}
+
+/* ── Live segment — the curated activity tail + inline decisions ───────────────
+   The chat's layer over the cycle event stream. Activity rows are compact
+   log-style lines (icon + label + detail), tone is a hint layered on the
+   always-present icon/label (never colour alone). The decision card is the
+   in-thread merge surface (origin gate). */
+.chat-live{display:flex;flex-direction:column;gap:6px}
+.chat-activity{display:flex;align-items:baseline;gap:8px;font-family:var(--font-mono);font-size:12.5px;line-height:1.5;color:var(--color-text-secondary)}
+.chat-activity-icon{flex-shrink:0;width:1.1em;text-align:center;color:var(--color-text-tertiary)}
+.chat-activity-label{color:var(--color-text-primary)}
+.chat-activity-detail{color:var(--color-text-tertiary)}
+.chat-activity.tone-good .chat-activity-icon{color:var(--color-success)}
+.chat-activity.tone-warn .chat-activity-icon{color:var(--color-accent)}
+.chat-activity.tone-bad .chat-activity-icon{color:var(--color-danger)}
+.chat-activity.kind-round{font-family:inherit;font-size:13px}
+.chat-activity.kind-round .chat-activity-label{font-weight:600}
+.chat-activity.kind-warning .chat-activity-label,.chat-activity.kind-error .chat-activity-label{color:var(--color-danger)}
+.chat-activity.kind-merge .chat-activity-label{color:var(--color-accent)}
+.chat-activity.kind-progress{opacity:.85}
+
+/* Inline decision card — the origin-gate HITL surface, folded in from the
+   removed OriginGateModal. Buttons fire existing /commands verbs. */
+.chat-msg.chat-decision{border:1px solid var(--color-accent);box-shadow:0 0 14px var(--color-accent-glow);display:flex;flex-direction:column;gap:10px;max-width:100%;width:100%;align-self:stretch}
+.chat-decision-title{font-weight:600;font-size:14px;color:var(--color-text-primary)}
+.chat-decision-lead{margin:0;font-size:13px;line-height:1.5;color:var(--color-text-secondary)}
+.chat-decision-verdict{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0;font-size:13px}
+.chat-decision-verdict>div{display:contents}
+.chat-decision-verdict dt{color:var(--color-text-secondary)}
+.chat-decision-verdict dd{margin:0;font-family:var(--font-mono);color:var(--color-text-primary)}
+.chat-decision-reasons{margin:0;padding-left:18px;font-size:12px;color:var(--color-text-secondary);line-height:1.5}
+.chat-decision-actions{display:flex;flex-wrap:wrap;gap:8px}
+.chat-decision-btn{padding:7px 14px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--color-border-tertiary);background:var(--color-background-secondary);color:var(--color-text-primary);transition:background .15s,border-color .15s}
+.chat-decision-btn:hover:not(:disabled){border-color:var(--color-accent)}
+.chat-decision-btn:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+.chat-decision-btn:disabled{opacity:.55;cursor:not-allowed}
+.chat-decision-btn.btn-primary{border-color:var(--color-accent);background:var(--color-accent);color:var(--color-text-on-accent,#fff)}
+.chat-decision-btn.btn-danger{border-color:var(--color-danger-border);color:var(--color-danger)}
+.chat-decision-err{margin:0;font-size:12px;color:var(--color-danger)}

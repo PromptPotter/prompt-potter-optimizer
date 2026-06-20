@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DatasetIndexEntry, OriginEntry } from "@/lib/api";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { originReadiness } from "@/lib/origin-readiness";
@@ -63,12 +63,14 @@ function CheckinLoadingWindow({ model }: { model: string }) {
 // The single ingest conversation, driven by `useIngestFlow`. Rendered by BOTH
 // the "New campaign" modal (`variant="modal"`, with the dataset entry list) and
 // the dashboard chat tab (`variant="inline"`, with the first-run illustration).
-// One thread: pick/drop → ask context only if missing → one check-in → Start.
+// One thread: pick/drop → ask context only if missing → one check-in → Start →
+// then the live cycle's curated activity + decisions (`liveSegment`).
 export function IngestConversation({
   flow,
   origins,
   datasets,
   variant,
+  liveSegment,
 }: {
   flow: IngestFlow;
   // Only the modal supplies the entry lists: existing origins to reuse +
@@ -76,6 +78,11 @@ export function IngestConversation({
   origins?: OriginEntry[];
   datasets?: DatasetIndexEntry[];
   variant: "modal" | "inline";
+  // The live tail (curated activity feed + decision buttons) appended into the
+  // thread once a cycle is bound. Present only on the inline chat tab. When set
+  // and showing content it also collapses the welcome illustration — the thread
+  // must never render the placeholder over live activity.
+  liveSegment?: ReactNode;
 }) {
   const { phase, messages } = flow;
   const [dragging, setDragging] = useState(false);
@@ -84,7 +91,10 @@ export function IngestConversation({
   const showEntryList =
     variant === "modal" && phase.stage === "idle" && datasets !== undefined;
   const showIllustration =
-    variant === "inline" && messages.length === 0 && phase.stage === "idle";
+    variant === "inline" &&
+    messages.length === 0 &&
+    phase.stage === "idle" &&
+    !liveSegment;
 
   return (
     <div className={cx("ingest-conversation", `ingest-conversation--${variant}`)}>
@@ -142,6 +152,10 @@ export function IngestConversation({
             ) : null}
           </div>
         ) : null}
+
+        {/* The live cycle's curated activity + inline decisions — the same
+            ordered thread, continued. */}
+        {liveSegment}
       </div>
 
       <div

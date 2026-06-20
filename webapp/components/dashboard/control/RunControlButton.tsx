@@ -57,14 +57,15 @@ export function RunControlButton() {
 
   if (!campaignId || !cycleId) return null;
 
-  // At the origin gate the run is alive but holding for a decision the
-  // OriginGateModal owns — a play/pause toggle would misfire (start-run on a
-  // live cycle → machine_busy). Show a non-actionable status instead.
+  // At the origin gate the run is alive but holding for a decision the chat
+  // thread owns (the inline gate decision card) — a play/pause toggle would
+  // misfire (start-run on a live cycle → machine_busy). Show a non-actionable
+  // status pointing at the chat instead.
   if (runPhase === "gate") {
     return (
       <div className="run-ctl" role="group" aria-label="Run control">
         <span className="run-ctl-pausing" role="status">
-          At origin gate — decide below.
+          At origin gate — decide in the chat.
         </span>
       </div>
     );

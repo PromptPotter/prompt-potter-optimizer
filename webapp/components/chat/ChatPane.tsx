@@ -19,6 +19,9 @@ import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeLi
 import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetControl";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useSelection } from "@/lib/SelectionContext";
+import { useCycleEvents } from "@/lib/chat/useCycleEvents";
+import { deriveDecision } from "@/lib/chat/decision";
+import { LiveSegment } from "@/components/chat/LiveSegment";
 
 interface Props {
   datasetTitle: string | null;
@@ -79,7 +82,7 @@ export function ChatPane({
 }: Props) {
   // Self-sourced live state + identity for the job bar + spend chips.
   const { dash } = useDashboard();
-  const { cycleId, sessionId } = useWorkspace();
+  const { campaignId, cycleId, sessionId } = useWorkspace();
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
   const [samplesOpen, setSamplesOpen] = useState(false);
@@ -88,6 +91,23 @@ export function ChatPane({
   // The dataset-ingest conversation, run inline on the chat tab. Same state
   // machine + view the "New campaign" modal uses (one path, one check-in call).
   const ingest = useIngestFlow({ onMint: (sel) => onMinted(sel) });
+
+  // The chat's curated layer over the cycle event stream (the webapp's first
+  // SSE consumer) + the inline gate-decision merge surface. Both bind to the
+  // viewed (campaign, cycle); the gate decision is raised from `run_phase`.
+  const live = useCycleEvents(campaignId, cycleId);
+  const decision = deriveDecision(dash?.run_phase, dash);
+  const liveSegment =
+    campaignId && cycleId ? (
+      <LiveSegment
+        campaignId={campaignId}
+        cycleId={cycleId}
+        activity={live.activity}
+        progress={live.progress}
+        connected={live.connected}
+        decision={decision}
+      />
+    ) : null;
 
   // Shared connector view (one provider-level fetch + health poll).
   const cv = useConnector();
@@ -155,6 +175,10 @@ export function ChatPane({
 
   return (
     <div className="content chat-content" id="content-chat">
+      {/* One anchor on top of the chat: the pipeline hero, with the job-bar
+          (cycle picker + KPI chips + status/spend dropdown) folded in as its
+          header row — not a separate strip stacked above it. */}
+      <div className="wf-hero">
       {cycleId ? (
       <div className={`chat-job-bar${jobOpen ? " open" : ""}`}>
         <div className="chat-job-head">
@@ -225,7 +249,6 @@ export function ChatPane({
       </div>
       ) : null}
 
-      <div className="wf-hero">
         <TargetPipelineHero samplesOpen={samplesOpen} onToggle={toggleSamples} />
         <PipelineNodeList />
         {showBackendDetail && (
@@ -254,7 +277,7 @@ export function ChatPane({
           <div className="chat-panel-header">
             <div className="chat-panel-title">New Chat</div>
           </div>
-          <IngestConversation flow={ingest} variant="inline" />
+          <IngestConversation flow={ingest} variant="inline" liveSegment={liveSegment} />
         </div>
 
         <div className="chat-settings">

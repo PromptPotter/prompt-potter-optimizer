@@ -34,7 +34,7 @@ state-sync P1–P4 shipped 2026-05-30 (per-cycle `dashboard.json`, `GET /api/v1/
 
 | # | Item | Status |
 |---|---|---|
-| C1 | **Chat-first front door** — replace the inert `ChatPane` with the real thread: copilot + activity stream + decision buttons (existing verbs); query state via `/api/v1/sessions/active/live-state` (∴ after P3) | unblocked — full design [`chat-foundation.md`](chat-foundation.md) |
+| C1 | **Chat-first front door** — one thread: ingest/check-in → curated activity stream → inline decision buttons (existing verbs). | **Arc 1 shipped** (curated activity + SSE consumer + in-thread loop control, origin gate folded in); Arc 2 (conversation endpoint) deferred — [`chat-foundation.md`](chat-foundation.md) |
 | C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § Connectors + L4) |
 | C3 | L4 closure — inner-cycle dispatch + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation (connector registered) | pending (see § Connectors + L4) |
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
@@ -68,7 +68,7 @@ Messy CSVs ingest without hidden defaults or a literal-column requirement: an LL
 - **Struck from the operator surface:** `reasoning_floor/ceiling` (`reasoning_effort` is backend-node-only; floor rides `backend.node_config`) and `model_locked` (= `OptimizationConfig.forbidden_axes_strict`, a developer policy).
 - **CLI fold:** `new <name|file>` dispatches on `Path(arg).is_file()`; the file branch shares `ingest.py::ingest_draft` + `launcher.py::commit_draft_to_dataset`; enabler is `resolve_dataset_config_dir` on `Session.dataset_config_dir`.
 
-### Ingest + chat-first web — partially shipped (Ingest Slice 1 done; ChatPane still inert)
+### Ingest + chat-first web — partially shipped (Ingest Slice 1 done; chat Arc 1 done — activity + control)
 > **Chat-first front door** (thread model, activity-stream translator, copilot decision
 > buttons, campaign-scoped persistence) has its own contract: [`chat-foundation.md`](chat-foundation.md).
 > This note keeps only the ingest / draft-campaign detail.

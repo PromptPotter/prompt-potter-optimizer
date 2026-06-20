@@ -29,11 +29,15 @@ This codebase is **chat-experience-first, and meant to be reused.** The chat cor
 model + activity translator + transport) is structured so another team can keep it and delete
 the PromptPotter-specific panes (§6).
 
-**Status:** spec-only. The `chat` tab is the webapp's default landing tab today
-(`webapp/components/shell/AppShell.tsx`, `useState<Tab>("chat")`), but `ChatPane`
-(`webapp/components/chat/ChatPane.tsx`) is **inert** — a job-bar + pipeline hero + the
-dataset-ingest wizard rendered as a thread, plus a hardcoded illustration and "Soon"
-toggles. This spec replaces the inert shell with a real thread.
+**Status:** **Arc 1 shipped — curated activity + loop control (frontend-only).** The
+`chat` tab (`webapp/components/chat/ChatPane.tsx`) now renders one ordered thread: the
+ingest/check-in segment, then a `LiveSegment` that projects a *curated* slice of the live
+cycle event stream (the webapp's first SSE consumer) and raises inline decision buttons
+that fire existing `/commands/{kind}` verbs. The origin gate moved into this thread (the
+global `OriginGateModal` was deleted), and the standalone job-bar strip folded into the
+pipeline hero (one anchor). **Deferred — Arc 2:** the conversational endpoint (§4a) + the
+genuine assistant tool-use behind the "Soon" toggles (§7). The §0 schema-first gate is
+untouched by Arc 1 (no new command, no new event, no new endpoint).
 
 ## 1. The unified thread model (the imprint)
 
@@ -80,35 +84,48 @@ surfaces never drift.
 State pairs an icon **and** a label (HIT/MISS, running/done) — never color alone — per the
 frontend accessibility invariant.
 
-## 3. Transport — the first SSE consumer in the webapp
+**As shipped (Arc 1), the feed is curated, not the firehose** (`webapp/lib/chat/activity.ts`):
+the high-signal kinds above become items; the per-sample `sample_scored` torrent collapses
+into a single replaced **progress chip**; `sample_order_preview` / `pobb_backfill` /
+`llm_call_progress` heartbeats / `token_usage` map to `null`; `command_ack` surfaces as a small
+"control applied" **merge** item (the visible resolution of the parallel chat ↔ trace streams);
+`command` / `decision` / `stream_snapshot` are non-items. Every `ProjectionKind` maps to an
+item or an explicit `null` — no orphan.
 
-Today the webapp has **no SSE/EventSource client**; all liveness is the 2s `dashboard.json`
-poll (`webapp/lib/poll.tsx`). The chat is the **first SSE consumer**, and the first step of
-the planned *SSE client cutover* (roadmap *Plus-backlog*: "backend `events:subscribe`
-shipped, client still 2s poll").
+## 3. Transport — the first SSE consumer, over a cross-process ledger tail
 
-- **Stream:** subscribe to the shipped SSE channel
-  `GET /campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe`
-  (`promptpotter/presentation/api/routers/campaigns/events.py::stream_cycle_events`; contract
-  in [`m12-events-asyncapi.yaml`](m12-events-asyncapi.yaml)). Honor its contract:
-  leading `stream_snapshot` frame → live tail on strictly-increasing `sequence` → 15s
-  heartbeats → on a sequence gap, re-subscribe.
-- **Session resolution:** the chat resolves the active `(campaign_id, cycle_id)` via the
-  shipped `GET /api/v1/sessions/active/live-state` (roadmap C1's stated dependency, P3) — the
-  hard-ordering rule routes new chat state-queries through `live-state`, not `dashboard.json`.
-- **No torn surfaces:** the activity backfill comes from the `stream_snapshot` frame (which
-  mirrors `dashboard.json`), so the thread shows correct history on (re)subscribe.
+The chat is the webapp's **first SSE consumer** (all other liveness is the 2s `dashboard.json`
+poll, `webapp/lib/poll.tsx`). Critically, the stream is **cross-process**: the endpoint tails
+the cycle's on-disk ledger (`.runtime/ledger.jsonl`) rather than an in-memory fan-out, so the
+chat sees a campaign no matter which process runs it (the API server, the CLI, a spawned
+runner). This was the migration that made the chat work at all — an in-memory stream only
+existed in the runner's process, so a webapp chat against a CLI-launched run was always blank.
+Codepath: `event_stream/tail.py::CycleLedgerTail` → `events.py::stream_cycle_events`.
+
+- **Stream:** subscribe to `GET /campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe`
+  (contract in [`m12-events-asyncapi.yaml`](m12-events-asyncapi.yaml) + the certified
+  [`event-stream.md`](../developer/event-stream.md)): a leading `stream_snapshot` frame →
+  live tail on increasing `sequence` (the ledger line index) → 15s heartbeats. The route 404s
+  **only** for an unknown cycle; a running, paused, or finished cycle all subscribe.
+- **Two-pass paint (efficient, no firehose replay):** the `stream_snapshot` frame (the cycle's
+  `dashboard.json`, read **as-is** — not extended) paints the state-so-far
+  (`snapshotToActivity`); the tail then begins at `snapshot_at_offset` and each live record
+  upserts by stable id (`projectionToActivity`). The ledger is never re-scanned from the top.
+- **Session resolution:** the chat reuses the viewed `(campaign_id, cycle_id)` pair already
+  owned by `useWorkspace()` (`webapp/lib/workspace.tsx`) — no new `live-state` call.
 
 ## 4. The conversational endpoint + button-gated agency
 
 **Two halves are net-new; flag them precisely against the §0 gate.**
 
-### 4a. Conversational endpoint — **new, openapi-first**
-The user ↔ assistant round-trip does not exist (chat input is disabled outside ingest). v1
-adds a chat endpoint that wraps an LLM and answers from campaign context. It uses the
-**per-campaign provider** already in `campaign.json` — no separate model surface. In v1 the
-assistant uses **no new tools** (it answers from context + the live stream); genuine
-web-search / MCP assistant tools are deferred (§7).
+### 4a. Conversational endpoint — **new, openapi-first (deferred to Arc 2)**
+The user ↔ assistant round-trip does not exist (chat input is disabled outside ingest). It
+adds a chat endpoint that wraps an LLM and answers from campaign context — a new optimizer
+node mirroring the `checkin` node, so its **provider/model lives per-node in
+`datasets/_optimizer/pipeline.json`** (resolved inside `run_optimizer_node`/`llm_call`), NOT
+in `campaign.json` (which carries no `optimizer_llm.provider`). The assistant uses **no new
+tools** (it answers from context + the live stream); genuine web-search / MCP assistant
+tools are deferred (§7).
 
 This is a **new HTTP surface** and **must be declared in
 [`m12-api-openapi.yaml`](m12-api-openapi.yaml) first**, in its own PR, before the handler
@@ -195,16 +212,23 @@ endpoint (§4a), declared in `m12-api-openapi.yaml` first.
 
 ## 8. Build order + acceptance
 
-1. **Openapi-first** (separate PR): declare the conversation endpoint in `m12-api-openapi.yaml`.
-2. **Translator** (`ProjectionEnvelope → ActivityItem`), unit-mapped 1:1 against
-   `LiveDisplay` handlers — no orphan `kind`.
-3. **SSE client** in `webapp/`, snapshot-then-tail, gap→re-subscribe; first consumer.
-4. **Thread model** extending `ChatMsg`; replace the inert `ChatPane`.
-5. **Conversation endpoint** handler (per-campaign provider; no new tools).
-6. **Decision buttons** → existing commands, starting with origin-gate + round-1 gate.
-7. **Persistence** extending the check-in thread, campaign-scoped.
+**Arc 1 — curated activity + loop control (shipped, frontend-only):**
+1. **Translator** (`ProjectionEnvelope → ActivityItem`, `lib/chat/activity.ts`), curated 1:1
+   against `LiveDisplay` handlers — every `kind` maps to an item or an explicit `null`.
+2. **SSE client** (`lib/chat/useCycleEvents.ts`), snapshot-then-tail, reconnect; first consumer.
+3. **One thread** — `LiveSegment` appended into `IngestConversation`'s thread; welcome stub
+   collapses, never renders over live activity. Chrome: job-bar folds into the hero (one anchor).
+4. **Decision buttons** → existing commands, the **origin gate** first (`origin-gate-decision`),
+   folded in from the deleted `OriginGateModal`. No new command. Pause/resume/stop stay on the
+   cross-tab RemoteBar pill.
 
-**Acceptance:** every `ProjectionKind` maps to a rendered item or an explicit non-item;
-buttons fire only existing commands; the conversation endpoint is in the openapi before its
-handler; the thread persists with the campaign and survives reload; the chat core has a
+**Arc 2 — conversation (deferred, YAML-first):**
+5. **Openapi-first**: declare the conversation endpoint in `m12-api-openapi.yaml`.
+6. **Conversation endpoint** — a `chat` optimizer node mirroring `checkin` (provider per-node in
+   `datasets/_optimizer/pipeline.json`); no new tools.
+7. **Persistence** extending the check-in thread, campaign-scoped (Arc 1 persists nothing new —
+   activity re-derives from the stream, decisions ride the command ledger).
+
+**Acceptance (Arc 1):** every `ProjectionKind` maps to a rendered item or an explicit non-item;
+buttons fire only existing commands; no new command / event / endpoint; the chat core has a
 documented delete-list; copy passes VOICE (anti-jargon, "the Potter", "node"/"origin").
