@@ -7,14 +7,16 @@ append-only source of truth — so the stream works regardless of which process
 runs the campaign (API server, CLI, spawned runner). On attach it emits one
 ``stream_snapshot`` envelope carrying the cycle's ``dashboard.json`` content +
 ``snapshot_at_offset``; then it polls the ledger file and fans out every newly
-appended record as live tail, interspersing 15 s SSE-comment heartbeats while
-idle.
+appended record as live tail, with a 15 s SSE-comment heartbeat.
 
-Wire shape (closed set): every frame is a
+Wire shape (closed set): every frame's ``data`` is a
 :class:`~promptpotter.domain.projection_envelope.ProjectionEnvelope`
-serialized with ``model_dump_json``. The certified contract — including the
-colon-suffix URL convention, snapshot-then-tail semantics, sequence gaps, and
-proxy-buffering headers — lives in ``docs/developer/event-stream.md``.
+serialized with ``model_dump_json``. ``EventSourceResponse`` (sse-starlette)
+owns the ``data:`` framing, the heartbeat ping, and teardown on both client
+disconnect and server shutdown (it patches uvicorn's ``handle_exit``, so a
+single Ctrl+C finishes graceful shutdown). The certified contract — colon-suffix
+URL, snapshot-then-tail semantics, sequence gaps — lives in
+``docs/developer/event-stream.md``.
 """
 
 from __future__ import annotations
@@ -24,10 +26,8 @@ import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from fastapi import Request
-from fastapi.responses import StreamingResponse
+from sse_starlette import EventSourceResponse
 
-from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.presentation.api.deps import StoreDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -39,66 +39,37 @@ __all__ = ["stream_cycle_events"]
 logger = logging.getLogger(__name__)
 
 
-_SSE_HEARTBEAT_INTERVAL_S = 15.0
 # How often the ledger file is polled for new records. Sub-second so the chat
 # tracks a live run closely; the read is incremental (seek past what's already
 # streamed), so the cost is bounded by new data, not ledger size.
 _SSE_POLL_INTERVAL_S = 0.5
-# Headers that defeat proxy buffering. Critical for nginx/Cloudflare/etc.
-# without these the stream sits in a buffer until 4 KB accumulates.
-_SSE_HEADERS = {
-    "Cache-Control": "no-cache",
-    "X-Accel-Buffering": "no",
-    "Content-Type": "text/event-stream",
-}
 
 
-def _format_frame(envelope: ProjectionEnvelope) -> bytes:
-    """SSE-format a single envelope: ``data: <json>\\n\\n``."""
-    return b"data: " + envelope.model_dump_json().encode("utf-8") + b"\n\n"
+async def _stream(tail: CycleLedgerTail) -> AsyncIterator[str]:
+    """Snapshot envelope, then poll the ledger file for live tail.
 
-
-def _heartbeat_frame() -> bytes:
-    """SSE comment line — proxies treat it as keepalive, clients ignore it."""
-    return b": keepalive\n\n"
-
-
-async def _stream(request: Request, tail: CycleLedgerTail) -> AsyncIterator[bytes]:
-    """Snapshot frame, then poll the ledger file for live tail.
-
-    File reads run via ``asyncio.to_thread`` so the event loop never blocks on
-    disk I/O. Exits cleanly when the client disconnects.
+    Yields each ``ProjectionEnvelope`` as a JSON string; ``EventSourceResponse``
+    adds the ``data:`` frame and handles heartbeat + disconnect/shutdown
+    teardown, so this is purely the snapshot-then-tail loop. File reads run via
+    ``asyncio.to_thread`` so the event loop never blocks on disk I/O.
     """
-    yield _format_frame(await asyncio.to_thread(tail.snapshot_frame))
-
-    idle_s = 0.0
+    yield (await asyncio.to_thread(tail.snapshot_frame)).model_dump_json()
     while True:
-        if await request.is_disconnected():
-            return
-        frames = await asyncio.to_thread(tail.read_new)
-        if frames:
-            idle_s = 0.0
-            for envelope in frames:
-                yield _format_frame(envelope)
-        else:
-            idle_s += _SSE_POLL_INTERVAL_S
-            if idle_s >= _SSE_HEARTBEAT_INTERVAL_S:
-                idle_s = 0.0
-                yield _heartbeat_frame()
+        for envelope in await asyncio.to_thread(tail.read_new):
+            yield envelope.model_dump_json()
         await asyncio.sleep(_SSE_POLL_INTERVAL_S)
 
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe",
-    response_class=StreamingResponse,
+    response_class=EventSourceResponse,
     tags=["Stream"],
 )
 async def stream_cycle_events(
-    request: Request,
     store: StoreDep,
     campaign_id: str,
     cycle_id: str,
-) -> StreamingResponse:
+) -> EventSourceResponse:
     """Subscribe to a cycle's live ledger via SSE.
 
     Returns ``404`` only when the cycle directory does not exist (unknown
@@ -111,7 +82,7 @@ async def stream_cycle_events(
     2. Live tail — every record appended to ``.runtime/ledger.jsonl`` after the
        snapshot is fanned out as a ``ProjectionEnvelope`` with ``kind`` = the
        record's ``record_type`` and ``sequence`` = the record's ledger offset.
-    3. Heartbeat comment line every 15 s while idle.
+    3. Heartbeat comment line every 15 s.
 
     See ``docs/developer/event-stream.md`` for the certified Profile A contract.
     """
@@ -119,8 +90,8 @@ async def stream_cycle_events(
     if not cycle_dir.exists():
         raise NotFoundError(f"Unknown cycle {campaign_id}/{cycle_id}.")
     tail = CycleLedgerTail(cycle_dir, cycle_id)
-    return StreamingResponse(
-        _stream(request, tail),
-        media_type="text/event-stream",
-        headers=_SSE_HEADERS,
-    )
+    # sep="\n": LF line endings (the contract's `data: <json>\n\n`; the default
+    # is CRLF). X-Accel-Buffering: the one proxy-defeating header sse-starlette
+    # does not set itself; Content-Type it sets, Cache-Control the no_store_on_api
+    # middleware forces to no-store regardless.
+    return EventSourceResponse(_stream(tail), sep="\n", headers={"X-Accel-Buffering": "no"})

@@ -12,7 +12,7 @@ GET /api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe
 
 The `:subscribe` suffix follows the AsyncAPI / Google AIP-136 convention for non-CRUD actions. Path resolution is `(campaign_id, cycle_id)`; tenant scope rides `IdentityContext` ambient.
 
-Response: `text/event-stream`. Headers set `Cache-Control: no-cache` and `X-Accel-Buffering: no` to defeat proxy buffering (nginx, Cloudflare, etc. buffer otherwise).
+Response: `text/event-stream` (set by `EventSourceResponse`). The handler adds `X-Accel-Buffering: no` to defeat proxy buffering (nginx, Cloudflare, etc. buffer otherwise); `Cache-Control: no-store` is forced on every `/api/v1/*` response by the `no_store_on_api` middleware.
 
 404 only when the cycle directory doesn't exist (unknown campaign/cycle). The stream tails the on-disk ledger **cross-process**, so a running, paused, or finished cycle all subscribe successfully — a finished cycle replays its snapshot then idles on heartbeats.
 
@@ -46,11 +46,7 @@ The runtime guarantees, in order:
 
 2. **Live tail.** Every subsequent `CycleRecord` appended to the ledger is broadcast as one envelope. `sequence` matches the record's ledger offset; envelopes for `offset > snapshot_at_offset` arrive in append order.
 
-3. **Heartbeat.** When the queue is idle for 15 s, the server emits an SSE comment line:
-   ```
-   : keepalive
-   ```
-   Heartbeats do not advance `sequence`. They exist solely so dumb proxies and clients can tell "no events" from "stream broken."
+3. **Heartbeat.** Every 15 s the server emits an SSE **comment** line (`EventSourceResponse`'s ping — currently `: ping - <timestamp>`). The exact text is not consumed: browsers' `EventSource` and proxies key on its *arrival*, not its content, so they can tell "no events" from "stream broken." Heartbeats do not advance `sequence`.
 
 4. **Idle after teardown.** The stream tails a file, so when the runner finalizes the cycle there's nothing to close — the tail simply stops seeing new lines and the connection idles on heartbeats. The client stays subscribed (and disconnects when the operator navigates away).
 

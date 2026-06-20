@@ -18,7 +18,7 @@ from promptpotter.diagnostics.complexity_ledger import compute_ledger
 # Captured 2026-06-19 after the unification-phase subtractions. Only ever edit a
 # number DOWNWARD (a deletion that earned it) — never up without a feature reason.
 LEDGER_BASELINE = {
-    "modules": 294,
+    "modules": 293,
     "init_files": 55,
     "reexport_shims": 42,
     "config_leaf_fields": 32,

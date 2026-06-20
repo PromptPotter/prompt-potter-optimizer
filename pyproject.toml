@@ -22,6 +22,7 @@ dependencies = [
     "python-multipart>=0.0.27", # why kept: multipart/form-data transport for POST /datasets/ingest tabular-file upload (FastAPI fails at route registration without it). Floor past CVE-2026-24486/40347/42561.
     "scalar-fastapi>=1.0.0",   # why kept: API doc UI on the FastAPI app
     "uvicorn[standard]>=0.27.0",  # why kept: ASGI server for the read-only API
+    "sse-starlette>=2.4.1",    # why kept: EventSourceResponse owns events:subscribe SSE framing + heartbeat + teardown on client-disconnect/server-shutdown (patches uvicorn handle_exit, so one Ctrl+C shuts down clean)
     "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
     "pydantic-settings>=2.1.0",  # why kept: env-driven settings for connectors + LLM
     "openai>=1.10.0",          # why kept: OpenAI-compatible client (Groq, OpenRouter, OpenAI all route through)
