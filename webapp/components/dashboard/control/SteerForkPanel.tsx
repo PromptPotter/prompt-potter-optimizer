@@ -18,11 +18,10 @@ import {
   liveCandidateSearchPoint,
   forkReconcileDefaults,
   limitOverridesFromDefaults,
+  searchPoint,
 } from "@/lib/derivations";
 import type { SelectedCandidate } from "@/lib/types";
-import { PromptFieldsEditor } from "./PromptFieldsEditor";
-import { NodeConfigEditor } from "./NodeConfigEditor";
-import { NodeOutputSchemaView } from "./NodeOutputSchemaView";
+import { NodeSurface } from "@/components/dashboard/pipeline/NodeSurface";
 import { LimitReconcile } from "./LimitReconcile";
 
 // The one operator-steered fork flow (decision H): the operator has selected a
@@ -129,23 +128,21 @@ export function SteerForkPanel({
         </p>
       )}
 
-      <PromptFieldsEditor
-        value={seedPrompt}
+      <NodeSurface
+        node={null}
+        point={searchPoint(seedPrompt, overlay)}
+        configSeed={overlay}
+        schema={cv.nodeConfigSchema}
+        outputSchema={cv.nodeOutputSchema}
+        mode="values"
+        flat
         onApply={(p) => {
           editedPrompt.current = p.origin_prompt_fields ?? {};
         }}
-        flat
-      />
-
-      <NodeConfigEditor
-        schema={cv.nodeConfigSchema}
-        seedOverlay={overlay}
-        onChange={(o) => {
+        onConfigChange={(o) => {
           editedOverlay.current = o;
         }}
       />
-
-      <NodeOutputSchemaView schema={cv.nodeOutputSchema} />
 
       <LimitReconcile onChange={(l) => (limits.current = l)} />
 

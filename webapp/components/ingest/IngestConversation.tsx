@@ -262,8 +262,8 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
 
       {/* Per node: the optimizer search-space controls (lock/allow + origin
           value) and, for the LLM node, the starting prompt — all inside that
-          node's surface (config → prompt → output), editable. The old
-          single-node AllowedValuesEditor folded into NodeLockEditor here. */}
+          node's surface (config → prompt → output), editable — the one
+          NodeSurface every node-detail surface renders. */}
       <PipelineSetupSection draft={draft} onApply={flow.applyPatch} />
 
       <details className="new-campaign-optional ingest-advanced">

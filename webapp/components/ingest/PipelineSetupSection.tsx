@@ -7,8 +7,8 @@ import { targetNodeIds } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 import { PipelineNodeList } from "@/components/dashboard/pipeline/PipelineNodeList";
 import { BackendNodeDetail } from "@/components/dashboard/pipeline/BackendNodeDetail";
-import { PromptFieldsEditor } from "@/components/dashboard/control/PromptFieldsEditor";
-import { NodeLockEditor } from "@/components/dashboard/control/NodeLockEditor";
+import { NodeSurface } from "@/components/dashboard/pipeline/NodeSurface";
+import { searchPoint } from "@/lib/derivations";
 
 // The pipeline block in "Set up campaign" — the SAME rendering the Chat tab uses
 // (inline node list + per-node `NodeSurface`), plus a two-mode toggle. Reuses the
@@ -65,7 +65,8 @@ function PipelineSetupInner({
   // Open the LLM node by default once the view loads — the prompt is the central
   // setup edit, and it lives inside that node's surface (config → prompt →
   // output). One-shot per mount; if the operator closes it, it stays closed.
-  const llmNodeId = nodes.find((n) => n.kind === "llm")?.id ?? null;
+  const llmNode = nodes.find((n) => n.kind === "llm") ?? null;
+  const llmNodeId = llmNode?.id ?? null;
   const autoOpened = useRef(false);
   useEffect(() => {
     if (!autoOpened.current && !isLlmOnly && selected == null && llmNodeId) {
@@ -106,16 +107,23 @@ function PipelineSetupInner({
             Single LLM node — the model answers each query directly from the prompt; no
             retrieval, web search, or matching.
           </p>
-          {llmNodeId && (cv.nodeConfigSchema?.[llmNodeId]?.length ?? 0) > 0 ? (
-            <NodeLockEditor
-              node={llmNodeId}
-              params={cv.nodeConfigSchema![llmNodeId]}
-              overlayBase={(draft.pipeline_overlay ?? {}) as Record<string, unknown>}
+          {/* Config + prompt + output as one unit — the search-space surface can't
+              render the prompt without its optimizer config (the drift this fixes). */}
+          {llmNode ? (
+            <NodeSurface
+              node={llmNode}
+              point={searchPoint(draft.origin_prompt_fields, draft.pipeline_overlay)}
+              configSeed={(draft.pipeline_overlay ?? {}) as Record<string, unknown>}
+              schema={cv.nodeConfigSchema}
+              outputSchema={cv.nodeOutputSchema}
+              mode="search-space"
               lockModel={draft.optimization_overrides.lock_model}
+              flat
               onApply={onApply}
             />
-          ) : null}
-          <PromptFieldsEditor value={draft.origin_prompt_fields} onApply={onApply} flat />
+          ) : (
+            <small className="config-hint">Loading node…</small>
+          )}
         </>
       ) : (
         <>

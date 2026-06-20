@@ -25,7 +25,7 @@ export function PipelineNodeList() {
         // a served config schema and no param in it is tunable (a paramless node
         // like cache_lookup is `[].every` → locked too). web_search /
         // entity_profiling keep tunable params → open. Mirror the lock the
-        // NodeLockEditor shows inside, on the collapsed toggle. Null schema
+        // search-space config editor shows inside, on the collapsed toggle. Null schema
         // (demo / not-yet-loaded) → no badge, not a false "open".
         const params = schema?.[n.id];
         const locked = params != null && params.every((p) => !p.optimizer_tunable);

@@ -92,6 +92,10 @@
 .config-editor{display:flex;flex-direction:column;gap:8px}
 .config-row{display:flex;align-items:center;gap:10px;font-size:12px;flex-wrap:wrap}
 .config-label{flex-shrink:0;width:64px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.04em;font-size:11px}
+/* values-mode key badges: ·evolved = carried from this searchpoint; optimizer-locked
+   = the optimizer can't permute it (model/provider) but the operator may set it. */
+.config-evolved{font-size:10px;color:var(--color-accent);text-transform:none;letter-spacing:0;margin-left:4px}
+.config-optlocked{font-size:9px;letter-spacing:0.02em;text-transform:uppercase;color:var(--color-text-tertiary);border:0.5px solid var(--color-border-tertiary,var(--color-border));border-radius:6px;padding:0 4px;margin-left:4px}
 .config-value{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 .config-model{flex:1;min-width:0}
 .config-lock{font-size:11px;font-weight:600;padding:2px 9px;border-radius:9px;border:0.5px solid var(--color-border-tertiary);background:transparent;color:var(--color-text-secondary);cursor:pointer}

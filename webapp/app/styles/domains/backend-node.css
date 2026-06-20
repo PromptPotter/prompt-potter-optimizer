@@ -68,8 +68,8 @@
 .pipeline-node-list small {
   color: var(--color-text-tertiary);
 }
-/* Lock glyph on a collapsed node toggle — mirrors the NodeLockEditor lock state
-   shown when the node is expanded. Small, leading the label. */
+/* Lock glyph on a collapsed node toggle — mirrors the search-space config editor
+   lock state shown when the node is expanded. Small, leading the label. */
 .pipeline-node-list .pnl-lock {
   font-size: 10px;
   line-height: 1;
