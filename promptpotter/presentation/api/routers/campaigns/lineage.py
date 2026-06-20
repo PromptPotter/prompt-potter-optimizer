@@ -204,54 +204,26 @@ def _summary_candidates(
     ]
 
 
-def _inflight_candidates(
-    l1_score: dict[str, Any], criterion: RoundScorer | None
-) -> list[CampaignLineageCandidate]:
-    """Map the in-flight ``current_round.nodes.l1_score.output.candidates`` to
-    pending lineage candidates. candidate_id + winner are assigned at round close,
-    so mid-round they render as pending nodes (empty id ⇒ the webapp derives a live
-    id from position); accuracy + lens value fill in live as each candidate is scored."""
-    out_block = l1_score.get("output")
-    cands = out_block.get("candidates") if isinstance(out_block, dict) else None
-    out: list[CampaignLineageCandidate] = []
-    for pos, c in enumerate(cands or [], start=1):
-        if not isinstance(c, dict):
-            continue
-        raw_stats = c.get("stats")
-        stats = raw_stats if isinstance(raw_stats, dict) else {}
-        out.append(
-            _to_lineage_candidate(
-                pos=pos,
-                candidate_id="",
-                label=str(c.get("label") or ""),
-                accuracy=stats.get("accuracy"),
-                is_winner=False,
-                evaluators=stats.get("evaluators"),
-                criterion=criterion,
-            )
-        )
-    return out
-
-
 def _rounds_from_dashboard(
     cycle_dir: Path, criterion: RoundScorer | None
 ) -> list[CampaignLineageRound]:
-    """Every round for a cycle from its live ``dashboard.json`` — the single
-    round-state projection (``LiveDashboardView``).
+    """The SETTLED rounds for a cycle from its live ``dashboard.json`` — the
+    single round-state projection (``LiveDashboardView``).
 
-    Completed rounds ride ``rounds[]`` (the full per-candidate scoreboard);
-    the in-flight round rides ``current_round`` and is appended as a pending
-    round the instant the first candidate is seeded — so the tree shows a round
-    *in progress*, not only completed ones. Round progress has ONE owner: no
-    read of ``index.json::rounds`` or the audit scoreboard here. (Topology —
-    parent / fork / sibling_kind — still rides ``index.json`` in the caller;
-    that's write-once identity, not updating state.)
+    Completed rounds ride ``rounds[]`` (the full per-candidate scoreboard). The
+    in-flight ``current_round`` is deliberately NOT appended here: the active
+    cycle's in-flight round has ONE owner — the webapp reads it live from the
+    same ``dashboard.json`` the fitness bars use (``roundCandidates``) and
+    overlays it onto the active lane. Duplicating it server-side was a second
+    mechanism for the same data (the phantom-0% source). Round progress reads no
+    ``index.json::rounds`` or audit scoreboard here. (Topology — parent / fork /
+    sibling_kind — still rides ``index.json`` in the caller; write-once identity,
+    not updating state.)
     """
     dash = read_json_optional(cycle_dir / "dashboard.json")
     if not isinstance(dash, dict):
         return []
     out: list[CampaignLineageRound] = []
-    completed: set[int] = set()
     rounds_raw = dash.get("rounds")
     if isinstance(rounds_raw, list):
         for r in rounds_raw:
@@ -260,7 +232,6 @@ def _rounds_from_dashboard(
             rn = r.get("round")
             if not isinstance(rn, int):
                 continue
-            completed.add(rn)
             _rc = r.get("candidates")
             raw_cands: list[Any] = _rc if isinstance(_rc, list) else []
             winner = next(
@@ -275,17 +246,6 @@ def _rounds_from_dashboard(
                     candidates=_summary_candidates(raw_cands, criterion),
                 )
             )
-    cur = dash.get("current_round")
-    if isinstance(cur, dict):
-        crn = cur.get("round")
-        nodes = cur.get("nodes")
-        l1_score = nodes.get("l1_score") if isinstance(nodes, dict) else None
-        if isinstance(crn, int) and crn not in completed and isinstance(l1_score, dict):
-            inflight = _inflight_candidates(l1_score, criterion)
-            if inflight:
-                out.append(
-                    CampaignLineageRound(round=crn, label="", accuracy=None, candidates=inflight)
-                )
     out.sort(key=lambda r: r.round)
     return out
 

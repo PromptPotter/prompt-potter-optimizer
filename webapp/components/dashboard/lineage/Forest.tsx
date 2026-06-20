@@ -29,6 +29,7 @@ import {
 // selection. Memo'd so unrelated lane toggles don't re-render every node.
 const CandidateNode = memo(function CandidateNode({
   n,
+  accuracy,
   selected,
   onPick,
   dimmed,
@@ -36,6 +37,10 @@ const CandidateNode = memo(function CandidateNode({
   divergence,
 }: {
   n: RoundNodePos;
+  // The live fitness value painted on this node (the `valueByKey` overlay) —
+  // separate from geometry so a value tick re-renders only this text, not the
+  // memoized layout.
+  accuracy: number | null;
   selected: boolean;
   onPick: (n: RoundNodePos) => void;
   // Mask overlay (served): `dimmed` = in the counterfactual subtree past a
@@ -58,7 +63,7 @@ const CandidateNode = memo(function CandidateNode({
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, accuracy ${fmtPct0(n.accuracy)}${n.isWinner ? ", round winner" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, accuracy ${fmtPct0(accuracy)}${n.isWinner ? ", round winner" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       onClick={() => onPick(n)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -82,7 +87,7 @@ const CandidateNode = memo(function CandidateNode({
         y={n.y + 3}
         className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
       >
-        {n.candidateLabel} {fmtPct0(n.accuracy)}
+        {n.candidateLabel} {fmtPct0(accuracy)}
       </text>
       {/* Invisible click target: the candidate's own slot — its stub plus the one
           column-width its label occupies before the next round's node. */}
@@ -99,6 +104,7 @@ export function Forest({
   campaignId,
   cycleId,
   detailByCycle,
+  valueByKey,
   expanded,
   onLaneActivate,
   onSelectCycle,
@@ -108,6 +114,9 @@ export function Forest({
   campaignId: string;
   cycleId: string | null;
   detailByCycle: DetailByCycle;
+  // Live per-candidate fitness, keyed `{cycleId}::{candidateId}` — painted onto
+  // nodes outside the geometry memo so a value tick costs only a text re-render.
+  valueByKey: ReadonlyMap<string, number | null>;
   expanded: ReadonlySet<string>;
   // A lane clicked away from a searchpoint node — toggles that cycle's lane
   // between its expanded candidate cladogram and the compact summary row, in
@@ -126,6 +135,11 @@ export function Forest({
   // subtree. Both empty when no lens is active. Rendered, never recomputed (R-36).
   const { divergenceByKey, divergentKeys } = useLineageOverlay();
   const nodeKey = (cid: string, round: number): string => `${cid}::r${round}`;
+  // The live fitness painted on a node — the `valueByKey` overlay, looked up by
+  // the same candidate identity the bars use. Outside the layout memo, so it
+  // updates each poll without re-flowing the tree.
+  const valOf = (n: RoundNodePos): number | null =>
+    valueByKey.get(`${n.cycleId}::${n.candidateId}`) ?? null;
   // Layout is pure + the inputs are content-stabilized upstream, so this memo
   // re-runs only on a real shape change (new round / candidate / winner flip /
   // lane toggle), never on a bare 2 s poll.
@@ -166,7 +180,7 @@ export function Forest({
             round: n.round,
             candidate_id: n.candidateId,
             label: n.candidateLabel,
-            accuracy: n.accuracy,
+            accuracy: valOf(n),
             is_winner: n.isWinner,
           },
     );
@@ -328,7 +342,7 @@ export function Forest({
                     className="family-cladogram-roundlabel"
                     textAnchor="middle"
                   >
-                    R{n.round} {fmtPct0(n.accuracy)}
+                    R{n.round} {fmtPct0(valOf(n))}
                   </text>
                   {rowLabelText && (
                     <text x={n.x + 8} y={n.y + 3} className="family-cladogram-cyclelabel">
@@ -340,7 +354,7 @@ export function Forest({
                     </text>
                   )}
                   <title>
-                    {n.cycleId} · R{n.round} · {fmtPct0(n.accuracy)}
+                    {n.cycleId} · R{n.round} · {fmtPct0(valOf(n))}
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
                     {isDivergence ? "\ndivergence under the scoring lens" : ""}
                     {isDivergent ? "\ncounterfactual under the scoring lens" : ""}
@@ -358,6 +372,7 @@ export function Forest({
                 <CandidateNode
                   key={`c-${n.cycleId}-${n.round}-${n.candidateId}`}
                   n={n}
+                  accuracy={valOf(n)}
                   selected={
                     n.cycleId === cycleId &&
                     candidate != null &&

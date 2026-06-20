@@ -23,6 +23,7 @@ export const FamilyTree = memo(function FamilyTree() {
   const {
     forests,
     detailByCycle,
+    valueByKey,
     expanded,
     onLaneActivate,
     naturalWidth,
@@ -127,6 +128,7 @@ export const FamilyTree = memo(function FamilyTree() {
                 campaignId={campaignId ?? ""}
                 cycleId={cycleId}
                 detailByCycle={detailByCycle}
+                valueByKey={valueByKey}
                 expanded={expanded}
                 onLaneActivate={onLaneActivate}
                 onSelectCycle={onSelectCycle}

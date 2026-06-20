@@ -18,10 +18,13 @@ import { useCallback, useMemo, useState } from "react";
 import { postCleanupEmpty } from "@/lib/api";
 import type { CampaignLineageCycle } from "@/lib/api";
 import { candidateLabel, liveCandidateId } from "@/lib/candidate-label";
+import { displayFitness, groupByRound, roundCandidates } from "@/lib/derivations";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import { rootCycleId, sessionIndexOf } from "@/lib/ids";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useLineageOverlay } from "@/lib/lineage-overlay";
 import { useStableContent } from "@/lib/stable";
+import type { CandidateRow } from "@/lib/types";
 import {
   COL_W,
   LEFT_PAD,
@@ -34,9 +37,9 @@ import {
   type DetailByCycle,
 } from "./layout";
 
-// Lineage snapshot → normalized detail. Candidates already arrive sorted by
-// rank; the display index drives the short "C{r}.{n}" label so it matches the
-// live (dashboard.json) labels for the active cycle.
+// Lineage snapshot → normalized STRUCTURE (no fitness value — that's the live
+// `valueByKey` overlay). Candidates already arrive sorted by rank; the display
+// index drives the short "C{r}.{n}" label so it matches the live labels.
 function detailFromLineage(c: CampaignLineageCycle): CycleDetail {
   return {
     rounds: c.rounds.map((r) => ({
@@ -44,10 +47,28 @@ function detailFromLineage(c: CampaignLineageCycle): CycleDetail {
       candidates: r.candidates.map((cand, i) => ({
         candidateId: cand.candidate_id || liveCandidateId(r.round, i),
         label: candidateLabel(r.round, i),
-        accuracy: cand.accuracy,
         isWinner: cand.is_winner,
       })),
     })),
+  };
+}
+
+// Live dashboard rows → the SAME normalized structure, for the in-view active
+// cycle. Sourced from `roundCandidates(dash)` (the fitness bars' source) so the
+// active cycle's tree includes the in-flight round and can't disagree with the
+// bars. Structure only — value rides `valueByKey`.
+function detailFromRows(rows: CandidateRow[]): CycleDetail {
+  return {
+    rounds: [...groupByRound(rows).entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([round, cands]) => ({
+        round,
+        candidates: cands.map((c) => ({
+          candidateId: c.candidate_id,
+          label: c.label,
+          isWinner: c.is_winner,
+        })),
+      })),
   };
 }
 
@@ -69,6 +90,12 @@ export interface Lineage {
   // One cladogram per session root, each with its own fork tree.
   forests: { rootId: string; tree: CycleNode }[];
   detailByCycle: DetailByCycle;
+  // Per-candidate fitness, keyed `{cycleId}::{candidateId}` — the live value
+  // overlay painted onto nodes. NOT part of the geometry (so a value tick never
+  // re-lays-out the tree). Active cycle's values come from the live dashboard
+  // (displayFitness = composite ?? accuracy, parity with the bars); other cycles
+  // from the settled /lineage. `undefined` for a node with no value yet.
+  valueByKey: ReadonlyMap<string, number | null>;
   expanded: ReadonlySet<string>;
   // In-place expand/collapse toggle for one cycle's lane (pure view state —
   // never changes the dashboard's selected cycle).
@@ -97,6 +124,18 @@ export function useLineage({
   // NOT re-exposed here — `FamilyTree` and `Forest` read them straight from
   // `useLineageOverlay()`, so this hook owns only the tree/expand/cleanup state.
   const { data } = useLineageOverlay();
+  // The in-view cycle's live dashboard — the same source the fitness bars read,
+  // so the active cycle's lineage detail (structure + values) can't disagree
+  // with them. Available here: this card renders under CycleStreamProvider.
+  const { dash } = useDashboard();
+
+  // The active (in-view) cycle's live candidate rows from dashboard.json —
+  // includes the in-flight round. Computed once and shared by the structure
+  // build and the value overlay below.
+  const liveRows = useMemo<CandidateRow[]>(
+    () => (cycleId && dash ? roundCandidates(dash) : []),
+    [cycleId, dash],
+  );
 
   // Independent per-cycle expand state — one unified tree where every cycle
   // opens its intra-cycle candidate cladogram in place, any number at once.
@@ -136,17 +175,47 @@ export function useLineage({
     return roots;
   }, [data]);
 
-  // Normalized per-cycle detail — purely the served lineage snapshot (closed
-  // rounds, origin C0 included), one source for every cycle. Content-stabilized
-  // so Forest's layout memo only recomputes on a real shape change.
+  // Normalized per-cycle STRUCTURE — source-by-cycle-role: the in-view active
+  // cycle from the live dashboard (so its in-flight round shows and tracks the
+  // bars), every other cycle from the settled /lineage. No fitness value here
+  // (that's `valueByKey`), and content-stabilized — so Forest's layout memo
+  // recomputes only on a real shape change (new candidate / round / winner flip
+  // / expand), never on a per-sample value tick.
   const detailEntries = useStableContent(
     useMemo(() => {
       const map = new Map<string, CycleDetail>();
-      for (const c of data?.cycles ?? []) map.set(c.cycle_id, detailFromLineage(c));
+      for (const c of data?.cycles ?? []) {
+        map.set(
+          c.cycle_id,
+          c.cycle_id === cycleId && dash ? detailFromRows(liveRows) : detailFromLineage(c),
+        );
+      }
       return [...map.entries()];
-    }, [data]),
+    }, [data, cycleId, dash, liveRows]),
   );
   const detailByCycle: DetailByCycle = useMemo(() => new Map(detailEntries), [detailEntries]);
+
+  // Per-candidate value overlay, keyed `{cycleId}::{candidateId}`. Settled values
+  // for every cycle from /lineage, then the active cycle OVERRIDDEN with the live
+  // bars' source (displayFitness). Deliberately NOT content-stabilized: it updates
+  // every poll, but only the painted node text consumes it — the geometry doesn't.
+  const valueByKey = useMemo<ReadonlyMap<string, number | null>>(() => {
+    const m = new Map<string, number | null>();
+    for (const c of data?.cycles ?? []) {
+      for (const r of c.rounds) {
+        r.candidates.forEach((cand, i) => {
+          const id = cand.candidate_id || liveCandidateId(r.round, i);
+          m.set(`${c.cycle_id}::${id}`, cand.accuracy);
+        });
+      }
+    }
+    if (cycleId && dash) {
+      for (const row of liveRows) {
+        m.set(`${cycleId}::${row.candidate_id}`, displayFitness(row.composite, row.accuracy));
+      }
+    }
+    return m;
+  }, [data, cycleId, dash, liveRows]);
 
   // One cladogram per session — every session root renders, including a lone
   // root with no forks (its single lane carries the intra-cycle view).
@@ -228,6 +297,7 @@ export function useLineage({
   return {
     forests,
     detailByCycle,
+    valueByKey,
     expanded,
     onLaneActivate,
     naturalWidth,

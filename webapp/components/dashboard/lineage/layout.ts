@@ -44,14 +44,16 @@ export const TRIGGER_GLYPH: Record<string, string> = {
   operator_steered: "✎",
 };
 
-// Normalized per-cycle detail the geometry consumes. Built by FamilyTree from
-// the lineage snapshot for every cycle, then OVERRIDDEN for the in-view active
-// cycle with live dashboard.json candidates (source-by-cycle-role — never a
-// per-field merge of the two). Labels are already short ("C1.2") here.
+// Normalized per-cycle detail the geometry consumes. Built by `useLineage`:
+// structure (rounds + candidate id/label/winner) only — NO fitness value. The
+// in-view active cycle's structure is sourced from the live dashboard.json
+// (`roundCandidates`), every other cycle from the settled `/lineage`
+// (source-by-cycle-role — never a per-field merge). The fitness number is a
+// separate live `valueByKey` overlay painted at render, so a per-sample value
+// tick never re-runs the layout memo. Labels are already short ("C1.2") here.
 export interface LaneCandidate {
   candidateId: string;
   label: string;
-  accuracy: number | null;
   isWinner: boolean;
 }
 export interface LaneRound {
@@ -203,7 +205,6 @@ export interface RoundNodePos {
   col: number;
   x: number;
   y: number;
-  accuracy: number | null;
   // Short candidate label ("C1.2") for expanded nodes; "" for collapsed summary
   // nodes (Forest draws "R{n}" for those).
   candidateLabel: string;
@@ -266,7 +267,6 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
           col: offset + r.round,
           x: colX(r.round),
           y,
-          accuracy: winner?.accuracy ?? null,
           candidateLabel: winner?.label ?? "",
           candidateId: winner?.candidateId ?? "",
           isWinner: true,
@@ -308,7 +308,6 @@ export function placeNodes(layouts: Map<string, LaneLayout>): {
           col: offset + r.round,
           x,
           y,
-          accuracy: cand.accuracy,
           candidateLabel: cand.label,
           candidateId: cand.candidateId,
           isWinner: cand.isWinner,
