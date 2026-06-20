@@ -91,6 +91,13 @@ class RoundBuffer:
         # Tokens may live on result or pd; prefer result, preserve 0 vs None.
         in_tok = result.get("input_tokens")
         out_tok = result.get("output_tokens")
+        # The scorer rides the candidate's running fitness (composite/accuracy/
+        # hits/total over samples-so-far) out on the sample. Store it on the slot
+        # so the live l1_score block serves a moving fitness before the final
+        # ``scores`` land (folder-UI parity for no-browser readers).
+        running = result.get("_running")
+        if isinstance(running, dict):
+            self.slot(ci, ct)["running"] = running
         self.slot(ci, ct)["samples"].append(
             {
                 "qi": qi,

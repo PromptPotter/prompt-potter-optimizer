@@ -15,20 +15,14 @@ CONCEPT MAP (one view per module):
   flushing ``.runtime/cache/rounds/round_NNNN.json`` (the only buffering view).
 * :class:`PoBBStreamView` (:mod:`.pobb_stream`) — appends per-sample P(best)
   updates to ``.runtime/streams/round_NNNN_p_best.jsonl``.
-* :class:`EventStreamView` (:mod:`.event_stream`) — SSE outbound highway;
-  broadcasts ``ProjectionEnvelope`` frames to N HTTP subscribers
-  (:class:`EventStreamSubscriber`). Looked up via the process-wide registry
-  (``register_event_stream`` / ``get_event_stream`` / ``deregister_event_stream``).
+
+The outbound SSE stream is NOT a ledger subscriber — it tails the on-disk
+``.runtime/ledger.jsonl`` cross-process via
+:class:`event_stream.CycleLedgerTail <.event_stream>`, so the writer side here
+just appends to the ledger like everything else; no in-process fan-out.
 """
 
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
-from promptpotter.infrastructure.projections.event_stream import (
-    EventStreamSubscriber,
-    EventStreamView,
-    deregister_event_stream,
-    get_event_stream,
-    register_event_stream,
-)
 from promptpotter.infrastructure.projections.live_dashboard import LiveDashboardView
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
@@ -41,16 +35,11 @@ from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamView
 
 __all__ = [
     "AuditTrailView",
-    "EventStreamSubscriber",
-    "EventStreamView",
     "LiveDashboardView",
     "LiveStateCore",
     "PoBBStreamView",
     "apply_p_best_update",
     "apply_phase",
-    "deregister_event_stream",
-    "get_event_stream",
-    "register_event_stream",
     "roll_p_best_at_round_complete",
     "top_n_p_best",
 ]

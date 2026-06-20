@@ -248,6 +248,20 @@ async def score_search_point(
         )
         _save_run(results, scores)
 
+    def _running_scores(results: list[QueryMeasurement]) -> dict[str, Any]:
+        """The in-flight candidate's fitness over results-so-far — the SAME shape
+        and inputs as the final ``scores`` below, recomputed per sample. It rides
+        out on the sample snapshot so ``dashboard.json`` carries a live composite
+        that converges to the final one: a file-tree reader (no browser) sees the
+        candidate's fitness move in real time, not sit at 0 until it completes."""
+        return compute_composite_fitness(
+            results,
+            pipeline_schema,
+            opt_sp=opt_sp,
+            round_scorer=session.scoring.round_scorer,
+            l1_diversity=l1_diversity,
+        )
+
     # Pre-register Samples so the SampleIndex carries primitives for any
     # query that lands. ``Sample.run_ids`` accumulates later, when
     # ``AxisIndex.refresh`` ingests this run from the archive.
@@ -267,6 +281,7 @@ async def score_search_point(
         n_total_candidates=n_total_candidates,
         axes=axes,
         persist_fresh=_persist_fresh,
+        running_scores=_running_scores,
         next_sample=next_sample,
         on_sample_pre_check=on_sample_pre_check,
     )

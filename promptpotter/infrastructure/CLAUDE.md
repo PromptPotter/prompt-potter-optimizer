@@ -30,7 +30,16 @@ follow the same pattern.
 | `LiveDashboardView` | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
 | `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundFile`) only when an operator drills into a specific round. |
 | `PoBBStreamView` | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
-| `EventStreamView` | per cycle | SSE frames over `GET /campaigns/{c}/cycles/{cy}/events:subscribe` | **Profile A outbound highway** — sole writer of `ProjectionEnvelope` frames (security box 4). Per-cycle ledger subscriber; broadcasts to N HTTP subscribers via per-subscriber asyncio queues bridged from the ledger thread via `loop.call_soon_threadsafe`. Snapshot-then-tail + 15 s heartbeat + sequence-gap detection. Certified contract: [`docs/developer/event-stream.md`](../../docs/developer/event-stream.md). Lookup via process-wide registry (`event_stream/registry.py`); `register_event_stream` at `build_run_observers`, `deregister_event_stream` at `drain_all`. |
+
+The **Profile A outbound SSE highway is NOT a projection/subscriber** — it is
+served by *tailing* the on-disk ledger (`event_stream/tail.py::CycleLedgerTail`)
+over `GET /campaigns/{c}/cycles/{cy}/events:subscribe`, **cross-process**: any
+reader (the API server, the CLI, a future MCP client) tails the cycle's
+`.runtime/ledger.jsonl` directly, so the stream no longer depends on the run
+living in the reader's own process. Snapshot-then-tail (leading `stream_snapshot`
+from `dashboard.json`, read as-is) + 15 s heartbeat; the ledger line index is the
+`ProjectionEnvelope.sequence`. The route 404s only for an unknown cycle. Certified
+contract: [`docs/developer/event-stream.md`](../../docs/developer/event-stream.md).
 
 `LiveDashboardView` writes into the **cycle's own dir**
 (`cycles/{cycle_id}/dashboard.json`) — every cycle (root, fork, sweep, diag)
@@ -38,8 +47,8 @@ owns its live stream, stamped with its own `cycle_id`. A fork's view can't
 surface the parent's id; a fork seeds its prior trajectory from the parent's
 on-disk `dashboard.json` (via `for_session(seed_from_cycle_id=…)`). The write
 target is the `CycleDir` newtype (`domain/cycle_paths.py`); the three read sites
-(`/api/v1/sessions/active/live-state`, the per-cycle `dashboard` route, `EventStreamView` snapshot)
-serve the viewed cycle's own file — no `root_cycle_id` collapse. Run-state rides
+(`/api/v1/sessions/active/live-state`, the per-cycle `dashboard` route, the SSE
+ledger-tail's snapshot frame) serve the viewed cycle's own file — no `root_cycle_id` collapse. Run-state rides
 `dashboard.json::run_phase` (declared by the runner, projected by
 `LiveDashboardView`); the old non-cached `/runstate` probe is gone — its
 freshness-based "running" was the symptom that run-state was never owned state.

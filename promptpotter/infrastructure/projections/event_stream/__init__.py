@@ -1,29 +1,17 @@
-"""``EventStreamView`` — sole writer of outbound SSE projection frames.
+"""Cross-process SSE projection — tail the on-disk cycle ledger.
 
-Subscribes to one cycle's ledger, broadcasts every record as a
-``ProjectionEnvelope`` to all live HTTP subscribers. Per-cycle scope;
-constructor takes ``CycleDir`` (audit-side, not the session root) so a
-fork's stream stays isolated from siblings.
+The outbound event stream is served by *tailing* the cycle's
+``.runtime/ledger.jsonl`` (the append-only source of truth), so it works in any
+process — the API server, the CLI, or a spawned runner. :class:`CycleLedgerTail`
+turns the file into a sequence of ``ProjectionEnvelope`` frames (a leading
+``stream_snapshot`` from ``dashboard.json`` + the live tail). The same primitive
+backs the SSE route today and a future MCP "watch this run" resource.
 
-The Profile-A certified contract (snapshot-then-tail semantics, heartbeat
+The certified Profile-A contract (snapshot-then-tail semantics, heartbeat
 cadence, sequence-gap detection) is documented in
 ``docs/developer/event-stream.md``.
 """
 
-from promptpotter.infrastructure.projections.event_stream.registry import (
-    deregister_event_stream,
-    get_event_stream,
-    register_event_stream,
-)
-from promptpotter.infrastructure.projections.event_stream.view import (
-    EventStreamSubscriber,
-    EventStreamView,
-)
+from promptpotter.infrastructure.projections.event_stream.tail import CycleLedgerTail
 
-__all__ = [
-    "EventStreamSubscriber",
-    "EventStreamView",
-    "deregister_event_stream",
-    "get_event_stream",
-    "register_event_stream",
-]
+__all__ = ["CycleLedgerTail"]

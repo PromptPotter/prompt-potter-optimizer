@@ -41,7 +41,7 @@ ProjectionKind = Literal[
     "round_warning",
     "snapshot",
     "token_usage",
-    # projection-only (1) — synthesized by ``EventStreamView``
+    # projection-only (1) — synthesized by the ledger tail (``CycleLedgerTail``)
     "stream_snapshot",
 ]
 

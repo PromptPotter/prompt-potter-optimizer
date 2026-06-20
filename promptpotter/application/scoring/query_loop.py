@@ -69,6 +69,15 @@ class QueryLoopResult:
 _BOLD_MARKER_RE = re.compile(r"\*\*[^*]+\*\*")
 
 
+def _with_running(result: QueryMeasurement, running: dict[str, Any]) -> QueryMeasurement:
+    """A shallow copy of the sample result carrying the candidate's running
+    fitness on ``_running`` — a transient projection hint for the live dashboard
+    (the persisted ``state.results`` keep the clean result, not this copy)."""
+    out = dict(result)
+    out["_running"] = running
+    return cast(QueryMeasurement, out)
+
+
 def _materialize_cached(
     item: QueryMeasurement,
     scorer: Scorer,
@@ -116,6 +125,11 @@ class QueryLoopState:
     # Persist the results-so-far after each fresh measurement. Cache hits do
     # not call this — their on-disk row is unchanged.
     persist_fresh: Callable[[list[QueryMeasurement]], None]
+    # The in-flight candidate's running fitness over results-so-far (same shape
+    # as the final scores). Computed per scored sample and ridden out on the
+    # sample snapshot (``result["_running"]``) so the live dashboard + chat show
+    # a candidate fitness that moves in real time instead of sitting at 0.
+    running_scores: Callable[[list[QueryMeasurement]], dict[str, Any]]
     # Async hook fired after each sample lands, before degradation checks
     # read prior coverage. The candidate loop uses it to catch PoBB priors
     # up on the just-measured sample so paired comparison sees full coverage
@@ -194,7 +208,9 @@ async def _process_cache_hit(
     cached_r["sample_id"] = sample.id
     state.results.append(cached_r)
     if ctx.on_sample_scored is not None:
-        ctx.on_sample_scored(cached_r, idx, dataset_len)
+        ctx.on_sample_scored(
+            _with_running(cached_r, ctx.running_scores(state.results)), idx, dataset_len
+        )
     if ctx.on_sample_pre_check is not None:
         await ctx.on_sample_pre_check(sample)
     # Elimination must see cached rows too — otherwise a candidate
@@ -245,7 +261,9 @@ async def _process_fresh_sample(
         state.consecutive_errors = 0
 
     if ctx.on_sample_scored is not None:
-        ctx.on_sample_scored(result, idx, dataset_len)
+        ctx.on_sample_scored(
+            _with_running(result, ctx.running_scores(state.results)), idx, dataset_len
+        )
 
     if ctx.on_sample_pre_check is not None:
         await ctx.on_sample_pre_check(sample)
@@ -271,6 +289,7 @@ async def run_query_loop(
     n_total_candidates: int,
     axes: AxisIndex | None,
     persist_fresh: Callable[[list[QueryMeasurement]], None],
+    running_scores: Callable[[list[QueryMeasurement]], dict[str, Any]],
     next_sample: Callable[[dict[int, bool]], int | None] | None = None,
     on_sample_pre_check: Callable[[Sample], Awaitable[None]] | None = None,
 ) -> QueryLoopResult:
@@ -297,6 +316,7 @@ async def run_query_loop(
         scorer_formula=session.scoring.scorer_formula,
         deprecated_samples=deprecated_samples,
         persist_fresh=persist_fresh,
+        running_scores=running_scores,
         on_sample_pre_check=on_sample_pre_check,
     )
 

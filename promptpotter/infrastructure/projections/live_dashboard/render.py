@@ -117,17 +117,21 @@ def build_l1_score_block(
                 "prompt_fields": cand.get("prompt_fields"),
             }
         )
-        cand_evaluators = dict(scores.get("evaluators") or {})
+        # Mid-scoring the final ``scores`` are empty; fall back to the scorer's
+        # running fitness (same shape, ridden out per sample on ``_running``) so
+        # composite / accuracy / hits / total are LIVE and converge to the final.
+        # ``scores`` wins the moment the candidate completes.
+        served = scores or cand.get("running") or {}
+        cand_evaluators = dict(served.get("evaluators") or {})
         samples = cand.get("samples") or []
-        final_accuracy = scores.get("accuracy")
+        served_accuracy = served.get("accuracy")
         stats: dict[str, Any] = {
-            # Final accuracy is null until a candidate fully scores; fall back to the
-            # running hit-rate over scored-so-far samples so the figure is never null
-            # mid-scoring (consumers read it, never recompute from sample lines).
-            "accuracy": final_accuracy
-            if final_accuracy is not None
+            # Never null mid-scoring: the running fitness carries accuracy; the
+            # bare hit-rate is the safety net before the first sample lands.
+            "accuracy": served_accuracy
+            if served_accuracy is not None
             else _partial_hit_rate(samples),
-            "composite_fitness": scores.get("composite_fitness"),
+            "composite_fitness": served.get("composite_fitness"),
             "composite_fitness_formula": active_formula,
             # Per-candidate value-inlined short formula. The legend for short
             # codes (``acc``, ``H``, ``lat``, ``R``, ``pc``) lives in
@@ -135,10 +139,10 @@ def build_l1_score_block(
             "composite_fitness_formula_short": inline_short_formula_values(
                 short_formula_template, cand_evaluators
             ),
-            "hits": scores.get("hits"),
-            "total": scores.get("total"),
-            "invalid": scores.get("invalid", False),
-            "validation_failures": scores.get("validation_failures") or [],
+            "hits": served.get("hits"),
+            "total": served.get("total"),
+            "invalid": served.get("invalid", False),
+            "validation_failures": served.get("validation_failures") or [],
         }
         output_candidates.append(
             {

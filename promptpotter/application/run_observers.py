@@ -28,11 +28,8 @@ from promptpotter.infrastructure.llm import (
 )
 from promptpotter.infrastructure.projections import (
     AuditTrailView,
-    EventStreamView,
     LiveDashboardView,
     PoBBStreamView,
-    deregister_event_stream,
-    register_event_stream,
 )
 from promptpotter.shared.errors import graceful
 
@@ -86,11 +83,11 @@ class RunCallbacks:
         # carried in ``event.data`` (the most opaque one is ``env=session``
         # which holds the BackendStore + LangfuseLogger handles those classes
         # can't serialize). Strip them before the record lands on the ledger so
-        # ``EventStreamView.on_record`` can ``model_dump(mode="json")`` and the
-        # on-disk dump stay clean. The typed ``view`` rides the in-memory
-        # fan-out (subscribers read it directly); Pydantic serializes it to its
-        # wire dict on persist + SSE. ``payload["data"]`` is only consumed live,
-        # in-memory, where the caller still holds the originals.
+        # the on-disk dump stays clean JSON (the SSE tail re-reads it verbatim).
+        # The typed ``view`` rides the in-memory subscribers (display reads it
+        # directly); Pydantic serializes it to its wire dict on persist.
+        # ``payload["data"]`` is only consumed live, in-memory, where the caller
+        # still holds the originals.
         safe_data = {k: v for k, v in event.data.items() if k not in _DATA_KEYS_RUNTIME_ONLY}
         self._emit(
             PhaseRecord(
@@ -276,10 +273,8 @@ class RunObservers:
     audit: AuditTrailView
     dashboard: LiveDashboardView
     pobb: PoBBStreamView
-    event_stream: EventStreamView
     display: LiveDisplay | None
     _ledger_token: Token[CycleEventLog | None] | None = None
-    _registry_key: tuple[str, str] | None = None
 
     def drain_all(self) -> None:
         """``drain()`` every projection + reset both emission ContextVars; called
@@ -289,12 +284,9 @@ class RunObservers:
         self.audit.drain()
         self.dashboard.drain()
         self.pobb.drain()
-        # event_stream.drain() closes every live SSE subscriber so HTTP
-        # handlers exit cleanly; deregister so subsequent /events:subscribe
-        # calls return 404 (cycle no longer running).
-        self.event_stream.drain()
-        if self._registry_key is not None:
-            deregister_event_stream(*self._registry_key)
+        # The SSE stream isn't a subscriber — it tails the on-disk ledger
+        # (``CycleLedgerTail``), so there's nothing to drain/deregister here;
+        # open HTTP tails idle on heartbeats once the run stops appending.
         if self._ledger_token is not None:
             reset_cycle_ledger(self._ledger_token)
         if self.callbacks._round_token is not None:
@@ -409,22 +401,15 @@ def build_run_observers(
         fresh_parent = CycleEventLog.open(parent_dir)
         ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
 
-    # Profile A — outbound SSE highway. Initial offset = ledger.next_offset so
-    # on-resume subscribers attach past the on-disk record history; live tail
-    # picks up at the next append. Registered in the process-wide registry
-    # under (campaign_id, cycle_id) so the SSE endpoint can find it.
-    event_stream = EventStreamView(
-        cycle_dir, cycle_id=session.state.cycle_id, initial_offset=ledger.next_offset
-    )
-    registry_key = (session.campaign_id, session.state.cycle_id)
-    register_event_stream(*registry_key, view=event_stream)
-
+    # Profile A — the outbound SSE highway is served by tailing the on-disk
+    # ledger (``CycleLedgerTail``), cross-process, so there's nothing to register
+    # here. The runner just appends; any reader (the API server, the CLI, a
+    # future MCP client) tails ``.runtime/ledger.jsonl`` directly.
     ledger.bind(dashboard)
     ledger.bind(audit)
     if display is not None:
         ledger.bind(display)
     ledger.bind(pobb)
-    ledger.bind(event_stream)
     session.state.ledger = ledger
 
     callbacks = RunCallbacks(ledger=ledger)
@@ -438,8 +423,6 @@ def build_run_observers(
         audit=audit,
         dashboard=dashboard,
         pobb=pobb,
-        event_stream=event_stream,
         display=display,
         _ledger_token=ledger_token,
-        _registry_key=registry_key,
     )

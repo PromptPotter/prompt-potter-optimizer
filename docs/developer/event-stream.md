@@ -2,7 +2,7 @@
 
 The outbound half of the M12 Control-remote highway: how a client subscribes to a cycle's live ledger over Server-Sent Events, what frames it gets and in what order, and the guarantees the runtime makes about ordering, gap detection, and idle-keepalive.
 
-Permanent contract: [`docs/adr/0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md). Wire schema: [`docs/specs/m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml). Codepath: [`promptpotter/infrastructure/projections/event_stream/view.py`](../../promptpotter/infrastructure/projections/event_stream/view.py) (`EventStreamView`) → [`promptpotter/presentation/api/routers/campaigns/events.py`](../../promptpotter/presentation/api/routers/campaigns/events.py) (`stream_cycle_events`).
+Permanent contract: [`docs/adr/0001-m12-control-plane.md`](../adr/0001-m12-control-plane.md). Wire schema: [`docs/specs/m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml). Codepath: [`promptpotter/infrastructure/projections/event_stream/tail.py`](../../promptpotter/infrastructure/projections/event_stream/tail.py) (`CycleLedgerTail`, tails the on-disk ledger) → [`promptpotter/presentation/api/routers/campaigns/events.py`](../../promptpotter/presentation/api/routers/campaigns/events.py) (`stream_cycle_events`).
 
 ## URL
 
@@ -14,7 +14,7 @@ The `:subscribe` suffix follows the AsyncAPI / Google AIP-136 convention for non
 
 Response: `text/event-stream`. Headers set `Cache-Control: no-cache` and `X-Accel-Buffering: no` to defeat proxy buffering (nginx, Cloudflare, etc. buffer otherwise).
 
-404 when the cycle isn't actively running — there's no in-process `EventStreamView` registered. Start the run before subscribing.
+404 only when the cycle directory doesn't exist (unknown campaign/cycle). The stream tails the on-disk ledger **cross-process**, so a running, paused, or finished cycle all subscribe successfully — a finished cycle replays its snapshot then idles on heartbeats.
 
 ## Frame shape — `ProjectionEnvelope`
 
@@ -52,7 +52,7 @@ The runtime guarantees, in order:
    ```
    Heartbeats do not advance `sequence`. They exist solely so dumb proxies and clients can tell "no events" from "stream broken."
 
-4. **Drain on cycle teardown.** When the runner finalizes the cycle, every live subscriber is closed cleanly. The handler exits its stream loop; the client sees the connection close and reconnects (which 404s until a new run starts).
+4. **Idle after teardown.** The stream tails a file, so when the runner finalizes the cycle there's nothing to close — the tail simply stops seeing new lines and the connection idles on heartbeats. The client stays subscribed (and disconnects when the operator navigates away).
 
 ## Sequence semantics + gap detection
 
@@ -60,32 +60,24 @@ The runtime guarantees, in order:
 
 The `Last-Event-ID` header is reserved for a future profile's resume-from-sequence semantics (declared in the AsyncAPI HTTP binding, not yet honored by the handler).
 
-## Sole writer — security box 4
+## Writer / reader split
 
-`EventStreamView.on_record` is the only code path that constructs `ProjectionEnvelope` frames and broadcasts them. The other projections (`LiveDashboardView`, `AuditTrailView`, `PoBBStreamView`) write their own on-disk artifacts; only this one emits onto the live HTTP fan-out. The handler at `stream_cycle_events` is a thin async adapter — it reads from subscriber queues and serializes; it doesn't synthesize frames except for the leading `stream_snapshot`.
+The **ledger is the writer**: `CycleEventLog.append` serializes every `CycleRecord` to `.runtime/ledger.jsonl` (one JSON object per line; line index = offset). The **SSE stream is a reader**: `CycleLedgerTail` tails that file, mapping each line to a `ProjectionEnvelope` (`kind` = the record's `record_type`, `sequence` = line index) and reading `dashboard.json` for the leading snapshot. No projection synthesizes frames; the on-disk ledger is the single medium. (This replaces the old in-memory `EventStreamView` fan-out, which only existed in the runner's own process.)
 
-This is the same "sole writer" rule that `LiveDashboardView._handle_token_usage` enforces for `dashboard.json::spend`.
+## Cross-process by construction
 
-## Backpressure
+Because the stream reads a file, it works from any process that shares the filesystem — the API server, the CLI runner, a spawned subprocess, a future MCP "watch this run" client. There is no in-memory registry and no requirement that the run live in the reader's process (the bug that left a webapp chat blank against a CLI-launched run). The same medium the `dashboard.json` poll already crosses processes on.
 
-Each subscriber holds a bounded asyncio queue (default 1024 frames). On overflow the subscriber is closed; the client reconnects and the new snapshot covers everything it missed. This is the simplest correct behavior — alternatives (back-pressure on the ledger writer, dropping individual frames) violate either the runner's append-must-not-block invariant or the no-gap guarantee.
+## Efficiency
 
-## Threading model
-
-`CycleEventLog.append` is synchronous and runs on whatever thread (usually an asyncio task) the runner uses. `on_record` calls `subscriber.publish` directly, which uses `loop.call_soon_threadsafe` to hop to the SSE handler's loop. The asyncio queue is therefore always touched from a single loop; producer-side cross-thread coordination lives in `call_soon_threadsafe`.
-
-## Process-wide registry
-
-The handler finds the right `EventStreamView` via [`infrastructure/projections/event_stream/registry.py`](../../promptpotter/infrastructure/projections/event_stream/registry.py): `register_event_stream(campaign_id, cycle_id, view)` at `build_run_observers`, `deregister_event_stream(...)` at `drain_all`. `get_event_stream(...)` returns `None` when the cycle isn't active — the handler 404s.
-
-The registry holds a process-global lock. Cycles can register and deregister concurrently; lookups are read-mostly.
+Reads are incremental: the tail tracks a byte cursor and seeks past everything already streamed, so a long ledger is never re-scanned. The handler polls every 0.5 s and runs each file read via `asyncio.to_thread`, so the event loop never blocks on disk I/O. A trailing partial line (a write mid-flight) is left for the next poll, so a torn read never yields a malformed frame.
 
 ## Testing
 
 No standing test (the structural/contract suite was cut to the silent-harm
 core — see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)). The event stream
-fails loud: a broken subscribe/publish/fan-out/heartbeat/drain path stops the
-dashboard updating, which is visible in use. Keep these in sync by hand —
+fails loud: a broken tail/snapshot/heartbeat path stops the chat activity
+updating, which is visible in use. Keep these in sync by hand —
 each drifts loud, not silent:
 - `ProjectionKind` Literal matches the AsyncAPI `kind` enum exactly (unknown kind raises on dispatch).
 - Every YAML-required envelope field exists in the Python model.
@@ -94,7 +86,7 @@ each drifts loud, not silent:
 ## Client integration cheatsheet
 
 ```bash
-# Curl smoke test (replace ids; the cycle must be running):
+# Curl smoke test (replace ids; the cycle just has to exist):
 curl -N http://localhost:8001/api/v1/campaigns/{cid}/cycles/{cyid}/events:subscribe
 ```
 
