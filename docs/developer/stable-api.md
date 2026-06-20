@@ -203,4 +203,4 @@ Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the roo
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
 - **Prompt templates** at `datasets/_optimizer/pipeline.json::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
 - **Test helpers** (`tests/_helpers.py`).
-- **The `webapp/` layout.** M11 surface + M12 control plane still iterating.
+- **The `webapp/` layout.** The webapp + control plane ship and serve users; internal component layout stays free to move.

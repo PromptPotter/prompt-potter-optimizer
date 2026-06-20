@@ -21,7 +21,7 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 
 ## Chat-first
 
-The front door is a chat. You talk to the Potter, watch it work inline as it runs — what it's scoring, the calls it's making, how each round landed — and it hands you a button whenever a decision is yours. PromptPotter also ships as a **canonical chat-app template**: the chat core (thread model + live activity stream + transport) is built to be kept, with the optimizer-specific panes deletable, so you can build your own chat app on top. Design: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
+The front door is a chat. You talk to the Potter and watch it work inline, Perplexity-style — the searches it runs, the tools it calls, what it's scoring, how each round landed — and it hands you a button whenever a decision is yours. PromptPotter also ships as a **canonical chat-app template**: the chat core (thread model + a generic agent-activity stream + transport) is built to be kept, with the optimizer-specific panes deletable, so you can build your own agent chat on top. Design: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
 
 Install → first run → reading output is the [`docs/manual/`](docs/manual/README.md) walkthrough.
 
@@ -94,7 +94,7 @@ Developer internals (Python symbols, data contracts, wiring) live under [`docs/d
 
 ## Watching a run
 
-While `python -m promptpotter resume` is running, the cleanest setup is **`campaigns/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query, per-round node I/O); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `output.log`, `rounds/`, `log.md`. Internal resume + audit state lives under `.cache/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the planned webapp. Full guide in [`CLAUDE.md`](CLAUDE.md#superuser-monitoring-live-runs).
+While `python -m promptpotter resume` is running, the cleanest setup is **`campaigns/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query, per-round node I/O); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `output.log`, `rounds/`, `log.md`. Internal resume + audit state lives under `.cache/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the read-only webapp at `http://localhost:8001/`. Full guide in [`CLAUDE.md`](CLAUDE.md#superuser-monitoring-live-runs).
 
 PromptPotter's inner **generate → score → critique** loop mirrors the classic **plan / implement / validate (PIV)** developer workflow, driven by an LLM at scale.
 

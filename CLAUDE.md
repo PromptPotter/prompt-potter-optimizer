@@ -6,7 +6,7 @@
 
 PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. **Orchestration is the product — backends are pluggable and read-only.** Node tunables ride a per-call overlay (`datasets/{name}/pipeline.json::nodes.{name}.config`);
 
-The **front door is a chat** — a human-in-the-loop copilot: the operator converses, the Potter posts its activity inline, and decisions surface as buttons that fire existing control-plane verbs. The chat core is built as a **reusable template** (keep it, delete the optimizer panes). Contract: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
+The **front door is a chat** — a human-in-the-loop copilot: the operator converses, the Potter posts its work into the thread Perplexity-style (tool calls, web search, each round as it lands), and decisions surface as buttons that fire existing control-plane verbs. The chat is a **canonical agent-chat template** built on a generic activity taxonomy — keep the core (thread model + activity stream + transport), delete the optimizer panes. Contract: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
 
 ## Origin & check-in — the two words that confuse
 
@@ -109,7 +109,7 @@ Before adding any new concept (class, projection, injection, prompt, field, dict
 ## Pointers
 
 - **Architecture:** [`docs/architecture.md`](docs/architecture.md) §0/§0.5 — backbone primitives, five I/O kinds, the central loop + L1/L2/L3 escalation + L4-is-recursion, searchpoints, scoring, identity, token/cost ledger. **Extend primitives in place** — the wrong shape is meant to be hard to express, not policed by a test.
-- **Roadmap:** multi-user beta at `https://app.promptpotter.dev` ([`deploy-linux/`](deploy-linux/); OIDC + allowlist + quotas). M0–M9 complete; M10–M13 in flight → [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+- **Roadmap:** multi-user beta at `https://app.promptpotter.dev` ([`deploy-linux/`](deploy-linux/); OIDC + allowlist + quotas). Engine + webapp + control plane + chat (Arc 1) + ingest shipped; Lane A (BYO keys) + Lane C (chat write-path, L4, composite fitness) in flight → [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 - **Persistence:** [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md) — four-entity tree (Workspace → Dataset → Campaign → Cycle), `.promptpotter/` layout, `archive/measurements/`, fork lineage, recovery.
 - **Per-layer contracts** (load only the layer you touch): [`promptpotter/CLAUDE.md`](promptpotter/CLAUDE.md) (index) · [`application/CLAUDE.md`](promptpotter/application/CLAUDE.md) (orchestration + backend-overlay merge / never-edit-backend rule) · [`application/optimization/CLAUDE.md`](promptpotter/application/optimization/CLAUDE.md) (L1/L2/L3 agent contracts + L4 recursion + dispatch) · [`domain/CLAUDE.md`](promptpotter/domain/CLAUDE.md) · [`infrastructure/CLAUDE.md`](promptpotter/infrastructure/CLAUDE.md) (ledger + projections + stores) · [`presentation/CLAUDE.md`](promptpotter/presentation/CLAUDE.md) · [`connectors/CLAUDE.md`](promptpotter/connectors/CLAUDE.md).
 - **Contracts:** ADRs [`0001`](docs/adr/0001-m12-control-plane.md) (control plane) · [`0002`](docs/adr/0002-identity-foundation.md) (identity) · [`0003`](docs/adr/0003-spend-and-tenancy.md) (spend/tenancy). Index map: [`docs/CLAUDE.md`](docs/CLAUDE.md).

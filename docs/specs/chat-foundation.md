@@ -1,22 +1,26 @@
 # Chat foundation — the first-class front door
 
-> **Forward-looking living contract.** This is the canonical design for the chat tab as
-> PromptPotter's front door + activity stream. Roadmap **C1** ("Chat write-path") and the
-> roadmap's *Ingest + chat-first web* note defer their detail here. Status lines below are
-> truth for what ships; full prose history is in `git log`.
+> **Living contract.** The canonical design for the chat tab as PromptPotter's front door +
+> agent-activity stream. **Arc 1 (curated activity + loop control) ships today**; the forward
+> part is the *imprint* — a generic agent-activity taxonomy (§1) that future tool-use
+> populates without reshaping. Roadmap **C1** ("Chat write-path") and the roadmap's *Ingest +
+> chat-first web* note defer their detail here. Status lines below are truth for what ships;
+> full prose history is in `git log`.
 >
 > Read [`../architecture.md`](../architecture.md) §0 (five I/O kinds) first.
 
 ## 0. What this is — and the positioning
 
 The first tab **is a chat**, and it is — deliberately and cleanly — an LLM wrapper. We own
-that rather than dress it up: the chat is the operator's front door to the Potter. It is a
+that rather than dress it up: the chat is the operator's front door to the Potter, and it is a
+**canonical agent-chat template** that happens to drive an optimizer. It is a
 **human-in-the-loop operator copilot**. Three things converge in **one ordered thread**:
 
 1. **Conversation** — the operator talks to an assistant that answers from campaign context.
-2. **Activity** — the Potter posts what it's doing into the same thread, Perplexity-style
-   ("scoring sample 14/40 · HIT", "optimizer call · gpt-oss-120b · 1,240 tok · 3.1s",
-   "round 3 complete"). This is exactly what the CLI already streams to the terminal.
+2. **Activity** — the Potter posts what it's doing into the same thread, Perplexity-style:
+   tool calls, web searches, backend matches, and each round as it lands ("optimizer call ·
+   gpt-oss-120b · 1,240 tok · 3.1s", "scoring sample 14/40 · HIT", "round 3 complete"). This is
+   exactly what the CLI already streams to the terminal.
 3. **Decisions** — when a choice is warranted (the round-1 halt-and-decide gate, the origin
    gate, a budget call), the copilot raises **inline buttons**. The copilot proposes; the
    operator's click acts.
@@ -26,8 +30,8 @@ button is a thin trigger for a control-plane command that already exists. The co
 is to converse, explain, and surface the right button at the right moment.
 
 This codebase is **chat-experience-first, and meant to be reused.** The chat core (thread
-model + activity translator + transport) is structured so another team can keep it and delete
-the PromptPotter-specific panes (§6).
+model + the generic activity translator + transport) is structured so another team can keep it
+and delete the PromptPotter-specific panes (§6) — what's left is a generic agent chat.
 
 **Status:** **Arc 1 shipped — curated activity + loop control (frontend-only).** The
 `chat` tab (`webapp/components/chat/ChatPane.tsx`) now renders one ordered thread: the
@@ -49,8 +53,19 @@ list of these"). The thread carries three item families:
 | Family | Items | Source |
 |---|---|---|
 | **Message** | `user`, `user-file`, `ai`, `error` | operator input + assistant replies (existing `ChatMsg`) |
-| **Activity** | running / done / progress / sample-result / round-summary / warning | projected from the cycle event stream (§2) |
+| **Activity** | the **generic** agent vocabulary — `step` (running → done), `progress`, `warning`, `error`, `merge` — plus the **optimizer specialization** `candidate` / `round` | projected from the cycle event stream (§2) |
 | **Decision** | a labelled button group with a pending/acted state | raised by the copilot; fires an existing command (§4) |
+
+**The imprint is the generic `step`.** Everything the Potter *does* — an optimizer LLM call, a
+web search, a code execution, an MCP call, a backend match — is one `step`: an icon + label +
+status (running → done, today the `running`/`done` pair) + optional duration / cost, rendered
+the same Perplexity way. Today the only populated `step`s are the optimizer's LLM calls and
+sample scoring; when backend tool-use lands (TermNorm's web-search strategy axis, MCP,
+code-exec — §7), **each emits a new `ProjectionKind` that maps into the same `step` family — no
+new item kind, no translator reshape.** That is what "imprint" means here: the taxonomy is
+fixed now and backends populate it over time. `candidate` (the scoreboard) and `round` (the
+round summary) are the **optimizer-specific** items layered on top — exactly what a reusing
+team deletes (§6).
 
 Activity and decision items are **rendered, never authored by the client** — the client
 projects them from the stream and from copilot turns. Message items are the only ones the
@@ -67,19 +82,31 @@ activity feed is a **browser port of `LiveDisplay`'s handler dispatch**: a clien
 translator from envelope `kind` → `ActivityItem`. Keep it 1:1 with `LiveDisplay` so the two
 surfaces never drift.
 
+**Generic mappings (the reusable core — kept on template extraction):**
+
 | `ProjectionEnvelope.kind` | `LiveDisplay` handler | Activity item |
 |---|---|---|
-| `llm_call_start` | `_handle_llm_call_start` (`↻ optimizer call: …`) | **running** — "{node} · {model}" (oversize → warn) |
+| `llm_call_start` | `_handle_llm_call_start` (`↻ optimizer call: …`) | **step (running)** — "{node} · {model}" (oversize → warn) |
 | `llm_call_progress` | `_handle_llm_call_progress` (`· still waiting`) | **progress** — "{node} still running · {N}s" |
-| `llm_call` | `_handle_llm_call` (`✓ … · Ns · tok`) | **done** — "{node} · {N}s · {tok} tok · $" (cached tag) |
-| `snapshot` (`event=sample_scored`) | `_handle_snapshot` → `on_sample_scored` | **sample** — HIT/MISS, "{i}/{n}" |
-| `snapshot` (`candidate_*`, `p_best_update`) | `on_candidate_*` / `on_p_best_update` | **candidate** — scoreboard / PoBB line |
-| `phase` (`phase=round`, `event=display`) | `_handle_phase` → `on_round_complete` | **round-summary** card — round N, leader, fitness, spend |
+| `llm_call` | `_handle_llm_call` (`✓ … · Ns · tok`) | **step (done)** — "{node} · {N}s · {tok} tok · $" (cached tag) |
 | `round_warning` | `_handle_round_warning` (`⚠`/`✗`) | **warning** — inline alert |
 | `token_usage` | (folded into spend) | feeds the running spend chip, not its own item |
 | `error` | (runner failure) | **error** message item |
-| `decision`, `command`, `command_ack` | — | drive decision-item / button state (§4), not free items |
-| `stream_snapshot` | (subscribe-time) | initial backfill of the thread's activity (§3) |
+| `command_ack` | — | a **merge** "control applied" item (rejected → warning); §4 |
+| `command`, `decision`, `stream_snapshot` | (subscribe-time / §4) | non-items: backfill (§3) + button state (§4), never free items |
+
+**Optimizer-specific mappings (deleted to de-PromptPotter, §6):**
+
+| `ProjectionEnvelope.kind` | `LiveDisplay` handler | Activity item |
+|---|---|---|
+| `snapshot` (`event=sample_scored`) | `_handle_snapshot` → `on_sample_scored` | **progress** chip — HIT/MISS, "{i}/{n}" |
+| `snapshot` (`candidate_*`, `p_best_update`) | `on_candidate_*` / `on_p_best_update` | **candidate** — scoreboard / PoBB line |
+| `phase` (`phase=round`, `event=display`) | `_handle_phase` → `on_round_complete` | **round** card — round N, leader, fitness, spend |
+
+**Tool-use lands as a `step`, not a new item kind.** When backend web-search / MCP / code-exec
+ship (§7), each new `ProjectionKind` maps to a generic **step** via this same translator — the
+imprint already has the slot. Only a *richer per-tool field set* (beyond what `llm_call` /
+`snapshot` carry) needs a new asyncapi `ProjectionKind` declared first (§0 gate).
 
 State pairs an icon **and** a label (HIT/MISS, running/done) — never color alone — per the
 frontend accessibility invariant.
@@ -194,15 +221,18 @@ buttons fire existing commands. The **only** new contract surface is the convers
 endpoint (§4a), declared in `m12-api-openapi.yaml` first.
 
 **Deferred (each needs the YAML edited first):**
-- Genuine assistant tool-use (web search / MCP / code-exec — the "Soon" toggles in
-  `ChatPane.tsx`). A richer per-tool activity item (beyond what the current records carry)
-  is a **new `ProjectionKind`** → `m12-events-asyncapi.yaml` first.
+- Genuine assistant tool-use. The **"Soon" toggles in `ChatPane.tsx` are Extended thinking ·
+  Web search · Code execution** (MCP is a planned fourth tool, not yet a toggle). Each tool,
+  when wired, emits a new `ProjectionKind` that renders as a generic **step** (§1, §2) — the
+  imprint already has the slot. A *richer per-tool field set* (beyond what the current records
+  carry) needs that `ProjectionKind` declared in `m12-events-asyncapi.yaml` first.
 - Backend (TermNorm) tool activity surfaces in v1 only at the granularity the existing
-  `snapshot` / `token_usage` records carry; a dedicated "web search" item is future work.
+  `snapshot` / `token_usage` records carry; a dedicated "web search" step is future work.
 
 **Drift this spec records (reconcile, don't silently fix):**
-- The roadmap calls this work **C1**; `code-debt-cleanup.md` labels the same inert controls
-  **"M13+"**. Unified to **C1** pointing here.
+- The roadmap calls this work **C1**; `code-debt-cleanup.md`'s "intentional UI placeholders"
+  table already points its chat rows at **C1** (the stale "M13+" tag was dropped). The
+  `adr/0001` historical "M13 chat-first user web" naming stays as constitutional record.
 - `mask-projection.md` requires the `/lineage?lens=` read endpoint declared in
   `m12-api-openapi.yaml`, but the openapi declares no read endpoints though mask M1 is marked
   shipped — a contract gap to resolve when the chat read-surface is declared.

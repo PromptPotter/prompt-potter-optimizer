@@ -86,7 +86,7 @@ bodies read), not "I spotted a smell." Productive patterns:
 - **Speculative API surface** — params never read, `X | None` always non-None, default kwargs no caller overrides, fields declared/written never read.
 - **Vibe-coded scaffolding** — `NotImplementedError` branches, comments referring to work the project doesn't plan. Verify the "future" really isn't on the roadmap first.
 
-**Anti-patterns — NOT debt, skip on sight:** M13+ intentional UI placeholders
+**Anti-patterns — NOT debt, skip on sight:** intentional UI placeholders
 (below); per-injection `char_cap`; domain vocabulary policed elsewhere (`origin`
 not `baseline`); the `application/intelligence/ ↮ application/optimization/`
 layer-invariant split; ABC `@abstractmethod` / `Protocol` `...` bodies; `from

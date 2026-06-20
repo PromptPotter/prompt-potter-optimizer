@@ -62,11 +62,7 @@ state-sync P1–P4 shipped 2026-05-30 (per-cycle `dashboard.json`, `GET /api/v1/
 Terse landing for the per-milestone specs that were consolidated here. Status is truth; full original prose is in `git log`.
 
 ### Origin-resolution check-in — SHIPPED 2026-05-30
-Messy CSVs ingest without hidden defaults or a literal-column requirement: an LLM proposer + deterministic readiness checklist resolve the origin and auto-confirm high-confidence fields before mint.
-- **Provenance:** every origin field is `unset | proposed | confirmed`; no field mints while `unset`/`proposed`; `high`-confidence findings auto-promote `proposed→confirmed`. Orthogonal `ProvenanceSource` axis `auto | stated` (`domain/origin_provenance.py`), persisted to `cache.json::sources`; the gate verdict reads `resolved`, never `sources`.
-- **As-built (diverges from the original design):** no separate `origin_resolve` node/model — reuses the `checkin/2` node with an origin block on `CheckinOutput`; consultation rides the LLM `user_content` (`build_origin_consultation`), not template placeholders; resolve-turn spend goes to the tenant workspace ledger (`CycleEventLog.open_workspace`). One resolver turn per request.
-- **Struck from the operator surface:** `reasoning_floor/ceiling` (`reasoning_effort` is backend-node-only; floor rides `backend.node_config`) and `model_locked` (= `OptimizationConfig.forbidden_axes_strict`, a developer policy).
-- **CLI fold:** `new <name|file>` dispatches on `Path(arg).is_file()`; the file branch shares `ingest.py::ingest_draft` + `launcher.py::commit_draft_to_dataset`; enabler is `resolve_dataset_config_dir` on `Session.dataset_config_dir`.
+LLM proposer + deterministic readiness gate resolve a messy CSV into a complete origin (no hidden defaults, no literal-column requirement); `high`-confidence fields auto-promote `proposed→confirmed` before mint. Non-derivable kernels: reuses the `checkin/2` node (no separate `origin_resolve` node/model); **deliberately off the operator surface** — `reasoning_floor/ceiling` (backend-node-only) and `model_locked` (= `forbidden_axes_strict`, a dev policy). Concept: root `CLAUDE.md` § Origin & check-in; mechanics in `git log`.
 
 ### Ingest + chat-first web — partially shipped (Ingest Slice 1 done; chat Arc 1 done — activity + control)
 > **Chat-first front door** (thread model, activity-stream translator, copilot decision
@@ -125,13 +121,9 @@ Hard-Sample Sorter Phase 2/3 (Phase 1 `build_hard_samples_artifact` shipped) · 
 
 ## Already shipped
 
-Verified against code 2026-05-30+:
-- **Engine.** Verdict-resolution P1 (`c714bffd`); engine exit gate `rounds_to_95` (`l1/stats.py`, `runner/entry.py`).
-- **Spend (= composite P1).** `emit_token_usage`, `TokenUsageRecord`, `LiveDashboardView._handle_token_usage`, `spend_total_used_usd`. → [`ADR-0003`](../adr/0003-spend-and-tenancy.md).
-- **Identity Stage 1.** OIDC middleware (`main.py:89`); Google + GitHub code exchange (`infrastructure/identity/`); server-side sessions; allowlist; `/auth/{login,callback,me,logout,quota-status,activity}`; per-user quotas (`UserStore`). *Stage 0.5 caveat:* OIDC wire live, RLS/SCIM isolation not yet enforced. → [`ADR-0002`](../adr/0002-identity-foundation.md).
-- **Control-plane highway.** `CommandDispatcher` + `routers/commands.py` + SSE `EventStreamView`; `LifecycleKind`/`CycleScopedKind`/`WorkspaceBackendKind`. → [`ADR-0001`](../adr/0001-m12-control-plane.md).
-- **Connector boundary + 2nd connector.** `termnorm` + `promptpotter` registered; lookup config-driven via `pipeline.json::backend_type` (`bootstrap/wiring.py`). Only the inner-cycle dispatch for the L4 run remains (C3).
-- **Origin-resolution check-in + Ingest Slice 1** (CSV, `DraftCampaign`, `POST /datasets/ingest`, `mint-campaign-from-draft`, `TenantDatasetStore`, `IngestPane`) · onboarding lockout · webapp read-only surface (served at root).
+Verified against code; `git log` + ADRs hold the detail. Engine (verdict-resolution P1 `c714bffd`, `rounds_to_95` exit gate) · spend / composite-P1 (`emit_token_usage`, `TokenUsageRecord`) · identity Stage 1 (OIDC Google+GitHub, allowlist, per-user quotas) · control-plane highway (`CommandDispatcher` + `routers/commands.py` + SSE) · connector boundary + 2nd connector (`termnorm` + `promptpotter`, config-driven `backend_type`) · origin check-in + Ingest Slice 1 · webapp read-only surface served at root. ADRs: [0001](../adr/0001-m12-control-plane.md) · [0002](../adr/0002-identity-foundation.md) · [0003](../adr/0003-spend-and-tenancy.md).
+
+**Live forward gap (non-derivable):** identity is **Stage 0.5** — OIDC wire is live but RLS / SCIM tenant isolation is **not yet enforced**.
 
 ## Non-functional requirements
 

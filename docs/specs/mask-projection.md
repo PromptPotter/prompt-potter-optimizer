@@ -1,6 +1,7 @@
 # Mask — a criterion projected over the lineage
 
-**Status:** design, pre-build. Roadmap: **Lane C8** ([`roadmap.md`](roadmap.md)
+**Status:** M1 (read-side) shipped — the scoring + abort verdicts on `GET /lineage`;
+write-side (fork-from-divergence) deferred. Roadmap: **Lane C8** ([`roadmap.md`](roadmap.md)
 § Lineage mask). Build bottom-up (concrete → general), one `feat(mask)` commit at
 arc close. (A frontend-first attempt at the order-mask collision signal —
 `pick_margin` + a `COLLISION_MARGIN_EPS` threshold owned in `SampleTrajectory.tsx`

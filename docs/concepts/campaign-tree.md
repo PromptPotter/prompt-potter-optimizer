@@ -39,7 +39,7 @@ Forks land flat under `cycles/`. The tree is reconstructed from `parent_cycle_id
 |---|---|---|
 | **Scoring divergence** | `resume --fork-on-divergence` detects a recorded decision no longer holds under the current scorer | none |
 | **Operator sweep** | `new --sweep-batch` with payloads under `datasets/{name}/sweep/` | `ResumeCheckpointRecord.data.fork.sweep_payload` |
-| **Manual rewind** (M11, planned) | operator labels a fork from any round | TBD |
+| **Operator-steered fork** | operator stops the run and forks a sibling from any round, editing the searchpoint's prompt + node config + limits (webapp Steer & fork) | `ForkPayload` (`origin_prompt_fields`, `pipeline_overlay`, `limit_overrides`, `steered_by`) |
 
 The primitive does not know which caller fired. New callers add new `data.*` keys; the primitive stays small. Library measurements are deliberately not on the tree — content-addressed by `JobSearchPoint.content_hash`, two forks see identical content hashes and read the same `archive/` row (why the second fork's origin costs zero LLM calls).
 

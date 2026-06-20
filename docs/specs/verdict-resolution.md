@@ -1,6 +1,6 @@
-# Spec: Verdict-Resolution Adaptive Queue Mechanism
+# Verdict-Resolution Adaptive Queue Mechanism
 
-**Status:** Phase 1 **shipped** (`c714bffd`) — `explore_weight`, `model_information_gain`, `predictive_hit_prob` removed from `promptpotter/`; ranking unified on `decision_information_gain`. Supersedes `bayesian-sample-picker.md`. Phase 2 (origin-relative observation weighting) deferred.
+**Status:** Documents the **live** mechanism. Phase 1 shipped (`c714bffd`) — ranking unified on `decision_information_gain`; the blended `explore_weight · model_information_gain` term removed. Phase 2 (origin-relative observation weighting) deferred — sketched below. Supersedes `bayesian-sample-picker.md`.
 
 ---
 
@@ -21,7 +21,7 @@ There is one statistical model. It produces one ranking. The ranking is updated 
 - All historical observations on that sample, across the entire dataset-scoped archive — every measurement every candidate has ever made on it.
 - The current candidate's own measurements so far in this run.
 
-In Phase 1, every historical observation counts equally — the population's behaviour on a sample is the prior, regardless of which candidate produced each measurement. As we measure the current candidate, those measurements sharpen the prediction further. The mechanism is the same one already running in the live adaptive queue mechanism: a per-candidate ability estimate that folds in observations as they arrive.
+Every historical observation counts equally — the population's behaviour on a sample is the prior, regardless of which candidate produced each measurement. As we measure the current candidate, those measurements sharpen the prediction further. The mechanism is a per-candidate ability estimate that folds in observations as they arrive.
 
 **The verdict layer.** Independently, the model tracks our current belief about whether the candidate will beat the seed. Every measurement updates that belief.
 
@@ -46,73 +46,16 @@ The ranking is alive. It updates whenever the conditioning changes:
 
 The ranking is written to `hard_samples_*.json` after each round boundary. That file is the webapp's read target. Reading it gives the latest serialized state of the same model — not a separate concept, not a frozen snapshot, just the current ranking. The webapp polls it; the live adaptive queue mechanism writes it.
 
----
-
-## What's already correct and stays
-
-The math for "expected information about the verdict" is in the code. `decision_information_gain` (`adaptive_queue_mechanism.py:137-162`) computes the mutual information between a Bernoulli outcome and the keep/abort verdict, conditioned on the candidate's current ability posterior. The hierarchical-EB Rasch fit (`exploration.py::fit_rasch`) supplies the per-sample population profile. The per-candidate posterior fold (`loop.py:240-296`) updates the ability estimate after each measurement. All of this is sound.
+A fresh mutation is ranked at `μ_c = μ_seed`, so its keep-or-abort prior is 50/50 by construction — correct, because its prior over ability genuinely is centred on the parent. The *expected* information still varies across samples through the prediction layer.
 
 ---
 
-## What's broken
+## Where it lives in code
 
-The current adaptive queue mechanism adds a second term to the score — an "exploration bonus" weighted at 0.05 — that rewards samples we have *less* data on. The intent was to keep some pull toward sharpening the population model; the effect is that at step 0 (where the verdict information is small for every sample because no candidate measurements exist yet) the exploration bonus dominates the ranking and promotes stranded, poorly-measured, always-miss samples to the top. This is the exact opposite of what we want: the table looks dumb because the tiebreaker is dumb.
-
-There is also one degeneracy at the call site that has nothing to do with the formula: when ranking samples for a candidate at step 0, the current code evaluates the verdict at `μ_c = μ_seed` exactly, which makes the keep-or-abort prior 50/50 by construction. That's correct for a fresh mutation (its prior over ability genuinely is centred on the parent), so the prior probability is 50/50 — but the math for *expected* information still varies across samples through the prediction layer. Removing the exploration bonus is what restores that variation; the call site does not need changing beyond that.
-
----
-
-## Phase 1 — what changes
-
-One model, one score, one call site. No knobs.
-
-- Remove the exploration bonus term entirely. Drop `model_information_gain`, `predictive_hit_prob`, and the `explore_weight` argument from `pick_value` / `expected_order` / `next_sample` in `adaptive_queue_mechanism.py`. Drop `ExplorationConfig.explore_weight` from `application/config.py`.
-- The single per-sample score is mutual information between the sample's outcome and the keep/abort verdict (`decision_information_gain`, unchanged math).
-- The call site that writes the persisted ranking (`hard_sample_sorter.py::_pick_score_under_prior`) calls the same scoring path the live adaptive queue mechanism calls. One function, two trigger points.
-- Everything else stays: `RaschPosterior`, the hierarchical-EB fit, the candidate posterior fold, the heatmap axis sorts, PoBB.
-
----
-
-## Phase 2 sketch — origin-relative weighting
-
-Not in Phase 1. Outlined here so the substrate doesn't paint into a corner.
-
-In Phase 1, every archive observation contributes equally to the population profile of a sample. Phase 2 will weight each observation by how relevant the producing candidate is to the current one — using similarity (lineage distance, prompt distance, or pipeline-config distance — undecided) and recency (older observations weighted lower, because pipeline capability drifts over time). The same scoring framework applies; only the conditioning is richer. The breaking primitive change Phase 2 needs is extending `Observation` (`exploration.py:38-44`) with a timestamp and a lineage hint, or routing those through a sidecar lookup.
-
----
-
-## Verification
-
-Three checks; each one fails against the current behaviour.
-
-1. **Ranking quality.** Open the operator's hard-samples table after the change. Samples where the population almost always hits or almost always misses sink toward the bottom. Genuinely contested samples (mixed hit/miss in the archive) sit at the top, ordered by how much they could shift the current candidate's verdict. Manual eyeball on any populated campaign.
-2. **Convergence speed.** Replay a recorded round where a candidate should die in 3–6 measurements against the seed. New adaptive queue mechanism should match or beat the current adaptive queue mechanism's measurement count on the same `(cycle_id, candidate_id, sample seed)`. New fixture: `tests/test_adaptive_queue_mechanism_convergence.py`.
-3. **PoBB integration unchanged.** `tests/test_pobb_check_*.py` must pass without modification — the verdict gate is unchanged; only the sample order changes.
-
----
-
-## What gets deleted (Phase 1)
-
-- `adaptive_queue_mechanism.py::model_information_gain`
-- `adaptive_queue_mechanism.py::predictive_hit_prob`
-- `explore_weight` argument from `pick_value`, `expected_order`, `next_sample`
-- `ExplorationConfig.explore_weight` field
-- All call-site references to `explore_weight` in `loop.py` and `hard_sample_sorter.py`
-
-`explore_weight` is a `policy` field; removing it on `resume` forks a sibling cycle. Expected, no migration.
-
----
-
-## Pre-flight gate
-
-1. **§0 bucket:** central loop (sample selection). No new bucket.
-2. **Existing channel:** yes — `RaschPosterior`, the `hard_samples_*.json` artifact, `loop.py`'s scoring path. No sidecar.
-3. **Distinct name:** no new identifiers; uses the existing `decision_information_gain` and `pick_score` artifact key.
-4. **Self-describing:** "mutual information between sample outcome and keep/abort verdict" reads in one line.
-5. **Rides existing infra:** yes — no new persisted state.
-6. **AI-readable:** the artifact's `pick_score.per_sample` and `pick_score.sample_order` shapes are unchanged; semantics are what the table behaviour already says they should be.
-7. **§0 update:** none required.
-8. **Langfuse:** adaptive queue mechanism is pure math, untraced.
+- `decision_information_gain` (`adaptive_queue_mechanism.py:137-162`) computes the mutual information between a Bernoulli outcome and the keep/abort verdict, conditioned on the candidate's current ability posterior.
+- The hierarchical-EB Rasch fit (`exploration.py::fit_rasch`) supplies the per-sample population profile.
+- The per-candidate posterior fold (`loop.py:240-296`) updates the ability estimate after each measurement.
+- The persisted ranking writer (`hard_sample_sorter.py::build_hard_samples_artifact_from_observations`) calls the same scoring path the live queue calls — one function, two trigger points.
 
 ---
 
@@ -131,16 +74,15 @@ p̄       = E[Bernoulli outcome] marginalized over candidate posterior
 score(s) = H(p0) − [ p̄ · H(p⁺) + (1 − p̄) · H(p⁻) ]            # mutual info, in nats
 ```
 
-Exactly what `decision_information_gain` already computes (`adaptive_queue_mechanism.py:137-162`). The math is correct; the spec only removes the exploration term that was added on top.
+Exactly what `decision_information_gain` computes (`adaptive_queue_mechanism.py:137-162`).
 
 ---
 
-## Open triangulation questions
+## Phase 2 sketch — origin-relative weighting
 
-To be answered with the operator before implementation:
+Not shipped. Outlined here so the substrate doesn't paint into a corner.
 
-1. **Phase 2 timing.** Spec-only, or wire similarity-weighting within the next 1–2 weeks? If the latter, Phase 1 should pre-extend `Observation` with a timestamp now — one breaking primitive change is cheaper than two.
-2. **Aging mechanism scope (Phase 2 design only).** Archive-wide capability-drift estimate, or per-pipeline-node capability curve? Determines `Observation` schema in Phase 2.
+Today every archive observation contributes equally to a sample's population profile. Phase 2 will weight each observation by how relevant the producing candidate is to the current one — using similarity (lineage distance, prompt distance, or pipeline-config distance — undecided) and recency (older observations weighted lower, because pipeline capability drifts over time). The same scoring framework applies; only the conditioning is richer. The breaking primitive change Phase 2 needs is extending `Observation` (`exploration.py:38-44`) with a timestamp and a lineage hint, or routing those through a sidecar lookup. Open design question: archive-wide capability-drift estimate vs per-pipeline-node capability curve — this determines the `Observation` schema.
 
 ---
 

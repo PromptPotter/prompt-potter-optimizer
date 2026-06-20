@@ -231,9 +231,9 @@ writes through, each with its own ingress: (1) **Persistence** — the
 sole writer is per-cycle `CycleEventLog.append`. Operator-initiated
 HITL collapses into this ingress: `inherit_from(parent, offset)` mints
 a fork at any chosen ledger offset (the operator picks the offset
-through the webapp's lineage inspector; pre-M12 forks endorse the
-parent's typed state unchanged, the substitute-typed-edit path is M12
-work). Workspace-scoped commands without any cycle target
+through the webapp's lineage inspector and may edit the forked
+searchpoint's prompt + node config + limits — the operator-steered
+fork). Workspace-scoped commands without any cycle target
 (`register-backend`, `sync-backend-experiments`) write to a sibling
 **workspace `CycleEventLog`** at `projects/{tenant}/.workspace/events.jsonl`
 — same shape, same single-writer discipline, identity-bound by the
@@ -306,7 +306,13 @@ separation is a structural invariant that fails loud at import (a cross-layer
 import breaks the run; the `test_structure` scan was cut to the silent-harm
 core — see `tests/CLAUDE.md`) so data types
 stay free of I/O and the orchestrator can be reused without dragging
-a backend client along. SearchPoint types are
+a backend client along. A **concept-first re-hierarchy** (slicing this
+layer cut into per-concept vertical packages) was investigated and
+**rejected** (2026-06): the recurring multi-directory fix signature is
+the inherent footprint of changing the central state spine
+(`opt_search_point` reaches 66 files across every layer) — a flow that
+is correctly layered, not a defect to carve away. The cut stays; don't
+re-propose (analysis in `git log`). SearchPoint types are
 **immutable**: once created, their fields can't change. That makes
 their content hash a trustworthy identity, which is what lets
 `--from N` resume a campaign with different hyperparameters and
@@ -409,14 +415,15 @@ Convention (not CI-enforced — the structural scan was cut; see
 (currently `notebooks/bbeh_potter.ipynb`) are **work-in-progress** —
 kept but not part of the documented entry-point surface. Mark them
 WIP in cell-1 markdown so a reader knows status at a glance. The
-webapp (`webapp/`) renders read-only views over `dashboard.json`
-plus a file-tree view; any panel reading from a disk file we don't
-already commit to writing is aspirational and out of M10. The `init`
+webapp (`webapp/`) ships — served read-only at the root, chat as the
+first tab — rendering views over `dashboard.json` plus a file-tree
+view; a panel that reads a disk file we don't already commit to
+writing needs that write committed first. The `init`
 command + `/potter-run` slash command sit in `presentation/` and
 orchestrate one-time onboarding (TermNorm download, dataset
 conversion, API key prompts) — load-bearing for the operator's first
 run; audit for accumulated cruft but don't delete the underlying
-mechanism. Future webapp panels arrive as M11/M12 sub-specs, not
+mechanism. New webapp panels arrive as ordinary sub-specs, not
 silent additions.
 
 **Tracing, Langfuse-shaped, lightweight by default.** Optimizer LLM
