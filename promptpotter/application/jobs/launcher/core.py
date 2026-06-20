@@ -304,15 +304,9 @@ async def commit_draft_to_dataset(
             f"slug collision at commit: {draft.slug!r} already exists in this tenant's collection"
         )
 
-    # The closed answer space is a deterministic fact (the target column's label
-    # set), not the operator's to complete by hand — fill answer_format here so an
-    # otherwise-ready draft whose authored prompt under-enumerated the labels
-    # isn't blocked at the gate. No-op when already canonical or open-ended.
-    normalized = draft.with_closed_answer_format()
-    if normalized is not draft:
-        draft = draft_registry.update(normalized)
-
-    # Deterministic origin gate BEFORE anything irreversible.
+    # Deterministic origin gate BEFORE anything irreversible. The resolver authored
+    # answer_format (enumerating the answer space); a dropped label surfaces here as
+    # an open gap rather than being silently back-filled.
     _assert_origin_ready(draft)
 
     # Preflight BEFORE commit_draft so a backend-down failure preserves the

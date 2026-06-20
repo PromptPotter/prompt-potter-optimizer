@@ -26,7 +26,6 @@ from __future__ import annotations
 import copy
 import threading
 import uuid
-from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -42,14 +41,6 @@ if TYPE_CHECKING:
 
 DEFAULT_CONNECTOR = "termnorm"
 """Only registered connector today (per root CLAUDE.md); operator-editable."""
-
-
-def closed_answer_format(labels: Sequence[str]) -> str:
-    """Canonical ``answer_format`` value for a closed label set: every label,
-    pipe-joined, so the prompt can emit any of them and the answer_space gate
-    passes deterministically. The single source for this string — both the
-    resolver (origin_resolve) and the commit gate (launcher) call it."""
-    return " | ".join(labels)
 
 
 DEFAULT_SCORING_COMPOSITE = "exact_match"
@@ -271,20 +262,6 @@ class DraftCampaign:
         if self.origin_prompt_fields:
             return dict(self.origin_prompt_fields)
         return {"instruction": self.raw_task_description}
-
-    def with_closed_answer_format(self) -> DraftCampaign:
-        """Return a draft whose ``answer_format`` prompt field enumerates the full
-        closed answer space. The label set is a deterministic fact (the target
-        column's distinct values), not the LLM's to transcribe — so code owns this
-        field and the answer_space gate becomes a safety that passes. No-op for an
-        open-ended target or a draft without an authored prompt yet."""
-        labels = self.answer_space()
-        if not labels or not self.origin_prompt_fields:
-            return self
-        want = closed_answer_format(labels)
-        if self.origin_prompt_fields.get("answer_format") == want:
-            return self
-        return self.patch(origin_prompt_fields={**self.origin_prompt_fields, "answer_format": want})
 
     def patch(self, **changes: Any) -> DraftCampaign:
         """Return a copy with ``updated_at`` refreshed and any provided fields replaced."""

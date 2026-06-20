@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.results import DegradationHealth, RoundResult, WarningDict
 
 # Degradation-health thresholds (explicit — no hidden defaults). The verdict
@@ -40,6 +41,22 @@ structural node fault, an unreachable backend carries NO ``diagnostics.warnings`
 was the blind spot that let a dead-backend round grade ``healthy`` and the loop
 grind zero-accuracy rounds against a corpse. This is not an optimization signal:
 the operator must restart the backend and ``resume``."""
+
+UNSCOREABLE_RATE: float = 0.50
+"""Fraction of a round's samples that SUCCEEDED yet produced no extractable
+prediction (``predicted == NO_RESULT`` — empty terminal ranking) at/above which
+the round is graded ``critical`` with reason ``unscoreable``. The distinct floor
+nothing else catches: the backend reports the generation a ``success`` and stamps
+no ``diagnostics.warning`` (its output simply carries no parseable label), so
+``classify_sample_failure`` is blind to it — an all-``NO_RESULT`` origin grades
+``healthy`` and sails into L1, where the optimizer wastes rounds mutating a prompt
+whose every output is unscoreable (the answer-format / extraction mismatch that
+left every JustLogic sample ``NO_RESULT``). PP owns this signal because PP, not the
+backend, decides the prediction is empty (``sample_measurement`` → ``NO_RESULT``).
+A majority-unscoreable round is structurally broken regardless of track record;
+the origin gate then halts so the operator fixes the format before optimizing.
+Distinct from a wrong-but-extractable miss (a hard task scoring 0% but emitting
+real labels is NOT flagged — that's a measurement, not a broken floor)."""
 
 EVIDENCE_STARVED_RATE: float = 0.40
 """Fraction of a round's samples for which a SINGLE pipeline node failed (hard
@@ -135,6 +152,7 @@ def compute_degradation_health(
     consecutive_degraded_rounds: int,
     dominant_node: str | None = None,
     unreachable_count: int = 0,
+    no_result_count: int = 0,
     node_failure_rates: dict[str, float] | None = None,
     node_warnings: dict[str, list[str]] | None = None,
 ) -> DegradationHealth | None:
@@ -166,6 +184,7 @@ def compute_degradation_health(
 
     ci_lo, ci_hi = wilson_ci(hits, total)
     structural_rate = structural_count / total
+    no_result_rate = no_result_count / total
     degraded_rate = (structural_count + transient_count) / total
     untested = prior_clean_rounds == 0
 
@@ -183,6 +202,12 @@ def compute_degradation_health(
         grade, reasons = "critical", ["backend_unreachable"]
     elif structural_rate >= STRUCTURAL_FLAG_RATE:
         grade, reasons = "critical", ["structural"]
+    elif no_result_rate >= UNSCOREABLE_RATE:
+        # Pipeline succeeded but emitted no extractable label on a majority of
+        # samples — a broken floor the backend's success/warning channel can't
+        # see. Ranked below ``structural`` (a hard node failure is the more
+        # specific, node-attributed cause) but above the softer signals.
+        grade, reasons = "critical", ["unscoreable"]
     elif starved_node is not None:
         grade, reasons = "critical", ["evidence_starved"]
         dominant_node = starved_node
@@ -225,6 +250,15 @@ def compute_degradation_health(
                 f"starved (e.g. quota / rate-limit exhausted), not a prompt fault.{_reported_by(dominant_node)} "
                 "Fix the backend (restore quota) and `resume` — don't burn rounds chasing it."
             )
+        elif "unscoreable" in reasons:
+            pct = round(no_result_rate * 100)
+            suggested_action = (
+                f"the pipeline produced no extractable answer on {pct}% of samples — "
+                "the model's output isn't matching what the grader reads (it ran "
+                "successfully, but no parseable label came back). Fix the prompt's "
+                "answer_format so the model commits a single parseable label (or the "
+                "extraction contract), then rescore — don't optimize against it."
+            )
         elif "persistent" in reasons:
             suggested_action = (
                 f"{consecutive_degraded_rounds} consecutive degraded rounds — "
@@ -245,6 +279,7 @@ def compute_degradation_health(
         samples=total,
         structural_count=structural_count,
         transient_count=transient_count,
+        no_result_count=no_result_count,
         degraded_rate=round(degraded_rate, 6),
         consecutive_degraded_rounds=consecutive_degraded_rounds,
         prior_clean_rounds=prior_clean_rounds,
@@ -348,7 +383,7 @@ def compute_round_health(
     then grades via :func:`compute_degradation_health`."""
     from promptpotter.shared.errors import ErrorCategory, error_category
 
-    structural = transient = unreachable = 0
+    structural = transient = unreachable = no_result = 0
     structural_nodes: dict[str, int] = {}
     for r in results or []:
         # Backend-down samples carry NO diagnostics (empty pipeline_data), so they're
@@ -360,6 +395,12 @@ def compute_round_health(
         ):
             unreachable += 1
             continue
+        # The pipeline ran (no transport/error) but the terminal ranker emitted no
+        # candidate → ``predicted == NO_RESULT``. The backend calls this a success and
+        # stamps no warning, so it's invisible to ``classify_sample_failure`` below —
+        # counted here as the PP-owned unscoreable signal.
+        if r.get("predicted") == NO_RESULT:
+            no_result += 1
         diag = (r.get("pipeline_data") or {}).get("diagnostics") or {}
         statuses = diag.get("step_statuses") or {}
         warnings = diag.get("warnings") or []
@@ -411,6 +452,7 @@ def compute_round_health(
         consecutive_degraded_rounds=consecutive,
         dominant_node=dominant,
         unreachable_count=unreachable,
+        no_result_count=no_result,
         node_failure_rates=node_failure_rates,
         node_warnings=node_warnings,
     )

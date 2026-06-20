@@ -16,9 +16,17 @@ state — not config that has a sane default:
   one field with no default; the operator states it or the resolver proposes it
   high-confidence.
 * **Answer space** — a closed-label target must enumerate every label in the
-  committed prompt. Code owns this (``with_closed_answer_format`` writes the
-  labels into ``answer_format``), so it's a safety that passes — kept because it
-  is the real post-condition that a closed-label campaign can emit each label.
+  committed prompt. The check-in resolver authors ``answer_format`` (handed the
+  full label set in its raw context); this is the *gate* that trips when the
+  resolver drops a label, nudging it rather than minting a campaign whose prompt
+  can never emit that label.
+* **Answer format** — when the scorer extracts a label from the raw output (it
+  carries an ``EXTRACTION_NOTES`` entry — ``exact_match`` bolds, ``aime_match``
+  boxes, …), the committed ``answer_format`` must be non-empty: the commit
+  instruction is what makes a prediction extractable. The resolver can satisfy
+  "Answer space" by listing labels in ``task_intent`` while leaving ``answer_format``
+  empty — present labels, but no commit instruction → every prediction misses. See
+  :func:`_check_commit_format`.
 * **Node model** — every active node configured as an LLM call (its connector-
   merged ``config`` block carries an LLM-call axis) must own a ``model``. The one
   config axis that IS gated, because a missing model has no sane default — the
@@ -44,6 +52,7 @@ from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     merge_pipeline_overlay,
 )
+from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, PARAM_SCOPE_KEYS
 
@@ -105,6 +114,7 @@ def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
     )
 
     _check_answer_space(draft, gaps=gaps)
+    _check_commit_format(draft, gaps=gaps)
     _check_node_models(draft, gaps=gaps)
 
     return OriginReadiness(complete=not gaps, gaps=tuple(gaps))
@@ -173,12 +183,12 @@ def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
     When the target column is a fixed taxonomy (:meth:`DraftCampaign.answer_space`),
     the origin stays open until each label appears verbatim in the prompt that
     will be committed — :meth:`DraftCampaign.committed_prompt_fields`, the one
-    encoding the prompt writer also uses. The deterministic gate; the check-in
-    proposer (handed the same answer space) is what authors the enumeration. A
-    proposer that drops a label surfaces here as an open gap rather than minting a
-    campaign whose prompt can never emit it (the failure that left every
-    non-``financial`` row unscoreable). No-op for an open-ended target — there's
-    no small fixed set to enumerate."""
+    encoding the prompt writer also uses. The check-in proposer (handed the same
+    answer space in its raw context) authors the enumeration; a proposer that
+    drops a label surfaces here as an open gap rather than minting a campaign whose
+    prompt can never emit it (the failure that left every non-``financial`` row
+    unscoreable). No-op for an open-ended target — there's no small fixed set to
+    enumerate."""
     labels = draft.answer_space()
     if not labels:
         return
@@ -196,6 +206,38 @@ def _check_answer_space(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
             hint=(
                 "Enumerate every target label in the prompt so the model picks one: "
                 f"{', '.join(labels)}. Missing: {', '.join(missing)}."
+            ),
+        )
+    )
+
+
+def _check_commit_format(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
+    """An extract-then-compare scorer needs a non-empty ``answer_format``.
+
+    When the draft's scorer reads a label out of the raw output (it carries an
+    :data:`~promptpotter.application.scoring.formula.matchers.EXTRACTION_NOTES`
+    entry — ``exact_match`` bolds, ``aime_match`` boxes, …), the committed prompt
+    MUST carry the commit instruction in ``answer_format``. The sibling
+    :func:`_check_answer_space` proves the labels appear *somewhere*, but the
+    resolver can enumerate them in ``task_intent`` while leaving ``answer_format``
+    empty (LLM authoring is non-deterministic): the labels are present yet the model
+    is never told to commit one, so the scorer can't isolate the answer and every
+    prediction misses. This is the *completeness* counterpart to the empirical
+    round-0 health grade — caught pre-mint as a check-in nudge, not after spending
+    round 0. No-op for a compare-raw scorer (no note): the output IS the label."""
+    if not extraction_note_for_scoring(draft.scoring_composite):
+        return
+    if str(draft.committed_prompt_fields().get("answer_format", "")).strip():
+        return
+    gaps.append(
+        FieldGap(
+            field="answer_format",
+            reason="proposed_unconfirmed" if draft.origin_prompt_fields else "unset",
+            hint=(
+                f"Author answer_format with the commit instruction — the "
+                f"{draft.scoring_composite!r} scorer extracts the answer from the "
+                "output (e.g. the last bolded span), so an empty format leaves "
+                "nothing to extract and every prediction misses."
             ),
         )
     )

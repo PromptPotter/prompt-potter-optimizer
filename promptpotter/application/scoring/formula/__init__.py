@@ -9,13 +9,10 @@ from promptpotter.application.scoring.formula.compiler import (
     compile_scorer,
     split_scoring_block,
 )
-from promptpotter.application.scoring.formula.matchers import (
-    DISPLAY_EXTRACTORS,
-    SCORING_FUNCTIONS,
-    extract_display_answer,
-)
+from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.application.scoring.formula.rescore import rescore_results
 from promptpotter.application.scoring.formula.round_scorer import compile_round_scorer
+from promptpotter.domain.rendering import DISPLAY_EXTRACTORS, extract_display_answer
 
 
 def extract_item_label(c: Any) -> str:

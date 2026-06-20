@@ -44,6 +44,7 @@ from promptpotter.application.optimization.dispatch.llm_call import (
     run_optimizer_node,
 )
 from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
+from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.origin_provenance import Provenance
@@ -58,9 +59,9 @@ logger = logging.getLogger(__name__)
 # genuinely-variable fields: the two column picks and the task framing. Config
 # (connector / scoring / optimizer LLM / max_rounds) is NOT proposed — those are
 # defaults the operator edits in the optional Advanced block, not facts the LLM
-# infers from the data. The closed answer space is code-owned (answer_format,
-# `with_closed_answer_format`). So the proposer authors framing + reads columns;
-# it does not negotiate config.
+# infers from the data. The proposer also authors the Layer-1 prompt (incl.
+# answer_format, enumerating the answer space + honoring the scorer's extraction
+# requirement); it reads columns + frames the task, it does not negotiate config.
 _FINDING_SETTERS: dict[str, str] = {
     "column.query": "column_query",
     "column.ground_truth": "column_ground_truth",
@@ -107,6 +108,15 @@ def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
             "target_column": draft.column_ground_truth,
             "labels": list(answer_space),
         }
+    # The answer-extraction contract is decided by the SCORING MATCHER (it's the
+    # matcher that reads a label out of the raw output), so it rides the resolver's
+    # raw context keyed off the draft's scorer — not the backend, which passes the
+    # raw answer through. The resolver folds it into `answer_format`, fixing the root
+    # (the resolver never knew the requirement) instead of overwriting downstream.
+    # Empty for a compare-raw scorer → the resolver authors a plain format.
+    extraction_note = extraction_note_for_scoring(draft.scoring_composite)
+    if extraction_note:
+        state["answer_extraction_requirement"] = extraction_note
     operator_message = draft.raw_task_description  # latest operator framing, if any
     user_content = (
         "DRAFT-CAMPAIGN ORIGIN to resolve. Propose values for the OPEN gaps "
@@ -122,8 +132,10 @@ def build_origin_consultation(draft: DraftCampaign) -> tuple[str, str]:
         "'next_action' (and 'recap' only when ready). ALSO decompose the "
         "task_description you propose this turn into the Layer 1 prompt fields + "
         "task_context — that decomposition seeds the campaign's starting prompt. "
-        "The closed answer space (when present) is filled in deterministically, "
-        "so frame the task around the labels rather than re-listing them."
+        "Author 'answer_format' so the model emits an EXTRACTABLE answer: when an "
+        "'answer_extraction_requirement' appears in the context, the format MUST "
+        "satisfy it verbatim; when a closed 'answer_space' is given, enumerate "
+        "every label so the model picks exactly one."
     )
     return user_content, consultation_instruction
 
@@ -210,18 +222,13 @@ def _apply_findings(draft: DraftCampaign, output: CheckinOutput) -> DraftCampaig
         values["decomposed_task_context"] = decomposed
     if not values:
         return draft
-    # A closed-label target's answer space is a deterministic fact — the distinct
-    # values of the ground-truth column, computed at ingest. Asking the LLM to
-    # transcribe every label into the prompt is what fails: it drops some, then
-    # the answer_space gate blocks mint forever (the campaign that listed only
-    # "financial | actionable" of {actionable, financial, informational, other}).
-    # So code owns the answer_format field — normalized on the FINAL draft, so a
-    # column finding that resolved the target *this same turn* is already in
-    # effect (reading answer_space off the pre-resolution draft would miss it).
-    # The optimizer + operator still edit the framing; the label set is always
-    # present verbatim, making the gate a safety that passes, not a tripwire.
-    updated = draft.apply_resolution(values=values, provenance=provenance)
-    return updated.with_closed_answer_format()
+    # The resolver OWNS answer_format: it was handed the closed answer space (to
+    # enumerate every label) and the scorer's extraction requirement (to commit a
+    # readable answer), both in its raw context — so a correct format comes from the
+    # proposer, not a downstream overwrite. `origin_readiness._check_answer_space` +
+    # `_check_commit_format` are the static gates that nudge when a label is dropped
+    # or answer_format is left empty; the round-0 health grade is the empirical backstop.
+    return draft.apply_resolution(values=values, provenance=provenance)
 
 
 def _coerce(field_key: str, proposed: str, draft: DraftCampaign) -> Any | None:

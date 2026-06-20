@@ -1546,6 +1546,46 @@ def test_evidence_starved_round_grades_critical_without_auto_halting():
     assert backend_unreachable_tripped(h) is None
 
 
+def test_unscoreable_origin_grades_critical_and_trips_the_origin_gate():
+    """The JustLogic failure mode: the pipeline RUNS (``step_statuses`` success, no
+    warning) but emits no extractable label → ``predicted == NO_RESULT`` on every
+    sample. The backend calls this a success, so the structural/transient channel is
+    blind to it — the OLD verdict graded the origin ``healthy`` and the loop wasted
+    rounds optimizing a prompt whose every output was unscoreable. The PP-owned
+    no-result rate must lift it to ``critical``/``unscoreable`` and trip the origin
+    gate, while a wrong-but-extractable round (real labels, just wrong) must NOT."""
+    from promptpotter.application.runner.termination import origin_gate_tripped
+    from promptpotter.domain.phases import StopReason
+    from promptpotter.domain.results_health import compute_round_health
+
+    def _row(predicted: str, *, hit: bool) -> dict:
+        return {
+            "predicted": predicted,
+            "hit": hit,
+            "pipeline_data": {"diagnostics": {"step_statuses": {"llm_only": "success"}}},
+        }
+
+    # All 20 succeeded but produced no parseable label → unscoreable floor.
+    no_result_rows = [_row("NO_RESULT", hit=False) for _ in range(20)]
+    h = compute_round_health(hits=0, total=20, results=no_result_rows, prior_healths=[])
+    assert h is not None
+    assert h.grade == "critical"
+    assert h.reasons == ["unscoreable"]
+    assert h.no_result_count == 20
+    assert h.suggested_action and "answer_format" in h.suggested_action
+    # Critical → halts even in the least-strict armed mode; this is the guarantee
+    # that the broken origin never silently enters L1.
+    assert origin_gate_tripped(h, "critical_only") == StopReason.ORIGIN_GATE
+
+    # A hard task that emits REAL labels (just wrong) is a measurement, not a broken
+    # floor — it must stay gradable on accuracy, never flagged ``unscoreable``.
+    wrong_rows = [_row("FALSE", hit=False) for _ in range(20)]
+    hw = compute_round_health(hits=0, total=20, results=wrong_rows, prior_healths=[])
+    assert hw is not None
+    assert hw.no_result_count == 0
+    assert "unscoreable" not in hw.reasons
+
+
 @pytest.mark.parametrize(
     ("hits", "total", "structural", "transient", "prior_clean", "consec", "grade", "reasons"),
     [

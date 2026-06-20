@@ -399,6 +399,12 @@ class DegradationHealth(BaseModel):
     samples: int
     structural_count: int
     transient_count: int
+    # Samples whose pipeline SUCCEEDED but emitted no extractable prediction
+    # (empty terminal ranking → ``NO_RESULT``). PP-owned — the backend stamps no
+    # warning, since from its side generation succeeded. A high share is a
+    # structurally-unscoreable floor (answer-format / extraction mismatch),
+    # distinct from a wrong-but-extractable miss. Drives the ``unscoreable`` grade.
+    no_result_count: int = 0
     degraded_rate: float
     consecutive_degraded_rounds: int
     prior_clean_rounds: int
